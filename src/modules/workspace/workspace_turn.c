@@ -962,6 +962,7 @@ int workspace_turn_bind_container_scoped(const char *task_id, const char *image,
        .image = (image && image[0]) ? image : NULL,
        .host = NULL,
        .hibernate_on_exit = 0,
+       .checked_resource = 1,
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
        .pkg_proxy = control_socket

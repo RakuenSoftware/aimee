@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
+#include "../modules/delegates/delegate_docker_internal.h"
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_launch_args.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -524,7 +525,12 @@ static const char *write_fake_docker_fixture(void)
            "    ;;\n"
            "  inspect)\n"
            "    if [ \"$2\" = --type ]; then\n"
-           "      printf '%%s\\n' '{\"mounts\":[],\"entrypoint\":null}'; exit 0\n"
+           "      printf '%%s\\n' '{\"labels\":null,\"mounts\":[],\"entrypoint\":null}'; exit 0\n"
+           "    fi\n"
+           "    if [[ \"$3\" = *HostConfig.Mounts* ]]; then\n"
+           "      printf '%%s\\n' "
+           "'{\"mounts\":[{\"Source\":\"/tmp\",\"Destination\":\"/tmp\"}],\"configured\":null}'; "
+           "exit 0\n"
            "    fi\n"
            "    name=\"${@: -1}\"\n"
            "    if [[ \"$name\" = aimee-delegate-* ]] && "
@@ -1357,7 +1363,7 @@ static void test_reap_aged_removes_only_old(void)
            "+0000 UTC\"\n"
            "    echo \"cccccccccccc some-other-container 2000-01-01 00:00:00 +0000 UTC\"\n"
            "    ;;\n"
-           "  inspect) printf '%%s\\n' '{\"mounts\":[],\"entrypoint\":null}';;\n"
+           "  inspect) printf '%%s\\n' '{\"labels\":null,\"mounts\":[],\"entrypoint\":null}';;\n"
            "  rm)\n"
            "    shift 2\n"
            "    echo \"$1\" >> %s\n"
@@ -1395,22 +1401,26 @@ static void test_reap_aged_removes_only_old(void)
 static void test_legacy_sweeps_retain_private(void)
 {
    static const char *reports[] = {
-       "{\"mounts\":[],\"entrypoint\":null}",
-       "{\"mounts\":[],\"entrypoint\":[\"sleep\",\"infinity\"]}",
-       "{\"mounts\":[{\"Source\":\"/foreign/socket\",\"Destination\":\"/run/aimee/"
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":null}",
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":[\"sleep\",\"infinity\"]}",
+       "{\"labels\":null,\"mounts\":[{\"Source\":\"/foreign/socket\",\"Destination\":\"/run/aimee/"
        "owner-io\",\"RW\":true}],\"entrypoint\":null}",
-       "{\"mounts\":[],\"entrypoint\":[\"/run/aimee/owner-io\"]}",
-       "{\"mounts\":[{\"Source\":\"/retained/acp-owners/nonce/owner-io\",\"Destination\":\"/"
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":[\"/run/aimee/owner-io\"]}",
+       "{\"labels\":null,\"mounts\":[{\"Source\":\"/retained/acp-owners/nonce/"
+       "owner-io\",\"Destination\":\"/"
        "wrong-target\"}],\"entrypoint\":null}",
        NULL, /* Docker inspect unavailable. */
        "not json",
-       "{\"mounts\":[]}",
-       "{\"mounts\":null,\"entrypoint\":null}",
-       "{\"mounts\":[{}],\"entrypoint\":null}",
-       "{\"mounts\":[],\"entrypoint\":[false]}",
-       "{\"mounts\":[],\"entrypoint\":null,\"entrypoint\":[\"/run/aimee/owner-io\"]}",
-       "{\"mounts\":[],\"entrypoint\":[\"env\",\"/run/aimee/owner-io\"]}",
-       "{\"mounts\":[],\"entrypoint\":null} trailing"};
+       "{\"labels\":null,\"mounts\":[]}",
+       "{\"labels\":null,\"mounts\":null,\"entrypoint\":null}",
+       "{\"labels\":null,\"mounts\":[{}],\"entrypoint\":null}",
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":[false]}",
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":null,\"entrypoint\":[\"/run/aimee/"
+       "owner-io\"]}",
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":[\"env\",\"/run/aimee/owner-io\"]}",
+       "{\"labels\":null,\"mounts\":[],\"entrypoint\":null} trailing",
+       "{\"labels\":{\"io.aimee.delegate.owner-lease\":\"\"},\"mounts\":[],\"entrypoint\":null}",
+       "{\"labels\":{\"io.aimee.delegate.owner-lease\":false},\"mounts\":[],\"entrypoint\":null}"};
    char script[512], log[512];
    snprintf(script, sizeof script, "%s/reaper-private-%d", platform_tmpdir(), (int)getpid());
    snprintf(log, sizeof log, "%s/reaper-private-rm-%d", platform_tmpdir(), (int)getpid());
@@ -1481,7 +1491,7 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
    char owners[512], parent[640], journal[700], helper[700], socket_path[700];
    char peer[512], attempts[512], endpoint[600];
    snprintf(owners, sizeof owners, "%s/acp-owners", g_fixture_home);
-   assert(!mkdir(owners, 0700));
+   assert(!mkdir(owners, 0700) || errno == EEXIST);
    snprintf(peer, sizeof peer, "%s/recovery-peer", g_fixture_home);
    snprintf(attempts, sizeof attempts, "%s/recovery-attempts", g_fixture_home);
    snprintf(endpoint, sizeof endpoint, "unix://%s/aimee-http.sock", g_fixture_home);
@@ -1495,7 +1505,7 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
    assert(!fclose(file) && !chmod(peer, 0700));
    setenv("AIMEE_DELEGATE_EGRESS_BIN", peer, 1);
    setenv("DOCKER_HOST", endpoint, 1);
-   for (int replaced = 0; replaced < 2; replaced++)
+   for (int replaced = 0; replaced < 3; replaced++)
    {
       snprintf(parent, sizeof parent, "%s/%064d", owners, replaced);
       assert(!mkdir(parent, 0700));
@@ -1526,6 +1536,14 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
                    (unsigned long long)socket_id.st_dev, (unsigned long long)socket_id.st_ino,
                    (unsigned long long)helper_id.st_dev, (unsigned long long)helper_id.st_ino,
                    (unsigned long long)parent_id.st_dev, (unsigned long long)parent_id.st_ino);
+      if (replaced == 2)
+         length = snprintf(
+             verdict, sizeof verdict,
+             "{\"schema\":\"aimee.container-cleanup.v1\",\"resource_mode\":\"ordinary-container\","
+             "\"container_id\":"
+             "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"removed\":"
+             "true,\"source_identities\":{\"parent\":{\"dev\":\"%llu\",\"inode\":\"%llu\"}}}\n",
+             (unsigned long long)parent_id.st_dev, (unsigned long long)parent_id.st_ino);
       assert(length > 0 && length < (int)sizeof verdict &&
              write(descriptor, verdict, (size_t)length) == length && !fsync(descriptor));
       // Invalid discovery sources cannot reach even this affirmative peer.
@@ -1564,7 +1582,7 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
       close(release[1]);
       int status;
       assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
-      if (replaced)
+      if (replaced == 1)
       {
          assert(!unlink(helper));
          file = fopen(helper, "w");
@@ -1575,7 +1593,14 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
       if (!removed)
          removed = delegate_backend_docker_remove_orphans();
       assert(removed == 1 && line_count(attempts) == replaced + 1);
-      assert(access(journal, F_OK) == -1 && access(socket_path, F_OK) == -1);
+      assert(access(journal, F_OK) == -1);
+      if (replaced == 2)
+      {
+         assert(!access(socket_path, F_OK));
+         assert(!unlink(socket_path));
+      }
+      else
+         assert(access(socket_path, F_OK) == -1);
       if (replaced)
       {
          assert(!access(helper, F_OK) && !access(parent, F_OK));
@@ -1596,6 +1621,124 @@ static void test_restart_scan_lock_and_original_artifact_custody(void)
    unsetenv("AIMEE_DOCKER_BIN");
    puts("  PASS: restart scanner skips inherited live lock; original artifacts retire, "
         "replacements survive");
+}
+
+/* Typed downstream owner fixture: this is a consumer/lifetime test, not a
+ * synthetic daemon posture proof. Go tests own actual receipt construction. */
+static void test_checked_ordinary_resource_keeps_image_io_and_requires_retirement(void)
+{
+   setup_fake_egress_fixture();
+   char peer[600], wrapper[600], allowed[600], operations[600], endpoint[600];
+   snprintf(peer, sizeof peer, "%s/ordinary-peer", g_fixture_home);
+   snprintf(wrapper, sizeof wrapper, "%s/ordinary-docker", g_fixture_home);
+   snprintf(allowed, sizeof allowed, "%s/ordinary-retire", g_fixture_home);
+   snprintf(operations, sizeof operations, "%s/ordinary-operations", g_fixture_home);
+   snprintf(endpoint, sizeof endpoint, "unix://%s/aimee-http.sock", g_fixture_home);
+   const char *fake = write_fake_docker_fixture();
+   FILE *file = fopen(wrapper, "w");
+   assert(file);
+   fprintf(
+       file,
+       "#!/bin/sh\nprintf '%%s\\n' \"${CHECKED_INNER_SECRET-unset}\" > '%s/client-environment'\nif "
+       "[ \"$1\" = --host ]; then printf '%%s %%s\\n' \"$2\" \"$3\" >> '%s'; "
+       "shift 2; fi\nexec '%s' \"$@\"\n",
+       g_fixture_home, operations, fake);
+   assert(!fclose(file) && !chmod(wrapper, 0700));
+   file = fopen(peer, "w");
+   assert(file);
+   fprintf(
+       file,
+       "#!/bin/sh\nop=$1; shift\nmode=; engine=; workdir=; source=\n"
+       "while [ $# -gt 0 ]; do case \"$1\" in --resource-receipt-json) mode=ordinary; shift;; "
+       "--engine-endpoint) engine=$2; shift 2;; --workdir) workdir=$2; shift 2;; --socket-source) "
+       "source=$2; shift 2;; *) shift;; esac; done\n"
+       "case \"$op\" in\nacquire) [ \"$mode\" = ordinary ] || exit 2; printf 'owned fixture\\n' "
+       ">&3; "
+       "printf "
+       "'{\"schema\":\"aimee.container-resource.v1\",\"resource_mode\":\"ordinary-container\","
+       "\"name\":\"ordinary-fixture\",\"container_id\":"
+       "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"image_id\":\"sha256:"
+       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"engine_endpoint\":\"%%"
+       "s\",\"workdir\":\"%%s\",\"control_socket_source\":\"%%s\",\"control_socket_target\":\"/run/"
+       "aimee/aimee-http.sock\",\"verified_posture\":true,\"fresh_container\":true}\\n' "
+       "\"$engine\" \"$workdir\" \"$source\";;\n"
+       "cleanup-lease) [ -f '%s' ] || exit 1; printf '%%s\\n' "
+       "'{\"schema\":\"aimee.container-cleanup.v1\",\"container_id\":"
+       "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"removed\":true}';;"
+       "\n*) exit 9;;\nesac\n",
+       allowed);
+   assert(!fclose(file) && !chmod(peer, 0700));
+   setenv("AIMEE_DOCKER_BIN", wrapper, 1);
+   setenv("AIMEE_DELEGATE_EGRESS_BIN", peer, 1);
+   setenv("DOCKER_HOST", endpoint, 1);
+   delegate_backend_t *backend = delegate_backend_docker_get();
+   delegate_backend_config_t cfg = {.workspace = g_fixture_workspace, .checked_resource = 1};
+   void *state = NULL;
+   assert(!backend->acquire(backend, "checked-ordinary", &cfg, &state) && state);
+   char cid[65], image[72];
+   assert(!backend->owned_resources->identity(state, cid, image) &&
+          !strcmp(cid, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+   const char *command = NULL, *home = NULL, *mcp = NULL;
+   assert(backend->owned_resources->prepared(state, &command, &home, &mcp) == -1);
+   char *inside[] = {"CHECKED_INNER_SECRET=inner-only", NULL};
+   delegate_exec_scope_t scope = {.environment = inside, .replace_environment = 1};
+   char output[128] = {0}, errors[128] = {0};
+   delegate_exec_result_t execution = {.stdout_buf = output,
+                                       .stdout_cap = sizeof output,
+                                       .stderr_buf = errors,
+                                       .stderr_cap = sizeof errors};
+   assert(!backend->exec_scoped(backend, state, "printf %s \"$CHECKED_INNER_SECRET\"", 5000, &scope,
+                                &execution) &&
+          execution.exit_code == 0 && !strcmp(output, "inner-only"));
+
+   char client_environment[700];
+   snprintf(client_environment, sizeof client_environment, "%s/client-environment", g_fixture_home);
+   file = fopen(client_environment, "r");
+   assert(file);
+   char observed[32] = {0};
+   assert(fgets(observed, sizeof observed, file) && !fclose(file) && !strcmp(observed, "unset\n"));
+   assert(!backend->write_file(backend, state, "checked-file", "ordinary image bytes\n"));
+   char *contents = NULL;
+   assert(!backend->read_file(backend, state, "checked-file", 0, 0, &contents) && contents &&
+          !strcmp(contents, "ordinary image bytes\n"));
+   free(contents);
+   assert(backend->owned_resources->retire(state) == -1);
+   backend->release(backend, state, 0); /* Unconfirmed retirement retains custody. */
+   assert(!access(g_fixture_workspace, F_OK));
+   char global_socket[600];
+   snprintf(global_socket, sizeof global_socket, "%s/aimee-http.sock", g_fixture_home);
+   assert(!access(global_socket, F_OK));
+   file = fopen(allowed, "w");
+   assert(file && !fclose(file));
+   assert(delegate_backend_docker_reap_aged(2147483647) == 1);
+   assert(!access(global_socket, F_OK)); /* Resource-only owner never owns this callback. */
+   file = fopen(operations, "r");
+   assert(file);
+   char recorded[8192] = {0};
+   assert(fread(recorded, 1, sizeof recorded - 1, file) > 0 && !fclose(file));
+   char pinned[128];
+   snprintf(pinned, sizeof pinned, "unix:///proc/%ld/fd/", (long)getpid());
+   assert(strstr(recorded, pinned) && strstr(recorded, "exec"));
+   // Unsupported checked transport refuses before a creator can claim anything.
+   setenv("DOCKER_HOST", "tcp://unsupported.invalid:2375", 1);
+   state = NULL;
+   assert(backend->acquire(backend, "remote-ordinary", &cfg, &state) ==
+              DELEGATE_ACQUIRE_REFUSED_ISOLATION &&
+          !state);
+   unsetenv("DOCKER_HOST");
+   unsetenv("AIMEE_DOCKER_BIN");
+   unsetenv("AIMEE_DELEGATE_EGRESS_BIN");
+   char owned_file[600];
+   snprintf(owned_file, sizeof owned_file, "%s/checked-file", g_fixture_workspace);
+   unlink(owned_file);
+   unlink(client_environment);
+   unlink(peer);
+   unlink(wrapper);
+   unlink(allowed);
+   unlink(operations);
+   teardown_fake_docker();
+   puts("  PASS: checked ordinary actual resource keeps image IO, private IO refuses, retirement "
+        "retry owns only scope");
 }
 
 static void test_owned_cleanup_custody_capacity_and_reaping(void)
@@ -1697,9 +1840,49 @@ static void test_owned_cleanup_custody_capacity_and_reaping(void)
    puts("  PASS: cleanup custody retained/reaped once; capacity refuses before helper launch");
 }
 
+static void test_controller_bind_recursion_facts_match_actual_mounts(void)
+{
+   docker_state_t *state = calloc(1, sizeof *state);
+   assert(state);
+   const char *templates[] = {
+       "{\"mounts\":[{\"Source\":\"/host/source\",\"Destination\":\"/"
+       "repo\"}],\"configured\":[{\"Type\":\"bind\",\"Source\":\"/host/source\",\"Target\":\"/"
+       "repo\",\"BindOptions\":{\"NonRecursive\":true}}]}",
+       "{\"mounts\":[{\"Source\":\"/host/source\",\"Destination\":\"/"
+       "repo\"}],\"configured\":[{\"Type\":\"bind\",\"Source\":\"/host/source\",\"Target\":\"/"
+       "repo\",\"BindOptions\":{\"NonRecursive\":false}}]}",
+       "{\"mounts\":[{\"Source\":\"/host/source\",\"Destination\":\"/"
+       "repo\"}],\"configured\":[{\"Type\":\"bind\",\"Source\":\"/host/source\",\"Target\":\"/"
+       "repo\"}]}",
+       "{\"mounts\":[{\"Source\":\"/host/source\",\"Destination\":\"/"
+       "repo\"}],\"configured\":[{\"Type\":\"bind\",\"Source\":\"/foreign\",\"Target\":\"/"
+       "repo\",\"BindOptions\":{\"NonRecursive\":true}}]}",
+       "{\"mounts\":[],\"configured\":[{\"Type\":\"bind\",\"Source\":\"/host/"
+       "source\",\"Target\":\"/repo\",\"BindOptions\":{\"NonRecursive\":\"false\"}}]}"};
+   for (size_t i = 0; i < sizeof templates / sizeof templates[0]; i++)
+   {
+      char *table = NULL;
+      int rc = docker_controller_snapshot(state, templates[i], &table);
+      if (i < 3)
+      {
+         assert(!rc && table && !strcmp(table, "/repo\t/host/source\n"));
+         assert(strstr(state->controller_binds,
+                       i == 0 ? "\"non_recursive\":true" : "\"non_recursive\":false"));
+      }
+      else
+         assert(rc == -1 && !table);
+      free(table);
+   }
+   free(state);
+   puts("  PASS: controller NonRecursive facts come from matching actual source/target; "
+        "absent/false preserved");
+}
+
 int main(void)
 {
+   test_controller_bind_recursion_facts_match_actual_mounts();
    test_owned_cleanup_custody_capacity_and_reaping();
+   test_checked_ordinary_resource_keeps_image_io_and_requires_retirement();
    test_restart_scan_lock_and_original_artifact_custody();
    test_remove_orphans_accepts_only_container_ids();
    test_reap_aged_removes_only_old();

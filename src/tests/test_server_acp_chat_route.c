@@ -646,6 +646,12 @@ static mcp_child_t mcp_start(const cJSON *spec, int mode)
    if (mode == 99)
       command = executable; /* Probe the expired cap through the same real entry after original
                                execFD revocation. */
+#ifdef AIMEE_ACP_BUILT_MCP_CLI
+   /* Optional transport conformance lane uses the actual shipping CLI entry,
+    * including expired-capability probes; the ordinary fixture is unchanged. */
+   command = AIMEE_ACP_BUILT_MCP_CLI;
+   assert(command && command[0] == '/' && !access(command, X_OK));
+#endif
    char *argv[] = {(char *)command, "mcp-serve", NULL};
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 0)), argv[1]));
    char *environment[32] = {0};
@@ -659,7 +665,13 @@ static mcp_child_t mcp_start(const cJSON *spec, int mode)
       if (mode == 27 && !strcmp(name, "AIMEE_SESSION_ID"))
          value = "foreign-session";
       if (mode == 28 && !strcmp(name, "AIMEE_API_BEARER"))
+      {
+#ifdef AIMEE_ACP_BUILT_MCP_MISSING_TOKEN
+         continue;
+#else
          value = "wrong-private-capability";
+#endif
+      }
       size_t length = strlen(name) + strlen(value) + 2;
       environment[count] = malloc(length);
       assert(environment[count]);

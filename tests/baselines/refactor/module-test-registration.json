@@ -263,6 +263,12 @@
       "ctest": false,
       "make": true,
       "module": "ir",
+      "test": "src/tests/test_ir_request_codec.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "ir",
       "test": "src/tests/test_ir_session_event.c"
     },
     {

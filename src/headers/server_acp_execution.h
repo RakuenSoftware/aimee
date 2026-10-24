@@ -14,4 +14,12 @@ void server_acp_container_scope_close(server_acp_container_scope_t *scope);
 int server_acp_container_bind(const agent_t *selected, const char *task, const char *image,
                               const char *workspace, int read_only,
                               server_acp_container_scope_t **scope);
+/* One producer-local plan spans every real dispatch and repair. Each selected
+ * attempt receives fresh resources; close must precede business application. */
+typedef struct server_delegate_container_plan server_delegate_container_plan_t;
+server_delegate_container_plan_t *server_delegate_container_plan_open(const char *delegation,
+                                                                      const char *image,
+                                                                      const char *workspace,
+                                                                      int read_only);
+int server_delegate_container_plan_close(server_delegate_container_plan_t *plan);
 #endif

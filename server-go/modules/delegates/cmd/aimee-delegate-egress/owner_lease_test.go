@@ -69,12 +69,13 @@ func privateLeaseFixture(t *testing.T) *leaseFixture {
 	}
 	lease.artifacts = &ownerSourceIdentities{Socket: sourceIdentity(socketInfo), Helper: sourceIdentity(helperInfo), Parent: sourceIdentity(parentInfo)}
 
-	source := delegates.SandboxRequest{WritesAllowed: true, RepoRoot: "/srv/repo", Worktree: "/srv/repo", IsGitCheckout: true, ParentSocketHost: socket, ParentSocketTarget: delegates.ControlSocketTarget}
+	workspace := t.TempDir()
+	source := delegates.SandboxRequest{WritesAllowed: true, RepoRoot: workspace, Worktree: workspace, IsGitCheckout: true, ParentSocketHost: socket, ParentSocketTarget: delegates.ControlSocketTarget}
 	spec, err := delegates.BuildOwnerSandboxSpec(source, helper)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &leaseFixture{lease, parent, path, socket, helper, delegates.DockerCreateRequest{Spec: spec, ContainerName: "pending-private-owner", Image: "configured-image", WorkDir: "/srv/repo"}}
+	return &leaseFixture{lease, parent, path, socket, helper, delegates.DockerCreateRequest{Spec: spec, ContainerName: "pending-private-owner", Image: "configured-image", WorkDir: workspace}}
 }
 func TestCreationJournalPreservesTypedIntentAndOnlyIgnoresIncompleteTail(t *testing.T) {
 	fixture := privateLeaseFixture(t)

@@ -4,11 +4,14 @@
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -252,12 +255,54 @@ static void fixture_package_proxy(void)
    fputs("full-worker-agent: default package proxy allowed Debian HEAD and denied loopback\n",
          stderr);
 }
-int main(void)
+static void fixture_read_only_mount(const char *cwd)
+{
+   char path[4096];
+   struct stat directory, seed;
+   assert(!stat(cwd, &directory) && directory.st_uid == getuid() && (directory.st_mode & S_IWUSR));
+   assert(snprintf(path, sizeof path, "%s/full-worker.txt", cwd) < (int)sizeof path);
+   assert(!stat(path, &seed) && seed.st_uid == getuid() && (seed.st_mode & S_IWUSR));
+   errno = 0;
+   int fd = open(path, O_WRONLY | O_TRUNC | O_CLOEXEC);
+   assert(fd < 0 && (errno == EROFS || errno == EPERM || errno == EACCES));
+   assert(snprintf(path, sizeof path, "%s/opaque-direct-write.txt", cwd) < (int)sizeof path);
+   errno = 0;
+   fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+   assert(fd < 0 && (errno == EROFS || errno == EPERM || errno == EACCES));
+   char private_path[4096];
+   const char *worktree = strstr(cwd, "/.aimee/worktrees/");
+   assert(worktree && (size_t)(worktree - cwd) < sizeof private_path);
+   memcpy(private_path, cwd, (size_t)(worktree - cwd));
+   private_path[worktree - cwd] = 0;
+   char *parent = strrchr(private_path, '/');
+   assert(parent && parent > private_path);
+   *parent = 0;
+   size_t prefix = strlen(private_path);
+   int size = snprintf(private_path + prefix, sizeof private_path - prefix,
+                       "/home/read-only-parent-private.txt");
+   assert(size > 0 && (size_t)size < sizeof private_path - prefix);
+   errno = 0;
+   fd = open(private_path, O_WRONLY | O_TRUNC | O_CLOEXEC);
+   assert(fd < 0 && (errno == ENOENT || errno == EROFS || errno == EPERM || errno == EACCES));
+   fputs("full-worker-agent: opaque direct truncate/create denied by actual mount; private parent "
+         "not writable\n",
+         stderr);
+}
+int main(int argc, char **argv)
 {
    alarm(55);
+   assert(argc == 1 || (argc == 2 && !strcmp(argv[1], "--read-only")));
+   int read_only = argc == 2;
    cJSON *request = fixture_read();
    const char *method = cJSON_GetStringValue(cJSON_GetObjectItem(request, "method"));
    assert(method && !strcmp(method, "initialize"));
+   if (read_only)
+   {
+      const cJSON *fs = cJSON_GetObjectItem(
+          cJSON_GetObjectItem(cJSON_GetObjectItem(request, "params"), "clientCapabilities"), "fs");
+      assert(cJSON_IsTrue(cJSON_GetObjectItem(fs, "readTextFile")) &&
+             cJSON_IsFalse(cJSON_GetObjectItem(fs, "writeTextFile")));
+   }
    fixture_reply(request, "{\"protocolVersion\":1,\"agentCapabilities\":{},\"authMethods\":[]}");
    cJSON_Delete(request);
    request = fixture_read();
@@ -278,16 +323,23 @@ int main(void)
    fixture_package_proxy();
    char target[4096];
    assert(snprintf(target, sizeof target, "%s/full-worker.txt", actual) < (int)sizeof target);
-   cJSON *call = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":\"full-worker-write\",\"method\":\"fs/"
-                             "write_text_file\",\"params\":{\"sessionId\":\"full-worker-acp\"}}");
-   assert(call && cJSON_AddStringToObject(cJSON_GetObjectItem(call, "params"), "path", target) &&
-          cJSON_AddStringToObject(cJSON_GetObjectItem(call, "params"), "content",
-                                  "full worker owned write\n"));
-   fixture_send(call);
-   cJSON *receipt = fixture_read();
-   assert(cJSON_IsObject(cJSON_GetObjectItem(receipt, "result")) &&
-          !cJSON_GetObjectItem(receipt, "error"));
-   cJSON_Delete(receipt);
+   cJSON *call = NULL;
+   cJSON *receipt = NULL;
+   if (read_only)
+      fixture_read_only_mount(actual);
+   else
+   {
+      call = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":\"full-worker-write\",\"method\":\"fs/"
+                         "write_text_file\",\"params\":{\"sessionId\":\"full-worker-acp\"}}");
+      assert(call && cJSON_AddStringToObject(cJSON_GetObjectItem(call, "params"), "path", target) &&
+             cJSON_AddStringToObject(cJSON_GetObjectItem(call, "params"), "content",
+                                     "full worker owned write\n"));
+      fixture_send(call);
+      receipt = fixture_read();
+      assert(cJSON_IsObject(cJSON_GetObjectItem(receipt, "result")) &&
+             !cJSON_GetObjectItem(receipt, "error"));
+      cJSON_Delete(receipt);
+   }
    call = cJSON_Parse("{\"jsonrpc\":\"2.0\",\"id\":\"full-worker-read\",\"method\":\"fs/"
                       "read_text_file\",\"params\":{\"sessionId\":\"full-worker-acp\"}}");
    assert(call && cJSON_AddStringToObject(cJSON_GetObjectItem(call, "params"), "path", target));

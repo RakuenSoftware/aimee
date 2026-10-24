@@ -26,7 +26,7 @@ func TestRetainedIntentCleanupAttestsCreatedStoppedResources(t *testing.T) {
 			observed.Config.WorkingDir = req.WorkDir
 			observed.Config.Entrypoint = []string{OwnerHelperTarget}
 			observed.Config.Cmd = []string{"--idle-guard"}
-			observed.Config.Healthcheck.Test = []string{"NONE"}
+			observed.Config.Healthcheck = &ImageHealthcheck{Test: []string{"NONE"}}
 			var environment []string
 			for _, entry := range spec.Env {
 				environment = append(environment, entry.Name+"="+entry.Value)

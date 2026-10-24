@@ -1,3 +1,4 @@
+#include "agent_dispatch_scope.h"
 /* External ACP execution: one admitted host task, not a provider SDK profile. */
 #include "server_acp_execution.h"
 #include "server_acp_resources.h"
@@ -1487,4 +1488,170 @@ void server_acp_container_scope_close(server_acp_container_scope_t *scope)
       container_scope = NULL;
    OPENSSL_cleanse(scope->token, sizeof scope->token);
    free(scope);
+}
+
+/* Resource acquisition is separate from model authority. Every constructor
+ * still admits its real source, registration, capture and role independently. */
+const char *delegation_active_id(void);
+struct server_delegate_container_plan
+{
+   agent_dispatch_scope_t dispatch;
+   const agent_dispatch_scope_t *previous;
+   pthread_t producer;
+   char delegation[65], workspace[4096], image[256], image_id[72];
+   int source_fd, read_only, active, poisoned;
+   unsigned attempts;
+   struct stat source;
+   request_context_snapshot_t owner;
+   server_acp_container_scope_t *acp;
+};
+static int delegate_plan_owner_matches(const server_delegate_container_plan_t *plan)
+{
+   const request_context_t *now = request_context_get(), *owner = &plan->owner.value;
+   if (plan->owner.active != (now != NULL))
+      return 0;
+   if (!now)
+      return 1;
+   /* Audit counters, accepted receipts and retry diagnostics may change. Actor,
+    * request, privilege and caller-supplied restrictive limits may not drift. */
+   return !now->context_refused && now->peer_uid == owner->peer_uid &&
+          now->transport == owner->transport && now->vault_transport == owner->vault_transport &&
+          now->capabilities == owner->capabilities && now->trusted == owner->trusted &&
+          now->model_execution == owner->model_execution &&
+          now->operator_script_origin == owner->operator_script_origin &&
+          now->request_budget_present == owner->request_budget_present &&
+          !strcmp(now->request_id, owner->request_id) &&
+          !strcmp(now->principal, owner->principal) &&
+          !strcmp(now->caller_subject, owner->caller_subject) &&
+          !strcmp(now->caller_authorization, owner->caller_authorization) &&
+          !strcmp(now->vault_principal, owner->vault_principal) &&
+          !strcmp(now->session_key, owner->session_key) &&
+          !strcmp(now->idempotency_key, owner->idempotency_key) &&
+          !strcmp(now->request_budget_limits, owner->request_budget_limits);
+}
+static int delegate_plan_end(void *context, char *error, size_t capacity)
+{
+   server_delegate_container_plan_t *plan = context;
+   if (!plan || !pthread_equal(plan->producer, pthread_self()) || !plan->active)
+      return -1;
+   int failed = workspace_turn_container_retire();
+   workspace_turn_unbind_active();
+   server_acp_container_scope_close(plan->acp);
+   plan->acp = NULL;
+   plan->active = 0;
+   if (failed)
+   {
+      plan->poisoned = 1;
+      if (error && capacity)
+      {
+         size_t used = strnlen(error, capacity);
+         if (used < capacity)
+            snprintf(error + used, capacity - used,
+                     "%sdelegate container quiescence was not verified", used ? "; " : "");
+      }
+   }
+   return failed ? -1 : 0;
+}
+static int delegate_plan_begin(const agent_t *selected, void *context, char *error, size_t capacity)
+{
+   server_delegate_container_plan_t *plan = context;
+   struct stat current;
+   const char *delegation = delegation_active_id();
+   if (!plan || !selected || plan->active || plan->poisoned ||
+       !pthread_equal(plan->producer, pthread_self()) ||
+       agent_dispatch_scope_current() != &plan->dispatch || !delegate_plan_owner_matches(plan) ||
+       agent_request_cancelled() || !delegation || strcmp(delegation, plan->delegation) ||
+       fstat(plan->source_fd, &current) || current.st_dev != plan->source.st_dev ||
+       current.st_ino != plan->source.st_ino || stat(plan->workspace, &current) ||
+       current.st_dev != plan->source.st_dev || current.st_ino != plan->source.st_ino ||
+       plan->attempts == UINT_MAX)
+      goto refused;
+   char identity[96], digest[65], task[65];
+   int length = snprintf(identity, sizeof identity, "%s:%u", plan->delegation, ++plan->attempts);
+   if (length < 0 || (size_t)length >= sizeof identity ||
+       aimee_sha256_hex(identity, (size_t)length, digest))
+      goto refused;
+   snprintf(task, sizeof task, "delegate-%.48s", digest);
+   if (server_acp_container_bind(selected, task,
+                                 plan->image_id[0] ? plan->image_id
+                                 : plan->image[0]  ? plan->image
+                                                   : NULL,
+                                 plan->workspace, plan->read_only, &plan->acp) <= 0)
+   {
+      server_acp_container_scope_close(plan->acp);
+      plan->acp = NULL;
+      goto refused;
+   }
+   plan->active = 1;
+   char container[65], image[72], source_digest[65];
+   int source = -1;
+   int valid = !workspace_turn_container_identity(container, image) &&
+               !workspace_turn_source_identity(plan->workspace, &source, source_digest) &&
+               source >= 0 && !fstat(source, &current) && current.st_dev == plan->source.st_dev &&
+               current.st_ino == plan->source.st_ino &&
+               (!plan->image_id[0] || !strcmp(image, plan->image_id));
+   if (source >= 0)
+      close(source);
+   if (!valid)
+   {
+      (void)delegate_plan_end(plan, error, capacity);
+      plan->poisoned = 1;
+      goto refused;
+   }
+   snprintf(plan->image_id, sizeof plan->image_id, "%s", image);
+   return 0;
+refused:
+   if (plan && pthread_equal(plan->producer, pthread_self()))
+      plan->poisoned = 1;
+   if (error && capacity && !error[0])
+      snprintf(error, capacity, "mandatory delegate attempt resource refused");
+   return -1;
+}
+server_delegate_container_plan_t *server_delegate_container_plan_open(const char *delegation,
+                                                                      const char *image,
+                                                                      const char *workspace,
+                                                                      int read_only)
+{
+   if (!delegation || !delegation[0] || strlen(delegation) >= 65 || !workspace ||
+       workspace[0] != '/' || strlen(workspace) >= 4096 || (image && strlen(image) >= 256) ||
+       (read_only != 0 && read_only != 1) || agent_dispatch_scope_current())
+      return NULL;
+   server_delegate_container_plan_t *plan = calloc(1, sizeof *plan);
+   if (!plan)
+      return NULL;
+   plan->source_fd = open(workspace, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   if (plan->source_fd < 0 || fstat(plan->source_fd, &plan->source))
+   {
+      if (plan->source_fd >= 0)
+         close(plan->source_fd);
+      free(plan);
+      return NULL;
+   }
+   plan->producer = pthread_self();
+   request_context_snapshot(&plan->owner);
+   plan->read_only = read_only;
+   snprintf(plan->delegation, sizeof plan->delegation, "%s", delegation);
+   snprintf(plan->workspace, sizeof plan->workspace, "%s", workspace);
+   snprintf(plan->image, sizeof plan->image, "%s", image ? image : "");
+   plan->dispatch = (agent_dispatch_scope_t){
+       .begin = delegate_plan_begin, .end = delegate_plan_end, .context = plan};
+   plan->previous = agent_dispatch_scope_bind(&plan->dispatch);
+   return plan;
+}
+int server_delegate_container_plan_close(server_delegate_container_plan_t *plan)
+{
+   if (!plan)
+      return 0;
+   if (!pthread_equal(plan->producer, pthread_self()) ||
+       agent_dispatch_scope_current() != &plan->dispatch)
+      return -1;
+   char error[128] = "";
+   if (plan->active)
+      (void)delegate_plan_end(plan, error, sizeof error);
+   int failed = plan->poisoned;
+   agent_dispatch_scope_bind(plan->previous);
+   close(plan->source_fd);
+   request_context_snapshot_clear(&plan->owner);
+   free(plan);
+   return failed ? -1 : 0;
 }

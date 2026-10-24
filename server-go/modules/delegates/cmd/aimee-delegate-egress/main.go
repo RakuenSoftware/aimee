@@ -67,12 +67,14 @@ func privateControlSocket(check, source, mounts string) ([]os.FileInfo, error) {
 func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (string, error) {
 	flags := flag.NewFlagSet("acquire", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	controllerBinds := flags.String("controller-binds", "", "producer-attested controller bind recursion facts")
 	leaseFD := flags.Int("lease-fd", -1, "inherited private durable creation lease")
 	leaseCheck := flags.String("lease-check", "", "private durable creation lease path")
 	engineEndpoint := flags.String("engine-endpoint", "", "launching owner's held Docker Unix endpoint")
 	helperCheck := flags.String("helper-check", "", "private measured owner helper path")
 	helperSource := flags.String("helper-source", "", "daemon-visible measured owner helper path")
 	helperSHA := flags.String("helper-sha256", "", "launching owner's helper measurement")
+	resourceReceipt := flags.Bool("resource-receipt-json", false, "checked ordinary resource receipt; no private IO owner")
 	receiptJSON := flags.Bool("receipt-json", false, "return the verified immutable acquisition receipt")
 	docker := flags.String("docker", "docker", "container runtime binary")
 	task := flags.String("task", "", "delegate task ID")
@@ -105,14 +107,21 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		return "", fmt.Errorf("a full source worktree and workdir are required")
 	}
 
-	if !*receiptJSON && (*engineEndpoint != "" || *helperCheck != "" || *helperSource != "" || *helperSHA != "" || *leaseFD >= 0 || *leaseCheck != "") {
+	if *receiptJSON && *resourceReceipt {
+		return "", errors.New("one receipt resource class required")
+	}
+	if *resourceReceipt && (*helperCheck != "" || *helperSource != "" || *helperSHA != "") {
+		return "", errors.New("ordinary resource has no private helper")
+	}
+	checked := *receiptJSON || *resourceReceipt
+	if !checked && (*controllerBinds != "" || *engineEndpoint != "" || *helperCheck != "" || *helperSource != "" || *helperSHA != "" || *leaseFD >= 0 || *leaseCheck != "") {
 		return "", errors.New("private lease inputs require an immutable receipt")
 	}
 	var lease *ownerLease
 	var helper *os.File
 	helperDigest := ""
 	var socketIdentity []os.FileInfo
-	if *receiptJSON {
+	if checked {
 		if !ownerEngineEndpoint(*engineEndpoint) {
 			return "", errors.New("launching owner's held Docker endpoint required")
 		}
@@ -120,16 +129,32 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		run = func(ctx context.Context, binary string, args ...string) (string, error) {
 			return supplied(ctx, binary, append([]string{"--host", *engineEndpoint}, args...)...)
 		}
-		socketIdentity, err = privateControlSocket(*socketCheck, *socketSource, *mountTable)
-		if err != nil {
-			return "", err
+		if *receiptJSON {
+			socketIdentity, err = privateControlSocket(*socketCheck, *socketSource, *mountTable)
+			if err != nil {
+				return "", err
+			}
+			helper, helperDigest, err = measuredOwnerHelper(*helperCheck, *helperSource, *helperSHA, *socketCheck, *mountTable)
+			if err != nil {
+				return "", err
+			}
+			defer helper.Close()
+		} else {
+			if delegates.TranslateMountPath(*socketCheck, *mountTable) != *socketSource {
+				return "", errors.New("ordinary control socket namespace differs")
+			}
+			parentInfo, failure := os.Lstat(filepath.Dir(*leaseCheck))
+			if failure != nil {
+				return "", failure
+			}
+			socketIdentity = []os.FileInfo{info, parentInfo}
 		}
-		helper, helperDigest, err = measuredOwnerHelper(*helperCheck, *helperSource, *helperSHA, *socketCheck, *mountTable)
-		if err != nil {
-			return "", err
+
+		if *receiptJSON {
+			lease, err = openOwnerLease(*leaseFD, *leaseCheck, *socketCheck)
+		} else {
+			lease, err = openJournal(*leaseFD, *leaseCheck, false)
 		}
-		defer helper.Close()
-		lease, err = openOwnerLease(*leaseFD, *leaseCheck, *socketCheck)
 		if err != nil {
 			return "", err
 		}
@@ -139,11 +164,18 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		if err != nil {
 			return "", err
 		}
-		helperInfo, err := helper.Stat()
-		if err != nil {
-			return "", err
+		if *receiptJSON {
+			helperInfo, err := helper.Stat()
+			if err != nil {
+				return "", err
+			}
+			lease.artifacts = &ownerSourceIdentities{Socket: sourceIdentity(socketIdentity[0]), Parent: sourceIdentity(socketIdentity[1]), Helper: sourceIdentity(helperInfo)}
+		} else {
+			lease.schema = ordinaryLeaseSchema
+			lease.resourceMode = ordinaryResourceMode
+			lease.artifacts = &ownerSourceIdentities{Parent: sourceIdentity(socketIdentity[1])}
 		}
-		lease.artifacts = &ownerSourceIdentities{Socket: sourceIdentity(socketIdentity[0]), Parent: sourceIdentity(socketIdentity[1]), Helper: sourceIdentity(helperInfo)}
+
 	}
 
 	request := delegates.SandboxRequest{
@@ -163,25 +195,50 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	if err != nil {
 		return "", err
 	}
+	if checked {
+		if err := verifyControllerBinds(*controllerBinds, *mountTable, *leaseCheck, spec); err != nil {
+			return "", err
+		}
+	}
 	name, err := delegates.ContainerName(*task, spec, *mountTable)
 	if err != nil {
 		return "", err
 	}
 	dockerRequest := delegates.DockerCreateRequest{Spec: spec, ContainerName: name, Image: *image,
 		WorkDir: *workdir, MountTable: *mountTable, Command: []string{"sleep", "infinity"}}
-	runner := delegates.ContainerRunner{Docker: *docker, Run: run, MountTable: *mountTable, RequireImmutableIdentity: *receiptJSON}
+	runner := delegates.ContainerRunner{Docker: *docker, Run: run, MountTable: *mountTable, RequireImmutableIdentity: checked}
 	if lease != nil {
 		runner.Journal = lease
 	}
-	result, err := runner.Acquire(ctx, dockerRequest)
+	var result delegates.ContainerResult
+	if *resourceReceipt {
+		dockerRequest.Image, dockerRequest.Startup, err = delegates.ResolveOrdinaryImage(ctx, run, *docker, *image)
+		if err != nil {
+			return "", err
+		}
+		dockerRequest.LeaseNonce = filepath.Base(filepath.Dir(*leaseCheck))
+		result, err = runner.Start(ctx, dockerRequest)
+	} else {
+		result, err = runner.Acquire(ctx, dockerRequest)
+	}
 	if err != nil {
 		return "", err
 	}
 	if result.Refused {
 		return "", errors.New(result.Reason)
 	}
-	if *receiptJSON {
-		current, err := privateControlSocket(*socketCheck, *socketSource, *mountTable)
+	if checked {
+		var current []os.FileInfo
+		var err error
+		if *receiptJSON {
+			current, err = privateControlSocket(*socketCheck, *socketSource, *mountTable)
+		} else {
+			currentSocket, failure := os.Lstat(*socketCheck)
+			if failure != nil || !os.SameFile(currentSocket, info) {
+				err = errors.New("global control socket changed during acquisition")
+			}
+		}
+
 		if err == nil {
 			for i := range current {
 				if !os.SameFile(current[i], socketIdentity[i]) {
@@ -190,7 +247,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 				}
 			}
 		}
-		if err == nil {
+		if err == nil && *receiptJSON {
 			_, err = verifyOwnerHelper(helper, *helperCheck, helperDigest)
 		}
 		if err != nil {
@@ -198,6 +255,22 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 				return "", fmt.Errorf("%w; cleanup: %v", err, cleanup)
 			}
 			return "", err
+		}
+		if *resourceReceipt {
+			encoded, failure := json.Marshal(struct {
+				Schema       string `json:"schema"`
+				ResourceMode string `json:"resource_mode"`
+				Name         string `json:"name"`
+				ID           string `json:"container_id"`
+				Image        string `json:"image_id"`
+				WorkDir      string `json:"workdir"`
+				Engine       string `json:"engine_endpoint"`
+				SocketSource string `json:"control_socket_source"`
+				SocketTarget string `json:"control_socket_target"`
+				Verified     bool   `json:"verified_posture"`
+				Fresh        bool   `json:"fresh_container"`
+			}{"aimee.container-resource.v1", ordinaryResourceMode, result.Name, result.ID, result.ImageID, result.WorkDir, *engineEndpoint, *socketSource, delegates.ControlSocketTarget, true, true})
+			return string(encoded), failure
 		}
 		receipt := struct {
 			Schema              string `json:"schema"`

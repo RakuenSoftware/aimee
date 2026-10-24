@@ -18,6 +18,7 @@
 #include <aimee/tools/agent_tools.h>
 #include <aimee/ir/session_event.h>
 #include "modules/workspace/workspace_turn.h"
+#include "modules/workspace/workspace_provider.h"
 #include "db1_client/primary_sessions.h"
 #include "cJSON.h"
 #include "cli_session.h"
@@ -356,11 +357,23 @@ int server_session_capture_after_terminal(server_session_capture_t *held,
    terminal_resource = resource;
    return 0;
 }
+/* Explicit platform-resource peer, not an actual Docker daemon/lease proof.
+ * Cache hashing is tested through the REAL runtime owner in its own fixture. */
+static int fixture_container_identity;
+static workspace_provider_t fixture_container_provider = {.kind = WS_PROVIDER_CONTAINER};
 int workspace_turn_resource_identity(const char *cwd, int *fd, char identity[65])
 {
    assert(!strcmp(cwd, host_workspace));
-   *fd = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-   assert(*fd >= 0);
+   if (fixture_container_identity)
+   {
+      assert(workspace_provider_active() == &fixture_container_provider);
+      *fd = -1; /* A container identity is not a borrowed host-directory capability. */
+   }
+   else
+   {
+      *fd = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      assert(*fd >= 0);
+   }
    snprintf(identity, 65, "%s", digest);
    return 0;
 }
@@ -1254,6 +1267,22 @@ int main(int argc, char **argv)
       }
       agent_result_clear_response(&out);
    }
+   /* A legitimate container namespace identity may have no host execution FD.
+    * The real factory retains canonical history and gives the owned fake SDK
+    * its independently held private workspace, never a source-FD substitution. */
+   reset(10);
+   fixture_container_identity = 1;
+   workspace_provider_set_active(&fixture_container_provider);
+   agent_result_t container_result = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &container_result));
+   assert(container_result.success &&
+          !strcmp(container_result.response, "ORIGINAL canonical output"));
+   assert(began == 1 && terminal && !completed);
+   finish(1);
+   assert(completed == 1 && closed == 1);
+   agent_result_clear_response(&container_result);
+   workspace_provider_clear_active();
+   fixture_container_identity = 0;
    /* Provider declines/partials and failed SDK framing retain original IR,
     * never the SDK display, and cannot publish a successful native cache. */
    for (int diagnostic = 12; diagnostic <= 18; diagnostic++)

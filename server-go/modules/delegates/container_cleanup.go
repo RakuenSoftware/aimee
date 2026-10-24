@@ -17,7 +17,7 @@ func (r ContainerRunner) ownedAbsent(ctx context.Context, id string) (bool, erro
 // CleanupOwned accepts only a retained creation intent. Stopped configuration
 // proves teardown custody, never execution admission or runtime isolation.
 func (r ContainerRunner) CleanupOwned(ctx context.Context, req DockerCreateRequest, id string) (string, error) {
-	req.Spec.ownerHelper = true
+	req.Spec.ownerHelper = req.LeaseNonce == ""
 	if r.Run == nil || !r.RequireImmutableIdentity {
 		return "", errors.New("owned cleanup transport unavailable")
 	}
@@ -54,7 +54,7 @@ func (r ContainerRunner) CleanupOwned(ctx context.Context, req DockerCreateReque
 	if err != nil || len(raw) > 1<<20 || json.Unmarshal([]byte(raw), &observed) != nil ||
 		observed.ID != id || observed.Name != "/"+req.ContainerName || observed.Config.Image != req.Image ||
 		!strings.HasPrefix(observed.Image, "sha256:") || !immutableContainerID(strings.TrimPrefix(observed.Image, "sha256:")) ||
-		observed.Config.WorkingDir != req.WorkDir || observed.Config.Env == nil || !ownerStartupMatches(req, observed) {
+		observed.Config.WorkingDir != req.WorkDir || observed.Config.Env == nil || ((req.LeaseNonce == "" && !ownerStartupMatches(req, observed)) || (req.LeaseNonce != "" && !ordinaryStartupMatches(req, observed))) {
 		return "", errors.New("creation intent does not attest this container; retain journal")
 	}
 	// Docker records requested binds even when creation completed before start.

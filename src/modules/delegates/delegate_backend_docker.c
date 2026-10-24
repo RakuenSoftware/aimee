@@ -18,6 +18,10 @@
 #include "cJSON.h"
 #include "cli_native_spawn_guard.h"
 #include "scoped_file_io.h"
+#include "delegate_docker_internal.h"
+static int docker_owned_capture(docker_state_t *state, const char *const argv[], char **out,
+                                size_t maximum, int timeout_ms, int input_fd);
+static int server_runs_in_container(void);
 
 #include <assert.h>
 
@@ -172,268 +176,6 @@ int delegate_backend_docker_build_exec_command(const char *container_name,
 
 /* --- container lifecycle --- */
 
-typedef struct
-{
-   char container_name[128];
-   char container_id[65], image_id[72];
-   char engine_endpoint[128];
-   char docker_binary[MAX_PATH_LEN];
-   int retired, engine_fd, lease_fd, lease_parent_fd, lease_owners_fd;
-   int artifact_helper_fd, artifact_socket_fd;
-   int cleanup_slot, cleanup_failed, cleanup_pending;
-   char lease_leaf[65];
-   struct stat lease_identity, parent_identity, helper_identity, socket_identity;
-   char lease_check[MAX_PATH_LEN];
-   cli_native_stdio_t file_owner, forwarder, package_forwarder;
-   int launcher_fd, launcher_cwd_fd, file_started;
-   int file_ready, file_busy;
-   unsigned file_requests;
-   long long file_deadline;
-   int (*file_validate)(void *);
-   void *file_context;
-   char prepared_command[4096], prepared_home[4096], prepared_mcp[4096];
-   char image[256];
-   char workspace_host[MAX_PATH_LEN]; /* host-side mount point */
-   char cwd[MAX_PATH_LEN];            /* in-container cwd, defaults to /workspace */
-   /* The in-container working directory, and what relative tool paths resolve
-    * against. Per-state, not the global resolve_docker_workdir(): a caller-provided
-    * tree is mounted at its OWN absolute host path (see docker_build_mounts), so
-    * /workspace is not where its files live. Anchoring resolution on a global while
-    * the mount moved is how a tool would read the wrong tree and report it as
-    * missing. */
-   char workdir[MAX_PATH_LEN];
-} docker_state_t;
-
-/* Capacity is reserved before strict creation. Failed cleanup transfers its
- * exact held lease here until the existing reaper confirms retirement. */
-#define DOCKER_OWNED_CLEANUP_MAX 16
-static pthread_mutex_t cleanup_lock = PTHREAD_MUTEX_INITIALIZER;
-static docker_state_t *cleanup_slots[DOCKER_OWNED_CLEANUP_MAX];
-static int docker_cleanup_reserve(docker_state_t *state)
-{
-   pthread_mutex_lock(&cleanup_lock);
-   for (int i = 0; i < DOCKER_OWNED_CLEANUP_MAX; i++)
-      if (!cleanup_slots[i])
-      {
-         cleanup_slots[i] = state;
-         state->cleanup_slot = i;
-         pthread_mutex_unlock(&cleanup_lock);
-         return 0;
-      }
-   pthread_mutex_unlock(&cleanup_lock);
-   return -1;
-}
-static void docker_cleanup_release(docker_state_t *state)
-{
-   pthread_mutex_lock(&cleanup_lock);
-   if (state->cleanup_slot >= 0 && state->cleanup_slot < DOCKER_OWNED_CLEANUP_MAX &&
-       cleanup_slots[state->cleanup_slot] == state)
-      cleanup_slots[state->cleanup_slot] = NULL;
-   pthread_mutex_unlock(&cleanup_lock);
-}
-static int docker_owned_capture(docker_state_t *state, const char *const argv[], char **out,
-                                size_t maximum, int timeout_ms, int input_fd);
-static int server_runs_in_container(void);
-
-static const char *resolve_delegate_egress_bin(void);
-static int docker_source_identity(const cJSON *object, struct stat *identity)
-{
-   const char *dev = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, "dev"));
-   const char *inode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, "inode"));
-   if (!dev || !dev[0] || strspn(dev, "0123456789") != strlen(dev) || !inode || !inode[0] ||
-       strspn(inode, "0123456789") != strlen(inode))
-      return -1;
-   errno = 0;
-   unsigned long long device = strtoull(dev, NULL, 10);
-   if (errno)
-      return -1;
-   unsigned long long number = strtoull(inode, NULL, 10);
-   if (errno || !number || (unsigned long long)(dev_t)device != device ||
-       (unsigned long long)(ino_t)number != number)
-      return -1;
-   identity->st_dev = (dev_t)device;
-   identity->st_ino = (ino_t)number;
-   return 0;
-}
-static int docker_cleanup_lease_mode(docker_state_t *state, int recover)
-{
-   if (!state || state->lease_fd < 0 || state->retired)
-      return 0;
-   if (state->cleanup_failed)
-      return -1;
-   const char *argv[] = {resolve_delegate_egress_bin(),
-                         "cleanup-lease",
-                         "--lease-fd",
-                         "3",
-                         "--lease-check",
-                         state->lease_check,
-                         "--engine-endpoint",
-                         state->engine_endpoint,
-                         "--docker",
-                         state->docker_binary,
-                         recover ? "--recover" : NULL,
-                         NULL};
-   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
-                          NULL};
-   char *output = NULL;
-   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, environment, &output, 4096, 45000,
-                                                 state->lease_fd, 3);
-   cJSON *receipt = !rc && output ? cJSON_ParseWithOpts(output, NULL, 1) : NULL;
-   const char *schema = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "schema"));
-   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "container_id"));
-   int valid_schema = schema && !strcmp(schema, "aimee.container-cleanup.v1");
-   int removed = valid_schema &&
-                 cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "removed")) && id &&
-                 strlen(id) == 64 && strspn(id, "0123456789abcdef") == 64 &&
-                 !cJSON_GetObjectItemCaseSensitive(receipt, "no_container") &&
-                 (!state->container_id[0] || !strcmp(id, state->container_id));
-   int no_container = valid_schema && !state->container_id[0] &&
-                      !cJSON_GetObjectItemCaseSensitive(receipt, "container_id") &&
-                      cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(receipt, "removed")) &&
-                      cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "no_container"));
-   if (recover)
-   {
-      const cJSON *identities = cJSON_GetObjectItemCaseSensitive(receipt, "source_identities");
-      if (!removed ||
-          docker_source_identity(cJSON_GetObjectItemCaseSensitive(identities, "socket"),
-                                 &state->socket_identity) ||
-          docker_source_identity(cJSON_GetObjectItemCaseSensitive(identities, "helper"),
-                                 &state->helper_identity) ||
-          docker_source_identity(cJSON_GetObjectItemCaseSensitive(identities, "parent"),
-                                 &state->parent_identity))
-         removed = no_container = 0;
-   }
-   cJSON_Delete(receipt);
-   free(output);
-   if (!removed && !no_container)
-   {
-      state->cleanup_failed = 1;
-      return -1;
-   }
-   state->retired = 1;
-   return 0;
-}
-static int docker_cleanup_lease(docker_state_t *state)
-{
-   return docker_cleanup_lease_mode(state, 0);
-}
-static int docker_unlink_owned(int parent, const char *name, const struct stat *identity, int flags)
-{
-   struct stat current;
-   if (fstatat(parent, name, &current, AT_SYMLINK_NOFOLLOW))
-      return errno == ENOENT ? 0 : -1;
-   if (current.st_dev != identity->st_dev || current.st_ino != identity->st_ino)
-      return -1; /* A replaced path is never cleanup authority. */
-   return unlinkat(parent, name, flags);
-}
-static void docker_release_artifacts(docker_state_t *state)
-{
-   if (state->lease_parent_fd < 0 || !state->retired)
-      return;
-   int failed =
-       docker_unlink_owned(state->lease_parent_fd, "lease.jsonl", &state->lease_identity, 0);
-   failed |= docker_unlink_owned(state->lease_parent_fd, "owner-io", &state->helper_identity, 0);
-   failed |=
-       docker_unlink_owned(state->lease_parent_fd, "aimee-http.sock", &state->socket_identity, 0);
-   if (!failed && state->lease_owners_fd >= 0)
-      failed = docker_unlink_owned(state->lease_owners_fd, state->lease_leaf,
-                                   &state->parent_identity, AT_REMOVEDIR);
-   if (failed)
-      LOG_WARN("delegate-sandbox", "owned cleanup artifacts changed; unmatched paths retained");
-   else if (state->lease_owners_fd >= 0)
-      (void)fsync(state->lease_owners_fd);
-}
-static void docker_state_destroy(docker_state_t *state)
-{
-   if (state)
-   {
-      cli_native_stdio_close(&state->file_owner);
-      cli_native_stdio_close(&state->forwarder);
-      cli_native_stdio_close(&state->package_forwarder);
-      if (state->launcher_fd >= 0)
-         close(state->launcher_fd);
-      state->launcher_fd = -1;
-      if (state->launcher_cwd_fd >= 0)
-         close(state->launcher_cwd_fd);
-      state->launcher_cwd_fd = -1;
-   }
-   if (state && docker_cleanup_lease(state))
-   {
-      state->file_validate = NULL;
-      state->file_context = NULL;
-      pthread_mutex_lock(&cleanup_lock);
-      state->cleanup_pending = 1;
-      pthread_mutex_unlock(&cleanup_lock);
-      LOG_ERROR("delegate-sandbox",
-                "strict lease cleanup unconfirmed; transferred to bounded cleanup custody");
-      return;
-   }
-   if (state)
-      docker_release_artifacts(state);
-   if (state && state->lease_fd >= 0)
-      close(state->lease_fd);
-   if (state && state->artifact_helper_fd >= 0)
-      close(state->artifact_helper_fd);
-   if (state && state->artifact_socket_fd >= 0)
-      close(state->artifact_socket_fd);
-   if (state && state->lease_parent_fd >= 0)
-      close(state->lease_parent_fd);
-   if (state && state->lease_owners_fd >= 0)
-      close(state->lease_owners_fd);
-   if (state && state->engine_fd >= 0)
-      close(state->engine_fd);
-   if (state)
-      docker_cleanup_release(state);
-   free(state);
-}
-static int docker_reap_pending(void)
-{
-   docker_state_t *state = NULL;
-   pthread_mutex_lock(&cleanup_lock);
-   for (int i = 0; i < DOCKER_OWNED_CLEANUP_MAX; i++)
-      if (cleanup_slots[i] && cleanup_slots[i]->cleanup_pending == 1)
-      {
-         state = cleanup_slots[i];
-         state->cleanup_pending = 2;
-         state->cleanup_failed = 0;
-         break;
-      }
-   pthread_mutex_unlock(&cleanup_lock);
-   if (!state)
-      return 0;
-   if (!docker_cleanup_lease(state))
-   {
-      docker_state_destroy(state);
-      return 1;
-   }
-   pthread_mutex_lock(&cleanup_lock);
-   state->cleanup_pending = 1;
-   pthread_mutex_unlock(&cleanup_lock);
-   return 0;
-}
-static int docker_pin_engine(docker_state_t *state)
-{
-#if !defined(__linux__)
-   (void)state;
-   return -1;
-#else
-   const char *configured = getenv("DOCKER_HOST");
-   const char *path = configured && configured[0] ? configured : "unix:///var/run/docker.sock";
-   if (strncmp(path, "unix:///", 8))
-      return -1;
-   int raw = open(path + 7, O_PATH | O_NOFOLLOW | O_CLOEXEC);
-   state->engine_fd = raw >= 0 ? cli_native_pin_fd(raw) : -1;
-   if (raw >= 0)
-      close(raw);
-   struct stat status;
-   if (state->engine_fd < 0 || fstat(state->engine_fd, &status) || !S_ISSOCK(status.st_mode) ||
-       snprintf(state->engine_endpoint, sizeof state->engine_endpoint, "unix:///proc/%ld/fd/%d",
-                (long)getpid(), state->engine_fd) >= (int)sizeof state->engine_endpoint)
-      return -1;
-   return 0;
-#endif
-}
-
 /* The in-container forwarder the package proxy bridges through. */
 #define DELEGATE_PKG_PROXY_URL  "http://127.0.0.1:3129"
 #define DOCKER_DEFAULT_IMAGE    "ubuntu:22.04"
@@ -459,13 +201,6 @@ static const char *resolve_docker_workdir(void)
 
 /* Pick the docker binary. Tests substitute a fake-docker fixture
  * via AIMEE_DOCKER_BIN. Production runs default to "docker". */
-static const char *resolve_docker_bin(void)
-{
-   const char *override = getenv("AIMEE_DOCKER_BIN");
-   if (override && override[0])
-      return override;
-   return "docker";
-}
 
 int delegate_backend_docker_translate_mount_path(const char *container_path,
                                                  const char *mount_table, char *out, size_t outsz)
@@ -520,6 +255,105 @@ int delegate_backend_docker_translate_mount_path(const char *container_path,
  * source. Inspect this container's mounts and translate the socket to its host
  * source. A host-native server has no inspectable self container, so it keeps the
  * original path. */
+/* A single pinned-daemon inspect supplies both translations and bind recursion
+ * facts. Propagation is deliberately irrelevant: only BindOptions.NonRecursive
+ * describes the observer layout. The Go owner checks relevant source/owner paths. */
+int docker_controller_snapshot(docker_state_t *owner, const char *encoded, char **table)
+{
+   cJSON *snapshot = encoded ? cJSON_ParseWithOpts(encoded, NULL, 1) : NULL;
+   const cJSON *mounts = cJSON_GetObjectItemCaseSensitive(snapshot, "mounts");
+   const cJSON *configured = cJSON_GetObjectItemCaseSensitive(snapshot, "configured");
+   cJSON *bindings = cJSON_CreateArray();
+   char *out = calloc(1, 8192);
+   size_t used = 0;
+   int valid = cJSON_IsArray(mounts) && (cJSON_IsArray(configured) || cJSON_IsNull(configured)) &&
+               bindings && out;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, mounts)
+   {
+      const char *source = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Source"));
+      const char *target =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Destination"));
+      if (!valid || !source || !target || strpbrk(source, "\t\r\n") || strpbrk(target, "\t\r\n"))
+      {
+         valid = 0;
+         break;
+      }
+      int size = snprintf(out + used, 8192 - used, "%s\t%s\n", target, source);
+      if (size < 0 || (size_t)size >= 8192 - used)
+      {
+         valid = 0;
+         break;
+      }
+      used += (size_t)size;
+   }
+   cJSON_ArrayForEach(item, configured)
+   {
+      if (!valid)
+         break;
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Type"));
+      if (!type)
+      {
+         valid = 0;
+         break;
+      }
+      if (strcmp(type, "bind"))
+         continue;
+      const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "BindOptions");
+      const cJSON *nonrecursive = cJSON_GetObjectItemCaseSensitive(options, "NonRecursive");
+      if ((options && !cJSON_IsNull(options) && !cJSON_IsObject(options)) ||
+          (nonrecursive && !cJSON_IsBool(nonrecursive)))
+      {
+         valid = 0;
+         break;
+      }
+      const char *source = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Source"));
+      const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Target"));
+      int matched = 0;
+      const cJSON *actual;
+      cJSON_ArrayForEach(actual, mounts)
+      {
+         const char *actual_source =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(actual, "Source"));
+         const char *actual_target =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(actual, "Destination"));
+         if (source && target && actual_source && actual_target && !strcmp(source, actual_source) &&
+             !strcmp(target, actual_target))
+            matched = 1;
+      }
+      if (!matched)
+      {
+         if (cJSON_IsTrue(nonrecursive))
+            valid = 0;
+         continue;
+      }
+      cJSON *binding = cJSON_CreateObject();
+      if (!binding || !cJSON_AddStringToObject(binding, "source", source) ||
+          !cJSON_AddStringToObject(binding, "target", target) ||
+          !cJSON_AddBoolToObject(binding, "non_recursive", cJSON_IsTrue(nonrecursive)))
+      {
+         cJSON_Delete(binding);
+         valid = 0;
+         break;
+      }
+      cJSON_AddItemToArray(bindings, binding);
+   }
+   char *facts = valid ? cJSON_PrintUnformatted(bindings) : NULL;
+   if (!facts || snprintf(owner->controller_binds, sizeof owner->controller_binds, "%s", facts) >=
+                     (int)sizeof owner->controller_binds)
+      valid = 0;
+   free(facts);
+   cJSON_Delete(bindings);
+   cJSON_Delete(snapshot);
+   if (!valid)
+   {
+      free(out);
+      return -1;
+   }
+   *table = out;
+   return 0;
+}
+
 static int docker_host_path_for_container(docker_state_t *owner, const char *container,
                                           const char *container_path, char *out, size_t outsz,
                                           char *table, size_t table_capacity)
@@ -530,12 +364,14 @@ static int docker_host_path_for_container(docker_state_t *owner, const char *con
       return n < 0 || (size_t)n >= outsz ? -1 : 0;
    }
 
-   const char *argv[] = {resolve_docker_bin(),
-                         "inspect",
-                         "--format",
-                         "{{range .Mounts}}{{printf \"%s\\t%s\\n\" .Destination .Source}}{{end}}",
-                         container,
-                         NULL};
+   const char *argv[] = {
+       resolve_docker_bin(),
+       "inspect",
+       "--format",
+       owner ? "{\"mounts\":{{json .Mounts}},\"configured\":{{json .HostConfig.Mounts}}}"
+             : "{{range .Mounts}}{{printf \"%s\\t%s\\n\" .Destination .Source}}{{end}}",
+       container,
+       NULL};
    char *mounts = NULL;
    int inspected =
        owner ? docker_owned_capture(owner, argv, &mounts, 1 << 20, DOCKER_PROBE_TIMEOUT_MS, -1)
@@ -548,6 +384,15 @@ static int docker_host_path_for_container(docker_state_t *owner, const char *con
          return -1;
       int n = snprintf(out, outsz, "%s", container_path);
       return n < 0 || (size_t)n >= outsz ? -1 : 0;
+   }
+   if (owner)
+   {
+      char *translated = NULL;
+      int valid = docker_controller_snapshot(owner, mounts, &translated);
+      free(mounts);
+      mounts = translated;
+      if (valid)
+         return -1;
    }
    if (table && table_capacity)
    {
@@ -669,116 +514,6 @@ static int is_container_id(const char *id)
    return 1;
 }
 
-/* Restart cleanup shares the existing reaper, never the prefix sweep. The
- * only discovery root is this process's configured Aimee home. A live creator,
- * helper or pending owner keeps the journal OFD locked. Each pass advances a
- * bounded directory cursor and attempts at most one qualified journal. */
-static int docker_recover_journal(void)
-{
-#if !defined(__linux__)
-   return 0;
-#else
-   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-   static long cursor;
-   static dev_t device;
-   static ino_t inode;
-   if (pthread_mutex_trylock(&lock))
-      return 0;
-   int removed = 0, home = -1, owners = -1;
-   DIR *directory = NULL;
-   const char *configured_home = aimee_home();
-   char root[MAX_PATH_LEN];
-   struct stat status;
-   if (!configured_home || configured_home[0] != '/' ||
-       snprintf(root, sizeof root, "%s", configured_home) >= (int)sizeof root ||
-       (home = open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
-       (owners = openat(home, "acp-owners", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
-       fstat(owners, &status) || status.st_uid != geteuid() || (status.st_mode & 0777) != 0700)
-      goto done;
-   if (device != status.st_dev || inode != status.st_ino)
-   {
-      cursor = 0;
-      device = status.st_dev;
-      inode = status.st_ino;
-   }
-   directory = fdopendir(owners);
-   if (!directory)
-      goto done;
-   owners = -1;
-   if (cursor)
-      seekdir(directory, cursor);
-   for (int count = 0; count < 32; count++)
-   {
-      struct dirent *entry = readdir(directory);
-      if (!entry)
-      {
-         cursor = 0;
-         break;
-      }
-      cursor = telldir(directory);
-      if (strlen(entry->d_name) != 64 || strspn(entry->d_name, "0123456789abcdef") != 64)
-         continue;
-      docker_state_t *state = calloc(1, sizeof *state);
-      if (!state)
-         break;
-      state->engine_fd = state->lease_fd = state->lease_parent_fd = state->lease_owners_fd = -1;
-      state->lease_parent_fd =
-          openat(dirfd(directory), entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-      int valid = state->lease_parent_fd >= 0 && !fstat(state->lease_parent_fd, &status) &&
-                  status.st_uid == geteuid() && (status.st_mode & 0777) == 0700;
-      if (valid)
-         state->lease_fd = openat(state->lease_parent_fd, "lease.jsonl",
-                                  O_RDWR | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
-      valid = valid && state->lease_fd >= 0 && !fstat(state->lease_fd, &state->lease_identity) &&
-              S_ISREG(state->lease_identity.st_mode) && state->lease_identity.st_uid == geteuid() &&
-              (state->lease_identity.st_mode & 0777) == 0600 &&
-              state->lease_identity.st_nlink == 1 && state->lease_identity.st_size > 0 &&
-              state->lease_identity.st_size <= (1 << 20) + 4096 &&
-              !flock(state->lease_fd, LOCK_EX | LOCK_NB);
-      if (valid)
-      {
-         valid =
-             snprintf(state->lease_check, sizeof state->lease_check, "%s/acp-owners/%s/lease.jsonl",
-                      root, entry->d_name) < (int)sizeof state->lease_check &&
-             snprintf(state->docker_binary, sizeof state->docker_binary, "%s",
-                      resolve_docker_bin()) < (int)sizeof state->docker_binary;
-         snprintf(state->lease_leaf, sizeof state->lease_leaf, "%s", entry->d_name);
-         state->lease_owners_fd = fcntl(dirfd(directory), F_DUPFD_CLOEXEC, 10);
-         if (valid && state->lease_owners_fd >= 0 && !docker_pin_engine(state) &&
-             !docker_cleanup_lease_mode(state, 1))
-         {
-            docker_release_artifacts(state);
-            removed = 1;
-         }
-         else
-            LOG_WARN("delegate-sandbox",
-                     "restart cleanup unconfirmed for private scope %s; journal retained",
-                     entry->d_name);
-      }
-      if (state->engine_fd >= 0)
-         close(state->engine_fd);
-      if (state->lease_fd >= 0)
-         close(state->lease_fd);
-      if (state->lease_parent_fd >= 0)
-         close(state->lease_parent_fd);
-      if (state->lease_owners_fd >= 0)
-         close(state->lease_owners_fd);
-      free(state);
-      if (valid)
-         break; /* At most one 45-second helper/daemon attempt per pass. */
-   }
-done:
-   if (directory)
-      closedir(directory);
-   if (owners >= 0)
-      close(owners);
-   if (home >= 0)
-      close(home);
-   pthread_mutex_unlock(&lock);
-   return removed;
-#endif
-}
-
 /* Prefix/age cleanup owns only ordinary delegates. Private owner evidence is
  * an exclusion, never an admission verdict: even a broken private mount/startup
  * must remain under its retained journal's exact-container cleanup authority.
@@ -790,7 +525,8 @@ static int docker_is_ordinary_delegate(const char *id)
                          "--type",
                          "container",
                          "--format",
-                         "{\"mounts\":{{json .Mounts}},\"entrypoint\":{{json .Config.Entrypoint}}}",
+                         "{\"mounts\":{{json .Mounts}},\"entrypoint\":{{json "
+                         ".Config.Entrypoint}},\"labels\":{{json .Config.Labels}}}",
                          id,
                          NULL};
    char *out = NULL;
@@ -799,11 +535,15 @@ static int docker_is_ordinary_delegate(const char *id)
        0)
       goto done;
    cJSON *report = out ? cJSON_ParseWithOpts(out, NULL, 1) : NULL;
-   if (!cJSON_IsObject(report) || cJSON_GetArraySize(report) != 2)
+   if (!cJSON_IsObject(report) || cJSON_GetArraySize(report) != 3)
       goto parsed;
    const cJSON *mounts = cJSON_GetObjectItemCaseSensitive(report, "mounts");
    const cJSON *entrypoint = cJSON_GetObjectItemCaseSensitive(report, "entrypoint");
    if (!cJSON_IsArray(mounts) || (!cJSON_IsArray(entrypoint) && !cJSON_IsNull(entrypoint)))
+      goto parsed;
+   const cJSON *labels = cJSON_GetObjectItemCaseSensitive(report, "labels");
+   if ((!cJSON_IsObject(labels) && !cJSON_IsNull(labels)) ||
+       cJSON_GetObjectItemCaseSensitive(labels, "io.aimee.delegate.owner-lease"))
       goto parsed;
    const cJSON *item;
    cJSON_ArrayForEach(item, mounts)
@@ -1244,11 +984,11 @@ static void docker_mount_table(char *out, size_t cap)
 /* Remove the forwarder binary from the container so a half-configured proxy delegate
  * can't be left with an unusable-but-present forwarder it could relaunch pointed at an
  * arbitrary UDS path. Best-effort. */
-static void docker_pkg_forwarder_strip(const char *container)
+static void docker_pkg_forwarder_strip(docker_state_t *state, const char *container)
 {
    const char *rm_argv[] = {
        "docker", "exec", container, "rm", "-f", "/usr/local/bin/aimee-forwarder", NULL};
-   (void)run_docker(rm_argv);
+   (void)(state ? docker_owned_run(state, rm_argv) : run_docker(rm_argv));
 }
 
 static int docker_forwarder_start(docker_state_t *state, const char *container, unsigned port)
@@ -1285,15 +1025,15 @@ static int docker_forwarder_start(docker_state_t *state, const char *container, 
       /* Copied but not running: strip it rather than leave a relaunchable binary. */
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "starting package forwarder in %s failed — stripping the binary", container);
-      docker_pkg_forwarder_strip(container);
+      docker_pkg_forwarder_strip(state, container);
       return -1;
    }
    return 0;
 }
 
-static void docker_pkg_forwarder_setup(const char *container)
+static void docker_pkg_forwarder_setup(docker_state_t *state, const char *container)
 {
-   if (docker_forwarder_start(NULL, container, 3129))
+   if (docker_forwarder_start(state, container, 3129))
       return;
    /* apt does not honour http_proxy through every transport — drop in an explicit
     * proxy config too. Best-effort (needs a root-writable /etc/apt; a non-root
@@ -1308,16 +1048,10 @@ static void docker_pkg_forwarder_setup(const char *container)
                              "Acquire::https::Proxy \"http://127.0.0.1:3129\";\\n' "
                              "> /etc/apt/apt.conf.d/99aimee-proxy 2>/dev/null || true",
                              NULL};
-   (void)run_docker(apt_argv);
+   (void)(state ? docker_owned_run(state, apt_argv) : run_docker(apt_argv));
    aimee_log(LOG_INFO, "delegate-sandbox",
              "package proxy armed in %s (127.0.0.1:3129 -> aimee UDS; egress via aimee)",
              container);
-}
-
-static const char *resolve_delegate_egress_bin(void)
-{
-   const char *override = getenv("AIMEE_DELEGATE_EGRESS_BIN");
-   return override && override[0] ? override : "aimee-delegate-egress";
 }
 
 /* C discovers canonical filesystem/socket facts. The Go egress module alone
@@ -1330,7 +1064,9 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    (void)self;
    if (state_out)
       *state_out = NULL;
-   if (!task_id || !task_id[0] || !state_out || !cfg || !cfg->workspace || !cfg->workspace[0])
+   if (!task_id || !task_id[0] || !state_out || !cfg ||
+       (cfg->checked_resource != 0 && cfg->checked_resource != 1) || !cfg->workspace ||
+       !cfg->workspace[0])
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "a full source workspace is required; refusing an empty sandbox");
@@ -1351,8 +1087,24 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       docker_state_destroy(st);
       return -1;
    }
-   if (cfg->control_socket && (docker_cleanup_reserve(st) || docker_pin_engine(st)))
+   int checked = cfg->control_socket || cfg->checked_resource;
+   st->private_io = cfg->control_socket != NULL;
+   if (checked && docker_capture_binary(st))
    {
+      LOG_ERROR("delegate-sandbox", "checked Docker client unavailable");
+      docker_state_destroy(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+   }
+   if (checked && cfg->hibernate_on_exit)
+   {
+      LOG_ERROR("delegate-sandbox", "checked resources cannot hibernate");
+      docker_state_destroy(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+   }
+   if (checked && (docker_cleanup_reserve(st) || docker_pin_engine(st)))
+   {
+      LOG_ERROR("delegate-sandbox", "checked resource requires a pinnable local Unix Docker "
+                                    "endpoint; remote transport is unsupported");
       docker_state_destroy(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
@@ -1411,9 +1163,9 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    }
    char mount_table[8192];
    docker_mount_table(mount_table, sizeof(mount_table));
-   int socket_path_result = docker_host_path_for_self(
-       cfg->control_socket ? st : NULL, container_sock, host_sock, sizeof(host_sock),
-       cfg->control_socket ? mount_table : NULL, cfg->control_socket ? sizeof mount_table : 0);
+   int socket_path_result =
+       docker_host_path_for_self(checked ? st : NULL, container_sock, host_sock, sizeof(host_sock),
+                                 checked ? mount_table : NULL, checked ? sizeof mount_table : 0);
    if (socket_path_result < 0 || (server_runs_in_container() && socket_path_result != 1))
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
@@ -1442,93 +1194,27 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       }
    }
 
-   if (cfg->control_socket)
+   if (checked && docker_lease_open(st, cfg->control_socket))
    {
-      char parent_path[MAX_PATH_LEN];
-      const char *leaf = strrchr(container_sock, '/');
-      if (!leaf ||
-          snprintf(parent_path, sizeof parent_path, "%.*s", (int)(leaf - container_sock),
-                   container_sock) >= (int)sizeof parent_path ||
-          snprintf(st->lease_check, sizeof st->lease_check, "%s/lease.jsonl", parent_path) >=
-              (int)sizeof st->lease_check)
-      {
-         docker_state_destroy(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
-      int parent = open(parent_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-      struct stat status;
-      int valid = parent >= 0 && !fstat(parent, &status) && status.st_uid == getuid() &&
-                  (status.st_mode & 0777) == 0700;
-      if (valid)
-         st->lease_fd = openat(parent, "lease.jsonl",
-                               O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
-#if defined(__linux__)
-      if (st->lease_fd >= 0 && flock(st->lease_fd, LOCK_EX | LOCK_NB))
-      {
-         close(st->lease_fd);
-         st->lease_fd = -1;
-      }
-#endif
-      if (st->lease_fd >= 0)
-         st->lease_parent_fd = fcntl(parent, F_DUPFD_CLOEXEC, 10);
-      valid = valid && st->lease_fd >= 0 && st->lease_parent_fd >= 0 && !fsync(parent) &&
-              !fstat(st->lease_fd, &st->lease_identity) && !fstat(parent, &st->parent_identity) &&
-              (st->artifact_helper_fd =
-                   openat(parent, "owner-io", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)) >= 0 &&
-              !fstat(st->artifact_helper_fd, &st->helper_identity) &&
-              S_ISREG(st->helper_identity.st_mode);
-#if defined(__linux__)
-      if (valid)
-      {
-         st->artifact_socket_fd =
-             openat(parent, "aimee-http.sock", O_PATH | O_NOFOLLOW | O_CLOEXEC);
-         valid = st->artifact_socket_fd >= 0 &&
-                 !fstat(st->artifact_socket_fd, &st->socket_identity) &&
-                 S_ISSOCK(st->socket_identity.st_mode);
-      }
-#else
-      valid = 0;
-#endif
-      if (valid)
-      {
-         const char *nonce = strrchr(parent_path, '/');
-         char owners_path[MAX_PATH_LEN];
-         struct stat named;
-         valid = nonce && strlen(nonce + 1) == 64 &&
-                 snprintf(owners_path, sizeof owners_path, "%.*s", (int)(nonce - parent_path),
-                          parent_path) < (int)sizeof owners_path &&
-                 (st->lease_owners_fd =
-                      open(owners_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) >= 0 &&
-                 !fstatat(st->lease_owners_fd, nonce + 1, &named, AT_SYMLINK_NOFOLLOW) &&
-                 named.st_dev == st->parent_identity.st_dev &&
-                 named.st_ino == st->parent_identity.st_ino;
-         if (valid)
-         {
-            snprintf(st->lease_leaf, sizeof st->lease_leaf, "%s", nonce + 1);
-            /* Parent descriptors remain held through pending reaping. */
-         }
-      }
-      if (parent >= 0)
-         close(parent);
-      if (!valid)
-      {
-         docker_state_destroy(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
+      docker_state_destroy(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    const char *argv[52];
    int n = 0;
    argv[n++] = resolve_delegate_egress_bin();
    argv[n++] = "acquire";
-   if (cfg->control_socket)
+   if (checked)
    {
-      argv[n++] = "--receipt-json";
+      argv[n++] = cfg->control_socket ? "--receipt-json" : "--resource-receipt-json";
       argv[n++] = "--lease-fd";
       argv[n++] = "3";
       argv[n++] = "--lease-check";
       argv[n++] = st->lease_check;
       argv[n++] = "--engine-endpoint";
       argv[n++] = st->engine_endpoint;
+   }
+   if (cfg->control_socket)
+   {
       argv[n++] = "--helper-check";
       argv[n++] = helper_check;
       argv[n++] = "--helper-source";
@@ -1537,7 +1223,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       argv[n++] = cfg->control_helper_sha256;
    }
    argv[n++] = "--docker";
-   argv[n++] = resolve_docker_bin();
+   argv[n++] = st->docker_binary;
    argv[n++] = "--task";
    argv[n++] = task_id;
    argv[n++] = "--image";
@@ -1563,6 +1249,11 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       argv[n++] = "--writes-allowed";
    if (cfg->pkg_proxy)
       argv[n++] = "--proxy";
+   if (checked && st->controller_binds[0])
+   {
+      argv[n++] = "--controller-binds";
+      argv[n++] = st->controller_binds;
+   }
    if (mount_table[0])
    {
       argv[n++] = "--mount-table";
@@ -1574,10 +1265,9 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    char *out = NULL;
    char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
                           NULL};
-   int rc = cfg->control_socket
-                ? safe_exec_capture_cwd_env_fd_timeout(argv, NULL, environment, &out, 8192, 70000,
-                                                       st->lease_fd, 3)
-                : safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 4096, 70000);
+   int rc = checked ? safe_exec_capture_cwd_env_fd_timeout(argv, NULL, environment, &out, 8192,
+                                                           70000, st->lease_fd, 3)
+                    : safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 4096, 70000);
    if (rc != 0 || !out)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
@@ -1589,11 +1279,10 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    size_t len = strlen(out);
    while (len && isspace((unsigned char)out[len - 1]))
       out[--len] = '\0';
-   cJSON *receipt = cfg->control_socket ? cJSON_Parse(out) : NULL;
-   const char *name = cfg->control_socket
-                          ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "name"))
-                          : out;
-   if (cfg->control_socket)
+   cJSON *receipt = checked ? cJSON_ParseWithOpts(out, NULL, 1) : NULL;
+   const char *name =
+       checked ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "name")) : out;
+   if (checked)
    {
       const char *engine =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "engine_endpoint"));
@@ -1617,16 +1306,28 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "control_socket_source"));
       const char *target =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "control_socket_target"));
-      if (!engine || strcmp(engine, st->engine_endpoint) || !helper ||
-          strcmp(helper, helper_source) || !helper_target ||
-          strcmp(helper_target, DELEGATE_OWNER_HELPER) || !helper_sha ||
-          strcmp(helper_sha, cfg->control_helper_sha256) || !startup ||
-          strcmp(startup, "owner-io-idle-guard-v1") ||
-          !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "fresh_container")) || !schema ||
-          strcmp(schema, "aimee.container-acquire.v1") || !id || strlen(id) != 64 ||
-          !is_container_id(id) || !image || strlen(image) != 71 || strncmp(image, "sha256:", 7) ||
-          !is_container_id(image + 7) || !workdir || strcmp(workdir, st->workdir) || !source ||
-          strcmp(source, host_sock) || !target || strcmp(target, DELEGATE_SOCK_PATH) ||
+      int private_valid = cfg->control_socket && engine && !strcmp(engine, st->engine_endpoint) &&
+                          helper && !strcmp(helper, helper_source) && helper_target &&
+                          !strcmp(helper_target, DELEGATE_OWNER_HELPER) && helper_sha &&
+                          !strcmp(helper_sha, cfg->control_helper_sha256) && startup &&
+                          !strcmp(startup, "owner-io-idle-guard-v1");
+      if (!(cfg->control_socket
+                ? private_valid
+                : engine && !strcmp(engine, st->engine_endpoint) &&
+                      !strcmp(cJSON_GetStringValue(
+                                  cJSON_GetObjectItemCaseSensitive(receipt, "resource_mode"))
+                                  ? cJSON_GetStringValue(
+                                        cJSON_GetObjectItemCaseSensitive(receipt, "resource_mode"))
+                                  : "",
+                              "ordinary-container")) ||
+          !schema ||
+          strcmp(schema, cfg->control_socket ? "aimee.container-acquire.v1"
+                                             : "aimee.container-resource.v1") ||
+          !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "fresh_container")) || !id ||
+          strlen(id) != 64 || !is_container_id(id) || !image || strlen(image) != 71 ||
+          strncmp(image, "sha256:", 7) || !is_container_id(image + 7) || !workdir ||
+          strcmp(workdir, st->workdir) || !source || strcmp(source, host_sock) || !target ||
+          strcmp(target, DELEGATE_SOCK_PATH) ||
           !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "verified_posture")))
       {
          cJSON_Delete(receipt);
@@ -1656,7 +1357,8 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    free(out);
 
    if (cfg->pkg_proxy && !cfg->control_socket)
-      docker_pkg_forwarder_setup(st->container_name);
+      docker_pkg_forwarder_setup(checked ? st : NULL,
+                                 checked ? st->container_id : st->container_name);
    *state_out = st;
    return 0;
 }
@@ -1739,9 +1441,9 @@ static int delegate_backend_docker_file_owner_start(void *state, int executable_
 {
    docker_state_t *owner = state;
    char id[65], image[72];
-   if (delegate_backend_docker_owned_identity(state, id, image) || owner->file_ready ||
-       owner->file_started || owner->file_owner.pid || !selected_command || !selected_command[0] ||
-       !validate || validate(context) || util_now_ms() >= deadline_ms)
+   if (!owner || !owner->private_io || delegate_backend_docker_owned_identity(state, id, image) ||
+       owner->file_ready || owner->file_started || owner->file_owner.pid || !selected_command ||
+       !selected_command[0] || !validate || validate(context) || util_now_ms() >= deadline_ms)
       return -1;
    owner->file_started = 1;
    owner->launcher_fd = cli_native_pin_fd(executable_fd);
@@ -1803,7 +1505,8 @@ static int delegate_backend_docker_owned_prepared(void *state, const char **comm
                                                   const char **home, const char **mcp_command)
 {
    docker_state_t *owner = state;
-   if (!owner || !owner->file_ready || owner->retired || !command || !home || !mcp_command)
+   if (!owner || !owner->private_io || !owner->file_ready || owner->retired || !command || !home ||
+       !mcp_command)
       return -1;
    *command = owner->prepared_command;
    *home = owner->prepared_home;
@@ -1889,6 +1592,8 @@ static int delegate_backend_docker_owned_file(void *state, const char *path, int
 static int delegate_backend_docker_owned_forwarder(void *state, unsigned port)
 {
    docker_state_t *owner = state;
+   if (!owner || !owner->private_io)
+      return -1;
    char id[65], image[72];
    cli_native_stdio_t *process = port == 3129 ? &owner->package_forwarder : &owner->forwarder;
    if ((port != 3131 && port != 3129) || delegate_backend_docker_owned_identity(state, id, image) ||
@@ -1932,23 +1637,7 @@ static int delegate_backend_docker_owned_retire(void *state)
    cli_native_stdio_close(&owner->package_forwarder);
    owner->file_validate = NULL;
    owner->file_context = NULL;
-   if (owner->lease_fd >= 0)
-      return docker_cleanup_lease(owner);
-   const char *remove[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
-   if (docker_owned_run(owner, remove))
-      return -1;
-   char filter[80];
-   snprintf(filter, sizeof filter, "id=%s", id);
-   const char *inspect[] = {resolve_docker_bin(), "ps",   "-aq", "--no-trunc",
-                            "--filter",           filter, NULL};
-   char *remaining = NULL;
-   int rc = docker_owned_capture(owner, inspect, &remaining, 4096, 15000, -1);
-   int absent = !rc && (!remaining || !remaining[strspn(remaining, " \t\r\n")]);
-   free(remaining);
-   if (!absent)
-      return -1;
-   owner->retired = 1;
-   return 0;
+   return owner->lease_fd >= 0 ? docker_cleanup_lease(owner) : -1;
 }
 
 static void docker_release(delegate_backend_t *self, void *state, int hibernate)
@@ -2033,7 +1722,14 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
    /* If AIMEE_DOCKER_BIN is set, swap the leading "docker" in the
     * built command for the override binary. Production runs leave
     * the env unset and the leading "docker" wins via PATH. */
-   const char *bin_override = getenv("AIMEE_DOCKER_BIN");
+   const char *bin_override = st->container_id[0] ? st->docker_binary : getenv("AIMEE_DOCKER_BIN");
+   char *quoted_binary = bin_override ? shell_quote(bin_override) : NULL;
+   if (bin_override && !quoted_binary)
+   {
+      free(docker_cmd);
+      return -1;
+   }
+   bin_override = quoted_binary;
    if (bin_override && bin_override[0] && strncmp(docker_cmd, "docker ", 7) == 0)
    {
       size_t bin_len = strlen(bin_override);
@@ -2041,6 +1737,7 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       char *swapped = malloc(bin_len + tail_len + 1);
       if (!swapped)
       {
+         free(quoted_binary);
          free(docker_cmd);
          return -1;
       }
@@ -2052,6 +1749,7 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       }
    }
 
+   free(quoted_binary);
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
    if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
@@ -2102,8 +1800,14 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       if (input < 0 || dup2(input, STDIN_FILENO) < 0)
          _exit(126);
       close(input);
-      if ((scope && child_environment_install(scope->environment, scope->replace_environment)) ||
-          dup2(out_pipe[1], STDOUT_FILENO) < 0 || dup2(err_pipe[1], STDERR_FILENO) < 0)
+      char *client_environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
+                                    "HOME=/nonexistent", NULL};
+      int environment_failed =
+          st->container_id[0] ? child_environment_install(client_environment, 1)
+                              : (scope && child_environment_install(scope->environment,
+                                                                    scope->replace_environment));
+      if (environment_failed || dup2(out_pipe[1], STDOUT_FILENO) < 0 ||
+          dup2(err_pipe[1], STDERR_FILENO) < 0)
          _exit(126);
       /* Original pipe descriptors are all >=10 and cannot close mapped stdio. */
       close(out_pipe[0]);
@@ -2357,7 +2061,7 @@ static int docker_read_file(delegate_backend_t *self, void *state, const char *p
    if (docker_resolve_in_workspace(st, p, abs, sizeof abs))
       return -1;
    size_t cap = limit > 0 ? (size_t)limit : SCOPED_FILE_IO_MAX, n = 0;
-   if (st->engine_fd >= 0)
+   if (st->private_io)
    {
       int unknown = 0;
       if (docker_owned_file_request(st, abs, 'R', NULL, 0, 30000, &buf, &n, &unknown) ||
@@ -2410,7 +2114,7 @@ static int docker_write_file(delegate_backend_t *self, void *state, const char *
    if (docker_resolve_in_workspace(st, p, abs, sizeof(abs)) != 0)
       return -1;
 
-   if (st->engine_fd >= 0)
+   if (st->private_io)
    {
       char *bytes = NULL;
       size_t length = 0;
@@ -2492,7 +2196,7 @@ static int docker_list_dir(delegate_backend_t *self, void *state, const char *p,
       return -1;
    }
 
-   if (st->engine_fd >= 0)
+   if (st->private_io)
    {
       char *bytes = NULL;
       size_t length = 0;

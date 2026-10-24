@@ -382,8 +382,8 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    assert(written && fread(actual, 1, sizeof actual - 1, written) == 6 &&
           !strcmp(actual, "scope\n") && !fclose(written));
    agent_tools_write_capable_set(0);
-   native = dispatch_tool_call("write_file", "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}",
-                               1000);
+   native = dispatch_tool_call("write_file",
+                               "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}", 1000);
    assert(native && strstr(native, "read-only delegate"));
    free(native);
    snprintf(native_path, sizeof native_path, "%s/forbidden.txt", worktree);

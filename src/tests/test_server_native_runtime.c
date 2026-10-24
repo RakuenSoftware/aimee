@@ -2541,6 +2541,38 @@ static void test_owned_native_context(const agent_t *selected, const request_con
    char baseline[65], changed[65];
    int scoped = server_native_runtime_cache_scope(runtime, &execution, baseline);
    assert(!scoped);
+   if (workspace->kind == WS_PROVIDER_CONTAINER)
+   {
+      /* Epoch digests are explicit platform-peer inputs here. The actual hash
+       * owner must preserve stable-scope equality and fork on a fresh resource,
+       * while the durable-history callbacks below remain canonical. */
+      char repeated[65], next_epoch[65];
+      assert(!server_native_runtime_cache_scope(runtime, &execution, repeated));
+      assert(!strcmp(repeated, baseline));
+      const char *previous_epoch = execution.workspace_digest;
+      execution.workspace_digest =
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+      server_native_runtime_t *fresh =
+          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      assert(fresh);
+      assert(!strcmp(server_native_runtime_binding(fresh), server_native_runtime_binding(runtime)));
+      const cJSON *before = server_native_runtime_source_history(runtime);
+      const cJSON *after = server_native_runtime_source_history(fresh);
+      assert(cJSON_IsArray(before) && cJSON_GetArraySize(before) == 1);
+      char *source_wire = cJSON_PrintUnformatted(before);
+      assert(source_wire && strstr(source_wire, "canonical source prompt") &&
+             !strstr(source_wire, "stale initial profile history"));
+      free(source_wire);
+      assert(after && cJSON_Compare(before, after, 1));
+      assert(!server_native_runtime_cache_scope(fresh, &execution, next_epoch));
+      assert(strcmp(next_epoch, baseline));
+      assert(!server_native_runtime_cache_scope(fresh, &execution, repeated));
+      assert(!strcmp(repeated, next_epoch));
+      server_native_runtime_close(fresh);
+      execution.workspace_digest = previous_epoch;
+      assert(!server_native_runtime_cache_scope(runtime, &execution, repeated));
+      assert(!strcmp(repeated, baseline));
+   }
    free(profile.system[0].text);
    profile.system[0].text = strdup("different host profile");
    server_native_runtime_t *other =
@@ -2844,6 +2876,11 @@ int main(void)
    test_native_bound_mcp(&selected, &a);
    test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
+   /* Same actual runtime/history owner with a synthetic container provider:
+    * no Docker/process custody claim is inferred from the peer's kind. */
+   alice_workspace.kind = WS_PROVIDER_CONTAINER;
+   test_owned_native_context(&selected, &a);
+   alice_workspace.kind = WS_PROVIDER_SHARED;
    test_native_sdk_identity(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);

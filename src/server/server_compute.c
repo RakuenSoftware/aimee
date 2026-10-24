@@ -569,27 +569,6 @@ static void delegate_run_ctx_restore(delegate_run_ctx_t *c)
    mailbox_release(c->mb);
 }
 
-/* Export this delegate's context (depth/parent/source-authority) from the
- * forking thread's TLS into the child's environment. Call ONLY in a freshly
- * fork()ed child, before exec: the parent-side process-global AIMEE_DELEGATE_*
- * env races across concurrent delegate threads, so a cross-process sub-client
- * (a CLI agent that shells out to `aimee delegate`) could inherit a neighbor
- * delegate's depth/parent. fork() copies the forking thread's TLS into the
- * (now single-threaded) child, so re-deriving the env here is immune to that
- * clobber. No-op for primary agents (depth 0, no parent), which keep their
- * inherited environment. Matches the adjacent post-fork unsetenv() pattern. */
-void delegate_child_export_context_env(void)
-{
-   if (tl_delegation_depth > 0 || tl_parent_delegation_id[0])
-   {
-      char depth_str[32];
-      snprintf(depth_str, sizeof(depth_str), "%d", tl_delegation_depth);
-      platform_setenv("AIMEE_DELEGATE_DEPTH", depth_str);
-      platform_setenv("AIMEE_PARENT_DELEGATION_ID", tl_parent_delegation_id);
-   }
-   agent_source_authority_export_env();
-}
-
 /* Build the delegate result envelope from a finished run. Mirrors the two
  * branches the worker emitted inline: on success the response + turn/token
  * metrics; on failure the (possibly stop-reason) status + augmented message,
@@ -788,7 +767,8 @@ static void delegate_worker_run(void *arg)
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
    char turn_root[MAX_PATH_LEN] = "", source_cwd[MAX_PATH_LEN] = "";
    workspace_turn_scope_t *source_workspace = NULL;
-   server_acp_container_scope_t *acp_container = NULL;
+   server_delegate_container_plan_t *execution_plan = NULL;
+   int container_quiescent = 1;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -1668,36 +1648,17 @@ static void delegate_worker_run(void *arg)
     * the turn refuses; there is no off switch or in-process fallback.
     *
     * Keyed by deleg_id, so each delegation gets its own container. */
-   /* Mount the tree the delegate already has server-side, so the container gets
-    * the ENTIRE CURRENT SOURCE TREE — by bind-mount, so it IS that tree rather
-    * than a copy that can drift from it. Without it the delegation refuses.
-    *
-    * A DELEGATE'S CHANGES MUST NOT LEAVE ITS CONTAINER. That is what decides the
-    * mode here, and aimee already draws the line this needs: write-capable
-    * delegates get their OWN sibling worktree, read-only delegates share the
-    * parent workspace (delegate_resolve_worktree). So:
-    *
-    *   its own worktree  -> read-write. Isolated by construction: nothing else is
-    *                        looking at that tree, and git shares the object store
-    *                        rather than copying it.
-    *   the shared parent -> READ-ONLY. Not because the delegate is untrusted, but
-    *                        because the tree is not its own; two delegates on one
-    *                        tree would write over each other with no way to tell.
-    *                        Read-only at the mount is a property, not a rule the
-    *                        way the write guard above is.
-    *
-    * The write guard still applies above this; the two agree, and neither is load-
-    * bearing alone. */
+   /* Mount the complete resolved source tree, with write access only when the
+    * resolved role permits it. Owning a private checkout provides isolation;
+    * it does not grant write permission. Non-repository read-only sources can
+    * still use their existing shared root, mounted read-only. */
    const char *container_ws = NULL;
    int container_ws_ro = 1;
    if (delegate_worktree_path[0] && (delegate_dedicated_worktree || !delegate_shared_worktree))
    {
-      /* This delegate's own tree — a sibling worktree, or a WFE per-slice tree it
-       * owns exclusively (dedicated). Either way nothing else looks at it, so mount
-       * it read-WRITE: the delegate's edits land in the tree the engine then diffs
-       * and commits. */
+      /* Sibling and dedicated WFE trees retain the same resolved role ceiling. */
       container_ws = delegate_worktree_path;
-      container_ws_ro = 0;
+      container_ws_ro = !delegate_allows_writes;
    }
    else if (cwd[0] == '/' && !delegate_allows_writes)
    {
@@ -1731,16 +1692,15 @@ static void delegate_worker_run(void *arg)
     * not the requested subject, and no delegate is exempt from the container path.
     * A WFE implement slice normally owns a dedicated per-slice worktree, so
     * container_ws points at that tree read-write. */
-   int container_bound =
-       detached_bound ? -1
-                      : server_acp_container_bind(target_agent, deleg_id, sbx_image_arg,
-                                                  container_ws, container_ws_ro, &acp_container);
+   if (!cost_limit_failed && !detached_bound)
+      execution_plan = server_delegate_container_plan_open(deleg_id, sbx_image_arg, container_ws,
+                                                           container_ws_ro);
 
    if (cost_limit_failed)
    {
       /* Result error was populated before any provider dispatch. */
    }
-   else if (container_bound < 0)
+   else if (!execution_plan)
    {
       /* The delegate could not be given a container: no worktree of its own to
        * mount, no docker backend, or a runtime that would not isolate it. There is
@@ -1772,17 +1732,6 @@ static void delegate_worker_run(void *arg)
                                               credential_state_path, &result);
       server_delegate_heartbeat_end();
    }
-   delegate_run_ctx_restore(&run_ctx);
-   if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
-      workspace_turn_unbind_active();
-   /* Same call, and never both (see the bind): it clears the active pointer AND
-    * releases the container. Only when a container was actually bound (>0); a hard
-    * isolation refusal (<0) already tore the container down and set no active binding. */
-   if (container_bound > 0)
-      workspace_turn_unbind_active();
-   server_acp_container_scope_close(acp_container);
-   acp_container = NULL;
-   (void)db1_delegation_spawn_complete(deleg_id);
 
    if (rc == 0 && delegate_project_completed_result(&result, handoff_json) != 0)
    {
@@ -1843,11 +1792,8 @@ static void delegate_worker_run(void *arg)
             agent_result_t repaired = {0};
             memset(&repaired, 0, sizeof(repaired));
             int repair_rc =
-                force_tools
-                    ? agent_run_with_tools_write_enforce(&acfg, role, system_prompt, repair_prompt,
-                                                         max_tokens, delegate_allows_writes,
-                                                         &repaired)
-                    : agent_run(&acfg, role, system_prompt, repair_prompt, max_tokens, &repaired);
+                delegate_run_attempt(&acfg, role, system_prompt, repair_prompt, max_tokens,
+                                     force_tools, delegate_allows_writes, &repaired);
             free(repair_prompt);
             if (delegate_merge_handoff_repair(&result, &repaired, repair_rc))
             {
@@ -1864,6 +1810,23 @@ static void delegate_worker_run(void *arg)
                   handoff_validation.error[0] ? handoff_validation.error : "validation failed");
       }
    }
+   /* Every model attempt and repair has joined and retired its resources before
+    * any parent-worktree application. Retain delegate/source attribution until
+    * this boundary; never repair as a host primary after restoring the caller. */
+   if (server_delegate_container_plan_close(execution_plan))
+   {
+      container_quiescent = 0;
+      rc = AGENT_RC_CAPTURE_FAILED;
+      result.success = 0;
+      if (!result.error[0])
+         snprintf(result.error, sizeof result.error,
+                  "delegate container quiescence was not verified");
+   }
+   execution_plan = NULL;
+   if (detached_bound)
+      workspace_turn_unbind_active();
+   delegate_run_ctx_restore(&run_ctx);
+   (void)db1_delegation_spawn_complete(deleg_id);
    /* Clear unconditionally: this thread is going back to the pool, and a leftover
     * override would silently re-scope the NEXT delegate's tools. */
    agent_tools_set_active_toolset(NULL);
@@ -2016,8 +1979,13 @@ static void delegate_worker_run(void *arg)
    }
 
    /* Clean up delegate worktree if we created one. */
-   if (delegate_worktree_path[0] && delegate_git_root[0])
+   if (container_quiescent && delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
+   else if (!container_quiescent)
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "delegate %s: retaining worktree until container "
+                "quiescence is confirmed",
+                deleg_id);
 
    /* Release the credential lease so siblings can pick it up. If the
     * delegate failed with a rate-limit / 429 / overloaded error, cool
@@ -2051,13 +2019,14 @@ static void delegate_worker_run(void *arg)
     * the exit has already sent its own error response; the success path returns
     * above and never falls through. */
 delegate_fail:
-   server_acp_container_scope_close(acp_container);
+   if (server_delegate_container_plan_close(execution_plan))
+      container_quiescent = 0;
    run_cmd_set_cwd(NULL);
    free(resolved_prompt);
    free(template_sys_prompt);
    if (target_agent && leased_cred_name[0])
       delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
-   if (delegate_worktree_path[0] && delegate_git_root[0])
+   if (container_quiescent && delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
    (void)workspace_turn_scope_end(source_workspace);
    compute_ctx_free(cctx);

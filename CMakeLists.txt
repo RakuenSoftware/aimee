@@ -729,6 +729,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_docker_lease.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_openai.c
 

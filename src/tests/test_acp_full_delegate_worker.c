@@ -74,11 +74,19 @@ void compute_pool_set_job(pool_job_kind_t kind, const char *format, ...)
 #include "server_http_identity.h"
 #include "delegate_permissions_stub.h"
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/module_api.h>
 #include "support/delegate_role_seam_stub.h"
 #include "modules/workspace/workspace_turn.h"
 #include <aimee/delegates/delegate_backend_docker.h>
 
-/* Exact code-role metadata recording, pinned by the Go rolepolicy_test.go
+static int full_worker_read_only;
+static const char *full_worker_role(void)
+{
+   return full_worker_read_only ? "diagnose" : "code";
+}
+
+/* Exact code/diagnose role metadata recording, pinned by the Go rolepolicy_test.go
  * TestRoleIsWrite contract. Permission grants come from the existing generated
  * ResolveRolePermissions recording; neither peer attests source or performs I/O. */
 static int full_worker_role_policy(int operation, const char *role, int a, int b, int c, int *out)
@@ -86,17 +94,48 @@ static int full_worker_role_policy(int operation, const char *role, int a, int b
    (void)a;
    (void)b;
    (void)c;
-   if (!role || strcmp(role, "code") || !out ||
+   if (!role || strcmp(role, full_worker_role()) || !out ||
        (operation != DELEGATE_ROLE_OP_BUILTIN && operation != DELEGATE_ROLE_OP_IS_WRITE))
       return -1;
-   *out = 1;
+   *out = operation == DELEGATE_ROLE_OP_BUILTIN || !full_worker_read_only;
    return 0;
+}
+
+/* Recorded Go review metadata: code is unguarded; diagnose is guarded but
+ * does not snippet-check historical evidence. The exact report below makes no
+ * clean-tree claim. This recording does not grade the execution. */
+static int full_worker_review_policy(const char *role, const char *response, unsigned flags,
+                                     unsigned *verdict, char *message, size_t capacity)
+{
+   if (!role || strcmp(role, full_worker_role()) || !response || !verdict)
+      return -1;
+   if (flags == AIMEE_DELEGATES_REVIEW_POLICY_ONLY && !response[0])
+      *verdict = full_worker_read_only ? AIMEE_DELEGATES_REVIEW_GUARDED : 0;
+   else if (full_worker_read_only && !(flags & ~AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) &&
+            !strcmp(response, "Full delegate worker ACP complete"))
+      *verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
+   else
+      return -1;
+   if (message && capacity)
+      message[0] = 0;
+   return 0;
+}
+
+static void full_worker_exact_file(const char *path, const char *expected)
+{
+   FILE *file = fopen(path, "rb");
+   char content[256];
+   assert(file);
+   size_t length = fread(content, 1, sizeof content, file);
+   assert(!ferror(file) && !fclose(file) && length == strlen(expected) &&
+          !memcmp(content, expected, length));
 }
 
 /* Exact in-memory DB1 service peer. It stores writer-owned canonical envelopes;
  * source/capture/control policy and all workspace/container I/O stay real. */
 static db1_server_session_t full_sessions[32];
 static int full_session_count;
+int db1_server_session_get(const char *sid, db1_server_session_t *out);
 int db1_server_session_create(const char *sid, const char *client, const char *actor)
 {
    assert(sid && sid[0] && actor && actor[0]);
@@ -110,7 +149,14 @@ int db1_server_session_create(const char *sid, const char *client, const char *a
    snprintf(row->principal, sizeof row->principal, "%s", actor);
    snprintf(row->created_at, sizeof row->created_at, "owned-fixture-incarnation");
    const char *bound = run_cmd_get_cwd();
-   acp_route_policy_reset(bound && bound[0] ? bound : workspace, actor, sid);
+   const char *source_session = agent_get_request_session();
+   if (!source_session || !source_session[0])
+      source_session = sid;
+   db1_server_session_t declared;
+   assert(!db1_server_session_get(source_session, &declared) && !strcmp(declared.principal, actor));
+   /* Logical tool/action ownership remains the admitted parent; canonical
+    * content is captured in the separately owned child turn/session. */
+   acp_route_policy_reset(bound && bound[0] ? bound : workspace, actor, source_session);
    acp_route_policy_fault(5);
    return 0;
 }
@@ -280,7 +326,7 @@ int db1_interaction_event_record(const char *sid, const char *type, const char *
    assert(!strcmp(outcome, "ok") || !strcmp(outcome, "error"));
    cJSON *event = cJSON_Parse(payload);
    assert(cJSON_IsObject(event));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "role")), "code"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "role")), full_worker_role()));
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "learning_owner")),
                   "canonical_session_log"));
    fprintf(stderr, "actual delegate exit observation: %s %s\n", outcome, payload);
@@ -303,7 +349,9 @@ int main(int argc, char **argv)
            "private HOME and prepared sandbox image");
       return 0;
    }
-   assert(argc == 3 && !strcmp(argv[1], "--full-worker"));
+   assert(argc == 3 &&
+          (!strcmp(argv[1], "--full-worker") || !strcmp(argv[1], "--full-worker-read-only")));
+   full_worker_read_only = !strcmp(argv[1], "--full-worker-read-only");
    const char *fixture_home = getenv("AIMEE_FULL_WORKER_HOME");
    assert(fixture_home && fixture_home[0] == '/' && getenv("AIMEE_HOME") && getenv("HOME") &&
           !strcmp(fixture_home, getenv("AIMEE_HOME")) && !strcmp(fixture_home, getenv("HOME")));
@@ -321,14 +369,16 @@ int main(int argc, char **argv)
    assert(count > 0 && count < (ssize_t)sizeof executable);
    executable[count] = 0;
    delegate_role_seam_install();
-   const char *canonical_role = delegate_role_canonicalize("code");
-   assert(canonical_role && strcmp(canonical_role, "code") == 0);
-   assert(strcmp(delegate_role_canonicalize(canonical_role), "code") == 0);
+   const char *canonical_role = delegate_role_canonicalize(full_worker_role());
+   assert(canonical_role && !strcmp(canonical_role, full_worker_role()));
+   assert(!strcmp(delegate_role_canonicalize(canonical_role), full_worker_role()));
    delegate_register_role_policy_provider(full_worker_role_policy);
+   delegate_register_review_evidence_provider(full_worker_review_policy);
    delegate_permissions_stub_install();
    expected_controls = 0;
    agent_tools_register_metadata(route_tool_metadata);
    agent_tools_register_classifier(route_tool_classify);
+   agent_tools_register_action_owner(policy_action_begin, policy_action_finish);
    log_entries = cJSON_CreateArray();
    stored_rows = cJSON_CreateArray();
    assert(!config_set_memory_recall_enabled(0));
@@ -365,7 +415,7 @@ int main(int argc, char **argv)
    cJSON *request = cJSON_CreateObject();
    assert(!db1_server_session_create("full-worker-parent", "cli", connection.vault_principal));
    cJSON_AddStringToObject(request, "session_id", "full-worker-parent");
-   cJSON_AddStringToObject(request, "role", "code");
+   cJSON_AddStringToObject(request, "role", full_worker_role());
    cJSON_AddStringToObject(request, "persona", "engineer");
    cJSON_AddStringToObject(request, "cwd", workspace);
    cJSON_AddStringToObject(request, "prompt", "Complete the owned full worker protocol fixture.");
@@ -373,15 +423,37 @@ int main(int argc, char **argv)
    assert(agent && agent[0] == '/' && strlen(agent) < 256);
    assert(access(agent, X_OK) != 0); /* Image-only agent: no host availability substitute. */
    cJSON_AddStringToObject(request, "acp_command", agent);
+   if (full_worker_read_only)
+      cJSON_AddStringToObject(request, "acp_args", "--read-only");
    cJSON_AddNumberToObject(request, "max_turns", 0);
    cJSON_AddNumberToObject(request, "timeout_ms", 60000);
    cJSON_AddBoolToObject(request, "handoff_json", 0);
    cJSON_AddBoolToObject(request, "tools", 1);
    cJSON_AddBoolToObject(request, "provided_target", 1);
+   char parent_seed[4096], private_sentinel[4096], parent_attempt[4096];
+   assert(snprintf(parent_seed, sizeof parent_seed, "%s/full-worker.txt", workspace) > 0);
+   assert(snprintf(private_sentinel, sizeof private_sentinel, "%s/read-only-parent-private.txt",
+                   fixture_home) > 0);
+   assert(snprintf(parent_attempt, sizeof parent_attempt, "%s/opaque-direct-write.txt", workspace) >
+          0);
+   if (full_worker_read_only)
+   {
+      full_worker_exact_file(parent_seed, "full worker owned write\n");
+      FILE *sentinel = fopen(private_sentinel, "wx");
+      assert(sentinel && !fchmod(fileno(sentinel), 0600) &&
+             fputs("parent private state unchanged\n", sentinel) >= 0 && !fclose(sentinel));
+      assert(access(parent_attempt, F_OK) && errno == ENOENT);
+   }
    compute_ctx_t *context = create_compute_ctx(&server, &connection, request);
    assert(context);
    context->compute_executor_threads = 1;
    delegate_worker(context);
+   if (full_worker_read_only)
+   {
+      full_worker_exact_file(parent_seed, "full worker owned write\n");
+      full_worker_exact_file(private_sentinel, "parent private state unchanged\n");
+      assert(access(parent_attempt, F_OK) && errno == ENOENT);
+   }
    char capture_path[4096];
    assert(snprintf(capture_path, sizeof capture_path, "%s/full-worker-canonical.private.json",
                    fixture_home) < (int)sizeof capture_path);
@@ -429,7 +501,7 @@ int main(int argc, char **argv)
    assert(text && !strcmp(text, "Full delegate worker ACP complete"));
    assert(response.usage_unobserved && cJSON_IsFalse(cJSON_GetObjectItem(result, "cost_known")));
    assert(cJSON_GetArraySize(stored_rows) > 0);
-   assert(acp_route_policy_writes() == 1);
+   assert(acp_route_policy_writes() == !full_worker_read_only);
    struct
    {
       char id[256];
@@ -480,9 +552,17 @@ int main(int argc, char **argv)
          }
       }
    }
-   assert(uses == 4 && results == 4 && bash == 1 && final_text > last_result);
+   int expected_pairs = full_worker_read_only ? 3 : 4;
+   assert(uses == expected_pairs && results == expected_pairs && bash == 1 &&
+          final_text > last_result);
 
-   assert(acp_route_policy_dispatches() == 4 && acp_route_policy_outcomes() == 4);
+   cJSON *bash_arguments = cJSON_Parse("{\"command\":\"read-only nested CLI\"}");
+   assert(bash_arguments && !agent_tools_action_managed("bash", bash_arguments));
+   cJSON_Delete(bash_arguments);
+   /* Three read operations, plus a write in the code lane, journal; Bash keeps
+    * its actual policy/source and result without an invented extra receipt. */
+   assert(acp_route_policy_dispatches() == expected_pairs &&
+          acp_route_policy_outcomes() == expected_pairs);
    free(text);
    aimee_response_free(&response);
    cJSON_Delete(result);

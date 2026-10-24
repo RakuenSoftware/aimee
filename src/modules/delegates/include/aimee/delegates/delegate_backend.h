@@ -45,8 +45,10 @@ extern "C"
     * use (e.g., `image` is meaningless to the local backend). */
    typedef struct delegate_backend_config
    {
-      const char *image;     /* docker image hint, NULL for default */
-      const char *host;      /* ssh target host, NULL for local */
+      const char *image; /* docker image hint, NULL for default */
+      const char *host;  /* ssh target host, NULL for local */
+      /* Internal actual-dispatch requirement, never a wire/user setting. */
+      int checked_resource;
       int hibernate_on_exit; /* if 1, release() preserves workspace state */
       /* Host directory to expose AS the workspace. Required: an empty scratch
        * checkout is not a source tree and is refused. Pointing this at the tree

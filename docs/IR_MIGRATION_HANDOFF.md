@@ -22,11 +22,12 @@ in `OWNERS.md`.
 
 ## Current source and qualification
 
-Committed checkpoint: `8be13dd5020a56b7d6a1b5b0530ef507730bf28f`.
-The working tree contains further implementation under qualification; HEAD alone
-therefore does not identify current source bytes.
+The assembled resource/dispatch checkpoint follows `89829d60a`; its exact commit
+and tree are recorded in `/var/tmp/aimee-final-resource-qualification/plan.json`.
+Combined broad and live qualification is pending; earlier component receipts do
+not establish final-image completion.
 
-That committed checkpoint passes the full native suite: 702 normal and 702
+Checkpoint `8be13dd5020a56b7d6a1b5b0530ef507730bf28f` passes the full native suite: 702 normal and 702
 ASan/UBSan/leak invocations, 699 unique binaries in each lane, with 35 explicit
 optional prerequisite notices per lane. All 76 lint gates pass. Compiler scratch
 uses owned disk directories under `/var/tmp`; runtime fixtures retain their short
@@ -81,35 +82,72 @@ endpoint/CID/image identity, private scoped Unix callbacks, supervised stdio,
 bounded raw filesystem IO, canonical capture and actual action/effect policy.
 Unknown post-spawn usage is retained on failed exchanges. Inline model-less ACP
 admission uses a conservative counter key without inventing model identity.
-The actual `.252` worker has progressed through raw filesystem writes/reads,
-MCP and Bash-to-shipping-CLI execution; final production action-owner assertions
-and frozen CLI entry-order qualification remain in progress. Component successes
-are not a completed installed-application claim.
+Actual `.252` fullworker component integration passes raw filesystem write/read,
+MCP through the built shipping CLI, Bash-to-nested-CLI read, canonical completion
+with unknown usage and normal resource cleanup. Four registered file actions
+produce real receipts; Bash retains its actual policy/source/result without an
+invented fifth file-action receipt. Persistence is an explicit service peer in
+this fixture: it is not installed-app/PG grading evidence. Proof:
+`/var/tmp/aimee-acp-container-proof/fullworker-positive-proof.json`.
 
-Current working changes preserve producer-issued revision worktree roots and
-retain their write policy through container callbacks. The new focused regression
-is being combined with the other owner changes. Do not broaden arbitrary worktree
-path patterns or disable session isolation to make this pass.
+The installed CLI now enters MCP service before ordinary native command dispatch.
+Actual built CLI cases pass 38 normal and 38 sanitizer-owner vectors, plus the
+same missing-token vectors; the old actual installed binary reproduces the
+initialization failure. SDK/subprocess binaries in those owner lanes are normal
+builds, not themselves sanitizer-instrumented. Proof:
+`/var/tmp/aimee-acp-container-proof/native-mcp-cli-entry-proof-final.json`.
 
-Legacy reapers now exclude private owned containers. Durable restart recovery
-uses the actual Docker daemon ID, held creation lock, recorded filesystem identities
-and exact-CID retirement; mismatched/legacy/partial evidence stays fail-closed.
-Focused recovery qualification passes 743 Go normal and race tests (two explicit
-optional skips per lane) and 28 native normal/sanitizer cases. Evidence:
-`/var/tmp/aimee-recovery-proof/qualified.json` and
-`/var/tmp/aimee-reaper-refreeze-proof/proof.json`.
-Actual Docker crash/rebind recovery still needs live qualification.
+Producer-issued revision worktree roots are retained through callbacks. Read-only
+roles now mount even their private checkouts read-only. The actual old worker
+allowed an opaque child to truncate its checkout directly; the corrected worker
+refuses direct truncate/create while preserving ACP/MCP reads, Bash/nested CLI,
+canonical completion and cleanup. The write-capable lane still passes. Original
+parent/private bytes stay exact. Proof:
+`/var/tmp/aimee-fullworker-readonly-proof/readonly-final-proof.json`.
+The published legacy shared-worktree API remains supported; unused unpublished
+child/source exporters are retired, with 58 retained function bodies unchanged.
 
-Two coordinated changes remain under implementation: lexical resource ownership
-for every actual dispatch/retry/repair, and a checked ordinary container backend.
-Keep request context through repair, retire before completing the session, poison
-uncertain retirement, preserve the worktree if execution may still be active, and
-only tighten existing deadlines. Do not reset a one-use native source capability.
-The ordinary backend must use the held endpoint and actual creation receipt,
-preserve image startup/callback behavior and live management/WFE hibernation,
-and explicitly distinguish ordinary resource custody from private ACP IO/source
-authority. Native delegated container support requires its own actual path proof;
-resource ownership alone does not establish native launch support.
+Lexical resource ownership now spans each actual selected dispatch, including
+credential/fallback attempts and handoff repair. Request context remains live
+through repair; joined retirement precedes canonical completion and parent
+application. Uncertain retirement poisons later execution and preserves the
+worktree. Setup only tightens existing deadlines; one-use native source grants
+are never reset. Normal headed native retry/repair is not blocked by the separate
+ATTEST_NONE service-source one-use contract. A new resource epoch forks native
+cache scope while retaining canonical history; primary UUID continuity uses its
+existing stable owner. Focused lifecycle, real runtime/history/hash-owner and
+explicit fake-SDK factory tests pass normally and under sanitizers. These do not
+claim a new real native Docker journey. Proofs:
+`/var/tmp/aimee-dispatch-container-plan-proof/final-index.json`,
+`/var/tmp/aimee-composed-dispatch-898-qualification/proof.json`,
+`/var/tmp/aimee-native-container-history-proof/final-index.json` and
+`/var/tmp/aimee-native-history-nonempty-proof/final-index.json`.
+
+The checked ordinary backend now retains actual creation receipts and the same
+held local Unix Docker endpoint/CID/image for operations and retirement. Its
+resource custody is distinct from private ACP IO/model-source authority. Image
+ENTRYPOINT, health, environment and ordinary callback behavior remain supported;
+legacy management/WFE hibernation remains separate. Unsupported checked transports
+and attested nonrecursive controller source layouts refuse explicitly. Existing
+VOLUME-extra-mount refusal remains; no volume stripping or added-mount exemption.
+Private/ordinary journals use the existing cleanup/recovery owner. Old generic
+reapers exclude owned containers; recovery checks durable daemon ID, creator
+lock and original assets, retaining ambiguous old evidence. Source exposure of
+private journals/helpers is refused before creation, using held kernel mount
+identities, bind aliases and reachable recursive mounts for workspace and Git
+metadata. Real local bind/tmpfs negatives and benign same-filesystem/nested cases
+pass. Privileged external host remounts remain a trusted-host boundary.
+
+The ordinary backend passes 779 Go normal and 779 race tests, with two existing
+optional skips per lane, and three native normal/sanitizer targets. Linux-only
+kernel fixtures have a Linux filename/build constraint. Independent source review
+is clear; Make links, CMake changed-object builds and module gates pass. Proofs:
+`/var/tmp/aimee-ordinary-final-proof/qualified.json`,
+`/var/tmp/aimee-ordinary-portability-proof/go-proof.json` and
+`/var/tmp/aimee-ordinary-resource-independent-review.json`.
+Actual Docker crash/rebind recovery and the newly composed worker paths still
+need their joint live qualification; earlier private-owner recovery receipts are
+retained at `/var/tmp/aimee-recovery-proof/qualified.json`.
 
 ## Retained `.252` runtime and required live work
 
@@ -141,9 +179,10 @@ Seal original history/cache/authority prefixes and identify actual new records.
 
 ## Remaining completion checks
 
-- Finish and jointly review checked ordinary resource custody and per-dispatch
-  cleanup, including cancellation, setup deadlines, retries, repairs and uncertain
-  teardown. Complete actual fullworker and shipping CLI proofs.
+- Run both actual worker modes on the composed resource/dispatch source with a
+  read-only journal observer retaining real CID evidence before successful normal
+  cleanup erases it. Qualify actual Docker crash/rebind recovery and the ordinary
+  image path; preserve the existing declared-volume refusal and original volumes.
 - Run combined normal/sanitizer checks and fresh whole Go/race qualification on
   the final source, all required lint/module gates, and actual shipping builds.
 - Complete final-image retained upgrade, separate clean install and the live

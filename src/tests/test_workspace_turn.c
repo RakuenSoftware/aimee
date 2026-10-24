@@ -92,6 +92,7 @@ static int fake_acquire(delegate_backend_t *self, const char *task_id,
 {
    (void)self;
    (void)task_id;
+   assert(cfg && cfg->checked_resource == 1); /* Every actual dispatch requires checked custody. */
    g_acquires++;
    snprintf(g_last_workspace, sizeof(g_last_workspace), "%s",
             (cfg && cfg->workspace) ? cfg->workspace : "");

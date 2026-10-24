@@ -90,7 +90,25 @@ func renderBind(m SandboxMount, mountTable string) string {
 }
 
 // DockerCreateRequest is everything needed to phrase the create command.
+// OwnerLeaseLabel marks creator custody; it is never sufficient cleanup authority.
+const OwnerLeaseLabel = "io.aimee.delegate.owner-lease"
+
+type ImageHealthcheck struct {
+	Test          []string
+	Interval      int64
+	Timeout       int64
+	Retries       int
+	StartPeriod   int64
+	StartInterval int64
+}
+type ImageStartup struct {
+	Entrypoint  []string
+	Healthcheck *ImageHealthcheck
+}
 type DockerCreateRequest struct {
+	LeaseNonce string
+	Startup    *ImageStartup
+
 	Spec          SandboxSpec
 	ContainerName string
 	Image         string
@@ -151,6 +169,12 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 	}
 
 	args := []string{"create", "--name", req.ContainerName}
+	if req.LeaseNonce != "" {
+		if len(req.LeaseNonce) != 64 || strings.Trim(req.LeaseNonce, "0123456789abcdef") != "" || req.Startup == nil || !strings.HasPrefix(req.Image, "sha256:") || !immutableContainerID(strings.TrimPrefix(req.Image, "sha256:")) {
+			return nil, fmt.Errorf("typed ordinary creation identity unavailable")
+		}
+		args = append(args, "--label", OwnerLeaseLabel+"="+req.LeaseNonce)
+	}
 
 	// The isolation primitive. Never conditional, never configurable.
 	args = append(args, "--network", req.Spec.NetworkMode())

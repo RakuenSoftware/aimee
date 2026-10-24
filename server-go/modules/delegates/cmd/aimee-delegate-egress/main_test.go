@@ -115,6 +115,7 @@ func ownerSocket(t *testing.T) (string, *net.UnixListener) {
 
 func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 	socket, _ := ownerSocket(t)
+	workspace := t.TempDir()
 	helper := filepath.Join(filepath.Dir(socket), "owner-io")
 	content := []byte("owner-measured-helper-fixture")
 	if err := os.WriteFile(helper, content, 0555); err != nil {
@@ -159,14 +160,14 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 			t.Fatal("name replaced resource ID", args)
 		}
 		if args[0] == "inspect" && args[2] == `{{json .}}` {
-			return `{"Id":"` + id + `","Image":"sha256:` + strings.Repeat("c", 64) + `","State":{"Running":true},"Config":{"WorkingDir":"/srv/repo","Entrypoint":["/run/aimee/owner-io"],"Cmd":["--idle-guard"],"Healthcheck":{"Test":["NONE"]}},"HostConfig":{"Privileged":false,"NetworkMode":"none","CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"]}}`, nil
+			return `{"Id":"` + id + `","Image":"sha256:` + strings.Repeat("c", 64) + `","State":{"Running":true},"Config":{"WorkingDir":` + strconv.Quote(workspace) + `,"Entrypoint":["/run/aimee/owner-io"],"Cmd":["--idle-guard"],"Healthcheck":{"Test":["NONE"]}},"HostConfig":{"Privileged":false,"NetworkMode":"none","CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"]}}`, nil
 		}
 		if args[0] == "inspect" && args[2] == `{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}};{{end}}` {
-			return "/srv/repo|/srv/repo|true;" + socket + "|" + delegates.ControlSocketTarget + "|true;" + helper + "|" + delegates.OwnerHelperTarget + "|false;", nil
+			return workspace + "|" + workspace + "|true;" + socket + "|" + delegates.ControlSocketTarget + "|true;" + helper + "|" + delegates.OwnerHelperTarget + "|false;", nil
 		}
 		return verifiedRunner(ctx, binary, args...)
 	}
-	args := []string{"--receipt-json", "--task", "acp1", "--image", "ubuntu:22.04", "--workdir", "/srv/repo", "--repo-root", "/srv/repo", "--worktree", "/srv/repo", "--writes-allowed", "--socket-check", socket, "--socket-source", socket, "--engine-endpoint", endpoint, "--helper-check", helper, "--helper-source", helper, "--helper-sha256", digest}
+	args := []string{"--receipt-json", "--task", "acp1", "--image", "ubuntu:22.04", "--workdir", workspace, "--repo-root", workspace, "--worktree", workspace, "--writes-allowed", "--socket-check", socket, "--socket-source", socket, "--engine-endpoint", endpoint, "--helper-check", helper, "--helper-source", helper, "--helper-sha256", digest}
 	lease, err := os.OpenFile(leasePath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)

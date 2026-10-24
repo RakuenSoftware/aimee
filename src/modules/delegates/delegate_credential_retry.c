@@ -79,9 +79,9 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
    return DELEGATE_CRED_RESOLVE_OK;
 }
 
-static int run_delegate_attempt(agent_config_t *cfg, const char *role, const char *system_prompt,
-                                const char *run_prompt, int max_tokens, int force_tools,
-                                int enforce_writes, agent_result_t *result)
+int delegate_run_attempt(agent_config_t *cfg, const char *role, const char *system_prompt,
+                         const char *run_prompt, int max_tokens, int force_tools,
+                         int enforce_writes, agent_result_t *result)
 {
    if (force_tools)
       return agent_run_with_tools_write_enforce(cfg, role, system_prompt, run_prompt, max_tokens,
@@ -119,7 +119,7 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
    if (!cfg || !result)
       return -1;
 
-   int rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
+   int rc = delegate_run_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
                                  enforce_writes, result);
    if (!agent || agent->credential_count <= 1 || !leased_cred_name || !leased_cred_name[0])
       return rc;
@@ -146,7 +146,7 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
       OPENSSL_cleanse(value, sizeof(value));
 
       memset(result, 0, sizeof(*result));
-      rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
+      rc = delegate_run_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
                                 enforce_writes, result);
       result_add_prior_metrics(result, &prior);
       agent_result_clear_response(&prior);

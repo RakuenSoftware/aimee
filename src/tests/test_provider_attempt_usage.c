@@ -12,6 +12,7 @@
 #undef http_retry_post_context
 #undef http_retry_post
 #include "wire_fence.h"
+#include "agent_dispatch_scope.h"
 #include "agent_config.h"
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/module_api.h>
@@ -296,6 +297,120 @@ static void test_actual_retry_observer_and_no_send(void)
    }
    puts("provider attempts: actual retries counted; preflight/guard/cancel no-send stays zero");
 }
+/* Resource lifecycle callbacks are explicitly synthetic here. Actual guarded
+ * dispatch, admission, routing and HTTP work remain production. This proves
+ * ordering/selected-attempt coverage, not a real container or source grant. */
+typedef struct
+{
+   int active, begins, ends, poisoned, fail_end, setup_delay_ms;
+   char selected[2][MAX_AGENT_NAME];
+} fixture_dispatch_lifetime_t;
+static int fixture_dispatch_begin(const agent_t *selected, void *context, char *error,
+                                  size_t capacity)
+{
+   fixture_dispatch_lifetime_t *state = context;
+   assert(!state->active);
+   if (state->poisoned)
+   {
+      snprintf(error, capacity, "fixture resource refused after uncertain retirement");
+      return -1;
+   }
+   assert(state->begins < 2);
+   snprintf(state->selected[state->begins], sizeof state->selected[0], "%s", selected->name);
+   state->begins++;
+   if (state->setup_delay_ms)
+      usleep((useconds_t)state->setup_delay_ms * 1000);
+   state->active = 1;
+   return 0;
+}
+static int fixture_dispatch_end(void *context, char *error, size_t capacity)
+{
+   fixture_dispatch_lifetime_t *state = context;
+   assert(state->active);
+   state->active = 0;
+   state->ends++;
+   if (state->fail_end)
+   {
+      state->poisoned = 1;
+      snprintf(error, capacity, "fixture resource retirement unconfirmed");
+      return -1;
+   }
+   return 0;
+}
+static const char *fixture_active_delegation;
+const char *delegation_active_id(void)
+{
+   return fixture_active_delegation;
+}
+static void test_dispatch_resource_refusal(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "resource-lifetime");
+   strcpy(agent.model, "gpt-4o");
+   strcpy(agent.provider, "openai");
+   strcpy(agent.auth_type, "none");
+   agent.max_parallel = 1;
+   agent.timeout_ms = 10000;
+   char url[128];
+   int listener = listening_peer(url);
+   strcpy(agent.endpoint, url);
+   agent_result_t result = {0};
+   fixture_active_delegation = "owned-test-delegation";
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   fixture_active_delegation = NULL;
+   assert(!result.success && !result.response);
+   struct pollfd pending = {.fd = listener, .events = POLLIN};
+   assert(poll(&pending, 1, 0) == 0);
+   fixture_dispatch_lifetime_t state = {.fail_end = 1};
+   agent_dispatch_scope_t scope = {
+       .begin = fixture_dispatch_begin, .end = fixture_dispatch_end, .context = &state};
+   const agent_dispatch_scope_t *previous = agent_dispatch_scope_bind(&scope);
+   atomic_int cancelled = 1;
+   atomic_int *previous_cancel = agent_get_request_cancel();
+   agent_set_request_cancel(&cancelled);
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   agent_set_request_cancel(previous_cancel);
+   assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
+   request_context_snapshot_t previous_owner;
+   request_context_snapshot(&previous_owner);
+   request_context_t refused = {.context_refused = 1};
+   request_context_set(&refused);
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   request_context_restore(&previous_owner);
+   assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
+   state.fail_end = 0;
+   state.setup_delay_ms = 30;
+   agent.tool_loop_timeout_ms_cap = 1;
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   assert(state.begins == 1 && state.ends == 1 && !state.active);
+   assert(agent.tool_loop_timeout_ms_cap == 1); /* Runtime copy only; no caller mutation. */
+   assert(poll(&pending, 1, 0) == 0);
+   agent.tool_loop_timeout_ms_cap = 0;
+   state = (fixture_dispatch_lifetime_t){.fail_end = 1};
+   int status = 200;
+   const char *body = known_zero;
+   pid_t child = serve_peer(listener, &status, &body, 1);
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CAPTURE_FAILED);
+   assert(!result.success && state.begins == 1 && state.ends == 1 && !state.active);
+   agent_result_clear_response(&result);
+   join_peer(child, listener);
+   listener = listening_peer(url);
+   strcpy(agent.endpoint, url);
+   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   assert(!result.success && state.begins == 1 && state.ends == 1);
+   pending = (struct pollfd){.fd = listener, .events = POLLIN};
+   assert(poll(&pending, 1, 0) == 0);
+   close(listener);
+   agent_dispatch_scope_bind(previous);
+   assert(agent_dispatch_scope_current() == previous);
+}
+
 /* Exercise the real routing owner, configured fallback chain and same-tier
  * selection. Only the HTTP endpoints and existing external module peers are
  * fixtures; dispatcher admission/health/IR parsing remain production code. */
@@ -338,9 +453,17 @@ static void test_actual_routing_retry_usage(void)
             cfg->fallback_count = 1;
             strcpy(cfg->fallback_chain[0], cfg->agents[1].name);
          }
+         fixture_dispatch_lifetime_t resources = {0};
+         agent_dispatch_scope_t scope = {
+             .begin = fixture_dispatch_begin, .end = fixture_dispatch_end, .context = &resources};
+         const agent_dispatch_scope_t *previous = agent_dispatch_scope_bind(&scope);
          agent_result_t result = {0};
          int rc = route == 0 ? agent_run_ex(cfg, "review", "system", "task", 128, 0, &result)
                              : agent_run_with_tools(cfg, "review", "system", "task", 128, &result);
+         agent_dispatch_scope_bind(previous);
+         assert(resources.begins == 2 && resources.ends == 2 && !resources.active);
+         assert(!strcmp(resources.selected[0], cfg->agents[0].name));
+         assert(!strcmp(resources.selected[1], cfg->agents[1].name));
          if (rc || !result.success)
             fprintf(stderr, "route %d known %d failed rc=%d: %s\n", route, known, rc, result.error);
          assert(!rc && result.success);
@@ -397,9 +520,10 @@ static void test_retry_owner_known_usage_boundaries(void)
 int main(int argc, char **argv)
 {
    int only_mode = -1;
+   int lifecycle_only = argc == 2 && !strcmp(argv[1], "dispatch-lifecycle");
    if (argc == 2)
    {
-      assert(!strcmp(argv[1], "bad-json") || !strcmp(argv[1], "retry-only"));
+      assert(lifecycle_only || !strcmp(argv[1], "bad-json") || !strcmp(argv[1], "retry-only"));
       only_mode = !strcmp(argv[1], "bad-json") ? 0 : 3;
    }
    else
@@ -415,6 +539,12 @@ int main(int argc, char **argv)
    assert(!platform_setenv("AIMEE_CONTEXT_NO_KB", "1"));
    assert(!config_set_memory_recall_enabled(0));
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
+   if (lifecycle_only)
+   {
+      test_actual_routing_retry_usage();
+      return 0;
+   }
+   test_dispatch_resource_refusal();
    test_actual_routing_retry_usage();
    test_retry_owner_known_usage_boundaries();
    test_actual_executor_observations(only_mode);

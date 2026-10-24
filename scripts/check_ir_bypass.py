@@ -16,6 +16,8 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "delegate_child_export_context_env",
+    "agent_source_authority_export_env",
     'openai_request_double',
     'openai_request_int',
     'openai_format_chat_completion',

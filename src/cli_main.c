@@ -1911,7 +1911,11 @@ int main(int argc, char **argv)
    /* A model-owned child may only use its retained host capability. Dispatch
     * before profile/remote files, integrations, local hooks or workspace upload. */
    if (cli_native_bridge_enabled())
+   {
+      if (argc == 2 && !strcmp(argv[1], "mcp-serve"))
+         return cli_mcp_serve();
       return cli_native_bridge_main(argc, argv);
+   }
 
    int json_output = 0;
    int debug = 0;

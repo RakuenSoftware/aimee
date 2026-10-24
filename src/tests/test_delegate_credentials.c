@@ -482,6 +482,7 @@ static int context_attempts, provider_failure_first;
 static int local_refusal_rc = AGENT_RC_CONTEXT_REFUSED;
 /* Controlled executor observations; rotation and credential custody are real. */
 static int usage_retry_mode;
+static int fixture_no_tools;
 
 static int context_attempt(agent_result_t *result)
 {
@@ -541,6 +542,7 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    (void)user_prompt;
    (void)max_tokens;
    (void)enforce_writes;
+   assert(!fixture_no_tools);
    return context_attempt(out);
 }
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
@@ -551,11 +553,12 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    (void)system_prompt;
    (void)user_prompt;
    (void)max_tokens;
+   assert(fixture_no_tools);
    return context_attempt(out);
 }
 void agent_run_force_no_tools(int force)
 {
-   (void)force;
+   fixture_no_tools = force;
 }
 static void test_context_refusal_does_not_rotate_credentials(void)
 {
@@ -622,6 +625,7 @@ static void test_rotation_preserves_canonical_usage_knowledge(void)
              delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128, tools, 0,
                                                 leased, sizeof leased, NULL, &result);
          assert(!rc && result.success && context_attempts == 2 && !strcmp(leased, "backup"));
+         assert(!fixture_no_tools);
          assert(result.turns == 5 && result.tool_calls == 8);
          assert(result.successful_tool_calls == 3 && result.rescue_recoveries == 10);
          assert(result.latency_ms == 28 && !result.cache_hit);

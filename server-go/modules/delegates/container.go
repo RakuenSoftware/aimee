@@ -92,14 +92,9 @@ func (r ContainerRunner) Start(ctx context.Context, req DockerCreateRequest) (Co
 	if r.Run == nil {
 		return ContainerResult{}, fmt.Errorf("no command runner configured")
 	}
-	args, err := DockerCreateArgs(DockerCreateRequest{
-		Spec:          req.Spec,
-		ContainerName: req.ContainerName,
-		Image:         req.Image,
-		WorkDir:       req.WorkDir,
-		MountTable:    r.MountTable,
-		Command:       req.Command,
-	})
+	rendered := req
+	rendered.MountTable = r.MountTable
+	args, err := DockerCreateArgs(rendered)
 	if err != nil {
 		return ContainerResult{Name: req.ContainerName}, err
 	}
@@ -189,7 +184,8 @@ type containerProfile struct {
 		Env         *[]string
 		Entrypoint  []string
 		Cmd         []string
-		Healthcheck struct{ Test []string }
+		Healthcheck *ImageHealthcheck
+		Labels      map[string]string
 	}
 	Host struct {
 		NetworkMode string
@@ -219,7 +215,7 @@ func ownerStartupMatches(req DockerCreateRequest, observed containerProfile) boo
 		(req.Spec.User != "" && observed.Config.User != req.Spec.User) ||
 		len(observed.Config.Entrypoint) != 1 || observed.Config.Entrypoint[0] != OwnerHelperTarget ||
 		len(observed.Config.Cmd) != 1 || observed.Config.Cmd[0] != "--idle-guard" ||
-		len(observed.Config.Healthcheck.Test) != 1 || observed.Config.Healthcheck.Test[0] != "NONE")
+		observed.Config.Healthcheck == nil || len(observed.Config.Healthcheck.Test) != 1 || observed.Config.Healthcheck.Test[0] != "NONE")
 }
 
 // verify keeps runtime posture and the optional immutable receipt on one resource.
@@ -233,6 +229,8 @@ func (r ContainerRunner) verify(ctx context.Context, req DockerCreateRequest, re
 			observed.ID != id || !observed.State.Running || !strings.HasPrefix(observed.Image, "sha256:") ||
 			!immutableContainerID(strings.TrimPrefix(observed.Image, "sha256:")) || observed.Config.WorkingDir != req.WorkDir || req.WorkDir == "" {
 			verdict = RuntimePostureVerdict{Refuse: true, Reason: "running container identity unavailable"}
+		} else if req.LeaseNonce != "" && !ordinaryStartupMatches(req, observed) {
+			verdict = RuntimePostureVerdict{Refuse: true, Reason: "ordinary creator startup identity unavailable"}
 		} else if req.Spec.ownerHelper && !ownerStartupMatches(req, observed) {
 			verdict = RuntimePostureVerdict{Refuse: true, Reason: "trusted owner startup posture unavailable"}
 		} else {
