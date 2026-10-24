@@ -1215,6 +1215,7 @@ EXT_GROUP_ORDER = ["Provider credentials", "Provider endpoints", "Reasoning effo
                    "Network / proxy", "Editor", "Codex / Claude integration"]
 
 EXT_DESC = {
+    "DOCKER_HOST": ("Network / proxy", "Docker daemon endpoint. Owned delegate execution requires a local Unix socket and pins it for the container lease."),
     "EMBEDDER_URL": ("Provider endpoints", "Compatibility embedding endpoint override when the AIMEE-prefixed endpoint is unset."),
     "EMBEDDER_DIMS": ("Provider endpoints", "Embedding dimension override; must match the stored vector-space identity."),
     "SYNTHESIS_AUTH_REQUIRED": ("Provider endpoints", "Require authenticated synthesis for the configured endpoint; checked by the curator provider."),

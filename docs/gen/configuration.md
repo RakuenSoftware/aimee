@@ -647,6 +647,7 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 
 | Variable | Description |
 |----------|-------------|
+| `DOCKER_HOST` | Docker daemon endpoint. Owned delegate execution requires a local Unix socket and pins it for the container lease. |
 | `HTTPS_PROXY` | HTTPS proxy for outbound provider/API calls. |
 | `NO_PROXY` | Hosts excluded from proxying. |
 
