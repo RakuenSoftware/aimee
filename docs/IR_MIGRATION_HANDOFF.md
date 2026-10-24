@@ -6,6 +6,79 @@ stop/handoff request below is superseded.
 
 ## Current continuation status: live `.252` acceptance follow-up
 
+### Latest acceptance and reduction checkpoint: 24 October 2026
+
+This section supersedes the historical pending-case statements below. Runtime
+source `e039bad687a1a005d9d85d64c3b112bf3b33bed9` is deployed on the retained,
+task-owned `.252` guest VM8168. `7573878c5` changes only its reviewed ownership
+ledger; it does not change the running application. The install was genuinely
+empty at `601aff47e`, followed by normal same-volume upgrades. Do not call the
+latest upgrade a second empty installation.
+
+The final retirement review found two remaining first-party flat stream
+consumers: `cli_chat_stream.c` (ACP) and `gateway_ctx.c`. Their canonical
+subscriber cutover is now active work; do not describe full internal conversion
+as complete while they remain. The old stream projection is also an explicitly
+documented external-client contract in `api/openapi-server-v1.yaml`; keep that
+boundary adapter. Canonical delivery must not implicitly advertise interactive
+question/permission capabilities that an ACP or gateway caller cannot answer.
+
+`d6a04cffc` retires three convenience execution wrappers with no production
+callers, deleting 44 production lines. Existing tests now use the active cfg
+executor and Codex callback. Both affected targets pass normally and under
+ASan/UBSan/leak checking with no skips; the bypass guard and 31 mutation checks
+pass. The proof is `/var/tmp/aimee-dead-cli-wrappers-proof/proof.json` (SHA256
+`497ca4cfcb3da996e170747314d9965d125a251ec99e162408856945ad099b2c`).
+The deployed runtime remains honestly labeled `e039bad68`, not this descendant.
+
+The real browser HTTP Cancel/Allow case now passes: two Sends, one normal Cancel
+HTTP 200 with a durable OPERATOR receipt, one browser Allow HTTP 200, one tool
+result and one exact 20-byte file effect. The original sleep processes retired;
+there was no process fault or retry. Reload leaves controls closed. All prior
+98 canonical records, full native SDK caches, authority and configuration remain
+preserved; the resulting durable history contains 125 records. The final seal is
+`/var/tmp/aimee-internal-ir-live-8168/fresh-601aff47e/generic-http-allow-e039/final-http-cancel-allow-seal.json`
+(SHA256 `83a61f469a788ecd9e79185efdc0187d99332c481a2893610ce85d108e75fcea`).
+This qualifies HTTP execution and permission replies. It does not establish a
+native unknown-history Allow: the actual Anthropic continuation refused, and its
+failed terminal and complete cache remain retained. Actual native question,
+original-UUID resume and bounded service execution have separate positive live
+evidence. No refused turn was retried or rewritten to manufacture acceptance.
+
+Current qualification is source-scoped: all 76 lint gates pass at `7573878c5`;
+the complete 693-invocation native normal and sanitizer runs qualify `e02930ec3`;
+the later cancellation delta has six focused normal and six sanitizer passes,
+21 normal and 21 race real-PostgreSQL checks with no skips, and independent
+production review. Complete Go normal/race runs and 24 exporter checks qualify
+`e039bad68`; explicitly optional server checks retain their 335 skips per run.
+All 497 frontend tests, type checking, both builds and 31 bypass checks pass;
+frontend source is unchanged after `e02930ec3`. Final zero-model checks pass at
+1280, 390 and 320 pixels: each 15-second idle window has no mutations, errors,
+overflow, pending replies or repeated controls, with the latest completion in
+view. Actual setup/help priority passes. Editor opens the exact created file in
+the same workspace without editing; desktop content is visible. Mobile Editor
+captures retain its help overlay and do not prove file-content visibility.
+Optional plugin/workflow/VSDA 404s and navigation/SSE aborts remain reported;
+this is not an all-network-200 claim. The UI report is
+`/var/tmp/aimee-internal-ir-live-8168/fresh-601aff47e/ui-final-e039-closed-allow/report.private.json`
+(SHA256 `da945635e2c43138423f39416960b5395757886016f292683aa3a3e7d981e504`).
+Fresh CI and the
+single final PR remain outstanding; neither delivery nor uniform vendor-path
+acceptance is claimed complete.
+
+Code reduction is a requirement, not a proxy for passing tests. Against the
+cleanup baseline `03d881e0e`, `7573878c5` removes **1,961 net production lines**
+(1,177 added / 3,138 deleted). Against current `testing`
+(`251536ddb90fed8e39421a27a8bd27cb73a3f362`), the full follow-up still adds
+**3,028 net production lines** (8,889 added / 5,861 deleted). These figures use
+the same explicit inclusion rules and full per-file census; tests, documentation
+and tooling are separate. The narrower retirement count does not satisfy the
+user's requested overall reduction. Preserve necessary admission, custody and
+native replay behavior; retire obsolete implementations rather than compressing
+code or moving it outside the count. The reproducible census and independent
+proof are `/var/tmp/aimee-ir-production-reduction-7573878c5.json` and
+`/var/tmp/aimee-ir-production-reduction-7573878c5-independent-proof.json`.
+
 ### Active work and delivery constraint: 22 October 2026
 
 Continue implementation and validation on `fix/native-mcp-startup-and-editor`.
