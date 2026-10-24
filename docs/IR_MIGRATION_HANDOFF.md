@@ -22,27 +22,43 @@ in `OWNERS.md`.
 
 ## Current source and qualification
 
-The assembled resource/dispatch checkpoint follows `89829d60a`; its exact commit
-and tree are recorded in `/var/tmp/aimee-final-resource-qualification/plan.json`.
-Combined broad and live qualification is pending; earlier component receipts do
-not establish final-image completion.
+Production checkpoint: `a36db17c1950941cfbcfc3404e1c4567b7ff7dda`, tree
+`16fced6f520cc9c636c1b5c6ecc7251eb12106f9`. Subsequent changes correct only test
+fixtures: complete canonical context serialization and an explicit delegation
+state service peer. They add no production authority or validation exceptions.
 
-Checkpoint `8be13dd5020a56b7d6a1b5b0530ef507730bf28f` passes the full native suite: 702 normal and 702
-ASan/UBSan/leak invocations, 699 unique binaries in each lane, with 35 explicit
-optional prerequisite notices per lane. All 76 lint gates pass. Compiler scratch
-uses owned disk directories under `/var/tmp`; runtime fixtures retain their short
-isolated `/tmp` paths. Original failed runs and their logs are retained separately.
-Evidence: `/var/tmp/aimee-final-ir-disk-qualification/final-index.json`.
+The exact a36 full native suite passes 702 normal and 702 ASan/UBSan/leak
+invocations, 699 unique binaries per lane, with 35 explicit optional prerequisite
+notices in each lane. All 76 lint checks pass. Make shipping server linkage and
+the CMake default-all thin-client build pass, with actual a36 version metadata.
+The source remained clean and byte-identical during those checks. Compiler
+scratch uses owned disk directories under `/var/tmp`; runtime fixtures retain
+short isolated `/tmp` paths. Original failed link/format runs are retained, along
+with their explicit corrections. Evidence:
+`/var/tmp/aimee-final-resource-qualification-r2/local-index.json` and
+`/var/tmp/aimee-shipping-a36/`.
+
+Whole Go normal/race passes 4,230 server tests, 43 control-web tests and 291
+runtime-web tests per lane; 337 server tests have explicit optional skips. All
+production Go inputs join exactly to this qualification. The corrected fixtures
+also pass the fresh real-PostgreSQL history/learning/native/selection/metrics
+pattern: 109 normal and 109 race cases, no skips. Partial/null context test data
+was replaced using the actual canonical serializer; all 154 existing privacy,
+ownership and fidelity assertions remain. The private restricted database/role
+were removed and PostgreSQL stopped. Evidence:
+`/var/tmp/aimee-final-resource-qualification/go/proof.json` and
+`/var/tmp/aimee-pg-search-diagnosis/final-index.json`.
+
+Independent local workflow-equivalent review passes 47 of 48 checks. The one
+remaining difference is the promotion-only public-surface baseline; integration
+work must not re-freeze it. Descriptor/schema, documentation, ownership, source
+boundary, mutation, exporter and composed proposal-history checks pass. This is
+local evidence, not fresh GitHub CI or production-promotion approval. Evidence:
+`/var/tmp/aimee-final-source-review-a36/final-index.json`.
 
 The aggregate-metrics checkpoint passes 510 frontend tests, typecheck and both
 production builds; 18 normal and 18 race PostgreSQL assertions pass without skips.
 Evidence: `/var/tmp/aimee-metrics-main-05dc/proof.json`.
-Whole Go normal/race qualification before the current recovery changes passes
-4,183 server tests, 43 control-web tests and 291 runtime-web tests per lane;
-337 server tests have explicit optional skips. This does not qualify newer Go
-ownership changes. Evidence: `/var/tmp/aimee-current-go-full-metrics/proof.json`.
-Make shipping and thin CMake default builds pass at earlier joined checkpoints;
-the final composed source still needs fresh shipping builds.
 
 A genuine local Claude SDK 2.1.310 two-turn journey uses the normal private Vault,
 registered CLI-owned project, server/native factory and canonical history. The
@@ -97,6 +113,18 @@ initialization failure. SDK/subprocess binaries in those owner lanes are normal
 builds, not themselves sanitizer-instrumented. Proof:
 `/var/tmp/aimee-acp-container-proof/native-mcp-cli-entry-proof-final.json`.
 
+The newly composed a36 worker now passes both write and read-only modes with
+actual CID observation: write `bc292a0ca4bf078b14e9627a97172dbc7fffe3aea36b40f91510ae6287b897f9`,
+read-only `caae969b1838174a22db73295370b537d11421f85a96334a9aa340e2716426e7`.
+Durable creation/removal records and independent absence checks bind both to the
+same actual daemon. The first current-source run correctly refused a missing
+fixture stop-state service before creation; the fixture now records the worker's
+actual spawn and serves exact active/completed lookups. No diagnostic logging or
+production decision changes are in the positive image. Original 128 IR records,
+five native sessions, SDK caches, authority, grants and products remain exact.
+Proof: `/var/tmp/aimee-acp-container-final-proof/a36-both-workers-final-proof.json`;
+seal: `/var/tmp/aimee-acp-container-final-proof/post-a36-workers-seal.json`.
+
 Producer-issued revision worktree roots are retained through callbacks. Read-only
 roles now mount even their private checkouts read-only. The actual old worker
 allowed an opaque child to truncate its checkout directly; the corrected worker
@@ -145,7 +173,7 @@ is clear; Make links, CMake changed-object builds and module gates pass. Proofs:
 `/var/tmp/aimee-ordinary-final-proof/qualified.json`,
 `/var/tmp/aimee-ordinary-portability-proof/go-proof.json` and
 `/var/tmp/aimee-ordinary-resource-independent-review.json`.
-Actual Docker crash/rebind recovery and the newly composed worker paths still
+Actual ordinary-container execution and Docker crash/rebind recovery still
 need their joint live qualification; earlier private-owner recovery receipts are
 retained at `/var/tmp/aimee-recovery-proof/qualified.json`.
 
@@ -179,10 +207,9 @@ Seal original history/cache/authority prefixes and identify actual new records.
 
 ## Remaining completion checks
 
-- Run both actual worker modes on the composed resource/dispatch source with a
-  read-only journal observer retaining real CID evidence before successful normal
-  cleanup erases it. Qualify actual Docker crash/rebind recovery and the ordinary
-  image path; preserve the existing declared-volume refusal and original volumes.
+- Qualify actual Docker crash/rebind recovery and the ordinary image path using
+  only task-owned resources, preserving the existing declared-volume refusal and
+  original volumes. Both a36 worker modes already have actual CID/cleanup proof.
 - Run combined normal/sanitizer checks and fresh whole Go/race qualification on
   the final source, all required lint/module gates, and actual shipping builds.
 - Complete final-image retained upgrade, separate clean install and the live

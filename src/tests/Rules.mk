@@ -7549,7 +7549,11 @@ $(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_at
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Full worker composition; requires the explicitly configured container fixture.
-$(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNECTION_LIB) $(DB1_CLIENT_SRCS:db1_client/%.c=$(OBJDIR)/tests/acp_route_db1/%.o) $(OBJDIR)/tests/test_acp_full_delegate_worker.o $(OBJDIR)/tests/support/acp_route_policy_fixture.o \
+$(OBJDIR)/tests/acp_full_delegation_client.o: db1_client/delegation.c tests/Rules.mk
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_delegation_spawn_record=unused_full_spawn_record -Ddb1_delegation_spawn_is_stopped=unused_full_spawn_is_stopped -Ddb1_delegation_spawn_complete=unused_full_spawn_complete -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNECTION_LIB) $(filter-out $(OBJDIR)/tests/acp_route_db1/delegation.o,$(DB1_CLIENT_SRCS:db1_client/%.c=$(OBJDIR)/tests/acp_route_db1/%.o)) $(OBJDIR)/tests/acp_full_delegation_client.o $(OBJDIR)/tests/test_acp_full_delegate_worker.o $(OBJDIR)/tests/support/acp_route_policy_fixture.o \
     $(OBJDIR)/tests/server_compute_acp_route.o $(OBJDIR)/tests/posix_compute_acp_route.o \
     $(OBJDIR)/server/server_provider_cli_execute.o $(OBJDIR)/server/server_acp_execution.o $(OBJDIR)/cli_proxy.o \
     $(OBJDIR)/cli_mcp_serve.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \

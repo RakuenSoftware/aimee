@@ -170,6 +170,56 @@ int db1_server_session_get(const char *sid, db1_server_session_t *out)
       }
    return -1;
 }
+/* Explicit delegation-state storage peer. Only the worker's actual record
+ * creates a known active ID; an unavailable/unknown ID is a refusal. This does
+ * not attest a model source, grant permission or perform container operations.
+ */
+static struct
+{
+   char id[64], parent[64], session[128], role[64];
+   int depth, recorded, completed, stop_reads;
+} full_spawn;
+int db1_delegation_spawn_record(const char *id, const char *parent, const char *sid, int depth,
+                                const char *role)
+{
+   db1_server_session_t session;
+   const char *parent_id = parent ? parent : "";
+   const request_context_t *context = request_context_get();
+   if (!id || !id[0] || strlen(id) >= sizeof full_spawn.id ||
+       strlen(parent_id) >= sizeof full_spawn.parent || !sid ||
+       strlen(sid) >= sizeof full_spawn.session || !role || strcmp(role, full_worker_role()) ||
+       depth < 0 || !context || strcmp(request_context_session_actor(context), owner) ||
+       db1_server_session_get(sid, &session) || strcmp(session.principal, owner))
+      return -1;
+   if (full_spawn.recorded)
+      return strcmp(full_spawn.id, id) || strcmp(full_spawn.parent, parent_id) ||
+                     strcmp(full_spawn.session, sid) || strcmp(full_spawn.role, role) ||
+                     full_spawn.depth != depth
+                 ? -1
+                 : 0;
+   snprintf(full_spawn.id, sizeof full_spawn.id, "%s", id);
+   snprintf(full_spawn.parent, sizeof full_spawn.parent, "%s", parent_id);
+   snprintf(full_spawn.session, sizeof full_spawn.session, "%s", sid);
+   snprintf(full_spawn.role, sizeof full_spawn.role, "%s", role);
+   full_spawn.depth = depth;
+   full_spawn.recorded = 1;
+   return 0;
+}
+int db1_delegation_spawn_is_stopped(const char *id)
+{
+   if (!full_spawn.recorded || !id || strcmp(id, full_spawn.id))
+      return -1;
+   full_spawn.stop_reads++;
+   return full_spawn.completed;
+}
+int db1_delegation_spawn_complete(const char *id)
+{
+   if (!full_spawn.recorded || !id || strcmp(id, full_spawn.id))
+      return -1;
+   full_spawn.completed = 1;
+   return 0;
+}
+
 int db1_session_ir_append(const char *sid, const char *id, const char *turn, const char *actor,
                           const char *payload, char sequence[32])
 {
@@ -447,7 +497,12 @@ int main(int argc, char **argv)
    compute_ctx_t *context = create_compute_ctx(&server, &connection, request);
    assert(context);
    context->compute_executor_threads = 1;
+   assert(db1_delegation_spawn_is_stopped("unrecorded-fixture-spawn") == -1);
+   assert(db1_delegation_spawn_complete("unrecorded-fixture-spawn") == -1);
    delegate_worker(context);
+   assert(full_spawn.recorded && full_spawn.completed && full_spawn.stop_reads > 0);
+   assert(db1_delegation_spawn_is_stopped(full_spawn.id) == 1);
+   assert(db1_delegation_spawn_is_stopped("unrecorded-fixture-spawn") == -1);
    if (full_worker_read_only)
    {
       full_worker_exact_file(parent_seed, "full worker owned write\n");
@@ -463,6 +518,23 @@ int main(int argc, char **argv)
    assert(fwrite(capture_json, 1, strlen(capture_json), capture_file) == strlen(capture_json));
    assert(!fclose(capture_file));
    free(capture_json);
+   cJSON *spawn_observation = cJSON_CreateObject();
+   assert(spawn_observation && cJSON_AddStringToObject(spawn_observation, "id", full_spawn.id) &&
+          cJSON_AddStringToObject(spawn_observation, "parent", full_spawn.parent) &&
+          cJSON_AddStringToObject(spawn_observation, "session", full_spawn.session) &&
+          cJSON_AddStringToObject(spawn_observation, "role", full_spawn.role) &&
+          cJSON_AddNumberToObject(spawn_observation, "depth", full_spawn.depth) &&
+          cJSON_AddNumberToObject(spawn_observation, "active_stop_reads", full_spawn.stop_reads) &&
+          cJSON_AddBoolToObject(spawn_observation, "completed", full_spawn.completed));
+   char *spawn_json = cJSON_PrintUnformatted(spawn_observation);
+   assert(snprintf(capture_path, sizeof capture_path, "%s/full-worker-spawn.private.json",
+                   fixture_home) < (int)sizeof capture_path);
+   capture_file = fopen(capture_path, "wx");
+   assert(capture_file && spawn_json && !fchmod(fileno(capture_file), 0600) &&
+          fwrite(spawn_json, 1, strlen(spawn_json), capture_file) == strlen(spawn_json) &&
+          !fclose(capture_file));
+   free(spawn_json);
+   cJSON_Delete(spawn_observation);
    cJSON_Delete(request);
    close(pair[0]);
    char wire[65536];
