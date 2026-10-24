@@ -1294,6 +1294,81 @@ static void test_private_service_native_http_forward(void)
    server_http_set_chat_handler(NULL);
 }
 
+static int private_typed_stream_calls[2];
+static void assert_private_stream_owner(const char *body)
+{
+   assert(!strcmp(body, "{\"stream\":true}"));
+   const request_context_t *owner = request_context_get();
+   assert(owner && owner->vault_transport == ATTEST_NONE && !owner->trusted &&
+          owner->model_execution == 1 && !owner->operator_script_origin);
+   assert(!strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server") &&
+          !strcmp(owner->session_key, "native-service-stream") &&
+          !strcmp(owner->request_id, "private-stream-request") && owner->capabilities == CAP_CHAT);
+   assert(server_http_identity_transport() == ATTEST_NONE && !server_http_identity_principal()[0] &&
+          !server_http_identity_browser_operator());
+}
+static int private_responses_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   assert_private_stream_owner(body);
+   private_typed_stream_calls[0]++;
+   emit(ctx, "response.created", "{\"type\":\"response.created\"}");
+   emit(ctx, "response.completed", "{\"type\":\"response.completed\"}");
+   return 0;
+}
+static int private_messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   assert_private_stream_owner(body);
+   private_typed_stream_calls[1]++;
+   emit(ctx, "message_start", "{\"type\":\"message_start\"}");
+   emit(ctx, "message_stop", "{\"type\":\"message_stop\"}");
+   return 0;
+}
+static void test_private_service_typed_stream_routes(void)
+{
+   server_http_set_responses_stream_handler(private_responses_stream);
+   server_http_set_messages_stream_handler(private_messages_stream);
+   fixture_native_service_admitted = 1;
+   for (int mode = 0; mode < 2; mode++)
+   {
+      private_typed_stream_calls[0] = private_typed_stream_calls[1] = 0;
+      request_context_t owner = {
+          .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+      strcpy(owner.principal, "server");
+      strcpy(owner.vault_principal, "server");
+      strcpy(owner.session_key, "native-service-stream");
+      strcpy(owner.request_id, "private-stream-request");
+      request_context_set(&owner);
+      server_http_identity_clear();
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      const char *body = "{\"stream\":true}";
+      assert(!server_http_native_forward(pair[0], "POST", mode ? "/v1/messages" : "/v1/responses",
+                                         body, (int)strlen(body)));
+      shutdown(pair[0], SHUT_WR);
+      char wire[4096];
+      size_t used = 0;
+      ssize_t bytes;
+      while ((bytes = read(pair[1], wire + used, sizeof wire - used - 1)) > 0)
+         used += (size_t)bytes;
+      wire[used] = 0;
+      assert(used && strstr(wire, "200 OK") && strstr(wire, "text/event-stream"));
+      assert(strstr(wire,
+                    mode ? "event: message_stop\ndata: {\"type\":\"message_stop\"}"
+                         : "event: response.completed\ndata: {\"type\":\"response.completed\"}"));
+      assert(!strstr(wire, mode ? "response.completed" : "message_stop"));
+      assert(!strstr(wire, "[DONE]"));
+      assert(private_typed_stream_calls[mode] == 1 && !private_typed_stream_calls[!mode]);
+      assert_private_stream_owner(body); /* Synchronous dispatch retains the exact owner. */
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   fixture_native_service_admitted = 0;
+   server_http_set_responses_stream_handler(NULL);
+   server_http_set_messages_stream_handler(NULL);
+}
+
 static void test_history_open_precedes_sse_headers(void)
 {
    for (int mode = 1; mode <= 4; mode++)
@@ -1356,6 +1431,7 @@ int main(void)
    test_json_number_serialization_is_exact();
    test_native_http_handoff_preserves_owner_and_caps();
    test_private_service_native_http_forward();
+   test_private_service_typed_stream_routes();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 

@@ -1171,23 +1171,13 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Run a streaming /v1/responses request: write event-stream headers, let the
- * handler emit typed events; the Responses protocol has no `data: [DONE]`
- * terminator (it ends with the handler's `response.completed`). */
-static void handle_responses_stream(int fd, const char *body, const char *request_id)
+/* Responses and Anthropic handlers emit typed SSE with their own terminal
+ * event. Share the live writer without appending the OpenAI [DONE] trailer. */
+static void handle_typed_stream(int fd, const char *body, server_http_responses_stream_fn handler,
+                                const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_responses_stream_handler);
-}
-
-/* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
- * Anthropic typed-event sequence (message_start … message_stop) via the same
- * `event:`/`data:` framer as Responses; unlike the OpenAI SSE path there is no
- * terminal `data: [DONE]` (the stream ends with message_stop). */
-static void handle_messages_stream(int fd, const char *body, const char *request_id)
-{
-   write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_messages_stream_handler);
+   server_http_sse_live_run(fd, body, handler);
 }
 
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
@@ -1221,10 +1211,10 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    int rc = 0;
    if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
        !strcmp(path, "/v1/responses") && g_responses_stream_handler)
-      handle_responses_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_responses_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/messages") && g_messages_stream_handler)
-      handle_messages_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_messages_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/chat/completions") && g_chat_stream_handler)
       handle_stream(fd, body, g_chat_stream_handler, owner->request_id);
@@ -2044,14 +2034,14 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
       }
       if (strcmp(path, "/v1/responses") == 0 && g_responses_stream_handler)
       {
-         handle_responses_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_responses_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;
       }
       if (strcmp(path, "/v1/messages") == 0 && g_messages_stream_handler)
       {
-         handle_messages_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_messages_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;

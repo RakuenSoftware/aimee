@@ -52,8 +52,8 @@ regressions pass. Independent review also closes explicit streamed refusal
 overwrite, duplicate closed-text aliases and nested response-identity conflicts;
 old-source failures and final focused normal/race results are retained. The integrated bypass gate passes 31 tests.
 
-Measured from `03d881e0e`, this continuation removes **2,096 net production lines**
-(960 added / 3,056 deleted, excluding tests, documentation, generated locks and
+Measured from `03d881e0e`, this continuation removes **2,106 net production lines**
+(969 added / 3,075 deleted, excluding tests, documentation, generated locks and
 build tooling). It retires parallel implementations rather than compressing source.
 The final CLI probe exit policy now lives in its existing response owner, keeping
 the forwarding file below the 2,500-line lint limit without exemptions.
@@ -150,6 +150,18 @@ fixture now supplies its required explicitly synthetic source issuer; this is
 not evidence of C MAC attestation. Final combined qualification, corrected-image
 service execution, permission/fault recovery, responsive idle/editor and one
 final PR/fresh CI remain unfinished.
+
+The service-forwarding source `4d5ab125c` passes all 693 normal C invocations,
+693 ASan/UBSan/leak invocations, all three Go modules normally and under race,
+and all 24 exporter checks. Its only full-lint failure was the HTTP file growing
+to 2,505 lines. Consolidating the identical Responses/Anthropic typed-stream
+wrappers into one handler-parameterized live writer brings it to 2,495 without
+an exemption. Focused actual HTTP normal/sanitizer checks cover both private
+NONE streaming routes, exact preserved owner context and protocol-owned terminal
+events without an OpenAI `[DONE]` trailer. OpenAI chat framing remains separate.
+The final image/current-source lint and post-fix live service/hybrid cases still
+must qualify; the intermediate `4d5ab125c` image was not deployed.
+
 
 
 
