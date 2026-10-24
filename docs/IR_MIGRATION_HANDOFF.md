@@ -9,9 +9,9 @@ stop/handoff request below is superseded.
 ### Latest acceptance and reduction checkpoint: 24 October 2026
 
 This section supersedes the historical pending-case statements below. Runtime
-source `e039bad687a1a005d9d85d64c3b112bf3b33bed9` is deployed on the retained,
-task-owned `.252` guest VM8168. `7573878c5` changes only its reviewed ownership
-ledger; it does not change the running application. The install was genuinely
+source `9c4b4b9526f4662609c6c6a025fa32c6835510df` is deployed on the retained,
+task-owned `.252` guest VM8168. Documentation-only descendants do not change the
+running application. The install was genuinely
 empty at `601aff47e`, followed by normal same-volume upgrades. Do not call the
 latest upgrade a second empty installation.
 
@@ -43,15 +43,48 @@ Combined lint exposed five issues, now repaired: canonical Make source ownership
 reviewed schema/adapter fingerprints, formatting, temporary-directory isolation
 and generated-doc discovery. Explicit environment reads preserve the same three
 fields and keep all 303 supported variables discoverable. No gate exemption was
-added. All five targeted gates pass; the full 76-gate rerun and final exact-source
-image/normal upgrade are next. Latest client/environment/TMPDIR fixtures and both
+added. All five targeted gates and the complete 76-gate rerun pass at `9c4b4b952`,
+with source clean and unchanged. Latest client/environment/TMPDIR fixtures and both
 retained-event replays pass in both normal and sanitizer modes on the corrected
 source (`/var/tmp/aimee-cli-ir-final-lint-delta-proof.json`).
 
 The existing local ACP transport identifies the real Unix UID and rejects remote
 ACP prompts; it cannot be relabeled as the PAM browser actor. Do not manufacture
 an auth bridge or new grants for validation. Installed ACP initialize/session-new
-can be checked without a model. Full final CI and delivery remain pending.
+pass on the installed final binary without a model. Full final CI and delivery
+remain pending.
+
+The final `9c4b4b952` image is
+`sha256:b2e1fc024ea8a53117200cc99e6a9ad476f3391da9ad8612f2125afe2fee00c1`;
+all 87 products and 19 modules match its exact source archive. Its normal
+same-project upgrade preserves all 125 canonical records, native tables, full SDK
+caches, authority, grants, the exact 20-byte file, README and HEAD. The served
+certificate matches the owned certificate and retains its prior SPKI/issuer/
+subject. Final desktop/390/320 UI and read-only Editor acceptance passes, with no
+models, repeated controls or idle mutations. The independent final seal also
+includes actual installed ACP initialize/session-new as UID1000 in an ephemeral
+CLI home; it is not a PAM model test. All SDK/native/browser activity is closed.
+The runtime qualification index is
+`/var/tmp/aimee-internal-ir-live-8168/final-9c4-runtime-qualification-index.json`
+(SHA256 `606ee0dc3f3e6b9f3c58c693f2556f16abefd18ed5b880bae1e47d6843e1b5bd`).
+
+The final same-rule census at `9c4b4b952` is **2,490 net production lines removed**
+from the cleanup baseline and **2,499 added** across the entire follow-up. The
+single additional physical line removed after `693442722` is formatter layout,
+not another behavioral retirement. The removed catalog metadata remains separate.
+See `/var/tmp/aimee-ir-production-reduction-9c4b4b952.json` and the independently
+joined source qualifications at
+`/var/tmp/aimee-final-source-9c4-qualification-join.json`.
+
+There are no remaining known implementation cutovers or live actions in this
+checkpoint. The single final PR and fresh CI remain required. The branch is
+`fix/native-mcp-startup-and-editor`, with `testing` freshly checked at
+`251536ddb90fed8e39421a27a8bd27cb73a3f362` and no missing base commits. The
+registered Aimee Git command still cannot start its detached workspace runner
+(no request sent); personally authenticated `gh` is absent and no browser is
+available. User instructions forbid connector mutations. Do not investigate
+`.100`, split PRs, weaken attribution or disable automatic reviews to bypass that
+delivery constraint. The prepared PR body is `/var/tmp/aimee-final-pr-body.md`.
 
 `d6a04cffc` retires three convenience execution wrappers with no production
 callers, deleting 44 production lines. Existing tests now use the active cfg
@@ -92,7 +125,7 @@ failed terminal and complete cache remain retained. Actual native question,
 original-UUID resume and bounded service execution have separate positive live
 evidence. No refused turn was retried or rewritten to manufacture acceptance.
 
-Current qualification is source-scoped: all 76 lint gates pass at `7573878c5`;
+Current qualification is source-scoped: all 76 lint gates pass at `9c4b4b952`;
 the complete 693-invocation native normal and sanitizer runs qualify `e02930ec3`;
 the later cancellation delta has six focused normal and six sanitizer passes,
 21 normal and 21 race real-PostgreSQL checks with no skips, and independent
