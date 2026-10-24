@@ -624,6 +624,11 @@ static mcp_child_t mcp_start(const cJSON *spec, int mode)
 }
 static cJSON *mcp_exchange(mcp_child_t *child, cJSON *request)
 {
+   char directory[512], diagnostic[1024];
+   const char *root = workspace[0] ? workspace : getcwd(directory, sizeof directory);
+   assert(root && root[0] == '/' &&
+          snprintf(diagnostic, sizeof diagnostic, "%s/mcp-stage.log", root) <
+              (int)sizeof diagnostic);
    const cJSON *id = cJSON_GetObjectItem(request, "id");
    double expected = id ? id->valuedouble : 0;
    char *raw = cJSON_PrintUnformatted(request);
@@ -637,7 +642,7 @@ static cJSON *mcp_exchange(mcp_child_t *child, cJSON *request)
       ssize_t length = getline(&line, &capacity, child->output);
       if (length <= 0)
       {
-         FILE *debug = fopen("mcp-stage.log", "a");
+         FILE *debug = fopen(diagnostic, "a");
          if (debug)
          {
             fprintf(debug, "EOF expected MCP id=%g\n", expected);
@@ -648,7 +653,7 @@ static cJSON *mcp_exchange(mcp_child_t *child, cJSON *request)
       cJSON *frame = aimee_ir_json_parse_frame(line, (size_t)length);
       free(line);
       assert(frame);
-      FILE *debug = fopen("mcp-stage.log", "a");
+      FILE *debug = fopen(diagnostic, "a");
       if (debug)
       {
          char *wire = cJSON_PrintUnformatted(frame);
