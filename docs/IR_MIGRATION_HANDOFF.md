@@ -265,3 +265,10 @@ Latest combined local usage evidence:
   normal/sanitizer targets and three actual old-source routing failures.
 - `/var/tmp/aimee-retry-usage-main-combined-proof/proof.json`: the same four
   normal/sanitizer targets on the assembled main worktree.
+
+Go strict acquisition/cleanup owner is integrated separately: immutable identity,
+held daemon/socket/helper receipts, trusted startup, fsynced private creation
+journal and exact-CID cleanup (including anonymous volumes) pass 732 normal and
+732 race tests with two explicit optional skips per lane. Legacy helper mode
+remains compatible. This does not claim the still-private C container cutover is
+installed or fully qualified. Evidence: `/var/tmp/aimee-go-owner-main-732/proof.json`.

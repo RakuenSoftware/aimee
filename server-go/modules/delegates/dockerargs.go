@@ -79,7 +79,7 @@ func TranslateMountPath(containerPath, mountTable string) string {
 // every tool call it makes fails against it.
 func renderBind(m SandboxMount, mountTable string) string {
 	source := m.Source
-	if mountTable != "" && m.Kind != SandboxControlSocket {
+	if mountTable != "" && m.Kind != SandboxControlSocket && m.Kind != SandboxOwnerHelper {
 		source = TranslateMountPath(source, mountTable)
 	}
 	bind := source + ":" + m.Target
@@ -169,7 +169,14 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 
 	args = append(args, "-w", workDir)
 
+	if req.Spec.ownerHelper {
+		args = append(args, "--entrypoint", OwnerHelperTarget, "--no-healthcheck", "--cap-drop", "ALL", "--security-opt", "no-new-privileges")
+	}
 	args = append(args, req.Image)
-	args = append(args, req.Command...)
+	if req.Spec.ownerHelper {
+		args = append(args, "--idle-guard")
+	} else {
+		args = append(args, req.Command...)
+	}
 	return args, nil
 }

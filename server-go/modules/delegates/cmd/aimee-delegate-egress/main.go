@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -31,9 +32,48 @@ func commandRunner(ctx context.Context, name string, args ...string) (string, er
 	return string(output), err
 }
 
+// privateControlSocket accepts only the C owner's private nonce-scoped listener.
+// The caller retains the socket lease; the helper checks its namespace mapping
+// and rechecks these same filesystem identities after the runtime mount verdict.
+func privateControlSocket(check, source, mounts string) ([]os.FileInfo, error) {
+	parent := filepath.Dir(check)
+	owners := filepath.Dir(parent)
+	nonce := filepath.Base(parent)
+	if !filepath.IsAbs(check) || filepath.Clean(check) != check || !filepath.IsAbs(source) || filepath.Clean(source) != source || filepath.Base(check) != delegates.ControlSocketBasename ||
+		filepath.Base(owners) != "acp-owners" || len(nonce) != 64 || strings.Trim(nonce, "0123456789abcdef") != "" ||
+		delegates.TranslateMountPath(check, mounts) != source {
+		return nil, errors.New("private owner control socket identity required")
+	}
+	var result []os.FileInfo
+	for i, path := range []string{check, parent, owners} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		mode := os.FileMode(0700)
+		if i == 0 {
+			mode = 0600
+		}
+		if !ok || int(stat.Uid) != os.Geteuid() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != mode ||
+			(i == 0 && info.Mode()&os.ModeSocket == 0) || (i != 0 && !info.IsDir()) {
+			return nil, errors.New("private owner control socket posture unavailable")
+		}
+		result = append(result, info)
+	}
+	return result, nil
+}
+
 func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (string, error) {
 	flags := flag.NewFlagSet("acquire", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	leaseFD := flags.Int("lease-fd", -1, "inherited private durable creation lease")
+	leaseCheck := flags.String("lease-check", "", "private durable creation lease path")
+	engineEndpoint := flags.String("engine-endpoint", "", "launching owner's held Docker Unix endpoint")
+	helperCheck := flags.String("helper-check", "", "private measured owner helper path")
+	helperSource := flags.String("helper-source", "", "daemon-visible measured owner helper path")
+	helperSHA := flags.String("helper-sha256", "", "launching owner's helper measurement")
+	receiptJSON := flags.Bool("receipt-json", false, "return the verified immutable acquisition receipt")
 	docker := flags.String("docker", "docker", "container runtime binary")
 	task := flags.String("task", "", "delegate task ID")
 	image := flags.String("image", "", "sandbox image")
@@ -65,6 +105,38 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		return "", fmt.Errorf("a full source worktree and workdir are required")
 	}
 
+	if !*receiptJSON && (*engineEndpoint != "" || *helperCheck != "" || *helperSource != "" || *helperSHA != "" || *leaseFD >= 0 || *leaseCheck != "") {
+		return "", errors.New("private lease inputs require an immutable receipt")
+	}
+	var lease *ownerLease
+	var helper *os.File
+	helperDigest := ""
+	var socketIdentity []os.FileInfo
+	if *receiptJSON {
+		if !ownerEngineEndpoint(*engineEndpoint) {
+			return "", errors.New("launching owner's held Docker endpoint required")
+		}
+		supplied := run
+		run = func(ctx context.Context, binary string, args ...string) (string, error) {
+			return supplied(ctx, binary, append([]string{"--host", *engineEndpoint}, args...)...)
+		}
+		socketIdentity, err = privateControlSocket(*socketCheck, *socketSource, *mountTable)
+		if err != nil {
+			return "", err
+		}
+		helper, helperDigest, err = measuredOwnerHelper(*helperCheck, *helperSource, *helperSHA, *socketCheck, *mountTable)
+		if err != nil {
+			return "", err
+		}
+		defer helper.Close()
+		lease, err = openOwnerLease(*leaseFD, *leaseCheck, *socketCheck)
+		if err != nil {
+			return "", err
+		}
+		defer lease.file.Close()
+		lease.engine, lease.helperSHA = *engineEndpoint, helperDigest
+	}
+
 	request := delegates.SandboxRequest{
 		WritesAllowed: *writes, RepoRoot: *repoRoot, Worktree: *worktree, GitDir: *gitdir,
 		IsGitCheckout: true, ParentSocketHost: *socketSource,
@@ -73,7 +145,12 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	if *proxy {
 		request.EgressProxy = "http://127.0.0.1:3129"
 	}
-	spec, err := delegates.BuildSandboxSpec(request)
+	var spec delegates.SandboxSpec
+	if *receiptJSON {
+		spec, err = delegates.BuildOwnerSandboxSpec(request, *helperSource)
+	} else {
+		spec, err = delegates.BuildSandboxSpec(request)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -83,12 +160,60 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	}
 	dockerRequest := delegates.DockerCreateRequest{Spec: spec, ContainerName: name, Image: *image,
 		WorkDir: *workdir, MountTable: *mountTable, Command: []string{"sleep", "infinity"}}
-	result, err := (delegates.ContainerRunner{Docker: *docker, Run: run, MountTable: *mountTable}).Acquire(ctx, dockerRequest)
+	runner := delegates.ContainerRunner{Docker: *docker, Run: run, MountTable: *mountTable, RequireImmutableIdentity: *receiptJSON}
+	if lease != nil {
+		runner.Journal = lease
+	}
+	result, err := runner.Acquire(ctx, dockerRequest)
 	if err != nil {
 		return "", err
 	}
 	if result.Refused {
 		return "", errors.New(result.Reason)
+	}
+	if *receiptJSON {
+		current, err := privateControlSocket(*socketCheck, *socketSource, *mountTable)
+		if err == nil {
+			for i := range current {
+				if !os.SameFile(current[i], socketIdentity[i]) {
+					err = errors.New("private control socket changed during acquisition")
+					break
+				}
+			}
+		}
+		if err == nil {
+			_, err = verifyOwnerHelper(helper, *helperCheck, helperDigest)
+		}
+		if err != nil {
+			if cleanup := runner.Stop(ctx, result.ID); cleanup != nil {
+				return "", fmt.Errorf("%w; cleanup: %v", err, cleanup)
+			}
+			return "", err
+		}
+		receipt := struct {
+			Schema              string `json:"schema"`
+			Name                string `json:"name"`
+			ContainerID         string `json:"container_id"`
+			ImageID             string `json:"image_id"`
+			WorkDir             string `json:"workdir"`
+			VerifiedPosture     bool   `json:"verified_posture"`
+			ControlSocketSource string `json:"control_socket_source"`
+			ControlSocketTarget string `json:"control_socket_target"`
+			EngineEndpoint      string `json:"engine_endpoint"`
+			HelperSource        string `json:"helper_source"`
+			HelperTarget        string `json:"helper_target"`
+			HelperSHA256        string `json:"helper_sha256"`
+			TrustedStartup      string `json:"trusted_startup"`
+			FreshContainer      bool   `json:"fresh_container"`
+		}{
+			Schema: "aimee.container-acquire.v1", Name: result.Name, ContainerID: result.ID, ImageID: result.ImageID,
+			WorkDir: result.WorkDir, VerifiedPosture: true, ControlSocketSource: *socketSource,
+			ControlSocketTarget: delegates.ControlSocketTarget, EngineEndpoint: *engineEndpoint,
+			HelperSource: *helperSource, HelperTarget: delegates.OwnerHelperTarget, HelperSHA256: helperDigest,
+			TrustedStartup: "owner-io-idle-guard-v1", FreshContainer: true,
+		}
+		encoded, err := json.Marshal(receipt)
+		return string(encoded), err
 	}
 	return result.Name, nil
 }
@@ -234,6 +359,9 @@ func run(ctx context.Context, args []string) error {
 		fmt.Println("aimee-delegate-egress go-v1")
 		return nil
 	}
+	if len(args) >= 2 && args[1] == "cleanup-lease" {
+		return cleanupOwnerLease(ctx, args[2:], commandRunner)
+	}
 	if len(args) >= 2 && args[1] == "reap-verifiers" {
 		return reapVerifiers(ctx, args[2:])
 	}
@@ -244,7 +372,7 @@ func run(ctx context.Context, args []string) error {
 		return proxy(ctx, args[2:])
 	}
 	if len(args) < 2 || args[1] != "acquire" {
-		return fmt.Errorf("usage: aimee-delegate-egress acquire [flags] | verify [flags] | reap-verifiers [flags] | proxy [flags] | version")
+		return fmt.Errorf("usage: aimee-delegate-egress acquire [flags] | cleanup-lease [flags] | verify [flags] | reap-verifiers [flags] | proxy [flags] | version")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
