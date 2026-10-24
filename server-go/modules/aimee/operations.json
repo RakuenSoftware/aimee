@@ -4421,6 +4421,10 @@
           {
             "name": "estimated_cost_usd",
             "type": "double"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 4096
@@ -4503,6 +4507,10 @@
           {
             "name": "total_estimated_cost_usd",
             "type": "double"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 4096
@@ -13499,6 +13507,10 @@
           {
             "name": "last_seen",
             "type": "text"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 524288

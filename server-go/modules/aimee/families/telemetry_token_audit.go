@@ -29,7 +29,7 @@ const sinceFilter = `($1 <= 0 OR created_at >= now() - make_interval(hours => $1
 // failure rather than a caller reading a cell that moved.
 const (
 	tokenAuditGroupedCells   = 5
-	tokenAuditDashboardCells = 9
+	tokenAuditDashboardCells = 10
 )
 
 const (
@@ -110,18 +110,19 @@ const (
 
 	// The dashboard is an AGGREGATE by tool and role, not a list of calls.
 	tokenAuditListDashboardSQL = `SELECT tool_name, role,
-	                                     COALESCE(SUM(prompt_tokens)::bigint, 0),
-	                                     COALESCE(SUM(completion_tokens)::bigint, 0),
-	                                     COALESCE(SUM(cache_write_tokens)::bigint, 0),
-	                                     COALESCE(SUM(cache_read_tokens)::bigint, 0),
-	                                     COALESCE(SUM(estimated_cost_usd), 0),
+	                                     COALESCE(SUM(prompt_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
+	                                     COALESCE(SUM(completion_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
+	                                     COALESCE(SUM(cache_write_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
+	                                     COALESCE(SUM(cache_read_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
+	                                     COALESCE(SUM(estimated_cost_usd) FILTER (WHERE ` + realizedFilter + `), 0),
 	                                     COUNT(*),
 	                                     COALESCE(to_char(MAX(created_at) AT TIME ZONE 'utc',
-	                                              'YYYY-MM-DD HH24:MI:SS'), '')
+	                                              'YYYY-MM-DD HH24:MI:SS'), ''),
+                                     COUNT(*) FILTER (WHERE usage_kind IS NULL OR usage_kind NOT IN ('realized', '', 'avoided'))
 	                                FROM token_audit
-	                               WHERE ` + realizedFilter + `
+	                               WHERE usage_kind IS NULL OR usage_kind <> 'avoided'
 	                               GROUP BY tool_name, role
-	                               ORDER BY COALESCE(SUM(estimated_cost_usd), 0) DESC,
+	                               ORDER BY COALESCE(SUM(estimated_cost_usd) FILTER (WHERE ` + realizedFilter + `), 0) DESC,
 	                                        MAX(created_at) DESC
 	                               LIMIT $1`
 )
@@ -309,19 +310,20 @@ func tokenAuditListDashboard(ctx context.Context, q store.Queryer, f []string) (
 	return collect(ctx, q, tokenAuditListDashboardSQL, tokenAuditDashboardCells,
 		func(scan func(...any) error) ([]string, error) {
 			var (
+				unknown                       int64
 				tool, role, lastSeen          string
 				prompt, completion, cw, cr, n int64
 				cost                          float64
 			)
 			if err := scan(&tool, &role, &prompt, &completion, &cw, &cr,
-				&cost, &n, &lastSeen); err != nil {
+				&cost, &n, &lastSeen, &unknown); err != nil {
 				return nil, err
 			}
 			return []string{
 				tool, role,
 				store.I64toa(prompt), store.I64toa(completion),
 				store.I64toa(cw), store.I64toa(cr),
-				store.Ftoa(cost), store.I64toa(n), lastSeen,
+				store.Ftoa(cost), store.I64toa(n), lastSeen, store.I64toa(unknown),
 			}, nil
 		}, max)
 }

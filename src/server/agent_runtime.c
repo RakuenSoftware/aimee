@@ -2050,6 +2050,7 @@ int agent_get_stats(const char *name, agent_stats_t *out, int max)
       s->total_cache_write_tokens = (int)rows[i].total_cache_write_tokens;
       s->total_cache_read_tokens = (int)rows[i].total_cache_read_tokens;
       s->total_estimated_cost_usd = rows[i].total_estimated_cost_usd;
+      s->unknown_usage_calls = rows[i].unknown_usage_calls;
    }
    return n;
 }

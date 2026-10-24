@@ -15,8 +15,8 @@ const (
 	agentLogFailureCells = 3
 	agentLogPatternCells = 8
 	agentLogSeedCells    = 4
-	agentLogMetricCells  = 8
-	agentLogStatsCells   = 9
+	agentLogMetricCells  = 9
+	agentLogStatsCells   = 10
 	agentLogPromCells    = 8
 	roleCountCells       = 2
 )
@@ -222,7 +222,8 @@ const (
 	                                   COALESCE(SUM(al.prompt_tokens + al.completion_tokens), 0),
 	                                   COALESCE(SUM(ta.cache_write_tokens), 0),
 	                                   COALESCE(SUM(ta.cache_read_tokens), 0),
-	                                   COALESCE(SUM(ta.estimated_cost_usd), 0)
+	                                   COALESCE(SUM(ta.estimated_cost_usd) FILTER (WHERE ta.usage_kind IN ('realized', '')), 0),
+                                   COUNT(*) FILTER (WHERE ta.id IS NULL OR ta.usage_kind IS NULL OR ta.usage_kind NOT IN ('realized', '', 'avoided'))
 	                              FROM agent_log al
 	                              LEFT JOIN token_audit ta ON ta.agent_log_id = al.id
 	                             GROUP BY al.role
@@ -236,7 +237,8 @@ const (
 	                                COALESCE(AVG(CASE WHEN al.success THEN 1.0 ELSE 0.0 END), 0),
 	                                COALESCE(SUM(ta.cache_write_tokens), 0),
 	                                COALESCE(SUM(ta.cache_read_tokens), 0),
-	                                COALESCE(SUM(ta.estimated_cost_usd), 0)
+	                                COALESCE(SUM(ta.estimated_cost_usd) FILTER (WHERE ta.usage_kind IN ('realized', '')), 0),
+                                   COUNT(*) FILTER (WHERE ta.id IS NULL OR ta.usage_kind IS NULL OR ta.usage_kind NOT IN ('realized', '', 'avoided'))
 	                           FROM agent_log al
 	                           LEFT JOIN token_audit ta ON ta.agent_log_id = al.id
 	                          WHERE ($1 = '' OR al.agent_name = $1)
@@ -467,20 +469,21 @@ func agentLogMetricsByRole(ctx context.Context, q store.Queryer, f []string) (ui
 	return collect(ctx, q, agentLogMetricsByRoleSQL, agentLogMetricCells,
 		func(scan func(...any) error) ([]string, error) {
 			var (
+				unknown                       int64
 				role                          string
 				total, successes              int64
 				tokens, cacheWrite, cacheRead int64
 				avgLatency, cost              float64
 			)
 			if err := scan(&role, &total, &successes, &avgLatency, &tokens,
-				&cacheWrite, &cacheRead, &cost); err != nil {
+				&cacheWrite, &cacheRead, &cost, &unknown); err != nil {
 				return nil, err
 			}
 			return []string{
 				role, store.I64toa(total), store.I64toa(successes),
 				store.Ftoa(avgLatency), store.I64toa(tokens),
 				store.I64toa(cacheWrite), store.I64toa(cacheRead),
-				store.Ftoa(cost),
+				store.Ftoa(cost), store.I64toa(unknown),
 			}, nil
 		}, max)
 }
@@ -493,13 +496,14 @@ func agentLogAgentStats(ctx context.Context, q store.Queryer, f []string) (uint3
 	return collect(ctx, q, agentLogAgentStatsSQL, agentLogStatsCells,
 		func(scan func(...any) error) ([]string, error) {
 			var (
+				unknown                       int64
 				agentName                     string
 				calls, prompt, completion     int64
 				cacheWrite, cacheRead         int64
 				avgLatency, successRate, cost float64
 			)
 			if err := scan(&agentName, &calls, &prompt, &completion, &avgLatency,
-				&successRate, &cacheWrite, &cacheRead, &cost); err != nil {
+				&successRate, &cacheWrite, &cacheRead, &cost, &unknown); err != nil {
 				return nil, err
 			}
 			return []string{
@@ -507,7 +511,7 @@ func agentLogAgentStats(ctx context.Context, q store.Queryer, f []string) (uint3
 				store.I64toa(prompt), store.I64toa(completion),
 				store.Ftoa(avgLatency), store.Ftoa(successRate),
 				store.I64toa(cacheWrite), store.I64toa(cacheRead),
-				store.Ftoa(cost),
+				store.Ftoa(cost), store.I64toa(unknown),
 			}, nil
 		}, f[0], max)
 }

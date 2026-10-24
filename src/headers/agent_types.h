@@ -701,6 +701,7 @@ typedef struct
    double total_estimated_cost_usd;
    int avg_latency_ms;
    double success_rate;
+   int unknown_usage_calls; /* Total usage/cost is incomplete when nonzero. */
 } agent_stats_t;
 
 /* Task type classification for context assembly */

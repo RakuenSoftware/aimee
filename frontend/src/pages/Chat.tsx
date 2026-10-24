@@ -1,3 +1,4 @@
+import { UsageCost } from "../components/UsageCost";
 import { parseJSON, stringifyJSON } from '../ir/json';
 import './chat.css';
 import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
@@ -99,6 +100,8 @@ interface MetricRow {
   cache_write_tokens: number;
   cache_read_tokens: number;
   estimated_cost_usd: number;
+  unknown_usage_calls?: number;
+  usage_complete?: boolean;
 }
 
 interface ModelInfo {
@@ -448,9 +451,10 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
   msgCount: number;
   metrics: MetricRow[];
 }) {
-  // metrics rows are realized spend (the server reader filters out
-  // estimated/avoided/partial), so this total is realized billable spend.
+  // Numeric values are observed realized subtotals, not totals for unknown work.
   const totalCost = metrics.reduce((s, m) => s + m.estimated_cost_usd, 0);
+  const unknownCalls = metrics.reduce((s, m) => s + (m.unknown_usage_calls ?? 0), 0);
+  const usageComplete = metrics.every(m => m.usage_complete === true);
   const totalTokens = metrics.reduce((s, m) => s + m.tokens + m.cache_write_tokens + m.cache_read_tokens, 0);
   const sessionTokens = sessionUsage.in + sessionUsage.out;
   const usagePct = totalCost > 0 ? (sessionUsage.cost / totalCost * 100) : 0;
@@ -503,16 +507,16 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
               {sessionUsage.cost > 0 ? `~$${sessionUsage.cost.toFixed(4)}` : '—'}
             </span>
           </div>
-          {totalCost > 0 && (
+          {(metrics.length > 0) && (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ color: tokens.textFaint, fontSize: '12px' }}>All-time realized</span>
-                <span style={{ color: tokens.textPale, fontSize: '12px' }}>${totalCost.toFixed(4)}</span>
+                <span style={{ color: tokens.textFaint, fontSize: '12px' }}>All-time observed</span>
+                <span style={{ color: tokens.textPale, fontSize: '12px' }}><UsageCost subtotal={totalCost} unknownCalls={unknownCalls} complete={usageComplete} /></span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                 <span style={{ color: tokens.textFaint, fontSize: '12px' }}>Usage %</span>
                 <span style={{ color: tokens.textPale, fontSize: '12px' }}>
-                  {usagePct > 0 ? `${usagePct.toFixed(1)}%` : '—'}
+                  {usageComplete && usagePct > 0 ? `${usagePct.toFixed(1)}%` : '—'}
                 </span>
               </div>
             </>
@@ -538,7 +542,7 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: tokens.textFaint, fontSize: '11px' }}>{mTokens.toLocaleString()} tok</span>
-                    <span style={{ color: tokens.textFaint, fontSize: '11px' }}>${m.estimated_cost_usd.toFixed(4)}</span>
+                    <span style={{ color: tokens.textFaint, fontSize: '11px' }}><UsageCost subtotal={m.estimated_cost_usd} unknownCalls={m.unknown_usage_calls} complete={m.usage_complete} /></span>
                   </div>
                 </div>
               );
