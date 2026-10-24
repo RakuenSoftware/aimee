@@ -452,6 +452,14 @@ typedef struct
    int primary_only;
 } agent_t;
 
+/* Transient producer-selected routing namespace, never configuration or authority.
+ * CONTAINER eligibility still requires the actual container owner before execution. */
+typedef enum
+{
+   AGENT_ROUTE_EXECUTION_HOST = 0,
+   AGENT_ROUTE_EXECUTION_CONTAINER = 1
+} agent_route_execution_t;
+
 typedef struct
 {
    char revision[65]; /* opaque Go roster revision for compare-and-swap saves */
@@ -468,6 +476,9 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* Runtime-only; only a delegate producer planning mandatory container binding
+    * sets this. Never serialized, persisted, or accepted from a request body. */
+   agent_route_execution_t route_execution;
    /* Initial dispatch cost estimate and qualified learning preference. Runtime only. */
    int route_input_tokens;
    int route_output_tokens;

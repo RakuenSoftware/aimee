@@ -160,7 +160,8 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
          if ((pass == 0) != (same_reg != 0))
             continue;
          if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
-             !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
+             !agent_supports_delegate_role(peer, role) ||
+             !agent_is_available_for_execution(peer, cfg->route_execution) ||
              agent_is_named_in_fallback_chain(cfg, peer->name))
             continue;
          if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)

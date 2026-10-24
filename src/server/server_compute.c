@@ -1005,6 +1005,9 @@ static void delegate_worker_run(void *arg)
       delegation_compute_error(cctx, "failed to load agent config");
       goto delegate_fail;
    }
+   /* All delegates must bind a verified container below. Only executable
+    * namespace lookup is deferred; an acquisition/constructor failure refuses. */
+   acfg.route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
    if (tool_loop_timeout_ms_cap > 0)
    {
       struct timespec now;

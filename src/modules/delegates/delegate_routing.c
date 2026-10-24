@@ -259,7 +259,7 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
    {
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled || strcmp(ag->provider, provider) != 0 ||
-          !agent_is_available_for_routing(ag))
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (role && !agent_has_role(ag, role))
          continue;
@@ -285,7 +285,7 @@ int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (role && !agent_has_role(ag, role))
          continue;
@@ -399,7 +399,8 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
          return -1;
       }
       char rdetail[128];
-      agent_route_block_t rblock = agent_routing_block_reason(selected, rdetail, sizeof(rdetail));
+      agent_route_block_t rblock = agent_routing_block_reason_for_execution(
+          selected, cfg->route_execution, rdetail, sizeof(rdetail));
       if (rblock != AGENT_ROUTE_OK)
       {
          /* Report the ACTUAL reason routing declined, tagged with the matching

@@ -403,6 +403,19 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
       return AGENT_ROUTE_NO_CREDENTIALS;
    return AGENT_ROUTE_OK;
 }
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_is_available_for_routing(agent);
+}
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_routing_block_reason(agent, detail, detail_sz);
+}
+
 /* Stubs for the seat resolver pulled in via ensemble_resolve_random_seats. These
  * test seats are all specific model names (never "$random"), so rt_seat_is_random
  * returns 0 and the resolver passes them through unchanged; delegate_pick_for_role

@@ -30,6 +30,7 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "agent.h"
 #include "request_context.h"
 #include "agent_config.h"
+#include "cmd_agent_delegate_impl.h"
 #include "oauth_flow.h"
 #include "vault_service.h"
 #include "runtime_secret.h"
@@ -327,6 +328,66 @@ static int test_policy_exclude_primary_unless_primary_turn(const agent_t *ag)
    if (agent_routing_primary_turn())
       return 0;
    return strcmp(ag->name, "primary") == 0;
+}
+
+static int test_container_route_blocked(const agent_t *agent)
+{
+   (void)agent;
+   return 1;
+}
+static int test_container_health_blocked(const char *name)
+{
+   (void)name;
+   return 1;
+}
+static void test_agent_container_execution_routing(void)
+{
+   agent_config_t *cfg = calloc(1, sizeof *cfg);
+   assert(cfg);
+   cfg->agent_count = 1;
+   agent_t *agent = &cfg->agents[0];
+   strcpy(agent->name, "image-only-acp");
+   strcpy(agent->backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(agent->cli_kind, "acp");
+   strcpy(agent->auth_type, "none");
+   strcpy(agent->roles[0], "code");
+   agent->role_count = 1;
+   agent->enabled = 1;
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent");
+   assert(access(agent->cli_cmd, X_OK) != 0);
+   strcpy(cfg->default_delegate, agent->name);
+   strcpy(cfg->default_agent, agent->name);
+   assert(cfg->route_execution == AGENT_ROUTE_EXECUTION_HOST);
+   assert(!agent_is_available_for_routing(agent) && !agent_route(cfg, "code"));
+   agent_routing_set_primary_turn(1);
+   assert(!agent_route(cfg, "code")); /* The local-primary namespace still refuses. */
+   agent_routing_set_primary_turn(0);
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   assert(agent_route(cfg, "code") == agent); /* Eligibility only, not executable verification. */
+   assert(!agent_is_available_for_routing(agent)); /* Default API remains host-only. */
+   char error[512];
+   assert(!delegate_apply_route_overrides(cfg, "code", agent->name, -1, NULL, NULL, error,
+                                          sizeof error));
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent ; /bin/true");
+   assert(!agent_route(cfg, "code")); /* Deferral cannot accept shell syntax. */
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_HOST;
+   assert(!agent_route(cfg, "code"));
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent");
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   agent_set_route_policy_filter(test_container_route_blocked);
+   assert(!agent_route(cfg, "code"));
+   agent_set_route_policy_filter(NULL);
+   agent_set_route_health_filter(test_container_health_blocked);
+   assert(!agent_route(cfg, "code"));
+   agent_set_route_health_filter(NULL);
+   cfg->route_execution = (agent_route_execution_t)99;
+   assert(!agent_route(cfg, "code"));
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   strcpy(agent->cli_kind, "unknown");
+   assert(!agent_route(cfg, "code")); /* No generic container CLI admission. */
+   free(cfg);
+   puts("  PASS: container-planned ACP route defers only executable existence; "
+        "host/syntax/policy/health remain guarded");
 }
 
 static void test_agent_route_primary_turn_marker(void)
@@ -4584,6 +4645,12 @@ int main(int argc, char **argv)
 {
    if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
       return script_rpc_admission_fixture_main();
+   if (argc == 2 && !strcmp(argv[1], "--container-routing"))
+   {
+      delegate_role_seam_install();
+      test_agent_container_execution_routing();
+      return 0;
+   }
    char test_executable[MAX_PATH_LEN];
    char *self = realpath(argv[0], test_executable);
    assert(self);
@@ -4633,6 +4700,7 @@ int main(int argc, char **argv)
    test_agent_route_selection_provider();
    test_route_authority_refuses_without_provider();
    test_agent_route_policy_filter();
+   test_agent_container_execution_routing();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
