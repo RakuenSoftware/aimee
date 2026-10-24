@@ -228,6 +228,11 @@ static char **native_arguments(const provider_cli_cfg_t *cfg)
    ARG("--bare");
    ARG("--setting-sources");
    ARG("");
+   /* Bare mode keeps these SDK-bundled hooks/skills enabled. Disable them
+    * before the unchanged empty-plugin launch proof can admit execution. */
+   ARG("--settings");
+   ARG("{\"enabledPlugins\":{\"cc-plugin-agents-md@builtin\":false,"
+       "\"cc-plugin-plugin-authoring@builtin\":false}}");
    ARG("--strict-mcp-config");
    ARG("--tools");
    ARG("");

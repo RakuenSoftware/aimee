@@ -994,6 +994,18 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
       assert(!strcmp(cli_claude_native_profile_error(host, bad), shape_reasons[i]));
       cJSON_Delete(bad);
    }
+   /* Disabling bundled plugins is a launch input, never an acceptance exception. */
+   const char *bundled[] = {"cc-plugin-agents-md", "cc-plugin-plugin-authoring"};
+   for (unsigned i = 0; i < sizeof bundled / sizeof *bundled; i++)
+   {
+      cJSON *bad = cJSON_Duplicate(frame, 1);
+      cJSON *plugin = cJSON_CreateObject();
+      assert(plugin && cJSON_AddStringToObject(plugin, "name", bundled[i]) &&
+             cJSON_AddStringToObject(plugin, "source", "builtin") &&
+             cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(bad, "plugins"), plugin));
+      assert(!strcmp(cli_claude_native_profile_error(host, bad), "plugins"));
+      cJSON_Delete(bad);
+   }
    cJSON *bad_name = cJSON_Duplicate(frame, 1);
    cJSON_ReplaceItemInArray(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0,
                             cJSON_CreateString("unowned-value-must-not-be-logged"));
@@ -1125,6 +1137,22 @@ int main(int argc, char **argv)
       struct stat channel;
       for (int fd = 0; fd < 3; fd++)
          assert(!fstat(fd, &channel) && S_ISFIFO(channel.st_mode));
+      int plugin_settings = 0;
+      for (int i = 1; i < argc; i++)
+         if (!strcmp(argv[i], "--settings"))
+         {
+            assert(!plugin_settings++ && i + 1 < argc);
+            cJSON *settings = cJSON_Parse(argv[++i]);
+            const cJSON *disabled = cJSON_GetObjectItemCaseSensitive(settings, "enabledPlugins");
+            assert(cJSON_IsObject(settings) && cJSON_GetArraySize(settings) == 1 &&
+                   cJSON_IsObject(disabled) && cJSON_GetArraySize(disabled) == 2 &&
+                   cJSON_IsFalse(
+                       cJSON_GetObjectItemCaseSensitive(disabled, "cc-plugin-agents-md@builtin")) &&
+                   cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(
+                       disabled, "cc-plugin-plugin-authoring@builtin")));
+            cJSON_Delete(settings);
+         }
+      assert(plugin_settings == 1);
       const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
       assert(setting && !strcmp(setting, "0"));
       setting = getenv("MCP_CONNECTION_NONBLOCKING");
