@@ -1,5 +1,7 @@
 /* Host-only creation and initialisation for event-bus shared-memory regions. */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <errno.h>
 #include <string.h>
 #include <sys/mman.h>

@@ -3,7 +3,9 @@
  * The wire version this host speaks. A client declares a [min,max] range at
  * attach and the host picks the highest common value, or denies.
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>

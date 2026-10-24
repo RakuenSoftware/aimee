@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <aimee/core/event_bus/bus_endpoint.h>
 
 #include <errno.h>
