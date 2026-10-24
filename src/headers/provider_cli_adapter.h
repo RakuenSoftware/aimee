@@ -79,8 +79,6 @@ extern "C"
       const char *display_name; /* human-readable CLI name for diagnostics */
       cli_adapter_caps_t caps;
 
-      int (*spawn)(const provider_cli_cfg_t *cfg, const char *task_prompt, int *stdin_fd,
-                   int *stdout_fd, pid_t *pid_out);
       /* Native provider bridge for routes that historically used provider-CLI
        * config but should execute through Aimee's HTTP provider loop. */
       const char *native_provider;
@@ -94,15 +92,12 @@ extern "C"
    } provider_cli_adapter_t;
 
    const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind);
-   /* Linked by the server's canonical scheduler owner. The weak standalone seam
-    * returns 1 when no host owner is linked. The daemon refuses unsupported
-    * profiles; an admitted host execution never falls back after refusal. */
+   /* Linked by the server's canonical scheduler owner. The weak seam returns 1
+    * when no host owner is linked; callers must refuse without launching an SDK. */
    int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out);
    int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adapter,
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);
-   int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
-                                        const provider_cli_cfg_t *cfg, agent_result_t *out);
 
    int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
                                int *stdout_fd, pid_t *pid_out);
@@ -119,11 +114,5 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-
-/* The provider CLI's --allowedTools list, exposed as data so the egress-gate
- * accounting test can enumerate it. Every entry must be classified by that test;
- * see src/tests/test_cli_claude_allowlist.c. */
-const char *const *cli_claude_allowed_tools(void);
-size_t cli_claude_allowed_tools_count(void);
 
 #endif /* DEC_PROVIDER_CLI_ADAPTER_H */

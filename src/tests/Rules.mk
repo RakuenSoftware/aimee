@@ -372,7 +372,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-wfe-manager-artifacts \
                $(TESTPREFIX)/unit-test-wfe-externalization \
                $(TESTPREFIX)/unit-test-tool-egress \
-               $(TESTPREFIX)/unit-test-cli-claude-allowlist \
                $(TESTPREFIX)/unit-test-web-read-spans \
                $(TESTPREFIX)/unit-test-web-egress \
                $(TESTPREFIX)/unit-test-web-search-fusion \
@@ -2257,13 +2256,6 @@ $(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-cli-claude-allowlist: $(OBJDIR)/tests/test_cli_claude_allowlist.o \
-                                    $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_claude_native.o \
-                                    $(OBJDIR)/modules/workflows/wfe_externalization.o \
-                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o \
-                                    $(OBJDIR)/modules/workflows/tool_egress.o
-	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 $(TESTPREFIX)/unit-test-tool-egress: $(OBJDIR)/tests/test_tool_egress.o \
                                     $(OBJDIR)/modules/workflows/tool_egress.o \
@@ -7187,8 +7179,14 @@ $(TESTPREFIX)/unit-test-harness-ir: $(OBJDIR)/tests/test_harness_ir.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+# The lifecycle fixture supplies only the native process-spawn boundary. Profile
+# validation remains the real production implementation in this object.
+$(OBJDIR)/tests/cli_claude_profile_fixture.o: server/cli_claude_native.c
+	@mkdir -p $(@D)
+	$(CC) $(C_FLAGS) -Dcli_claude_native_spawn=unused_fixture_native_spawn -c -o $@ $<
+
 $(TESTPREFIX)/unit-test-claude-headless: $(OBJDIR)/tests/test_claude_headless.o \
-    $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/translation/harness_ir.o \
+    $(OBJDIR)/server/claude_headless.o $(OBJDIR)/tests/cli_claude_profile_fixture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/translation/harness_ir.o \
     $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
      $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o

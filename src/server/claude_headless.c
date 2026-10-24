@@ -103,9 +103,16 @@ static char *claude_user_line(const char *prompt, const char *resume)
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind_session,
                         void *context, agent_result_t *out)
 {
-   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0] || !out)
+   if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
+   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0])
+      return -1;
+   if (!cfg->claude_host)
+   {
+      snprintf(out->error, sizeof out->error, "canonical Claude execution owner unavailable");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    uint64_t execution_started = mono_ms();
    const agent_t *agent = cfg->agent;
    const char *prompt = cfg->user_prompt;
@@ -113,11 +120,11 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    int in = -1, output = -1, status = 0, rc = -1, saw_result = 0, interrupted = 0, eof = 0,
        capture_failed = 0;
    pid_t pid = -1;
-   aimee_harness_ir_t ir = {.host_model_capture = cfg->claude_host != NULL};
+   aimee_harness_ir_t ir = {.host_model_capture = 1};
    int profile_seen = 0;
    char *input_line = NULL;
    int initialized = !cfg->control_channel, prompt_sent = !cfg->control_channel;
-   int native_readiness = cfg->control_channel && cfg->claude_host;
+   int native_readiness = cfg->control_channel;
    int mcp_ready =
        !native_readiness || (cfg->claude_host->catalog && !cfg->claude_host->catalog->n_tools);
    int mcp_waiting = 0;
@@ -130,7 +137,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
       snprintf(out->error, sizeof out->error, "browser control owner is unavailable");
       goto finish;
    }
-   if (claude_provider_cli_adapter.spawn(cfg, prompt, &in, &output, &pid) != 0)
+   if (cli_claude_native_spawn(cfg, &in, &output, &pid) != 0)
    {
       snprintf(out->error, sizeof(out->error), "could not start claude -p");
       goto finish;
@@ -147,7 +154,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    uint64_t last = mono_ms(), started = last;
    while (!eof)
    {
-      if (cfg->claude_host && cfg->claude_host->progress &&
+      if (cfg->claude_host->progress &&
           cfg->claude_host->progress(cfg->claude_host->progress_context))
          goto capture_stop;
       if (agent_request_cancelled())
@@ -361,7 +368,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                      goto next_line;
                   }
                }
-               if (cfg->claude_host && cJSON_IsString(frame_type))
+               if (cJSON_IsString(frame_type))
                {
                   const char *subtype =
                       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "subtype"));
@@ -491,42 +498,10 @@ stop:
       }
    }
    if (eof && initialized && prompt_sent && !capture_failed && !interrupted && saw_result == 1 &&
-       (!cfg->claude_host || profile_seen) && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+       profile_seen && WIFEXITED(status) && WEXITSTATUS(status) == 0)
    {
-      if (cfg->claude_host)
-      {
-         /* Only scheduler completion. The server factory still requires the
-          * original canonical terminal response before reporting task success. */
-         out->success = 1;
-         out->turns = 1;
-         rc = 0;
-         goto finish;
-      }
-      /* Compatibility callers receive a projection of the admitted native
-       * snapshot. A terminal result alone cannot invent model history. */
-      aimee_response_t response = {0};
-      char error[128];
-      if (!ir.claude_message ||
-          anthropic_backend_parse(ir.claude_message, &response, error, sizeof error) != 0)
-      {
-         aimee_response_free(&response);
-         snprintf(out->error, sizeof out->error,
-                  "Claude completed without canonical assistant output");
-         capture_failed = 1;
-         goto finish;
-      }
-      out->response = aimee_ir_response_text_alloc(&response);
-      out->prompt_tokens = (int)response.usage_in;
-      out->completion_tokens = (int)response.usage_out;
-      out->cache_read_tokens = (int)response.usage_cache_read;
-      out->cache_write_tokens = (int)response.usage_cache_write;
-      out->canonical_response = response;
-      if (!out->response)
-      {
-         snprintf(out->error, sizeof out->error, "cannot allocate canonical Claude response");
-         capture_failed = 1;
-         goto finish;
-      }
+      /* Only scheduler completion. The factory installs the original canonical
+       * response after joining callbacks; SDK stdout is never model authority. */
       out->success = 1;
       out->turns = 1;
       rc = 0;

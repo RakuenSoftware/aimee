@@ -6,6 +6,7 @@
 extern int native_limit_test_tls;
 extern int native_limit_test_observed;
 extern int native_limit_test_calls;
+extern int native_limit_test_host_unavailable;
 
 int main(void)
 {
@@ -29,6 +30,16 @@ int main(void)
       assert(!result.success && !result.canonical_response.n_content);
       agent_result_clear_response(&result);
    }
+   /* Even an unseeded request without any capture or credential ownership must
+    * refuse when the canonical host owner is absent. Boundary stubs abort if
+    * credential inspection or the old standalone executor is reached. */
+   agent_t selected = {.max_turns = 3};
+   agent_result_t unavailable = {0};
+   native_limit_test_host_unavailable = 1;
+   assert(agent_execute_provider_session(&adapter, &selected, NULL, NULL, "system", "task", NULL,
+                                         NULL, &unavailable) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!unavailable.success && !unavailable.canonical_response.n_content);
+   assert(strstr(unavailable.error, "execution owner unavailable"));
    puts("native adapter preserves configured/TLS minimum turn caps: ok");
    return 0;
 }

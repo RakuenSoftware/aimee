@@ -482,19 +482,8 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
       return host;
-   /* Standalone adapter fixtures have no server capture. An attested session
-    * cannot fall back to an SDK credential HOME or private native history. */
-   agent_request_creds_t attestation;
-   agent_request_creds_snapshot(&attestation);
-   int standalone = !seed && !server_session_log_active() && !attestation.session_id[0] &&
-                    !attestation.vault_principal[0] && !attestation.codex_token[0] &&
-                    !attestation.codex_account_id[0] && !attestation.codex_registration[0] &&
-                    !attestation.claude_token[0] && !attestation.claude_registration[0] &&
-                    !attestation.claude_target[0] && !attestation.api_key[0] &&
-                    !attestation.api_key_registration[0] && !attestation.api_key_target[0];
-   OPENSSL_cleanse(&attestation, sizeof attestation);
-   if (standalone)
-      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
+   /* A missing host owner is a refusal, including unseeded requests. Native
+    * execution must never fall back to an unmanaged SDK process. */
    memset(out, 0, sizeof *out);
    snprintf(out->error, sizeof out->error, "canonical %s execution owner unavailable",
             adapter->display_name);

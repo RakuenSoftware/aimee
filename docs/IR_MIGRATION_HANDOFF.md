@@ -6,6 +6,23 @@ stop/handoff request below is superseded.
 
 ## Current continuation status: live `.252` acceptance follow-up
 
+### Active continuation after the validated checkpoint
+
+The reduction audit found an additional real migration gap: outbound ACP is
+advertised by the CLI/configured backend and existed on `testing`, but the new
+strong native factory rejects it. Implementation is therefore still unfinished.
+Restore the existing one-shot external ACP contract through an actual owned
+canonical constructor and governed byte/range filesystem resource owner; do not
+delete the feature or re-enable ambient/weak fallback. Preserve its explicit
+unsupported history/resume and hidden-budget limits, without inventing native
+SDK/cache/generation or trusted tool-effect proofs.
+
+Confirmed unreachable unmanaged Claude/Codex branches are being retired in
+parallel. The real managed SDK workers remain active and must stay. The live
+`9c4b4b952` checkpoint below remains validated and untouched; later source work
+stays on the same branch and will need combined qualification before deployment.
+The PR authentication question does not block this implementation work.
+
 ### Latest acceptance and reduction checkpoint: 24 October 2026
 
 This section supersedes the historical pending-case statements below. Runtime

@@ -38,42 +38,6 @@ int agent_request_cancelled(void)
    return 0;
 }
 
-static agent_t g_seen_agent;
-static char g_seen_system[256];
-static char g_seen_user[256];
-static int g_seen_max_tokens;
-static double g_seen_temperature;
-
-int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
-                             const char *system_prompt, const char *user_prompt, int max_tokens,
-                             double temperature, agent_result_t *out)
-{
-   (void)network;
-   assert(agent != NULL);
-   assert(out != NULL);
-   memcpy(&g_seen_agent, agent, sizeof(g_seen_agent));
-   snprintf(g_seen_system, sizeof(g_seen_system), "%s", system_prompt ? system_prompt : "");
-   snprintf(g_seen_user, sizeof(g_seen_user), "%s", user_prompt ? user_prompt : "");
-   g_seen_max_tokens = max_tokens;
-   g_seen_temperature = temperature;
-
-   memset(out, 0, sizeof(*out));
-   snprintf(out->agent_name, sizeof(out->agent_name), "%s", agent->name);
-   assert(!agent_result_from_host_text(out, "native ok"));
-   out->success = 1;
-   out->turns = 1;
-   return 0;
-}
-
-static void reset_seen_agent(void)
-{
-   memset(&g_seen_agent, 0, sizeof(g_seen_agent));
-   g_seen_system[0] = '\0';
-   g_seen_user[0] = '\0';
-   g_seen_max_tokens = 0;
-   g_seen_temperature = 0.0;
-}
-
 static void test_registry_and_caps(void)
 {
    const provider_cli_adapter_t *codex = provider_cli_adapter_get("codex");
@@ -96,7 +60,7 @@ static void test_registry_and_caps(void)
    assert(codex->caps.supports_tool_use == 1);
    /* Exact value (not a floor) so an accidental drift back toward 0 is caught. */
    assert(codex->caps.max_context_tokens == 272000);
-   assert(claude->spawn != NULL);
+   assert(claude->execute == NULL); /* Metadata only; the owned factory executes Claude. */
    assert(claude->caps.proto_stability == PROVIDER_CLI_PROTO_STABLE);
    /* The gemini CLI adapter is gone: it pinned the NATIVE Google endpoint
     * (generativelanguage.googleapis.com/v1beta, GEMINI_API_KEY), which is exactly
@@ -105,134 +69,17 @@ static void test_registry_and_caps(void)
    assert(provider_cli_adapter_get("gemini") == NULL);
    assert(mistral->caps.supports_tool_use == 1);
    assert(mistral->caps.proto_stability == PROVIDER_CLI_PROTO_NATIVE);
-   assert(mistral->spawn == NULL);
-   assert(mistral->execute != NULL);
+   assert(mistral->execute == NULL); /* Native HTTP bridge metadata, not a second executor. */
    assert(strcmp(mistral->native_provider, "mistral") == 0);
    assert(strcmp(mistral->native_default_endpoint, "https://api.mistral.ai/v1") == 0);
    assert(strcmp(mistral->native_default_model, "mistral-vibe-cli-latest") == 0);
    assert(strcmp(mistral->native_api_key_env, "MISTRAL_API_KEY") == 0);
 }
 
-static void test_claude_stream_json_does_not_duplicate_final_result(void)
-{
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee-fake-claude-XXXXXX", platform_tmpdir());
-   int fd = mkstemp(path);
-   assert(fd >= 0);
-   FILE *f = fdopen(fd, "w");
-   assert(f != NULL);
-   fputs("#!/bin/sh\n"
-         "cat >/dev/null\n"
-         "printf '%s\\n' "
-         "'{\"type\":\"assistant\",\"message\":{\"id\":\"fixture\",\"role\":\"assistant\","
-         "\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"stop_reason\":\"end_turn\"}}'\n"
-         "printf '%s\\n' "
-         "'{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\",\"duration_ms\":5}'\n",
-         f);
-   fclose(f);
-   chmod(path, 0700);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "fake-claude");
-   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "claude");
-   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
-   agent.timeout_ms = 5000;
-
-   agent_result_t out = {0};
-   assert(provider_cli_adapter_execute_cfg(
-              provider_cli_adapter_get("claude"),
-              &(provider_cli_cfg_t){
-                  .agent = &agent, .cwd = ".", .system_prompt = "sys", .user_prompt = "user"},
-              &out) == 0);
-   assert(out.success == 1);
-   assert(out.response != NULL);
-   assert(strcmp(out.response, "ok") == 0);
-   assert(out.turns == 1);
-   agent_result_clear_response(&out);
-   unlink(path);
-}
-
-static int reject_live_capture(const aimee_session_event_t *event, void *context)
-{
-   int *count = context;
-   assert(event->kind == AIMEE_SESSION_MESSAGE && event->message &&
-          !strcmp(event->message->role, "assistant"));
-   ++*count;
-   return -1;
-}
-static void test_provider_cli_captures_before_child_completion(void)
-{
-   char path[512], marker[544];
-   snprintf(path, sizeof path, "%s/aimee-live-claude-XXXXXX", platform_tmpdir());
-   int fd = mkstemp(path);
-   assert(fd >= 0);
-   snprintf(marker, sizeof marker, "%s.marker", path);
-   FILE *script = fdopen(fd, "w");
-   assert(script);
-   fputs("#!/bin/sh\ncat >/dev/null\n"
-         "printf '%s\\n' "
-         "'{\"type\":\"assistant\",\"message\":{\"id\":\"live\",\"role\":\"assistant\",\"content\":"
-         "[{\"type\":\"text\",\"text\":\"pending\"}]}}'\n"
-         "sleep 2\n",
-         script);
-   fprintf(script, "touch '%s'\n", marker);
-   fclose(script);
-   assert(chmod(path, 0700) == 0);
-   agent_t agent = {0};
-   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", path);
-   agent.timeout_ms = 5000;
-   int observed = 0;
-   aimee_ir_session_set_sink(reject_live_capture, &observed);
-   agent_result_t out = {0};
-   assert(provider_cli_adapter_execute_cfg(
-              provider_cli_adapter_get("claude"),
-              &(provider_cli_cfg_t){
-                  .agent = &agent, .cwd = ".", .system_prompt = "", .user_prompt = "user"},
-              &out) == AGENT_RC_CAPTURE_FAILED);
-   assert(observed == 1 && !out.success && access(marker, F_OK) != 0);
-   aimee_ir_session_set_sink(NULL, NULL);
-   agent_result_clear_response(&out);
-   unlink(path);
-}
-
-static void test_provider_cli_honors_workflow_tool_loop_cap(void)
-{
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee-slow-claude-XXXXXX", platform_tmpdir());
-   int fd = mkstemp(path);
-   assert(fd >= 0);
-   FILE *f = fdopen(fd, "w");
-   assert(f != NULL);
-   fputs("#!/bin/sh\ncat >/dev/null\nsleep 2\n", f);
-   fclose(f);
-   chmod(path, 0700);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "slow-claude");
-   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "claude");
-   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
-   agent.timeout_ms = 5000;
-   agent.tool_loop_timeout_ms_cap = 50;
-
-   agent_result_t out = {0};
-   assert(provider_cli_adapter_execute_cfg(
-              provider_cli_adapter_get("claude"),
-              &(provider_cli_cfg_t){
-                  .agent = &agent, .cwd = ".", .system_prompt = "sys", .user_prompt = "user"},
-              &out) != 0);
-   assert(strstr(out.error, "timed out after 50 ms") != NULL);
-   unlink(path);
-}
-
-static void test_mistral_native_adapter_execution(void)
+static void test_mistral_native_http_configuration(void)
 {
    const provider_cli_adapter_t *mistral = provider_cli_adapter_get("mistral-plan");
    assert(mistral != NULL);
-   assert(mistral->spawn == NULL);
 
    agent_t agent;
    memset(&agent, 0, sizeof(agent));
@@ -245,30 +92,22 @@ static void test_mistral_native_adapter_execution(void)
    agent.max_tokens = 1234;
    agent.timeout_ms = 4321;
 
-   reset_seen_agent();
    assert(runtime_secret_store("MISTRAL_API_KEY", "unit-test-mistral-key") == 0);
-   agent_result_t out = {0};
-   assert(provider_cli_adapter_execute_cfg(
-              mistral,
-              &(provider_cli_cfg_t){
-                  .agent = &agent, .cwd = ".", .system_prompt = "sys", .user_prompt = "user"},
-              &out) == 0);
-   assert(out.success == 1);
-   assert(out.response != NULL);
-   assert(strcmp(out.response, "native ok") == 0);
-   assert(strcmp(g_seen_agent.name, "mistral-test") == 0);
-   assert(strcmp(g_seen_agent.provider, "mistral") == 0);
-   assert(g_seen_agent.backend[0] == '\0');
-   assert(g_seen_agent.cli_kind[0] == '\0');
-   assert(g_seen_agent.cli_cmd[0] == '\0');
-   assert(strcmp(g_seen_agent.endpoint, "https://api.mistral.ai/v1") == 0);
-   assert(strcmp(g_seen_agent.model, "mistral-vibe-cli-latest") == 0);
-   assert(strcmp(g_seen_agent.auth_type, "bearer") == 0);
-   assert(strcmp(g_seen_agent.api_key, "unit-test-mistral-key") == 0);
-   assert(g_seen_agent.tools_enabled == 1);
-   assert(g_seen_agent.max_tokens == 1234);
-   assert(g_seen_agent.timeout_ms == 4321);
-   agent_result_clear_response(&out);
+   agent_t native_agent;
+   char error[256];
+   assert(!provider_cli_adapter_prepare_native_agent(mistral, &agent, &native_agent, error,
+                                                     sizeof error));
+   assert(strcmp(native_agent.name, "mistral-test") == 0);
+   assert(strcmp(native_agent.provider, "mistral") == 0);
+   assert(native_agent.backend[0] == '\0');
+   assert(native_agent.cli_kind[0] == '\0');
+   assert(native_agent.cli_cmd[0] == '\0');
+   assert(strcmp(native_agent.endpoint, "https://api.mistral.ai/v1") == 0);
+   assert(strcmp(native_agent.model, "mistral-vibe-cli-latest") == 0);
+   assert(strcmp(native_agent.auth_type, "bearer") == 0);
+   assert(strcmp(native_agent.api_key, "unit-test-mistral-key") == 0);
+   assert(native_agent.tools_enabled == 1 && native_agent.max_tokens == 1234 &&
+          native_agent.timeout_ms == 4321);
    runtime_secret_remove("MISTRAL_API_KEY");
 }
 
@@ -301,148 +140,10 @@ static void test_missing_and_invalid_cli_fail_cleanly(void)
    assert(provider_cli_check_available("/no/such/provider-cli", "codex") == 0);
 }
 
-static int forbidden_legacy_spawn(const provider_cli_cfg_t *cfg, const char *prompt, int *input,
-                                  int *output, pid_t *pid)
-{
-   (void)cfg;
-   (void)prompt;
-   (void)input;
-   (void)output;
-   (void)pid;
-   assert(!"an adapter without a canonical executor must never spawn");
-   return -1;
-}
-static int flat_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
-{
-   (void)cfg;
-   result->response = strdup("unqualified native text");
-   assert(result->response);
-   result->success = 1;
-   return 0;
-}
-static aimee_stop_reason_t claimed_stop;
-static aimee_block_type_t claimed_block = AIMEE_BLK_TEXT;
-static int terminal_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
-{
-   (void)cfg;
-   assert(!agent_result_from_host_text(result, "terminal diagnostic"));
-   aimee_block_t *block = &result->canonical_response.content[0];
-   block->type = claimed_block;
-   if (claimed_block == AIMEE_BLK_IMAGE || claimed_block == AIMEE_BLK_DOCUMENT)
-   {
-      free(block->text);
-      block->text = NULL;
-      block->media_type =
-          strdup(claimed_block == AIMEE_BLK_IMAGE ? "image/png" : "application/pdf");
-      block->media_ref = strdup("https://example.invalid/retained-media");
-   }
-   if (claimed_block == AIMEE_BLK_TOOL_USE)
-   {
-      free(block->text);
-      block->text = NULL;
-      block->tool_id = strdup("pending-tool");
-      block->tool_name = strdup("read_file");
-      block->tool_input = cJSON_Parse("{\"path\":\"README.md\"}");
-      assert(block->tool_input);
-   }
-   result->canonical_response.stop_reason = claimed_stop;
-   free(result->canonical_response.raw_stop_reason);
-   result->canonical_response.raw_stop_reason = strdup("provider-terminal");
-   result->canonical_response.usage_in = 11;
-   result->canonical_response.usage_out = 7;
-   if (claimed_stop == AIMEE_STOP_CONTENT_FILTER)
-   {
-      result->canonical_response.refusal = calloc(1, sizeof *result->canonical_response.refusal);
-      assert(result->canonical_response.refusal);
-      result->canonical_response.refusal->category = strdup("retained-category");
-   }
-   result->success = 1;
-   return 0;
-}
-static void test_incomplete_native_terminal_cannot_claim_success(void)
-{
-   provider_cli_adapter_t adapter = {.display_name = "terminal fixture",
-                                     .execute = terminal_executor};
-   provider_cli_cfg_t cfg = {.user_prompt = "task"};
-   aimee_ir_session_set_sink(NULL, NULL);
-   for (int i = 0; i < 4; ++i)
-   {
-      claimed_stop = (aimee_stop_reason_t[]){AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_CONTENT_FILTER,
-                                             AIMEE_STOP_UNKNOWN, AIMEE_STOP_TOOL_USE}[i];
-      agent_result_t result = {0};
-      assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
-      assert(!result.success && result.canonical_response.stop_reason == claimed_stop);
-      assert(!strcmp(result.canonical_response.raw_stop_reason, "provider-terminal"));
-      assert(result.canonical_response.usage_in == 11 && result.canonical_response.usage_out == 7);
-      assert(!strcmp(result.response, "terminal diagnostic"));
-      if (claimed_stop == AIMEE_STOP_CONTENT_FILTER)
-         assert(!strcmp(result.canonical_response.refusal->category, "retained-category"));
-      assert(!aimee_ir_session_capture_failed());
-      agent_result_clear_response(&result);
-   }
-   claimed_stop = AIMEE_STOP_TOOL_USE;
-   claimed_block = AIMEE_BLK_TOOL_USE;
-   agent_result_t pending = {0};
-   assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &pending) == AGENT_RC_CONTEXT_REFUSED);
-   assert(!pending.success && pending.canonical_response.content[0].type == AIMEE_BLK_TOOL_USE);
-   assert(!strcmp(pending.canonical_response.content[0].tool_id, "pending-tool"));
-   assert(!aimee_ir_session_capture_failed());
-   agent_result_clear_response(&pending);
-   claimed_stop = AIMEE_STOP_END_TURN;
-   claimed_block = AIMEE_BLK_THINKING;
-   agent_result_t result = {0};
-   assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
-   assert(!result.success && result.canonical_response.content[0].type == AIMEE_BLK_THINKING);
-   assert(!strcmp(result.canonical_response.content[0].text, "terminal diagnostic"));
-   agent_result_clear_response(&result);
-   for (int i = 0; i < 2; ++i)
-   {
-      claimed_block = i ? AIMEE_BLK_DOCUMENT : AIMEE_BLK_IMAGE;
-      assert(!provider_cli_adapter_execute_cfg(&adapter, &cfg, &result));
-      assert(result.success && result.canonical_response.content[0].type == claimed_block);
-      assert(!strcmp(result.canonical_response.content[0].media_ref,
-                     "https://example.invalid/retained-media"));
-      agent_result_clear_response(&result);
-   }
-   claimed_block = AIMEE_BLK_TEXT;
-}
-static int passive_capture(const aimee_session_event_t *event, void *context)
-{
-   (void)event;
-   (void)context;
-   return 0;
-}
-static void test_no_flat_child_fallback(void)
-{
-   provider_cli_adapter_t legacy = {.display_name = "legacy", .spawn = forbidden_legacy_spawn};
-   provider_cli_cfg_t cfg = {.user_prompt = "task"};
-   agent_result_t result = {0};
-   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
-   assert(!result.response && !result.canonical_response.content && !result.success);
-   legacy.execute = flat_executor;
-   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
-   assert(!result.success);
-   agent_result_clear_response(&result);
-   aimee_ir_session_set_sink(passive_capture, NULL);
-   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
-   assert(!result.success && aimee_ir_session_capture_failed());
-   agent_result_clear_response(&result);
-   aimee_ir_session_set_sink(NULL, NULL); /* Independent negative fixture ends here. */
-
-   for (const char **kind = (const char *[]){"codex", "claude", "mistral", "acp", NULL}; *kind;
-        kind++)
-      assert(provider_cli_adapter_get(*kind)->execute);
-}
-
 int main(void)
 {
-   test_incomplete_native_terminal_cannot_claim_success();
-   test_no_flat_child_fallback();
    test_registry_and_caps();
-   test_claude_stream_json_does_not_duplicate_final_result();
-   test_provider_cli_captures_before_child_completion();
-   test_provider_cli_honors_workflow_tool_loop_cap();
-   test_mistral_native_adapter_execution();
+   test_mistral_native_http_configuration();
    test_native_auth_cmd_uses_bearer_token_command();
    test_missing_and_invalid_cli_fail_cleanly();
    printf("provider CLI adapter tests passed\n");

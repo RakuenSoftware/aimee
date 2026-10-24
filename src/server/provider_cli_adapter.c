@@ -1,7 +1,5 @@
 /* provider_cli_adapter.c: shared provider-CLI delegate adapter registry. */
 #include "provider_cli_adapter.h"
-#include "agent_exec.h"
-#include <aimee/ir/session_event.h>
 
 #include "aimee.h"
 #include "cJSON.h"
@@ -411,64 +409,4 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
          return adapters[i];
    }
    return NULL;
-}
-
-int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
-                                     const provider_cli_cfg_t *config, agent_result_t *out)
-{
-   if (!config)
-      return -1;
-   provider_cli_cfg_t cfg = *config;
-   const agent_t *agent = cfg.agent;
-   const char *user_prompt = cfg.user_prompt;
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   if (agent)
-   {
-      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
-      snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
-      snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
-   }
-
-   if (!adapter)
-   {
-      snprintf(out->error, sizeof(out->error), "provider-cli: no adapter");
-      return -1;
-   }
-   if (!user_prompt || !user_prompt[0])
-   {
-      snprintf(out->error, sizeof(out->error), "empty prompt");
-      return -1;
-   }
-
-   if (!adapter->execute)
-   {
-      snprintf(out->error, sizeof out->error, "provider-cli: %s has no canonical executor",
-               adapter->display_name);
-      return AGENT_RC_CONTEXT_REFUSED;
-   }
-   int rc = adapter->execute(&cfg, out);
-   /* A host scheduler is only an intermediate stage: its factory validates and
-    * installs the original response after joining native callbacks. Every
-    * standalone completed executor must already own admitted model output. */
-   if (!rc && out->success && !cfg.codex_host && !cfg.claude_host &&
-       (!out->canonical_response.n_content || aimee_ir_response_admit(&out->canonical_response)))
-   {
-      out->success = 0;
-      snprintf(out->error, sizeof out->error,
-               "provider-cli: canonical output is missing or invalid");
-      aimee_ir_session_fail_capture();
-      return AGENT_RC_CAPTURE_FAILED;
-   }
-   if (!rc && out->success && !cfg.codex_host && !cfg.claude_host &&
-       aimee_ir_response_complete_valid(&out->canonical_response))
-   {
-      out->success = 0;
-      if (!out->error[0])
-         snprintf(out->error, sizeof out->error,
-                  "provider-cli: executor did not return a complete canonical answer");
-      return AGENT_RC_CONTEXT_REFUSED;
-   }
-   return rc;
 }

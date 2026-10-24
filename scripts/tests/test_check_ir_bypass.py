@@ -36,6 +36,32 @@ class IRBypassTests(unittest.TestCase):
                 checker.check(self.root)
             target.unlink()
 
+    def test_unowned_sdk_policy_stays_retired(self):
+        for name in ("cli_claude_allowed_tools", "cli_claude_allowed_tools_count", "claude_build_argv",
+                     "claude_spawn", "claude_execute", "CLAUDE_ALLOWED_TOOLS", "CLAUDE_ARG_MAX",
+                     "cli_codex_parse_server_request_method", "cli_codex_approval_decision",
+                     "cli_codex_command_restarts_aimee_server", "cli_codex_json_has_server_restart",
+                     "cli_codex_method_is_shell_approval", "cli_codex_send_approval_decision",
+                     "cli_codex_send_permissions_decision", "cli_codex_send_user_input_decision",
+                     "cli_codex_send_elicitation_decision", "CLI_CODEX_APPROVAL_POLICY_CONFIG",
+                     "CLI_CODEX_SANDBOX_READ_ONLY_CONFIG", "CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG",
+                     "CLI_CODEX_SANDBOX_DANGER_CONFIG"):
+            path = self.source("src/server/renamed_codex.c", name + "(frame);\n")
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+
+    def test_renamed_codex_ambient_launch_stays_retired(self):
+        for call in ('execlp("codex", "codex", "app-server", 0)',
+                     'execvp(command, arguments)', 'setenv("HOME", borrowed, 1)',
+                     'unsetenv("OPENAI_API_KEY")'):
+            path = self.source("src/server/cli_codex.c", "void renamed(void) { " + call + "; }")
+            with self.subTest(call=call), self.assertRaisesRegex(ValueError, "codex-ambient-launch"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/server/cli_codex.c", "void owned(void) { fexecve(fd, argv, environment); }")
+        checker.check(self.root)
+
     def test_production_tree(self):
         checker.check(checker.ROOT)
 

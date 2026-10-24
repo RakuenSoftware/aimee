@@ -16,6 +16,15 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "cli_claude_allowed_tools", "cli_claude_allowed_tools_count", "claude_build_argv",
+    "claude_spawn", "claude_execute", "CLAUDE_ALLOWED_TOOLS", "CLAUDE_ARG_MAX",
+    "cli_codex_parse_server_request_method", "cli_codex_approval_decision",
+    "cli_codex_command_restarts_aimee_server", "cli_codex_json_has_server_restart",
+    "cli_codex_method_is_shell_approval", "cli_codex_send_approval_decision",
+    "cli_codex_send_permissions_decision", "cli_codex_send_user_input_decision",
+    "cli_codex_send_elicitation_decision", "CLI_CODEX_APPROVAL_POLICY_CONFIG",
+    "CLI_CODEX_SANDBOX_READ_ONLY_CONFIG", "CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG",
+    "CLI_CODEX_SANDBOX_DANGER_CONFIG",
     "builtin_chat_send_ex", "builtin_chat_stream_t", "builtin_chat_stream_control_t",
     "chat_stream_on_open", "chat_stream_finish", "g_acp_tool_seq",
     "db1_primary_session_save", "db1_primary_session_load", "db1_primary_session_delete",
@@ -84,6 +93,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "codex-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "delegate-model-bypass": re.compile(r"\b(?:exec\.Command(?:Context)?|[A-Za-z_]\w*\.TextResponse)\s*\("),
     "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen)\s*\("),
     "legacy-transcript-write": re.compile(r"\bdb1_primary_session_save\s*\("),
@@ -190,6 +200,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "codex-ambient-launch" and relative != "src/server/cli_codex.c":
+                continue
             if rule == "provider-probe-exec" and Path(relative).parent.as_posix() != "server-go/modules/providers":
                 continue
             if rule == "delegate-model-bypass" and Path(relative).parent.as_posix() != "server-go/modules/delegates":

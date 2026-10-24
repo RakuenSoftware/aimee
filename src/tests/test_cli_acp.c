@@ -43,7 +43,6 @@ static void test_acp_adapter_registered(void)
    assert(acp != NULL);
    assert(strcmp(acp->cli_kind, "acp") == 0);
    assert(acp->execute != NULL);
-   assert(acp->spawn == NULL);
    printf("PASS: acp adapter registered with cli_kind='acp' and execute set\n");
 }
 
@@ -513,7 +512,7 @@ static void test_live_acp_ownership_and_budgets(void)
    server_control_scope_t *previous = server_control_scope_bind(scope);
    aimee_ir_session_set_sink(live_capture, NULL);
    agent_result_t result = {0};
-   int status = provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result);
+   int status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
    if (status)
       fprintf(stderr, "live ACP failed: %d %s\n", status, result.error);
    assert(!status && result.success && !strcmp(result.response, "ACP done"));
@@ -535,7 +534,7 @@ static void test_live_acp_ownership_and_budgets(void)
    cfg.tool_call = NULL;
    cfg.tool_context = NULL;
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s long", script);
-   assert(!provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result));
+   assert(!provider_cli_adapter_get("acp")->execute(&cfg, &result));
    assert(result.success && !strcmp(result.response, "ACP done"));
    agent_result_clear_response(&result);
 
@@ -546,7 +545,7 @@ static void test_live_acp_ownership_and_budgets(void)
    {
       new_execution();
       snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s %s", script, stops[i]);
-      status = provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result);
+      status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
       assert(status == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(result.canonical_response.stop_reason == reasons[i]);
       assert(!strcmp(result.canonical_response.raw_stop_reason, stops[i]));
@@ -559,7 +558,7 @@ static void test_live_acp_ownership_and_budgets(void)
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s blocked %s", script, marker);
    agent.tool_loop_timeout_ms_cap = 500;
    long long start = util_now_ms();
-   status = provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result);
+   status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
    assert(status == AGENT_RC_CONTEXT_REFUSED && util_now_ms() - start < 2000);
    assert(!access(marker, F_OK)); /* Native peer reached the blocked-write stage. */
    unlink(marker);
@@ -570,18 +569,15 @@ static void test_live_acp_ownership_and_budgets(void)
    int attempts = 0;
    cfg.native_progress = refuse_launch;
    cfg.native_progress_context = &attempts;
-   assert(provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result) ==
-          AGENT_RC_CONTEXT_REFUSED);
+   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
    assert(attempts == 1 && access(marker, F_OK));
    cfg.native_progress = NULL;
    aimee_ir_session_fail_capture();
-   assert(provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result) ==
-          AGENT_RC_CAPTURE_FAILED);
+   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CAPTURE_FAILED);
    assert(access(marker, F_OK));
    new_execution();
    cfg.history = &catalog;
-   assert(provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result) ==
-          AGENT_RC_CONTEXT_REFUSED);
+   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
    assert(access(marker, F_OK));
    agent_result_clear_response(&result);
    free(large);

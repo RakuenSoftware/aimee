@@ -1,8 +1,4 @@
-/* cli_codex.h: legacy codex `app-server` adapter for provider-backed chat/delegation.
- *
- * This is used only for explicit provider-CLI configs such as `codex-cli`.
- * Direct Codex adapter configs go through the primary session adapter instead.
- */
+/* Codex app-server protocol helpers for the owned canonical native scheduler. */
 #ifndef DEC_CLI_CODEX_H
 #define DEC_CLI_CODEX_H 1
 
@@ -74,20 +70,6 @@ extern "C"
     * out and return 1. Used to detect the `turn/completed` sentinel
     * that ends the drain loop. */
    int cli_codex_parse_method(const char *line, char *out, size_t outsz);
-
-   /* If `line` is a JSON-RPC request emitted by `codex app-server`
-    * (has both "id" and "method"), copy the method string into out and
-    * return 1. Notifications have no id; responses have no method. */
-   int cli_codex_parse_server_request_method(const char *line, char *out, size_t outsz);
-
-   /* Return the Codex approval decision string for a known approval
-    * request method under the given autonomous mode. */
-   int cli_codex_approval_decision(const char *method, int autonomous, char *out, size_t outsz);
-
-   /* Return 1 if a shell command would restart/stop/kill the local
-    * aimee-server. Used to keep autonomous delegates from terminating
-    * their own hosting server mid-turn. */
-   int cli_codex_command_restarts_aimee_server(const char *command);
 
 #ifdef __cplusplus
 }

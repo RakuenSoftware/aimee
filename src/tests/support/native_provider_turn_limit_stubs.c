@@ -8,6 +8,7 @@
 int native_limit_test_tls;
 int native_limit_test_observed;
 int native_limit_test_calls;
+int native_limit_test_host_unavailable;
 
 /* Strong server-owned TLS override for the actual weak adapter seam. */
 int agent_native_request_turn_limit(void)
@@ -26,7 +27,9 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
    native_limit_test_calls++;
    native_limit_test_observed = cfg->native_turn_limit;
    out->success = 0;
-   return AGENT_RC_CONTEXT_REFUSED; /* No transport fallback is permitted. */
+   return native_limit_test_host_unavailable
+              ? 1
+              : AGENT_RC_CONTEXT_REFUSED; /* No transport fallback is permitted. */
 }
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
@@ -35,13 +38,5 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
 }
 int server_session_log_active(void)
 {
-   abort();
-}
-int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
-                                     const provider_cli_cfg_t *cfg, agent_result_t *out)
-{
-   (void)adapter;
-   (void)cfg;
-   (void)out;
    abort();
 }

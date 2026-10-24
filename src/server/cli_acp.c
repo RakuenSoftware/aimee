@@ -772,6 +772,5 @@ const provider_cli_adapter_t acp_provider_cli_adapter = {
              .supports_tool_use = 1,
              .proto_stability = PROVIDER_CLI_PROTO_STABLE,
              .write_confidence = 0.85f},
-    .spawn = NULL,
     .execute = acp_adapter_execute,
 };

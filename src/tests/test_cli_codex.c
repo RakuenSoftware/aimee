@@ -147,89 +147,175 @@ static void test_parse_method_invalid_inputs(void)
    assert(cli_codex_parse_method("not json", buf, sizeof(buf)) == 0);
 }
 
-static void test_parse_server_request_method_extracts_approval(void)
+/* Run the real adapter through owned interpreter and directory descriptors.
+ * Protocol scripts answer config/read themselves: profile verification, ready,
+ * thread adoption and all byte-frame checks remain production code. */
+extern char **environ;
+typedef struct
 {
-   const char *line = "{\"jsonrpc\":\"2.0\",\"id\":42,"
-                      "\"method\":\"item/commandExecution/requestApproval\",\"params\":{}}";
-   char buf[96];
-   assert(cli_codex_parse_server_request_method(line, buf, sizeof(buf)) == 1);
-   assert(strcmp(buf, "item/commandExecution/requestApproval") == 0);
+   const provider_cli_cfg_t *cfg;
+   int ready;
+} owned_fixture_t;
+static int owned_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
+{
+   owned_fixture_t *state = context;
+   assert(strlen(digest) == 64 && !state->ready++);
+   replay->history = state->cfg->history;
+   replay->resume_id = state->cfg->resume_id;
+   return 0;
+}
+static int owned_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   if (cfg->codex_host)
+   {
+      server_control_scope_t *scope =
+          server_control_scope_open("probe-session", "probe-turn", "fixture");
+      assert(scope);
+      server_control_scope_t *previous = server_control_scope_bind(scope);
+      int rc = codex_provider_cli_adapter.execute(cfg, out);
+      server_control_scope_bind(previous);
+      server_control_scope_close(scope);
+      return rc;
+   }
+   assert(cfg->cwd && cfg->cwd[0]);
+   char script[1024], entry[1024];
+   assert(snprintf(script, sizeof script, "%s", cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : "") <
+          (int)sizeof script);
+   if (!script[0])
+      assert(snprintf(script, sizeof script, "%s/codex", cfg->cwd) < (int)sizeof script);
+   assert(snprintf(entry, sizeof entry, "%s/app-server", cfg->cwd) < (int)sizeof entry);
+   FILE *file = fopen(script, "r");
+   assert(file);
+   char shebang[128];
+   assert(fgets(shebang, sizeof shebang, file) && !fclose(file));
+   const char *interpreter = strstr(shebang, "python3") ? "/usr/bin/python3" : "/bin/sh";
+   assert(!symlink(script, entry));
+   cJSON *config = cJSON_CreateObject();
+   cJSON *providers = cJSON_AddObjectToObject(config, "model_providers");
+   cJSON *provider = cJSON_AddObjectToObject(providers, "aimee_ir");
+   cJSON *headers = cJSON_AddObjectToObject(provider, "http_headers");
+   assert(cJSON_AddStringToObject(provider, "base_url", "http://127.0.0.1:1/v1"));
+   assert(cJSON_AddStringToObject(headers, "Authorization", "Bearer fixture-token"));
+   cJSON *projects = cJSON_AddObjectToObject(config, "projects");
+   assert(cJSON_AddObjectToObject(projects, cfg->cwd));
+   char *raw = cJSON_PrintUnformatted(config);
+   assert(raw);
+   size_t count = 0;
+   for (char **e = environ; *e; e++)
+      if (!strncmp(*e, "AIMEE_TEST_", 11) && strncmp(*e, "AIMEE_TEST_OWNED_PROFILE=", 25))
+         count++;
+   char **environment = calloc(count + 5, sizeof *environment);
+   assert(environment);
+   size_t at = 0;
+   for (char **e = environ; *e; e++)
+      if (!strncmp(*e, "AIMEE_TEST_", 11) && strncmp(*e, "AIMEE_TEST_OWNED_PROFILE=", 25))
+         environment[at++] = strdup(*e);
+   environment[at++] = strdup("PATH=/usr/bin:/bin");
+   environment[at] = malloc(strlen(raw) + sizeof "AIMEE_TEST_OWNED_PROFILE=");
+   assert(environment[at]);
+   sprintf(environment[at++], "AIMEE_TEST_OWNED_PROFILE=%s", raw);
+   free(raw);
+   owned_fixture_t state = {.cfg = cfg};
+   cli_codex_host_launch_t host = {
+       .executable_fd = open(interpreter, O_RDONLY | O_CLOEXEC),
+       .cwd_fd = open(cfg->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC),
+       .home = cfg->cwd,
+       .cwd = cfg->cwd,
+       .build_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       .gateway_url = "http://127.0.0.1:1",
+       .gateway_token = "fixture-token",
+       .environment = environment,
+       .expected_config = config,
+       .ready = owned_ready,
+       .context = &state};
+   assert(host.executable_fd >= 0 && host.cwd_fd >= 0);
+   provider_cli_cfg_t owned = *cfg;
+   owned.codex_host = &host;
+   server_control_scope_t *scope = NULL, *previous = server_control_scope_current();
+   if (!previous)
+   {
+      scope = server_control_scope_open("owned-session", "owned-turn", "fixture");
+      assert(scope);
+      server_control_scope_bind(scope);
+   }
+   int rc = codex_provider_cli_adapter.execute(&owned, out);
+   if (scope)
+   {
+      server_control_scope_bind(previous);
+      server_control_scope_close(scope);
+   }
+   close(host.executable_fd);
+   close(host.cwd_fd);
+   assert(!unlink(entry));
+   for (size_t i = 0; environment[i]; i++)
+      free(environment[i]);
+   free(environment);
+   cJSON_Delete(config);
+   return rc;
 }
 
-static void test_parse_server_request_method_extracts_legacy_approval(void)
+static void test_execute_requires_owned_resources(void)
 {
-   const char *line = "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\","
-                      "\"method\":\"execCommandApproval\",\"params\":{}}";
-   char buf[64];
-   assert(cli_codex_parse_server_request_method(line, buf, sizeof(buf)) == 1);
-   assert(strcmp(buf, "execCommandApproval") == 0);
-}
-
-static void test_parse_server_request_method_skips_notifications_and_responses(void)
-{
-   char buf[64] = "untouched";
-   assert(cli_codex_parse_server_request_method(
-              "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{}}", buf,
-              sizeof(buf)) == 0);
-   assert(strcmp(buf, "untouched") == 0);
-   assert(cli_codex_parse_server_request_method("{\"jsonrpc\":\"2.0\",\"id\":1,"
-                                                "\"result\":{}}",
-                                                buf, sizeof(buf)) == 0);
-   assert(strcmp(buf, "untouched") == 0);
-}
-
-static void test_parse_server_request_method_invalid_inputs(void)
-{
-   char buf[64];
-   assert(cli_codex_parse_server_request_method(NULL, buf, sizeof(buf)) == 0);
-   assert(cli_codex_parse_server_request_method("{\"id\":1,\"method\":\"x\"}", NULL, sizeof(buf)) ==
-          0);
-   assert(cli_codex_parse_server_request_method("{\"id\":1,\"method\":\"x\"}", buf, 0) == 0);
-   assert(cli_codex_parse_server_request_method("not json", buf, sizeof(buf)) == 0);
-}
-
-static void test_approval_decision_respects_autonomous_mode(void)
-{
-   char buf[32];
-   assert(cli_codex_approval_decision("item/commandExecution/requestApproval", 0, buf,
-                                      sizeof(buf)) == 1);
-   assert(strcmp(buf, "decline") == 0);
-   assert(cli_codex_approval_decision("item/commandExecution/requestApproval", 1, buf,
-                                      sizeof(buf)) == 1);
-   assert(strcmp(buf, "accept") == 0);
-}
-
-static void test_approval_decision_uses_legacy_review_values(void)
-{
-   char buf[32];
-   assert(cli_codex_approval_decision("execCommandApproval", 0, buf, sizeof(buf)) == 1);
-   assert(strcmp(buf, "denied") == 0);
-   assert(cli_codex_approval_decision("execCommandApproval", 1, buf, sizeof(buf)) == 1);
-   assert(strcmp(buf, "approved") == 0);
-}
-
-static void test_approval_decision_skips_unknown_methods(void)
-{
-   char buf[32] = "untouched";
-   assert(cli_codex_approval_decision("item/tool/requestUserInput", 1, buf, sizeof(buf)) == 0);
-   assert(strcmp(buf, "untouched") == 0);
-   assert(cli_codex_approval_decision(NULL, 1, buf, sizeof(buf)) == 0);
-   assert(cli_codex_approval_decision("execCommandApproval", 1, NULL, sizeof(buf)) == 0);
-   assert(cli_codex_approval_decision("execCommandApproval", 1, buf, 0) == 0);
-}
-
-static void test_server_restart_command_detection_blocks_lifecycle_writes(void)
-{
-   assert(cli_codex_command_restarts_aimee_server("./aimee server restart") == 1);
-   assert(cli_codex_command_restarts_aimee_server("systemctl --user restart aimee-server") == 1);
-   assert(cli_codex_command_restarts_aimee_server("pkill -f aimee-server") == 1);
-}
-
-static void test_server_restart_command_detection_allows_read_only_checks(void)
-{
-   assert(cli_codex_command_restarts_aimee_server("systemctl --user status aimee-server") == 0);
-   assert(cli_codex_command_restarts_aimee_server("aimee status") == 0);
-   assert(cli_codex_command_restarts_aimee_server("make -C src unit-tests") == 0);
+   char root[256], script[512], marker[512], entry[512];
+   assert(snprintf(root, sizeof root, "%s/aimee-codex-unowned-XXXXXX", platform_tmpdir()) <
+          (int)sizeof root);
+   assert(mkdtemp(root));
+   snprintf(script, sizeof script, "%s/unowned", root);
+   snprintf(entry, sizeof entry, "%s/app-server", root);
+   snprintf(marker, sizeof marker, "%s/started", root);
+   FILE *file = fopen(script, "w");
+   assert(file);
+   fprintf(file, "#!/bin/sh\nprintf started > '%s'\nexit 42\n", marker);
+   assert(!fclose(file) && !chmod(script, 0700) && !symlink(script, entry));
+   agent_t agent = {0};
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
+   agent.cli_idle_timeout_ms = 1000;
+   provider_cli_cfg_t cfg = {
+       .agent = &agent, .cwd = root, .user_prompt = "owned resources required"};
+   agent_result_t out = {0};
+   assert(codex_provider_cli_adapter.execute(&cfg, &out) != 0);
+   assert(access(marker, F_OK) != 0); /* Actual predecessor starts the ambient executable. */
+   cJSON *expected = cJSON_CreateObject();
+   char *environment[] = {"PATH=/usr/bin:/bin", NULL};
+   cli_codex_host_launch_t host = {
+       .executable_fd = open("/bin/sh", O_RDONLY | O_CLOEXEC),
+       .cwd_fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC),
+       .home = root,
+       .cwd = root,
+       .build_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       .gateway_url = "http://127.0.0.1:1",
+       .gateway_token = "fixture-token",
+       .environment = environment,
+       .expected_config = expected,
+       .ready = owned_ready};
+   assert(host.executable_fd >= 0 && host.cwd_fd >= 0);
+   cfg.codex_host = &host;
+   assert(!server_control_scope_current());
+   assert(codex_provider_cli_adapter.execute(&cfg, &out) != 0);
+   assert(strstr(out.error, "control scope") && access(marker, F_OK) != 0);
+   server_control_scope_t *scope =
+       server_control_scope_open("negative-session", "negative-turn", "fixture");
+   assert(scope);
+   server_control_scope_t *previous = server_control_scope_bind(scope);
+   int fd = host.executable_fd;
+   host.executable_fd = -1;
+   assert(codex_provider_cli_adapter.execute(&cfg, &out) != 0);
+   assert(access(marker, F_OK) != 0);
+   int closed_fd = dup(fd);
+   assert(closed_fd >= 0 && !close(closed_fd));
+   host.executable_fd = closed_fd;
+   assert(codex_provider_cli_adapter.execute(&cfg, &out) != 0);
+   assert(access(marker, F_OK) != 0);
+   host.executable_fd = fd;
+   host.ready = NULL;
+   assert(codex_provider_cli_adapter.execute(&cfg, &out) != 0);
+   assert(access(marker, F_OK) != 0);
+   server_control_scope_bind(previous);
+   server_control_scope_close(scope);
+   close(host.executable_fd);
+   close(host.cwd_fd);
+   cJSON_Delete(expected);
+   assert(!unlink(entry) && !unlink(script) && !rmdir(root));
 }
 
 static void test_spawn_failure_captures_stderr_and_exit_status(void)
@@ -250,23 +336,24 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    agent.autonomous = 1;
 
    agent_result_t out = {0};
-   int rc = codex_provider_cli_adapter.execute(
-       &(provider_cli_cfg_t){
-           .agent = &agent, .cwd = NULL, .system_prompt = NULL, .user_prompt = "hello"},
-       &out);
+   int rc = owned_execute(&(provider_cli_cfg_t){.agent = &agent,
+                                                .cwd = platform_tmpdir(),
+                                                .system_prompt = NULL,
+                                                .user_prompt = "hello"},
+                          &out);
    assert(rc == -1);
    assert(strstr(out.error, "status 42") != NULL);
-   assert(strstr(out.error, "approval_policy=\"on-request\"") != NULL);
-   assert(strstr(out.error, "sandbox_mode=\"read-only\"") != NULL);
+   assert(strstr(out.error, "fixture-args:") != NULL);
    assert(strstr(out.error, "fixture-stderr-message") != NULL);
 
    agent.write_capable = 1;
-   rc = codex_provider_cli_adapter.execute(
-       &(provider_cli_cfg_t){
-           .agent = &agent, .cwd = NULL, .system_prompt = NULL, .user_prompt = "hello"},
-       &out);
+   rc = owned_execute(&(provider_cli_cfg_t){.agent = &agent,
+                                            .cwd = platform_tmpdir(),
+                                            .system_prompt = NULL,
+                                            .user_prompt = "hello"},
+                      &out);
    assert(rc == -1);
-   assert(strstr(out.error, "sandbox_mode=\"workspace-write\"") != NULL);
+   assert(strstr(out.error, "fixture-args:") != NULL);
    unlink(path);
 }
 
@@ -299,134 +386,6 @@ static void test_parse_tool_action_skips_other_methods(void)
    assert(cli_codex_parse_tool_action(line) == 0);
    assert(cli_codex_parse_tool_action("not json") == 0);
    assert(cli_codex_parse_tool_action(NULL) == 0);
-}
-
-static int bind_native_fixture(const char *id, void *context)
-{
-   assert(!strcmp(id, "t1"));
-   (*(int *)context)++;
-   return 0;
-}
-
-static void test_codex_adapter_uses_requested_cwd(void)
-{
-   char root[256];
-   snprintf(root, sizeof root, "%s/aimee-codex-cwd-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(root) != NULL);
-
-   char workdir[512];
-   char script[512];
-   char marker[512];
-   char request_marker[512];
-   snprintf(workdir, sizeof(workdir), "%s/work", root);
-   snprintf(script, sizeof(script), "%s/fake-codex", root);
-   snprintf(marker, sizeof(marker), "%s/cwd.txt", root);
-   snprintf(request_marker, sizeof(request_marker), "%s/request.txt", root);
-   assert(mkdir(workdir, 0700) == 0);
-
-   FILE *fp = fopen(script, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "pwd > \"$AIMEE_TEST_CODEX_CWD_OUT\"\n"
-         "if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then\n"
-         "  printf '%s\\n' \"$HOME\" \"$AIMEE_SESSION_ID\" > \"$AIMEE_TEST_CODEX_RESUME_OUT\"\n"
-         "fi\n"
-         "i=0\n"
-         "while IFS= read -r line; do\n"
-         "  i=$((i + 1))\n"
-         "  case \"$i\" in\n"
-         "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
-         "       if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then printf '%s\\n' \"$line\" >> "
-         "\"$AIMEE_TEST_CODEX_RESUME_OUT\"; fi\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
-         "    3) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
-         "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"id\":\"cwd-answer\",\"text\":\"ok from fake codex\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
-         "{\"status\":\"completed\"}}}'\n"
-         "       exit 0 ;;\n"
-         "  esac\n"
-         "done\n",
-         fp);
-   fclose(fp);
-   assert(chmod(script, 0700) == 0);
-   assert(setenv("AIMEE_TEST_CODEX_CWD_OUT", marker, 1) == 0);
-   assert(setenv("AIMEE_TEST_CODEX_REQUEST_OUT", request_marker, 1) == 0);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "fake-codex");
-   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", script);
-   agent.cli_idle_timeout_ms = 5000;
-
-   agent_result_t out = {0};
-   assert(codex_provider_cli_adapter.execute(&(provider_cli_cfg_t){.agent = &agent,
-                                                                   .cwd = workdir,
-                                                                   .system_prompt = "system",
-                                                                   .user_prompt = "user prompt"},
-                                             &out) == 0);
-   assert(out.response != NULL);
-   assert(strcmp(out.response, "ok from fake codex") == 0);
-   assert(out.canonical_response.n_content == 1);
-   assert(!strcmp(out.canonical_response.content[0].text, "ok from fake codex"));
-   agent_result_clear_response(&out);
-
-   char seen[512];
-   fp = fopen(marker, "r");
-   assert(fp != NULL);
-   assert(fgets(seen, sizeof(seen), fp) != NULL);
-   fclose(fp);
-   seen[strcspn(seen, "\r\n")] = '\0';
-   assert(strcmp(seen, workdir) == 0);
-
-   fp = fopen(request_marker, "r");
-   assert(fp != NULL);
-   char req_line[2048];
-   assert(fgets(req_line, sizeof(req_line), fp) != NULL);
-   fclose(fp);
-   assert(strstr(req_line, "\"type\":\"text\"") != NULL);
-   assert(strstr(req_line, "\"text\":\"user prompt\"") != NULL);
-   assert(strstr(req_line, "\"text_elements\":[]") != NULL);
-
-   char resume_marker[512];
-   snprintf(resume_marker, sizeof resume_marker, "%s/resume.txt", root);
-   setenv("AIMEE_TEST_CODEX_RESUME_OUT", resume_marker, 1);
-   int bound = 0;
-   provider_cli_cfg_t cfg = {.agent = &agent,
-                             .cwd = workdir,
-                             .system_prompt = "system",
-                             .user_prompt = "resumed prompt",
-                             .home = workdir,
-                             .session_id = "private-delegate",
-                             .resume_id = "t1",
-                             .bind_session = bind_native_fixture,
-                             .bind_context = &bound};
-   assert(!codex_provider_cli_adapter.execute(&cfg, &out));
-   assert(out.success && bound == 1);
-   agent_result_clear_response(&out);
-   fp = fopen(resume_marker, "r");
-   assert(fp && fgets(seen, sizeof seen, fp));
-   seen[strcspn(seen, "\r\n")] = 0;
-   assert(!strcmp(seen, workdir));
-   assert(fgets(seen, sizeof seen, fp) && !strcmp(seen, "private-delegate\n"));
-   assert(fgets(req_line, sizeof req_line, fp));
-   assert(strstr(req_line, "thread/resume") && strstr(req_line, "t1"));
-   fclose(fp);
-   unsetenv("AIMEE_TEST_CODEX_RESUME_OUT");
-   unlink(resume_marker);
-
-   unsetenv("AIMEE_TEST_CODEX_CWD_OUT");
-   unsetenv("AIMEE_TEST_CODEX_REQUEST_OUT");
-   unlink(marker);
-   unlink(request_marker);
-   unlink(script);
-   rmdir(workdir);
-   rmdir(root);
 }
 
 typedef struct
@@ -550,7 +509,7 @@ static int execute_adapter_fixture(const adapter_fixture_request_t *request,
    capture.previous = aimee_ir_session_get_sink(&capture.previous_context);
    aimee_ir_session_set_sink(adapter_fixture_event, &capture);
    agent_result_t actual = {0};
-   int rc = codex_provider_cli_adapter.execute(&cfg, &actual);
+   int rc = owned_execute(&cfg, &actual);
    snprintf(result->error, sizeof result->error, "%s", actual.error);
    if (!rc && callback)
       rc = callback("turn_end", NULL, context);
@@ -558,226 +517,6 @@ static int execute_adapter_fixture(const adapter_fixture_request_t *request,
    aimee_ir_session_restore_sink(capture.previous, capture.previous_context, failed);
    agent_result_clear_response(&actual);
    return rc;
-}
-
-static void test_adapter_preserves_distinct_message_groups(void)
-{
-   char root[256];
-   snprintf(root, sizeof root, "%s/aimee-codex-stream-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(root) != NULL);
-
-   char script[512];
-   snprintf(script, sizeof(script), "%s/codex", root);
-   FILE *fp = fopen(script, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "i=0\n"
-         "while IFS= read -r line; do\n"
-         "  i=$((i + 1))\n"
-         "  case \"$i\" in\n"
-         "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
-         "    3) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\",\"params\":"
-         "{\"threadId\":\"t1\",\"turnId\":\"turn1\",\"itemId\":\"m1\",\"delta\":\"First.\"}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"id\":\"m1\",\"text\":\"First.\","
-         "\"phase\":\"commentary\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\",\"params\":"
-         "{\"threadId\":\"t1\",\"turnId\":\"turn1\",\"itemId\":\"m2\",\"delta\":\"Second.\"}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"id\":\"m2\",\"text\":\"Second.\","
-         "\"phase\":\"final_answer\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
-         "{\"status\":\"completed\"}}}'\n"
-         "       exit 0 ;;\n"
-         "  esac\n"
-         "done\n",
-         fp);
-   fclose(fp);
-   assert(chmod(script, 0700) == 0);
-
-   const char *old_path_env = getenv("PATH");
-   char old_path[8192] = "";
-   if (old_path_env)
-      snprintf(old_path, sizeof(old_path), "%s", old_path_env);
-   char new_path[8704];
-   snprintf(new_path, sizeof(new_path), "%s:%s", root, old_path_env ? old_path_env : "");
-   assert(setenv("PATH", new_path, 1) == 0);
-
-   adapter_fixture_request_t req = {0};
-   req.cwd = root;
-   req.user_prompt = "hello";
-   req.timeout_ms = 5000;
-
-   adapter_fixture_result_t out;
-   codex_stream_capture_t cap = {0};
-   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
-   assert(strcmp(cap.buf, "<S>First.<S>Second.<E>") == 0);
-
-   if (old_path_env)
-      assert(setenv("PATH", old_path, 1) == 0);
-   else
-      unsetenv("PATH");
-   unlink(script);
-   rmdir(root);
-}
-
-static void test_adapter_rejects_completed_items_without_ids(void)
-{
-   char root[256];
-   snprintf(root, sizeof root, "%s/aimee-codex-stream-noids-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(root) != NULL);
-
-   char script[512];
-   snprintf(script, sizeof(script), "%s/codex", root);
-   FILE *fp = fopen(script, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "i=0\n"
-         "while IFS= read -r line; do\n"
-         "  i=$((i + 1))\n"
-         "  case \"$i\" in\n"
-         "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
-         "    3) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\",\"params\":"
-         "{\"threadId\":\"t1\",\"turnId\":\"turn1\",\"delta\":\"First.\"}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"First.\",\"phase\":\"commentary\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\",\"params\":"
-         "{\"threadId\":\"t1\",\"turnId\":\"turn1\",\"delta\":\"Second.\"}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"Second.\",\"phase\":\"final_answer\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
-         "{\"status\":\"completed\"}}}'\n"
-         "       exit 0 ;;\n"
-         "  esac\n"
-         "done\n",
-         fp);
-   fclose(fp);
-   assert(chmod(script, 0700) == 0);
-
-   const char *old_path_env = getenv("PATH");
-   char old_path[8192] = "";
-   if (old_path_env)
-      snprintf(old_path, sizeof(old_path), "%s", old_path_env);
-   char new_path[8704];
-   snprintf(new_path, sizeof(new_path), "%s:%s", root, old_path_env ? old_path_env : "");
-   assert(setenv("PATH", new_path, 1) == 0);
-
-   adapter_fixture_request_t req = {0};
-   req.cwd = root;
-   req.user_prompt = "hello";
-   req.timeout_ms = 5000;
-
-   adapter_fixture_result_t out;
-   codex_stream_capture_t cap = {0};
-   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) != 0);
-   assert(aimee_ir_session_capture_failed());
-   assert(!strstr(cap.buf, "<E>"));
-   aimee_ir_session_set_sink(NULL, NULL); /* End this failed independent fixture. */
-
-   if (old_path_env)
-      assert(setenv("PATH", old_path, 1) == 0);
-   else
-      unsetenv("PATH");
-   unlink(script);
-   rmdir(root);
-}
-
-static void test_adapter_replaces_invalid_utf8_prompt_bytes(void)
-{
-   char root[256];
-   snprintf(root, sizeof root, "%s/aimee-codex-utf8-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(root) != NULL);
-
-   char script[512];
-   char marker[512];
-   snprintf(script, sizeof(script), "%s/codex", root);
-   snprintf(marker, sizeof(marker), "%s/request.jsonl", root);
-   FILE *fp = fopen(script, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "i=0\n"
-         "while IFS= read -r line; do\n"
-         "  i=$((i + 1))\n"
-         "  case \"$i\" in\n"
-         "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
-         "    3) printf '%s' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
-         "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"id\":\"utf8-answer\",\"text\":\"ok\"}}}'\n"
-         "       printf '%s\\n' "
-         "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
-         "{\"status\":\"completed\"}}}'\n"
-         "       exit 0 ;;\n"
-         "  esac\n"
-         "done\n",
-         fp);
-   fclose(fp);
-   assert(chmod(script, 0700) == 0);
-
-   const char *old_path_env = getenv("PATH");
-   char old_path[8192] = "";
-   if (old_path_env)
-      snprintf(old_path, sizeof(old_path), "%s", old_path_env);
-   char new_path[8704];
-   snprintf(new_path, sizeof(new_path), "%s:%s", root, old_path_env ? old_path_env : "");
-   assert(setenv("PATH", new_path, 1) == 0);
-   assert(setenv("AIMEE_TEST_CODEX_REQUEST_OUT", marker, 1) == 0);
-
-   const char bad_prompt[] = {'b',        'a',        'd',        ' ',        (char)0x80, ' ',
-                              (char)0xf0, (char)0x28, (char)0x8c, (char)0x28, '\0'};
-   adapter_fixture_request_t req = {0};
-   req.cwd = root;
-   req.user_prompt = bad_prompt;
-   req.timeout_ms = 5000;
-
-   adapter_fixture_result_t out;
-   codex_stream_capture_t cap = {0};
-   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
-   assert(strcmp(cap.buf, "<S>ok<E>") == 0);
-
-   unsigned char buf[4096];
-   fp = fopen(marker, "rb");
-   assert(fp != NULL);
-   size_t n = fread(buf, 1, sizeof(buf), fp);
-   fclose(fp);
-   assert(n > 0 && n < sizeof(buf));
-
-   int saw_replacement = 0;
-   for (size_t i = 0; i < n; i++)
-   {
-      assert(buf[i] != 0x80);
-      if (i + 2 < n && buf[i] == 0xef && buf[i + 1] == 0xbf && buf[i + 2] == 0xbd)
-         saw_replacement = 1;
-   }
-   assert(saw_replacement);
-
-   unsetenv("AIMEE_TEST_CODEX_REQUEST_OUT");
-   if (old_path_env)
-      assert(setenv("PATH", old_path, 1) == 0);
-   else
-      unsetenv("PATH");
-   unlink(marker);
-   unlink(script);
-   rmdir(root);
 }
 
 static int operator_requests, operator_responses;
@@ -822,8 +561,13 @@ static void test_operator_replies_reach_native_child(void)
    snprintf(script, sizeof script, "%s/codex", root);
    FILE *fp = fopen(script, "w");
    assert(fp);
-   fputs("#!/usr/bin/env python3\nimport json, sys\ndef send(value):\n print(json.dumps(value), "
-         "flush=True)\nfor i in range(3):\n frame=json.loads(sys.stdin.readline())\n if "
+   fputs("#!/usr/bin/env python3\nimport json, os, sys\ndef profile(f):\n "
+         "c=json.loads(os.environ['AIMEE_TEST_OWNED_PROFILE'])\n assert os.getcwd() in "
+         "c['projects']\n return "
+         "{'id':f['id'],'result':{'config':c,'layers':[{'name':{'type':'user','file':os.getcwd()+'/"
+         ".codex/config.toml'},'config':c}]}}\ndef send(value):\n print(json.dumps(value), "
+         "flush=True)\nfor i in range(4):\n frame=json.loads(sys.stdin.readline())\n if "
+         "frame.get('method')=='config/read':\n  send(profile(frame))\n  continue\n if "
          "frame.get('method') == 'initialized':\n  frame=json.loads(sys.stdin.readline())\n "
          "result={'thread': {'id':'t1'}} if frame['method'].startswith('thread/') else {}\n "
          "send({'jsonrpc':'2.0','id':frame['id'],'result':result})\nfor method, ident, params, "
@@ -857,7 +601,7 @@ static void test_operator_replies_reach_native_child(void)
    adapter_fixture_result_t out;
    codex_stream_capture_t cap = {0};
    assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
-   assert(strstr(cap.buf, "Operator replies received"));
+   assert(!strstr(cap.buf, "Operator replies received")); /* Host model output is not duplicated. */
    assert(operator_requests == 3 && operator_responses == 3);
    aimee_ir_session_set_sink(NULL, NULL);
    server_control_scope_bind(previous);
@@ -880,7 +624,13 @@ static void test_canonical_history_adoption(void)
    snprintf(marker, sizeof marker, "%s/requests", root);
    FILE *fp = fopen(script, "w");
    assert(fp);
-   fputs("#!/usr/bin/env python3\nimport json, os, sys\n"
+   fputs("#!/usr/bin/env python3\nimport json, os, sys\ndef profile(f):\n "
+         "c=json.loads(os.environ['AIMEE_TEST_OWNED_PROFILE'])\n if "
+         "os.environ.get('AIMEE_TEST_BAD_PROFILE')=='1': c['extra_mutation']=True\n assert "
+         "os.getcwd() in "
+         "c['projects']\n return "
+         "{'id':f['id'],'result':{'config':c,'layers':[{'name':{'type':'user','file':os.getcwd()+'/"
+         ".codex/config.toml'},'config':c}]}}\n"
          "def send(v):\n print(json.dumps(v),flush=True)\n"
          "adopted=False\nlast=0\n"
          "for line in sys.stdin:\n f=json.loads(line)\n m=f.get('method')\n"
@@ -889,6 +639,7 @@ static void test_canonical_history_adoption(void)
          "log.write(json.dumps(f)+'\\n')\n"
          " assert f['id']>last\n last=f['id']\n p=f.get('params',{})\n"
          " if m=='initialize': send({'id':f['id'],'result':{}})\n"
+         " elif m=='config/read': send(profile(f))\n"
          " elif m in ('thread/start','thread/resume'):\n"
          "  assert m==os.environ['AIMEE_TEST_HISTORY_SESSION']\n"
          "  send({'id':f['id'],'result':{'thread':{'id':'t-history'}}})\n"
@@ -945,9 +696,10 @@ static void test_canonical_history_adoption(void)
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
    agent.cli_idle_timeout_ms = 5000;
    for (int resume = 0; resume < 2; resume++)
-      for (int refuse = 0; refuse < 3; refuse++)
+      for (int refuse = 0; refuse < 4; refuse++)
       {
          unlink(marker);
+         assert(!setenv("AIMEE_TEST_BAD_PROFILE", refuse == 3 ? "1" : "0", 1));
          setenv("AIMEE_TEST_HISTORY_SESSION", resume ? "thread/resume" : "thread/start", 1);
          setenv("AIMEE_TEST_HISTORY_REFUSE", refuse == 1 ? "1" : "0", 1);
          /* Invalid canonical content must refuse before injection/turn/start. */
@@ -960,9 +712,11 @@ static void test_canonical_history_adoption(void)
                                    .user_prompt = "current user",
                                    .resume_id = resume ? "t-history" : NULL};
          agent_result_t out = {0};
-         rc = codex_provider_cli_adapter.execute(&cfg, &out);
+         rc = owned_execute(&cfg, &out);
          if (!refuse)
-            assert(out.success && out.response && !strcmp(out.response, "history adopted"));
+            assert(out.success && !out.response && !out.canonical_response.n_content);
+         else if (refuse == 3)
+            assert(strstr(out.error, "native SDK configuration could not be verified"));
          else
             assert(strstr(out.error, "canonical history adoption failed"));
          agent_result_clear_response(&out);
@@ -974,7 +728,7 @@ static void test_canonical_history_adoption(void)
          size_t n = fread(log, 1, sizeof log - 1, fp);
          assert(n && !ferror(fp));
          fclose(fp);
-         assert((strstr(log, "thread/inject_items") != NULL) == (refuse != 2));
+         assert((strstr(log, "thread/inject_items") != NULL) == (refuse != 2 && refuse != 3));
          assert((strstr(log, "turn/start") != NULL) == !refuse);
       }
    blocks[0].type = AIMEE_BLK_TEXT;
@@ -987,6 +741,7 @@ static void test_canonical_history_adoption(void)
    else
       unsetenv("PATH");
    free(old_path);
+   unsetenv("AIMEE_TEST_BAD_PROFILE");
    unsetenv("AIMEE_TEST_HISTORY_LOG");
    unsetenv("AIMEE_TEST_HISTORY_SESSION");
    unsetenv("AIMEE_TEST_HISTORY_REFUSE");
@@ -1112,12 +867,19 @@ static void test_dynamic_host_execution(void)
    FILE *file = fopen(script, "w");
    assert(file);
    fputs("#!/usr/bin/env python3\nimport "
-         "json,os,sys,signal\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nmode=int(os.environ['"
+         "json,os,sys,signal\ndef profile(f):\n "
+         "c=json.loads(os.environ['AIMEE_TEST_OWNED_PROFILE'])\n assert os.getcwd() in "
+         "c['projects']\n return "
+         "{'id':f['id'],'result':{'config':c,'layers':[{'name':{'type':'user','file':os.getcwd()+'/"
+         ".codex/"
+         "config.toml'},'config':c}]}}\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nmode=int(os."
+         "environ['"
          "AIMEE_TEST_DYNAMIC_VARIANT'])\ndef send(v): "
          "print(json.dumps(v),flush=True)\nfor line in sys.stdin:\n f=json.loads(line); "
          "m=f.get('method'); p=f.get('params',{})\n if m=='initialize':\n  assert "
          "p['capabilities']['experimentalApi'] is True\n  send({'id':f['id'],'result':{}})\n elif "
-         "m=='thread/start':\n  t=p['dynamicTools']; assert len(t)==1 and t[0]['name']=='aimee'\n  "
+         "m=='config/read': send(profile(f))\n elif m=='thread/start':\n  t=p['dynamicTools']; "
+         "assert len(t)==1 and t[0]['name']=='aimee'\n  "
          "assert t[0]['tools'][0]['name']=='exec_command'\n  "
          "send({'id':f['id'],'result':{'thread':{'id':'thread-owned'}}})\n elif m=='turn/start':\n "
          " assert p['threadId']=='thread-owned'\n  "
@@ -1195,11 +957,11 @@ static void test_dynamic_host_execution(void)
                                 .tool_call = dynamic_host_fixture,
                                 .tool_context = &state};
       agent_result_t out = {0};
-      rc = codex_provider_cli_adapter.execute(&cfg, &out);
+      rc = owned_execute(&cfg, &out);
       if (invalid_frame)
          assert(strstr(out.error, "invalid-json-rpc-frame"));
       if (success)
-         assert(out.success && out.response && !strcmp(out.response, "host complete"));
+         assert(out.success && !out.response && !out.canonical_response.n_content);
       agent_result_clear_response(&out);
 
       assert(success ? rc == 0 : rc != 0);
@@ -1438,6 +1200,9 @@ int main(int argc, char **argv)
 {
    test_execute_refuses_missing_configuration();
    test_execute_rejects_missing_inputs();
+   test_execute_requires_owned_resources();
+   if (argc == 2 && !strcmp(argv[1], "--ownership-negative-only"))
+      return 0;
    signal(SIGPIPE, SIG_IGN);
    if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
    {
@@ -1506,42 +1271,6 @@ int main(int argc, char **argv)
    test_parse_method_invalid_inputs();
    printf("OK\n");
 
-   printf("test_parse_server_request_method_extracts_approval... ");
-   test_parse_server_request_method_extracts_approval();
-   printf("OK\n");
-
-   printf("test_parse_server_request_method_extracts_legacy_approval... ");
-   test_parse_server_request_method_extracts_legacy_approval();
-   printf("OK\n");
-
-   printf("test_parse_server_request_method_skips_notifications_and_responses... ");
-   test_parse_server_request_method_skips_notifications_and_responses();
-   printf("OK\n");
-
-   printf("test_parse_server_request_method_invalid_inputs... ");
-   test_parse_server_request_method_invalid_inputs();
-   printf("OK\n");
-
-   printf("test_approval_decision_respects_autonomous_mode... ");
-   test_approval_decision_respects_autonomous_mode();
-   printf("OK\n");
-
-   printf("test_approval_decision_uses_legacy_review_values... ");
-   test_approval_decision_uses_legacy_review_values();
-   printf("OK\n");
-
-   printf("test_approval_decision_skips_unknown_methods... ");
-   test_approval_decision_skips_unknown_methods();
-   printf("OK\n");
-
-   printf("test_server_restart_command_detection_blocks_lifecycle_writes... ");
-   test_server_restart_command_detection_blocks_lifecycle_writes();
-   printf("OK\n");
-
-   printf("test_server_restart_command_detection_allows_read_only_checks... ");
-   test_server_restart_command_detection_allows_read_only_checks();
-   printf("OK\n");
-
    printf("test_spawn_failure_captures_stderr_and_exit_status... ");
    test_spawn_failure_captures_stderr_and_exit_status();
    printf("OK\n");
@@ -1556,22 +1285,6 @@ int main(int argc, char **argv)
 
    printf("test_parse_tool_action_skips_other_methods... ");
    test_parse_tool_action_skips_other_methods();
-   printf("OK\n");
-
-   printf("test_codex_adapter_uses_requested_cwd... ");
-   test_codex_adapter_uses_requested_cwd();
-   printf("OK\n");
-
-   printf("test_adapter_preserves_distinct_message_groups... ");
-   test_adapter_preserves_distinct_message_groups();
-   printf("OK\n");
-
-   printf("test_adapter_rejects_completed_items_without_ids... ");
-   test_adapter_rejects_completed_items_without_ids();
-   printf("OK\n");
-
-   printf("test_adapter_replaces_invalid_utf8_prompt_bytes... ");
-   test_adapter_replaces_invalid_utf8_prompt_bytes();
    printf("OK\n");
 
    test_operator_replies_reach_native_child();

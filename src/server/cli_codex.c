@@ -2,7 +2,6 @@
 #include <aimee/translation/aimee_backend.h>
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "aimee_home.h"
 #include "cli_codex_profile.h"
 /* cli_codex.c: see cli_codex.h. Spawns `codex app-server`, drives the
  * JSON-RPC handshake (initialize → thread/start → turn/start), reads
@@ -17,7 +16,6 @@
 #include "provider_cli_adapter.h"
 #include "server_session_control.h"
 
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -31,13 +29,9 @@
 
 /* Default idle ceiling. The codex side has its own timeout; this is the
  * safety net for "subprocess wedged with no output." */
-#define CLI_CODEX_DEFAULT_IDLE_TIMEOUT_MS        -1     /* no idle timeout */
-#define CLI_CODEX_QUIET_POLL_MS                  300000 /* 5 min */
-#define CLI_CODEX_LINE_MAX                       (8 * 1024 * 1024)
-#define CLI_CODEX_APPROVAL_POLICY_CONFIG         "approval_policy=\"on-request\""
-#define CLI_CODEX_SANDBOX_READ_ONLY_CONFIG       "sandbox_mode=\"read-only\""
-#define CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG "sandbox_mode=\"workspace-write\""
-#define CLI_CODEX_SANDBOX_DANGER_CONFIG          "sandbox_mode=\"danger-full-access\""
+#define CLI_CODEX_DEFAULT_IDLE_TIMEOUT_MS -1     /* no idle timeout */
+#define CLI_CODEX_QUIET_POLL_MS           300000 /* 5 min */
+#define CLI_CODEX_LINE_MAX                (8 * 1024 * 1024)
 
 /* Reasons cli_codex_read_line can return NULL — propagated into the
  * stall message so operators can tell EOF (codex exited) from an idle
@@ -79,16 +73,13 @@ typedef struct
     * print it and operators know where to look. */
    int err_log_fd;
    char err_log_path[64];
-   int autonomous;
    int child_reaped;
    int child_status;
    cli_codex_read_status_t last_read_status;
    aimee_harness_ir_t ir;
-   const char *home;
    const cli_codex_host_launch_t *host_launch;
    int (*progress)(void *context);
    void *progress_context;
-   const char *session_id;
    const aimee_request_t *tool_catalog;
    int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
    void *tool_context;
@@ -285,15 +276,11 @@ static void cli_codex_exit_status_desc(const cli_codex_t *c, char *out, size_t o
 }
 
 /* Spawn `codex app-server`. Returns 0 on success. */
-static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
-                           const char *sandbox_config)
+static int cli_codex_spawn(cli_codex_t *c)
 {
    if (c->host_launch && c->host_launch->spawn_guard &&
        (!c->host_launch->spawn_guard->child || !c->host_launch->spawn_guard->parent))
       return -1;
-   char aimee_root[4096] = "";
-   if (c->home && c->home[0])
-      snprintf(aimee_root, sizeof(aimee_root), "%s", aimee_home());
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
@@ -369,40 +356,6 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
 #endif
          _exit(127);
       }
-      if (cwd && cwd[0] && chdir(cwd) != 0)
-      {
-         dprintf(STDERR_FILENO, "aimee: chdir(%s) failed: %s\n", cwd, strerror(errno));
-         _exit(126);
-      }
-      const char *cmd = (cli_cmd && cli_cmd[0]) ? cli_cmd : "codex";
-      const char *sandbox = (sandbox_config && sandbox_config[0])
-                                ? sandbox_config
-                                : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
-      if (c->home && c->home[0])
-      {
-         char codex_home[4096];
-         if (snprintf(codex_home, sizeof(codex_home), "%s/.codex", c->home) >=
-             (int)sizeof(codex_home))
-            _exit(126);
-         setenv("AIMEE_HOME", aimee_root, 1);
-         char endpoint[4140];
-         if (snprintf(endpoint, sizeof(endpoint), "unix:%s/aimee-http.sock", aimee_root) >=
-             (int)sizeof(endpoint))
-            _exit(126);
-         setenv("AIMEE_API_ENDPOINT", endpoint, 1);
-         setenv("HOME", c->home, 1);
-         setenv("CODEX_HOME", codex_home, 1);
-         unsetenv("OPENAI_API_KEY");
-         if (c->session_id && c->session_id[0])
-            setenv("AIMEE_SESSION_ID", c->session_id, 1);
-         execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox, "-c",
-                "model_provider=\"openai\"", "-c", "mcp_servers.aimee.command=\"aimee\"", "-c",
-                "mcp_servers.aimee.args=[\"mcp\",\"serve\"]", (char *)NULL);
-         _exit(127);
-      }
-      execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox,
-             (char *)NULL);
-      _exit(127);
    }
    /* Parent: the optional owner attaches this exact child before SDK exec. */
    if (c->host_launch && c->host_launch->spawn_guard &&
@@ -1011,101 +964,6 @@ int cli_codex_parse_method(const char *line, char *out, size_t outsz)
    return rc;
 }
 
-int cli_codex_parse_server_request_method(const char *line, char *out, size_t outsz)
-{
-   if (!line || !out || outsz == 0)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
-      return 0;
-   int rc = 0;
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(obj, "id");
-   cJSON *method = cJSON_GetObjectItemCaseSensitive(obj, "method");
-   if (id && !cJSON_IsNull(id) && cJSON_IsString(method) && method->valuestring)
-   {
-      snprintf(out, outsz, "%s", method->valuestring);
-      rc = 1;
-   }
-   cJSON_Delete(obj);
-   return rc;
-}
-
-int cli_codex_approval_decision(const char *method, int autonomous, char *out, size_t outsz)
-{
-   if (!method || !method[0] || !out || outsz == 0)
-      return 0;
-   if (strcmp(method, "execCommandApproval") == 0 || strcmp(method, "applyPatchApproval") == 0)
-   {
-      snprintf(out, outsz, "%s", autonomous ? "approved" : "denied");
-      return 1;
-   }
-   if (strcmp(method, "item/commandExecution/requestApproval") == 0 ||
-       strcmp(method, "item/fileChange/requestApproval") == 0)
-   {
-      snprintf(out, outsz, "%s", autonomous ? "accept" : "decline");
-      return 1;
-   }
-   return 0;
-}
-
-int cli_codex_command_restarts_aimee_server(const char *command)
-{
-   if (!command || !command[0])
-      return 0;
-
-   char lower[4096];
-   size_t n = strlen(command);
-   if (n >= sizeof(lower))
-      n = sizeof(lower) - 1;
-   for (size_t i = 0; i < n; i++)
-      lower[i] = (char)tolower((unsigned char)command[i]);
-   lower[n] = '\0';
-
-   if (strstr(lower, "aimee server restart") || strstr(lower, "aimee server stop"))
-      return 1;
-   if (strstr(lower, "aimee-server restart") || strstr(lower, "aimee-server stop"))
-      return 1;
-
-   int targets_server =
-       strstr(lower, "aimee-server") != NULL || strstr(lower, "aimee-server.service") != NULL;
-   if (!targets_server)
-      return 0;
-
-   if (strstr(lower, "systemctl") || strstr(lower, "service "))
-   {
-      if (strstr(lower, " restart") || strstr(lower, " stop") || strstr(lower, " kill"))
-         return 1;
-   }
-
-   if (strstr(lower, "pkill") || strstr(lower, "killall"))
-      return 1;
-   return 0;
-}
-
-static int cli_codex_json_has_server_restart(cJSON *node)
-{
-   if (!node)
-      return 0;
-   if (cJSON_IsString(node) && node->valuestring)
-      return cli_codex_command_restarts_aimee_server(node->valuestring);
-   if (cJSON_IsArray(node) || cJSON_IsObject(node))
-   {
-      cJSON *child = NULL;
-      cJSON_ArrayForEach(child, node)
-      {
-         if (cli_codex_json_has_server_restart(child))
-            return 1;
-      }
-   }
-   return 0;
-}
-
-static int cli_codex_method_is_shell_approval(const char *method)
-{
-   return method && (strcmp(method, "item/commandExecution/requestApproval") == 0 ||
-                     strcmp(method, "execCommandApproval") == 0);
-}
-
 static int cli_codex_send_jsonrpc_result(cli_codex_t *c, cJSON *id, cJSON *result)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -1146,97 +1004,6 @@ static int cli_codex_send_jsonrpc_error(cli_codex_t *c, cJSON *id, int code, con
    int rc = cli_codex_send(c, resp);
    cJSON_Delete(resp);
    return rc;
-}
-
-static int cli_codex_send_approval_decision(cli_codex_t *c, cJSON *obj, cJSON *id,
-                                            const char *method)
-{
-   cJSON *result = cJSON_CreateObject();
-   if (!result)
-      return -1;
-   char decision[32];
-   int autonomous = c->autonomous;
-   int deny_self_restart = autonomous && cli_codex_method_is_shell_approval(method) &&
-                           cli_codex_json_has_server_restart(obj);
-   if (!cli_codex_approval_decision(method, deny_self_restart ? 0 : autonomous, decision,
-                                    sizeof(decision)))
-   {
-      cJSON_Delete(result);
-      return -1;
-   }
-   cJSON_AddStringToObject(result, "decision", decision);
-   if (deny_self_restart)
-   {
-      cJSON_AddStringToObject(result, "reason",
-                              "Refusing to restart or stop aimee-server from inside a delegate");
-      cJSON_AddStringToObject(result, "message",
-                              "Refusing to restart or stop aimee-server from inside a delegate");
-   }
-   return cli_codex_send_jsonrpc_result(c, id, result);
-}
-
-static int cli_codex_send_permissions_decision(cli_codex_t *c, cJSON *obj, cJSON *id)
-{
-   cJSON *result = cJSON_CreateObject();
-   cJSON *permissions = NULL;
-   if (c->autonomous)
-   {
-      cJSON *params = cJSON_GetObjectItemCaseSensitive(obj, "params");
-      cJSON *requested = cJSON_GetObjectItemCaseSensitive(params, "permissions");
-      if (requested && !cJSON_IsNull(requested))
-         permissions = cJSON_Duplicate(requested, 1);
-   }
-   if (!permissions)
-      permissions = cJSON_CreateObject();
-   if (!result || !permissions)
-   {
-      cJSON_Delete(result);
-      cJSON_Delete(permissions);
-      return -1;
-   }
-   cJSON_AddItemToObject(result, "permissions", permissions);
-   cJSON_AddStringToObject(result, "scope", c->autonomous ? "session" : "turn");
-   return cli_codex_send_jsonrpc_result(c, id, result);
-}
-
-static int cli_codex_send_user_input_decision(cli_codex_t *c, cJSON *id)
-{
-   if (!c->autonomous)
-      return cli_codex_send_jsonrpc_error(
-          c, id, -32000, "Aimee cannot provide interactive input outside autonomous mode");
-
-   cJSON *result = cJSON_CreateObject();
-   cJSON *answers = cJSON_CreateObject();
-   if (!result || !answers)
-   {
-      cJSON_Delete(result);
-      cJSON_Delete(answers);
-      return -1;
-   }
-   cJSON_AddItemToObject(result, "answers", answers);
-   return cli_codex_send_jsonrpc_result(c, id, result);
-}
-
-static int cli_codex_send_elicitation_decision(cli_codex_t *c, cJSON *id)
-{
-   cJSON *result = cJSON_CreateObject();
-   if (!result)
-      return -1;
-   cJSON_AddStringToObject(result, "action", c->autonomous ? "accept" : "decline");
-   if (c->autonomous)
-   {
-      cJSON *content = cJSON_CreateObject();
-      if (!content)
-      {
-         cJSON_Delete(result);
-         return -1;
-      }
-      cJSON_AddItemToObject(result, "content", content);
-   }
-   else
-      cJSON_AddNullToObject(result, "content");
-   cJSON_AddNullToObject(result, "_meta");
-   return cli_codex_send_jsonrpc_result(c, id, result);
 }
 
 static const char *codex_string(const cJSON *object, const char *key)
@@ -1296,9 +1063,7 @@ static int codex_handle_dynamic_call(cli_codex_t *c, const cJSON *frame, cJSON *
    return 1;
 }
 
-/* Aimee drives codex app-server headlessly. If the server asks the client for
- * approval or user input and we ignore it, the nested delegate waits forever.
- * Reply explicitly, approving only when Aimee autonomous mode is active. */
+/* Native control replies come only from the current canonical operator scope. */
 static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
 {
    if (!line)
@@ -1367,30 +1132,15 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
       return 1;
    }
 
-   if (strcmp(m, "item/commandExecution/requestApproval") == 0 ||
-       strcmp(m, "item/fileChange/requestApproval") == 0 || strcmp(m, "execCommandApproval") == 0 ||
-       strcmp(m, "applyPatchApproval") == 0)
+   /* No operator scope means no authority to answer controls. A managed
+    * SDK may not fall back to autonomous or ambient permission decisions. */
+   if (supported)
    {
-      (void)cli_codex_send_approval_decision(c, obj, id, m);
-   }
-   else if (strcmp(m, "item/permissions/requestApproval") == 0)
-   {
-      (void)cli_codex_send_permissions_decision(c, obj, id);
-   }
-   else if (strcmp(m, "item/tool/requestUserInput") == 0)
-   {
-      (void)cli_codex_send_user_input_decision(c, id);
-   }
-   else if (strcmp(m, "mcpServer/elicitation/request") == 0)
-   {
-      (void)cli_codex_send_elicitation_decision(c, id);
+      (void)cli_codex_send_jsonrpc_error(c, id, -32000, "Host control scope unavailable");
+      aimee_ir_session_fail_capture();
    }
    else
-   {
-      char msg[160];
-      snprintf(msg, sizeof(msg), "Aimee cannot handle Codex app-server request '%s'", m);
-      (void)cli_codex_send_jsonrpc_error(c, id, -32601, msg);
-   }
+      (void)cli_codex_send_jsonrpc_error(c, id, -32601, "Unsupported Codex request");
 
    cJSON_Delete(obj);
    return 1;
@@ -1612,8 +1362,6 @@ static int cli_codex_host_ready(cli_codex_t *c, cli_codex_host_replay_t *replay,
                                 long long *deadline_ms, int idle_timeout_ms)
 {
    const cli_codex_host_launch_t *host = c->host_launch;
-   if (!host)
-      return 0;
    if (!host->home || !host->cwd || !host->build_digest || strlen(host->build_digest) != 64 ||
        !host->gateway_url || !host->gateway_token || !host->expected_config || !host->ready)
       return -1;
@@ -1643,11 +1391,26 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       return -1;
    }
    const agent_t *agent = cfg->agent;
-   const char *cwd = cfg->cwd, *system_prompt = cfg->system_prompt, *user_prompt = cfg->user_prompt;
+   const char *user_prompt = cfg->user_prompt;
    if (!agent)
    {
       snprintf(out->error, sizeof(out->error), "missing agent");
       return -1;
+   }
+   const cli_codex_host_launch_t *host = cfg->codex_host;
+   if (!host || host->executable_fd < 0 || host->cwd_fd < 0 ||
+       fcntl(host->executable_fd, F_GETFD) < 0 || fcntl(host->cwd_fd, F_GETFD) < 0 ||
+       !host->environment || !host->home || !host->cwd || !host->build_digest ||
+       strlen(host->build_digest) != 64 || !host->gateway_url || !host->gateway_token ||
+       !host->expected_config || !host->ready)
+   {
+      snprintf(out->error, sizeof out->error, "Codex requires an owned native launch");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   if (!server_control_scope_current())
+   {
+      snprintf(out->error, sizeof out->error, "Codex requires an owned control scope");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
 
@@ -1666,13 +1429,10 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    c.out_fd = -1;
    c.err_fd = -1;
    c.err_log_fd = -1;
-   c.autonomous = agent->autonomous;
-   c.home = cfg->home;
    c.host_launch = cfg->codex_host;
    c.progress = cfg->native_progress;
    c.progress_context = cfg->native_progress_context;
-   c.ir.host_model_capture = c.host_launch != NULL;
-   c.session_id = cfg->session_id;
+   c.ir.host_model_capture = 1;
    c.ir.admitted_prompt = user_prompt;
    if (codex_bind_dynamic_tools(&c, cfg->tool_catalog, cfg->tool_call, cfg->tool_context))
    {
@@ -1681,12 +1441,9 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cli_codex_close(&c);
       return -1;
    }
-   const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "codex";
-   const char *sandbox_config = agent->write_capable ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
-                                                     : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
-   if (cli_codex_spawn(&c, cli_cmd, cwd, sandbox_config) != 0)
+   if (cli_codex_spawn(&c) != 0)
    {
-      snprintf(out->error, sizeof(out->error), "failed to spawn `%s app-server`", cli_cmd);
+      snprintf(out->error, sizeof out->error, "failed to spawn owned Codex app-server");
       return -1;
    }
 
@@ -1711,7 +1468,7 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cJSON_Delete(resp);
    }
 
-   cli_codex_host_replay_t replay = {.history = cfg->history, .resume_id = cfg->resume_id};
+   cli_codex_host_replay_t replay = {0};
    if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
    {
       snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
@@ -1726,8 +1483,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cJSON *params = cJSON_CreateObject();
       if (resume)
          cJSON_AddStringToObject(params, "threadId", replay.resume_id);
-      else if (system_prompt && system_prompt[0])
-         cli_codex_add_utf8_string(params, "developerInstructions", system_prompt);
       cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params,
                                       next_id++, &deadline_ms, idle_timeout_ms);
       int got_id = resp && cli_codex_response_thread_id(resp, thread_id, sizeof thread_id);
@@ -1821,23 +1576,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
          break;
    }
 
-   /* The host factory validates its original response separately. Compatibility
-    * execution must retain the admitted observations, never reparse joined text. */
-   if (!c.host_launch)
-   {
-      aimee_response_t response = {0};
-      if (aimee_harness_ir_response(&c.ir, &response) ||
-          agent_result_adopt_response(out, &response))
-      {
-         aimee_response_free(&response);
-         cli_codex_close(&c);
-         snprintf(out->error, sizeof out->error, "Codex completed without canonical output");
-         aimee_ir_session_fail_capture();
-         return AGENT_RC_CAPTURE_FAILED;
-      }
-      out->canonical_response.usage_in = out->prompt_tokens;
-      out->canonical_response.usage_out = out->completion_tokens;
-   }
    cli_codex_close(&c);
    out->latency_ms = (int)(util_now_ms() - start_ms);
    out->turns = 1;
@@ -1861,6 +1599,5 @@ const provider_cli_adapter_t codex_provider_cli_adapter = {
              .supports_tool_use = 1,
              .proto_stability = PROVIDER_CLI_PROTO_STABLE,
              .write_confidence = 0.95f},
-    .spawn = NULL,
     .execute = codex_adapter_execute,
 };
