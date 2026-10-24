@@ -247,15 +247,20 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * that edit via file tools produced no-op rounds while bash-writers slipped
     * through — the whole fleet's convergence depended on each model's tool
     * preferences. */
-   char norm[MAX_PATH_LEN];
+   char norm[MAX_PATH_LEN], norm_cwd[MAX_PATH_LEN] = "";
    normalize_path(path, cwd, norm, sizeof(norm));
+   if (cwd && cwd[0])
+      normalize_path(cwd, NULL, norm_cwd, sizeof(norm_cwd));
+   /* The delegate producer issues this exact checkout root after creation.
+    * Revision-named worktrees need no path-spelling exception or wider scope. */
+   if (g_parent_ro_root[0] && g_parent_write_root[0] && !strcmp(norm_cwd, g_parent_write_root) &&
+       agent_tools_path_under_root(norm, g_parent_write_root))
+      return 0;
    if (worktree_scope_non_git(cwd, norm))
       return 0;
    size_t root_len = agent_tools_managed_root_len(norm);
-   if (root_len && cwd && cwd[0])
+   if (root_len && norm_cwd[0])
    {
-      char norm_cwd[MAX_PATH_LEN];
-      normalize_path(cwd, NULL, norm_cwd, sizeof(norm_cwd));
       size_t cwd_root_len = agent_tools_managed_root_len(norm_cwd);
       if (cwd_root_len == root_len && strncmp(norm, norm_cwd, root_len) == 0)
          return 0;

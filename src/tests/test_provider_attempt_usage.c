@@ -22,6 +22,87 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "agent_admission.h"
+#include "provider_cli_adapter.h"
+
+/* This peer refuses execution. It observes the real guarded dispatcher's live
+ * admission slot; it never affirms a source/host/model or starts a child. */
+static int admission_probe_active, admission_probe_calls;
+static const char *admission_probe_model;
+int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   assert(admission_probe_active && cfg && cfg->agent);
+   assert(agent_admission_agent_active(cfg->agent->name) == 1);
+   assert(!strcmp(cfg->agent->model, admission_probe_model));
+   assert(!strcmp(out->model, admission_probe_model) &&
+          !strcmp(out->served_model, admission_probe_model));
+   admission_probe_calls++;
+   snprintf(out->error, sizeof out->error, "fixture refuses native execution after admission");
+   return AGENT_RC_CONTEXT_REFUSED;
+}
+static int guarded_admission_probe(agent_t *agent)
+{
+   agent_network_t network = {0};
+   agent_result_t result = {0};
+   admission_probe_active = 1;
+   admission_probe_model = agent->model;
+   request_context_clear();
+   int rc = agent_dispatch_one(agent, &network, NULL, "system", "task", 128, 0, 1, &result);
+   admission_probe_active = 0;
+   assert(!result.success && !result.canonical_response.n_content);
+   assert(!agent->model[0] || !strcmp(result.model, agent->model));
+   agent_result_clear_response(&result);
+   return rc;
+}
+static void test_actual_acp_admission_unknown_model_bucket(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "acp-admission-a");
+   strcpy(agent.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(agent.cli_kind, "acp");
+   agent.max_parallel = 1;
+   agent_dispatch_set_fail_fast(1);
+   admission_probe_calls = 0;
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   assert(admission_probe_calls == 1 && !agent.model[0]);
+   assert(agent_admission_global_active() == 0);
+
+   agent_admission_configure(16, 1, NULL, 0);
+   agent_admit_req_t held = {.ctx_handle = "fixture-held",
+                             .agent = "other-acp-alias",
+                             .model = "acp:unknown-model",
+                             .per_agent_max = 1,
+                             .flags = AGENT_ADMIT_NONBLOCKING};
+   agent_slot_t *slot = agent_admission_acquire(&held, NULL);
+   assert(slot);
+   strcpy(agent.name, "acp-admission-b");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 1); /* Distinct aliases share the unknown model cap. */
+   strcpy(agent.model, "declared-model");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   assert(admission_probe_calls == 2); /* A real model keeps its own bucket/metadata. */
+   agent_admission_release(slot);
+
+   held.agent = agent.name;
+   held.model = "different-model";
+   slot = agent_admission_acquire(&held, NULL);
+   assert(slot);
+   agent.model[0] = 0;
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 2); /* Per-agent cap is still enforced. */
+   agent_admission_release(slot);
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   assert(admission_probe_calls == 3 && !agent.model[0]);
+
+   strcpy(agent.cli_kind, "claude");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 3); /* No generic model-less bypass. */
+   assert(agent_admission_global_active() == 0);
+   agent_dispatch_set_fail_fast(0);
+   puts("ACP actual dispatcher: unknown admission bucket bounded; metadata stays unknown; no "
+        "execution");
+}
+
 /* No operator role definition and an empty permission response from the
  * external role-owner peer: these cases exercise text-only routing, not grants. */
 char *role_template_frontmatter(const char *root, const char *role)
@@ -338,5 +419,6 @@ int main(int argc, char **argv)
    test_retry_owner_known_usage_boundaries();
    test_actual_executor_observations(only_mode);
    test_actual_retry_observer_and_no_send();
+   test_actual_acp_admission_unknown_model_bucket();
    return 0;
 }

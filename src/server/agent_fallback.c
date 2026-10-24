@@ -1,6 +1,7 @@
 /* agent_fallback.c: Delegate fallback classification and retry helpers. */
 #include "aimee.h"
 #include "agent.h"
+#include "agent_retry_usage.h"
 #include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "provider_catalog.h"
@@ -15,23 +16,11 @@ int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *networ
                              const char *system, const char *prompt, int max_tokens,
                              double temperature, int use_tools, agent_result_t *out)
 {
-   const aimee_response_t *response = &out->canonical_response;
-   int unknown = agent_result_usage_is_unobserved(out) || out->prompt_tokens > 0 ||
-                 out->completion_tokens > 0 || out->cache_read_tokens > 0 ||
-                 out->cache_write_tokens > 0 || response->usage_in > 0 || response->usage_out > 0 ||
-                 response->usage_cache_read > 0 || response->usage_cache_write > 0 ||
-                 response->usage_reasoning > 0;
+   int unknown = agent_retry_usage_tainted(out);
    agent_result_clear_response(out);
    int rc = agent_dispatch_one(agent, network, role, system, prompt, max_tokens, temperature,
                                use_tools, out);
-   if (unknown)
-   {
-      out->usage_unobserved = 1;
-      out->canonical_response.usage_unobserved = 1;
-      out->canonical_response.usage_in = out->canonical_response.usage_out =
-          out->canonical_response.usage_cache_read = out->canonical_response.usage_cache_write =
-              out->canonical_response.usage_reasoning = 0;
-   }
+   agent_retry_usage_apply(out, unknown);
    return rc;
 }
 

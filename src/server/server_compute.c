@@ -11,6 +11,7 @@
 #include "server_acp_execution.h"
 #include "server_compute_impl.h"
 #include "agent_config.h"
+#include "agent_retry_usage.h"
 #include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
@@ -620,6 +621,14 @@ static int delegate_project_completed_result(agent_result_t *result, int handoff
       return -1;
    agent_result_replace_display_text(result, display);
    return 0;
+}
+
+/* Admission of the repair body and accounting for its execution are distinct. */
+static int delegate_merge_handoff_repair(agent_result_t *result, agent_result_t *repair, int rc)
+{
+   int admitted = rc == 0 && repair->success && agent_result_project_complete_text(repair) == 0;
+   agent_retry_merge_attempt(result, repair, admitted);
+   return admitted;
 }
 
 static cJSON *delegate_build_result_response(
@@ -1753,16 +1762,9 @@ static void delegate_worker_run(void *arg)
    }
    else
    {
-      /* Inside a container the mount IS the isolation boundary: the delegate's
-       * writes go through the provider into its own RW-mounted tree, which nothing
-       * else on the host can see. The host-side parent-write guard exists only for
-       * the in-process (same-host) path; here it is redundant and would only risk
-       * blocking a legitimate write, so drop it once a container is actually bound. */
-      if (container_bound > 0)
-      {
-         agent_tools_parent_write_guard_clear();
-         parent_write_guard_active = 0;
-      }
+      /* Keep the producer-issued checkout and read-only policy in callback
+       * scopes. Container mounts complement these checks; clearing this guard
+       * also resets write capability and loses the managed revision root. */
       server_delegate_heartbeat_begin(cctx->background_job_id);
       rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                               max_tokens, force_tools, delegate_allows_writes,
@@ -1847,14 +1849,8 @@ static void delegate_worker_run(void *arg)
                                                          &repaired)
                     : agent_run(&acfg, role, system_prompt, repair_prompt, max_tokens, &repaired);
             free(repair_prompt);
-            if (repair_rc == 0 && repaired.success &&
-                agent_result_project_complete_text(&repaired) == 0)
+            if (delegate_merge_handoff_repair(&result, &repaired, repair_rc))
             {
-               agent_result_move_response(&result, &repaired);
-               result.turns += repaired.turns;
-               result.tool_calls += repaired.tool_calls;
-               if (repaired.agent_name[0])
-                  snprintf(result.agent_name, sizeof(result.agent_name), "%s", repaired.agent_name);
                (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
                handoff_validation.repair_attempted = 1;
             }

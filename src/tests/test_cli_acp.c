@@ -694,6 +694,7 @@ static void test_live_acp_ownership_and_budgets(void)
       agent.max_turns = unsupported == 5 ? 1 : 0;
       assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
       assert(!result.success && access(marker, F_OK));
+      assert(!result.usage_unobserved && !result.canonical_response.usage_unobserved);
       agent_result_clear_response(&result);
    }
    cfg.no_tools = cfg.native_turn_limit = agent.max_tokens = agent.max_turns = 0;
@@ -725,6 +726,12 @@ static void test_live_acp_ownership_and_budgets(void)
    status = run_owned_fixture(&cfg, &result);
    assert(status == AGENT_RC_CONTEXT_REFUSED && util_now_ms() - start < 2000);
    assert(!access(marker, F_OK)); /* Native peer reached the blocked-write stage. */
+   assert(result.usage_unobserved && result.canonical_response.usage_unobserved);
+   cJSON *failed_response = aimee_ir_response_json(&result.canonical_response);
+   const cJSON *failed_usage = cJSON_GetObjectItem(failed_response, "usage");
+   assert(cJSON_IsObject(failed_usage) && cJSON_GetArraySize(failed_usage) == 1 &&
+          cJSON_IsTrue(cJSON_GetObjectItem(failed_usage, "unobserved")));
+   cJSON_Delete(failed_response);
    unlink(marker);
    agent_result_clear_response(&result);
    agent.tool_loop_timeout_ms_cap = 0;
@@ -735,6 +742,7 @@ static void test_live_acp_ownership_and_budgets(void)
    cfg.native_progress_context = &attempts;
    assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
    assert(attempts == 1 && access(marker, F_OK));
+   assert(!result.usage_unobserved && !result.canonical_response.usage_unobserved);
    cfg.native_progress = NULL;
    aimee_ir_session_fail_capture();
    assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CAPTURE_FAILED);

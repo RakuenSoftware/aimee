@@ -244,10 +244,16 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
     * not a provider fault. */
    char admit_ctxbuf[192];
    const char *admit_deleg = delegation_active_id();
+   /* Generic ACP may not disclose its provider model. Use one conservative
+    * external-agent concurrency bucket only; keep actual model metadata unknown. */
+   const char *admission_model = ag->model;
+   if (!admission_model[0] && !strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) &&
+       !strcmp(ag->cli_kind, "acp"))
+      admission_model = "acp:unknown-model";
    agent_admit_req_t admit_req = {
        .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
        .agent = ag->name,
-       .model = ag->model,
+       .model = admission_model,
        .per_agent_max = ag->max_parallel,
        .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
                                                    : AGENT_ADMIT_PRIORITY_INTERACTIVE,

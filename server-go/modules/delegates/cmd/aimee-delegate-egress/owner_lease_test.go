@@ -54,6 +54,21 @@ func privateLeaseFixture(t *testing.T) *leaseFixture {
 	t.Cleanup(func() { lease.file.Close() })
 	lease.engine = fmt.Sprintf("unix:///proc/%d/fd/99", os.Getppid())
 	lease.helperSHA = hex.EncodeToString(hash[:])
+	lease.daemonID = "opaque-daemon-fixture:v2"
+	socketInfo, err := os.Lstat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperInfo, err := os.Lstat(helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentInfo, err := os.Lstat(filepath.Dir(socket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.artifacts = &ownerSourceIdentities{Socket: sourceIdentity(socketInfo), Helper: sourceIdentity(helperInfo), Parent: sourceIdentity(parentInfo)}
+
 	source := delegates.SandboxRequest{WritesAllowed: true, RepoRoot: "/srv/repo", Worktree: "/srv/repo", IsGitCheckout: true, ParentSocketHost: socket, ParentSocketTarget: delegates.ControlSocketTarget}
 	spec, err := delegates.BuildOwnerSandboxSpec(source, helper)
 	if err != nil {
@@ -169,6 +184,9 @@ func TestCleanupLeaseRecoversCreateGapBeforeImmutableRemoval(t *testing.T) {
 	}
 	metadata := map[string]any{"Id": id, "Name": "/" + fixture.request.ContainerName, "Image": "sha256:" + strings.Repeat("b", 64), "State": map[string]any{"Running": false}, "Config": config, "HostConfig": map[string]any{"Privileged": false, "NetworkMode": "none", "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "Binds": binds}}
 	run := func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 3 && args[0] == "--host" && args[2] == "info" {
+			return `"opaque-daemon-fixture:v2"`, nil
+		}
 		if len(args) < 3 || args[0] != "--host" || args[1] != fixture.lease.engine {
 			t.Fatal("cleanup changed daemon", args)
 		}
@@ -255,6 +273,9 @@ func TestDurableKnownIDAbsenceDoesNotReAdmitMutableFilePosture(t *testing.T) {
 			args := []string{"--engine-endpoint", fixture.lease.engine, "--lease-fd", strconv.Itoa(descriptor), "--lease-check", fixture.path}
 			called := false
 			if err := cleanupOwnerLease(context.Background(), args, func(_ context.Context, _ string, args ...string) (string, error) {
+				if len(args) >= 3 && args[0] == "--host" && args[2] == "info" {
+					return `"opaque-daemon-fixture:v2"`, nil
+				}
 				if args[0] != "--host" || args[1] != fixture.lease.engine || args[2] != "ps" || args[len(args)-1] != "id="+id {
 					t.Fatal("absence introduced new authority", args)
 				}
@@ -320,6 +341,9 @@ func TestUnresolvedCleanupRetainsCompleteIntentAndPartialEvidence(t *testing.T) 
 			args := []string{"--engine-endpoint", fixture.lease.engine, "--lease-fd", strconv.Itoa(descriptor), "--lease-check", fixture.path}
 			id := strings.Repeat("e", 64)
 			err = cleanupOwnerLease(context.Background(), args, func(_ context.Context, _ string, args ...string) (string, error) {
+				if len(args) >= 3 && args[0] == "--host" && args[2] == "info" {
+					return `"opaque-daemon-fixture:v2"`, nil
+				}
 				if args[0] != "--host" || args[1] != fixture.lease.engine || args[2] != "inspect" {
 					t.Fatal("uncertain cleanup gained effect authority", args)
 				}
@@ -391,6 +415,9 @@ func TestDurableCreatedCIDRetiresRefusedPostureAndAnonymousVolumes(t *testing.T)
 	removed := false
 	args := []string{"--engine-endpoint", fixture.lease.engine, "--lease-fd", strconv.Itoa(descriptor), "--lease-check", fixture.path}
 	if err := cleanupOwnerLease(context.Background(), args, func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 3 && args[0] == "--host" && args[2] == "info" {
+			return `"opaque-daemon-fixture:v2"`, nil
+		}
 		if args[0] != "--host" || args[1] != fixture.lease.engine {
 			t.Fatal("retirement switched daemon", args)
 		}

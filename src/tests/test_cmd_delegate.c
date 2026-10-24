@@ -1323,6 +1323,8 @@ static void test_inline_acp_agent_synthesis(void)
    assert(strcmp(a->cli_cmd, "claude agent") == 0); /* command + args joined */
    assert(a->role_count == 1 && strcmp(a->roles[0], "code") == 0);
    assert(a->enabled == 1);
+   assert(a->max_parallel == 1);
+   assert(a->model[0] == 0); /* External provider model is not observed. */
    assert(a->tools_enabled == 1);
    assert(a->max_turns == -1); /* no declared cap; role floor applies */
 

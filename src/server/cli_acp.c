@@ -567,6 +567,10 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
       snprintf(out->error, sizeof out->error, "ACP launch failed");
       goto failed;
    }
+   /* Once opaque external code starts, provider usage is unobservable even
+    * when initialization, transport or a later tool request fails. */
+   out->usage_unobserved = 1;
+   out->canonical_response.usage_unobserved = 1;
    cJSON *params = NULL, *request = acp_request("initialize", 1, &params);
    cJSON *capabilities = params ? cJSON_AddObjectToObject(params, "clientCapabilities") : NULL;
    cJSON *fs = capabilities ? cJSON_AddObjectToObject(capabilities, "fs") : NULL;

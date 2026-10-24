@@ -1741,6 +1741,7 @@ $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
+                      $(OBJDIR)/modules/ir/response_codec.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                       $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_codex_profile.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o  \
@@ -7460,9 +7461,13 @@ $(OBJDIR)/tests/acp_route_learning_peer.o: tests/support/learning_outcome_stub.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) -Daimee_module_command_call_context=acp_route_learning_call -c -o $@ $<
 
-$(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c
+$(OBJDIR)/tests/acp_full_learning_peer.o: tests/support/learning_outcome_stub.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) -Daimee_module_command_call_context=acp_route_learning_call -Ddb1_interaction_event_record=full_route_task_outcome_record -c -o $@ $<
+
+$(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c tests/Rules.mk
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_session_ir_history_load=unused_route_db1_session_ir_history_load -Ddb1_session_native_history_load=unused_route_db1_session_native_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
 
 $(OBJDIR)/tests/support/acp_route_policy_fixture.o: tests/support/acp_route_policy_fixture.c
 	@mkdir -p $(dir $@)
@@ -7571,7 +7576,7 @@ $(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNE
     $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/modules/tools/agent_tools_completion.o \
     $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o \
     $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_learning_outcome.o \
-    $(OBJDIR)/tests/acp_route_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/tests/acp_full_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/delegates/delegate_routing.o \
     $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/translation/history_ir.o \
     $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \

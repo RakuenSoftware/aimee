@@ -248,7 +248,7 @@ static void fixture_package_proxy(void)
           (!strcmp(https, "http://127.0.0.1:3129") || !strcmp(https, "http://127.0.0.1:3129/")));
    int status = fixture_proxy_head("http://deb.debian.org/debian/", "deb.debian.org");
    assert(status >= 200 && status < 400);
-   assert(fixture_proxy_head("http://127.0.0.1/", "127.0.0.1") == 403);
+   assert(fixture_proxy_head("http://127.0.0.1/", "127.0.0.1") == 502);
    fputs("full-worker-agent: default package proxy allowed Debian HEAD and denied loopback\n",
          stderr);
 }

@@ -6,6 +6,8 @@
 #include "modules/workspace/workspace_turn.h"
 #include "agent_exec.h"
 #define AIMEE_ACP_FULL_WORKER_FIXTURE           1
+#define compute_pool_set_job                    full_unused_compute_pool_set_job
+#define test_learning_assert_source             full_unused_test_learning_assert_source
 #define session_persona_get                     full_unused_session_persona_get
 #define session_primary_get                     full_unused_session_primary_get
 #define err_json                                full_unused_err_json
@@ -29,6 +31,13 @@
 #define presence_turn_host_own                  full_unused_presence_turn_host_own
 #define presence_emit_turn_delta                full_unused_presence_emit_turn_delta
 #include "test_server_acp_chat_route.c"
+#undef test_learning_assert_source
+#undef compute_pool_set_job
+void compute_pool_set_job(pool_job_kind_t kind, const char *format, ...)
+{
+   (void)format;
+   assert(kind == POOL_JOB_DELEGATE);
+}
 #undef ingress_preinject_set_health_turn_id
 #undef ingress_preinject_acquire_send_guard
 #undef ingress_preinject_release_send_guard
@@ -187,6 +196,98 @@ int db1_session_ir_running_history_load(const char *sid, const char *actor, cons
    return *out ? 0 : -1;
 }
 
+/* Fresh child history is a storage observation, not an affirmative source
+ * handoff. Refuse any preexisting model or interruption content in this case. */
+static cJSON *full_fresh_completed_history(const char *sid, const char *actor, const char *turn)
+{
+   db1_server_session_t session;
+   if (db1_server_session_get(sid, &session) || strcmp(session.principal, actor))
+      return NULL;
+   const cJSON *row;
+   cJSON_ArrayForEach(row, stored_rows)
+   {
+      if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "session_id")), sid))
+         continue;
+      const cJSON *event = cJSON_GetObjectItem(row, "event");
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(event, "kind"));
+      if (!kind || strstr(kind, "interruption"))
+         return NULL;
+      if (!strcmp(kind, "message"))
+      {
+         const char *row_turn = cJSON_GetStringValue(cJSON_GetObjectItem(row, "turn_id"));
+         const cJSON *message = cJSON_GetObjectItem(event, "payload");
+         const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(message, "role"));
+         /* The admitted current user input is still pending, not completed
+          * history. It must not be replayed as an earlier turn. */
+         if (!row_turn || strcmp(row_turn, turn) || !role || strcmp(role, "user"))
+            return NULL;
+      }
+   }
+   return cJSON_CreateArray();
+}
+int db1_session_ir_history_load(const char *sid, const char *scope, const char *actor,
+                                const char *turn, char **out)
+{
+   assert(scope && !strcmp(scope, "primary") && turn && turn[0] && out);
+   cJSON *history = full_fresh_completed_history(sid, actor, turn);
+   *out = history ? cJSON_PrintUnformatted(history) : NULL;
+   cJSON_Delete(history);
+   return *out ? 0 : -1;
+}
+int db1_session_native_history_load(const char *actor, const char *sid, const char *mode,
+                                    const char *turn, char **out)
+{
+   assert(mode && !strcmp(mode, "completed") && turn && turn[0] && out);
+   cJSON *history = full_fresh_completed_history(sid, actor, turn);
+   if (!history)
+      return -1;
+   cJSON *value = cJSON_CreateObject();
+   assert(value && cJSON_AddItemToObject(value, "messages", history) &&
+          cJSON_AddArrayToObject(value, "interruptions"));
+   *out = cJSON_PrintUnformatted(value);
+   cJSON_Delete(value);
+   return *out ? 0 : -1;
+}
+
+void test_learning_assert_source(const cJSON *record)
+{
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItem(record, "session_id"));
+   const char *actor = cJSON_GetStringValue(cJSON_GetObjectItem(record, "actor"));
+   const char *sequence = cJSON_GetStringValue(cJSON_GetObjectItem(record, "sequence"));
+   assert(sid && actor && sequence && !strcmp(actor, owner));
+   const cJSON *row;
+   cJSON_ArrayForEach(row, stored_rows)
+   {
+      if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "session_id")), sid) ||
+          strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "sequence")), sequence))
+         continue;
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "actor")), actor));
+      assert(cJSON_Compare(cJSON_GetObjectItem(row, "event"), cJSON_GetObjectItem(record, "event"),
+                           1));
+      return;
+   }
+   assert(!"learning observation must reference an actual committed owned row");
+}
+
+int full_route_task_outcome_record(const char *, const char *, const char *, const char *,
+                                   const char *);
+int db1_interaction_event_record(const char *sid, const char *type, const char *actor,
+                                 const char *payload, const char *outcome)
+{
+   if (strcmp(type, "delegate_exit"))
+      return full_route_task_outcome_record(sid, type, actor, payload, outcome);
+   assert(sid && sid[0] && !strcmp(actor, "system"));
+   assert(!strcmp(outcome, "ok") || !strcmp(outcome, "error"));
+   cJSON *event = cJSON_Parse(payload);
+   assert(cJSON_IsObject(event));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "role")), "code"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "learning_owner")),
+                  "canonical_session_log"));
+   fprintf(stderr, "actual delegate exit observation: %s %s\n", outcome, payload);
+   cJSON_Delete(event);
+   return 42;
+}
+
 int main(int argc, char **argv)
 {
    if (argc > 1 && !strcmp(argv[1], "--acp-route-child"))
@@ -220,6 +321,9 @@ int main(int argc, char **argv)
    assert(count > 0 && count < (ssize_t)sizeof executable);
    executable[count] = 0;
    delegate_role_seam_install();
+   const char *canonical_role = delegate_role_canonicalize("code");
+   assert(canonical_role && strcmp(canonical_role, "code") == 0);
+   assert(strcmp(delegate_role_canonicalize(canonical_role), "code") == 0);
    delegate_register_role_policy_provider(full_worker_role_policy);
    delegate_permissions_stub_install();
    expected_controls = 0;
@@ -278,14 +382,15 @@ int main(int argc, char **argv)
    assert(context);
    context->compute_executor_threads = 1;
    delegate_worker(context);
-   char owners_path[4096];
-   assert(snprintf(owners_path, sizeof owners_path, "%s/acp-owners", fixture_home) > 0);
-   DIR *owners = opendir(owners_path);
-   assert(owners);
-   struct dirent *entry;
-   while ((entry = readdir(owners)))
-      assert(!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."));
-   assert(!closedir(owners));
+   char capture_path[4096];
+   assert(snprintf(capture_path, sizeof capture_path, "%s/full-worker-canonical.private.json",
+                   fixture_home) < (int)sizeof capture_path);
+   FILE *capture_file = fopen(capture_path, "wx");
+   char *capture_json = cJSON_PrintUnformatted(stored_rows);
+   assert(capture_file && capture_json && !fchmod(fileno(capture_file), 0600));
+   assert(fwrite(capture_json, 1, strlen(capture_json), capture_file) == strlen(capture_json));
+   assert(!fclose(capture_file));
+   free(capture_json);
    cJSON_Delete(request);
    close(pair[0]);
    char wire[65536];
@@ -308,6 +413,15 @@ int main(int argc, char **argv)
       fprintf(stderr, "actual full worker response: %s\n", wire);
    const char *status = result ? cJSON_GetStringValue(cJSON_GetObjectItem(result, "status")) : NULL;
    assert(status && !strcmp(status, "ok"));
+   char owners_path[4096];
+   assert(snprintf(owners_path, sizeof owners_path, "%s/acp-owners", fixture_home) > 0);
+   DIR *owners = opendir(owners_path);
+   assert(owners);
+   struct dirent *entry;
+   while ((entry = readdir(owners)))
+      assert(!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."));
+   assert(!closedir(owners));
+
    aimee_response_t response = {0};
    assert(!aimee_ir_response_parse(cJSON_GetObjectItem(result, "ir"), &response));
    assert(!aimee_ir_response_complete_valid(&response));

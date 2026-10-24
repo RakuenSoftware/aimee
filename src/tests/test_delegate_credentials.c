@@ -480,10 +480,47 @@ static void test_save_load_v2_roundtrips_principal(void)
  * real. Exercise refusal both initially and after one real provider failure. */
 static int context_attempts, provider_failure_first;
 static int local_refusal_rc = AGENT_RC_CONTEXT_REFUSED;
+/* Controlled executor observations; rotation and credential custody are real. */
+static int usage_retry_mode;
+
 static int context_attempt(agent_result_t *result)
 {
    memset(result, 0, sizeof(*result));
    context_attempts++;
+   if (usage_retry_mode)
+   {
+      aimee_response_t observed = {0};
+      assert(!aimee_ir_response_from_text(&observed, "controlled answer", "fixture-model"));
+      observed.raw = cJSON_Parse("{\"provider_usage\":{\"input\":0,\"output\":0,\"reasoning\":0}}");
+      assert(observed.raw && !agent_result_adopt_response(result, &observed));
+      result->turns = context_attempts == 1 ? 2 : 3;
+      result->tool_calls = context_attempts == 1 ? 3 : 5;
+      result->successful_tool_calls = context_attempts == 1 ? 1 : 2;
+      result->rescue_recoveries = context_attempts == 1 ? 4 : 6;
+      result->latency_ms = context_attempts == 1 ? 11 : 17;
+      result->cache_hit = context_attempts != 1;
+      if (context_attempts == 1)
+      {
+         result->usage_unobserved = usage_retry_mode == 1;
+         result->canonical_response.usage_unobserved = usage_retry_mode == 2;
+         if (usage_retry_mode == 3)
+         {
+            result->prompt_tokens = result->canonical_response.usage_in = 3;
+            result->completion_tokens = result->canonical_response.usage_out = 5;
+         }
+         if (usage_retry_mode == 4)
+         {
+            result->cache_read_tokens = result->canonical_response.usage_cache_read = 7;
+            result->cache_write_tokens = result->canonical_response.usage_cache_write = 11;
+         }
+         if (usage_retry_mode == 5)
+            result->canonical_response.usage_reasoning = 13;
+         snprintf(result->error, sizeof result->error, "HTTP 429 rate limit");
+         return -1;
+      }
+      result->success = 1;
+      return 0;
+   }
    if (provider_failure_first && context_attempts == 1)
    {
       snprintf(result->error, sizeof(result->error), "HTTP 429 rate limit");
@@ -562,9 +599,57 @@ static void test_context_refusal_does_not_rotate_credentials(void)
          }
    puts("  PASS: local refusal keeps credentials and stops retries");
 }
+static void test_rotation_preserves_canonical_usage_knowledge(void)
+{
+   for (int tools = 0; tools < 2; tools++)
+      for (int mode = 1; mode <= 6; mode++)
+      {
+         delegate_credentials_reset_for_test();
+         agent_config_t cfg = {0};
+         agent_t agent = {0};
+         snprintf(agent.name, sizeof agent.name, "usage-rotation");
+         snprintf(agent.provider, sizeof agent.provider, "openai");
+         agent.credential_count = 2;
+         agent.credentials[0] = make_cred("main", "FIXTURE_MAIN");
+         agent.credentials[1] = make_cred("backup", "FIXTURE_BACKUP");
+         char leased[32], env[64];
+         assert(!delegate_credentials_acquire("", agent.name, agent.credentials, 2, leased,
+                                              sizeof leased, env, sizeof env));
+         context_attempts = 0;
+         usage_retry_mode = mode;
+         agent_result_t result = {0};
+         int rc =
+             delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128, tools, 0,
+                                                leased, sizeof leased, NULL, &result);
+         assert(!rc && result.success && context_attempts == 2 && !strcmp(leased, "backup"));
+         assert(result.turns == 5 && result.tool_calls == 8);
+         assert(result.successful_tool_calls == 3 && result.rescue_recoveries == 10);
+         assert(result.latency_ms == 28 && !result.cache_hit);
+         assert(result.usage_unobserved == (mode != 6));
+         assert(result.canonical_response.usage_unobserved == (mode != 6));
+         assert(!result.canonical_response.usage_in && !result.canonical_response.usage_out &&
+                !result.canonical_response.usage_cache_read &&
+                !result.canonical_response.usage_cache_write &&
+                !result.canonical_response.usage_reasoning);
+         assert(result.prompt_tokens == (mode == 3 ? 3 : 0));
+         assert(result.completion_tokens == (mode == 3 ? 5 : 0));
+         assert(result.cache_read_tokens == (mode == 4 ? 7 : 0));
+         assert(result.cache_write_tokens == (mode == 4 ? 11 : 0));
+         const cJSON *raw =
+             cJSON_GetObjectItemCaseSensitive(result.canonical_response.raw, "provider_usage");
+         assert(cJSON_IsObject(raw) &&
+                cJSON_GetObjectItemCaseSensitive(raw, "reasoning")->valueint == 0);
+         assert(!aimee_ir_response_complete_text_valid(&result.canonical_response));
+         agent_result_clear_response(&result);
+         delegate_credentials_release("", agent.name, leased);
+      }
+   usage_retry_mode = 0;
+   puts("  PASS: actual credential rotation preserves unknown/mixed usage and diagnostic counts");
+}
 int main(void)
 {
    test_context_refusal_does_not_rotate_credentials();
+   test_rotation_preserves_canonical_usage_knowledge();
    printf("delegate_credentials:\n");
    test_acquire_round_robin();
    test_release_makes_credential_available();

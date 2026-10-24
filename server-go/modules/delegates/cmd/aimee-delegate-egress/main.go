@@ -135,6 +135,15 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		}
 		defer lease.file.Close()
 		lease.engine, lease.helperSHA = *engineEndpoint, helperDigest
+		lease.daemonID, err = ownerDaemonID(ctx, run, *docker)
+		if err != nil {
+			return "", err
+		}
+		helperInfo, err := helper.Stat()
+		if err != nil {
+			return "", err
+		}
+		lease.artifacts = &ownerSourceIdentities{Socket: sourceIdentity(socketIdentity[0]), Parent: sourceIdentity(socketIdentity[1]), Helper: sourceIdentity(helperInfo)}
 	}
 
 	request := delegates.SandboxRequest{

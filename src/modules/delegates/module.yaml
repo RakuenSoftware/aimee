@@ -169,6 +169,7 @@
     "server-go/modules/delegates/cmd/aimee-delegate-egress/main_test.go",
     "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_control_test.go",
     "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_lease_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_recovery_test.go",
     "server-go/modules/delegates/worktreeplan_test.go",
     "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/launchargs_stage_test.go",

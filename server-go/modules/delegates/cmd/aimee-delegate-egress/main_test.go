@@ -128,12 +128,28 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 	digest := hex.EncodeToString(measured[:])
 	endpoint := fmt.Sprintf("unix:///proc/%d/fd/99", os.Getppid())
 	id := strings.Repeat("b", 64)
+	leasePath := filepath.Join(filepath.Dir(socket), "lease.jsonl")
 	run := func(ctx context.Context, binary string, args ...string) (string, error) {
+		if len(args) >= 3 && args[0] == "--host" && args[2] == "info" {
+			return `"opaque-daemon-fixture:v2"`, nil
+		}
 		if len(args) < 3 || args[0] != "--host" || args[1] != endpoint {
 			t.Fatal("ambient daemon authority", args)
 		}
 		args = args[2:]
 		if args[0] == "create" {
+			committed, err := os.Open(leasePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer committed.Close()
+			before := &ownerLease{file: committed}
+			if err := before.read(); err != nil || before.schema != ownerLeaseSchema || before.daemonID != "opaque-daemon-fixture:v2" || before.engine != endpoint || !before.artifacts.valid() {
+				t.Fatal("create preceded durable actual daemon/source identity", err)
+			}
+			if err := syscall.Flock(int(committed.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != syscall.EWOULDBLOCK {
+				t.Fatal("create has no exclusive producer custody", err)
+			}
 			return id, nil
 		}
 		if args[0] == "inspect" && args[2] == `{{.Id}}` {
@@ -151,7 +167,6 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 		return verifiedRunner(ctx, binary, args...)
 	}
 	args := []string{"--receipt-json", "--task", "acp1", "--image", "ubuntu:22.04", "--workdir", "/srv/repo", "--repo-root", "/srv/repo", "--worktree", "/srv/repo", "--writes-allowed", "--socket-check", socket, "--socket-source", socket, "--engine-endpoint", endpoint, "--helper-check", helper, "--helper-source", helper, "--helper-sha256", digest}
-	leasePath := filepath.Join(filepath.Dir(socket), "lease.jsonl")
 	lease, err := os.OpenFile(leasePath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +181,15 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 			t.Fatal(err)
 		}
 		return append(append([]string{}, args...), "--lease-fd", strconv.Itoa(fd), "--lease-check", leasePath)
+	}
+	createCalls := 0
+	if _, err := acquire(context.Background(), leaseArgs(), func(_ context.Context, _ string, argv ...string) (string, error) {
+		if len(argv) >= 3 && argv[2] == "create" {
+			createCalls++
+		}
+		return "", fmt.Errorf("actual daemon identity unavailable")
+	}); err == nil || createCalls != 0 {
+		t.Fatal("unidentified daemon admitted create", err, createCalls)
 	}
 	encoded, err := acquire(context.Background(), leaseArgs(), run)
 	if err != nil {
@@ -182,6 +206,9 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 		}
 		cleaned := false
 		_, err = acquire(context.Background(), leaseArgs(), func(ctx context.Context, binary string, argv ...string) (string, error) {
+			if len(argv) >= 3 && argv[0] == "--host" && argv[2] == "info" {
+				return `"opaque-daemon-fixture:v2"`, nil
+			}
 			if len(argv) < 3 || argv[0] != "--host" || argv[1] != endpoint {
 				t.Fatal("cleanup changed daemon", argv)
 			}

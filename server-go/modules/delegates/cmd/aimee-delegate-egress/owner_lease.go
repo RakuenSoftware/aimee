@@ -17,10 +17,47 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 )
 
-const ownerLeaseSchema = "aimee.container-lease.v1"
+const ownerLeaseSchema = "aimee.container-lease.v2"
+const ownerLeaseLegacySchema = "aimee.container-lease.v1"
 const ownerLeaseMax = (1 << 20) + 4096
 
+type ownerSourceIdentity struct {
+	Dev   string `json:"dev"`
+	Inode string `json:"inode"`
+}
+type ownerSourceIdentities struct {
+	Socket ownerSourceIdentity `json:"socket"`
+	Helper ownerSourceIdentity `json:"helper"`
+	Parent ownerSourceIdentity `json:"parent"`
+}
+
+func sourceIdentity(info os.FileInfo) ownerSourceIdentity {
+	stat := info.Sys().(*syscall.Stat_t)
+	return ownerSourceIdentity{strconv.FormatUint(uint64(stat.Dev), 10), strconv.FormatUint(uint64(stat.Ino), 10)}
+}
+func (identity ownerSourceIdentity) valid() bool {
+	dev, err := strconv.ParseUint(identity.Dev, 10, 64)
+	inode, failure := strconv.ParseUint(identity.Inode, 10, 64)
+	return err == nil && failure == nil && inode != 0 && strconv.FormatUint(dev, 10) == identity.Dev && strconv.FormatUint(inode, 10) == identity.Inode
+}
+func (identities *ownerSourceIdentities) valid() bool {
+	return identities != nil && identities.Socket.valid() && identities.Helper.valid() && identities.Parent.valid()
+}
+
+// Docker defines SystemInfo.ID as the daemon identifier. Its representation is
+// opaque; never substitute a hostname, socket spelling, or assumed UUID format.
+func ownerDaemonID(ctx context.Context, run delegates.CommandRunner, docker string) (string, error) {
+	output, err := run(ctx, docker, "info", "--format", "{{json .ID}}")
+	var id string
+	if err != nil || len(output) > 4096 || json.Unmarshal([]byte(output), &id) != nil || strings.TrimSpace(id) == "" {
+		return "", errors.New("actual Docker daemon identity unavailable")
+	}
+	return id, nil
+}
+
 type ownerLeaseRecord struct {
+	DaemonID   string                         `json:"daemon_id,omitempty"`
+	Artifacts  *ownerSourceIdentities         `json:"source_identities,omitempty"`
 	Schema     string                         `json:"schema"`
 	Kind       string                         `json:"kind"`
 	Engine     string                         `json:"engine_endpoint,omitempty"`
@@ -32,6 +69,8 @@ type ownerLeaseRecord struct {
 	ID         string                         `json:"container_id,omitempty"`
 }
 type ownerLease struct {
+	schema, daemonID  string
+	artifacts         *ownerSourceIdentities
 	file              *os.File
 	engine, helperSHA string
 	request           *delegates.DockerCreateRequest
@@ -96,10 +135,17 @@ func openOwnerLeaseMode(fd int, check, socket string, retained bool) (*ownerLeas
 		file.Close()
 		return nil, err
 	}
-	return &ownerLease{file: file}, nil
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		file.Close()
+		return nil, errors.New("creation lease has another live owner")
+	}
+	return &ownerLease{file: file, schema: ownerLeaseSchema}, nil
 }
 func (lease *ownerLease) append(record ownerLeaseRecord) error {
-	record.Schema = ownerLeaseSchema
+	record.Schema = lease.schema
+	if record.Schema == "" {
+		record.Schema = ownerLeaseSchema
+	}
 	encoded, err := json.Marshal(record)
 	if err != nil || len(encoded) > 1<<20 {
 		return errors.New("creation lease record exceeds bound")
@@ -124,14 +170,14 @@ func (lease *ownerLease) append(record ownerLeaseRecord) error {
 }
 func (lease *ownerLease) Intent(request delegates.DockerCreateRequest) error {
 	info, err := lease.file.Stat()
-	if err != nil || info.Size() != 0 {
+	if err != nil || info.Size() != 0 || strings.TrimSpace(lease.daemonID) == "" || !lease.artifacts.valid() {
 		return errors.New("fresh creation lease must be empty")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return errors.New("creation lease source identity unavailable")
 	}
-	if err := lease.append(ownerLeaseRecord{Kind: "intent", Engine: lease.engine, HelperSHA: lease.helperSHA, Startup: "owner-io-idle-guard-v1", Request: &request, LeaseDev: strconv.FormatUint(uint64(stat.Dev), 10), LeaseInode: strconv.FormatUint(uint64(stat.Ino), 10)}); err != nil {
+	if err := lease.append(ownerLeaseRecord{Kind: "intent", DaemonID: lease.daemonID, Artifacts: lease.artifacts, Engine: lease.engine, HelperSHA: lease.helperSHA, Startup: "owner-io-idle-guard-v1", Request: &request, LeaseDev: strconv.FormatUint(uint64(stat.Dev), 10), LeaseInode: strconv.FormatUint(uint64(stat.Ino), 10)}); err != nil {
 		return err
 	}
 	lease.request = &request
@@ -172,10 +218,15 @@ func (lease *ownerLease) read() error {
 		var record ownerLeaseRecord
 		decoder := json.NewDecoder(bytes.NewReader(line))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&record) != nil || decoder.Decode(new(any)) != io.EOF || record.Schema != ownerLeaseSchema {
+		if decoder.Decode(&record) != nil || decoder.Decode(new(any)) != io.EOF || (record.Schema != ownerLeaseSchema && record.Schema != ownerLeaseLegacySchema) {
 			return errors.New("invalid complete creation lease record")
 		}
 		if index == 0 {
+			lease.schema = record.Schema
+			if (record.Schema == ownerLeaseSchema && (strings.TrimSpace(record.DaemonID) == "" || len(record.DaemonID) > 4096 || !record.Artifacts.valid())) || (record.Schema == ownerLeaseLegacySchema && (record.DaemonID != "" || record.Artifacts != nil)) {
+				return errors.New("durable daemon/source identity unavailable")
+			}
+			lease.daemonID, lease.artifacts = record.DaemonID, record.Artifacts
 			if record.Kind != "intent" || record.Request == nil || record.Engine == "" || record.Startup != "owner-io-idle-guard-v1" || len(record.HelperSHA) != 64 || strings.Trim(record.HelperSHA, "0123456789abcdef") != "" || record.ID != "" {
 				return errors.New("typed creation intent unavailable")
 			}
@@ -189,7 +240,7 @@ func (lease *ownerLease) read() error {
 			}
 			lease.engine, lease.helperSHA, lease.request = record.Engine, record.HelperSHA, record.Request
 		} else {
-			if record.Request != nil || record.Engine != "" || record.HelperSHA != "" || record.Startup != "" || record.LeaseDev != "" || record.LeaseInode != "" || len(record.ID) != 64 || strings.Trim(record.ID, "0123456789abcdef") != "" {
+			if record.Schema != lease.schema || record.DaemonID != "" || record.Artifacts != nil || record.Request != nil || record.Engine != "" || record.HelperSHA != "" || record.Startup != "" || record.LeaseDev != "" || record.LeaseInode != "" || len(record.ID) != 64 || strings.Trim(record.ID, "0123456789abcdef") != "" {
 				return errors.New("invalid creation identity record")
 			}
 			if index == 1 && (record.Kind == "created" || record.Kind == "resolved") {
@@ -210,6 +261,7 @@ func cleanupOwnerLease(ctx context.Context, args []string, run delegates.Command
 	docker := flags.String("docker", "docker", "container runtime binary")
 	descriptor := flags.Int("lease-fd", -1, "inherited private creation journal")
 	check := flags.String("lease-check", "", "private creation journal path")
+	recoverOwner := flags.Bool("recover", false, "recover an unlocked v2 journal through a requalified daemon")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -227,6 +279,9 @@ func cleanupOwnerLease(ctx context.Context, args []string, run delegates.Command
 		return err
 	}
 	if info.Size() == 0 {
+		if *recoverOwner {
+			return errors.New("no durable recovery intent")
+		}
 		// Before any durable intent there is no creation call. The C owner has
 		// joined the producer; current named custody authenticates this blank file.
 		duplicate, err := syscall.Dup(int(lease.file.Fd()))
@@ -238,12 +293,26 @@ func cleanupOwnerLease(ctx context.Context, args []string, run delegates.Command
 			return err
 		}
 		named.file.Close()
-		return emitOwnerCleanup("")
+		return emitOwnerCleanup("", nil)
 	}
 	if err = lease.read(); err != nil {
 		return err
 	}
-	if lease.engine != *endpoint {
+	pinned := func(ctx context.Context, binary string, args ...string) (string, error) {
+		return run(ctx, binary, append([]string{"--host", *endpoint}, args...)...)
+	}
+	if !*recoverOwner && lease.engine != *endpoint {
+		return errors.New("creation lease endpoint differs")
+	}
+	if *recoverOwner && (lease.schema != ownerLeaseSchema || info.Size() != lease.validEnd) {
+		return errors.New("complete v2 recovery intent required")
+	}
+	if lease.schema == ownerLeaseSchema {
+		actual, err := ownerDaemonID(ctx, pinned, *docker)
+		if err != nil || actual != lease.daemonID {
+			return errors.New("creation lease daemon identity differs")
+		}
+	} else if lease.engine != *endpoint {
 		return errors.New("creation lease daemon differs")
 	}
 	request := *lease.request
@@ -260,9 +329,6 @@ func cleanupOwnerLease(ctx context.Context, args []string, run delegates.Command
 		return errors.New("journal private source scope differs")
 	}
 
-	pinned := func(ctx context.Context, binary string, args ...string) (string, error) {
-		return run(ctx, binary, append([]string{"--host", *endpoint}, args...)...)
-	}
 	lease.recovering = true
 	runner := delegates.ContainerRunner{Docker: *docker, Run: pinned, MountTable: request.MountTable, RequireImmutableIdentity: true, Journal: lease}
 	id, err := runner.CleanupOwned(ctx, request, lease.id)
@@ -274,16 +340,17 @@ func cleanupOwnerLease(ctx context.Context, args []string, run delegates.Command
 			return err
 		}
 	}
-	return emitOwnerCleanup(id)
+	return emitOwnerCleanup(id, lease.artifacts)
 }
 
-func emitOwnerCleanup(id string) error {
+func emitOwnerCleanup(id string, artifacts *ownerSourceIdentities) error {
 	encoded, _ := json.Marshal(struct {
-		Schema      string `json:"schema"`
-		ID          string `json:"container_id,omitempty"`
-		Removed     bool   `json:"removed"`
-		NoContainer bool   `json:"no_container,omitempty"`
-	}{"aimee.container-cleanup.v1", id, id != "", id == ""})
+		Artifacts   *ownerSourceIdentities `json:"source_identities,omitempty"`
+		Schema      string                 `json:"schema"`
+		ID          string                 `json:"container_id,omitempty"`
+		Removed     bool                   `json:"removed"`
+		NoContainer bool                   `json:"no_container,omitempty"`
+	}{artifacts, "aimee.container-cleanup.v1", id, id != "", id == ""})
 	_, err := fmt.Fprintln(os.Stdout, string(encoded))
 	return err
 }
