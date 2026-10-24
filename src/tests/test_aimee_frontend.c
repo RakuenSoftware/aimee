@@ -98,8 +98,41 @@ static void test_unobserved_usage_projection(void)
    cJSON_Delete(chat);
 }
 
+static void test_canonical_success_usage_and_truncation(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "the answer"};
+   aimee_response_t response = {
+       .role = "assistant", .content = &text, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   response.usage_in = 100;
+   response.usage_out = 5;
+   response.usage_cache_read = 80;
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *reply = responses_frontend_render(&response);
+   assert(chat && reply);
+   const cJSON *usage = cJSON_GetObjectItem(reply, "usage");
+   assert(cJSON_GetObjectItem(usage, "total_tokens")->valueint == 105);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(usage, "input_tokens_details"), "cached_tokens")
+              ->valueint == 80);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "completed"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+   response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   reply = responses_frontend_render(&response);
+   chat = openai_frontend_render(&response);
+   assert(reply && chat);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "incomplete"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetObjectItem(reply, "incomplete_details"), "reason")),
+                  "max_output_tokens"));
+   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(chat, "choices"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "finish_reason")), "length"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+}
+
 int main(void)
 {
+   test_canonical_success_usage_and_truncation();
    test_unobserved_usage_projection();
    unrepresentable_refusal();
    printf("aimee-frontend: ");

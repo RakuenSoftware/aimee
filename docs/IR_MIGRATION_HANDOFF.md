@@ -79,7 +79,8 @@ probes preserve the same distinction. Optional wire usage is omitted or null
 according to its external contract; mandatory numeric usage refuses unknown. Ambiguous old result-cache entries must miss rather
 than guess usage knowledge; native opaque caches remain untouched. Focused normal,
 sanitizer, old-code failure and real-PostgreSQL evidence is retained separately;
-final combined qualification is still required.
+combined focused qualification now passes, while final broad/live qualification
+and the independently confirmed outer routing-retry accumulator remain required.
 
 The frontend correction is committed at `c7338b33d`: historical errors render
 beside their own turn and the mobile placeholder no longer clips. Its 503 tests,
@@ -89,6 +90,12 @@ SPA is not deployed yet. The integrated usage-bar follow-up also clears a prior
 turn’s count when the latest assistant has unknown usage. Its actual main-tree
 504 frontend tests, typecheck and both builds pass; this is local qualification,
 not a deployed browser claim.
+
+The plain no-tools executor follow-up at `daf28435f` preserves transport, retry,
+fallback and decoding uncertainty. Its actual HTTP regression exercises both
+plain and tool executors, including successful unknown usage and known zero;
+five normal and five sanitizer targets pass. Owner-level routing retries still
+reset results between agents and are being repaired separately.
 
 The current live history contains 128 rows. One fresh bounded native Send failed
 before SDK launch at `claude_source_lineage`, during native runtime preparation.
@@ -174,6 +181,12 @@ The same-rule fb0 census removes 1,285 net production lines from cleanup baselin
 `03d881e0e`, but the whole follow-up against testing `251536ddb` still adds 3,704.
 The local disconnected-executor retirement removes a further 1,001 production
 lines: cleanup becomes minus 2,286, whole follow-up plus 2,703.
+A subsequent source cleanup retires 19 disconnected OpenAI success/item/read
+constructors now served by canonical adapters, removing another 575 production
+lines. It preserves every live helper and the actual created/failed bytes;
+retained historical wrappers are not supported public SDK exports. The usage
+checkpoint before that cleanup has cleanup minus 2,067 / full follow-up plus
+2,922 under the same counting rules. Recompute after the final assembled source.
 This does not establish the requested overall reduction. Do not narrow the census,
 minify source or remove supported behavior to change the count.
 
@@ -238,3 +251,9 @@ Latest combined local usage evidence:
 - `/var/tmp/aimee-combined-usage-lint-followup/proof.json`: nine normal and nine
   sanitizer targets after the two lint corrections.
 - `/var/tmp/aimee-combined-usage-final-gates/lint/proof.json`: all 76 lint gates.
+
+- `/var/tmp/aimee-plain-transport-usage-final-proof/final-index.json`: plain/tool
+  actual HTTP regression, old plain source failure and five normal/sanitizer targets.
+- `/var/tmp/aimee-dead-shapers-proof/final-index.json`: 575 production lines
+  retired, six normal/sanitizer targets, 40 guard mutation tests, 512 actual
+  created/failed byte comparisons, 14 unchanged retained bodies and shipping link.

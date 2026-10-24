@@ -28,6 +28,14 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_parallel_openai_success_shapers_cannot_return(self):
+        for name in ('openai_request_double', 'openai_request_int', 'openai_format_chat_completion', 'openai_format_chat_completion_reason', 'openai_format_response', 'openai_format_response_status', 'openai_format_run', 'openai_format_responses_delta', 'openai_format_responses_completed', 'openai_format_responses_incomplete', 'openai_responses_message_item', 'openai_responses_function_call_item', 'openai_format_responses_msg_item_added', 'openai_format_responses_msg_item_done', 'openai_format_responses_fc_item_added', 'openai_format_responses_fc_item_done', 'openai_format_responses_fc_args_delta', 'openai_format_responses_fc_args_done', 'openai_format_responses_completed_items'):
+            for relative in ("src/server/reintroduced_shape.c", "src/headers/reintroduced_shape.h"):
+                path = self.source(relative, f"int {name}(void);\n")
+                with self.subTest(name=name, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
     def test_dormant_parallel_c_execution_cannot_return(self):
         for name in ('agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
             for relative in ("src/server/reintroduced_runner.c", "src/headers/reintroduced_runner.h"):
