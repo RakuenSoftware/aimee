@@ -7,6 +7,34 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Retry owners pass an initialized, owned result. The guarded dispatcher still
+ * accepts an uninitialized output; only this lexical owner reads the old value.
+ * Nonzero prior work cannot be priced at the final peer's model tariff. Its
+ * per-attempt canonical capture remains intact, while the aggregate is unknown. */
+int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
+                             const char *system, const char *prompt, int max_tokens,
+                             double temperature, int use_tools, agent_result_t *out)
+{
+   const aimee_response_t *response = &out->canonical_response;
+   int unknown = agent_result_usage_is_unobserved(out) || out->prompt_tokens > 0 ||
+                 out->completion_tokens > 0 || out->cache_read_tokens > 0 ||
+                 out->cache_write_tokens > 0 || response->usage_in > 0 || response->usage_out > 0 ||
+                 response->usage_cache_read > 0 || response->usage_cache_write > 0 ||
+                 response->usage_reasoning > 0;
+   agent_result_clear_response(out);
+   int rc = agent_dispatch_one(agent, network, role, system, prompt, max_tokens, temperature,
+                               use_tools, out);
+   if (unknown)
+   {
+      out->usage_unobserved = 1;
+      out->canonical_response.usage_unobserved = 1;
+      out->canonical_response.usage_in = out->canonical_response.usage_out =
+          out->canonical_response.usage_cache_read = out->canonical_response.usage_cache_write =
+              out->canonical_response.usage_reasoning = 0;
+   }
+   return rc;
+}
+
 /* Classify transient provider errors where a different fallback may succeed. */
 int agent_error_is_retryable(const char *error)
 {
@@ -155,17 +183,13 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
 
          peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         agent_result_clear_response(out);
-         out->response = NULL;
-         out->error[0] = '\0';
-
          aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
                    peer->name, pass == 0 ? "same" : "other");
          /* Through the single guarded executor: enforces peer->max_parallel and
           * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
           * non-zero so the loop simply moves to the next same-tier peer. */
-         rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                                 0.3, 1 /* use_tools */, out);
+         rc = agent_retry_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt,
+                                       max_tokens, 0.3, 1 /* use_tools */, out);
          if (rc == 0)
          {
             ag = peer;

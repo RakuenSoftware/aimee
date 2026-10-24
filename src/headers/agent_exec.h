@@ -137,6 +137,11 @@ int agent_error_is_retryable(const char *error);
  * saturation refusal (AGENT_RC_AT_LIMIT) or a retryable provider error; false for
  * success (0) or a non-retryable hard failure. */
 int agent_rc_should_try_another(int rc, const char *error);
+/* Private retry owner: out must be initialized and owns its previous response.
+ * Clears that response before dispatch, retaining aggregate usage uncertainty. */
+int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
+                             const char *system, const char *prompt, int max_tokens,
+                             double temperature, int use_tools, agent_result_t *out);
 /* Remaining milliseconds in the one request-wide delegate tool-loop budget.
  * Returns 0 when no request cap exists and -1 after an existing cap expires. */
 int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg);

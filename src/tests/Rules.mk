@@ -7538,5 +7538,5 @@ $(TESTPREFIX)/unit-test-acp-service-source: $(OBJDIR)/tests/test_acp_service_sou
 $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audit.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/token_tracker.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON) $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
+$(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON) $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

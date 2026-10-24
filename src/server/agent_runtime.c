@@ -444,8 +444,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       /* The turn goes through the single guarded executor: it enforces max_parallel
        * and records provider health. Returns 0 (ok), AGENT_RC_AT_LIMIT (agent
        * saturated — no health recorded), or -1 (run failure — health recorded). */
-      int rc = agent_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt,
-                                  max_tokens, temperature, use_tools, out);
+      int rc = agent_retry_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt,
+                                        max_tokens, temperature, use_tools, out);
       free(enhanced);
 
       if (rc == 0)
@@ -468,10 +468,9 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
        * (health already recorded by agent_dispatch_one for a real failure). */
       if (ntried < MAX_AGENTS)
          tried[ntried++] = ag->name;
-      agent_result_clear_response(out);
-      out->response = NULL;
    }
 
+   agent_result_clear_response(out);
    if (!out->error[0])
       agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
@@ -809,13 +808,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             break;
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         agent_result_clear_response(out);
-         out->response = NULL;
-         out->error[0] = '\0';
-
          aimee_log(LOG_INFO, "agent", "fallback: trying agent '%s'", fb->name);
-         rc = agent_dispatch_one(fb, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                                 0.3, 1 /* use_tools */, out);
+         rc = agent_retry_dispatch_one(fb, &cfg->network, role, system_prompt, user_prompt,
+                                       max_tokens, 0.3, 1 /* use_tools */, out);
          if (rc == 0)
             ag = fb; /* update ag for post-run logging (health recorded by dispatch_one) */
       }

@@ -13,12 +13,37 @@
 #undef http_retry_post
 #include "wire_fence.h"
 #include "agent_config.h"
+#include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/module_api.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/* No operator role definition and an empty permission response from the
+ * external role-owner peer: these cases exercise text-only routing, not grants. */
+char *role_template_frontmatter(const char *root, const char *role)
+{
+   (void)root;
+   (void)role;
+   return NULL;
+}
+static int retry_role_permissions(const uint8_t *request, size_t length, uint8_t *response,
+                                  size_t capacity, size_t *used)
+{
+   (void)request;
+   (void)length;
+   aimee_delegates_wire_t w;
+   aimee_delegates_wire_init(&w, response, capacity);
+   aimee_delegates_wire_u32(&w, AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC);
+   aimee_delegates_wire_u32(&w, 0); /* grants */
+   aimee_delegates_wire_u32(&w, 0); /* unenforced */
+   aimee_delegates_wire_u32(&w, 0); /* denied tools */
+   *used = w.len;
+   return w.overflow ? -1 : 0;
+}
 
 static int listening_peer(char url[128])
 {
@@ -190,6 +215,104 @@ static void test_actual_retry_observer_and_no_send(void)
    }
    puts("provider attempts: actual retries counted; preflight/guard/cancel no-send stays zero");
 }
+/* Exercise the real routing owner, configured fallback chain and same-tier
+ * selection. Only the HTTP endpoints and existing external module peers are
+ * fixtures; dispatcher admission/health/IR parsing remain production code. */
+static void test_actual_routing_retry_usage(void)
+{
+   const char *first_bodies[] = {"{\"error\":{\"message\":\"invalid_api_key\"}}",
+                                 "{\"error\":{\"message\":\"invalid_api_key\"},"
+                                 "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}"};
+   for (int route = 0; route < 3; route++)
+      for (int known = 0; known < (route ? 1 : 2); known++)
+      {
+         agent_config_t *cfg = calloc(1, sizeof *cfg);
+         assert(cfg);
+         cfg->agent_count = 2;
+         int listeners[2];
+         pid_t children[2];
+         for (int a = 0; a < 2; a++)
+         {
+            agent_t *agent = &cfg->agents[a];
+            snprintf(agent->name, sizeof agent->name, "retry-%d-%d-%d", route, known, a);
+            snprintf(agent->model, sizeof agent->model, "fixture-model-%d", a);
+            strcpy(agent->provider, "openai");
+            strcpy(agent->auth_type, "none");
+            strcpy(agent->roles[0], "review");
+            agent->role_count = 1;
+            agent->enabled = 1;
+            agent->max_parallel = 1;
+            agent->max_turns = 2;
+            agent->timeout_ms = 10000;
+            char url[128];
+            listeners[a] = listening_peer(url);
+            strcpy(agent->endpoint, url);
+            int status = a || known ? 200 : 401;
+            const char *body = a ? known_zero : first_bodies[known];
+            children[a] = serve_peer(listeners[a], &status, &body, 1);
+         }
+         strcpy(cfg->default_delegate, cfg->agents[0].name);
+         if (route == 1)
+         {
+            cfg->fallback_count = 1;
+            strcpy(cfg->fallback_chain[0], cfg->agents[1].name);
+         }
+         agent_result_t result = {0};
+         int rc = route == 0 ? agent_run_ex(cfg, "review", "system", "task", 128, 0, &result)
+                             : agent_run_with_tools(cfg, "review", "system", "task", 128, &result);
+         if (rc || !result.success)
+            fprintf(stderr, "route %d known %d failed rc=%d: %s\n", route, known, rc, result.error);
+         assert(!rc && result.success);
+         assert(!strcmp(result.agent_name, cfg->agents[1].name));
+         assert(agent_result_usage_is_unobserved(&result));
+         assert(result.canonical_response.usage_unobserved);
+         assert(!result.canonical_response.usage_in && !result.canonical_response.usage_out);
+         assert(!aimee_ir_response_admit(&result.canonical_response));
+         agent_result_clear_response(&result);
+         for (int a = 0; a < 2; a++)
+            join_peer(children[a], listeners[a]);
+         free(cfg);
+      }
+   puts("provider retry owners: actual plain route/configured chain/same-tier retain unknown or "
+        "prior paid usage");
+}
+
+static void test_retry_owner_known_usage_boundaries(void)
+{
+   for (int prior = 0; prior < 4; prior++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.name, sizeof agent.name, "retry-boundary-%d", prior);
+      strcpy(agent.model, "gpt-4o");
+      strcpy(agent.provider, "openai");
+      strcpy(agent.auth_type, "none");
+      agent.max_parallel = 1;
+      agent.timeout_ms = 10000;
+      char url[128];
+      int listener = listening_peer(url), status = 200;
+      strcpy(agent.endpoint, url);
+      const char *body = known_zero;
+      pid_t child = serve_peer(listener, &status, &body, 1);
+      /* An initialized owned diagnostic result, not a fabricated source receipt.
+       * Primary, cached and reasoning counters all prevent latest-model pricing. */
+      agent_result_t out = {0};
+      if (prior == 1)
+         out.prompt_tokens = 7;
+      if (prior == 2)
+         out.canonical_response.usage_cache_read = 3;
+      if (prior == 3)
+         out.canonical_response.usage_reasoning = 2;
+      assert(!agent_retry_dispatch_one(&agent, NULL, NULL, "system", "task", 128, 0, 0, &out));
+      assert(out.success && agent_result_usage_is_unobserved(&out) == (prior != 0));
+      assert(out.canonical_response.usage_unobserved == (prior != 0));
+      assert(!aimee_ir_response_admit(&out.canonical_response));
+      agent_result_clear_response(&out);
+      join_peer(child, listener);
+   }
+   puts("provider retry owner: observed zero preserved; prior primary/cache/reasoning work cannot "
+        "price at final model");
+}
+
 int main(int argc, char **argv)
 {
    int only_mode = -1;
@@ -201,6 +324,7 @@ int main(int argc, char **argv)
    else
       assert(argc == 1);
    delegate_role_seam_install();
+   delegate_register_permissions_provider(retry_role_permissions);
    agent_tools_register_metadata(fixture_metadata);
    char home[4096];
    snprintf(home, sizeof home, "%s/provider-usage-XXXXXX", platform_tmpdir());
@@ -210,6 +334,8 @@ int main(int argc, char **argv)
    assert(!platform_setenv("AIMEE_CONTEXT_NO_KB", "1"));
    assert(!config_set_memory_recall_enabled(0));
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
+   test_actual_routing_retry_usage();
+   test_retry_owner_known_usage_boundaries();
    test_actual_executor_observations(only_mode);
    test_actual_retry_observer_and_no_send();
    return 0;

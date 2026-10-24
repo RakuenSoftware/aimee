@@ -80,7 +80,8 @@ according to its external contract; mandatory numeric usage refuses unknown. Amb
 than guess usage knowledge; native opaque caches remain untouched. Focused normal,
 sanitizer, old-code failure and real-PostgreSQL evidence is retained separately;
 combined focused qualification now passes, while final broad/live qualification
-and the independently confirmed outer routing-retry accumulator remain required.
+remain required. The owner-local routing-retry accumulator is now integrated
+and focused normal/sanitizer qualification passes.
 
 The frontend correction is committed at `c7338b33d`: historical errors render
 beside their own turn and the mobile placeholder no longer clips. Its 503 tests,
@@ -94,8 +95,11 @@ not a deployed browser claim.
 The plain no-tools executor follow-up at `daf28435f` preserves transport, retry,
 fallback and decoding uncertainty. Its actual HTTP regression exercises both
 plain and tool executors, including successful unknown usage and known zero;
-five normal and five sanitizer targets pass. Owner-level routing retries still
-reset results between agents and are being repaired separately.
+five normal and five sanitizer targets pass. Owner-level routing retries now preserve unknown or prior paid work across
+plain routing, configured tool fallbacks and same-tier fallbacks. They never
+read an uninitialized dispatcher result or reprice prior work as the final
+model. Actual HTTP401-to-known-zero regressions fail on the old source for all
+three paths; four normal and four sanitizer targets pass on the repair.
 
 The current live history contains 128 rows. One fresh bounded native Send failed
 before SDK launch at `claude_source_lineage`, during native runtime preparation.
@@ -257,3 +261,7 @@ Latest combined local usage evidence:
 - `/var/tmp/aimee-dead-shapers-proof/final-index.json`: 575 production lines
   retired, six normal/sanitizer targets, 40 guard mutation tests, 512 actual
   created/failed byte comparisons, 14 unchanged retained bodies and shipping link.
+- `/var/tmp/aimee-retry-usage-proof/final-index.json`: owner retry fix, four
+  normal/sanitizer targets and three actual old-source routing failures.
+- `/var/tmp/aimee-retry-usage-main-combined-proof/proof.json`: the same four
+  normal/sanitizer targets on the assembled main worktree.
