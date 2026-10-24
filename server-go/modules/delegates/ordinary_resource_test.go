@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"text/template"
+	"time"
 )
 
 func TestOrdinaryIntentNeedsFullCreatorEvidenceBeforeResolvingID(t *testing.T) {
@@ -184,5 +185,183 @@ func TestResolveOrdinaryImageRequiresObservedConfig(t *testing.T) {
 	}, "held-docker", image)
 	if err == nil || id != "" || startup != nil || calls != 1 {
 		t.Fatal("missing required Config was admitted or retried")
+	}
+}
+
+func TestResolveOrdinaryImageAcquiresOnlyDefinitelyAbsentNamedReference(t *testing.T) {
+	for _, tc := range []struct{ ref, missing string }{
+		{"ubuntu:22.04", "ubuntu:22.04"},
+		{"registry.example/runtime:stable", "registry.example/runtime:stable"},
+		{"runtime", "runtime:latest"},
+		{"registry.invalid/team/runtime", "registry.invalid/team/runtime:latest"},
+		{"localhost:54321/team/runtime", "localhost:54321/team/runtime:latest"},
+		{"localhost:54321/team/runtime:qa", "localhost:54321/team/runtime:qa"},
+		{"docker.io/library/runtime", "runtime:latest"},
+		{"docker.io/library/runtime:qa", "runtime:qa"},
+		{"library/runtime", "runtime:latest"},
+		{"index.docker.io/library/runtime", "runtime:latest"},
+		{"docker.io/team/runtime", "team/runtime:latest"},
+	} {
+		ref := tc.ref
+		t.Run(ref, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			id := "sha256:" + strings.Repeat("c", 64)
+			calls := 0
+			format := ""
+			got, startup, err := ResolveOrdinaryImage(ctx, func(current context.Context, binary string, args ...string) (string, error) {
+				calls++
+				if current != ctx || binary != "held-docker" {
+					t.Fatal("creator transport or deadline changed")
+				}
+				switch calls {
+				case 1:
+					if len(args) != 5 || args[0] != "image" || args[1] != "inspect" || args[2] != "--format" || args[4] != ref {
+						t.Fatalf("unexpected initial observation: %q", args)
+					}
+					format = args[3]
+					return "Error response from daemon: No such image: " + tc.missing + "\n", errors.New("exit status 1")
+				case 2:
+					if !reflect.DeepEqual(args, []string{"image", "pull", "--quiet", ref}) {
+						t.Fatalf("not the same requested image: %q", args)
+					}
+					return "pull output is not identity authority", nil
+				case 3:
+					if !reflect.DeepEqual(args, []string{"image", "inspect", "--format", format, ref}) {
+						t.Fatalf("observation changed: %q", args)
+					}
+					return `{"id":"` + id + `","entrypoint":["/inherited"],"healthcheck":{"Test":["CMD","health"],"Retries":2}}`, nil
+				default:
+					t.Fatal("image acquisition retried")
+					return "", nil
+				}
+			}, "held-docker", ref)
+			if err != nil || got != id || startup == nil || !reflect.DeepEqual(startup.Entrypoint, []string{"/inherited"}) || startup.Healthcheck == nil || startup.Healthcheck.Retries != 2 || calls != 3 {
+				t.Fatalf("actual image startup was not pinned: %q %#v %v calls%d", got, startup, err, calls)
+			}
+		})
+	}
+}
+
+func TestResolveOrdinaryImageDoesNotRefreshPresentTag(t *testing.T) {
+	calls := 0
+	id := "sha256:" + strings.Repeat("a", 64)
+	got, _, err := ResolveOrdinaryImage(context.Background(), func(context.Context, string, ...string) (string, error) {
+		calls++
+		return `{"id":"` + id + `","entrypoint":null,"healthcheck":null}`, nil
+	}, "held-docker", "existing:tag")
+	if err != nil || got != id || calls != 1 {
+		t.Fatal("present tag was refreshed or lost")
+	}
+}
+
+func TestResolveOrdinaryImageDoesNotPullUnprovenAbsence(t *testing.T) {
+	exit := errors.New("exit status 1")
+	for _, tc := range []struct {
+		name, ref, output             string
+		err                           error
+		cancelBefore, cancelInInspect bool
+	}{
+		{name: "auth", output: "Error response from daemon: pull access denied", err: exit},
+		{name: "transport", output: "Cannot connect to Docker daemon", err: exit},
+		{name: "template", output: "template parsing error: missing map key", err: exit},
+		{name: "other-reference", output: "Error response from daemon: No such image: other:tag", err: exit},
+		{name: "additional-output", output: "warning\nError response from daemon: No such image: ubuntu:22.04", err: exit},
+		{name: "unrecognized", err: exit},
+		{name: "malformed-success", output: "{"},
+		{name: "no-error", output: "Error response from daemon: No such image: ubuntu:22.04"},
+		{name: "cancel-error", output: "Error response from daemon: No such image: ubuntu:22.04", err: context.Canceled},
+		{name: "deadline-error", output: "Error response from daemon: No such image: ubuntu:22.04", err: context.DeadlineExceeded},
+		{name: "cancelled-context", output: "Error response from daemon: No such image: ubuntu:22.04", err: exit, cancelBefore: true},
+		{name: "cancel-after-observation", output: "Error response from daemon: No such image: ubuntu:22.04", err: exit, cancelInInspect: true},
+		{name: "immutable-digest", ref: "sha256:" + strings.Repeat("a", 64), err: exit},
+		{name: "immutable-bare-id", ref: strings.Repeat("a", 64), err: exit},
+		{name: "wrong-normalized-namespace", ref: "docker.io/team/runtime", output: "Error response from daemon: No such image: runtime:latest", err: exit},
+		{name: "wrong-normalized-tag", ref: "docker.io/team/runtime", output: "Error response from daemon: No such image: team/runtime:other", err: exit},
+		{name: "foreign-registry-prefix", ref: "registry.invalid/library/runtime", output: "Error response from daemon: No such image: runtime:latest", err: exit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := tc.ref
+			if ref == "" {
+				ref = "ubuntu:22.04"
+			}
+			output := tc.output
+			if tc.ref != "" && output == "" {
+				output = "Error response from daemon: No such image: " + ref
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelBefore {
+				cancel()
+			}
+			calls := 0
+			id, startup, err := ResolveOrdinaryImage(ctx, func(context.Context, string, ...string) (string, error) {
+				calls++
+				if calls != 1 {
+					t.Fatal("unproven absence caused a pull")
+				}
+				if tc.cancelInInspect {
+					cancel()
+				}
+				return output, tc.err
+			}, "held-docker", ref)
+			if err == nil || id != "" || startup != nil || calls != 1 {
+				t.Fatal("failed observation was admitted or retried")
+			}
+		})
+	}
+}
+
+func TestResolveOrdinaryImageStopsAfterAcquisitionFailure(t *testing.T) {
+	for _, failure := range []string{"pull", "cancel", "malformed-reinspection", "missing-again"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls, pulls := 0, 0
+			ref := "ubuntu:22.04"
+			id, startup, err := ResolveOrdinaryImage(ctx, func(current context.Context, binary string, args ...string) (string, error) {
+				if current != ctx || binary != "held-docker" {
+					t.Fatal("creator transport changed")
+				}
+				calls++
+				if calls == 1 {
+					return "Error response from daemon: No such image: " + ref, errors.New("exit status 1")
+				}
+				if args[1] == "pull" {
+					pulls++
+					if failure == "pull" {
+						return "", errors.New("pull refused")
+					}
+					if failure == "cancel" {
+						cancel()
+					}
+					return "untrusted pull output", nil
+				}
+				if calls != 3 {
+					t.Fatal("acquisition retried")
+				}
+				if failure == "missing-again" {
+					return "Error response from daemon: No such image: " + ref, errors.New("exit status 1")
+				}
+				return "{", nil
+			}, "held-docker", ref)
+			expected := 3
+			if failure == "pull" || failure == "cancel" {
+				expected = 2
+			}
+			if err == nil || id != "" || startup != nil || calls != expected || pulls != 1 {
+				t.Fatal("failed acquisition was admitted/retried")
+			}
+		})
+	}
+}
+
+func TestResolveOrdinaryImageUnsupportedReferenceStillRefusesBeforeRuntime(t *testing.T) {
+	id, startup, err := ResolveOrdinaryImage(context.Background(), func(context.Context, string, ...string) (string, error) {
+		t.Fatal("unsupported reference reached runtime")
+		return "", nil
+	}, "held-docker", "registry.example/runtime@sha256:"+strings.Repeat("b", 64))
+	if err == nil || id != "" || startup != nil {
+		t.Fatal("existing image-reference policy widened")
 	}
 }
