@@ -449,7 +449,10 @@ fn serve<B: ModuleBus>(
             stage_id: expected,
             deadline_ns: message.deadline_ns,
             trace_id: message.trace_id,
-            principal_class: 1,
+            // The host stamps principal_ref from the admitted slot. Zero is
+            // reserved for host-origin traffic: external module grants cannot
+            // enroll principal zero. Request bodies never supply this class.
+            principal_class: u32::from(f.principal_ref != 0),
             principal_ref: f.principal_ref,
             cancelled: Arc::new(AtomicBool::new(false)),
         };
@@ -774,6 +777,37 @@ mod tests {
         }
         shutdown.trigger();
         t.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn invocation_preserves_attested_host_and_module_origins() {
+        let bus = Arc::new(FakeBus::default());
+        push_invoke(&bus, KIND, STAGE, 1, 0, &[b'x'; 181]);
+        for event in bus.inbox.lock().unwrap().iter_mut() {
+            event.frame.principal_ref = 0;
+        }
+        // A module body claiming host identity cannot replace frame metadata.
+        push_invoke(
+            &bus,
+            KIND,
+            STAGE,
+            2,
+            0,
+            br#"{"principal_class":0,"principal_ref":0}"#,
+        );
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&seen);
+        let handler: Handler = Arc::new(move |inv, _| {
+            captured
+                .lock()
+                .unwrap()
+                .push((inv.principal_class, inv.principal_ref));
+            (Vec::new(), ModuleStatus::Ok)
+        });
+        serve(bus, Some(handler), &[1, 2]);
+        let mut origins = seen.lock().unwrap().clone();
+        origins.sort_unstable();
+        assert_eq!(origins, vec![(0, 0), (1, 90)]);
     }
 
     fn echo() -> Handler {
