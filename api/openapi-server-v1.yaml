@@ -5203,6 +5203,13 @@ paths:
               required: [message]
               properties:
                 ir_version: { type: integer, enum: [1], description: Select the canonical durable session stream }
+                control_replies:
+                  type: boolean
+                  default: true
+                  description: >
+                    Set false for a caller without an interactive reply subscriber.
+                    Questions and permission requests then refuse instead of waiting.
+                    This only restricts existing capabilities; it grants no authority.
                 attach_id: { type: string, description: Server-minted presence attachment }
                 queue: { type: boolean, description: Wait for the session turn lock }
                 queue_wait_ms: { type: integer, minimum: 0, maximum: 120000 }
