@@ -90,43 +90,51 @@ static const char known_zero[] =
     "{\"model\":\"gpt-4o\",\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":"
     "\"assistant\",\"content\":\"Measured "
     "zero.\"}}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}";
+static const char unknown_usage[] =
+    "{\"model\":\"gpt-4o\",\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":"
+    "\"assistant\",\"content\":\"Unknown usage.\"}}]}";
 static void test_actual_executor_observations(int only_mode)
 {
-   const int statuses[][2] = {{200, 0}, {400, 0}, {204, 0}, {500, 200}, {200, 0}, {400, 200}};
-   const char *bodies[][2] = {{"not-json", NULL}, {"{}", NULL},       {"", NULL},
-                              {"{}", known_zero}, {known_zero, NULL}, {"{}", known_zero}};
-   for (int mode = 0; mode < 6; mode++)
-   {
-      if (only_mode >= 0 && mode != only_mode)
-         continue;
-      char url[128];
-      int listener = listening_peer(url), count = mode == 3 || mode == 5 ? 2 : 1;
-      pid_t child = serve_peer(listener, statuses[mode], bodies[mode], count);
-      agent_t agent = {0};
-      strcpy(agent.name, "transport-usage");
-      strcpy(agent.model, "gpt-4o");
-      strcpy(agent.provider, "openai");
-      strcpy(agent.auth_type, "none");
-      strcpy(agent.endpoint, url);
-      if (mode == 5)
-         strcpy(agent.fallback_model, "fallback-model");
-      agent.max_turns = 2;
-      agent.timeout_ms = 10000;
-      agent_network_t network = {0};
-      agent_result_t result = {0};
-      int rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "system", "task", 128, 0,
-                                                 &result);
-      assert((rc == 0 && result.success) == (mode >= 3));
-      assert(agent_result_usage_is_unobserved(&result) == (mode != 4));
-      if (mode >= 3)
+   const int statuses[][2] = {{200, 0}, {400, 0},   {204, 0}, {500, 200},
+                              {200, 0}, {400, 200}, {200, 0}};
+   const char *bodies[][2] = {{"not-json", NULL},   {"{}", NULL},       {"", NULL},
+                              {"{}", known_zero},   {known_zero, NULL}, {"{}", known_zero},
+                              {unknown_usage, NULL}};
+   for (int execution = 0; execution < 2; execution++)
+      for (int mode = 0; mode < 7; mode++)
       {
-         assert(result.canonical_response.usage_unobserved == (mode != 4));
-         assert(!aimee_ir_response_admit(&result.canonical_response));
+         if (only_mode >= 0 && mode != only_mode)
+            continue;
+         char url[128];
+         int listener = listening_peer(url), count = mode == 3 || mode == 5 ? 2 : 1;
+         pid_t child = serve_peer(listener, statuses[mode], bodies[mode], count);
+         agent_t agent = {0};
+         strcpy(agent.name, "transport-usage");
+         strcpy(agent.model, "gpt-4o");
+         strcpy(agent.provider, "openai");
+         strcpy(agent.auth_type, "none");
+         strcpy(agent.endpoint, url);
+         if (mode == 5)
+            strcpy(agent.fallback_model, "fallback-model");
+         agent.max_turns = 2;
+         agent.timeout_ms = 10000;
+         agent_network_t network = {0};
+         agent_result_t result = {0};
+         int rc = execution ? agent_execute(&agent, "system", "task", 128, 0, &result)
+                            : agent_execute_with_tools_for_role(&agent, &network, NULL, "system",
+                                                                "task", 128, 0, &result);
+         assert((rc == 0 && result.success) == (mode >= 3));
+         assert(agent_result_usage_is_unobserved(&result) == (mode != 4));
+         if (mode >= 3)
+         {
+            assert(result.canonical_response.usage_unobserved == (mode != 4));
+            assert(!aimee_ir_response_admit(&result.canonical_response));
+         }
+         agent_result_clear_response(&result);
+         join_peer(child, listener);
       }
-      agent_result_clear_response(&result);
-      join_peer(child, listener);
-   }
-   puts("provider attempts: real HTTP decode/status/empty/retry/fallback unknown, first knownzero "
+   puts("provider attempts: plain and tool HTTP decode/status/empty/retry/fallback unknown, first "
+        "knownzero "
         "remains known");
 }
 static void test_actual_retry_observer_and_no_send(void)

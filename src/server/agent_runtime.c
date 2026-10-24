@@ -899,6 +899,7 @@ static void parse_response(const char *body, const agent_t *agent,
       cJSON *root = cJSON_Parse(body);
       if (!root)
       {
+         out->usage_unobserved = 1;
          snprintf(out->error, sizeof out->error, "invalid JSON response");
          return;
       }
@@ -908,12 +909,24 @@ static void parse_response(const char *body, const agent_t *agent,
    }
    if (rc != 0)
    {
+      out->usage_unobserved = 1;
       snprintf(out->error, sizeof out->error, "%s",
                rc == AGENT_IR_CAPTURE_FAILED ? "canonical response persistence failed"
                                              : "provider response could not be admitted as IR");
       if (rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed())
          snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
       return;
+   }
+   out->prompt_tokens = response.usage_in;
+   out->completion_tokens = response.usage_out;
+   out->cache_read_tokens = response.usage_cache_read;
+   out->cache_write_tokens = response.usage_cache_write;
+   out->usage_unobserved |= response.usage_unobserved;
+   if (out->usage_unobserved)
+   {
+      response.usage_unobserved = 1;
+      response.usage_in = response.usage_out = response.usage_cache_read =
+          response.usage_cache_write = response.usage_reasoning = 0;
    }
    if (response.error_message)
    {
@@ -923,10 +936,6 @@ static void parse_response(const char *body, const agent_t *agent,
       out->canonical_response = response;
       return;
    }
-   out->prompt_tokens = response.usage_in;
-   out->completion_tokens = response.usage_out;
-   out->cache_read_tokens = response.usage_cache_read;
-   out->cache_write_tokens = response.usage_cache_write;
    if (response.model && response.model[0])
       snprintf(out->model, sizeof out->model, "%s", response.model);
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
@@ -1054,14 +1063,20 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
    wire_fence_route_t wire_route = is_anthropic_provider(agent) ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                    : strstr(url, "/responses")  ? WIRE_FENCE_OPENAI_RESPONSES
                                                                 : WIRE_FENCE_OPENAI_CHAT;
-   int http_status = wire_fence_revalidate_sources() != 0
-                         ? HTTP_RETRY_ADMISSION_REFUSED
-                         : wire_fence_post(url, auth_header, body, strlen(body), &response_body,
-                                           agent->timeout_ms, extra_headers, ra, rb, rm,
-                                           agent->provider, agent->model, session_id(), wire_route);
+   wire_fence_observation_t observation = {0};
+   int http_status =
+       wire_fence_revalidate_sources() != 0
+           ? HTTP_RETRY_ADMISSION_REFUSED
+           : wire_fence_post_observed(url, auth_header, body, strlen(body), &response_body,
+                                      agent->timeout_ms, extra_headers, ra, rb, rm, agent->provider,
+                                      agent->model, session_id(), wire_route, &observation);
+   out->usage_unobserved |=
+       observation.transport_attempts > 1 ||
+       (observation.transport_attempts && (http_status != 200 || !response_body));
    free(body);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
+      out->usage_unobserved |= observation.transport_attempts != 0;
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
       free(augmented_prompt);
@@ -1101,18 +1116,23 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
             aimee_ir_session_fail_capture();
             return AGENT_RC_CAPTURE_FAILED;
          }
-         http_status =
-             wire_fence_revalidate_sources() != 0
-                 ? HTTP_RETRY_ADMISSION_REFUSED
-                 : wire_fence_post(url, auth_header, fb_body, strlen(fb_body), &response_body,
-                                   agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
-                                   fb_agent.model, session_id(), wire_route);
+         observation = (wire_fence_observation_t){0};
+         http_status = wire_fence_revalidate_sources() != 0
+                           ? HTTP_RETRY_ADMISSION_REFUSED
+                           : wire_fence_post_observed(
+                                 url, auth_header, fb_body, strlen(fb_body), &response_body,
+                                 agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
+                                 fb_agent.model, session_id(), wire_route, &observation);
+         out->usage_unobserved |=
+             observation.transport_attempts > 1 ||
+             (observation.transport_attempts && (http_status != 200 || !response_body));
          free(fb_body);
       }
    }
    free(augmented_prompt);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
+      out->usage_unobserved |= observation.transport_attempts != 0;
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
       return -1;
