@@ -6666,3 +6666,9 @@ cause is still a hypothesis. The selected legacy credential origin is unchanged.
 The browser failure-state fix remains included. The next complete source build
 will contain it together with these permission and catalog repairs. Preserve
 all failed turns, previous native cache evidence and negative custody fixtures.
+
+### ACP usage-presence foundation (continuation, not final qualification)
+
+Canonical response usage now distinguishes unobserved provider counts from observed zero. The unknown response usage variant is `{"unobserved":true}`; canonical terminal deltas omit usage counts when none were observed. Existing observed count wire values are unchanged. C/Go codec admission rejects mixed or malformed variants, response assembly preserves absence, and memory evaluation refuses unobserved usage rather than grading fabricated zero-cost output. The browser retains absent usage through durable replay.
+
+Qualification: actual C session assembly/serialization fixture passes normally and under ASan/UBSan with leak detection; Go IR and memory-eval packages pass race testing, including C/Go roundtrip and unknown-evaluation negatives. The frontend patch independently passes 500 tests plus type checking and both app/console builds. These are source-delta checks, not a new live deployment or a completed ACP migration. ACP producer activation and the actual public-route resource/tool fixtures remain in progress.

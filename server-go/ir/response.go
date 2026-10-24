@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -32,11 +33,52 @@ type ResponseBlock struct {
 }
 
 type ResponseUsage struct {
-	Input      string `json:"input"`
-	Output     string `json:"output"`
-	CacheRead  string `json:"cache_read"`
-	CacheWrite string `json:"cache_write"`
-	Reasoning  string `json:"reasoning"`
+	Input      string `json:"input,omitempty"`
+	Output     string `json:"output,omitempty"`
+	CacheRead  string `json:"cache_read,omitempty"`
+	CacheWrite string `json:"cache_write,omitempty"`
+	Reasoning  string `json:"reasoning,omitempty"`
+	Unobserved bool   `json:"unobserved,omitempty"`
+}
+
+// Unknown usage is a distinct wire variant, never an observed zero count.
+func (u ResponseUsage) Valid() bool {
+	for _, value := range []string{u.Input, u.Output, u.CacheRead, u.CacheWrite, u.Reasoning} {
+		if u.Unobserved {
+			if value != "" {
+				return false
+			}
+		} else if !canonicalUnsigned(value, 63) {
+			return false
+		}
+	}
+	return true
+}
+
+func (u *ResponseUsage) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if !ValidJSON(data) || json.Unmarshal(data, &fields) != nil || fields == nil {
+		return errors.New("invalid canonical usage")
+	}
+	if value, ok := fields["unobserved"]; ok {
+		if len(fields) != 1 || !bytes.Equal(bytes.TrimSpace(value), []byte("true")) {
+			return errors.New("mixed or invalid unobserved usage")
+		}
+		*u = ResponseUsage{Unobserved: true}
+		return nil
+	}
+	if len(fields) != 5 {
+		return errors.New("incomplete canonical usage")
+	}
+	type plain ResponseUsage
+	var value plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil || !ResponseUsage(value).Valid() {
+		return errors.New("invalid canonical usage counts")
+	}
+	*u = ResponseUsage(value)
+	return nil
 }
 
 type StopReason int
@@ -52,7 +94,9 @@ const (
 	StopError
 )
 
-func ZeroUsage() ResponseUsage { return ResponseUsage{"0", "0", "0", "0", "0"} }
+func ZeroUsage() ResponseUsage {
+	return ResponseUsage{Input: "0", Output: "0", CacheRead: "0", CacheWrite: "0", Reasoning: "0"}
+}
 
 func canonicalUnsigned(value string, bits int) bool {
 	_, err := strconv.ParseUint(value, 10, bits)
@@ -75,11 +119,8 @@ func (r Response) Valid() bool {
 		r.Blocks == nil || len(r.Blocks) > 4096 || r.StopReason < StopUnknown || r.StopReason > StopError {
 		return false
 	}
-	for _, value := range []string{r.Usage.Input, r.Usage.Output, r.Usage.CacheRead, r.Usage.CacheWrite, r.Usage.Reasoning} {
-		// C usage is a nonnegative signed long on the shipped 64-bit platforms.
-		if !canonicalUnsigned(value, 63) {
-			return false
-		}
+	if !r.Usage.Valid() {
+		return false
 	}
 	for _, value := range []*string{r.ID, r.Model, r.ErrorMessage, r.RawStopReason} {
 		if value != nil && (strings.ContainsRune(*value, 0) || !utf8.ValidString(*value)) {

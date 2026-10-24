@@ -141,6 +141,44 @@ it('shows cache projection independently of reasoning without changing history',
   }
 });
 
+it('replays ACP fidelity as read-only notices without changing message or control authority', () => {
+  const initial = emptySession('s');
+  const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'acp-context', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, host_context_blocks_as_text: 1 } } };
+  const state = reduceSession(initial, report);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  expect(reduceSession(state, report)).toBe(state);
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
+  const view = render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP sends host instructions as context (1 block).');
+  expect(screen.queryByRole('button')).toBeNull();
+  view.unmount();
+  const reports = reduceSession(state, { ...report, sequence: '2', event_id: 'acp-tools',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, unverified_external_tool_reports: 2 } } });
+  render(<IRTranscript state={reports} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP sends host instructions as context.');
+  expect(screen.getByRole('status').textContent).toContain('External tool reports are unverified.');
+  expect(screen.getByText('Model compatibility details (2)').closest('details')?.textContent).toContain('External tool reports are unverified (2).');
+  expect(reports.messages).toBe(initial.messages);
+  expect(reports.controls).toBe(initial.controls);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('rejects malformed or empty ACP fidelity counts at the durable replay boundary', () => {
+  for (const field of ['host_context_blocks_as_text', 'unverified_external_tool_reports']) {
+    for (const count of [-1, 0, 0.5, 4097, Number.MAX_SAFE_INTEGER + 1, null, '1']) {
+      const invalid = { version: 1, session_id: 's', sequence: '1', event_id: 'bad-projection', turn_id: 't', actor: 'alice',
+        event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,
+          omitted_opaque_state_blocks: 0, [field]: count } } };
+      expect(() => reduceSession(emptySession('s'), invalid as Envelope)).toThrow('Invalid projection report');
+    }
+  }
+});
+
 it('loads an expanded delegate from its private canonical log without adding it to parent messages', () => {
   class Stream {
     static instances: Stream[] = [];

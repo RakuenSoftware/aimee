@@ -707,7 +707,11 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    if (!delta || delta->type < AIMEE_DELTA_TURN_START || delta->type > AIMEE_DELTA_ERROR ||
        (delta->type == AIMEE_DELTA_TURN_STOP &&
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
-         delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
+         delta->usage_cache_write < 0 || delta->usage_reasoning < 0 ||
+         (delta->usage_unobserved != 0 && delta->usage_unobserved != 1) ||
+         (delta->usage_unobserved &&
+          (delta->usage_in || delta->usage_out || delta->usage_cache_read ||
+           delta->usage_cache_write || delta->usage_reasoning)))))
       return NULL;
    if (delta->refusal &&
        (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
@@ -771,9 +775,12 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
               add_string(out, "tool_args_delta", delta->tool_args_delta);
    }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
-      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason)) &&
-           cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
-           cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   {
+      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason));
+      if (!delta->usage_unobserved)
+         ok = ok && cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
+              cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
    {
       ok = ok && add_string(out, "raw_stop_reason", delta->raw_stop_reason);
@@ -1243,6 +1250,7 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
                            .usage_cache_read = response->usage_cache_read,
                            .usage_cache_write = response->usage_cache_write,
                            .usage_reasoning = response->usage_reasoning};
+   delta.usage_unobserved = response->usage_unobserved;
    return aimee_ir_session_emit(&event);
 }
 

@@ -37,6 +37,9 @@ func projectModelReply(reply modelReply) (modelReply, error) {
 	if err != nil {
 		return reply, fmt.Errorf("evaluation requires complete canonical text: %w", err)
 	}
+	if reply.Output.Usage.Unobserved {
+		return reply, errors.New("evaluation requires observed provider token usage")
+	}
 	input, err := strconv.Atoi(reply.Output.Usage.Input)
 	if err != nil {
 		return reply, errors.New("evaluation input usage exceeds supported integer range")

@@ -1400,6 +1400,11 @@ int aimee_ir_response_valid(const aimee_response_t *response)
    if (response->usage_in < 0 || response->usage_out < 0 || response->usage_cache_read < 0 ||
        response->usage_cache_write < 0 || response->usage_reasoning < 0)
       return -1;
+   if ((response->usage_unobserved != 0 && response->usage_unobserved != 1) ||
+       (response->usage_unobserved &&
+        (response->usage_in || response->usage_out || response->usage_cache_read ||
+         response->usage_cache_write || response->usage_reasoning)))
+      return -1;
    for (int i = 0; i < response->n_content; i++)
    {
       const aimee_block_t *block = &response->content[i];
@@ -1756,6 +1761,7 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
       builder->response.usage_cache_read = delta->usage_cache_read;
       builder->response.usage_cache_write = delta->usage_cache_write;
       builder->response.usage_reasoning = delta->usage_reasoning;
+      builder->response.usage_unobserved = delta->usage_unobserved;
       if (aimee_ir_response_admit(&builder->response))
          return -1;
       builder->complete = 1;

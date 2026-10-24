@@ -297,6 +297,11 @@ func TestAgentModelCanonicalTerminalAdmission(t *testing.T) {
 	}
 	usage := *text
 	usage.Usage = canonical.ZeroUsage()
+	usage.Usage = canonical.ResponseUsage{Unobserved: true}
+	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), "system", "prompt", 256); err == nil || !strings.Contains(err.Error(), "observed provider token usage") {
+		t.Fatal("unknown usage promoted to measured evaluation", err)
+	}
+	usage.Usage = canonical.ZeroUsage()
 	usage.Usage.Input = "18446744073709551615"
 	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), "system", "prompt", 256); err == nil {
 		t.Fatal("overflow usage silently converted")

@@ -364,6 +364,7 @@ typedef struct aimee_response
    long usage_reasoning;
    struct cJSON *raw;                /* sidecar */
    aimee_refusal_details_t *refusal; /* owned terminal diagnostic; NULL when absent */
+   int usage_unobserved; /* No provider usage observation; numeric storage must be zero. */
 } aimee_response_t;
 
 /* ---- streaming: a SEPARATE IR surface (event stream, not one object) ----
@@ -411,6 +412,7 @@ typedef struct
    long usage_cache_read, usage_cache_write, usage_reasoning;
    const char *error_message;              /* ERROR */
    const aimee_refusal_details_t *refusal; /* TURN_STOP diagnostic, borrowed */
+   int usage_unobserved; /* TURN_STOP: omit unknown usage rather than report zero. */
 } aimee_delta_t;
 
 /* Bounded owned model-delta assembly for canonical persistence/replay. This

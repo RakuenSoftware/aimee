@@ -65,7 +65,9 @@ cJSON *aimee_ir_response_json(const aimee_response_t *response)
    }
    long values[] = {copy.usage_in, copy.usage_out, copy.usage_cache_read, copy.usage_cache_write,
                     copy.usage_reasoning};
-   for (size_t i = 0; i < sizeof values / sizeof *values; i++)
+   if (copy.usage_unobserved && !cJSON_AddBoolToObject(usage, "unobserved", 1))
+      goto fail;
+   for (size_t i = 0; !copy.usage_unobserved && i < sizeof values / sizeof *values; i++)
    {
       char decimal[32];
       snprintf(decimal, sizeof decimal, "%ld", values[i]);
@@ -129,10 +131,13 @@ int aimee_ir_response_parse(const cJSON *json, aimee_response_t *out)
    const cJSON *schema = cJSON_GetObjectItemCaseSensitive(json, "schema");
    const cJSON *stop = cJSON_GetObjectItemCaseSensitive(json, "stop_reason");
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive(json, "usage");
+   const cJSON *unobserved = cJSON_GetObjectItemCaseSensitive(usage, "unobserved");
    if (!cJSON_IsString(schema) || strcmp(schema->valuestring, "aimee.response.v1") ||
        !cJSON_IsNumber(stop) || stop->valuedouble != stop->valueint ||
        stop->valueint < AIMEE_STOP_UNKNOWN || stop->valueint > AIMEE_STOP_ERROR ||
-       !cJSON_IsObject(usage) || cJSON_GetArraySize(usage) != 5)
+       !cJSON_IsObject(usage) ||
+       (unobserved ? (!cJSON_IsTrue(unobserved) || cJSON_GetArraySize(usage) != 1)
+                   : cJSON_GetArraySize(usage) != 5))
       return -1;
    aimee_message_t message = {0};
    aimee_response_t result = {0};
@@ -165,9 +170,10 @@ int aimee_ir_response_parse(const cJSON *json, aimee_response_t *out)
    result.content = message.blocks;
    result.n_content = message.n_blocks;
    result.stop_reason = (aimee_stop_reason_t)stop->valueint;
+   result.usage_unobserved = unobserved != NULL;
    long *values[] = {&result.usage_in, &result.usage_out, &result.usage_cache_read,
                      &result.usage_cache_write, &result.usage_reasoning};
-   for (size_t i = 0; i < sizeof values / sizeof *values; i++)
+   for (size_t i = 0; !result.usage_unobserved && i < sizeof values / sizeof *values; i++)
       if (read_usage(usage, usage_keys[i], values[i]))
          goto fail;
    if (read_optional(json, "id", &result.id) || read_optional(json, "model", &result.model) ||

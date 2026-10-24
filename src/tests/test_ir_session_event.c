@@ -752,6 +752,27 @@ int main(void)
    compaction_json = aimee_ir_session_event_json(&compaction_event);
    assert(!compaction_json);
 
+   aimee_delta_t unknown_usage = {
+       .type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN, .usage_unobserved = 1};
+   cJSON *unknown_json = aimee_ir_delta_json(&unknown_usage);
+   assert(unknown_json && !cJSON_GetObjectItem(unknown_json, "usage_in") &&
+          !cJSON_GetObjectItem(unknown_json, "usage_out"));
+   cJSON_Delete(unknown_json);
+   aimee_ir_response_builder_t unknown_builder = {0};
+   aimee_delta_t unknown_start = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&unknown_builder, &unknown_start));
+   assert(!aimee_ir_response_builder_apply(&unknown_builder, &unknown_usage));
+   assert(unknown_builder.response.usage_unobserved);
+   aimee_ir_response_builder_free(&unknown_builder);
+   unknown_usage.usage_in = 1;
+   assert(!aimee_ir_delta_json(&unknown_usage));
+   unknown_usage.usage_in = 0;
+   unknown_usage.usage_unobserved = 0;
+   unknown_json = aimee_ir_delta_json(&unknown_usage);
+   assert(unknown_json && cJSON_GetObjectItem(unknown_json, "usage_in") &&
+          cJSON_GetObjectItem(unknown_json, "usage_out"));
+   cJSON_Delete(unknown_json);
+
    puts("IR session event tests passed");
    return 0;
 }

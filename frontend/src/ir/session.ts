@@ -53,7 +53,7 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
-export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number; host_context_blocks_as_text?: number; unverified_external_tool_reports?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 /** Host custody metadata. Browser schema admission grants no execution authority. */
 export type DelegateLearningBinding = {
@@ -291,7 +291,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const report = event.payload;
       if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks < 0 ||
           !Number.isSafeInteger(report.omitted_cache_controls ?? 0) || (report.omitted_cache_controls ?? 0) < 0 ||
-          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0) ||
+          (report.host_context_blocks_as_text !== undefined && (!Number.isSafeInteger(report.host_context_blocks_as_text) || report.host_context_blocks_as_text < 0 || report.host_context_blocks_as_text > 4096)) ||
+          (report.unverified_external_tool_reports !== undefined && (!Number.isSafeInteger(report.unverified_external_tool_reports) || report.unverified_external_tool_reports < 0 || report.unverified_external_tool_reports > 4096)) ||
+          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0 &&
+            (report.host_context_blocks_as_text ?? 0) === 0 && (report.unverified_external_tool_reports ?? 0) === 0) ||
           !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
           report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');
       next.projections = [...(state.projections ?? []), { ...report, id: envelope.event_id, turn: envelope.turn_id }];
@@ -490,10 +493,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
             throw new Error('Invalid model usage');
         }
-        message.usage = { input: d.usage_in || 0, output: d.usage_out || 0,
+        message.usage = [d.usage_in, d.usage_out, d.usage_cache_read, d.usage_cache_write, d.usage_reasoning].some(value => value !== undefined) ? { input: d.usage_in || 0, output: d.usage_out || 0,
           ...(d.usage_cache_read !== undefined ? { cacheRead: d.usage_cache_read } : {}),
           ...(d.usage_cache_write !== undefined ? { cacheWrite: d.usage_cache_write } : {}),
-          ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) };
+          ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) } : undefined;
         message.stopReason = d.stop_reason;
         message.nativeStopReason = d.raw_stop_reason;
         if (d.refusal !== undefined) message.refusal = d.refusal === null ? null : { ...d.refusal };
