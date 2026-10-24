@@ -219,8 +219,10 @@ interruption receipt. This is real fault/recovery/cancellation evidence.
 
 The same session's native continuation launches one SDK but produces no observed
 provider response, permission or file effect. A 90-second browser harness wait
-ends before the configured 180-second runtime deadline. At that deadline the SDK
-records a synthetic local gateway 502 and exits; this generic proxy error does
+ends first. At about 180 seconds the SDK records a synthetic local gateway 502
+and exits; this observed timing does not establish a native execution deadline.
+A later normal model read confirms the preserved original alias has a 600-second
+timeout. The generic proxy error does
 not establish upstream dispatch or its cause. No extra Send or Allow occurs.
 The canonical turn nevertheless remains running. Source and function backtraces
 establish that the producer has returned; this is not a native worker-join hang.
@@ -240,6 +242,13 @@ native/cache bytes and authority remain exact; the current 63 records are sealed
 with zero SDK/native activity and no file effect or Allow.
 Final combined qualification and updated-image acceptance remain pending.
 
+The revised continuation catches the erroneous 180-second alias assertion during
+preparation, before any additional Send. The original alias stays unchanged.
+A distinct test-owned alias shares its registration and all other behavior with
+explicit three-generation/180-second bounds; normal configuration and original
+record equality must be verified before using that alias. No request-body
+substitution or silent timeout relaxation is permitted.
+
 The final focused C delta passes three normal and three ASan/UBSan/leak targets
 for browser capture, native runtime and private service source. A separate
 retirement deletes two unused diagnostic/catalog wrappers and their declarations
@@ -251,6 +260,42 @@ passes all 31 mutation-aware tests and rejects both retired symbols. Including
 the terminal fix and diagnostic labels, the cleanup checkpoint now removes
 2,114 net production lines; the full follow-up still adds 2,875 against the
 recorded `testing` base. Do not claim a whole-branch net reduction.
+
+Runtime `e5c8c6c32` now builds all 87 products/19 modules and passes a normal
+same-volume upgrade from `f3e9f22ef`, preserving all 63 prior IR records, native
+tables, full SDK files, configuration, grants and authority. Two subsequent
+descendants change only an inert test path and its formatting; the runtime image
+remains honestly labeled `e5c8c6c32`. Final lint passes all 76 checks on `843a104e8`.
+The supported 2,048-token service case passes one SDK invocation/one real model
+generation, END_TURN, 403 input/1,422 output tokens, zero tools, completed child
+and parent, human pause, 15-second deduplication and normal Stop/rule removal.
+All previous 63 records/caches remain exact; current history reaches 77 records.
+A distinct monetary negative then parks as `cost_limit_unsupported` for at least
+16 seconds with zero SDK launches, zero charged/reserved cost and no automatic
+resume. Scheduler poll counts are timing inference, not a fabricated counter.
+
+The additional bounded native continuation reaches the actual provider but is
+refused (`reasoning_extraction`, 534 input/zero output tokens). The full refusal
+and the real failed terminal are retained: this live result verifies the repaired
+failure-terminal path. It does not qualify a successful Allow or file effect.
+All previous 77 records/caches remain exact; current history reaches 83 records.
+The refused session/transcript must not be rewritten or retried to force success.
+A fresh ordinary native write also cannot be assumed to request permission:
+native allowedTools admits host tools, while explicit unknown-effect permission
+requires a real prior interruption receipt. That proposed paid case was cancelled
+before Send. The next independent positive control fixture must establish its
+receipt through normal execution/cancellation; source-only Codex-native alias
+feasibility reuses the existing Codex registration without importing credentials.
+
+Actual UI inspection also finds setup and tab-help dialogs displayed together.
+The fix gates the existing tab help with `wizardOpen`, preserving acknowledgement
+and restoring help after dismissal/completion. Old source fails three overlap
+regressions; all 497 frontend tests, type checking, both builds and the 31-test
+bypass suite pass on the repair. This adds two production lines; the corresponding
+cleanup measurement is now 2,112 net lines removed, while the full follow-up
+still adds 2,877 against the recorded `testing` base. Updated-SPA deployment,
+positive permission/effect, final responsive/editor checks and final PR/CI remain
+unfinished.
 
 
 
