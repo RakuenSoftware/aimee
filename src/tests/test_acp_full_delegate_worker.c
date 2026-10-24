@@ -5,23 +5,38 @@
  * It never invokes a provider SDK or a model. */
 #include "modules/workspace/workspace_turn.h"
 #include "agent_exec.h"
-#define AIMEE_ACP_FULL_WORKER_FIXTURE     1
-#define session_persona_get               full_unused_session_persona_get
-#define session_primary_get               full_unused_session_primary_get
-#define err_json                          full_unused_err_json
-#define persona_load                      full_unused_persona_load
-#define persona_free                      full_unused_persona_free
-#define workspace_turn_resource_identity  unused_route_resource_identity
-#define workspace_turn_bind_active        unused_route_bind_active
-#define workspace_turn_unbind_active      unused_route_unbind_active
-#define workspace_turn_active_cwd         unused_route_active_cwd
-#define workspace_turn_drift_notice       unused_route_drift_notice
-#define workspace_turn_reject_foreign_cwd unused_route_reject_foreign_cwd
-#define workspace_turn_mirror_bind        unused_route_mirror_bind
-#define workspace_turn_mirror_release     unused_route_mirror_release
-#define workspace_turn_container_bound    unused_route_container_bound
-#define agent_run_with_tools              unused_route_agent_run
+#define AIMEE_ACP_FULL_WORKER_FIXTURE           1
+#define session_persona_get                     full_unused_session_persona_get
+#define session_primary_get                     full_unused_session_primary_get
+#define err_json                                full_unused_err_json
+#define persona_load                            full_unused_persona_load
+#define persona_free                            full_unused_persona_free
+#define workspace_turn_resource_identity        unused_route_resource_identity
+#define workspace_turn_bind_active              unused_route_bind_active
+#define workspace_turn_unbind_active            unused_route_unbind_active
+#define workspace_turn_active_cwd               unused_route_active_cwd
+#define workspace_turn_drift_notice             unused_route_drift_notice
+#define workspace_turn_reject_foreign_cwd       unused_route_reject_foreign_cwd
+#define workspace_turn_mirror_bind              unused_route_mirror_bind
+#define workspace_turn_mirror_release           unused_route_mirror_release
+#define workspace_turn_container_bound          unused_route_container_bound
+#define agent_run_with_tools                    unused_route_agent_run
+#define ingress_preinject_set_health_turn_id    full_unused_ingress_preinject_set_health_turn_id
+#define ingress_preinject_acquire_send_guard    full_unused_ingress_preinject_acquire_send_guard
+#define ingress_preinject_release_send_guard    full_unused_ingress_preinject_release_send_guard
+#define ingress_preinject_set_session_id        full_unused_ingress_preinject_set_session_id
+#define ingress_preinject_set_task_requirements full_unused_ingress_preinject_set_task_requirements
+#define presence_turn_host_own                  full_unused_presence_turn_host_own
+#define presence_emit_turn_delta                full_unused_presence_emit_turn_delta
 #include "test_server_acp_chat_route.c"
+#undef ingress_preinject_set_health_turn_id
+#undef ingress_preinject_acquire_send_guard
+#undef ingress_preinject_release_send_guard
+#undef ingress_preinject_set_session_id
+#undef ingress_preinject_set_task_requirements
+#undef presence_turn_host_own
+#undef presence_emit_turn_delta
+
 #undef workspace_turn_resource_identity
 #undef workspace_turn_bind_active
 #undef workspace_turn_unbind_active
@@ -180,6 +195,13 @@ int main(int argc, char **argv)
       return cli_mcp_serve();
    if (cli_native_bridge_enabled())
       return cli_native_bridge_main(argc, argv);
+   if (argc == 1)
+   {
+      puts("SKIP: full ACP delegate worker requires the real Docker integration fixture; "
+           "run make integration-test-acp-full-delegate-worker with its owned repository, "
+           "private HOME and prepared sandbox image");
+      return 0;
+   }
    assert(argc == 3 && !strcmp(argv[1], "--full-worker"));
    const char *fixture_home = getenv("AIMEE_FULL_WORKER_HOME");
    assert(fixture_home && fixture_home[0] == '/' && getenv("AIMEE_HOME") && getenv("HOME") &&
@@ -213,7 +235,12 @@ int main(int argc, char **argv)
    assert(!socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair));
    platform_peer_cred_t peer;
    assert(!platform_ipc_peer_cred(pair[0], &peer) && peer.uid == getuid());
-   server_conn_t connection = {.fd = pair[0], .capabilities = CAPS_ALL, .peer_uid = peer.uid};
+   /* The connection owns large bounded buffers; keep this single-run fixture
+    * off the process stack, exactly as a real accepted connection is heap-owned. */
+   static server_conn_t connection;
+   connection.fd = pair[0];
+   connection.capabilities = CAPS_ALL;
+   connection.peer_uid = peer.uid;
    connection.attested_transport =
        vault_principal_resolve(0, 0, peer.uid, NULL, 0, NULL, connection.vault_principal,
                                sizeof connection.vault_principal);
@@ -230,7 +257,7 @@ int main(int argc, char **argv)
    assert(ingress && ingress->peer_uid == (long)peer.uid &&
           ingress->vault_transport == ATTEST_UDS_PEERCRED &&
           !strcmp(ingress->principal, connection.vault_principal));
-   server_ctx_t server = {0};
+   static server_ctx_t server; /* Real server ownership is heap/static, not a 67 MiB stack frame. */
    cJSON *request = cJSON_CreateObject();
    assert(!db1_server_session_create("full-worker-parent", "cli", connection.vault_principal));
    cJSON_AddStringToObject(request, "session_id", "full-worker-parent");

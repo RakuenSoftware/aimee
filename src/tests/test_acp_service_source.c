@@ -13,10 +13,48 @@
 #include "server_session_control.h"
 #include "server_learning_outcome.h"
 #include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_turn.h"
 #include <aimee/tools/agent_tools.h>
 #include <sys/wait.h>
 #include "cli_proxy.h"
 #include "server_http_internal.h"
+
+/* This shared-source fixture must never affirm a container dependency. */
+int workspace_turn_container_identity(char id[65], char image[72])
+{
+   (void)id;
+   (void)image;
+   abort();
+}
+int workspace_turn_container_retire(void)
+{
+   abort();
+}
+int workspace_turn_container_file_owner_start(int exe, int cwd, const char *command,
+                                              int (*validate)(void *), void *context,
+                                              long long deadline)
+{
+   (void)exe;
+   (void)cwd;
+   (void)command;
+   (void)validate;
+   (void)context;
+   (void)deadline;
+   abort();
+}
+int workspace_turn_container_prepared(const char **command, const char **home, const char **mcp)
+{
+   (void)command;
+   (void)home;
+   (void)mcp;
+   abort();
+}
+
+int workspace_turn_container_forwarder(unsigned port)
+{
+   (void)port;
+   abort();
+}
 
 extern const provider_cli_adapter_t acp_provider_cli_adapter;
 static cJSON *capture_rows;

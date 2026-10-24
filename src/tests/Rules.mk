@@ -337,6 +337,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-openai-shape \
                $(TESTPREFIX)/unit-test-scoped-file-io \
+               $(TESTPREFIX)/unit-test-acp-full-delegate-worker \
                $(TESTPREFIX)/unit-test-openai-chat-policed \
                $(TESTPREFIX)/unit-test-graph-scoring \
                $(TESTPREFIX)/unit-test-code-projection \
@@ -7536,7 +7537,8 @@ $(TESTPREFIX)/unit-test-acp-service-source: $(OBJDIR)/tests/test_acp_service_sou
  $(OBJDIR)/modules/translation/aimee_backend_responses.o \
  $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o \
  $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/session_id.o \
- $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
+ $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
+ $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audit.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/token_tracker.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
@@ -7581,14 +7583,48 @@ $(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNE
     $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/role_templates.o $(OBJDIR)/persona.o \
     $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/modules/delegates/delegate_backend_docker.o \
     $(OBJDIR)/modules/workspace/workspace_runner_queue.o $(OBJDIR)/modules/workspace/workspace_runner_registry.o \
-    $(OBJDIR)/modules/workspace/workspace_provider_detached.o $(OBJDIR)/modules/workspace/workspace_mirror.o
+    $(OBJDIR)/modules/workspace/workspace_provider_detached.o $(OBJDIR)/modules/workspace/workspace_mirror.o \
+    $(OBJDIR)/modules/delegates/delegate_checkout.o \
+    $(OBJDIR)/modules/delegates/delegate_credential_retry.o \
+    $(OBJDIR)/modules/delegates/delegate_credentials.o \
+    $(OBJDIR)/modules/delegates/delegate_driver.o \
+    $(OBJDIR)/modules/delegates/delegate_economics.o \
+    $(OBJDIR)/modules/delegates/delegate_prompt.o \
+    $(OBJDIR)/modules/delegates/delegate_run_phases.o \
+    $(OBJDIR)/modules/delegates/delegate_sandbox_image.o \
+    $(OBJDIR)/modules/delegates/delegate_source_authority.o \
+    $(OBJDIR)/modules/workspace/workspace_provider_container.o \
+    $(OBJDIR)/payload_rewrite.o \
+    $(OBJDIR)/server/agent_admission.o \
+    $(OBJDIR)/server/agent_fallback.o \
+    $(OBJDIR)/server/delegate_egress_adapter.o \
+    $(OBJDIR)/server/ingress_preinject.o \
+    $(OBJDIR)/server/ingress_project_scope.o \
+    $(OBJDIR)/server/middleware.o \
+    $(OBJDIR)/server/otel.o \
+    $(OBJDIR)/server/presence.o \
+    $(OBJDIR)/server/rounds_to_resume.o \
+    $(OBJDIR)/server/server_active_project.o \
+    $(OBJDIR)/server/server_compute_mailbox.o \
+    $(OBJDIR)/server/server_delegate_monitor.o \
+    $(OBJDIR)/server/server_error_kind.o \
+    $(OBJDIR)/server/server_native_history.o \
+    $(OBJDIR)/server/session_compact.o \
+    $(OBJDIR)/tests/acp_full_config_metadata.o \
+    $(OBJDIR)/modules/delegates/delegate_openai.o \
+    $(OBJDIR)/modules/kb_client/kb_client_code_graph.o \
+    $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
+    $(OBJDIR)/server/agent_runtime_liveness.o \
+    $(OBJDIR)/server/cli_session.o \
+    $(OBJDIR)/server/retrieval_outcome_bridge.o \
+    $(OBJDIR)/server/server_session_question.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB) -Wl,-rpath,'$(shell pkg-config --variable=libdir libpq 2>$(NULLDEV))'
 
 
 # Keep the actual command parser; registry metadata is an explicit fixture peer.
 # Pure protocol peer packaged only in the task-owned full-worker sandbox image.
 # Compile in the pinned Debian builder; this is not a shipping product.
-$(TESTPREFIX)/aimee-acp-fixture-agent: tests/support/acp_full_worker_agent.c vendor/cJSON.c vendor/headers/cJSON.h
+$(OBJDIR)/aimee-acp-fixture-agent: tests/support/acp_full_worker_agent.c vendor/cJSON.c vendor/headers/cJSON.h
 	@mkdir -p $(dir $@)
 	$(CC) -static -O2 -Wall -Wextra -Werror -Ivendor/headers tests/support/acp_full_worker_agent.c vendor/cJSON.c -lm -o $@
 
@@ -7596,3 +7632,19 @@ $(TESTPREFIX)/aimee-acp-fixture-agent: tests/support/acp_full_worker_agent.c ven
 $(OBJDIR)/tests/test_scoped_file_io.o: aimee_forwarder.c headers/scoped_file_io.h
 $(TESTPREFIX)/unit-test-scoped-file-io: $(OBJDIR)/tests/test_scoped_file_io.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Actual mandatory-container integration. The caller provides a fresh UID-owned,
+# committed repository whose normal project config selects the prepared image.
+# No fixture manufactures Docker acquisition, source admission or host I/O.
+.PHONY: integration-test-acp-full-delegate-worker
+integration-test-acp-full-delegate-worker: $(TESTPREFIX)/unit-test-acp-full-delegate-worker $(OBJDIR)/aimee-acp-fixture-agent
+	@if [ -z "$$AIMEE_FULL_WORKER_REPO" ]; then \
+	  echo "SKIP: ACP container integration requires AIMEE_FULL_WORKER_REPO and a prepared real Docker fixture"; \
+	else \
+	  $(TESTPREFIX)/unit-test-acp-full-delegate-worker --full-worker "$$AIMEE_FULL_WORKER_REPO"; \
+	fi
+
+# The existing roster/find fixture peer stays explicit; metadata helpers are real.
+$(OBJDIR)/tests/acp_full_config_metadata.o: modules/routing/agent_config.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Dagent_load_config=full_fixture_unused_agent_load_config -Dagent_registry_find=full_fixture_unused_agent_registry_find -c -o $@ $<

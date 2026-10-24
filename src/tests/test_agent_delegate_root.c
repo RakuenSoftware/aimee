@@ -580,8 +580,12 @@ static char *sandbox_capture_exec_shell_scoped(const workspace_provider_t *p, co
                                                int timeout_ms, const delegate_exec_scope_t *scope,
                                                int *exit_code)
 {
-   assert(scope && scope->replace_environment == 1 && scope->progress);
-   assert(scope->environment && !strcmp(scope->environment[0], "SCOPED_CONTAINER=owned"));
+   assert(scope && scope->progress);
+   if (scope->environment)
+      assert(scope->replace_environment == 1 &&
+             !strcmp(scope->environment[0], "SCOPED_CONTAINER=owned"));
+   else
+      assert(scope->replace_environment == 0); /* Ordinary container Bash: no lexical overlay. */
    assert(!scope->progress(scope->context));
    return sandbox_capture_exec_shell_timeout(p, cmd, timeout_ms, exit_code);
 }
@@ -651,6 +655,7 @@ void test_container_execute_script_runs_in_sandbox(void)
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
    mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
+   mock.exec_shell_scoped = sandbox_capture_exec_shell_scoped;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
    g_sbx_timeout_ms = -1;
