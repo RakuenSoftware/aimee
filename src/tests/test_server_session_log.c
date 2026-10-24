@@ -641,7 +641,8 @@ static void child_control_reply_capability(void)
             server_control_scope_disable_replies(parent);
          server_session_log_t *scope = NULL;
          assert(!server_session_log_begin_selected("review", "explicit child capability",
-                   "selected-agent", "actual-provider", "actual-model", producer_enabled, &scope));
+                                                   "selected-agent", "actual-provider",
+                                                   "actual-model", producer_enabled, &scope));
          server_control_scope_t *child = server_control_scope_current();
          assert(child && child != parent);
          assert(server_control_scope_can_reply(child) == (parent_enabled && producer_enabled));
@@ -663,7 +664,8 @@ static void child_control_reply_capability(void)
    aimee_ir_session_set_sink(parent_sink, &parent_events);
    server_session_log_t *scope = NULL;
    assert(server_session_log_begin_selected(NULL, "existing browser owner", "selected-agent",
-              "actual-provider", "actual-model", 0, &scope) == 1 && !scope);
+                                            "actual-provider", "actual-model", 0, &scope) == 1 &&
+          !scope);
    assert(server_control_scope_current() == headed && server_control_scope_can_reply(headed));
    aimee_ir_session_set_sink(NULL, NULL);
    server_control_scope_close(headed);

@@ -217,7 +217,10 @@ static int disabled_record_calls;
 static int record_disabled(const char *session, const char *turn, const char *principal,
                            const aimee_session_event_t *event)
 {
-   (void)session; (void)turn; (void)principal; (void)event;
+   (void)session;
+   (void)turn;
+   (void)principal;
+   (void)event;
    disabled_record_calls++;
    return 0;
 }
@@ -237,7 +240,8 @@ static void headless_control_scope(void)
    assert(server_control_register(scope, "p", "permission", request) < 0);
    assert(server_control_reserve(scope, "q", "question", request) < 0);
    assert(server_control_register_recorded(scope, "r", "permission", request, record_disabled) < 0);
-   assert(!disabled_record_calls && server_control_reply("headless", "turn:p", "alice", reply) == 1);
+   assert(!disabled_record_calls &&
+          server_control_reply("headless", "turn:p", "alice", reply) == 1);
    cJSON_Delete(request);
    cJSON_Delete(reply);
    server_control_scope_close(scope);

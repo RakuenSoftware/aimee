@@ -346,13 +346,12 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    if (!presence_turn_host_own(c->presence_session, c->presence_turn_id))
       return -1;
    const cJSON *replies = NULL, *field;
-   cJSON_ArrayForEach(field, c->req)
-      if (field->string && !strcmp(field->string, "control_replies"))
-      {
-         if (replies || !cJSON_IsBool(field))
-            return -1;
-         replies = field;
-      }
+   cJSON_ArrayForEach(field, c->req) if (field->string && !strcmp(field->string, "control_replies"))
+   {
+      if (replies || !cJSON_IsBool(field))
+         return -1;
+      replies = field;
+   }
    db1_server_session_t row;
    int found = db1_server_session_get(session, &row);
    if (found == 0 && strcmp(row.principal, c->vault_principal))

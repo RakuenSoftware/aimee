@@ -212,8 +212,8 @@ int server_control_register(server_control_scope_t *scope, const char *id, const
 static int register_control(server_control_scope_t *scope, const char *id, const char *kind,
                             const cJSON *request, server_control_record_fn record, int reserved)
 {
-   if (!server_control_scope_can_reply(scope) || !id || !id[0] || strlen(id) > 1024 || !kind || !kind[0] ||
-       !cJSON_IsObject(request) || !aimee_ir_json_unique(request))
+   if (!server_control_scope_can_reply(scope) || !id || !id[0] || strlen(id) > 1024 || !kind ||
+       !kind[0] || !cJSON_IsObject(request) || !aimee_ir_json_unique(request))
       return -1;
    struct pending_control *p = calloc(1, sizeof *p);
    if (!p)

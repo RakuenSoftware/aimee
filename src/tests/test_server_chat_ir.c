@@ -590,7 +590,8 @@ static void explicit_control_reply_capability(void)
       assert(server_control_scope_can_reply(c.ir_controls) == (i != 2));
       assert(c.ir_capture && !server_session_capture_failed(c.ir_capture));
       server_control_scope_t *lease = NULL;
-      assert(!server_control_scope_capture("session-one", "alice", &lease) && lease == c.ir_controls);
+      assert(!server_control_scope_capture("session-one", "alice", &lease) &&
+             lease == c.ir_controls);
       server_control_scope_release(lease);
       cJSON *request = cJSON_Parse("{\"tool\":\"write_file\",\"input\":{}}");
       int reserved = server_control_reserve(c.ir_controls, "capability", "permission", request);

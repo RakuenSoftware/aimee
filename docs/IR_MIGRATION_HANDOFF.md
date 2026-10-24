@@ -15,13 +15,43 @@ ledger; it does not change the running application. The install was genuinely
 empty at `601aff47e`, followed by normal same-volume upgrades. Do not call the
 latest upgrade a second empty installation.
 
-The final retirement review found two remaining first-party flat stream
-consumers: `cli_chat_stream.c` (ACP) and `gateway_ctx.c`. Their canonical
-subscriber cutover is now active work; do not describe full internal conversion
-as complete while they remain. The old stream projection is also an explicitly
+The final retirement review found and converted the two remaining known
+first-party flat stream consumers: `cli_chat_stream.c` (ACP) and `gateway_ctx.c`.
+Commit `693442722` gives both one canonical subscriber. It requires a current
+durable host completion, rejects malformed/partial/failed streams, preserves
+parallel tool identity and deduplicates streamed text against final snapshots.
+The private reader's unused flat-status path and old TUI plumbing are retired.
+The old server stream projection is an explicitly
 documented external-client contract in `api/openapi-server-v1.yaml`; keep that
-boundary adapter. Canonical delivery must not implicitly advertise interactive
-question/permission capabilities that an ACP or gateway caller cannot answer.
+boundary adapter. Explicit disable-only reply capability prevents headless
+questions/permissions from waiting, including through child scopes. Existing
+headed browser capture is reused unchanged. ACP output sizing and failure
+handling now support valid large text/tool IDs without truncated JSON.
+
+Seven focused client targets pass normally and under sanitizers; actual old-code
+entry points reproduce three failing regressions. Make CLI/gateway and CMake CLI
+links pass. Private retained-event replay returns the exact expected HTTP text
+(15 rows, 55 bytes) and native service text (12 child rows, 2,629 bytes; two parent
+rows remain separate), normally and under sanitizers. These are observed-event
+replays, not new model calls or byte-identical original HTTP wire claims. The
+qualified cutover removes 118 net production C/H lines. The independent census
+at `693442722` is **2,489 net production lines removed** from the cleanup baseline
+and **2,500 added** across the complete follow-up; metadata and tests are separate.
+The complete branch therefore still has no overall net production reduction.
+
+Combined lint exposed five issues, now repaired: canonical Make source ownership,
+reviewed schema/adapter fingerprints, formatting, temporary-directory isolation
+and generated-doc discovery. Explicit environment reads preserve the same three
+fields and keep all 303 supported variables discoverable. No gate exemption was
+added. All five targeted gates pass; the full 76-gate rerun and final exact-source
+image/normal upgrade are next. Latest client/environment/TMPDIR fixtures and both
+retained-event replays pass in both normal and sanitizer modes on the corrected
+source (`/var/tmp/aimee-cli-ir-final-lint-delta-proof.json`).
+
+The existing local ACP transport identifies the real Unix UID and rejects remote
+ACP prompts; it cannot be relabeled as the PAM browser actor. Do not manufacture
+an auth bridge or new grants for validation. Installed ACP initialize/session-new
+can be checked without a model. Full final CI and delivery remain pending.
 
 `d6a04cffc` retires three convenience execution wrappers with no production
 callers, deleting 44 production lines. Existing tests now use the active cfg

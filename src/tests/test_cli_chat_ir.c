@@ -240,7 +240,12 @@ int main(int argc, char **argv)
    (void)tool_ids;
    (void)phases;
    (void)text_callback;
-   snprintf(home, sizeof home, "/tmp/acp-ir-%ld-XXXXXX", (long)getpid());
+   const char *tmpdir = getenv("TMPDIR");
+   int path_length = snprintf(home, sizeof home, "%s/acp-ir-%ld-XXXXXX",
+                              tmpdir && tmpdir[0] ? tmpdir : "/tmp", (long)getpid());
+   assert(path_length > 0 && (size_t)path_length < sizeof home);
+   assert((size_t)path_length + strlen("/aimee-http.sock") <
+          sizeof(((struct sockaddr_un *)0)->sun_path));
    assert(mkdtemp(home));
    signal(SIGPIPE, SIG_IGN);
 #ifndef CLI_IR_PREDECESSOR_PROBE

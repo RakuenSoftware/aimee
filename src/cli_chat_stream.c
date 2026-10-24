@@ -344,14 +344,14 @@ char *cli_chat_stream(const char *sock, const char *session, const char *message
    char cwd[4096];
    if (getcwd(cwd, sizeof cwd))
       cJSON_AddStringToObject(request, "cwd", cwd);
-   const char *env[] = {"AIMEE_MODE", "AIMEE_ATTACH_ID", "AIMEE_CLIENT_TYPE"};
-   const char *fields[] = {"mode", "attach_id", "client_type"};
-   for (int i = 0; i < 3; i++)
-   {
-      const char *value = getenv(env[i]);
-      if (value && value[0])
-         cJSON_AddStringToObject(request, fields[i], value);
-   }
+   const char *mode = getenv("AIMEE_MODE"), *attach = getenv("AIMEE_ATTACH_ID"),
+              *client_type = getenv("AIMEE_CLIENT_TYPE");
+   if (mode && mode[0])
+      cJSON_AddStringToObject(request, "mode", mode);
+   if (attach && attach[0])
+      cJSON_AddStringToObject(request, "attach_id", attach);
+   if (client_type && client_type[0])
+      cJSON_AddStringToObject(request, "client_type", client_type);
    char *reply = cli_chat_request_stream(endpoint ? endpoint : local, bearer, request, -1, text_cb,
                                          tool_cb, context);
    cJSON_Delete(request);
