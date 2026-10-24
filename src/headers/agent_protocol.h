@@ -37,11 +37,6 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 
 /* --- Response parsers --- */
 
-/* Extract the Responses (codex) response object (the one with the `output` array)
- * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
- * cJSON the caller owns, or NULL. */
-struct cJSON *agent_responses_sse_response_object(const char *body);
-
 /* Native response entry adapters. The caller owns the full typed response until
  * tool dispatch and history append finish. No text/tool projection occurs here.
  * rescue_mode < 0 skips rescue, 0 admits dialect calls, 1 also admits bare JSON;

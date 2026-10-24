@@ -209,6 +209,49 @@ is authorized with the same bounded actions; the already-reviewed exact-process
 checks execute immediately without another dynamic-PID review handoff. Count both
 HTTP attempts honestly; do not relabel the first as successful restart coverage.
 
+The distinct second hybrid attempt performs one exact PIDFD core fault while its
+HTTP sleep is pending. The same container automatically restarts once; its new
+PID1/core are verified and all 33 old process identities retire. An observer's
+namespace-inode inequality assertion was invalid: equal numeric namespace IDs
+are recorded honestly, while process lifetime and restart facts establish the
+actual recovery. One normal owner Cancel then commits the genuine OPERATOR
+interruption receipt. This is real fault/recovery/cancellation evidence.
+
+The same session's native continuation launches one SDK but produces no observed
+provider response, permission or file effect. A 90-second browser harness wait
+ends before the configured 180-second runtime deadline. At that deadline the SDK
+records a synthetic local gateway 502 and exits; this generic proxy error does
+not establish upstream dispatch or its cause. No extra Send or Allow occurs.
+The canonical turn nevertheless remains running. Source and function backtraces
+establish that the producer has returned; this is not a native worker-join hang.
+The browser sink rejects the host failure event after sticky capture failure,
+even though its retained capture owner explicitly permits failed/cancelled
+terminals. The repair allows only those negative terminals through the owner's
+normal storage checks and refuses successful completion after sticky failure.
+Old-source failure and focused normal/sanitizer regressions cover failure flags,
+lost subscribers, exactly one terminal and retained storage rejection. No fake
+checkpoint, tool result or successful grade is introduced. Fixed, content-free
+native request failure labels make the next admission failure diagnosable.
+One separately counted corrective normal owner Cancel returns 200 for the old
+stuck turn and commits its real cancelled event (sequence 11), with no additional
+tool-interruption receipt. The attempt uses two Cancels in total; this is not
+concealed inside the original single-Cancel budget. All previous 52 records,
+native/cache bytes and authority remain exact; the current 63 records are sealed,
+with zero SDK/native activity and no file effect or Allow.
+Final combined qualification and updated-image acceptance remain pending.
+
+The final focused C delta passes three normal and three ASan/UBSan/leak targets
+for browser capture, native runtime and private service source. A separate
+retirement deletes two unused diagnostic/catalog wrappers and their declarations
+(45 production lines), moving useful assertions to the active typed Responses
+decoder and canonical catalog owner. Its three registered normal and three
+sanitizer targets pass; four optional STORE_URL checks remain explicit skips in
+the agent target. All changed assertions run unconditionally. The bypass gate
+passes all 31 mutation-aware tests and rejects both retired symbols. Including
+the terminal fix and diagnostic labels, the cleanup checkpoint now removes
+2,114 net production lines; the full follow-up still adds 2,875 against the
+recorded `testing` base. Do not claim a whole-branch net reduction.
+
 
 
 

@@ -218,8 +218,15 @@ int server_chat_ir_progress(compute_ctx_t *c)
 static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 {
    compute_ctx_t *c = context;
-   if (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
-       server_session_capture_failed(c->ir_capture))
+   int failure_terminal = event && event->kind == AIMEE_SESSION_EXECUTION &&
+                          event->execution_status &&
+                          (!strcmp(event->execution_status, "failed") ||
+                           !strcmp(event->execution_status, "cancelled"));
+   /* A failed producer cannot publish more content or success. Its host must
+    * still close the real turn through the retained owner's storage checks. */
+   if (!failure_terminal &&
+       (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
+        server_session_capture_failed(c->ir_capture) || aimee_ir_session_capture_failed()))
    {
       c->ir_failed = 1;
       return -1;
@@ -374,6 +381,10 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    server_session_capture_counts_t counts = {0};
    if (server_session_capture_counts(c->ir_capture, &counts))
       error = "canonical capture owner unavailable";
+   if (!error &&
+       (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
+        server_session_capture_failed(c->ir_capture) || aimee_ir_session_capture_failed()))
+      error = "canonical capture failed";
    if (!error && !agent_request_cancelled() && !counts.model_events && !c->ir_history_checkpointed)
       error = "Selected harness produced no canonical model output";
    aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,

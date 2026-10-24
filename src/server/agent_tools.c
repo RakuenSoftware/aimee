@@ -1673,35 +1673,6 @@ static int builtin_ir_definition(const builtin_tool_def_t *definition, aimee_too
    return 0;
 }
 
-int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
-{
-   if (!out || !count)
-      return -1;
-   *out = NULL;
-   *count = 0;
-   size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
-   aimee_tool_t *catalog = calloc(n, sizeof *catalog);
-   if (!catalog)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-   {
-      const builtin_tool_def_t *definition = &g_builtin_tools[i];
-      if (agent_tools_is_git_write(definition->name) && !g_git_write_fn)
-         continue;
-      if (builtin_ir_definition(definition, catalog + *count))
-      {
-         for (int j = 0; j < *count; j++)
-            aimee_tool_free(catalog + j);
-         free(catalog);
-         *count = 0;
-         return -1;
-      }
-      (*count)++;
-   }
-   *out = catalog;
-   return 0;
-}
-
 /* The immutable canonical schema cache owns borrowed lookup pointers until exit. */
 static aimee_request_t g_schema_cache;
 static int g_schema_cache_ready;

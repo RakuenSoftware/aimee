@@ -316,8 +316,79 @@ static void worker_capture_failure_is_sticky(void)
    aimee_response_t response = {.role = "assistant"};
    assert(aimee_ir_session_emit_response(&response, "after-worker-failure") < 0);
    assert(c.ir_failed && writes == 2 && cJSON_GetArraySize(log_entries) == 2);
-   assert(server_chat_ir_finish(&c, NULL) < 0);
+   assert(!server_chat_ir_finish(&c, NULL));
+   assert(cJSON_GetArraySize(log_entries) == 3);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                   cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 2), "payload"), "status")),
+               "failed"));
    cleanup(&c);
+}
+
+static void native_failure_terminal_survives_lost_subscriber(void)
+{
+   for (int failure = 0; failure < 4; failure++)
+      for (int lost = 0; lost < 2; lost++)
+         for (int cancel = 0; cancel < 2; cancel++)
+         {
+            compute_ctx_t c = context();
+            assert(!server_chat_ir_begin(&c, "session-one", "native upstream failure"));
+            aimee_delta_t start = {.type = AIMEE_DELTA_TURN_START};
+            aimee_session_event_t begun = {.kind = AIMEE_SESSION_DELTA,
+                                           .role = "assistant",
+                                           .message_id = "native-no-provider-response",
+                                           .delta = &start};
+            assert(!aimee_ir_session_emit(&begun));
+            if (failure == 0)
+               c.ir_failed = 1;
+            else if (failure == 1)
+               server_session_capture_fail(c.ir_capture);
+            else if (failure == 2)
+            {
+               cJSON *request = cJSON_Parse("{\"title\":\"Question\"}");
+               assert(server_control_register_recorded(c.ir_controls, "failed", "permission",
+                                                       request, failed_control_record) < 0);
+               cJSON_Delete(request);
+            }
+            else
+               aimee_ir_session_fail_capture();
+            int unchanged = cJSON_GetArraySize(log_entries);
+            aimee_session_event_t success = {.kind = AIMEE_SESSION_EXECUTION,
+                                             .execution_status = "completed"};
+            assert(aimee_ir_session_emit(&success) < 0);
+            aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "must not become output"};
+            aimee_message_t message = {.role = "assistant", .blocks = &text, .n_blocks = 1};
+            aimee_session_event_t content = {
+                .kind = AIMEE_SESSION_MESSAGE, .message_id = "after-failure", .message = &message};
+            assert(aimee_ir_session_emit(&content) < 0);
+            cJSON *question = cJSON_Parse("{\"title\":\"Late question\"}");
+            aimee_session_event_t control = {.kind = AIMEE_SESSION_CONTROL_REQUEST,
+                                             .request_id = "after-failure",
+                                             .control_kind = "question",
+                                             .control = question};
+            assert(aimee_ir_session_emit(&control) < 0);
+            cJSON_Delete(question);
+            assert(cJSON_GetArraySize(log_entries) == unchanged);
+            disconnected = lost;
+            cancelled = cancel;
+            int before = cJSON_GetArraySize(log_entries);
+            int finished = server_chat_ir_finish(&c, "native upstream connection failed");
+            assert(!finished && cJSON_GetArraySize(log_entries) == before + 1);
+            const cJSON *last = cJSON_GetArrayItem(log_entries, before);
+            const cJSON *payload = cJSON_GetObjectItem(last, "payload");
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(last, "kind")), "execution"));
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(payload, "status")),
+                           cancel ? "cancelled" : "failed"));
+            assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(payload, "error")),
+                           "native upstream connection failed"));
+            assert(!cJSON_GetObjectItem(last, "verification_proofs"));
+            assert(test_learning_observations() ==
+                   1); /* Real failed/cancelled, ungraded observation. */
+            assert(!lost || !c.conn_alive);
+            assert(!server_chat_ir_finish(&c, NULL));
+            assert(cJSON_GetArraySize(log_entries) == before + 1);
+            cleanup(&c);
+         }
 }
 
 static void *fail_capture_worker(void *arg)
@@ -388,8 +459,13 @@ static void retained_worker_failure_refuses_completion(void)
       int joined = pthread_join(worker, NULL);
       assert(!joined && !aimee_ir_session_capture_failed());
       int completed = server_chat_ir_finish(&c, NULL);
-      assert(completed < 0 && c.ir_failed && cJSON_GetArraySize(log_entries) == before);
-      assert(!test_learning_observations());
+      assert(!completed && cJSON_GetArraySize(log_entries) == before + 1);
+      const cJSON *terminal =
+          cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, before), "payload");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "status")), "failed"));
+      assert(!server_chat_ir_finish(&c, NULL));
+      assert(cJSON_GetArraySize(log_entries) == before + 1);
+      assert(test_learning_observations() == 1); /* Failure remains an observed outcome. */
       cleanup(&c);
    }
 }
@@ -462,6 +538,7 @@ int main(void)
 {
    log_entries = cJSON_CreateArray();
    failed_steering_admission_is_observation_only();
+   native_failure_terminal_survives_lost_subscriber();
    worker_capture_failure_is_sticky();
    retained_worker_failure_refuses_completion();
    retained_worker_progress_uses_durable_pages();
@@ -516,6 +593,8 @@ int main(void)
    aimee_response_t ir = {.role = "assistant"};
    assert(aimee_ir_session_emit_response(&ir, "failed") < 0);
    assert(c.ir_failed && writes == 2 && cJSON_GetArraySize(log_entries) == 2);
+   assert(server_chat_ir_finish(&c, "original storage failure") < 0);
+   assert(cJSON_GetArraySize(log_entries) == 2 && !test_learning_observations());
    cleanup(&c);
 
    c = context();

@@ -443,13 +443,6 @@ fail:
    return NULL;
 }
 
-/* Compatibility entry for existing diagnostics. Native framing is owned by
- * translation; execution calls its typed decoder directly. */
-cJSON *agent_responses_sse_response_object(const char *body)
-{
-   return responses_backend_sse_object(body);
-}
-
 /* --- Message utilities --- */
 
 /* Core history is canonical. Legacy provider formats are admitted only by

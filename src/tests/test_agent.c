@@ -692,9 +692,12 @@ static int catalog_metadata(const char *name, aimee_tool_metadata_t *out)
 
 static void test_tool_surface_single_source(void)
 {
-   aimee_tool_t *canonical = NULL, *independent = NULL;
-   int count = 0, independent_count = 0;
-   int status = agent_tools_builtin_catalog(&canonical, &count);
+   aimee_request_t canonical_catalog = {0}, independent_catalog = {0};
+   int status = agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &canonical_catalog);
+   aimee_tool_t *canonical = canonical_catalog.tools;
+   int count = canonical_catalog.n_tools;
+   cJSON *chat = fixture_chat_tools();
+   cJSON *resp = fixture_responses_tools();
    assert(status == 0 && count > 20);
    aimee_tool_metadata_t metadata = {0};
    assert(agent_tools_metadata("read_file", &metadata) == -1);
@@ -706,6 +709,13 @@ static void test_tool_surface_single_source(void)
          fprintf(stderr, "missing built-in policy metadata: %s\n", canonical[i].name);
       assert(classified == 0 && aimee_tool_metadata_valid(&metadata));
    }
+   const cJSON *response_tool;
+   cJSON_ArrayForEach(response_tool, resp)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(response_tool, "name"));
+      assert(name && !agent_tools_metadata(name, &metadata));
+      assert(aimee_tool_metadata_valid(&metadata));
+   }
    metadata = (aimee_tool_metadata_t){AIMEE_TOOL_CLASS_READ, 1, 1};
    assert(agent_tools_metadata("unregistered_tool", &metadata) == -1);
    assert(!metadata.classification && !metadata.primary && !metadata.categories);
@@ -714,10 +724,9 @@ static void test_tool_surface_single_source(void)
    assert(metadata.categories & AIMEE_TOOL_POLICY_EXTERNAL);
    agent_tools_register_metadata(NULL);
 
-   status = agent_tools_builtin_catalog(&independent, &independent_count);
-   assert(status == 0 && independent_count == count);
-   cJSON *chat = fixture_chat_tools();
-   cJSON *resp = fixture_responses_tools();
+   status = agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &independent_catalog);
+   aimee_tool_t *independent = independent_catalog.tools;
+   assert(status == 0 && independent_catalog.n_tools == count);
    assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
    cJSON *question = tools_find(chat, "request_input", 1);
    cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
@@ -776,13 +785,8 @@ static void test_tool_surface_single_source(void)
    cJSON_AddBoolToObject(canonical[0].schema, "fixture_mutation", 1);
    assert(independent[0].name[0] != '!');
    assert(!cJSON_GetObjectItem(independent[0].schema, "fixture_mutation"));
-   for (int i = 0; i < count; i++)
-   {
-      aimee_tool_free(canonical + i);
-      aimee_tool_free(independent + i);
-   }
-   free(canonical);
-   free(independent);
+   aimee_request_free(&canonical_catalog);
+   aimee_request_free(&independent_catalog);
 
    cJSON_Delete(chat);
    cJSON_Delete(resp);

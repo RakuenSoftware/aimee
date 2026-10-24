@@ -127,7 +127,10 @@ static int native_owned_guard(aimee_request_t *request, void *context)
 {
    native_request_owner_t *owner = context;
    if (server_native_replay_restore(request, owner->runtime->replay))
+   {
+      aimee_log(LOG_ERROR, "native.runtime", "canonical request replay restoration refused");
       return -1;
+   }
    if (owner->require_complete)
    {
       cJSON *snapshot = aimee_ir_request_json(request);
@@ -140,6 +143,7 @@ static int native_owned_guard(aimee_request_t *request, void *context)
       cJSON_Delete(snapshot);
       if (invalid)
       {
+         aimee_log(LOG_ERROR, "native.runtime", "post-policy canonical history admission refused");
          server_session_capture_fail(owner->runtime->capture);
          return -1;
       }
@@ -511,12 +515,17 @@ static int native_owned_request(aimee_request_t *request, void *context)
       cJSON *history = NULL;
       if (aimee_ir_request_clone(&runtime->request_profile, &owner->request) ||
           server_session_capture_history(runtime->capture, &history))
+      {
+         aimee_log(LOG_ERROR, "native.runtime", "canonical request source history unavailable");
          goto failed;
+      }
       if (owner->require_complete &&
           server_native_history_admit_source(
               server_session_capture_session(runtime->capture), runtime->owner.vault_principal,
               server_session_capture_turn(runtime->capture), 1, history))
       {
+         aimee_log(LOG_ERROR, "native.runtime",
+                   "canonical request source history admission refused");
          cJSON_Delete(history);
          goto failed; /* A missing result is not permission to invent an outcome. */
       }
@@ -540,7 +549,10 @@ static int native_owned_request(aimee_request_t *request, void *context)
       cJSON_Delete(history);
       owner->request.mutated = 1;
       if (aimee_ir_request_admit(&owner->request))
+      {
+         aimee_log(LOG_ERROR, "native.runtime", "canonical owned request admission refused");
          goto failed;
+      }
       owner->prepared = 1;
    }
    if (!aimee_ir_request_clone(&owner->request, request) &&
