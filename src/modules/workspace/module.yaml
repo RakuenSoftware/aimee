@@ -15,6 +15,7 @@
   "sources": [
     "src/modules/workspace/cli_workspace_serve.c",
     "src/modules/workspace/workspace.c",
+    "src/modules/workspace/workspace_identity.c",
     "src/modules/workspace/workspace_session_lookup.c",
     "src/modules/workspace/workspace_client_diff.c",
     "src/modules/workspace/workspace_handle.c",
@@ -39,6 +40,7 @@
   ],
   "public_headers": [
     "src/modules/workspace/include/aimee/workspace/module_api.h",
+    "src/modules/workspace/include/aimee/workspace/identity.h",
     "src/modules/workspace/include/aimee/workspace/workspace.h"
   ],
   "private_headers": [
@@ -51,7 +53,8 @@
     "src/modules/workspace/workspace_runner_queue.h",
     "src/modules/workspace/workspace_runner_registry.h",
     "src/modules/workspace/workspace_scope.h",
-    "src/modules/workspace/workspace_turn.h"
+    "src/modules/workspace/workspace_turn.h",
+    "src/modules/workspace/workspace_identity.h"
   ],
   "tests": [
     "src/tests/test_workspace.c",

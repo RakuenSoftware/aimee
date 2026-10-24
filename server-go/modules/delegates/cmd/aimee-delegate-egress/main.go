@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -64,7 +65,34 @@ func privateControlSocket(check, source, mounts string) ([]os.FileInfo, error) {
 	return result, nil
 }
 
-func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (string, error) {
+// acquireFailure carries only a fixed public phase across the helper boundary.
+// The underlying error remains available to in-process callers, never the C log.
+type acquireFailure struct {
+	stage string
+	cause error
+}
+
+func (e *acquireFailure) Error() string { return e.cause.Error() }
+func (e *acquireFailure) Unwrap() error { return e.cause }
+func writeCommandFailure(w io.Writer, err error) {
+	var failure *acquireFailure
+	if errors.As(err, &failure) {
+		_ = json.NewEncoder(w).Encode(struct {
+			Schema string `json:"schema"`
+			Stage  string `json:"stage"`
+		}{"aimee.delegate-acquire-error.v1", failure.stage})
+		return
+	}
+	fmt.Fprintf(w, "aimee-delegate-egress: %v\n", err)
+}
+
+func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (resultText string, failure error) {
+	stage, checked := "arguments", false
+	defer func() {
+		if checked && failure != nil {
+			failure = &acquireFailure{stage, failure}
+		}
+	}()
 	flags := flag.NewFlagSet("acquire", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	controllerBinds := flags.String("controller-binds", "", "producer-attested controller bind recursion facts")
@@ -92,10 +120,12 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	if err := flags.Parse(args); err != nil {
 		return "", err
 	}
+	checked = *receiptJSON || *resourceReceipt
 	if flags.NArg() != 0 {
 		return "", fmt.Errorf("unexpected positional arguments")
 	}
 
+	stage = "control-socket"
 	info, err := os.Lstat(*socketCheck)
 	if err != nil {
 		return "", fmt.Errorf("required sole-egress socket: %w", err)
@@ -113,7 +143,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	if *resourceReceipt && (*helperCheck != "" || *helperSource != "" || *helperSHA != "") {
 		return "", errors.New("ordinary resource has no private helper")
 	}
-	checked := *receiptJSON || *resourceReceipt
+	checked = *receiptJSON || *resourceReceipt
 	if !checked && (*controllerBinds != "" || *engineEndpoint != "" || *helperCheck != "" || *helperSource != "" || *helperSHA != "" || *leaseFD >= 0 || *leaseCheck != "") {
 		return "", errors.New("private lease inputs require an immutable receipt")
 	}
@@ -134,6 +164,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 			if err != nil {
 				return "", err
 			}
+			stage = "helper-identity"
 			helper, helperDigest, err = measuredOwnerHelper(*helperCheck, *helperSource, *helperSHA, *socketCheck, *mountTable)
 			if err != nil {
 				return "", err
@@ -150,6 +181,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 			socketIdentity = []os.FileInfo{info, parentInfo}
 		}
 
+		stage = "lease-open"
 		if *receiptJSON {
 			lease, err = openOwnerLease(*leaseFD, *leaseCheck, *socketCheck)
 		} else {
@@ -160,6 +192,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		}
 		defer lease.file.Close()
 		lease.engine, lease.helperSHA = *engineEndpoint, helperDigest
+		stage = "daemon-identity"
 		lease.daemonID, err = ownerDaemonID(ctx, run, *docker)
 		if err != nil {
 			return "", err
@@ -186,6 +219,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	if *proxy {
 		request.EgressProxy = "http://127.0.0.1:3129"
 	}
+	stage = "sandbox-spec"
 	var spec delegates.SandboxSpec
 	if *receiptJSON {
 		spec, err = delegates.BuildOwnerSandboxSpec(request, *helperSource)
@@ -196,10 +230,12 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 		return "", err
 	}
 	if checked {
+		stage = "controller-custody"
 		if err := verifyControllerBinds(*controllerBinds, *mountTable, *leaseCheck, spec); err != nil {
 			return "", err
 		}
 	}
+	stage = "container-name"
 	name, err := delegates.ContainerName(*task, spec, *mountTable)
 	if err != nil {
 		return "", err
@@ -212,21 +248,26 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 	}
 	var result delegates.ContainerResult
 	if *resourceReceipt {
+		stage = "image-observation"
 		dockerRequest.Image, dockerRequest.Startup, err = delegates.ResolveOrdinaryImage(ctx, run, *docker, *image)
 		if err != nil {
 			return "", err
 		}
 		dockerRequest.LeaseNonce = filepath.Base(filepath.Dir(*leaseCheck))
+		stage = "container-start"
 		result, err = runner.Start(ctx, dockerRequest)
 	} else {
+		stage = "container-start"
 		result, err = runner.Acquire(ctx, dockerRequest)
 	}
 	if err != nil {
 		return "", err
 	}
+	stage = "posture"
 	if result.Refused {
 		return "", errors.New(result.Reason)
 	}
+	stage = "receipt-source"
 	if checked {
 		var current []os.FileInfo
 		var err error
@@ -256,6 +297,7 @@ func acquire(ctx context.Context, args []string, run delegates.CommandRunner) (s
 			}
 			return "", err
 		}
+		stage = "receipt-encoding"
 		if *resourceReceipt {
 			encoded, failure := json.Marshal(struct {
 				Schema       string `json:"schema"`
@@ -470,7 +512,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "aimee-delegate-egress: %v\n", err)
+		writeCommandFailure(os.Stderr, err)
 		os.Exit(1)
 	}
 }

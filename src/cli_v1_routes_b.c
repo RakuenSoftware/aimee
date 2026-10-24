@@ -470,7 +470,35 @@ cJSON *marshal_workspace_add(int argc, char **argv)
    static const char *ws_bool_flags[] = {"no-scan", NULL};
    cli_args_parse(argc, argv, ws_bool_flags, &opts);
    if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "root", opts.positional[0]);
+   {
+      const char *root = opts.positional[0];
+      char absolute[4096], cwd[4096];
+      if (root[0] && !aimee_path_is_absolute(root))
+      {
+         /* The server may have a different cwd, including over local HTTP UDS.
+          * Preserve virtual absolute mirror/detached roots without statting them. */
+         if (!getcwd(cwd, sizeof cwd))
+            goto invalid_root;
+         int n = snprintf(absolute, sizeof absolute, "%s/%s", cwd, root);
+         if (n < 0 || (size_t)n >= sizeof absolute)
+            goto invalid_root;
+         cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
+         for (int i = 0; i < argc; i++)
+            if (argv[i] == root)
+            {
+               cJSON *value = cJSON_CreateString(absolute);
+               if (!value || !cJSON_ReplaceItemInArray(args, i, value))
+               {
+                  cJSON_Delete(value);
+                  goto invalid_root;
+               }
+               break;
+            }
+         root = absolute;
+      }
+      if (!cJSON_AddStringToObject(req, "root", root))
+         goto invalid_root;
+   }
    const char *prov = cli_args_get(&opts, "provider");
    if (prov)
       cJSON_AddStringToObject(req, "provider", prov);
@@ -497,6 +525,10 @@ cJSON *marshal_workspace_add(int argc, char **argv)
    if (cli_args_has_flag(&opts, "no-scan"))
       cJSON_AddBoolToObject(req, "scan", 0);
    return req;
+invalid_root:
+   fprintf(stderr, "aimee: workspace root cannot be resolved from the client's cwd\n");
+   cJSON_Delete(req);
+   return NULL;
 }
 
 /* `aimee workspace mirror-sync <root>`: ship the client's full working-tree patch

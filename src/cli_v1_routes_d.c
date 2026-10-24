@@ -1381,7 +1381,14 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
 static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
 {
    char project_name[128];
-   cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name));
+   if (cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name)))
+   {
+      fprintf(stderr, "aimee: cannot resolve canonical project identity for %s\n", abs_root);
+      return 1;
+   }
+
+   if (!g_cli_ws_json_output)
+      printf("indexing project: %s\n", project_name);
 
    ws_ingest_ctx_t s = {0};
    s.remote = remote;
@@ -1428,8 +1435,8 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
 /* Ingest a workspace tree as ONE PROJECT PER GIT REPO: code_collect_discover_repos
  * finds each real checkout under abs_root (skipping linked worktrees and symlink
  * cycles) and we ingest each as its own project (cli_ws_ingest_root names a
- * project by its basename). Falls back to ingesting abs_root itself when it holds
- * no nested git repo — e.g. adding a single repo directly, or a plain directory. */
+ * project by its canonical repository identity). Falls back to ingesting abs_root itself when it
+ * holds no nested git repo — e.g. adding a single repo directly, or a plain directory. */
 typedef struct
 {
    const char *remote;
@@ -1441,13 +1448,6 @@ typedef struct
 static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 {
    ws_tree_ctx_t *t = (ws_tree_ctx_t *)ctx;
-   const char *base = strrchr(repo_abs, '/');
-   base = (base && base[1]) ? base + 1 : repo_abs;
-   if (!g_cli_ws_json_output)
-   {
-      printf("indexing project: %s\n", base);
-      fflush(stdout);
-   }
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -2319,7 +2319,11 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          {
             cJSON_Delete(projects);
             projects = NULL;
-            if (cli_ws_ingest_tree(remote, bearer, worktree_root) == 0)
+            int previous_json = g_cli_ws_json_output;
+            g_cli_ws_json_output = effective_json_output;
+            int ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
+            g_cli_ws_json_output = previous_json;
+            if (ingest_rc == 0)
             {
                projects =
                    cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status);

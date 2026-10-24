@@ -268,10 +268,15 @@ def native_main_check(binary: pathlib.Path) -> None:
             assert result.returncode != 0, (result.stdout, result.stderr)
             before = len(NativeHandler.paths)
             for command in (["agent", "token", "private"], ["remote", "set", "tcp:127.0.0.1:1"],
-                            ["--profile", "foreign", "agent", "token", "private"],
-                            ["mcp-serve"]):
+                            ["--profile", "foreign", "agent", "token", "private"]):
                 result = run(command)
                 assert result.returncode != 0 and "never-export-this" not in result.stdout
+            # Native SDKs use this registered stdio service. A clean EOF closes
+            # it successfully without granting ordinary credential/profile access.
+            result = subprocess.run([str(binary), "mcp-serve"], env=env, input="",
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 0 and result.stdout == "", (result.returncode, result.stdout)
+            assert "never-export-this" not in result.stderr
             result = run(["index", "investigate", "no grant"], {"AIMEE_API_BEARER": ""})
             assert result.returncode != 0
             result = run(["index", "investigate", "no endpoint"], {"AIMEE_API_ENDPOINT": ""})

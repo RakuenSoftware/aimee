@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -279,5 +281,34 @@ func TestPrivateControlSocketRejectsUnscopedOrChangedAuthority(t *testing.T) {
 	}
 	if _, err := privateControlSocket(socket, "/host"+socket, "/	/host"); err != nil {
 		t.Fatal("exact owner namespace translation refused", err)
+	}
+}
+
+func TestCheckedAcquireFailureHasPublicStageOnly(t *testing.T) {
+	const marker = "PRIVATE_PATH_MUST_NOT_REACH_LOG"
+	_, err := acquire(context.Background(), []string{"--resource-receipt-json", "--socket-check", "/missing/" + marker}, func(context.Context, string, ...string) (string, error) {
+		t.Fatal("unexpected runtime operation")
+		return "", nil
+	})
+	var failure *acquireFailure
+	if !errors.As(err, &failure) || failure.stage != "control-socket" || !strings.Contains(err.Error(), marker) {
+		t.Fatalf("underlying failure lost: %v", err)
+	}
+	if !errors.Is(err, failure.cause) {
+		t.Fatal("underlying error identity lost")
+	}
+	var output bytes.Buffer
+	writeCommandFailure(&output, err)
+	if strings.Contains(output.String(), marker) {
+		t.Fatal("private failure detail escaped")
+	}
+	var envelope map[string]string
+	if json.Unmarshal(output.Bytes(), &envelope) != nil || len(envelope) != 2 || envelope["schema"] != "aimee.delegate-acquire-error.v1" || envelope["stage"] != "control-socket" {
+		t.Fatal("invalid public stage envelope")
+	}
+	output.Reset()
+	writeCommandFailure(&output, errors.New("legacy command failure"))
+	if output.String() != "aimee-delegate-egress: legacy command failure\n" {
+		t.Fatal("legacy failure contract changed")
 	}
 }

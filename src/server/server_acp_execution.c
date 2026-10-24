@@ -1580,6 +1580,10 @@ static int delegate_plan_begin(const agent_t *selected, void *context, char *err
    {
       server_acp_container_scope_close(plan->acp);
       plan->acp = NULL;
+      if (error && capacity && !error[0])
+         snprintf(error, capacity,
+                  "delegate could not be given a sandboxed container with a complete source tree; "
+                  "refusing to run it un-sandboxed (see the delegate-sandbox log for the cause)");
       goto refused;
    }
    plan->active = 1;

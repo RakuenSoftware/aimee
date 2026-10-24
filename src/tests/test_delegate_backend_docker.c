@@ -1878,11 +1878,74 @@ static void test_controller_bind_recursion_facts_match_actual_mounts(void)
         "absent/false preserved");
 }
 
+static void test_checked_acquire_failure_stage_is_strict_and_private(void)
+{
+   setup_fake_egress_fixture();
+   setenv("AIMEE_DOCKER_BIN", write_fake_docker_fixture(), 1);
+   char helper[600], sink[600], endpoint[600];
+   snprintf(helper, sizeof helper, "%s/stage-helper", g_fixture_home);
+   snprintf(endpoint, sizeof endpoint, "unix://%s/aimee-http.sock", g_fixture_home);
+   setenv("DOCKER_HOST", endpoint, 1);
+   const char *cases[] = {
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"stage\":\"image-observation\"}",
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"stage\":\"SECRET_MARKER\"}",
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"stage\":\"image-observation\",\"raw\":"
+       "\"SECRET_MARKER\"}",
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"stage\":\"image-observation\"} "
+       "SECRET_MARKER",
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"stage\":null}",
+       "{\"schema\":\"aimee.delegate-acquire-error.v1\",\"schema\":\"SECRET_MARKER\",\"stage\":"
+       "\"image-observation\"}"};
+   delegate_backend_t *backend = delegate_backend_docker_get();
+   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
+   {
+      FILE *f = fopen(helper, "w");
+      assert(f);
+      fprintf(f,
+              "#!/bin/sh\ncase \"$1\" in\nacquire) printf '%%s\\n' '%s' >&2; exit 1;;\n"
+              "cleanup-lease) printf '%%s\\n' "
+              "'{\"schema\":\"aimee.container-cleanup.v1\",\"removed\":false,\"no_container\":true}"
+              "';;\n*) exit 9;;\nesac\n",
+              cases[i]);
+      assert(!fclose(f) && !chmod(helper, 0700));
+      setenv("AIMEE_DELEGATE_EGRESS_BIN", helper, 1);
+      snprintf(sink, sizeof sink, "%s/stage-log-%zu", g_fixture_home, i);
+      int saved_stderr = dup(STDERR_FILENO);
+      int sink_fd = open(sink, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      assert(saved_stderr >= 0 && sink_fd >= 0 && dup2(sink_fd, STDERR_FILENO) >= 0);
+      close(sink_fd);
+      delegate_backend_config_t cfg = {.workspace = g_fixture_workspace, .checked_resource = 1};
+      void *state = NULL;
+      assert(backend->acquire(backend, "diagnostic-refusal", &cfg, &state) ==
+             DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+      assert(!state);
+      fflush(stderr);
+      assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+      close(saved_stderr);
+      f = fopen(sink, "r");
+      assert(f);
+      char data[8192];
+      size_t count = fread(data, 1, sizeof data - 1, f);
+      data[count] = 0;
+      assert(!fclose(f));
+      assert(strstr(data, i == 0 ? "stage=image-observation" : "stage=unavailable"));
+      assert(!strstr(data, "SECRET_MARKER"));
+      assert(!unlink(sink));
+   }
+   unsetenv("DOCKER_HOST");
+   unsetenv("AIMEE_DOCKER_BIN");
+   unsetenv("AIMEE_DELEGATE_EGRESS_BIN");
+   assert(!unlink(helper));
+   puts("  PASS: actual checked helper failure exposes finite stage only; malformed/private output "
+        "stays generic");
+}
+
 int main(void)
 {
    test_controller_bind_recursion_facts_match_actual_mounts();
    test_owned_cleanup_custody_capacity_and_reaping();
    test_checked_ordinary_resource_keeps_image_io_and_requires_retirement();
+   test_checked_acquire_failure_stage_is_strict_and_private();
    test_restart_scan_lock_and_original_artifact_custody();
    test_remove_orphans_accepts_only_container_ids();
    test_reap_aged_removes_only_old();

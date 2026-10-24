@@ -181,7 +181,7 @@ TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # reads to decide whether a retired source is still linked into the daemon, and
 # a test-only object list there reads exactly like a reverted cutover.
 
-TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_session_lookup.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o \
+TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/modules/workspace/workspace_session_lookup.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o \
 $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/module_stage_adapters.o \
@@ -270,7 +270,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/test
                  $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/kb_store/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                  $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
                  $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/agent_hints.o $(OBJDIR)/kb_store/agent_outcomes.o $(OBJDIR)/kb_store/anti_patterns.o $(OBJDIR)/kb_store/collab_rules.o $(OBJDIR)/kb_store/curiosity.o $(OBJDIR)/kb_store/decision_log.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/kb_store/entity_edges.o $(OBJDIR)/kb_store/entity_nodes.o $(OBJDIR)/kb_store/code_projection.o $(OBJDIR)/kb_store/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/kb_store/entity_profiles.o $(OBJDIR)/kb_store/failed_queries.o $(OBJDIR)/kb_store/feedback.o $(OBJDIR)/kb_store/notes.o $(OBJDIR)/kb_store/rules.o $(OBJDIR)/kb_store/tasks.o $(OBJDIR)/kb_store/tool_registry.o $(OBJDIR)/kb_store/kind_lifecycle.o $(OBJDIR)/kb_store/kb_runtime_state.o $(OBJDIR)/kb_store/kb_service_backend.o $(OBJDIR)/kb_store/kb_service_backend_ingest.o $(OBJDIR)/kb_store/learning.o $(OBJDIR)/kb_store/code_index.o $(OBJDIR)/kb_store/sketch.o $(OBJDIR)/kb_store/pgvec_transport.o $(OBJDIR)/kb_store/kb_vectors.o $(OBJDIR)/kb_store/vector_status.o $(OBJDIR)/kb_store/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
-                 $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
+                 $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
                  $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/kb_store/learning_synth_ops.o \
                  $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/kb_store/demotion.o $(OBJDIR)/kb_store/calibration.o \
                  $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
@@ -7653,3 +7653,21 @@ integration-test-acp-full-delegate-worker: $(TESTPREFIX)/unit-test-acp-full-dele
 $(OBJDIR)/tests/acp_full_config_metadata.o: modules/routing/agent_config.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) -Dagent_load_config=full_fixture_unused_agent_load_config -Dagent_registry_find=full_fixture_unused_agent_registry_find -c -o $@ $<
+
+# Actual thin-CLI forwarding consumers share the canonical identity closure.
+$(TESTPREFIX)/unit-test-acp-full-delegate-worker \
+$(TESTPREFIX)/unit-test-cli-argspec \
+$(TESTPREFIX)/unit-test-cli-http-transport \
+$(TESTPREFIX)/unit-test-cli-index-worktree \
+$(TESTPREFIX)/unit-test-cli-native-bridge \
+$(TESTPREFIX)/unit-test-cli-v1-delegate \
+$(TESTPREFIX)/unit-test-cli-v1-poll-deadline \
+$(TESTPREFIX)/unit-test-cli-v1-subcommands \
+$(TESTPREFIX)/unit-test-dashboard \
+$(TESTPREFIX)/unit-test-gateway \
+$(TESTPREFIX)/unit-test-gateway-ntfy-webhook \
+$(TESTPREFIX)/unit-test-gateway-telegram \
+$(TESTPREFIX)/unit-test-kb-client-memory \
+$(TESTPREFIX)/unit-test-kb-client-search \
+$(TESTPREFIX)/unit-test-server-acp-chat-route \
+$(TESTPREFIX)/unit-test-workspace-add-noscan: $(WORKSPACE_IDENTITY_OBJS)

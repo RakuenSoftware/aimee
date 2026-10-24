@@ -635,6 +635,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/payload_rewrite.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_semantic.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     # THE session worktree/branch key, shared with the thin client.
     ${AIMEE_SRC_DIR}/session_worktree_key.c
@@ -1115,6 +1116,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_gate.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/wiki_render.c
@@ -1409,6 +1411,13 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
 )
+if(NOT WIN32)
+    target_sources(aimee PRIVATE
+        ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
+        ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
+        ${AIMEE_SRC_DIR}/report_enrichment.c
+        ${AIMEE_SRC_DIR}/util_url.c)
+endif()
 target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers

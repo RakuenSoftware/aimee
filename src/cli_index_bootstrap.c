@@ -1,6 +1,7 @@
 /* cli_index_bootstrap.c: make a thin client's canonical repository visible to
  * the remote code index before session isolation enters a hidden worktree. */
 #include "cli_client.h"
+#include "cli_v1_routes_internal.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -21,8 +22,12 @@ int cli_index_ensure_remote(const char *root)
       fprintf(stderr, "aimee: index bootstrap: cannot resolve repository '%s'\n", root);
       return 1;
    }
-   const char *base = strrchr(abs, '/');
-   base = (base && base[1]) ? base + 1 : abs;
+   char identity[128];
+   if (cli_ws_project_identity(NULL, NULL, abs, identity, sizeof identity))
+   {
+      free(abs);
+      return 1;
+   }
 
    char *remote = cli_v1_client_endpoint();
    char *bearer = cli_v1_client_bearer();
@@ -52,7 +57,7 @@ int cli_index_ensure_remote(const char *root)
       const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
       const char *indexed_root =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (name && indexed_root && strcmp(name, base) == 0 && strcmp(indexed_root, abs) == 0)
+      if (name && indexed_root && strcmp(name, identity) == 0 && strcmp(indexed_root, abs) == 0)
       {
          present = 1;
          break;

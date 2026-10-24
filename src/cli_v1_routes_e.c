@@ -10,6 +10,7 @@
 
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
+#include <aimee/workspace/identity.h>
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
@@ -135,7 +136,7 @@ char *cli_index_worktree_root(const char *method, const cJSON *req)
  * first. The caller's actual worktree registration takes precedence over the
  * main checkout's, including when that registration is ambiguous. */
 static const char *cli_index_registered_project(const cJSON *projects, const char *cwd,
-                                                int *matched)
+                                                const char *identity, int *matched)
 {
    const char *best = NULL;
    size_t best_len = 0;
@@ -147,7 +148,7 @@ static const char *cli_index_registered_project(const cJSON *projects, const cha
    {
       const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
       const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (!name || !name[0] || !root || root[0] != '/')
+      if (!name || strcmp(name, identity) || !root || root[0] != '/')
          continue;
       size_t n = strlen(root);
       while (n > 1 && root[n - 1] == '/')
@@ -172,50 +173,32 @@ int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *
       return 1;
    const cJSON *projects = cJSON_GetObjectItemCaseSensitive(response, "projects");
    const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "cwd"));
+   char identity[128];
+   if (cli_ws_project_identity(NULL, NULL, cwd ? cwd : root, identity, sizeof identity))
+      return 0;
    int matched = 0;
-   const char *name = cli_index_registered_project(projects, cwd, &matched);
+   const char *name = cli_index_registered_project(projects, cwd, identity, &matched);
    if (!matched)
-      name = cli_index_registered_project(projects, root, &matched);
+      name = cli_index_registered_project(projects, root, identity, &matched);
    if (name)
       cJSON_AddStringToObject(req, "project", name);
    return matched;
 }
 
-void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
-                             char *out, size_t out_len)
+int cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root, char *out,
+                            size_t out_len)
 {
-   const char *base = strrchr(abs_root, '/');
-   base = (base && base[1]) ? base + 1 : abs_root;
-   snprintf(out, out_len, "%s", base);
-   const char *verb = NULL;
-   const char *path = cli_v1_route_for_method("index.list", &verb);
-   int status = 0;
-   cJSON *response =
-       path ? cli_http_request(remote, verb ? verb : "POST", path, "{}", bearer, 15000, &status)
-            : NULL;
-   cJSON *projects = response ? cJSON_GetObjectItemCaseSensitive(response, "projects") : NULL;
-   int collision = 0;
-   cJSON *project = NULL;
-   cJSON_ArrayForEach(project, projects)
-   {
-      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
-      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (root && strcmp(root, abs_root) == 0 && name && name[0])
-      {
-         snprintf(out, out_len, "%s", name);
-         cJSON_Delete(response);
-         return;
-      }
-      if (name && strcmp(name, base) == 0)
-         collision = 1;
-   }
-   cJSON_Delete(response);
-   if (!collision)
-      return;
-   unsigned long hash = 2166136261u;
-   for (const unsigned char *p = (const unsigned char *)abs_root; *p; p++)
-      hash = (hash ^ *p) * 16777619u;
-   snprintf(out, out_len, "%s-%08lx", base, hash & 0xfffffffful);
+   (void)remote;
+   (void)bearer;
+   if (out && out_len)
+      out[0] = 0;
+#if defined(AIMEE_POSIX)
+   return workspace_repo_identity(abs_root, out, out_len, NULL, 0);
+#else
+   /* Client-push indexing and safe argv Git reads remain unsupported here. */
+   (void)abs_root;
+   return -1;
+#endif
 }
 
 cJSON *marshal_workspace_prepare(int argc, char **argv)

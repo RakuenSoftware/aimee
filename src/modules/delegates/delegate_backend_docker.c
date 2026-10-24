@@ -1058,6 +1058,28 @@ static void docker_pkg_forwarder_setup(docker_state_t *state, const char *contai
  * decides the container shape, creates or resumes it, and verifies its complete
  * runtime posture before returning a name. There is deliberately no network or
  * isolation-policy argument at this boundary. */
+/* Only an exact typed helper failure reaches diagnostics. Never log its raw body. */
+static const char *docker_acquire_failure_stage(const char *output)
+{
+   static const char *const stages[] = {
+       "arguments",          "control-socket",  "helper-identity",
+       "lease-open",         "daemon-identity", "sandbox-spec",
+       "controller-custody", "container-name",  "image-observation",
+       "container-start",    "posture",         "receipt-source",
+       "receipt-encoding"};
+   cJSON *root = output ? cJSON_ParseWithOpts(output, NULL, 1) : NULL;
+   const char *schema = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "schema"));
+   const char *stage = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stage"));
+   const char *result = "unavailable";
+   if (cJSON_IsObject(root) && cJSON_GetArraySize(root) == 2 && schema &&
+       !strcmp(schema, "aimee.delegate-acquire-error.v1") && stage)
+      for (size_t i = 0; i < sizeof stages / sizeof stages[0]; i++)
+         if (!strcmp(stage, stages[i]))
+            result = stages[i];
+   cJSON_Delete(root);
+   return result;
+}
+
 static int docker_acquire(delegate_backend_t *self, const char *task_id,
                           const delegate_backend_config_t *cfg, void **state_out)
 {
@@ -1271,7 +1293,8 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    if (rc != 0 || !out)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "Go egress module could not establish and verify delegate %s; refusing", task_id);
+                "Go egress module could not establish and verify delegate %s; stage=%s; refusing",
+                task_id, docker_acquire_failure_stage(out));
       free(out);
       docker_state_destroy(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
