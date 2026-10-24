@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 func execOnDB(t *testing.T, path, query string, args ...any) {
@@ -1736,5 +1738,115 @@ func TestUnsupportedCostLimitParksPermanentlyBeforeDispatch(t *testing.T) {
 		if err != nil || result.PauseReason != "cost_limit_unsupported" || runner.calls.Load() != int32(attempt) || caller.calls.Load() != 0 {
 			t.Fatalf("explicit resume must preserve unsupported guard: %+v %v", result, err)
 		}
+	}
+}
+
+// The synthetic producer crosses the real canonical bus-client admission seam;
+// the execution budget and scheduler still use the real PostgreSQL owner.
+type outputLimitCaller struct{ calls atomic.Int32 }
+
+func (c *outputLimitCaller) Call(_ context.Context, _, _ uint32, _ uint64, _ time.Duration, request []byte) ([]byte, error) {
+	c.calls.Add(1)
+	var invocation contract.Invocation
+	if err := json.Unmarshal(request, &invocation); err != nil {
+		return nil, err
+	}
+	output := canonical.TextResponse("partial plan")
+	output.StopReason = canonical.StopMaxTokens
+	output.Usage.Input, output.Usage.Output = "403", "512"
+	return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Status: "failed", Error: "native execution failed", Response: "forged success", Output: output, CostKnown: true, CostUSD: 0.25, Termination: &contract.TerminationDiagnostic{Kind: contract.TerminationTurnCap, MaxTurns: 1, ObservedTurns: 2, ExecutionTimeoutMS: invocation.ExecutionTimeoutMS}})
+}
+
+type outputLimitRunner struct {
+	client AgentClient
+	calls  atomic.Int32
+}
+
+func (r *outputLimitRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
+	r.calls.Add(1)
+	_, err := r.client.Delegate(ctx, DelegateRequest{Role: "draft", Persona: "engineer", Prompt: req.Proposal, WorkItemID: req.WorkItem.ID, MaxCostUSD: req.CostLimitUSD})
+	return StepResult{}, fmt.Errorf("author plan: %w", err)
+}
+func newOutputLimitFixture(t *testing.T) (*workflowstore.Store, *Engine, *outputLimitRunner, *outputLimitCaller) {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: output-limit\nstart: plan\nnodes:\n  - id: plan\n    block: author.plan\n    in: {proposal: seed.out}\n  - id: seed\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(dir, "output-limit.yaml"), definition, 0600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := registry.Load("output-limit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = artifacts.PutProposal("wi_output_limit", []byte("bounded plan")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = artifacts.PutNodeArtifact("wi_output_limit", "seed", "proposal", []byte("bounded plan")); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.AdmitRoot(t.Context(), workflowstore.CreateWorkItem{ID: "wi_output_limit", Repo: "repo", ProposalPath: "proposal", WorkflowName: "output-limit", WorkflowVersion: def.Version, StartStage: "plan", Mode: "autonomous", MaxCostUSD: 0}, 1); err != nil {
+		t.Fatal(err)
+	}
+	caller := &outputLimitCaller{}
+	client, err := contract.NewClient(caller, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &outputLimitRunner{client: client}
+	engine, err := New(store, artifacts, dir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store, engine, runner, caller
+}
+func TestCanonicalOutputLimitParksWithoutArtifactSuccess(t *testing.T) {
+	store, engine, runner, caller := newOutputLimitFixture(t)
+	result, err := engine.Advance(t.Context(), "wi_output_limit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Parked || result.Terminal || result.PauseReason != "delegate_output_limit" {
+		t.Fatalf("canonical MAX mislabeled: %+v", result)
+	}
+	item, err := store.WorkItem(t.Context(), "wi_output_limit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.PauseReason != "delegate_output_limit" || item.Stage != "plan" || item.ContentHash != "" || item.CumulativeCostUSD != 0.25 || item.ReservedCostUSD != 0 || item.ReservationState != "" {
+		t.Fatalf("failed generation acquired success or lost accounting: %+v", item)
+	}
+	if runner.calls.Load() != 1 || caller.calls.Load() != 1 {
+		t.Fatalf("runner=%d dispatch=%d", runner.calls.Load(), caller.calls.Load())
+	}
+	if _, err = engine.artifacts.NodeArtifact(item.ID, "plan"); err == nil {
+		t.Fatal("partial plan was stored as a business artifact")
+	}
+	if err = store.Resume(t.Context(), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = engine.Advance(t.Context(), item.ID)
+	if err != nil || result.PauseReason != "delegate_output_limit" || runner.calls.Load() != 2 || caller.calls.Load() != 2 {
+		t.Fatalf("operator resume did not recheck terminal: %+v %v", result, err)
+	}
+	item, err = store.WorkItem(t.Context(), item.ID)
+	if err != nil || item.CumulativeCostUSD != 0.5 || item.ReservedCostUSD != 0 || item.ReservationState != "" {
+		t.Fatalf("second explicit execution accounting: %+v %v", item, err)
 	}
 }

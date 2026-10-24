@@ -258,10 +258,15 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		reason := "runner_unavailable"
 		capacity := isCapacityBackpressure(err)
 		costUnsupported := errors.Is(err, ErrDelegateCostLimitUnsupported)
+		outputLimited := errors.Is(err, ErrDelegateOutputLimit)
 		if costUnsupported {
 			// A monetary guarantee unsupported by the delegate cannot heal with
 			// time. Only an operator may change the configuration and resume.
 			reason = "cost_limit_unsupported"
+		} else if outputLimited {
+			// A provider-completed MAX response needs an operator decision, not
+			// another automatic model generation with the same output limit.
+			reason = "delegate_output_limit"
 		} else if errors.Is(err, ErrGitIdentityMissing) {
 			// This cannot heal on the scheduler's five-second runner backoff. Park
 			// until an operator seals the documented install-time identity and
@@ -281,10 +286,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			bound, counter = maxCapacityWaitsWithoutProgress, e.db.CapacityWaitsSinceProgress
 		}
 		if failures, ferr := counter(context.WithoutCancel(ctx), item.ID, item.Stage); ferr == nil &&
-			failures >= bound && !costUnsupported {
+			failures >= bound && !costUnsupported && !outputLimited {
 			reason = "delegate_failed"
 		}
-		if !costUnsupported && errors.Is(err, context.DeadlineExceeded) {
+		if !costUnsupported && !outputLimited && errors.Is(err, context.DeadlineExceeded) {
 			reason = "wall_cap"
 		}
 		var execution *DelegateExecutionError

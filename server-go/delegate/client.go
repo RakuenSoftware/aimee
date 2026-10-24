@@ -170,6 +170,7 @@ type DelegateGroupClient interface {
 
 var (
 	ErrDelegateTerminal             = errors.New("delegate execution failed")
+	ErrDelegateOutputLimit          = errors.New("delegate canonical output token limit reached")
 	ErrDelegateReplayUnavailable    = errors.New("delegate calls are stateless; replay-only execution is unavailable")
 	ErrDelegateUnassignedExpired    = errors.New("delegate was not assigned")
 	ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
@@ -181,6 +182,9 @@ var (
 )
 
 type DelegateExecutionError struct {
+	// Output is an admitted producer observation retained only for diagnostics.
+	// A failed envelope never grants business/artifact completion authority.
+	Output      *canonical.Response
 	Err         error
 	Dispatched  bool
 	CostKnown   bool
@@ -394,7 +398,10 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 				failure = fmt.Errorf("%w: %s", ErrDelegateTerminal, detail)
 			}
 		}
-		return DelegateResult{}, &DelegateExecutionError{Err: failure,
+		if result.Output != nil && result.Output.StopReason == canonical.StopMaxTokens {
+			failure = errors.Join(ErrDelegateOutputLimit, failure)
+		}
+		return DelegateResult{}, &DelegateExecutionError{Err: failure, Output: result.Output,
 			Dispatched: true, CostKnown: result.CostKnown, CostUSD: result.CostUSD,
 			Termination: result.Termination}
 	}

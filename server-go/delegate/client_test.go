@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 type recordingCaller struct {
@@ -315,5 +317,119 @@ func TestSafeDiagnosticPreservesWireClassificationSlugs(t *testing.T) {
 		if got := SafeDiagnostic(err.Error()); got != err.Error() {
 			t.Fatalf("wire classification slug changed: got %q want %q", got, err)
 		}
+	}
+}
+
+func TestFailedCanonicalResponseDiagnosticIsNotDiscarded(t *testing.T) {
+	output := canonical.TextResponse("partial plan")
+	output.StopReason = canonical.StopMaxTokens
+	output.Usage.Input, output.Usage.Output = "403", "512"
+	encrypted := "inert-signed-thinking"
+	missingText := ""
+	output.Blocks = append(output.Blocks, canonical.ResponseBlock{Block: canonical.Block{Type: "thinking", Text: &missingText, EncryptedContent: &encrypted}, Raw: json.RawMessage(`{"opaque":true}`)})
+	output.Raw = json.RawMessage(`{"provider_metadata":{"retained":true}}`)
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed", Error: "native execution failed", Response: "forged success", Output: output, CostKnown: true, CostUSD: 0.25}}
+	client, _ := NewClient(caller, time.Second)
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Prompt: "plan"})
+	var execution *DelegateExecutionError
+	if !errors.As(err, &execution) || !execution.Dispatched || !execution.CostKnown || execution.CostUSD != 0.25 {
+		t.Fatalf("failed execution accounting lost: %v", err)
+	}
+	if result.Output != nil || result.Response != "" {
+		t.Fatal("failed model response was exposed as a successful result")
+	}
+	// Reflection lets this loss regression run against the old error shape too;
+	// old source must fail at the actual discarded diagnostic, not compilation.
+	field := reflect.ValueOf(execution).Elem().FieldByName("Output")
+	if !field.IsValid() || field.IsNil() {
+		t.Fatal("admitted canonical failed response was discarded")
+	}
+	diagnostic, ok := field.Interface().(*canonical.Response)
+	if !ok {
+		t.Fatal("diagnostic is not a typed canonical response")
+	}
+	before, _ := json.Marshal(output)
+	after, _ := json.Marshal(diagnostic)
+	if string(before) != string(after) {
+		t.Fatalf("canonical diagnostic changed: %s", after)
+	}
+	if _, err := diagnostic.SemanticText(); err == nil {
+		t.Fatal("partial canonical output acquired artifact authority")
+	}
+}
+
+func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
+	for _, kind := range []string{"max", "max-after-turn-cap", "end-with-forged-strings", "unknown", "refused", "error", "tool", "missing", "invalid-max", "done-max", "transport-string"} {
+		t.Run(kind, func(t *testing.T) {
+			output := canonical.TextResponse("partial plan")
+			output.StopReason = canonical.StopMaxTokens
+			rawStop := "max_tokens"
+			output.RawStopReason = &rawStop
+			output.Raw = json.RawMessage(`{"stop_reason":"max_tokens"}`)
+			response := InvocationResult{Version: WireVersion, Status: "failed", Error: ErrDelegateOutputLimit.Error(), Response: "max_tokens", Output: output, CostKnown: true, CostUSD: 0.25}
+			caller := &recordingCaller{}
+			wantLimit, wantOutput := kind == "max" || kind == "max-after-turn-cap", true
+			switch kind {
+			case "max-after-turn-cap":
+				response.Termination = &TerminationDiagnostic{Kind: TerminationTurnCap, MaxTurns: 1, ObservedTurns: 2, ExecutionTimeoutMS: 1000}
+			case "end-with-forged-strings":
+				output.StopReason = canonical.StopEndTurn
+			case "unknown":
+				output.StopReason = canonical.StopUnknown
+			case "refused":
+				output.StopReason = canonical.StopContentFilter
+				category, explanation := "reasoning_extraction", "inert diagnostic"
+				output.Refusal = &canonical.RefusalDetails{Category: &category, Explanation: &explanation}
+			case "error":
+				output.StopReason = canonical.StopError
+				message := "provider transport failed"
+				output.ErrorMessage = &message
+			case "tool":
+				output.StopReason = canonical.StopToolUse
+				output.Blocks = []canonical.ResponseBlock{{Block: canonical.Block{Type: "tool_use", ToolID: "pending", Name: "read_file", Input: json.RawMessage(`{}`)}}}
+			case "missing":
+				response.Output = nil
+				wantOutput = false
+			case "invalid-max":
+				output.Usage.Output = "-1"
+				wantOutput = false
+			case "done-max":
+				response.Status = "done"
+				response.Error = ""
+				wantOutput = false
+			case "transport-string":
+				caller.err = errors.New(ErrDelegateOutputLimit.Error())
+				wantOutput = false
+			}
+			caller.result = response
+			client, _ := NewClient(caller, time.Second)
+			result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Prompt: "plan"})
+			if err == nil || errors.Is(err, ErrDelegateOutputLimit) != wantLimit {
+				t.Fatalf("canonical classification mismatch: kind=%s error=%v", kind, err)
+			}
+			var execution *DelegateExecutionError
+			if !errors.As(err, &execution) || !execution.Dispatched {
+				t.Fatalf("dispatch uncertainty lost: %v", err)
+			}
+			if (execution.Output != nil) != wantOutput {
+				t.Fatalf("unadmitted or missing response acquired diagnostics: %s", kind)
+			}
+			if kind == "max-after-turn-cap" && (!errors.Is(err, ErrDelegateTurnCap) || execution.Termination == nil || execution.Termination.ObservedTurns != 2) {
+				t.Fatal("host turn-cap diagnostic lost alongside canonical MAX")
+			}
+			if wantOutput {
+				before, _ := json.Marshal(output)
+				after, _ := json.Marshal(execution.Output)
+				if string(before) != string(after) || !execution.CostKnown || execution.CostUSD != 0.25 {
+					t.Fatal("admitted failed response or billing metadata changed")
+				}
+			}
+			if result.Output != nil || result.Response != "" {
+				t.Fatal("failed envelope acquired success-shaped result")
+			}
+			if _, err = result.SemanticText(); err == nil {
+				t.Fatal("failed envelope acquired business text")
+			}
+		})
 	}
 }

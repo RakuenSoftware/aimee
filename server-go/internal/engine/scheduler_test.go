@@ -596,3 +596,50 @@ func TestSchedulerDoesNotRetryUnsupportedCostLimit(t *testing.T) {
 		t.Fatalf("permanent refusal auto-resumed: runner=%d dispatch=%d events=%d->%d item=%+v", runner.calls.Load(), caller.calls.Load(), len(before), len(after), item)
 	}
 }
+
+func TestSchedulerDoesNotRetryCanonicalOutputLimit(t *testing.T) {
+	store, engine, runner, caller := newOutputLimitFixture(t)
+	if _, err := engine.Advance(t.Context(), "wi_output_limit"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Events(t.Context(), "wi_output_limit", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, engine, 1, nil)
+	// Mature every real transient backoff without sleeping. The permanent reason
+	// must remain absent from this list and from every scheduler resume pass.
+	scheduler.transientPauses = append([]transientPause(nil), schedulerTransientPauses...)
+	for n := range scheduler.transientPauses {
+		scheduler.transientPauses[n].backoff = 0
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	for n := 0; n < 3; n++ {
+		scheduler.fill(ctx)
+		deadline := time.Now().Add(schedulerTestTimeout)
+		for {
+			scheduler.mu.Lock()
+			active := len(scheduler.running)
+			scheduler.mu.Unlock()
+			if active == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("scheduler worker did not finish")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	item, err := store.WorkItem(t.Context(), "wi_output_limit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.Events(t.Context(), item.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls.Load() != 1 || caller.calls.Load() != 1 || len(after) != len(before) || item.PauseReason != "delegate_output_limit" || item.CumulativeCostUSD != 0.25 || item.ReservedCostUSD != 0 || item.ReservationState != "" {
+		t.Fatalf("permanent refusal auto-resumed: runner=%d dispatch=%d events=%d->%d item=%+v", runner.calls.Load(), caller.calls.Load(), len(before), len(after), item)
+	}
+}

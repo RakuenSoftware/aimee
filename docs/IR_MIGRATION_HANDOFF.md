@@ -55,6 +55,13 @@ old-source failures and final focused normal/race results are retained. The inte
 Measured from `03d881e0e`, this continuation removes **2,106 net production lines**
 (969 added / 3,075 deleted, excluding tests, documentation, generated locks and
 build tooling). It retires parallel implementations rather than compressing source.
+This is the retirement checkpoint, not the whole-branch result. Against fetched
+`testing` (`251536ddb90fed8e39421a27a8bd27cb73a3f362`), source `f3e9f22ef`
+still adds **2,883 net production lines** (8,681 added / 5,798 deleted).
+The user expects a significant overall reduction; do not present the narrower
+retirement measurement as satisfying that expectation. The reproducible audit at
+`/var/tmp/aimee-ir-production-reduction-f3e9f22ef.json` contains explicit inclusion
+rules and the full included/excluded file list, rather than a selected path list.
 The final CLI probe exit policy now lives in its existing response owner, keeping
 the forwarding file below the 2,500-line lint limit without exemptions.
 A further 195-line frontend retirement removes the unsupported legacy thread
@@ -161,6 +168,46 @@ NONE streaming routes, exact preserved owner context and protocol-owned terminal
 events without an OpenAI `[DONE]` trailer. OpenAI chat framing remains separate.
 The final image/current-source lint and post-fix live service/hybrid cases still
 must qualify; the intermediate `4d5ab125c` image was not deployed.
+
+Source `f3e9f22ef` subsequently passes all 76 lint gates and builds all 87 image
+products/19 modules. Its normal same-volume upgrade from `ce789ccf3` preserves
+the original question/resume history, full SDK caches, native records and protected
+authority. The intermediate `4d5ab125c` image was never deployed. A fresh service
+attempt now reaches the actual provider through the admitted server/NONE source,
+proving the previous HTTP 403 is repaired. Its one invocation/one generation
+returns canonical MAX_TOKENS with 403 input/512 output tokens, partial text and
+opaque thinking. This is a failed bounded attempt, not service acceptance. Normal
+Stop and owned-rule removal each occur once; prior 26 records/caches remain exact,
+the 11 new canonical records and full 7,227-byte SDK cache are retained, and both
+native activity and SDK process counts return to zero. No retry or cap increase
+was performed on that item.
+
+This attempt exposes another internal consumer defect: the shared Go delegate
+client discards an admitted canonical failed response and the scheduler treats
+its output limit as generic transient runner failure. The repair preserves that
+full response as error diagnostics and classifies MAX_TOKENS solely from its
+admitted canonical typed stop reason, with operator-only resumption. Failed
+envelopes still cannot grant artifact/business success; dispatched, spend and
+termination diagnostics remain intact. Actual old-client and PostgreSQL scheduler
+failures reproduce the defect. The repaired four Go packages pass 917 tests and
+subtests in each normal and race run, with 49 unrelated optional family skips;
+required engine/store checks use actual PostgreSQL with zero skips. Those tests
+reuse the explicitly qualified `601aff47e` C DB-owner/config products with the
+newly built current Go module; they are not a new C qualification.
+A distinct positive service fixture may use a new
+test-owned 2,048-token alias/template with the same one-generation/deadline/tool
+bounds and no monetary claim; preserve the original 512-token configuration and
+negative attempt. That positive case, the hybrid fault/permission case, final UX
+observations and final-source delivery remain unfinished.
+
+The first actual hybrid attempt reaches one canonical HTTP bash call and naturally
+completes its 120-second sleep. Harness review latency misses the fault window;
+the unchanged age guard refuses before any fault receipt or signal. No core fault,
+restart, Cancel, native Send, Allow or file effect occurs. Its 15 records and
+unchanged prior 37 records/caches/authority are retained. A distinct fresh attempt
+is authorized with the same bounded actions; the already-reviewed exact-process
+checks execute immediately without another dynamic-PID review handoff. Count both
+HTTP attempts honestly; do not relabel the first as successful restart coverage.
 
 
 
