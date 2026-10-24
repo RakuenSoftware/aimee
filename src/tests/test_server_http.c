@@ -13,6 +13,7 @@
 #include "presence.h"
 #include "turn_registry.h"
 #include "server_compute_impl.h"
+#include "server_session_capture.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -696,19 +697,23 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
          at += n;
       }
       assert(at == request_len);
+      turn_entry_t *active = turn_registry_find("cancel-session");
+      assert(!active || !turn_entry_cancelled(active)); /* Commit before signalling. */
       cancel_store_calls++;
       if (cancel_store_status < 0)
          return AIMEE_MODULE_CALL_TRANSPORT;
       uint8_t *out = response_body;
       aimee_db1_put_u32(out, cancel_store_status ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_OK);
-      aimee_db1_put_u32(out + 4, cancel_store_status ? 0 : 1);
+      aimee_db1_put_u32(out + 4, cancel_store_status == 1 ? 0 : 1);
       *response_len = 8;
-      if (!cancel_store_status)
+      if (cancel_store_status != 1)
       {
-         assert(response_capacity >= 14);
-         aimee_db1_put_u32(out + 8, 2);
-         memcpy(out + 12, "71", 2);
-         *response_len = 14;
+         const char *cell = cancel_store_status == 2 ? "native-active" : "71";
+         size_t n = strlen(cell);
+         assert(response_capacity >= 12 + n);
+         aimee_db1_put_u32(out + 8, (uint32_t)n);
+         memcpy(out + 12, cell, n);
+         *response_len = 12 + n;
       }
       return AIMEE_MODULE_CALL_OK;
    }
@@ -1111,6 +1116,15 @@ static void test_operator_control_reply_route(void)
    server_control_scope_close(scope);
 }
 
+static int cancel_owner_callbacks;
+static void cancelled_owner_callback(int success, void *resource)
+{
+   server_session_capture_t *capture = resource;
+   assert(!success && !cancel_owner_callbacks++);
+   char sequence[32];
+   assert(!server_session_capture_cursor(capture, sequence) && !strcmp(sequence, "71"));
+   assert(!server_session_capture_accepting(capture));
+}
 static void test_operator_exact_cancel_route(void)
 {
    char response[1024];
@@ -1145,13 +1159,37 @@ static void test_operator_exact_cancel_route(void)
       assert(!turn_entry_cancelled(turn) && !cancel_store_calls);
       turn_registry_clear(turn);
       turn = turn_registry_publish("cancel-session", "cancel-turn");
+      server_session_capture_t *capture = server_session_capture_open(
+          "cancel-session", "cancel-turn", "webuser:alice", "cancel-session");
+      assert(capture &&
+             !server_session_capture_after_terminal(capture, cancelled_owner_callback, capture));
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 200);
-      assert(turn_entry_cancelled(turn) && strstr(response, "stopping") && !cancel_store_calls);
+      assert(turn_entry_cancelled(turn) && strstr(response, "stopping") && cancel_store_calls == 1);
+      assert(cancel_owner_callbacks == 1 && server_session_capture_operator_cancelled(capture));
+      server_session_capture_close(capture);
+      assert(cancel_owner_callbacks == 1);
       turn_registry_clear(turn);
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 200);
-      assert(strstr(response, "cancelled") && strstr(response, "71") && cancel_store_calls == 1);
+      assert(strstr(response, "cancelled") && strstr(response, "71") && cancel_store_calls == 2);
+      turn = turn_registry_publish("cancel-session", "cancel-turn");
+      cancel_store_status = 1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409);
+      assert(!turn_entry_cancelled(turn));
+      cancel_store_status = -1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 503);
+      assert(!turn_entry_cancelled(turn));
+      cancel_store_status = 2;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 200);
+      assert(turn_entry_cancelled(turn) && strstr(response, "stopping"));
+      assert(!strstr(response, "terminal_sequence")); /* Native stop is not a durable receipt. */
+      turn_registry_clear(turn);
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409); /* No local native owner. */
       cancel_store_status = 1;
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 409);

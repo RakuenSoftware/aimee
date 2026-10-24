@@ -27,6 +27,8 @@ static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled, delivered_sequence;
 static server_session_capture_t *page_writer;
 static char owner[64] = "alice";
+static compute_ctx_t *cancel_during_finish;
+static int externally_cancel(const char *, const char *, const char *, char[32]);
 void test_learning_observations_reset(void);
 int test_learning_observations(void);
 void test_learning_assert_source(const cJSON *record)
@@ -48,6 +50,14 @@ int presence_turn_host_own(const char *sid, const char *turn)
 }
 int agent_request_cancelled(void)
 {
+   if (cancel_during_finish)
+   {
+      compute_ctx_t *c = cancel_during_finish;
+      cancel_during_finish = NULL;
+      char sequence[32];
+      assert(!server_session_capture_cancel_owned("alice", "session-one", c->ir_turn, sequence,
+                                                  externally_cancel));
+   }
    return cancelled;
 }
 int db1_server_session_get(const char *id, db1_server_session_t *row)
@@ -534,9 +544,45 @@ static void failed_steering_admission_is_observation_only(void)
    cleanup(&reset);
 }
 
+static int externally_cancel(const char *actor, const char *session, const char *turn,
+                             char sequence[32])
+{
+   assert(!strcmp(actor, "alice") && !strcmp(session, "session-one") && strlen(turn) == 32);
+   strcpy(sequence, "71");
+   return 0;
+}
+static void canonical_turn_and_external_cancel(void)
+{
+   for (int during = 0; during < 2; during++)
+   {
+      compute_ctx_t c = context();
+      c.ir_delivery = 0;
+      assert(!server_chat_ir_prepare_turn(&c));
+      char canonical[33];
+      strcpy(canonical, c.ir_turn);
+      assert(!server_chat_ir_prepare_turn(&c) && !strcmp(canonical, c.ir_turn));
+      assert(!server_chat_ir_begin(&c, "session-one", "cancelled owner"));
+      assert(!strcmp(canonical, c.ir_turn));
+      int before = cJSON_GetArraySize(log_entries);
+      char sequence[32];
+      if (during)
+         cancel_during_finish = &c;
+      else
+         assert(!server_session_capture_cancel_owned("alice", "session-one", canonical, sequence,
+                                                     externally_cancel));
+      assert(!server_chat_ir_finish(&c, NULL));
+      assert(!cancel_during_finish && !c.ir_failed && !server_session_capture_failed(c.ir_capture));
+      assert(!server_session_capture_cursor(c.ir_capture, sequence) && !strcmp(sequence, "71"));
+      assert(cJSON_GetArraySize(log_entries) == before);
+      assert(!server_chat_ir_finish(&c, NULL));
+      cleanup(&c);
+   }
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   canonical_turn_and_external_cancel();
    failed_steering_admission_is_observation_only();
    native_failure_terminal_survives_lost_subscriber();
    worker_capture_failure_is_sticky();

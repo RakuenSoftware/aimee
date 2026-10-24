@@ -118,6 +118,7 @@ void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 /* Failed continuation admission is an execution diagnostic, never model history. */
 int server_chat_ir_replace_steer(cJSON *request, const char *message);
 int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
+int server_chat_ir_prepare_turn(compute_ctx_t *cctx);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
 int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);

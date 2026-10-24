@@ -32,6 +32,7 @@
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
 #include "turn_registry.h"
+#include "server_session_capture.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/server_sessions.h"
 #include "request_context.h"
@@ -1364,22 +1365,33 @@ static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 403, "session ownership mismatched");
    }
-   int local = turn_registry_cancel_exact(session, turn);
+   int local = turn_registry_match_exact(session, turn);
    char sequence[32] = "";
-   int rc = local ? local < 0 ? 1 : 0
-                  : db1_session_ir_cancel(identity.vault_principal, session, turn, sequence);
-   if (rc)
+   int rc = local < 0 ? 1
+                      : server_session_capture_cancel_owned(identity.vault_principal, session, turn,
+                                                            sequence, db1_session_ir_cancel);
+   /* Only the durable owner's exact native-active refusal authorizes a local
+    * native stop without an operator terminal. Generic refusals never do. */
+   if (rc == 2 && local != 1)
+      rc = 1;
+   if (rc != 0 && rc != 2)
    {
       cJSON_Delete(body);
       return err_json(resp, cap, rc == 1 ? 409 : 503,
                       "exact turn cancellation refused or unavailable");
    }
+   int flagged = turn_registry_cancel_exact(session, turn);
+   if (rc == 2 && flagged != 1)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 409, "native turn is no longer locally owned");
+   }
    cJSON *result = cJSON_CreateObject();
    cJSON_AddStringToObject(result, "status", "ok");
    cJSON_AddStringToObject(result, "session_id", session);
    cJSON_AddStringToObject(result, "turn_id", turn);
-   cJSON_AddStringToObject(result, "disposition", local ? "stopping" : "cancelled");
-   if (!local)
+   cJSON_AddStringToObject(result, "disposition", flagged == 1 ? "stopping" : "cancelled");
+   if (rc == 0)
       cJSON_AddStringToObject(result, "terminal_sequence", sequence);
    char *wire = cJSON_PrintUnformatted(result);
    int n = wire ? snprintf(resp, (size_t)cap, "%s", wire) : -1;

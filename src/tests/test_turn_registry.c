@@ -27,6 +27,10 @@ static void test_publish_and_collision(void)
    turn_entry_t *a = turn_registry_publish("sess-A", "turn-1");
    assert(a != NULL);
    assert(strcmp(a->session_id, "sess-A") == 0);
+   assert(turn_registry_match_exact("sess-A", "turn-1") == 1);
+   assert(turn_registry_match_exact("sess-A", "stale") == -1);
+   assert(turn_registry_match_exact("absent", "turn-1") == 0);
+   assert(!turn_entry_cancelled(a));
    assert(atomic_load(&a->cancel) == 0);
    /* A second publish for the same session is a collision -> NULL (no overwrite). */
    turn_entry_t *dup = turn_registry_publish("sess-A", "turn-2");

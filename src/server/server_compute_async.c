@@ -583,12 +583,12 @@ static void chat_stream_worker_pooled(void *arg)
    atomic_int *request_cancel = NULL;
    if (delta_session[0])
    {
-      cancel_entry = turn_registry_publish(delta_session, delta_turn);
+      cancel_entry = turn_registry_publish(delta_session, cctx->ir_turn);
       if (cancel_entry)
       {
          cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
          request_cancel = &cancel_entry->cancel;
-         (void)ti_turn_manifest_init(&cancel_entry->integrity, delta_turn, delta_session,
+         (void)ti_turn_manifest_init(&cancel_entry->integrity, cctx->ir_turn, delta_session,
                                      delta_session);
          (void)ti_turn_transition(&cancel_entry->integrity, TI_TURN_CONTEXTUALIZED,
                                   "async turn admitted");
@@ -871,6 +871,8 @@ static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
    }
    if (strcmp(cctx->presence_session, sid) || !presence_turn_host_own(sid, cctx->presence_turn_id))
       goto fail;
+   if (server_chat_ir_prepare_turn(cctx))
+      goto fail;
    if (g_chat_dispatch_override)
    {
       if (g_chat_dispatch_override(cctx))
@@ -940,8 +942,9 @@ static presence_turn_result_t retry_after_reclaiming_abandoned_turn(const char *
 
    /* Not under any presence lock: the registry mutex is a leaf and callers may
     * not hold a presence lock across a registry call (turn_registry.h). */
-   turn_entry_t *owner = turn_registry_find(session_id);
-   if (owner && strcmp(owner->turn_id, stuck) == 0)
+   /* Registry identity is canonical; the presence lease has its own transport
+    * identity. One published worker per session remains evidence of ownership. */
+   if (turn_registry_find(session_id))
       return PRESENCE_TURN_BUSY; /* a worker owns it; it is slow, not lost */
 
    if (!presence_turn_reclaim(session_id, stuck))

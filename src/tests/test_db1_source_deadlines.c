@@ -12,16 +12,19 @@ static uint32_t expected_op;
 static uint64_t expected_budget;
 static int calls;
 static int cancel_status;
+static uint32_t cancel_filled = 1;
 static const char *cancel_sequence = "9007199254740993";
 int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint32_t count,
              char *const *values, const size_t *caps, uint32_t slots, uint32_t *filled)
 {
-   (void)filled;
+
    assert(op == expected_op && family->timeout_ms == expected_budget);
    if (op == AIMEE_DB1_OP_SESSION_IR_CANCEL)
    {
       assert(count == 3 && !strcmp(fields[0], "actor") && !strcmp(fields[1], "session") &&
              !strcmp(fields[2], "exact-turn") && slots == 1 && caps[0] == 32);
+      if (filled)
+         *filled = cancel_filled;
       snprintf(values[0], caps[0], "%s", cancel_sequence);
       return cancel_status;
    }
@@ -75,6 +78,16 @@ int main(void)
    }
    cancel_status = AIMEE_DB1_STATUS_INVALID;
    assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_sequence = "native-active";
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 2 && !sequence[0]);
+   cancel_filled = 0;
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_filled = 2;
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_filled = 1;
+   cancel_sequence = "native-active-other";
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_sequence = "native-active";
    cancel_status = AIMEE_DB1_STATUS_MISSING;
    assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
    cancel_status = -1;

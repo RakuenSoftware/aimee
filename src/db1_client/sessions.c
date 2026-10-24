@@ -1074,8 +1074,9 @@ int db1_session_ir_cancel(const char *actor, const char *session_id, const char 
                            turn_id ? turn_id : ""};
    char *const values[] = {out_sequence};
    const size_t caps[] = {32u};
-   int status =
-       db1_call(&history_family, AIMEE_DB1_OP_SESSION_IR_CANCEL, fields, 3, values, caps, 1, NULL);
+   uint32_t filled = 0;
+   int status = db1_call(&history_family, AIMEE_DB1_OP_SESSION_IR_CANCEL, fields, 3, values, caps,
+                         1, &filled);
    if (status == (int)AIMEE_DB1_STATUS_OK)
    {
       size_t n = strlen(out_sequence);
@@ -1083,7 +1084,11 @@ int db1_session_ir_cancel(const char *actor, const char *session_id, const char 
           (n < 19 || strcmp(out_sequence, "9223372036854775807") <= 0))
          return 0;
    }
+   int native = status == (int)AIMEE_DB1_STATUS_INVALID && filled == 1 &&
+                !strcmp(out_sequence, "native-active");
    out_sequence[0] = 0;
+   if (native)
+      return 2;
    return status == (int)AIMEE_DB1_STATUS_INVALID || status == (int)AIMEE_DB1_STATUS_MISSING ? 1
                                                                                              : -1;
 }

@@ -53,6 +53,16 @@ int server_session_capture_observe_verification(server_session_capture_t *owner,
 int server_session_capture_retain_current(const char *execution_session, const char *principal,
                                           server_session_capture_t **out);
 void server_session_capture_release(server_session_capture_t *owner);
+/* Normal browser operator cancellation is committed by the durable owner.
+ * 0 acknowledges that exact cancelled terminal, 1 refuses, 2 classifies an
+ * exact active native owner (no writes), -1 is unavailable. Native2 never seals
+ * this capture or claims process quiescence. No model/client flag enters here. */
+typedef int (*server_session_operator_cancel_fn)(const char *actor, const char *session,
+                                                 const char *turn, char sequence[32]);
+int server_session_capture_cancel_owned(const char *actor, const char *session, const char *turn,
+                                        char sequence[32],
+                                        server_session_operator_cancel_fn commit);
+int server_session_capture_operator_cancelled(const server_session_capture_t *owner);
 void server_session_capture_close(server_session_capture_t *owner);
 void server_session_capture_fail(server_session_capture_t *owner);
 int server_session_capture_failed(const server_session_capture_t *owner);

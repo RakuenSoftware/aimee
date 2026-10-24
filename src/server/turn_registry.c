@@ -127,6 +127,17 @@ int turn_registry_cancel(const char *session_id, const char *owner_principal)
    return 1;
 }
 
+int turn_registry_match_exact(const char *session_id, const char *turn_id)
+{
+   if (!session_id || !session_id[0] || !turn_id || !turn_id[0])
+      return -1;
+   pthread_mutex_lock(&g_lock);
+   turn_entry_t *entry = find_locked(session_id);
+   int rc = !entry ? 0 : strcmp(entry->turn_id, turn_id) ? -1 : 1;
+   pthread_mutex_unlock(&g_lock);
+   return rc;
+}
+
 int turn_registry_cancel_exact(const char *session_id, const char *turn_id)
 {
    if (!session_id || !session_id[0] || !turn_id || !turn_id[0])

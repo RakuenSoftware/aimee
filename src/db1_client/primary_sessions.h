@@ -100,7 +100,8 @@ extern "C"
 
    /* Privileged operator cancellation of an exact owned API turn. Native
     * custody must already be resolved. This fences continuation, not effects.
-    * Returns 0 committed/idempotent, 1 stale/refused, -1 storage failure. */
+    * Returns 0 committed/idempotent, 1 stale/refused, 2 exact owned active
+    * native (refused without writes), -1 storage failure. */
    int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
                              char out_sequence[32]);
 

@@ -234,7 +234,8 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
    char *json = NULL, sequence[32];
    if (server_session_capture_append(c->ir_capture, event, &json, sequence))
    {
-      c->ir_failed = 1;
+      if (!server_session_capture_operator_cancelled(c->ir_capture))
+         c->ir_failed = 1;
       return -1;
    }
    int rc = chat_ir_deliver(c, json, sequence);
@@ -323,6 +324,20 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
    return result || terminal ? -1 : 0;
 }
 
+int server_chat_ir_prepare_turn(compute_ctx_t *c)
+{
+   if (!c)
+      return -1;
+   if (c->ir_turn[0])
+      return strlen(c->ir_turn) == 32 && strspn(c->ir_turn, "0123456789abcdef") == 32 ? 0 : -1;
+   unsigned char random[16];
+   if (RAND_bytes(random, sizeof random) != 1)
+      return -1;
+   for (size_t i = 0; i < sizeof random; i++)
+      snprintf(c->ir_turn + 2 * i, 3, "%02x", random[i]);
+   return 0;
+}
+
 int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
 {
    if (!c->presence_locked || !session || !session[0] || strlen(session) >= sizeof(c->ir_session) ||
@@ -337,12 +352,10 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    if (found != 0 && db1_server_session_create(session, "webchat", c->vault_principal) != 0)
       return -1;
    snprintf(c->ir_session, sizeof(c->ir_session), "%s", session);
-   /* Random process-independent turn identity, also for requests without a presence attachment. */
-   unsigned char random[16];
-   if (RAND_bytes(random, sizeof(random)) != 1)
+   /* Async admission already minted this host identity before publishing the
+    * cancel registry. Direct history operations mint it here exactly once. */
+   if (server_chat_ir_prepare_turn(c))
       return -1;
-   for (int i = 0; i < 16; i++)
-      snprintf(c->ir_turn + 2 * i, 3, "%02x", random[i]);
    c->ir_controls = server_control_scope_open(c->ir_session, c->ir_turn, c->vault_principal);
    if (!c->ir_controls)
       return -1;
@@ -378,6 +391,8 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    if (!c->ir_enabled || c->ir_completed)
       return 0;
    c->ir_completed = 1;
+   if (server_session_capture_operator_cancelled(c->ir_capture))
+      return server_chat_ir_progress(c);
    server_session_capture_counts_t counts = {0};
    if (server_session_capture_counts(c->ir_capture, &counts))
       error = "canonical capture owner unavailable";
@@ -392,7 +407,10 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
                                                           ? "cancelled"
                                                           : (error ? "failed" : "completed"),
                                   .execution_error = error};
-   return aimee_ir_session_emit(&event);
+   int result = aimee_ir_session_emit(&event);
+   if (result && server_session_capture_operator_cancelled(c->ir_capture))
+      return server_chat_ir_progress(c);
+   return result;
 }
 
 void server_chat_ir_close(compute_ctx_t *c)

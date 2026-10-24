@@ -297,6 +297,36 @@ still adds 2,877 against the recorded `testing` base. Updated-SPA deployment,
 positive permission/effect, final responsive/editor checks and final PR/CI remain
 unfinished.
 
+The updated UI image `e02930ec3` passes its normal upgrade with all 83 prior
+records, native/cache bytes, configuration and authority preserved. Actual
+1280/390/320 idle checks report no overflow, duplicate controls or unintended
+mutations; mobile screenshots retain scroll position rather than proving the
+last message is viewport-visible. The normal Editor opens the exact session
+workspace and displays the unchanged README. Two optional VS Code assets return
+404; the workbench and file read work, so no all-network-200 claim is made.
+
+The next fresh HTTP approval test exposes a real remaining identity cutover:
+active exact Cancel returns 409 because the registry uses a presence ID while
+the IR execution uses another ID. The active route also skips the durable
+operator cancellation transaction. That failed test uses one Send and one
+refused Cancel, with no second Send, approval or file effect; the command finishes
+naturally. All previous 83 records/caches remain exact, current history reaches
+98 records, and the negative case is sealed.
+
+The repair allocates the canonical ID once before async publication and reuses
+it for execution, registry and integrity. HTTP cancellation commits the real Go
+operator terminal and interruption receipts before signalling the worker; the
+retained capture adopts the actual cursor and handles late writers/finish without
+duplicate terminal or false persistence failure. Native custody refusal stays
+strict: only an affirmative private classification for the exact open owned
+native turn permits the existing local stop, without a fabricated receipt or
+quiescence claim. Six focused normal and six ASan/UBSan/leak targets pass,
+including the actual async/route/retained-owner path and deterministic writer
+race. Old route/async code and a late-finish mutation reproduce failures.
+Actual PostgreSQL passes 21 normal and 21 race cases with zero skips, including
+both observed reserve/cancel lock orders. Final integrated qualification and the
+new-image approval/effect test remain required.
+
 
 
 

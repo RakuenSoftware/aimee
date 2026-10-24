@@ -69,6 +69,9 @@ extern "C"
    /* Host-only exact-turn cancellation, after authenticated durable owner
     * admission. Returns1 requested,0 no local session,−1 different/invalid turn.
     * Requesting cancellation does not prove effects have stopped. */
+   /* Nonmutating exact admission before durable cancellation; same return
+    * values as cancel_exact, without setting the worker flag. */
+   int turn_registry_match_exact(const char *session_id, const char *turn_id);
    int turn_registry_cancel_exact(const char *session_id, const char *turn_id);
 
    /* Look up the entry for a session (NULL if none). */

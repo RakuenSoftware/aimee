@@ -397,6 +397,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-harness-ir \
                $(TESTPREFIX)/unit-test-claude-headless \
                $(TESTPREFIX)/unit-test-server-chat-ir \
+               $(TESTPREFIX)/unit-test-canonical-cancel-compute \
                $(TESTPREFIX)/unit-test-ir-legacy-parity \
                $(TESTPREFIX)/unit-test-agent-request-build \
                $(TESTPREFIX)/unit-test-ir-crossproto-egress \
@@ -2059,7 +2060,7 @@ $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_pr
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
 $(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/turn_registry.o $(OBJDIR)/server/server_learning_approaches.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/module_commands.o
-$(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/server_compute_owner.o
+$(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/server_compute_owner.o
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/tests/support/module_bus_stub.o $(filter-out $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/conversation.o,$(DB1_CLIENT_OBJS)) $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
@@ -7415,3 +7416,12 @@ $(TESTPREFIX)/unit-test-native-service-runtime-source: $(OBJDIR)/tests/test_nati
 
 $(TESTPREFIX)/unit-test-native-provider-turn-limit: $(OBJDIR)/tests/test_native_provider_turn_limit.o $(OBJDIR)/tests/support/native_provider_turn_limit_stubs.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lm
+
+$(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/tests/test_canonical_cancel_compute.o $(OBJDIR)/json_fluent.o \
+    $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_chat_ir.o \
+    $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_learning_outcome.o \
+    $(OBJDIR)/server/turn_registry.o $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+    $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/interaction_event_names.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

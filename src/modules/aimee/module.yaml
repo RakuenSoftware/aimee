@@ -180,6 +180,7 @@
     "server-go/modules/aimee/families/session_ir_import_live_test.go",
     "server-go/modules/aimee/families/session_ir_import_compat_live_test.go",
     "server-go/modules/aimee/families/session_ir_import_browse_race_live_test.go",
+    "server-go/modules/aimee/families/session_ir_cancel_native_live_test.go",
     "server-go/modules/aimee/families/session_ir_cancel_test.go"
   ],
   "docs": [
