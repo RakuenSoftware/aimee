@@ -27,6 +27,7 @@ provider/model pages, and CLI operations consume the same `providers` owner.
 
 - `config`: configuration and concurrency projections for provider/model state.
 - `egress`: authenticated outbound discovery and provider HTTP probes.
+- `ir`: canonical request/response admission for provider diagnostics.
 - `module-runtime`: process identity, event grants, and bus attachment.
 - `vault`: credential storage accessed through the attested resource helper.
 
@@ -52,7 +53,8 @@ alias. The GUI accepts both. Discovery failures remain separate from inference
 success, and `--no-run` never sends an inference request. HTTP inference probes
 admit an owned canonical request and response, retain complete native response
 bytes as an inert raw sidecar, and require completed text before declaring health.
-Partial, refused, tool-pending, unknown, and malformed results cannot grant health.
+Results that are partial, refused, unknown or malformed, or that still await tool results,
+cannot grant health.
 
 Native probes return `execution_tested: false` without `execution_ok` or
 `model_available`, with “Test this native model in a conversation.” The GUI

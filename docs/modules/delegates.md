@@ -132,7 +132,7 @@ no ACP private I/O or MCP/profile authority. Unchecked management and WFE hibern
 supported lifecycles. Checked remote Docker transport is refused before creation until a qualified
 remote transport owner exists.
 
-The private Docker lease component owns bounded pending cleanup and restart recovery through the
+The private Docker lease component owns bounded deferred cleanup and restart recovery through the
 existing reaper. Durable v2 private-I/O and v3 ordinary-resource journals retain the actual daemon ID;
 a new endpoint must requalify that same ID. Known identities retire exactly; unresolved creation
 requires complete creator evidence, and absence of a name is not a quiescence receipt. Ordinary

@@ -203,6 +203,7 @@ $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentia
                              $(OBJDIR)/server/process_mgr.o \
                              $(OBJDIR)/modules/lsp/lsp_manager.o $(OBJDIR)/modules/lsp/lsp_client.o \
                              $(OBJDIR)/server/model_provider.o $(OBJDIR)/tests/support/providers_module_stub.o  \
+                                                 \
                              $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                              $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                              $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o \
@@ -577,6 +578,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-embedding-dim \
                $(TESTPREFIX)/unit-test-ontology-evolution \
                $(TESTPREFIX)/unit-test-decision-log \
+               \
                $(TESTPREFIX)/unit-test-http-retry \
                $(TESTPREFIX)/unit-test-sandbox \
                $(TESTPREFIX)/unit-test-slop-detect \
@@ -1688,6 +1690,8 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
 # Mirrors unit-test-agent's link line so message_history_repair (agent_bridge.o,
 # pulled via the shared object set) and cJSON resolve; gc-sections drops the rest.
 $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
+                      \
+                       \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o \
@@ -1703,8 +1707,10 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_st
                      $(OBJDIR)/db1_store_ready.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/server/execution_policy_bus.o \
+                      \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                       \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o \
@@ -1733,6 +1739,7 @@ $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
+                      $(OBJDIR)/modules/ir/response_codec.o \
                       $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_codex_profile.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o  \
                       $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/cli_mistral.o \
@@ -2080,8 +2087,12 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDI
  $(OBJDIR)/model_catalog_release.o \
  $(OBJDIR)/cmd_init.o \
  $(OBJDIR)/server/server_trigger.o $(OBJDIR)/tests/support/trigger_proposals_stub.o \
+ \
  $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/modules/delegates/delegate_backend_docker.o $(OBJDIR)/modules/delegates/delegate_docker_lease.o $(OBJDIR)/platform_random.o \
  $(OBJDIR)/server/model_provider.o $(OBJDIR)/tests/support/providers_module_stub.o  \
+    \
+   \
+  \
  $(OBJDIR)/modules/delegates/delegate_credentials.o $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o \
  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
  $(OBJDIR)/aimee_home.o \
@@ -2226,6 +2237,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/secrets.o \
                            $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
+                           \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
@@ -2347,6 +2359,7 @@ $(TESTPREFIX)/unit-test-aimee-backend: $(OBJDIR)/tests/test_aimee_backend.o \
                                       $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                       $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                       $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                       \
                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                       $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
                                       $(OBJDIR)/text.o $(OBJDIR)/util.o
@@ -2420,6 +2433,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
                                             $(OBJDIR)/server/server_mgmt_status.o \
                                                                   $(OBJDIR)/cJSON.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
+                           \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
@@ -2457,6 +2471,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-read-endpoint: \
 $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
     $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
     $(OBJDIR)/server/server_mgmt_checkpoint_client.o $(OBJDIR)/server/server_mgmt_status.o \
+    \
     $(OBJDIR)/modules/vault/runtime_secret.o \
     $(OBJDIR)/kb/kb_mgmt_status.o \
     $(OBJDIR)/cJSON.o \
@@ -2516,6 +2531,7 @@ $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_ident
 $(TESTPREFIX)/unit-test-server-write-tier-db1: \
     $(OBJDIR)/tests/test_server_write_tier_db1.o \
     $(OBJDIR)/server/server_write_tier_db1.o $(OBJDIR)/server/server_runtime_identity.o \
+    \
     $(OBJDIR)/cJSON.o \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
@@ -2730,6 +2746,7 @@ $(TESTPREFIX)/unit-test-aimee-ir-shadow: $(OBJDIR)/tests/test_aimee_ir_shadow.o 
                                         $(OBJDIR)/server/aimee_ir_shadow.o \
                                         $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                         $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                         \
                                         $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                         $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2746,10 +2763,12 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                        \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                                        \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2760,10 +2779,12 @@ $(TESTPREFIX)/unit-test-openai-ingress-ir: $(OBJDIR)/modules/ir/request_codec.o 
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                        \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                                        \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                        $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o
@@ -2909,6 +2930,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/modules/delegates/delegate_routing.o $(
                       $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                       $(OBJDIR)/tests/test_agent_delegate_root.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o  \
+                       \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o \
@@ -2916,6 +2938,9 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/modules/delegates/delegate_routing.o $(
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o \
                       $(OBJDIR)/server/model_provider.o   \
+                        \
+                        \
+                        \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
@@ -2959,10 +2984,13 @@ $(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_con
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
                                $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                $(CONFIG_CLIENT_TEST_OBJS) \
+\
+\
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/yaml.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS) $(OBJDIR)/interaction_event_names.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/module_runtime_fixture.o \
                            $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                           \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB) | $(OBJDIR)/aimee-memory-fixture
@@ -3741,6 +3769,7 @@ $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_rac
                                            $(OBJDIR)/core/event_bus/bus_capture.o \
                                       $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
+                           \
                            $(CORE_EVENT_BUS_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread $(PQ_LIB)
 
@@ -4067,6 +4096,9 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
 $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                             $(OBJDIR)/tests/support/interaction_events_stub.o \
                             $(OBJDIR)/server/model_provider.o $(OBJDIR)/tests/support/providers_module_stub.o  \
+                               \
+                              \
+                             \
                             $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(TEST_CORE_OBJS) $(OBJDIR)/interaction_event_names.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5693,12 +5725,16 @@ $(TESTPREFIX)/unit-test-server-ready: $(OBJDIR)/tests/test_server_ready.o \
 $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o $(OBJDIR)/dstr.o \
                            $(OBJDIR)/working_profile.o \
+                           \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR)/server/server_http_body.o \
+                     \
                      $(OBJDIR)/server/server_mgmt_jwks_cache.o \
                      $(OBJDIR)/wfe_store_lists.o \
+                     \
+                     \
                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                      $(OBJDIR)/tests/delegate_permissions_stub.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -5706,6 +5742,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR
                      $(OBJDIR)/server/server_runtime_identity.o \
                      $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/appliance_admin.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
+                           \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \
@@ -5720,6 +5757,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
                            $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
+                           \
                            $(TEST_CORE_OBJS) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
@@ -6027,6 +6065,7 @@ $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
 $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
+                     \
                      $(OBJDIR)/modules/vault/vault_service.o \
                      $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -6041,6 +6080,7 @@ $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
 $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
+                     \
                      $(OBJDIR)/modules/vault/vault_service.o \
                      $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -6056,6 +6096,7 @@ $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
 
 $(TESTPREFIX)/unit-test-oauth-refresh-diagnostics: $(OBJDIR)/tests/test_oauth_refresh_diagnostics.o \
                      $(OBJDIR)/server/oauth_pkce.o \
+                     \
                      $(OBJDIR)/modules/vault/vault_service.o \
                      $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -6380,6 +6421,7 @@ $(OBJDIR)/tests/inspect_real_session.o: ../tests/eval/agentic_context_virtualiza
 
 $(TESTPREFIX)/virtual-context-inspect: $(OBJDIR)/tests/inspect_real_session.o \
                      $(OBJDIR)/conversation_context.o \
+                     \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -6808,6 +6850,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
                      $(OBJDIR)/server/session_search_tool.o \
                      $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/platform_random.o \
                      $(OBJDIR)/yaml.o \
+                     \
                      $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                      $(OBJDIR)/log.o \
                      $(OBJDIR)/aimee_home.o \
@@ -6828,6 +6871,7 @@ $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                        $(OBJDIR)/server/model_sampling.o \
+                                        \
                                        $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o  \
                                        $(OBJDIR)/server/agent_request_shaping.o \
                                        $(OBJDIR)/server/provider_catalog.o \
@@ -6837,6 +6881,7 @@ $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_
 
 $(TESTPREFIX)/unit-test-ir-crossproto-egress: $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/tests/test_ir_crossproto_egress.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                        \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
@@ -6850,6 +6895,7 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                        \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -6870,6 +6916,7 @@ $(TESTPREFIX)/unit-test-ir-shadow-response: $(OBJDIR)/tests/test_ir_shadow_respo
                                             $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                             $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                             $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                             \
                                             $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                             $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                             $(OBJDIR)/modules/translation/wire_codec.o \
@@ -6897,6 +6944,7 @@ $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/modules/ir/response_codec.o $(
                                         $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                         $(OBJDIR)/modules/ir/aimee_ir.o \
                                         $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
+                                         \
                                         $(TEST_CORE_OBJS) \
      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
     $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o
@@ -6904,6 +6952,7 @@ $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/modules/ir/response_codec.o $(
 
 $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                       \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o \
@@ -6922,9 +6971,11 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                           $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                           $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+                                           \
                                           $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
                                           $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
+                                           \
                                           $(TEST_CORE_OBJS) \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7406,9 +7457,13 @@ $(OBJDIR)/tests/acp_route_learning_peer.o: tests/support/learning_outcome_stub.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) -Daimee_module_command_call_context=acp_route_learning_call -c -o $@ $<
 
-$(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c
+$(OBJDIR)/tests/acp_full_learning_peer.o: tests/support/learning_outcome_stub.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) -Daimee_module_command_call_context=acp_route_learning_call -Ddb1_interaction_event_record=full_route_task_outcome_record -c -o $@ $<
+
+$(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c tests/Rules.mk
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_session_ir_history_load=unused_route_db1_session_ir_history_load -Ddb1_session_native_history_load=unused_route_db1_session_native_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
 
 $(OBJDIR)/tests/support/acp_route_policy_fixture.o: tests/support/acp_route_policy_fixture.c
 	@mkdir -p $(dir $@)
@@ -7511,12 +7566,13 @@ $(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNE
     $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/agent_tools.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/server/liveness.o \
     $(OBJDIR)/db1_store_ready.o $(OBJDIR)/modules/delegates/delegate_role.o \
+     \
     $(OBJDIR)/server/execution_policy_bus.o $(OBJDIR)/server/server_governed_action.o \
     $(OBJDIR)/modules/tools/agent_tools.o $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
     $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/modules/tools/agent_tools_completion.o \
     $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o \
     $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_learning_outcome.o \
-    $(OBJDIR)/tests/acp_route_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/tests/acp_full_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/delegates/delegate_routing.o \
     $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/translation/history_ir.o \
     $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \

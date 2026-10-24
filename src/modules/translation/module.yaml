@@ -47,5 +47,9 @@
   ],
   "docs": [
     "docs/modules/translation.md"
+  ],
+  "private_headers": [
+    "src/modules/translation/anthropic_refusal.h",
+    "src/modules/translation/usage_observation.h"
   ]
 }

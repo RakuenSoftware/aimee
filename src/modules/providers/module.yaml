@@ -44,10 +44,12 @@
     "server-go/modules/providers/testdata/nativefixture/main.go"
   ],
   "go_tests": [
+    "server-go/modules/providers/codex_catalog_test.go",
     "server-go/modules/providers/compatibility_test.go",
     "server-go/modules/providers/concurrency_test.go",
     "server-go/modules/providers/inspect_test.go",
     "server-go/modules/providers/management_test.go",
+    "server-go/modules/providers/model_tools_idempotence_test.go",
     "server-go/modules/providers/rules_test.go",
     "server-go/modules/providers/model_services_test.go",
     "server-go/modules/providers/competence_test.go",

@@ -328,7 +328,7 @@ int delegate_add_inline_acp_agent(agent_config_t *cfg, const char *command, cons
    snprintf(a->roles[0], sizeof(a->roles[0]), "%s", (role && role[0]) ? role : "execute");
    a->role_count = 1;
    a->enabled = 1;
-   a->max_parallel = 1; /* One admitted execution for this ephemeral external agent. */
+   a->max_parallel = 1;  /* One admitted execution for this ephemeral external agent. */
    a->tools_enabled = 1; /* ACP agents drive aimee's tools/worktree per the protocol */
    a->max_turns = -1;    /* no declared cap; the role floor applies */
    a->cost_tier = 3;     /* external agent: it bills its own model, outside aimee */
