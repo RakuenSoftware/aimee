@@ -31,6 +31,23 @@ pass. The proof is `/var/tmp/aimee-dead-cli-wrappers-proof/proof.json` (SHA256
 `497ca4cfcb3da996e170747314d9965d125a251ec99e162408856945ad099b2c`).
 The deployed runtime remains honestly labeled `e039bad68`, not this descendant.
 
+`76cb8c8b6` additionally retires eight unused private primary-transcript/native
+alias operations end to end, leaving their numeric IDs unused. It removes 404
+production C/Go lines and 421 lines of catalog metadata; schemas, stored records
+and the active bounded legacy import remain intact. Two C targets pass normally
+and under sanitizers; Go family normal/race and real PostgreSQL import checks
+(five normal plus five race, no skips) pass. Actual-wire old-code regressions
+prove retired writes reached SQL before removal; all eight now refuse for host
+and module principals before storage. Independent review and the combined
+31-test bypass suite pass. Qualification is
+`/var/tmp/aimee-dead-session-qualification/proof.json` (SHA256
+`d903157319fc687265322480baac10ca530b9934735b3c98d0e7484b2eb10e0f`).
+The same-rule census at `76cb8c8b6` is now **2,409 net production lines removed**
+from the cleanup baseline and **2,580 net production lines added** across the
+whole follow-up. Catalog metadata is separate from those figures. Full per-file
+evidence is `/var/tmp/aimee-ir-production-reduction-76cb8c8b6.json`; this remains
+a checkpoint while the first-party consumer cutover is unfinished.
+
 The real browser HTTP Cancel/Allow case now passes: two Sends, one normal Cancel
 HTTP 200 with a durable OPERATOR receipt, one browser Allow HTTP 200, one tool
 result and one exact 20-byte file effect. The original sleep processes retired;
