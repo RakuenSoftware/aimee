@@ -413,15 +413,6 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
    return NULL;
 }
 
-int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const agent_t *agent,
-                                 const char *cwd, const char *system_prompt,
-                                 const char *user_prompt, agent_result_t *out)
-{
-   provider_cli_cfg_t cfg = {
-       .agent = agent, .cwd = cwd, .system_prompt = system_prompt, .user_prompt = user_prompt};
-   return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-}
-
 int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
                                      const provider_cli_cfg_t *config, agent_result_t *out)
 {

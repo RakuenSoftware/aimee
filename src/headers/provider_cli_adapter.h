@@ -101,10 +101,6 @@ extern "C"
    int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adapter,
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);
-   int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const agent_t *agent,
-                                    const char *cwd, const char *system_prompt,
-                                    const char *user_prompt, agent_result_t *out);
-
    int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
                                         const provider_cli_cfg_t *cfg, agent_result_t *out);
 

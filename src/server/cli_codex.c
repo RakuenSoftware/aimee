@@ -1845,20 +1845,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    return 0;
 }
 
-int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
-                                   const char *user_prompt, agent_result_t *out)
-{
-   provider_cli_cfg_t cfg = {
-       .agent = agent, .cwd = cwd, .system_prompt = system_prompt, .user_prompt = user_prompt};
-   return codex_execute_cfg(&cfg, out);
-}
-
-int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
-                            const char *user_prompt, agent_result_t *out)
-{
-   return agent_execute_cli_codex_at_cwd(agent, NULL, system_prompt, user_prompt, out);
-}
-
 static int codex_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
    return cfg && cfg->agent ? codex_execute_cfg(cfg, out) : -1;

@@ -26,9 +26,15 @@ static void test_execute_rejects_missing_inputs(void)
 {
    agent_result_t out = {0};
    agent_t agent = {0};
-   assert(agent_execute_cli_codex_at_cwd(&agent, NULL, NULL, "prompt", NULL) == -1);
-   assert(agent_execute_cli_codex_at_cwd(NULL, NULL, NULL, "prompt", &out) == -1);
-   assert(strcmp(out.error, "missing agent") == 0);
+   assert(codex_provider_cli_adapter.execute(
+              &(provider_cli_cfg_t){
+                  .agent = &agent, .cwd = NULL, .system_prompt = NULL, .user_prompt = "prompt"},
+              NULL) == -1);
+   assert(codex_provider_cli_adapter.execute(
+              &(provider_cli_cfg_t){
+                  .agent = NULL, .cwd = NULL, .system_prompt = NULL, .user_prompt = "prompt"},
+              &out) == -1);
+   assert(!out.success && !out.canonical_response.n_content && !out.response);
    assert(codex_provider_cli_adapter.execute(NULL, &out) == -1);
    provider_cli_cfg_t cfg = {.agent = &agent, .user_prompt = "prompt"};
    assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
@@ -244,7 +250,10 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    agent.autonomous = 1;
 
    agent_result_t out = {0};
-   int rc = agent_execute_cli_codex(&agent, NULL, "hello", &out);
+   int rc = codex_provider_cli_adapter.execute(
+       &(provider_cli_cfg_t){
+           .agent = &agent, .cwd = NULL, .system_prompt = NULL, .user_prompt = "hello"},
+       &out);
    assert(rc == -1);
    assert(strstr(out.error, "status 42") != NULL);
    assert(strstr(out.error, "approval_policy=\"on-request\"") != NULL);
@@ -252,7 +261,10 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    assert(strstr(out.error, "fixture-stderr-message") != NULL);
 
    agent.write_capable = 1;
-   rc = agent_execute_cli_codex(&agent, NULL, "hello", &out);
+   rc = codex_provider_cli_adapter.execute(
+       &(provider_cli_cfg_t){
+           .agent = &agent, .cwd = NULL, .system_prompt = NULL, .user_prompt = "hello"},
+       &out);
    assert(rc == -1);
    assert(strstr(out.error, "sandbox_mode=\"workspace-write\"") != NULL);
    unlink(path);
@@ -296,7 +308,7 @@ static int bind_native_fixture(const char *id, void *context)
    return 0;
 }
 
-static void test_agent_execute_cli_codex_uses_requested_cwd(void)
+static void test_codex_adapter_uses_requested_cwd(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-cwd-XXXXXX", platform_tmpdir());
@@ -353,7 +365,11 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    agent.cli_idle_timeout_ms = 5000;
 
    agent_result_t out = {0};
-   assert(agent_execute_cli_codex_at_cwd(&agent, workdir, "system", "user prompt", &out) == 0);
+   assert(codex_provider_cli_adapter.execute(&(provider_cli_cfg_t){.agent = &agent,
+                                                                   .cwd = workdir,
+                                                                   .system_prompt = "system",
+                                                                   .user_prompt = "user prompt"},
+                                             &out) == 0);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok from fake codex") == 0);
    assert(out.canonical_response.n_content == 1);
@@ -1407,9 +1423,15 @@ static int native_history_probe(const char *resume, const char *history_file, in
 static void test_execute_refuses_missing_configuration(void)
 {
    agent_result_t out = {0};
-   assert(agent_execute_cli_codex(NULL, "system", "user", &out) == -1);
-   assert(strcmp(out.error, "missing agent") == 0);
-   assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
+   assert(codex_provider_cli_adapter.execute(
+              &(provider_cli_cfg_t){
+                  .agent = NULL, .cwd = NULL, .system_prompt = "system", .user_prompt = "user"},
+              &out) == -1);
+   assert(!out.success && !out.canonical_response.n_content && !out.response);
+   assert(codex_provider_cli_adapter.execute(
+              &(provider_cli_cfg_t){
+                  .agent = NULL, .cwd = NULL, .system_prompt = "system", .user_prompt = "user"},
+              NULL) == -1);
 }
 
 int main(int argc, char **argv)
@@ -1536,8 +1558,8 @@ int main(int argc, char **argv)
    test_parse_tool_action_skips_other_methods();
    printf("OK\n");
 
-   printf("test_agent_execute_cli_codex_uses_requested_cwd... ");
-   test_agent_execute_cli_codex_uses_requested_cwd();
+   printf("test_codex_adapter_uses_requested_cwd... ");
+   test_codex_adapter_uses_requested_cwd();
    printf("OK\n");
 
    printf("test_adapter_preserves_distinct_message_groups... ");

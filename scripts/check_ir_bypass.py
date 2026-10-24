@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
     "agent_responses_sse_response_object", "agent_tools_builtin_catalog",
+    "provider_cli_adapter_execute", "agent_execute_cli_codex", "agent_execute_cli_codex_at_cwd",
     "provider_client_complete", "provider_client_build_openai", "provider_import_request",
     "build_tools_array", "build_tools_array_responses", "build_tools_array_anthropic",
     "agent_tools_filter_for_role", "agent_tools_filter_anthropic_for_role",

@@ -109,7 +109,9 @@ class IRBypassTests(unittest.TestCase):
 
     def test_untyped_provider_entries_stay_retired(self):
         for symbol in ("provider_client_complete", "provider_client_build_openai", "provider_import_request",
-                       "agent_responses_sse_response_object", "agent_tools_builtin_catalog"):
+                       "agent_responses_sse_response_object", "agent_tools_builtin_catalog",
+                       "provider_cli_adapter_execute", "agent_execute_cli_codex",
+                       "agent_execute_cli_codex_at_cwd"):
             with self.subTest(symbol=symbol):
                 path = self.source("src/server/new_model.c", symbol + "(profile, messages, schema, output, err, cap);")
                 with self.assertRaisesRegex(ValueError, "retired-api"):

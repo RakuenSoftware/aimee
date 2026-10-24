@@ -16,23 +16,6 @@ extern "C"
 {
 #endif
 
-   /* Run a single delegate turn against `codex app-server`. Spawns the
-    * subprocess, drives initialize → thread/start → turn/start, reads
-    * notifications until turn/completed, and fills `out` with the final
-    * agent_message text + token usage + latency. Returns 0 on success,
-    * -1 on error (out->error populated).
-    *
-    * The signature mirrors agent_execute_cli_session so this slots into
-    * the same dispatch site in agent_execute_with_tools. system_prompt
-    * is wired through as the codex `developerInstructions` field on
-    * thread/start; user_prompt becomes the first turn's text input. */
-   int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
-                               const char *user_prompt, agent_result_t *out);
-
-   int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd,
-                                      const char *system_prompt, const char *user_prompt,
-                                      agent_result_t *out);
-
    /* Host-owned resources for the canonical native scheduler. Descriptor and
     * environment custody outlive the synchronous child. The adapter verifies
     * the actual effective SDK config before ready can consume a cache claim. */
