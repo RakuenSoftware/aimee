@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "cli_codex.h"
@@ -155,7 +156,24 @@ typedef struct
 {
    const provider_cli_cfg_t *cfg;
    int ready;
+   struct stat executable, directory;
 } owned_fixture_t;
+static int owned_guard_child(void *context, int executable, int cwd)
+{
+   owned_fixture_t *state = context;
+   struct stat program, directory;
+   assert(executable >= 0 && cwd >= 0 && executable != cwd);
+   assert(!fstat(executable, &program) && !fstat(cwd, &directory));
+   assert(program.st_dev == state->executable.st_dev && program.st_ino == state->executable.st_ino);
+   assert(directory.st_dev == state->directory.st_dev &&
+          directory.st_ino == state->directory.st_ino);
+   return 0;
+}
+static int owned_guard_parent(void *context, pid_t child)
+{
+   assert(context && child > 0);
+   return 0;
+}
 static int owned_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
 {
    owned_fixture_t *state = context;
@@ -229,6 +247,9 @@ static int owned_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
        .ready = owned_ready,
        .context = &state};
    assert(host.executable_fd >= 0 && host.cwd_fd >= 0);
+   assert(!fstat(host.executable_fd, &state.executable) && !fstat(host.cwd_fd, &state.directory));
+   cli_native_spawn_guard_t guard = {owned_guard_child, owned_guard_parent, &state};
+   host.spawn_guard = &guard;
    provider_cli_cfg_t owned = *cfg;
    owned.codex_host = &host;
    server_control_scope_t *scope = NULL, *previous = server_control_scope_current();
@@ -615,6 +636,7 @@ static void test_operator_replies_reach_native_child(void)
    rmdir(root);
 }
 
+static int stdio_hole_case;
 static void test_canonical_history_adoption(void)
 {
    char root[256], script[512], marker[512];
@@ -624,7 +646,8 @@ static void test_canonical_history_adoption(void)
    snprintf(marker, sizeof marker, "%s/requests", root);
    FILE *fp = fopen(script, "w");
    assert(fp);
-   fputs("#!/usr/bin/env python3\nimport json, os, sys\ndef profile(f):\n "
+   fputs("#!/usr/bin/env python3\nimport json, os, sys, stat\nassert "
+         "all(stat.S_ISFIFO(os.fstat(i).st_mode) for i in (0,1,2))\ndef profile(f):\n "
          "c=json.loads(os.environ['AIMEE_TEST_OWNED_PROFILE'])\n if "
          "os.environ.get('AIMEE_TEST_BAD_PROFILE')=='1': c['extra_mutation']=True\n assert "
          "os.getcwd() in "
@@ -695,8 +718,8 @@ static void test_canonical_history_adoption(void)
    snprintf(agent.name, sizeof agent.name, "history-fixture");
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
    agent.cli_idle_timeout_ms = 5000;
-   for (int resume = 0; resume < 2; resume++)
-      for (int refuse = 0; refuse < 4; refuse++)
+   for (int resume = 0; resume < (stdio_hole_case ? 1 : 2); resume++)
+      for (int refuse = 0; refuse < (stdio_hole_case ? 1 : 4); refuse++)
       {
          unlink(marker);
          assert(!setenv("AIMEE_TEST_BAD_PROFILE", refuse == 3 ? "1" : "0", 1));
@@ -748,6 +771,27 @@ static void test_canonical_history_adoption(void)
    unlink(marker);
    unlink(script);
    rmdir(root);
+}
+
+static void test_owned_stdio_holes(void)
+{
+   fflush(NULL);
+   for (int holes = 1; holes < 8; holes++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         for (int fd = 0; fd < 3; fd++)
+            if (holes & (1 << fd))
+               close(fd);
+         stdio_hole_case = 1;
+         test_canonical_history_adoption();
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+   }
 }
 
 /* Used by the opt-in real SDK integration fixture. All model traffic is sent
@@ -1287,6 +1331,7 @@ int main(int argc, char **argv)
    test_parse_tool_action_skips_other_methods();
    printf("OK\n");
 
+   test_owned_stdio_holes();
    test_operator_replies_reach_native_child();
    printf("All cli_codex parse tests passed.\n");
    return 0;

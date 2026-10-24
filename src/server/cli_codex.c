@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -40,8 +40,8 @@ typedef enum
 {
    CLI_CODEX_READ_OK = 0,
    CLI_CODEX_READ_DEADLINE,     /* idle deadline_ms reached */
-   CLI_CODEX_READ_LINE_TIMEOUT, /* select() returned 0 within per-line budget */
-   CLI_CODEX_READ_SELECT_ERR,
+   CLI_CODEX_READ_LINE_TIMEOUT, /* poll() returned 0 within per-line budget */
+   CLI_CODEX_READ_POLL_ERR,
    CLI_CODEX_READ_EOF, /* read() returned 0 → codex exited */
    CLI_CODEX_READ_READ_ERR,
    CLI_CODEX_READ_LINE_TOO_LARGE,
@@ -284,7 +284,8 @@ static int cli_codex_spawn(cli_codex_t *c)
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
-   if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
+   if (cli_native_pipe(in_pipe) != 0 || cli_native_pipe(out_pipe) != 0 ||
+       cli_native_pipe(err_pipe) != 0)
    {
       if (in_pipe[0] >= 0)
          close(in_pipe[0]);
@@ -314,6 +315,10 @@ static int cli_codex_spawn(cli_codex_t *c)
    }
    if (pid == 0)
    {
+      int executable = cli_native_pin_fd(c->host_launch->executable_fd);
+      int cwd = cli_native_pin_fd(c->host_launch->cwd_fd);
+      if (executable < 0 || cwd < 0)
+         _exit(126);
       /* Child. Become process-group leader so SIGTERM to -pgid kills the
        * codex node wrapper AND the inner codex binary it execs. Without
        * this, signaling the wrapper PID alone leaves the inner binary
@@ -332,8 +337,7 @@ static int cli_codex_spawn(cli_codex_t *c)
       if (c->host_launch)
       {
          const cli_codex_host_launch_t *host = c->host_launch;
-         if (host->executable_fd < 0 || host->cwd_fd < 0 || !host->environment ||
-             fchdir(host->cwd_fd))
+         if (host->executable_fd < 0 || host->cwd_fd < 0 || !host->environment || fchdir(cwd))
             _exit(126);
          /* The child inherits only its pipes and explicitly owned launch
           * resources. Never leak server/Vault sockets through SDK descendants. */
@@ -343,12 +347,12 @@ static int cli_codex_spawn(cli_codex_t *c)
          for (int fd = 3; fd < limit; fd++)
             if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
                _exit(126);
-         if (host->spawn_guard && host->spawn_guard->child(host->spawn_guard->context,
-                                                           host->executable_fd, host->cwd_fd))
+         if (host->spawn_guard &&
+             host->spawn_guard->child(host->spawn_guard->context, executable, cwd))
             _exit(126);
          char *const arguments[] = {"codex", "app-server", NULL};
 #if defined(__linux__)
-         fexecve(host->executable_fd, arguments, host->environment);
+         fexecve(executable, arguments, host->environment);
 #else
          /* This owner needs an executable-descriptor launch implementation on
           * other hosts before claiming custody; no ambient executable fallback. */
@@ -522,15 +526,25 @@ static int cli_codex_reserve_stdout(cli_codex_t *c, size_t need, cli_codex_read_
    return 0;
 }
 
+static int cli_codex_owner_live(cli_codex_t *c)
+{
+   if (c->progress && c->progress(c->progress_context))
+      aimee_ir_session_fail_capture();
+   return !c->dynamic_failed && !agent_request_cancelled() && !aimee_ir_session_capture_failed();
+}
+
 /* Write `total` bytes from `data` to c->in_fd in chunks. The fd is
- * non-blocking; when it would block, select() on writability AND
+ * non-blocking; when it would block, poll writability AND
  * concurrent readability of stdout/stderr so codex can't pipe-deadlock
  * us by producing output before draining stdin. */
 static int cli_codex_write_all(cli_codex_t *c, const char *data, size_t total)
 {
    size_t off = 0;
+   long long deadline = util_now_ms() + 30000;
    while (off < total)
    {
+      if (!cli_codex_owner_live(c))
+         return -1;
       ssize_t w = write(c->in_fd, data + off, total - off);
       if (w > 0)
       {
@@ -539,27 +553,27 @@ static int cli_codex_write_all(cli_codex_t *c, const char *data, size_t total)
       }
       if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
       {
-         fd_set rfds, wfds;
-         FD_ZERO(&rfds);
-         FD_ZERO(&wfds);
-         FD_SET(c->in_fd, &wfds);
-         if (c->out_fd >= 0)
-            FD_SET(c->out_fd, &rfds);
-         int max_fd = c->in_fd > c->out_fd ? c->in_fd : c->out_fd;
-         struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
-         int sel = select(max_fd + 1, &rfds, &wfds, NULL, &tv);
-         if (sel < 0)
+         struct pollfd descriptors[] = {
+             {c->in_fd, POLLOUT, 0}, {c->out_fd, POLLIN, 0}, {c->err_fd, POLLIN, 0}};
+         long long remaining = deadline - util_now_ms();
+         if (remaining <= 0)
+            return -1;
+         int ready = poll(descriptors, 3, remaining < 100 ? (int)remaining : 100);
+         if (ready < 0)
          {
             if (errno == EINTR)
                continue;
             return -1;
          }
-         if (sel == 0)
-            return -1;
+         if (!ready)
+            continue; /* Recheck the actual owner while stdin is backpressured. */
+         for (int i = 0; i < 3; i++)
+            if (descriptors[i].revents & POLLNVAL)
+               return -1;
 
          /* Drain whatever codex produced while we were blocked so its
           * stdout pipe doesn't backpressure into stdin. */
-         if (c->out_fd >= 0 && FD_ISSET(c->out_fd, &rfds))
+         if (c->out_fd >= 0 && (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR)))
          {
             size_t read_room =
                 c->buf_len < CLI_CODEX_LINE_MAX ? CLI_CODEX_LINE_MAX - c->buf_len : 0;
@@ -617,14 +631,7 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
    long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
-      if (c->progress && c->progress(c->progress_context))
-      {
-         aimee_ir_session_fail_capture();
-         if (status)
-            *status = CLI_CODEX_READ_READ_ERR;
-         return NULL;
-      }
-      if (c->dynamic_failed || agent_request_cancelled() || aimee_ir_session_capture_failed())
+      if (!cli_codex_owner_live(c))
       {
          if (status)
             *status = CLI_CODEX_READ_READ_ERR;
@@ -687,23 +694,18 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          ms = remaining < timeout_ms ? (long)remaining : timeout_ms;
       }
 
-      fd_set rfds;
-      FD_ZERO(&rfds);
-      FD_SET(c->out_fd, &rfds);
-      int max_fd = c->out_fd;
-      if (c->err_fd >= 0)
-      {
-         FD_SET(c->err_fd, &rfds);
-         if (c->err_fd > max_fd)
-            max_fd = c->err_fd;
-      }
+      struct pollfd descriptors[] = {{c->out_fd, POLLIN, 0}, {c->err_fd, POLLIN, 0}};
       /* Poll cancellation while preserving the caller's complete line budget. */
       if (ms > 100 && aimee_ir_session_get_sink(NULL))
          ms = 100;
-      struct timeval tv;
-      tv.tv_sec = ms / 1000;
-      tv.tv_usec = (ms % 1000) * 1000;
-      int sel = select(max_fd + 1, &rfds, NULL, NULL, &tv);
+      int sel = ms < 0 ? -1 : poll(descriptors, 2, (int)ms);
+      if (ms < 0)
+         errno = EINVAL;
+      if (sel > 0 && ((descriptors[0].revents | descriptors[1].revents) & POLLNVAL))
+      {
+         errno = EBADF;
+         sel = -1;
+      }
       if (sel == 0)
       {
          if (aimee_ir_session_get_sink(NULL) && (!line_deadline || util_now_ms() < line_deadline))
@@ -717,12 +719,12 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          if (errno == EINTR)
             continue;
          if (status)
-            *status = CLI_CODEX_READ_SELECT_ERR;
+            *status = CLI_CODEX_READ_POLL_ERR;
          return NULL;
       }
-      if (c->err_fd >= 0 && FD_ISSET(c->err_fd, &rfds))
+      if (c->err_fd >= 0 && (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR)))
          cli_codex_drain_stderr(c);
-      if (!FD_ISSET(c->out_fd, &rfds))
+      if (!(descriptors[0].revents & (POLLIN | POLLHUP | POLLERR)))
          continue;
 
       /* Grow buffer if needed. */
@@ -792,7 +794,7 @@ static const char *cli_codex_read_status_str(cli_codex_read_status_t s)
       return "idle-timeout-expired";
    case CLI_CODEX_READ_LINE_TIMEOUT:
       return "line-read-timeout";
-   case CLI_CODEX_READ_SELECT_ERR:
+   case CLI_CODEX_READ_POLL_ERR:
       return "select-error";
    case CLI_CODEX_READ_EOF:
       return "codex-exited-eof";
@@ -1432,8 +1434,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    c.host_launch = cfg->codex_host;
    c.progress = cfg->native_progress;
    c.progress_context = cfg->native_progress_context;
-   c.ir.host_model_capture = 1;
-   c.ir.admitted_prompt = user_prompt;
    if (codex_bind_dynamic_tools(&c, cfg->tool_catalog, cfg->tool_call, cfg->tool_context))
    {
       if (out)

@@ -396,6 +396,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-harness-ir \
                $(TESTPREFIX)/unit-test-claude-headless \
                $(TESTPREFIX)/unit-test-server-chat-ir \
+               $(TESTPREFIX)/unit-test-server-acp-chat-route \
                $(TESTPREFIX)/unit-test-canonical-cancel-compute \
                $(TESTPREFIX)/unit-test-ir-legacy-parity \
                $(TESTPREFIX)/unit-test-agent-request-build \
@@ -679,6 +680,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-cli-session \
                $(TESTPREFIX)/unit-test-cli-session-pty \
                $(TESTPREFIX)/unit-test-cli-codex \
+               $(TESTPREFIX)/unit-test-cli-codex-io \
                $(TESTPREFIX)/unit-test-delegate-backend \
                $(TESTPREFIX)/unit-test-delegate-backend-docker \
                $(TESTPREFIX)/unit-test-session-compact \
@@ -939,6 +941,7 @@ $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-acp-resources
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-tool-admission
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-launch
@@ -969,7 +972,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
 ifeq ($(UNAME_S),Linux)
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-containment
 endif
-$(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
+$(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o $(OBJDIR)/server/server_provider_cli_execute.o \
     $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/platform_random.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
@@ -1082,6 +1085,8 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-coord-dispatcher-startup \
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-native-source-issuers \
                 $(TESTPREFIX)/unit-test-native-delegate-source $(TESTPREFIX)/unit-test-native-service-runtime-source $(TESTPREFIX)/unit-test-native-provider-turn-limit
+
+TEST_TARGETS += $(TESTPREFIX)/unit-test-acp-service-source
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -6033,6 +6038,13 @@ $(TESTPREFIX)/unit-test-cli-codex: $(OBJDIR)/tests/test_cli_codex.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+
+$(OBJDIR)/tests/test_cli_codex_io.o: server/cli_codex.c
+$(TESTPREFIX)/unit-test-cli-codex-io: $(OBJDIR)/tests/test_cli_codex_io.o \
+    $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.o \
                      $(OBJDIR)/modules/delegates/delegate_backend.o \
                      $(PLATFORM_BASIC_OBJS)
@@ -7433,4 +7445,100 @@ $(TESTPREFIX)/unit-test-cli-chat-ir: $(OBJDIR)/tests/test_cli_chat_ir.o $(OBJDIR
 
 $(TESTPREFIX)/unit-test-cli-acp-projection: $(OBJDIR)/tests/test_cli_acp_projection.o \
     $(OBJDIR)/modules/protocols/acp/acp_server.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-acp-resources: $(OBJDIR)/tests/test_server_acp_resources.o \
+    $(OBJDIR)/server/tool_args_coerce.o \
+    $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_native_tool_admission.o \
+    $(OBJDIR)/tests/acp_resource_validator.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/request_codec.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(OBJDIR)/tests/acp_resource_validator.o: server/agent_policy.c tool_prompts_data.h
+	@mkdir -p $(@D)
+	$(CC) $(C_FLAGS) -Dtool_policy_metadata=unused_acp_fixture_policy_metadata -c -o $@ $<
+
+$(OBJDIR)/tests/acp_route_learning_peer.o: tests/support/learning_outcome_stub.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Daimee_module_command_call_context=acp_route_learning_call -c -o $@ $<
+
+$(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
+
+$(OBJDIR)/tests/support/acp_route_policy_fixture.o: tests/support/acp_route_policy_fixture.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Imodules/execution-policy/include -c -o $@ $<
+
+# Real public primary selection and owned ACP subprocess, with synthetic
+# configuration/storage services and no provider/model requests.
+$(OBJDIR)/tests/posix_compute_acp_route.o: posix/server_compute.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Dprovider_cli_adapter_host_execute=route_observed_host_execute -c -o $@ $<
+
+$(OBJDIR)/tests/server_compute_acp_route.o: server/server_compute.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Dwrite_all=route_compute_write_all -c -o $@ $<
+
+ACP_ROUTE_SUPPORT = $(filter-out $(OBJDIR)/log.o $(OBJDIR)/modules/routing/agent_config.o \
+    $(OBJDIR)/modules/workspace/workspace_turn.o \
+    $(OBJDIR)/posix/cli_main.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/server/agent_runtime.o \
+    $(OBJDIR)/tests/support/delegate_child_env_export_stub.o $(OBJDIR)/server/agent_tools.o \
+    $(OBJDIR)/module_json_call.o, $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA))
+
+$(TESTPREFIX)/unit-test-server-acp-chat-route: $(CORE_CODEC_LIB) $(CORE_CONNECTION_LIB) $(DB1_CLIENT_SRCS:db1_client/%.c=$(OBJDIR)/tests/acp_route_db1/%.o) $(OBJDIR)/tests/test_server_acp_chat_route.o $(OBJDIR)/tests/support/acp_route_policy_fixture.o \
+    $(OBJDIR)/tests/server_compute_acp_route.o $(OBJDIR)/tests/posix_compute_acp_route.o \
+    $(OBJDIR)/server/server_provider_cli_execute.o $(OBJDIR)/server/server_acp_execution.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/cli_mcp_serve.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
+    $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/server/server_http_config_routes.o \
+    $(OBJDIR)/command_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
+    $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o \
+    $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o \
+    $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o \
+    $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o \
+    $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/code_collect.o \
+    $(OBJDIR)/modules/workspace/workspace_client_diff.o \
+    $(OBJDIR)/server/cli_acp.o $(OBJDIR)/server/provider_cli_adapter.o \
+    $(OBJDIR)/server/server_acp_resources.o $(OBJDIR)/server/server_native_tool_source.o \
+    $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/agent_tools.o \
+    $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/server/liveness.o \
+    $(OBJDIR)/db1_store_ready.o $(OBJDIR)/modules/delegates/delegate_role.o \
+    $(OBJDIR)/tests/support/role_template_toolset_stub.o \
+    $(OBJDIR)/server/execution_policy_bus.o $(OBJDIR)/server/server_governed_action.o \
+    $(OBJDIR)/modules/tools/agent_tools.o $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
+    $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/modules/tools/agent_tools_completion.o \
+    $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o \
+    $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_learning_outcome.o \
+    $(OBJDIR)/tests/acp_route_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/delegates/delegate_routing.o \
+    $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/translation/history_ir.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_ir_stream.o \
+    $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/text.o $(OBJDIR)/util.o $(ACP_ROUTE_SUPPORT)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+
+
+# Keep the actual command parser; registry metadata is an explicit fixture peer.
+$(OBJDIR)/tests/acp-source-command-parser.o: server/provider_cli_adapter.c
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -Dprovider_cli_adapter_get=unused_acp_source_registry_get -c -o $@ $<
+$(TESTPREFIX)/unit-test-acp-service-source: $(OBJDIR)/tests/test_acp_service_source.o \
+ $(OBJDIR)/server/server_native_delegate_source.o $(OBJDIR)/server/server_acp_execution.o \
+ $(OBJDIR)/server/cli_acp.o $(OBJDIR)/server/server_acp_resources.o \
+ $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/core/connection/auth.o \
+ $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
+ $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_native_tool_admission.o \
+ $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o \
+ $(OBJDIR)/server/request_context.o $(OBJDIR)/tests/source-runtime-real-credentials.o \
+ $(OBJDIR)/tests/acp-source-command-parser.o $(OBJDIR)/server/tool_args_coerce.o \
+ $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/translation/aimee_ir_stream.o \
+ $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+ $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+ $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+ $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o \
+ $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/session_id.o \
+ $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

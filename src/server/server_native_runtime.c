@@ -1115,22 +1115,11 @@ static int native_cli_dispatch(server_native_runtime_t *runtime, native_tool_wor
       io->response_started(io->context);
       return server_http_native_forward(io->downstream_fd, "GET", "/v1/cli/manifest", "", 0);
    }
-   char tool[128], nonce[33], attempt[128], detail[512] = "";
+   char tool[128], nonce[33];
    cJSON *arguments = NULL, *response = NULL;
-   aimee_tool_t definition = {0};
-   char *wire = NULL, *text = NULL;
-   int reserved = 0, is_error = 1, rc = -1;
    if (server_native_cli_project(work->cli_request, tool, &arguments, nonce))
-      goto done;
-   const char *submitted_session =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(work->cli_request, "session_id"));
-   const char *submitted_cwd =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(work->cli_request, "cwd"));
-   if ((submitted_session && strcmp(submitted_session, runtime->session)) ||
-       (submitted_cwd && strcmp(submitted_cwd, runtime->cwd)))
-      goto done;
-   /* Project only an exact advertised registry identity. Neither a family
-    * spelling nor the CLI manifest can introduce an unadvertised operation. */
+      return -1;
+   cJSON_Delete(arguments);
    const server_native_tool_binding_t *binding = NULL;
    for (int i = 0; i < runtime->n_bindings; i++)
       if (!strcmp(runtime->bindings[i].registry_name, tool))
@@ -1140,77 +1129,10 @@ static int native_cli_dispatch(server_native_runtime_t *runtime, native_tool_wor
       }
    const aimee_tool_t *advertised =
        binding ? aimee_ir_find_function(work->cli_catalog, binding->space, binding->name) : NULL;
-   if (!advertised || agent_tools_execution_definition(tool, &definition) ||
-       !(wire = cJSON_PrintUnformatted(arguments)) ||
-       tool_validate_ir(advertised, wire, detail, sizeof detail) ||
-       tool_validate_ir(&definition, wire, detail, sizeof detail))
-      goto done;
-   int begun = server_native_cli_begin(work->cli, work->cli_request, nonce, attempt, &response);
-   if (begun < 0)
-      goto done;
-   if (begun == 1)
-   {
+   int rc = server_native_cli_execute(work->cli, work->cli_request, advertised, 120000, &response);
+   if (!rc)
       rc = native_mcp_write(io, 200, response);
-      goto done;
-   }
-   reserved = 1;
-   const char *refusal = server_native_tool_admit_attempt(tool, arguments, runtime->session,
-                                                          attempt, detail, sizeof detail);
-   if (agent_request_cancelled() || server_native_cli_cancelled(work->cli) ||
-       owner->context_refused || !server_session_capture_accepting(runtime->capture))
-      goto done;
-   if (refusal)
-      text = strdup(detail[0] ? detail : "tool policy refused execution");
-   else
-   {
-      /* Independent callback TLS/action state: the producer remains inside the
-       * real outer Bash call. No producer queue, borrowed sink or fake model ID. */
-      agent_tools_set_effect_authorized(1);
-      text = dispatch_tool_call_ir_ctx_status(&definition, wire, 120000, &is_error);
-      agent_tools_set_effect_authorized(0);
-      text = policy_annotate_indexed(tool, wire, attempt, text);
-   }
-   if (!text)
-      goto done;
-   /* This is the advertised tool contract, not an operator REST handler
-    * with a different batch envelope. Return complete owned text unchanged. */
-   response = cJSON_CreateObject();
-   cJSON *content = response ? cJSON_AddArrayToObject(response, "content") : NULL;
-   cJSON *item = content ? cJSON_CreateObject() : NULL;
-   if (!item || !cJSON_AddStringToObject(item, "type", "text") ||
-       !cJSON_AddStringToObject(item, "text", text) ||
-       !cJSON_AddBoolToObject(response, "isError", is_error))
-   {
-      cJSON_Delete(item);
-      goto done;
-   }
-   if (!cJSON_AddItemToArray(content, item))
-   {
-      cJSON_Delete(item);
-      goto done;
-   }
-   if (!response)
-      goto done;
-   int complete = server_native_cli_finish(work->cli, response);
-   reserved = 0;
-   if (complete)
-   {
-      server_session_capture_fail(runtime->capture);
-      goto done;
-   }
-   rc = native_mcp_write(io, 200, response);
-done:
-   if (reserved)
-   {
-      server_native_cli_finish(work->cli, NULL);
-      server_session_capture_fail(runtime->capture);
-   }
-   agent_tools_set_effect_authorized(0);
-   cJSON_Delete(arguments);
    cJSON_Delete(response);
-   free(wire);
-   free(text);
-   aimee_tool_free(&definition);
    return rc;
 }
 

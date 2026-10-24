@@ -31,6 +31,59 @@ static __thread ti_effect_contract_t g_effect;
 static __thread int g_effect_active;
 static __thread int g_effect_authorized;
 
+_Thread_local agent_tools_dispatch_outcome_t agent_tools_dispatch_outcome = {
+    .verdict = "ok", .reason = "", .mode = "internal"};
+void td_outcome_reset(void)
+{
+   agent_tools_dispatch_outcome =
+       (agent_tools_dispatch_outcome_t){.verdict = "ok", .reason = "", .mode = "internal"};
+   agent_tools_effect_reset();
+}
+void td_outcome_set(const char *verdict, const char *reason)
+{
+   agent_tools_dispatch_outcome.verdict = verdict;
+   agent_tools_dispatch_outcome.reason = reason;
+   agent_tools_dispatch_outcome.explicit_verdict = 1;
+}
+struct agent_tools_effect_scope
+{
+   ti_effect_contract_t effect;
+   agent_tools_dispatch_outcome_t outcome;
+   int active, authorized;
+   struct agent_tools_effect_scope *previous;
+};
+static _Thread_local agent_tools_effect_scope_t *effect_scope;
+int agent_tools_effect_scope_push(agent_tools_effect_scope_t **out)
+{
+   if (!out || *out)
+      return -1;
+   agent_tools_effect_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+      return -1;
+   scope->effect = g_effect;
+   scope->outcome = agent_tools_dispatch_outcome;
+   scope->active = g_effect_active;
+   scope->authorized = g_effect_authorized;
+   scope->previous = effect_scope;
+   td_outcome_reset();
+   g_effect_authorized = 0;
+   effect_scope = scope;
+   *out = scope;
+   return 0;
+}
+int agent_tools_effect_scope_pop(agent_tools_effect_scope_t *scope)
+{
+   if (!scope || effect_scope != scope)
+      return -1;
+   g_effect = scope->effect;
+   agent_tools_dispatch_outcome = scope->outcome;
+   g_effect_active = scope->active;
+   g_effect_authorized = scope->authorized;
+   effect_scope = scope->previous;
+   free(scope);
+   return 0;
+}
+
 void agent_tools_set_effect_authorized(int authorized)
 {
    g_effect_authorized = !!authorized;
@@ -346,8 +399,9 @@ int agent_tools_classification(const char *name)
    return agent_tools_effect_classification(name, g_tool_classifier);
 }
 
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char *arguments_json,
-                                       int timeout_ms, int *is_error)
+static char *dispatch_ir_owned(const aimee_tool_t *admitted, const char *arguments_json,
+                               int timeout_ms, int *is_error, agent_tool_file_resource_fn execute,
+                               void *context)
 {
    if (is_error)
       *is_error = 1;
@@ -367,5 +421,52 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char 
       cJSON_Delete(args);
       return safe_strdup("error: admitted tool arguments are not canonical");
    }
-   return agent_tools_dispatch_owned(admitted->name, arguments_json, timeout_ms, is_error, args);
+   return agent_tools_dispatch_file_owned(admitted->name, arguments_json, timeout_ms, is_error,
+                                          args, execute, context);
+}
+
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char *arguments_json,
+                                       int timeout_ms, int *is_error)
+{
+   return dispatch_ir_owned(admitted, arguments_json, timeout_ms, is_error, NULL, NULL);
+}
+char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *admitted,
+                                             const char *arguments_json, int timeout_ms,
+                                             agent_tool_file_resource_fn execute, void *context,
+                                             int *is_error)
+{
+   if (!execute || !admitted || !admitted->name ||
+       (strcmp(admitted->name, "read_file") && strcmp(admitted->name, "write_file")))
+   {
+      if (is_error)
+         *is_error = 1;
+      return safe_strdup("error: invalid file resource owner");
+   }
+   return dispatch_ir_owned(admitted, arguments_json, timeout_ms, is_error, execute, context);
+}
+
+/* Public entry: fire the tool-event hook (no-op unless a worker installed one)
+ * around the actual dispatch, so streaming/run consumers see started/completed
+ * without the dispatcher's many return paths needing to care. */
+char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
+{
+   return dispatch_tool_call_ctx_status(name, arguments_json, timeout_ms, NULL);
+}
+
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error)
+{
+   return agent_tools_dispatch_owned(name, arguments_json, timeout_ms, is_error, NULL);
+}
+
+char *agent_tools_dispatch_owned(const char *name, const char *arguments_json, int timeout_ms,
+                                 int *is_error, cJSON *admitted_arguments)
+{
+   return agent_tools_dispatch_file_owned(name, arguments_json, timeout_ms, is_error,
+                                          admitted_arguments, NULL, NULL);
+}
+
+char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms)
+{
+   return dispatch_tool_call_ctx(name, arguments_json, timeout_ms);
 }

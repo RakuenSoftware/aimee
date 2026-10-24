@@ -43,16 +43,23 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/wait.h>
-static _Thread_local char *const *bash_environment;
+static _Thread_local agent_tools_bash_scope_t bash_scope;
+agent_tools_bash_scope_t agent_tools_bind_bash_scope(const agent_tools_bash_scope_t *scope)
+{
+   agent_tools_bash_scope_t previous = bash_scope;
+   bash_scope = scope ? *scope : (agent_tools_bash_scope_t){0};
+   return previous;
+}
 char *const *agent_tools_bind_bash_environment(char *const environment[])
 {
-   char *const *previous = bash_environment;
-   bash_environment = environment;
+   char *const *previous = bash_scope.environment;
+   bash_scope.environment = environment;
+   bash_scope.replace_environment = 0;
    return previous;
 }
 static void bash_install_child_environment(void)
 {
-   if (child_environment_overlay(bash_environment))
+   if (child_environment_install(bash_scope.environment, bash_scope.replace_environment))
       _exit(126);
 }
 
@@ -129,6 +136,8 @@ static void bash_prepend_path_dir(char *buf, size_t buf_len, const char *dir)
 }
 static void bash_prepare_child_path(void)
 {
+   if (bash_scope.replace_environment)
+      return;
    char path_buf[8192];
    const char *old_path = getenv("PATH");
    snprintf(path_buf, sizeof(path_buf), "%s", old_path ? old_path : "");
@@ -828,7 +837,8 @@ char *tool_bash(const char *command, int timeout_ms)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
    sandbox_config_t sbox_cfg;
    config_sandbox(&sbox_cfg);
-   sbox_cfg.child_environment = bash_environment;
+   sbox_cfg.child_environment = bash_scope.environment;
+   sbox_cfg.child_environment_replace = bash_scope.replace_environment;
    const char *guard_ro = agent_tools_parent_write_guard_root();
    const char *guard_rw = agent_tools_parent_write_guard_write_root();
    int guarded_parent = guard_ro && guard_ro[0];
@@ -1038,7 +1048,8 @@ char *tool_bash(const char *command, int timeout_ms)
    }
    while (stdout_open || stderr_open || !reaped)
    {
-      if (bash_delegate_cancel_requested())
+      if ((bash_scope.progress && bash_scope.progress(bash_scope.context)) ||
+          bash_delegate_cancel_requested())
       {
          cancelled = 1;
          break;
@@ -1175,6 +1186,19 @@ char *tool_bash(const char *command, int timeout_ms)
 static const char *validate_file_path(const char *path, char *resolved, size_t resolved_len)
 {
    return guardrails_check_sensitive_path(path, resolved, resolved_len);
+}
+
+const char *agent_tools_validate_file_resource(const char *path, int writing)
+{
+   char resolved[MAX_PATH_LEN];
+   const char *error = validate_file_path(path, resolved, sizeof resolved);
+   if (error)
+      return error;
+   if (writing && agent_tools_readonly_delegate_blocks())
+      return "error: write blocked: read-only delegate (not write-capable)";
+   if (writing && agent_tools_parent_write_guard_blocks(path, NULL))
+      return "error: write blocked: parent worktree is read-only for delegates";
+   return NULL;
 }
 
 const char *path_in_thread_cwd(const char *path, char *buf, size_t buf_len)
@@ -1357,14 +1381,9 @@ char *tool_write_file(const char *path, const char *content)
 {
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
-   char resolved[MAX_PATH_LEN];
-   const char *err = validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *err = agent_tools_validate_file_resource(actual_path, 1);
    if (err)
       return safe_strdup(err);
-   if (agent_tools_readonly_delegate_blocks())
-      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
-   if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
-      return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
    if (!text_is_valid_utf8(content))
       return safe_strdup("error: content is not valid UTF-8; refusing text-file write");
 

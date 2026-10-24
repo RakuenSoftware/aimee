@@ -182,11 +182,11 @@ func enabled(a agentEntry) bool { return a.Enabled == nil || bool(*a.Enabled) }
 
 func available(a agentEntry) bool { return a.Available == nil || bool(*a.Available) }
 
-var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude or Codex host registration")
+var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude, Codex or ACP host registration")
 
 func canonicalModelAdapter(a agentEntry) bool {
 	switch strings.ToLower(strings.TrimSpace(a.CLIKind)) {
-	case "claude", "claude-code", "codex":
+	case "claude", "claude-code", "codex", "acp":
 		return true
 	default:
 		return false

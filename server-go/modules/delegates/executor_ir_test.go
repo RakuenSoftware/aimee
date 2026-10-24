@@ -191,3 +191,64 @@ func TestPrivateTriggerScopeRequiresStampedWorkflowCaller(t *testing.T) {
 		t.Fatal("claimed actor bypassed strict private source contract")
 	}
 }
+
+// The bus peer is explicit: this qualifies the real Go selector/transport and
+// canonical result admission, not an actual ACP process or durable C source.
+func TestACPUsesCanonicalHostAndPreservesUnknownUsage(t *testing.T) {
+	for _, mode := range []string{"complete", "no-source", "host-failure", "display-only", "turn-bound-refused"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			executor, marker := hostFixture(t, "acp", hostCallFunc(func(_ context.Context, event, stage uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+				calls++
+				var request contract.Invocation
+				if event != HostExecuteEvent || stage != HostExecuteStage || !canonical.Decode(body, &request) || request.Model != "native" || request.ExecutionScope != strings.Repeat("a", 64) || request.Input == nil || !request.Input.Valid() || !request.Tools {
+					t.Fatalf("lost admitted ACP source/input: %s", body)
+				}
+				if mode == "host-failure" {
+					return nil, errors.New("host unavailable")
+				}
+				if mode == "turn-bound-refused" {
+					if request.MaxTurns != 2 {
+						t.Fatal("generation bound dropped before owner")
+					}
+					return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "failed", Error: "ACP generation bound unsupported"})
+				}
+				if request.MaxTurns != 0 {
+					t.Fatal("injected generation bound")
+				}
+				if mode == "display-only" {
+					return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "done", Response: "unadmitted display text"})
+				}
+				result := hostResult("canonical ACP answer")
+				result.Output.Usage = canonical.ResponseUsage{Unobserved: true}
+				return json.Marshal(result)
+			}))
+			request := nativeInvocation()
+			request.MaxTurns = 0
+			if mode == "no-source" {
+				request.ExecutionScope = ""
+			}
+			if mode == "turn-bound-refused" {
+				request.MaxTurns = 2
+			}
+			result := executor.Execute(t.Context(), request)
+			expectedCalls := 1
+			if mode == "no-source" {
+				expectedCalls = 0
+			}
+			if calls != expectedCalls {
+				t.Fatalf("host calls=%d", calls)
+			}
+			if mode == "complete" {
+				if result.Status != "done" || result.Output == nil || !result.Output.Usage.Unobserved || result.Output.Usage.Input != "" || result.Response != "canonical ACP answer" || len(result.History) != 1 {
+					t.Fatalf("lost canonical ACP result: %+v", result)
+				}
+			} else if result.Status != "failed" || result.Response != "" {
+				t.Fatalf("unadmitted ACP success: %+v", result)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("ACP command executed outside canonical host")
+			}
+		})
+	}
+}

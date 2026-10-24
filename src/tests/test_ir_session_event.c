@@ -773,6 +773,39 @@ int main(void)
           cJSON_GetObjectItem(unknown_json, "usage_out"));
    cJSON_Delete(unknown_json);
 
+   aimee_session_event_t external_projection = {.kind = AIMEE_SESSION_PROJECTION,
+                                                .projection_model = "configured ACP agent",
+                                                .projection_boundary = "request",
+                                                .projection_host_context_blocks_as_text = 1};
+   cJSON *fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity);
+   const cJSON *fidelity_payload = cJSON_GetObjectItem(fidelity, "payload");
+   assert(cJSON_GetObjectItem(fidelity_payload, "host_context_blocks_as_text")->valueint == 1);
+   assert(!cJSON_GetObjectItem(fidelity_payload, "unverified_external_tool_reports"));
+   assert(!cJSON_GetObjectItem(fidelity_payload, "omitted_reasoning_blocks")->valueint);
+   cJSON_Delete(fidelity);
+   external_projection.projection_host_context_blocks_as_text = 0;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = 2;
+   fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity);
+   cJSON_Delete(fidelity);
+   external_projection.projection_unverified_external_tool_reports = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = -1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = 0;
+   external_projection.projection_history_messages_as_text = 2;
+   fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(fidelity, "payload"), "history_messages_as_text")
+                  ->valueint == 2);
+   cJSON_Delete(fidelity);
+   external_projection.projection_history_messages_as_text = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_history_messages_as_text = -1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+
    puts("IR session event tests passed");
    return 0;
 }

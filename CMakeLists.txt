@@ -1005,6 +1005,9 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
     ${AIMEE_SRC_DIR}/server/server_native_cli.c
     ${AIMEE_SRC_DIR}/server/server_native_execution.c
+    ${AIMEE_SRC_DIR}/server/server_provider_cli_execute.c
+    ${AIMEE_SRC_DIR}/server/server_acp_execution.c
+    ${AIMEE_SRC_DIR}/server/server_acp_resources.c
     ${AIMEE_SRC_DIR}/server/server_native_cache_lease.c
     ${AIMEE_SRC_DIR}/server/server_native_containment.c
     ${AIMEE_SRC_DIR}/server/server_native_launch.c

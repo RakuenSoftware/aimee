@@ -2071,7 +2071,8 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
    if (!config || !selected || !selected->enabled || !role || !role[0] ||
        (tools != 0 && tools != 1) || !request || !response || !out ||
        strcmp(selected->backend, "provider-cli") ||
-       (strcmp(selected->cli_kind, "claude") && strcmp(selected->cli_kind, "codex")) ||
+       (strcmp(selected->cli_kind, "claude") && strcmp(selected->cli_kind, "codex") &&
+        strcmp(selected->cli_kind, "acp")) ||
        aimee_ir_request_admit(request))
       return -1;
    char query[4096];

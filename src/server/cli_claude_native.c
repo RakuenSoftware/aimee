@@ -434,15 +434,18 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
       return -1;
 
    int in[2] = {-1, -1}, out[2] = {-1, -1};
-   if (pipe(in) || pipe(out))
+   if (cli_native_pipe(in) || cli_native_pipe(out))
       goto failure;
    pid_t child = fork();
    if (child < 0)
       goto failure;
    if (!child)
    {
-      if (setsid() < 0 || fchdir(host->cwd_fd) || dup2(in[0], STDIN_FILENO) < 0 ||
-          dup2(out[1], STDOUT_FILENO) < 0 || dup2(out[1], STDERR_FILENO) < 0)
+      int executable = cli_native_pin_fd(host->executable_fd);
+      int cwd = cli_native_pin_fd(host->cwd_fd);
+      if (executable < 0 || cwd < 0 || setsid() < 0 || fchdir(cwd) ||
+          dup2(in[0], STDIN_FILENO) < 0 || dup2(out[1], STDOUT_FILENO) < 0 ||
+          dup2(out[1], STDERR_FILENO) < 0)
          _exit(126);
       close(in[0]);
       close(in[1]);
@@ -455,10 +458,10 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
          if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
             _exit(126);
       if (host->spawn_guard &&
-          host->spawn_guard->child(host->spawn_guard->context, host->executable_fd, host->cwd_fd))
+          host->spawn_guard->child(host->spawn_guard->context, executable, cwd))
          _exit(126);
 #if defined(__linux__)
-      fexecve(host->executable_fd, args, host->environment);
+      fexecve(executable, args, host->environment);
 #endif
       _exit(127);
    }

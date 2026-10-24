@@ -86,6 +86,11 @@ int agent_tools_action_managed(const char *name, const struct cJSON *arguments);
 /* Bind a successful execution-policy decision to the next dispatch on this
  * thread. External mutations and unknown remote tools refuse execution without
  * this trusted caller signal; model-provided arguments cannot set it. */
+typedef struct agent_tools_effect_scope agent_tools_effect_scope_t;
+/* Preserve an outer executing effect while synchronous nested producer work
+ * uses a fresh slot. Pop accepts only this thread's current lexical scope. */
+int agent_tools_effect_scope_push(agent_tools_effect_scope_t **out);
+int agent_tools_effect_scope_pop(agent_tools_effect_scope_t *scope);
 void agent_tools_set_effect_authorized(int authorized);
 
 struct aimee_tool;
@@ -94,6 +99,19 @@ struct aimee_tool;
 char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
                                        const char *canonical_arguments_json, int timeout_ms,
                                        int *is_error);
+/* Private host file-resource executor. It runs only for read_file/write_file,
+ * after the same admitted-schema, role, guardrail and final-action owners as
+ * ordinary dispatch. The callback receives the final owner-normalized args;
+ * its explicit error flag is authoritative, never the bytes being read. */
+typedef char *(*agent_tool_file_resource_fn)(const char *name, const struct cJSON *arguments,
+                                             void *context, int *is_error);
+char *dispatch_tool_file_resource_ctx_status(const struct aimee_tool *admitted,
+                                             const char *canonical_arguments_json, int timeout_ms,
+                                             agent_tool_file_resource_fn execute, void *context,
+                                             int *is_error);
+/* Shared file policy below dispatch. Path must already be resolved against the
+ * execution cwd. This grants no execution or filesystem capability. */
+const char *agent_tools_validate_file_resource(const char *path, int writing);
 /* Fresh owned definition from the current execution owner. Unregistered or
  * unavailable capabilities refuse; no process-global schema cache is used. */
 int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
@@ -101,6 +119,16 @@ int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
 /* Host-only shell environment. Prepared/owned by the caller until the shell
  * joins; only the forked child installs it. Never changes process environ.
  * Container/detached providers do not inherit host transport capabilities. */
+typedef struct
+{
+   char *const *environment;
+   int replace_environment;
+   int (*progress)(void *context);
+   void *context;
+} agent_tools_bash_scope_t;
+/* Lexical producer-thread scope; all borrowed data lives until the child joins.
+ * A failing progress callback cancels and joins the child, never grants control. */
+agent_tools_bash_scope_t agent_tools_bind_bash_scope(const agent_tools_bash_scope_t *scope);
 char *const *agent_tools_bind_bash_environment(char *const environment[]);
 
 /* Complete registry-owned canonical catalog. Exposure preserves the selected

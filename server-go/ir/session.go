@@ -263,18 +263,32 @@ func ValidSessionEvent(encoded []byte) bool {
 			strings.Trim(value[4:68]+value[69:133]+value[134:], "0123456789abcdef") == ""
 	case "projection":
 		var projection struct {
-			Model         string `json:"model"`
-			Boundary      string `json:"boundary"`
-			Reasoning     *int64 `json:"omitted_reasoning_blocks"`
-			Opaque        *int64 `json:"omitted_opaque_state_blocks"`
-			CacheControls int64  `json:"omitted_cache_controls,omitempty"`
+			Model         string          `json:"model"`
+			Boundary      string          `json:"boundary"`
+			Reasoning     *int64          `json:"omitted_reasoning_blocks"`
+			Opaque        *int64          `json:"omitted_opaque_state_blocks"`
+			CacheControls int64           `json:"omitted_cache_controls,omitempty"`
+			History       json.RawMessage `json:"history_messages_as_text,omitempty"`
+			HostContext   json.RawMessage `json:"host_context_blocks_as_text,omitempty"`
+			ExternalTools json.RawMessage `json:"unverified_external_tool_reports,omitempty"`
 		}
-		return Decode(e.Payload, &projection) && projection.Model != "" &&
+		if !Decode(e.Payload, &projection) {
+			return false
+		}
+		counts := [3]int64{}
+		for i, raw := range []json.RawMessage{projection.HostContext, projection.ExternalTools, projection.History} {
+			if len(raw) != 0 && (bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || !Decode(raw, &counts[i])) {
+				return false
+			}
+		}
+		return projection.Model != "" &&
 			(projection.Boundary == "request" || projection.Boundary == "response") &&
 			projection.Reasoning != nil && projection.Opaque != nil &&
 			*projection.Reasoning >= 0 && *projection.Reasoning <= 9007199254740991 &&
 			projection.CacheControls >= 0 && projection.CacheControls <= 9007199254740991 &&
-			(*projection.Reasoning > 0 || projection.CacheControls > 0) &&
+			counts[0] >= 0 && counts[0] <= 4096 &&
+			counts[1] >= 0 && counts[1] <= 4096 && counts[2] >= 0 && counts[2] <= 4096 &&
+			(*projection.Reasoning > 0 || projection.CacheControls > 0 || counts[0] > 0 || counts[1] > 0 || counts[2] > 0) &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "child_execution":
 		var child ChildExecutionPayload

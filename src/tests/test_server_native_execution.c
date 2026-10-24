@@ -766,6 +766,26 @@ static int sdk_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 }
 const provider_cli_adapter_t codex_provider_cli_adapter = {.cli_kind = "codex",
                                                            .execute = sdk_execute};
+typedef struct
+{
+   struct stat program, directory;
+} stdio_launch_identity_t;
+static int stdio_guard_child(void *context, int executable, int cwd)
+{
+   stdio_launch_identity_t *expected = context;
+   struct stat program, directory;
+   assert(executable >= 0 && cwd >= 0 && executable != cwd);
+   assert(!fstat(executable, &program) && !fstat(cwd, &directory));
+   assert(program.st_dev == expected->program.st_dev && program.st_ino == expected->program.st_ino);
+   assert(directory.st_dev == expected->directory.st_dev &&
+          directory.st_ino == expected->directory.st_ino);
+   return 0;
+}
+static int stdio_guard_parent(void *context, pid_t child)
+{
+   assert(context && child > 0);
+   return 0;
+}
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind,
                         void *context, agent_result_t *out)
 {
@@ -884,15 +904,43 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    assert(probe_host.executable_fd >= 0);
    probe_host.spawn_guard = NULL;
    probe_cfg.claude_host = &probe_host;
-   int input = -1, output = -1, status = -1;
-   pid_t probe;
-   assert(!cli_claude_native_spawn(&probe_cfg, &input, &output, &probe));
-   close(input);
-   char observed[128] = {0};
-   ssize_t bytes = read(output, observed, sizeof observed - 1);
-   assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
-   close(output);
-   assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   for (int holes = 0; holes < 8; holes++)
+   {
+      pid_t verifier = fork();
+      assert(verifier >= 0);
+      if (!verifier)
+      {
+         for (int fd = 0; fd < 3; fd++)
+            if (holes & (1 << fd))
+               close(fd);
+         cli_claude_host_launch_t launched = probe_host;
+         launched.executable_fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+         launched.cwd_fd = open(host->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         assert(launched.executable_fd >= 0 && launched.cwd_fd >= 0);
+         stdio_launch_identity_t identity;
+         assert(!fstat(launched.executable_fd, &identity.program) &&
+                !fstat(launched.cwd_fd, &identity.directory));
+         cli_native_spawn_guard_t guard = {stdio_guard_child, stdio_guard_parent, &identity};
+         launched.spawn_guard = &guard;
+         provider_cli_cfg_t launch = probe_cfg;
+         launch.claude_host = &launched;
+         int input = -1, output = -1, status = -1;
+         pid_t probe;
+         assert(!cli_claude_native_spawn(&launch, &input, &output, &probe));
+         close(input);
+         char observed[128] = {0};
+         ssize_t bytes = read(output, observed, sizeof observed - 1);
+         assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
+         close(output);
+         assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && !WEXITSTATUS(status));
+         close(launched.executable_fd);
+         close(launched.cwd_fd);
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(verifier, &status, 0) == verifier && WIFEXITED(status) &&
+             !WEXITSTATUS(status));
+   }
    close(probe_host.executable_fd);
 #endif
    snprintf(private_home, sizeof private_home, "%s", host->home);
@@ -1060,10 +1108,23 @@ static void finish(int success)
    action(success, terminal_resource);
    terminal_resource = NULL;
 }
+/* This fixture exercises the real strong router and native owner. External ACP
+ * has its own real-process/public-route fixture and must not enter this one. */
+int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   (void)cfg;
+   (void)out;
+   assert(!"unexpected ACP route in native factory fixture");
+   return AGENT_RC_CONTEXT_REFUSED;
+}
+
 int main(int argc, char **argv)
 {
    if (argc > 1 && !strcmp(argv[1], "--bare"))
    {
+      struct stat channel;
+      for (int fd = 0; fd < 3; fd++)
+         assert(!fstat(fd, &channel) && S_ISFIFO(channel.st_mode));
       const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
       assert(setting && !strcmp(setting, "0"));
       setting = getenv("MCP_CONNECTION_NONBLOCKING");
@@ -1603,7 +1664,7 @@ int main(int argc, char **argv)
    qualified_mode = 0;
    active_sdk = "codex";
    reset(0);
-   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "acp");
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "unsupported");
    agent_result_t unsupported = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &unsupported) == AGENT_RC_CONTEXT_REFUSED);
    assert(!unsupported.success && unsupported.error[0]);

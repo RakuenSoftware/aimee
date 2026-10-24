@@ -8,20 +8,39 @@ stop/handoff request below is superseded.
 
 ### Active continuation after the validated checkpoint
 
-The reduction audit found an additional real migration gap: outbound ACP is
-advertised by the CLI/configured backend and existed on `testing`, but the new
-strong native factory rejects it. Implementation is therefore still unfinished.
-Restore the existing one-shot external ACP contract through an actual owned
-canonical constructor and governed byte/range filesystem resource owner; do not
-delete the feature or re-enable ambient/weak fallback. Preserve its explicit
-unsupported history/resume and hidden-budget limits, without inventing native
-SDK/cache/generation or trusted tool-effect proofs.
+The migration remains unfinished. The advertised outbound ACP backend needs an
+owned canonical execution path; its previous one-shot adapter ignored prior
+conversation history. The new path projects admitted prior messages as explicit
+text context, sends the latest USER once, preserves unknown usage and refuses
+unrepresentable resume, hidden generation/token and no-internal-tools guarantees.
+It makes no native SDK/cache/generation or trusted external tool-report claim.
 
-Confirmed unreachable unmanaged Claude/Codex branches are being retired in
-parallel. The real managed SDK workers remain active and must stay. The live
-`9c4b4b952` checkpoint below remains validated and untouched; later source work
-stays on the same branch and will need combined qualification before deployment.
-The PR authentication question does not block this implementation work.
+Current local composition: 23 public configured/inline ACP route cases pass
+normally and under ASan/UBSan with leak detection. They include real child
+processes, canonical persistence/capture, headed controls, filesystem effects,
+headless restrictions, configured versus inline command authority and a real
+second browser turn. Backend module/policy/storage services are explicit test
+peers; these are not live provider/Go-store qualifications. Direct and nested scoped MCP/CLI composition now passes 38 public cases normally
+and under sanitizers; the real signed service-source handoff also passes. All
+implementation patches are integrated. Combined source checks and the final
+`.252` upgrade/E2E remain required before completion.
+
+Confirmed unreachable unmanaged native paths have been retired. A further
+371-production-line native harness retirement is independently reviewed and
+qualified in isolation (four native/ACP fixtures normally and under sanitizers),
+with the predecessor decoder’s alternate mode reproducing the competing-history
+regression (not a claim that the old managed worker selected that mode).
+The gateway's original model/history capture and native cache/replay remain the
+owners; controls, compaction and bounded diagnostics stay in the harness adapter.
+Seven closed-stdio combinations also qualify both native launchers and custody
+channels. Unknown canonical usage and its browser replay remain distinct from
+observed zero; the frontend now passes 501 tests, type checking and both builds.
+
+The live `9c4b4b952` checkpoint below remains validated and untouched. Later source
+work stays on the same branch and requires combined checks and a normal `.252`
+upgrade before live acceptance. The user explicitly directed continued work and
+no further PR/authentication questions; PR administration is not an implementation
+prerequisite. Keep one eventual PR, automatic reviews and strict attribution.
 
 ### Latest acceptance and reduction checkpoint: 24 October 2026
 

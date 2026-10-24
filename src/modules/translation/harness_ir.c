@@ -1,6 +1,4 @@
 #include <aimee/translation/harness_ir.h>
-#include <aimee/translation/aimee_backend.h>
-#include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
 #include <stdio.h>
 #include <math.h>
@@ -19,10 +17,11 @@ typedef struct
 struct aimee_harness_output
 {
    harness_output_entry_t *entries;
-   int count, failed;
+   int count, failed, usage_unobserved;
    size_t bytes;
    char *raw_stop_reason;
    aimee_stop_reason_t stop_reason;
+   char *error_message;
 };
 static void harness_output_clear(struct aimee_harness_output *output)
 {
@@ -40,7 +39,10 @@ static void harness_output_clear(struct aimee_harness_output *output)
    output->bytes = 0;
    free(output->raw_stop_reason);
    output->raw_stop_reason = NULL;
+   free(output->error_message);
+   output->error_message = NULL;
    output->stop_reason = AIMEE_STOP_UNKNOWN;
+   output->usage_unobserved = 0;
 }
 static int harness_output_complete(const struct aimee_harness_output *output)
 {
@@ -182,8 +184,6 @@ static int harness_output_decode(const cJSON *frame, aimee_harness_ir_t *state,
 {
    if (!state)
       return -1;
-   if (state->host_model_capture)
-      return decode(frame, state); /* Original host model observation remains authoritative. */
    if (!state->output)
       state->output = calloc(1, sizeof *state->output);
    if (!state->output || state->output->failed)
@@ -234,13 +234,16 @@ int aimee_harness_ir_response(const aimee_harness_ir_t *state, aimee_response_t 
       view.usage_cache_read = response->usage_cache_read;
       view.usage_cache_write = response->usage_cache_write;
       view.usage_reasoning = response->usage_reasoning;
+      view.usage_unobserved = response->usage_unobserved;
    }
    if (state->output->raw_stop_reason)
    {
       view.raw_stop_reason = state->output->raw_stop_reason;
       view.stop_reason = state->output->stop_reason;
    }
-   int rc = view.n_content ? aimee_ir_response_clone(&view, out) : -1;
+   view.usage_unobserved |= state->output->usage_unobserved;
+   view.error_message = state->output->error_message;
+   int rc = view.n_content || view.error_message ? aimee_ir_response_clone(&view, out) : -1;
    free(view.content); /* Its blocks borrow into the original canonical observations. */
    return rc;
 fail:
@@ -338,9 +341,9 @@ int aimee_acp_client_tool_result_ir(aimee_harness_ir_t *state, const aimee_block
        .kind = AIMEE_SESSION_MESSAGE, .message_id = result->tool_id, .message = &message};
    harness_output_capture_t capture = {.output = state->output};
    capture.parent = aimee_ir_session_get_sink(&capture.parent_context);
-   int rc = state->host_model_capture ? aimee_ir_session_emit(&event)
-            : !capture.output         ? -1
-                                      : harness_output_observe(&event, &capture);
+   int rc = capture.output ? harness_output_observe(&event, &capture) : -1;
+   if (!rc)
+      state->acp_text_seen = 0;
    if (rc)
    {
       if (state->output)
@@ -477,37 +480,17 @@ static int message(const char *id, const char *role, aimee_block_t *blocks, int 
    aimee_session_event_t e = {.kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &m};
    return aimee_ir_session_emit(&e);
 }
-static int delta(const char *id, aimee_delta_t *d)
-{
-   aimee_session_event_t e = {
-       .kind = AIMEE_SESSION_DELTA, .message_id = id, .role = "assistant", .delta = d};
-   return aimee_ir_session_emit(&e);
-}
 void aimee_harness_ir_free(aimee_harness_ir_t *s)
 {
    if (!s)
       return;
    harness_output_clear(s->output);
    free(s->output);
-   cJSON_Delete(s->started);
    cJSON_Delete(s->pending);
-   cJSON_Delete(s->claude_message);
-   cJSON_Delete(s->acp_tools);
    cJSON_Delete(s->acp_client_requests);
    aimee_block_free_contents(&s->acp_client_call);
    memset(s, 0, sizeof(*s));
 }
-static int claude_snapshot(const cJSON *m, const char *id)
-{
-   aimee_response_t ir = {0};
-   char error[128];
-   if (anthropic_backend_parse(m, &ir, error, sizeof(error)))
-      return -1;
-   int rc = aimee_ir_session_emit_response(&ir, id);
-   aimee_response_free(&ir);
-   return rc;
-}
-
 static int native_compaction(const char *harness)
 {
    aimee_session_event_t event = {.kind = AIMEE_SESSION_NATIVE_COMPACTION,
@@ -556,132 +539,12 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
             (!strcmp(type, "stream_event") &&
              !strcmp(str(cJSON_GetObjectItemCaseSensitive(f, "event"), "type"), "message_start")))
       s->failure = AIMEE_HARNESS_FAILURE_NONE;
-   if (s->host_model_capture && (!strcmp(type, "stream_event") || !strcmp(type, "assistant") ||
-                                 !strcmp(type, "user") || !strcmp(type, "result")))
+   if (!strcmp(type, "stream_event") || !strcmp(type, "assistant") || !strcmp(type, "user") ||
+       !strcmp(type, "result"))
       return 0; /* Original host capture owns model/tool/history observations. */
 
    if (!strcmp(type, "system") && !strcmp(str(f, "subtype"), "compact_boundary"))
       return native_compaction("claude");
-   if (!strcmp(type, "stream_event"))
-   {
-      const cJSON *event = cJSON_GetObjectItemCaseSensitive(f, "event");
-      const char *kind = str(event, "type");
-      if (!strcmp(kind, "message_start"))
-      {
-         const char *id = str(cJSON_GetObjectItemCaseSensitive(event, "message"), "id");
-         if (!id[0] || strlen(id) >= sizeof(s->message_id))
-            return -1;
-         snprintf(s->message_id, sizeof(s->message_id), "%s", id);
-         anthropic_backend_stream_state_init(&s->anthropic);
-         cJSON_Delete(s->claude_message);
-         s->claude_message = NULL;
-         s->claude_open = 0;
-      }
-      if (!s->message_id[0])
-         return -1;
-      aimee_delta_t d = {0};
-      int n = anthropic_stream_to_deltas(kind, event, &s->anthropic, &d, 1);
-      if (n < 0)
-         return -1;
-      if (!strcmp(kind, "content_block_start"))
-         s->claude_open++;
-      if (!strcmp(kind, "content_block_stop"))
-         s->claude_open--;
-      if (!strcmp(kind, "message_stop") && s->claude_open)
-      {
-         d = (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
-                             .error_message = "Claude response ended with incomplete tool input"};
-         return delta(s->message_id, &d);
-      }
-      if (n && delta(s->message_id, &d))
-         return -1;
-      if (!strcmp(kind, "message_stop") && s->claude_message)
-         return claude_snapshot(s->claude_message, s->message_id);
-      return 0;
-   }
-   if (!strcmp(type, "assistant"))
-   {
-      const cJSON *m = cJSON_GetObjectItemCaseSensitive(f, "message");
-      const char *id = str(m, "id");
-      if (!id[0])
-         return -1;
-      /* Claude emits one assistant snapshot PER BLOCK, sharing a message ID,
-       * before that block's stop event. Accumulate it at this native boundary;
-       * only publish the complete typed snapshot after the model TURN_STOP. */
-      if (s->anthropic.started && !s->anthropic.terminal_emitted && !strcmp(id, s->message_id))
-      {
-         const cJSON *content = cJSON_GetObjectItemCaseSensitive(m, "content");
-         if (!cJSON_IsArray(content))
-            return -1;
-         if (!s->claude_message)
-         {
-            s->claude_message = cJSON_Duplicate(m, 1);
-            if (!s->claude_message)
-               return -1;
-         }
-         else
-         {
-            cJSON *all = cJSON_GetObjectItemCaseSensitive(s->claude_message, "content");
-            if (cJSON_GetArraySize(all) + cJSON_GetArraySize(content) > 4096)
-               return -1;
-            const cJSON *part = NULL;
-            cJSON_ArrayForEach(part, content)
-            {
-               cJSON *copy = cJSON_Duplicate(part, 1);
-               if (!copy || !cJSON_AddItemToArray(all, copy))
-               {
-                  cJSON_Delete(copy);
-                  return -1;
-               }
-            }
-         }
-         return 0;
-      }
-      int rc = claude_snapshot(m, id);
-      if (rc)
-         return rc;
-      cJSON *copy = cJSON_Duplicate(m, 1);
-      if (!copy)
-         return -1;
-      cJSON_Delete(s->claude_message);
-      s->claude_message = copy;
-      return 0;
-   }
-   if (!strcmp(type, "user"))
-   {
-      const cJSON *m = cJSON_GetObjectItemCaseSensitive(f, "message");
-      const cJSON *content = cJSON_GetObjectItemCaseSensitive(m, "content");
-      int tools = 0;
-      const cJSON *b = NULL;
-      cJSON_ArrayForEach(b, content) if (!strcmp(str(b, "type"), "tool_result")) tools++;
-      if (!tools)
-         return 0; /* admitted prompt has one capture owner, the session */
-      cJSON *req = cJSON_CreateObject(), *messages = cJSON_CreateArray();
-      cJSON_AddStringToObject(req, "model", "harness");
-      cJSON_AddNumberToObject(req, "max_tokens", 1);
-      cJSON_AddItemToArray(messages, cJSON_Duplicate(m, 1));
-      cJSON_AddItemToObject(req, "messages", messages);
-      aimee_request_t ir = {0};
-      char error[128], id[64];
-      snprintf(id, sizeof(id), "claude-tool-results-%lu", ++s->counter);
-      int rc = anthropic_frontend_parse(req, &ir, error, sizeof(error));
-      if (!rc && ir.n_messages == 1)
-      {
-         for (int j = 0; j < ir.messages[0].n_blocks; j++)
-         {
-            free(ir.messages[0].blocks[j].thinking_binding);
-            ir.messages[0].blocks[j].thinking_binding = NULL;
-         }
-         aimee_session_event_t e = {
-             .kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &ir.messages[0]};
-         rc = aimee_ir_session_emit(&e);
-      }
-      else
-         rc = -1;
-      aimee_request_free(&ir);
-      cJSON_Delete(req);
-      return rc;
-   }
    if (!strcmp(type, "control_request") || !strcmp(type, "control_response"))
    {
       int incoming = !strcmp(type, "control_request");
@@ -733,57 +596,6 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    return 0; /* init, result and lifecycle metadata are owned by the host */
 }
 
-static int codex_text(const cJSON *item, const char *id, const char *role)
-{
-   const char *type = str(item, "type");
-   if (!strcmp(type, "agentMessage") || !strcmp(type, "plan"))
-   {
-      aimee_block_t b = {.type = AIMEE_BLK_TEXT, .text = (char *)str(item, "text")};
-      return message(id, role, &b, 1);
-   }
-   const cJSON *content =
-       cJSON_GetObjectItemCaseSensitive(item, !strcmp(type, "reasoning") ? "summary" : "content");
-   if (!cJSON_IsArray(content))
-      return -1;
-   int count = cJSON_GetArraySize(content);
-   if (count > 4096)
-      return -1;
-   aimee_block_t *blocks = calloc(count ? count : 1, sizeof(*blocks));
-   if (!blocks)
-      return -1;
-   const cJSON *part = NULL;
-   int i = 0, rc = 0;
-   cJSON_ArrayForEach(part, content)
-   {
-      aimee_block_t *b = &blocks[i++];
-      const char *kind = str(part, "type");
-      if (!strcmp(type, "reasoning"))
-      {
-         b->type = AIMEE_BLK_THINKING;
-         b->text = (char *)(cJSON_IsString(part) ? part->valuestring : str(part, "text"));
-      }
-      else if (!strcmp(kind, "text"))
-      {
-         b->type = AIMEE_BLK_TEXT;
-         b->text = (char *)str(part, "text");
-      }
-      else if (!strcmp(kind, "image") || !strcmp(kind, "localImage"))
-      {
-         b->type = AIMEE_BLK_IMAGE;
-         b->media_type = "image/*";
-         b->media_ref = (char *)str(part, !strcmp(kind, "image") ? "url" : "path");
-      }
-      else
-      {
-         rc = -1;
-         break;
-      }
-   }
-   if (!rc)
-      rc = message(id, role, blocks, count);
-   free(blocks);
-   return rc;
-}
 static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    if (!cJSON_IsObject(f) || !s)
@@ -792,33 +604,8 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!strcmp(method, "thread/compacted"))
       return native_compaction("codex");
    const cJSON *params = cJSON_GetObjectItemCaseSensitive(f, "params");
-   if (s->host_model_capture && !strcmp(method, "item/agentMessage/delta"))
-      return 0;
    if (!strcmp(method, "item/agentMessage/delta"))
-   {
-      const char *id = str(params, "itemId"), *text = str(params, "delta");
-      if (!id[0])
-         return -1;
-      if (!s->started)
-         s->started = cJSON_CreateObject();
-      if (!s->started)
-         return -1;
-      if (!cJSON_GetObjectItemCaseSensitive(s->started, id))
-      {
-         aimee_delta_t d = {.type = AIMEE_DELTA_TURN_START};
-         if (delta(id, &d))
-            return -1;
-         d.type = AIMEE_DELTA_BLOCK_START;
-         d.kind = AIMEE_BLK_TEXT;
-         if (delta(id, &d))
-            return -1;
-         if (!cJSON_AddTrueToObject(s->started, id))
-            return -1;
-      }
-      aimee_delta_t d = {
-          .type = AIMEE_DELTA_BLOCK_DELTA, .kind = AIMEE_BLK_TEXT, .text_delta = text};
-      return delta(id, &d);
-   }
+      return 0; /* The original gateway capture owns model observations. */
    const cJSON *rpcid = cJSON_GetObjectItemCaseSensitive(f, "id");
    if (rpcid &&
        (strstr(method, "requestApproval") || !strcmp(method, "item/tool/requestUserInput") ||
@@ -895,155 +682,16 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    const char *type = str(item, "type"), *id = str(item, "id");
    if (!id[0] || !type[0])
       return -1;
-   int complete = !strcmp(method, "item/completed");
-   if (s->host_model_capture &&
-       (!strcmp(type, "agentMessage") || !strcmp(type, "userMessage") ||
-        !strcmp(type, "reasoning") || !strcmp(type, "plan") || !strcmp(type, "commandExecution") ||
-        !strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall") ||
-        !strcmp(type, "fileChange") || !strcmp(type, "webSearch") || !strcmp(type, "imageView")))
-      return 0;
    if (!strcmp(type, "agentMessage") || !strcmp(type, "userMessage") ||
-       !strcmp(type, "reasoning") || !strcmp(type, "plan"))
-   {
-      if (!strcmp(type, "userMessage") && complete && s->admitted_prompt && !s->user_echo_seen)
-      {
-         const cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
-         const cJSON *first = cJSON_GetArrayItem(content, 0);
-         if (cJSON_GetArraySize(content) == 1 && !strcmp(str(first, "type"), "text") &&
-             !strcmp(str(first, "text"), s->admitted_prompt))
-         {
-            s->user_echo_seen = 1;
-            return 0;
-         }
-      }
-      if (!complete)
-         return 0;
-      if (s->started && cJSON_GetObjectItemCaseSensitive(s->started, id))
-      {
-         aimee_delta_t d = {.type = AIMEE_DELTA_BLOCK_STOP, .kind = AIMEE_BLK_TEXT};
-         if (delta(id, &d))
-            return -1;
-         d.type = AIMEE_DELTA_TURN_STOP;
-         d.stop_reason = AIMEE_STOP_END_TURN;
-         if (delta(id, &d))
-            return -1;
-         cJSON_DeleteItemFromObjectCaseSensitive(s->started, id);
-      }
-      return codex_text(item, id, !strcmp(type, "userMessage") ? "user" : "assistant");
-   }
+       !strcmp(type, "reasoning") || !strcmp(type, "plan") || !strcmp(type, "commandExecution") ||
+       !strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall") ||
+       !strcmp(type, "fileChange") || !strcmp(type, "webSearch") || !strcmp(type, "imageView"))
+      return 0;
    if (!strcmp(type, "contextCompaction"))
       return native_compaction("codex");
    if (!strcmp(type, "enteredReviewMode") || !strcmp(type, "exitedReviewMode"))
       return 0;
-   const char *input_key = NULL, *output_key = NULL, *name = type;
-   if (!strcmp(type, "commandExecution"))
-   {
-      input_key = "command";
-      output_key = "aggregatedOutput";
-   }
-   else if (!strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall"))
-   {
-      input_key = "arguments";
-      output_key = !strcmp(type, "dynamicToolCall") ? "contentItems" : "result";
-      name = str(item, "tool");
-   }
-   else if (!strcmp(type, "fileChange"))
-   {
-      input_key = "changes";
-      output_key = "changes";
-   }
-   else if (!strcmp(type, "webSearch"))
-   {
-      input_key = "action";
-      output_key = "action";
-   }
-   else if (!strcmp(type, "imageView"))
-   {
-      input_key = "path";
-      output_key = "path";
-   }
-   else
-      return -1; /* never turn unknown items into fake tools */
-   size_t n = strlen(id) + 16;
-   char *mid = malloc(n);
-   if (!mid)
-      return -1;
-   snprintf(mid, n, "%s:%s", id, complete ? "result" : "use");
-   aimee_block_t b = {.type = complete ? AIMEE_BLK_TOOL_RESULT : AIMEE_BLK_TOOL_USE,
-                      .tool_id = (char *)id,
-                      .tool_name = (char *)name,
-                      .tool_namespace = (char *)str(item, "server")};
-   cJSON *value = cJSON_CreateObject();
-   if (!value)
-   {
-      free(mid);
-      return -1;
-   }
-   const cJSON *source = cJSON_GetObjectItemCaseSensitive(item, complete ? output_key : input_key);
-   if (source)
-      cJSON_AddItemToObject(value, complete ? "output" : "arguments", cJSON_Duplicate(source, 1));
-   for (int i = 0; i < 3; i++)
-   {
-      const char *key = complete ? (const char *[]){"exitCode", "status", "error"}[i]
-                                 : (const char *[]){"cwd", "server", "tool"}[i];
-      const cJSON *v = cJSON_GetObjectItemCaseSensitive(item, key);
-      if (v)
-         cJSON_AddItemToObject(value, key, cJSON_Duplicate(v, 1));
-   }
-   const cJSON *exit_code = cJSON_GetObjectItemCaseSensitive(item, "exitCode");
-   const cJSON *error = cJSON_GetObjectItemCaseSensitive(item, "error");
-   const cJSON *success = cJSON_GetObjectItemCaseSensitive(item, "success");
-   b.tool_is_error =
-       complete &&
-       (!strcmp(str(item, "status"), "failed") || !strcmp(str(item, "status"), "declined") ||
-        (!strcmp(type, "commandExecution") && cJSON_IsNumber(exit_code) &&
-         exit_code->valuedouble != 0) ||
-        (!strcmp(type, "dynamicToolCall") && cJSON_IsFalse(success)) ||
-        (!strcmp(type, "mcpToolCall") &&
-         ((error && !cJSON_IsNull(error)) ||
-          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(source, "isError")))));
-   if (complete)
-      b.tool_result = value;
-   else
-      b.tool_input = value;
-   char *native_namespace = NULL;
-   if (!strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall"))
-   {
-      /* A function call's input is its actual arguments. Host SDK metadata
-       * belongs outside that object; wrapping it changes a replayed call. */
-      if (!complete)
-      {
-         cJSON_Delete(value);
-         value = source ? cJSON_Duplicate(source, 1) : cJSON_CreateObject();
-         if (!value)
-         {
-            free(mid);
-            return -1;
-         }
-         b.tool_input = value;
-      }
-      if (!strcmp(type, "dynamicToolCall"))
-         b.tool_namespace = (char *)str(item, "namespace");
-      else if (str(item, "server")[0])
-      {
-         /* Match the callable namespace advertised by Codex's MCP owner. */
-         size_t capacity = strlen(str(item, "server")) + 6;
-         native_namespace = malloc(capacity);
-         if (!native_namespace)
-         {
-            cJSON_Delete(value);
-            free(mid);
-            return -1;
-         }
-         snprintf(native_namespace, capacity, "mcp__%s", str(item, "server"));
-         b.tool_namespace = native_namespace;
-      }
-   }
-   int rc = message(mid, complete ? "tool" : "assistant", &b, 1);
-   cJSON_Delete(value);
-   free(native_namespace);
-   free(mid);
-   return rc;
+   return -1; /* Unsupported item kinds retain the existing refusal. */
 }
 
 static int aimee_codex_reply_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
@@ -1103,6 +751,7 @@ static int aimee_codex_reply_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 
 static int acp_delta(aimee_harness_ir_t *s, aimee_delta_t *d)
 {
+   d->usage_unobserved = 1;
    aimee_session_event_t e = {
        .kind = AIMEE_SESSION_DELTA, .role = s->acp_role, .message_id = s->message_id, .delta = d};
    return aimee_ir_session_emit(&e);
@@ -1115,11 +764,44 @@ static int acp_close(aimee_harness_ir_t *s)
    if (acp_delta(s, &d))
       return -1;
    d.type = AIMEE_DELTA_TURN_STOP;
-   d.stop_reason = AIMEE_STOP_END_TURN;
+   d.stop_reason =
+       s->output && s->output->raw_stop_reason ? s->output->stop_reason : AIMEE_STOP_END_TURN;
+   d.raw_stop_reason = s->output ? s->output->raw_stop_reason : NULL;
    if (acp_delta(s, &d))
+      return -1;
+   harness_output_entry_t *entry = harness_output_entry(s->output, s->message_id);
+   if (!entry || !entry->builder.complete ||
+       message(s->message_id, s->acp_role, entry->builder.response.content,
+               entry->builder.response.n_content))
       return -1;
    s->acp_open = 0;
    return 0;
+}
+static int acp_close_observed(const cJSON *unused, aimee_harness_ir_t *state)
+{
+   (void)unused;
+   return acp_close(state);
+}
+int aimee_acp_before_host_tool(aimee_harness_ir_t *state)
+{
+   if (!state || state->acp_terminal_status || state->acp_client_call.tool_id ||
+       (state->output && state->output->failed))
+      return -1;
+   return harness_output_decode(NULL, state, acp_close_observed);
+}
+int aimee_acp_observe_host_tool_result(aimee_harness_ir_t *state, const aimee_block_t *result)
+{
+   if (!state || !state->output || state->acp_open || state->acp_terminal_status || !result ||
+       result->type != AIMEE_BLK_TOOL_RESULT || !aimee_ir_block_valid(result))
+      return -1;
+   aimee_message_t message = {.role = "tool", .blocks = (aimee_block_t *)result, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = result->tool_id, .message = &message};
+   harness_output_capture_t private_view = {.output = state->output};
+   int rc = harness_output_observe(&event, &private_view);
+   if (!rc)
+      state->acp_text_seen = 0;
+   return rc;
 }
 static int acp_chunk(aimee_harness_ir_t *s, const char *role, aimee_block_type_t kind,
                      const char *text)
@@ -1141,16 +823,36 @@ static int acp_chunk(aimee_harness_ir_t *s, const char *role, aimee_block_type_t
          return -1;
       s->acp_open = 1;
    }
+   if (!strcmp(role, "assistant") && kind == AIMEE_BLK_TEXT && text && text[0])
+      s->acp_text_seen = 1;
    aimee_delta_t d = {.type = AIMEE_DELTA_BLOCK_DELTA, .kind = kind, .text_delta = text};
    return acp_delta(s, &d);
 }
+static int acp_unverified_report(aimee_harness_ir_t *s)
+{
+   if (s->acp_external_tool_reports == AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = s->acp_model ? s->acp_model : "external-acp",
+                                  .projection_boundary = "response",
+                                  .projection_unverified_external_tool_reports = 1};
+   if (aimee_ir_session_emit(&event))
+      return -1;
+   s->acp_external_tool_reports++;
+   return 0;
+}
 static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
-   if (!cJSON_IsObject(f) || !s)
+   if (!cJSON_IsObject(f) || !s || !s->output)
       return -1;
+   s->output->usage_unobserved = 1;
    const char *method = str(f, "method");
    const cJSON *p = cJSON_GetObjectItemCaseSensitive(f, "params");
    const cJSON *rpcid = cJSON_GetObjectItemCaseSensitive(f, "id");
+   const char *session = str(p, "sessionId");
+   if (s->acp_terminal_status || !aimee_ir_json_unique(f) ||
+       (session[0] && s->acp_session_id && strcmp(session, s->acp_session_id)))
+      return -1;
    if (rpcid && (!strcmp(method, "fs/read_text_file") || !strcmp(method, "fs/write_text_file")))
    {
       if (s->acp_client_call.tool_id || acp_close(s))
@@ -1209,53 +911,78 @@ static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    }
    if (!method[0] && rpcid)
    {
+      int expected = s->acp_prompt_id ? s->acp_prompt_id : 2;
+      if (!cJSON_IsNumber(rpcid) || rpcid->valuedouble != expected || s->acp_terminal_status ||
+          !s->output)
+         return -1;
+      const cJSON *error = cJSON_GetObjectItemCaseSensitive(f, "error");
+      if (error)
+      {
+         if (!cJSON_IsObject(error) || !str(error, "message")[0])
+            return -1;
+         s->output->error_message = strdup(str(error, "message"));
+         s->output->raw_stop_reason = strdup("acp_error");
+         s->output->stop_reason = AIMEE_STOP_ERROR;
+         if (!s->output->error_message || !s->output->raw_stop_reason || acp_close(s))
+            return -1;
+         snprintf(s->message_id, sizeof s->message_id, "acp-error-%lu", ++s->counter);
+         s->acp_role = "assistant";
+         aimee_delta_t d = {.type = AIMEE_DELTA_TURN_START};
+         if (acp_delta(s, &d))
+            return -1;
+         d.type = AIMEE_DELTA_ERROR;
+         d.error_message = s->output->error_message;
+         if (acp_delta(s, &d))
+            return -1;
+         s->acp_terminal_status = -1;
+         return 0;
+      }
       const cJSON *result = cJSON_GetObjectItemCaseSensitive(f, "result");
       const cJSON *content = cJSON_GetObjectItemCaseSensitive(result, "content");
-      /* The supported legacy terminal text is decoded here as native input,
-       * never rebuilt from the executor's accumulated display buffer. */
-      int open_text =
-          s->acp_open && s->acp_kind == AIMEE_BLK_TEXT && !strcmp(s->acp_role, "assistant");
+      const cJSON *stop = cJSON_GetObjectItemCaseSensitive(result, "stopReason");
+      if (!cJSON_IsObject(result) || (content && !cJSON_IsString(content)) ||
+          (stop && (!cJSON_IsString(stop) || !stop->valuestring[0])) ||
+          (!stop && (expected != 2 || !content)))
+         return -1;
+      const char *raw = stop ? stop->valuestring : "legacy_result";
+      s->output->raw_stop_reason = strdup(raw);
+      if (!s->output->raw_stop_reason)
+         return -1;
+      s->output->stop_reason = !strcmp(raw, "end_turn") || !strcmp(raw, "legacy_result")
+                                   ? AIMEE_STOP_END_TURN
+                               : !strcmp(raw, "max_tokens") ? AIMEE_STOP_MAX_TOKENS
+                               : !strcmp(raw, "refusal")    ? AIMEE_STOP_CONTENT_FILTER
+                               : !strcmp(raw, "cancelled")  ? AIMEE_STOP_ERROR
+                                                            : AIMEE_STOP_UNKNOWN;
       if (acp_close(s))
          return -1;
-      if (content)
+      /* Legacy result.content is a fallback, never a second version of already
+       * streamed authored text. Standard completion still requires stopReason. */
+      if (content && !(expected == 2 && s->acp_text_seen))
       {
-         if (!cJSON_IsString(content))
-            return -1;
          char id[256];
-         if (open_text)
-            snprintf(id, sizeof id, "%s", s->message_id);
-         else
-            snprintf(id, sizeof id, "acp-result-%lu", ++s->counter);
+         snprintf(id, sizeof id, "acp-result-%lu", ++s->counter);
          aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = content->valuestring};
          if (message(id, "assistant", &block, 1))
             return -1;
       }
-      const cJSON *stop = cJSON_GetObjectItemCaseSensitive(result, "stopReason");
-      if (stop)
-      {
-         if (!cJSON_IsString(stop) || !stop->valuestring[0] || !s->output)
-            return -1;
-         char *copy = strdup(stop->valuestring);
-         if (!copy)
-            return -1;
-         free(s->output->raw_stop_reason);
-         s->output->raw_stop_reason = copy;
-         s->output->stop_reason = !strcmp(copy, "end_turn")     ? AIMEE_STOP_END_TURN
-                                  : !strcmp(copy, "max_tokens") ? AIMEE_STOP_MAX_TOKENS
-                                  : !strcmp(copy, "refusal")    ? AIMEE_STOP_CONTENT_FILTER
-                                  : !strcmp(copy, "cancelled")  ? AIMEE_STOP_ERROR
-                                                                : AIMEE_STOP_UNKNOWN;
-      }
+      s->acp_terminal_status = 1;
       return 0;
-   } /* prompt completion/response */
+   }
    if (!strcmp(method, "text/delta"))
       return acp_chunk(s, "assistant", AIMEE_BLK_TEXT, str(p, "content"));
+   if (!strcmp(method, "tool/call"))
+      return acp_unverified_report(s);
    if (strcmp(method, "session/update"))
       return 0;
    const cJSON *u = cJSON_GetObjectItemCaseSensitive(p, "update");
    const char *kind = str(u, "sessionUpdate");
    if (!kind[0])
       kind = str(u, "type");
+   /* This adapter starts a fresh prompt, never session/load. Its peer cannot
+    * introduce a new operator-authored input into the canonical transcript. */
+   if (!strcmp(kind, "user_message_chunk"))
+      return -1;
    if ((!kind[0] && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(u, "content"))) ||
        !strcmp(kind, "agent_message_chunk") || !strcmp(kind, "agent_thought_chunk") ||
        !strcmp(kind, "user_message_chunk"))
@@ -1302,73 +1029,9 @@ static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    }
    if (!strcmp(kind, "tool_call") || !strcmp(kind, "tool_call_update"))
    {
-      if (acp_close(s))
-         return -1;
-      const char *id = str(u, "toolCallId");
-      if (!id[0] || strlen(id) > 1024)
-         return -1;
-      if (!s->acp_tools)
-         s->acp_tools = cJSON_CreateObject();
-      if (!s->acp_tools)
-         return -1;
-      cJSON *all = cJSON_GetObjectItemCaseSensitive(s->acp_tools, id);
-      if (!all)
-      {
-         all = cJSON_CreateObject();
-         if (!all || !cJSON_AddItemToObject(s->acp_tools, id, all))
-         {
-            cJSON_Delete(all);
-            return -1;
-         }
-      }
-      const cJSON *field = NULL;
-      cJSON_ArrayForEach(field, u)
-      {
-         cJSON *copy = cJSON_Duplicate(field, 1);
-         if (!copy)
-            return -1;
-         cJSON_DeleteItemFromObjectCaseSensitive(all, field->string);
-         if (!cJSON_AddItemToObject(all, field->string, copy))
-         {
-            cJSON_Delete(copy);
-            return -1;
-         }
-      }
-      const char *name = str(all, "title");
-      if (!name[0])
-         name = str(all, "kind");
-      if (!name[0])
-         name = "ACP tool";
-      aimee_block_t use = {.type = AIMEE_BLK_TOOL_USE,
-                           .tool_id = (char *)id,
-                           .tool_name = (char *)name,
-                           .tool_input = cJSON_GetObjectItemCaseSensitive(all, "rawInput")};
-      char mid[1200];
-      snprintf(mid, sizeof(mid), "acp-use:%s", id);
-      if (message(mid, "assistant", &use, 1))
-         return -1;
-      const char *status = str(all, "status");
-      if (!strcmp(status, "completed") || !strcmp(status, "failed"))
-      {
-         cJSON *output = cJSON_CreateObject();
-         if (!output)
-            return -1;
-         const cJSON *raw = cJSON_GetObjectItemCaseSensitive(all, "rawOutput"),
-                     *content = cJSON_GetObjectItemCaseSensitive(all, "content");
-         if (raw)
-            cJSON_AddItemToObject(output, "output", cJSON_Duplicate(raw, 1));
-         if (content)
-            cJSON_AddItemToObject(output, "content", cJSON_Duplicate(content, 1));
-         aimee_block_t result = {.type = AIMEE_BLK_TOOL_RESULT,
-                                 .tool_id = (char *)id,
-                                 .tool_result = output,
-                                 .tool_is_error = !strcmp(status, "failed")};
-         snprintf(mid, sizeof(mid), "acp-result:%s", id);
-         int rc = message(mid, "tool", &result, 1);
-         cJSON_Delete(output);
-         return rc;
-      }
-      return 0;
+      /* An external agent's report is not an original Aimee call or result.
+       * Only the actual fs/client request path can create those records. */
+      return acp_unverified_report(s);
    }
    if (!strcmp(kind, "plan"))
    {
@@ -1402,7 +1065,7 @@ int aimee_claude_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
 
 int aimee_codex_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
 {
-   int rc = harness_output_decode(frame, state, aimee_codex_frame_ir_decode);
+   int rc = aimee_codex_frame_ir_decode(frame, state);
    if (rc < 0)
       aimee_ir_session_fail_capture();
    return rc;
@@ -1410,7 +1073,7 @@ int aimee_codex_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
 
 int aimee_codex_reply_ir(const cJSON *frame, aimee_harness_ir_t *state)
 {
-   int rc = harness_output_decode(frame, state, aimee_codex_reply_ir_decode);
+   int rc = aimee_codex_reply_ir_decode(frame, state);
    if (rc < 0)
       aimee_ir_session_fail_capture();
    return rc;
@@ -1644,4 +1307,9 @@ cJSON *aimee_codex_control_reply(const char *method, const cJSON *params, const 
       return NULL;
    }
    return result;
+}
+
+int aimee_acp_turn_status(const aimee_harness_ir_t *state)
+{
+   return state ? state->acp_terminal_status : -1;
 }

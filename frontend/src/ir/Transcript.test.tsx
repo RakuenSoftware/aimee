@@ -168,8 +168,24 @@ it('replays ACP fidelity as read-only notices without changing message or contro
   expect(screen.queryByRole('button')).toBeNull();
 });
 
+it('keeps ACP prior-history context fidelity outside message and tool authority', () => {
+  const initial = emptySession('s');
+  const event: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'history-context', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, history_messages_as_text: 3 } } };
+  const state = reduceSession(initial, event);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  expect(reduceSession(state, event)).toBe(state);
+  expect(JSON.parse(JSON.stringify([event])).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP receives earlier messages as text context (3).');
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
 it('rejects malformed or empty ACP fidelity counts at the durable replay boundary', () => {
-  for (const field of ['host_context_blocks_as_text', 'unverified_external_tool_reports']) {
+  for (const field of ['host_context_blocks_as_text', 'history_messages_as_text', 'unverified_external_tool_reports']) {
     for (const count of [-1, 0, 0.5, 4097, Number.MAX_SAFE_INTEGER + 1, null, '1']) {
       const invalid = { version: 1, session_id: 's', sequence: '1', event_id: 'bad-projection', turn_id: 't', actor: 'alice',
         event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,

@@ -3,9 +3,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "aimee_home.h"                  /* aimee_home() — the delegate's /v1 socket path */
-#include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
-#include "agent_config.h"                /* agent_api_key_secret: resolve at use, not at load */
+#include "agent_config.h" /* agent_api_key_secret: resolve at use, not at load */
 #include "runtime_secret.h"
 #include "util.h"
 
@@ -15,10 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-/* Defined in server_compute.c; called post-fork to seed the child's delegate
- * context env from the forking thread's TLS (race-free). */
-void delegate_child_export_context_env(void);
 
 /* Non-server adapters/fixtures have no host capture or Vault authority. */
 __attribute__((weak)) int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg,
@@ -249,141 +243,6 @@ int provider_cli_check_available(const char *cli_cmd, const char *cli_kind)
    int available = provider_cli_executable_on_path(argv[0]);
    provider_cli_free_tokens(argv, count);
    return available;
-}
-
-static void delegate_child_strip_forge_creds(int flag)
-{
-   if (!flag)
-      return;
-   /* Ambient forge tokens gh/git would pick up. */
-   unsetenv("GH_TOKEN");
-   unsetenv("GITHUB_TOKEN");
-   unsetenv("GH_ENTERPRISE_TOKEN");
-   unsetenv("GITHUB_ENTERPRISE_TOKEN");
-   /* Credential plumbing: the askpass shim, an agent-forwarded SSH key, and any
-    * inherited credential helper reachable via the global/system git config.
-    * SSH_AUTH_SOCK is broader than git: dropping it means a delegate cannot use
-    * agent-backed SSH to ANY host, not just the forge. That is intended (a forwarded
-    * agent is a general-purpose credential we do not want in a delegate), but it is
-    * the one strip here that can bite non-git work -- see require_aimee_git in
-    * config.h. */
-   unsetenv("GIT_ASKPASS");
-   unsetenv("SSH_ASKPASS");
-   unsetenv("SSH_AUTH_SOCK");
-   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
-   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
-   /* gh reads its stored oauth token from GH_CONFIG_DIR (default ~/.config/gh);
-    * point it at a path that holds no hosts.yml rather than leaving the default. */
-   setenv("GH_CONFIG_DIR", "/nonexistent/aimee-delegate-no-gh", 1);
-   /* Never let a credential prompt block the child waiting on a tty. */
-   setenv("GIT_TERMINAL_PROMPT", "0", 1);
-}
-
-/* Point the delegate's `aimee` CLI at THIS server, so its MCP proxy
- * (`aimee mcp serve`, wired in cli_claude.c) has somewhere to forward to. The /v1
- * Unix socket is the right transport here: it is always served, needs no TCP port
- * (server_api_http_port defaults to 0/disabled) and no network bearer.
- *
- * Never overwrites: an operator who set AIMEE_API_ENDPOINT explicitly means it.
- * Pre-resolved by the parent — see delegate_child_strip_forge_creds on why the
- * child does no allocation. */
-static void delegate_child_export_aimee_endpoint(const char *endpoint)
-{
-   if (endpoint && endpoint[0])
-      setenv("AIMEE_API_ENDPOINT", endpoint, 0);
-}
-
-int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
-                            int *stdout_fd, pid_t *pid_out)
-{
-   if (!argv || !argv[0] || !stdin_fd || !stdout_fd || !pid_out)
-      return -1;
-
-   /* Resolve the dial BEFORE forking (see delegate_child_strip_forge_creds).
-    * Unreadable config reads as enforcing: a guard that fails open is not a guard.
-    *
-    * ...but ONLY strip when aimee-server actually holds a forge credential
-    * (operator ruling 2026-07-15). The point of taking the delegate's credentials
-    * away is to push its git through aimee, which runs on the server. If the server
-    * has no credential, aimee's git cannot work either, so stripping would remove
-    * the delegate's only route and leave it nothing — breakage dressed as policy.
-    * No aimee route, no restriction. */
-   int strip_forge_creds =
-       (!config_present() || config_require_aimee_git()) && git_cred_forge_configured();
-
-   /* Resolve the delegate's aimee endpoint before forking (aimee_home may read/
-    * allocate). See delegate_child_export_aimee_endpoint. */
-   char aimee_endpoint[MAX_PATH_LEN + 32] = "";
-   {
-      const char *home = aimee_home();
-      if (home && home[0])
-         snprintf(aimee_endpoint, sizeof(aimee_endpoint), "unix:%s/aimee-http.sock", home);
-   }
-
-   int in_pipe[2] = {-1, -1};
-   int out_pipe[2] = {-1, -1};
-   if (pipe(in_pipe) < 0)
-      return -1;
-   if (pipe(out_pipe) < 0)
-   {
-      close(in_pipe[0]);
-      close(in_pipe[1]);
-      return -1;
-   }
-
-   pid_t pid = fork();
-   if (pid < 0)
-   {
-      close(in_pipe[0]);
-      close(in_pipe[1]);
-      close(out_pipe[0]);
-      close(out_pipe[1]);
-      return -1;
-   }
-
-   if (pid == 0)
-   {
-      setsid();
-      close(in_pipe[1]);
-      close(out_pipe[0]);
-      dup2(in_pipe[0], STDIN_FILENO);
-      dup2(out_pipe[1], STDOUT_FILENO);
-      dup2(out_pipe[1], STDERR_FILENO);
-      close(in_pipe[0]);
-      close(out_pipe[1]);
-      if (cfg && cfg->cwd && cfg->cwd[0] && chdir(cfg->cwd) != 0)
-         _exit(126);
-      if (cfg && cfg->home && cfg->home[0])
-      {
-         setenv("HOME", cfg->home, 1);
-         unsetenv("CLAUDE_CONFIG_DIR");
-      }
-      if (cfg && cfg->session_id && cfg->session_id[0])
-         setenv("AIMEE_SESSION_ID", cfg->session_id, 1);
-      /* A spawned provider-CLI agent is its own session: clear the surrounding
-       * Claude Code session's nesting guards so agents that are themselves
-       * Claude Code (e.g. the `claude-code-acp` ACP adapter) don't refuse to
-       * launch with "cannot be launched inside another Claude Code session".
-       * No-op when aimee-server isn't running inside a Claude Code session. */
-      unsetenv("CLAUDECODE");
-      unsetenv("CLAUDE_CODE_SSE_PORT");
-      unsetenv("CLAUDE_CODE_ENTRYPOINT");
-      /* Give a cross-process delegate sub-client this delegate's depth/parent/
-       * source context from the forking thread's TLS, immune to the parent-side
-       * concurrent env clobber. */
-      delegate_child_export_context_env();
-      delegate_child_export_aimee_endpoint(aimee_endpoint);
-      delegate_child_strip_forge_creds(strip_forge_creds);
-      execvp(argv[0], argv);
-      _exit(127);
-   }
-
-   close(in_pipe[0]);
-   close(out_pipe[1]);
-   *stdin_fd = in_pipe[1];
-   *stdout_fd = out_pipe[0];
-   *pid_out = pid;
-   return 0;
 }
 
 extern const provider_cli_adapter_t acp_provider_cli_adapter;

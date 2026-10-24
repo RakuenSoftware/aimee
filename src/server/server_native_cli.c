@@ -1,6 +1,13 @@
 /* Lifetime-scoped child CLI capability; no provider credentials, global server
  * endpoint or alternate conversation store. */
 #include "server_native_cli.h"
+#include "server_native_tool_admission.h"
+#include "server_session_capture.h"
+#include "request_context.h"
+#include "agent_exec.h"
+#include "agent_config.h"
+#include "util.h"
+#include <aimee/tools/agent_tools.h>
 #include "platform_random.h"
 #include "aimee_sha256.h"
 #include <aimee/core/connection/auth.h>
@@ -314,4 +321,110 @@ int server_native_cli_finish(server_native_cli_t *grant, const cJSON *response)
    grant->busy = 0;
    pthread_mutex_unlock(&grant->lock);
    return saved ? 0 : -1;
+}
+
+/* Shared source-derived CLI operation; callers select the exact advertised
+ * definition from the retained shell catalog, never from the CLI manifest. */
+int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
+                              const aimee_tool_t *advertised, int timeout_ms, cJSON **out)
+{
+   const request_context_t *owner = request_context_get();
+   server_session_capture_t *capture = server_session_capture_current();
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!owner || !capture || !owner->model_execution || owner->operator_script_origin ||
+       timeout_ms <= 0 ||
+       !server_native_cli_owner(grant, session_id(), owner->vault_principal, run_cmd_get_cwd()))
+      return -1;
+   char tool[128], nonce[33], attempt[128], detail[512] = "";
+   cJSON *arguments = NULL, *response = NULL;
+   aimee_tool_t definition = {0};
+   char *wire = NULL, *text = NULL;
+   int reserved = 0, is_error = 1, rc = -1;
+   if (server_native_cli_project(request, tool, &arguments, nonce))
+      goto done;
+   const char *submitted_session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "session_id"));
+   const char *submitted_cwd =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "cwd"));
+   if ((submitted_session && strcmp(submitted_session, session_id())) ||
+       (submitted_cwd && strcmp(submitted_cwd, run_cmd_get_cwd())))
+      goto done;
+   if (!advertised || agent_tools_execution_definition(tool, &definition) ||
+       !(wire = cJSON_PrintUnformatted(arguments)) ||
+       tool_validate_ir(advertised, wire, detail, sizeof detail) ||
+       tool_validate_ir(&definition, wire, detail, sizeof detail))
+      goto done;
+   int begun = server_native_cli_begin(grant, request, nonce, attempt, &response);
+   if (begun < 0)
+      goto done;
+   if (begun == 1)
+   {
+      *out = response;
+      response = NULL;
+      rc = 0;
+      goto done;
+   }
+   reserved = 1;
+   const char *refusal = server_native_tool_admit_attempt(tool, arguments, session_id(), attempt,
+                                                          detail, sizeof detail);
+   if (agent_request_cancelled() || server_native_cli_cancelled(grant) || owner->context_refused ||
+       !server_session_capture_accepting(capture))
+      goto done;
+   if (refusal)
+      text = strdup(detail[0] ? detail : "tool policy refused execution");
+   else
+   {
+      /* Independent callback TLS/action state: the producer remains inside the
+       * real outer Bash call. No producer queue, borrowed sink or fake model ID. */
+      agent_tools_set_effect_authorized(1);
+      text = dispatch_tool_call_ir_ctx_status(&definition, wire, timeout_ms, &is_error);
+      agent_tools_set_effect_authorized(0);
+      text = policy_annotate_indexed(tool, wire, attempt, text);
+   }
+   if (!text)
+      goto done;
+   /* This is the advertised tool contract, not an operator REST handler
+    * with a different batch envelope. Return complete owned text unchanged. */
+   response = cJSON_CreateObject();
+   cJSON *content = response ? cJSON_AddArrayToObject(response, "content") : NULL;
+   cJSON *item = content ? cJSON_CreateObject() : NULL;
+   if (!item || !cJSON_AddStringToObject(item, "type", "text") ||
+       !cJSON_AddStringToObject(item, "text", text) ||
+       !cJSON_AddBoolToObject(response, "isError", is_error))
+   {
+      cJSON_Delete(item);
+      goto done;
+   }
+   if (!cJSON_AddItemToArray(content, item))
+   {
+      cJSON_Delete(item);
+      goto done;
+   }
+   if (!response)
+      goto done;
+   int complete = server_native_cli_finish(grant, response);
+   reserved = 0;
+   if (complete)
+   {
+      server_session_capture_fail(capture);
+      goto done;
+   }
+   *out = response;
+   response = NULL;
+   rc = 0;
+done:
+   if (reserved)
+   {
+      server_native_cli_finish(grant, NULL);
+      server_session_capture_fail(capture);
+   }
+   agent_tools_set_effect_authorized(0);
+   cJSON_Delete(arguments);
+   cJSON_Delete(response);
+   free(wire);
+   free(text);
+   aimee_tool_free(&definition);
+   return rc;
 }

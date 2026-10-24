@@ -704,9 +704,10 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
             return -1;
          }
+         int owned_acp = !strcmp(adapter->cli_kind, "acp");
          if (seed &&
-             (!owned_native || !server_session_log_active() || !server_session_capture_current() ||
-              aimee_ir_history_admit_host(initial_messages) ||
+             ((!owned_native && !owned_acp) || !server_session_log_active() ||
+              !server_session_capture_current() || aimee_ir_history_admit_host(initial_messages) ||
               server_session_log_history_save(initial_messages)))
          {
             snprintf(out->error, sizeof out->error,

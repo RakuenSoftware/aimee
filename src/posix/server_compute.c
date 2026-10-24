@@ -802,7 +802,8 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    agent_t *selected_agent = agent_find(&acfg, selected);
    int native = selected_agent && (!strcmp(selected_agent->cli_kind, "claude") ||
                                    !strcmp(selected_agent->cli_kind, "claude-code") ||
-                                   !strcmp(selected_agent->cli_kind, "codex"));
+                                   !strcmp(selected_agent->cli_kind, "codex") ||
+                                   !strcmp(selected_agent->cli_kind, "acp"));
    int rc;
    if (native && !cctx->ir_enabled)
    {

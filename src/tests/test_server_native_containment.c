@@ -236,11 +236,48 @@ static cJSON *read_manifest(void)
    assert(v);
    return v;
 }
+static void test_guard_channels_stdio_holes(void)
+{
+   fflush(NULL);
+   for (int holes = 1; holes < 8; holes++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         for (int fd = 0; fd < 3; fd++)
+            if (holes & (1 << fd))
+               close(fd);
+         int command[2], ready[2], io[2];
+         assert(!cli_native_pipe(command) && !cli_native_pipe(ready) && !cli_native_pipe(io));
+         assert(dup2(io[0], 0) == 0 && dup2(io[1], 1) == 1 && dup2(io[1], 2) == 2);
+         for (int i = 0; i < 2; i++)
+         {
+            assert(command[i] >= 10 && ready[i] >= 10);
+            assert(fcntl(command[i], F_GETFD) & FD_CLOEXEC);
+            assert(fcntl(ready[i], F_GETFD) & FD_CLOEXEC);
+         }
+         char value;
+         assert(write(command[1], "A", 1) == 1 && read(command[0], &value, 1) == 1 && value == 'A');
+         assert(write(ready[1], "R", 1) == 1 && read(ready[0], &value, 1) == 1 && value == 'R');
+         for (int i = 0; i < 2; i++)
+         {
+            close(command[i]);
+            close(ready[i]);
+            close(io[i]);
+         }
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+   }
+}
 int main(int argc, char **argv)
 {
    if ((argc == 7 || argc == 8) && (!strcmp(argv[1], "--probe") || !strcmp(argv[1], "--writer") ||
                                     !strcmp(argv[1], "--stable-probe")))
       return sdk(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argc == 8 ? argv[7] : NULL);
+   test_guard_channels_stdio_holes();
    const char *root = getenv("AIMEE_TEST_NATIVE_CGROUP_ROOT");
    if (!root || !*root)
    {

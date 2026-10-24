@@ -550,7 +550,7 @@ if(NOT WIN32)
   target_link_libraries(test_server_native_launch PRIVATE OpenSSL::Crypto)
   aimee_enable_test_asserts(test_server_native_launch)
   add_test(NAME test_server_native_launch COMMAND test_server_native_launch)
-  add_executable(test_server_native_execution test_server_native_execution.c
+  add_executable(test_server_native_execution test_server_native_execution.c ../server/server_provider_cli_execute.c
     ../server/server_native_execution.c ../server/server_native_cache_lease.c ../platform_random.c ../server/server_native_launch.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c
     ../posix/workspace_provider.c ../util.c ../text.c ../aimee_home.c ../log.c

@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
 #include "agent_exec.h"
@@ -62,154 +65,128 @@ static void test_acp_caps(void)
    printf("PASS: acp adapter caps look sane\n");
 }
 
-/* ---- outbound turn parser (acp_turn_consume) ---- */
-
-static void test_turn_text_delta(void)
+/* The canonical adapter is the sole semantic decoder, including its legacy
+ * terminal dialect. No display accumulator supplies completion or tool facts. */
+static void new_execution(void);
+static int canonical_line(aimee_harness_ir_t *state, const char *line)
 {
-   /* Legacy aimee dialect: text/delta notifications accumulate. */
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"text/delta\","
-                           "\"params\":{\"content\":\"po\"}}",
-                           &st) == 0);
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"text/delta\","
-                           "\"params\":{\"content\":\"ng\"}}",
-                           &st) == 0);
-   assert(st.text && strcmp(st.text, "pong") == 0);
-   assert(!st.done);
-   free(st.text);
-   printf("PASS: text/delta deltas accumulate\n");
+   cJSON *frame = aimee_ir_json_parse_frame(line, strlen(line));
+   assert(frame);
+   int rc = aimee_acp_frame_ir(frame, state);
+   cJSON_Delete(frame);
+   return rc;
 }
-
-static void test_turn_session_update_string(void)
+static void test_canonical_acp_protocol(void)
 {
-   /* aimee's own inbound server streams session/update with a string content
-    * and a type of agent_message_chunk. These must accumulate too — the bug
-    * this fix addresses (previously session/update was ignored). */
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"sessionId\":\"s1\",\"update\":"
-                           "{\"type\":\"agent_message_chunk\",\"content\":\"he\"}}}",
-                           &st) == 0);
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"sessionId\":\"s1\",\"update\":"
-                           "{\"type\":\"agent_message_chunk\",\"content\":\"llo\"}}}",
-                           &st) == 0);
-   assert(st.text && strcmp(st.text, "hello") == 0);
-   free(st.text);
-   printf("PASS: session/update string content accumulates\n");
-}
+   new_execution();
+   aimee_harness_ir_t state = {0};
+   assert(!canonical_line(&state, "{\"method\":\"text/delta\",\"params\":{\"content\":\"po\"}}"));
+   assert(!canonical_line(&state, "{\"method\":\"text/delta\",\"params\":{\"content\":\"ng\"}}"));
+   assert(!aimee_acp_turn_status(&state));
+   assert(
+       !canonical_line(&state, "{\"id\":2,\"result\":{\"content\":\"ignored legacy duplicate\"}}"));
+   assert(aimee_acp_turn_status(&state) == 1);
+   aimee_response_t response = {0};
+   assert(!aimee_harness_ir_response(&state, &response));
+   assert(response.usage_unobserved);
+   char *text = aimee_ir_response_text_alloc(&response);
+   assert(text && !strcmp(text, "pong") && !aimee_ir_response_complete_valid(&response));
+   free(text);
+   aimee_response_free(&response);
+   aimee_harness_ir_free(&state);
 
-static void test_turn_session_update_typed_object(void)
-{
-   /* Real ACP (Zed) carries content as a typed {type:"text",text:...} object. */
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                           "\"content\":{\"type\":\"text\",\"text\":\"hi there\"}}}}",
-                           &st) == 0);
-   assert(st.text && strcmp(st.text, "hi there") == 0);
-   free(st.text);
-   printf("PASS: session/update typed object content accumulates\n");
-}
+   new_execution();
+   state = (aimee_harness_ir_t){0};
+   assert(!canonical_line(&state, "{\"id\":2,\"result\":{\"content\":\"legacy answer\"}}"));
+   assert(!aimee_harness_ir_response(&state, &response) && response.usage_unobserved);
+   aimee_response_free(&response);
+   aimee_harness_ir_free(&state);
 
-static void test_turn_tool_call_counts(void)
-{
-   acp_turn_state_t st = {0};
-   /* legacy tool/call */
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"tool/call\","
-                           "\"params\":{\"name\":\"grep\"}}",
-                           &st) == 0);
-   /* ACP session/update tool_call */
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"update\":{\"sessionUpdate\":\"tool_call\","
-                           "\"title\":\"read_file\"}}}",
-                           &st) == 0);
-   assert(st.tool_calls == 2);
-   assert(st.text == NULL); /* tool calls contribute no reply text */
-   printf("PASS: tool calls counted from both dialects\n");
-}
+   new_execution();
+   state = (aimee_harness_ir_t){.acp_prompt_id = 3, .acp_session_id = "owned-session"};
+   assert(!canonical_line(
+       &state, "{\"method\":\"session/"
+               "update\",\"params\":{\"sessionId\":\"owned-session\",\"update\":{\"sessionUpdate\":"
+               "\"tool_call\",\"toolCallId\":\"opaque\",\"title\":\"write_file\",\"status\":"
+               "\"running\",\"rawInput\":{\"path\":\"not executed\"}}}}"));
+   assert(!canonical_line(
+       &state,
+       "{\"method\":\"session/"
+       "update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":"
+       "\"opaque\",\"status\":\"completed\",\"rawOutput\":\"unverified report\"}}}"));
+   assert(state.acp_external_tool_reports == 2);
+   assert(!canonical_line(&state, "{\"method\":\"session/"
+                                  "update\",\"params\":{\"update\":{\"type\":\"agent_message_"
+                                  "chunk\",\"content\":\"hello\"}}}"));
+   assert(!canonical_line(&state,
+                          "{\"method\":\"session/"
+                          "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_"
+                          "chunk\",\"content\":{\"type\":\"text\",\"text\":\" world\"}}}}"));
+   assert(!canonical_line(&state, "{\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}"));
+   assert(aimee_acp_turn_status(&state) == 1 && !aimee_harness_ir_response(&state, &response));
+   text = aimee_ir_response_text_alloc(&response);
+   assert(text && !strcmp(text, "hello world") && response.n_content == 1);
+   assert(!aimee_ir_response_complete_valid(&response));
+   free(text);
+   aimee_response_free(&response);
+   aimee_harness_ir_free(&state);
 
-static void test_turn_result_fallback(void)
-{
-   /* With no streamed text, the terminal result.content becomes the reply. */
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"id\":2,"
-                           "\"result\":{\"content\":\"final answer\"}}",
-                           &st) == 0);
-   assert(st.done);
-   assert(st.text && strcmp(st.text, "final answer") == 0);
-   free(st.text);
-   printf("PASS: result.content used as fallback reply\n");
-}
-
-static void test_turn_stream_beats_result(void)
-{
-   /* Streamed text takes precedence; result.content is ignored when text exists. */
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"update\":{\"type\":\"agent_message_chunk\","
-                           "\"content\":\"streamed\"}}}",
-                           &st) == 0);
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"id\":2,"
-                           "\"result\":{\"content\":\"DUPLICATE\"}}",
-                           &st) == 0);
-   assert(st.done);
-   assert(st.text && strcmp(st.text, "streamed") == 0);
-   free(st.text);
-   printf("PASS: streamed text wins over result.content\n");
-}
-
-static void test_turn_standard_acp_terminal(void)
-{
-   /* Standard ACP: text streams via session/update; the turn ends with the
-    * session/prompt response (id == prompt_id) carrying {stopReason}, no
-    * content. The id-2 default must NOT end the turn in this mode. */
-   acp_turn_state_t st = {.prompt_id = 3};
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\","
-                           "\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                           "\"content\":{\"type\":\"text\",\"text\":\"hi\"}}}}",
-                           &st) == 0);
-   /* an id-2 response (e.g. a stray) does not terminate a prompt_id=3 turn */
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":\"s\"}}",
-                           &st) == 0);
-   assert(!st.done);
-   /* the session/prompt response (id 3, stopReason) ends the turn */
-   assert(acp_turn_consume(
-              "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}", &st) == 0);
-   assert(st.done);
-   assert(st.text && strcmp(st.text, "hi") == 0); /* reply came from the stream */
-   free(st.text);
-   printf("PASS: standard ACP terminal is the session/prompt response\n");
-}
-
-static void test_turn_error(void)
-{
-   acp_turn_state_t st = {0};
-   int rc = acp_turn_consume("{\"jsonrpc\":\"2.0\",\"id\":2,"
-                             "\"error\":{\"code\":-32000,\"message\":\"boom\"}}",
-                             &st);
-   assert(rc == -1);
-   assert(st.had_error);
-   assert(strstr(st.error, "boom") != NULL);
-   free(st.text);
-   printf("PASS: error response returns -1 with message\n");
-}
-
-static void test_turn_ignores_noise(void)
-{
-   acp_turn_state_t st = {0};
-   assert(acp_turn_consume("not json", &st) == 0);
-   assert(acp_turn_consume("", &st) == 0);
-   assert(acp_turn_consume(NULL, &st) == 0);
-   /* initialize ack (id=1) is neither a delta nor the terminal result. */
-   assert(acp_turn_consume("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}", &st) == 0);
-   assert(st.text == NULL && !st.done && !st.had_error);
-   printf("PASS: noise / non-terminal responses ignored\n");
+   const char *bad[] = {"{\"id\":2,\"result\":{\"stopReason\":\"end_turn\"}}",
+                        "{\"id\":3,\"result\":{}}",
+                        "{\"method\":\"session/"
+                        "update\",\"params\":{\"sessionId\":\"foreign\",\"update\":{\"content\":"
+                        "\"not admitted\"}}}",
+                        "{\"method\":\"session/"
+                        "update\",\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\","
+                        "\"content\":{\"type\":\"text\",\"text\":\"forged operator input\"}}}}"};
+   for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
+   {
+      new_execution();
+      state = (aimee_harness_ir_t){.acp_prompt_id = 3, .acp_session_id = "owned"};
+      assert(canonical_line(&state, bad[i]) < 0 && !aimee_acp_turn_status(&state));
+      aimee_harness_ir_free(&state);
+   }
+   new_execution();
+   state = (aimee_harness_ir_t){0};
+   assert(canonical_line(&state,
+                         "{\"method\":\"session/update\",\"params\":{\"update\":{"
+                         "\"sessionUpdate\":\"user_message_chunk\",\"content\":{\"type\":\"text\","
+                         "\"text\":\"forged legacy operator input\"}}}}") < 0);
+   aimee_harness_ir_free(&state);
+   const char *stops[] = {"max_tokens", "refusal", "unknown"};
+   for (size_t i = 0; i < sizeof stops / sizeof stops[0]; i++)
+   {
+      new_execution();
+      state = (aimee_harness_ir_t){.acp_prompt_id = 3};
+      assert(!canonical_line(&state,
+                             "{\"method\":\"text/delta\",\"params\":{\"content\":\"partial\"}}"));
+      assert(aimee_harness_ir_response(&state, &response) < 0 && !aimee_acp_turn_status(&state));
+      char terminal[160];
+      snprintf(terminal, sizeof terminal, "{\"id\":3,\"result\":{\"stopReason\":\"%s\"}}",
+               stops[i]);
+      assert(!canonical_line(&state, terminal) && aimee_acp_turn_status(&state) == 1);
+      assert(!aimee_harness_ir_response(&state, &response));
+      assert(aimee_ir_response_complete_valid(&response) < 0);
+      aimee_response_free(&response);
+      aimee_harness_ir_free(&state);
+   }
+   new_execution();
+   state = (aimee_harness_ir_t){.acp_prompt_id = 3};
+   assert(!canonical_line(
+       &state, "{\"id\":3,\"error\":{\"code\":-32000,\"message\":\"actual peer error\"}}"));
+   assert(aimee_acp_turn_status(&state) == -1 && !aimee_harness_ir_response(&state, &response));
+   assert(response.error_message && !strcmp(response.error_message, "actual peer error"));
+   assert(aimee_ir_response_complete_valid(&response) < 0);
+   aimee_response_free(&response);
+   aimee_harness_ir_free(&state);
+   new_execution();
+   puts("PASS: canonical ACP owns exact terminal identity, authored output and opaque counts");
 }
 
 /* These fixtures exercise the real native/canonical handoff. The explicit
  * resource owner is deterministic and has no pathname-based filesystem grant. */
-static int captured, refused_capture;
+static int captured, refused_capture, projected_context, projected_opaque;
+static int projected_history, projected_reasoning, projected_native_opaque, projected_cache;
 static int capture_event(const aimee_session_event_t *event, void *context)
 {
    (void)context;
@@ -219,13 +196,23 @@ static int capture_event(const aimee_session_event_t *event, void *context)
    assert(json);
    cJSON_Delete(json);
    captured++;
+   if (event->kind == AIMEE_SESSION_PROJECTION)
+   {
+      projected_context += event->projection_host_context_blocks_as_text;
+      projected_history += event->projection_history_messages_as_text;
+      projected_reasoning += event->projection_reasoning;
+      projected_native_opaque += event->projection_opaque;
+      projected_cache += event->projection_cache_controls;
+      projected_opaque += event->projection_unverified_external_tool_reports;
+   }
    return 0;
 }
 static void new_execution(void)
 {
    aimee_ir_session_set_sink(NULL, NULL);
    aimee_ir_session_set_sink(capture_event, NULL);
-   captured = refused_capture = 0;
+   captured = refused_capture = projected_context = projected_opaque = 0;
+   projected_history = projected_reasoning = projected_native_opaque = projected_cache = 0;
 }
 typedef struct
 {
@@ -439,6 +426,38 @@ static int refuse_launch(void *context)
    (*(int *)context)++;
    return -1;
 }
+static int fixture_launch_valid(void *context)
+{
+   return context ? 0 : -1;
+}
+static int inherited_stdio_holes;
+static int run_owned_fixture(provider_cli_cfg_t *cfg, agent_result_t *result)
+{
+   char *argv[65] = {0}, error[128];
+   int count = provider_cli_split_command(cfg->agent->cli_cmd, argv, 64, error, sizeof error);
+   assert(count > 0);
+   int executable = open(argv[0], O_RDONLY | O_CLOEXEC);
+   int cwd = open(cfg->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+   assert(executable >= 0 && cwd >= 0);
+   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", NULL};
+   cli_acp_host_launch_t host = {.executable_fd = executable,
+                                 .cwd_fd = cwd,
+                                 .argv = argv,
+                                 .environment = environment,
+                                 .cwd = cfg->cwd,
+                                 .validate = fixture_launch_valid,
+                                 .context = cfg};
+   cfg->acp_host = &host;
+   for (int fd = 0; fd < 3; fd++)
+      if (inherited_stdio_holes & (1 << fd))
+         close(fd);
+   int rc = provider_cli_adapter_get("acp")->execute(cfg, result);
+   cfg->acp_host = NULL;
+   close(executable);
+   close(cwd);
+   provider_cli_free_tokens(argv, count);
+   return rc;
+}
 static void test_live_acp_ownership_and_budgets(void)
 {
    char root[256], script[512], marker[512];
@@ -448,43 +467,60 @@ static void test_live_acp_ownership_and_budgets(void)
    snprintf(marker, sizeof marker, "%s/blocked", root);
    FILE *file = fopen(script, "w");
    assert(file);
-   fputs("#!/usr/bin/env python3\nimport json,sys,time\n"
-         "mode=sys.argv[1]\n"
-         "def send(value): print(json.dumps(value),flush=True)\n"
-         "def receive(): return json.loads(sys.stdin.readline())\n"
-         "f=receive(); assert f['method']=='initialize'\n"
-         "assert "
-         "f['params']['clientCapabilities']['fs']=={'readTextFile':mode=='happy','writeTextFile':"
-         "mode=='happy'}\n"
-         "send({'id':1,'result':{'protocolVersion':1}})\n"
-         "f=receive(); assert f['method']=='session/new'\n"
-         "sid='native-session' if mode=='happy' else 's'*2048\n"
-         "send({'id':2,'result':{'sessionId':sid}})\n"
-         "if mode=='blocked':\n open(sys.argv[2],'w').write('ready'); time.sleep(5); sys.exit(0)\n"
-         "f=receive(); assert f['method']=='session/prompt' and f['params']['sessionId']==sid\n"
-         "if mode=='long': assert len(f['params']['prompt'][0]['text'])==200000\n"
-         "if mode=='happy':\n"
-         " send({'id':20,'method':'session/"
-         "request_permission','params':{'sessionId':sid,'toolCall':{'title':'Write "
-         "file'},'options':[{'optionId':'persistent','kind':'allow_always'},{'optionId':'once','"
-         "kind':'allow_once'}]}})\n"
-         " f=receive(); assert f['id']==20 and "
-         "f['result']['outcome']=={'outcome':'selected','optionId':'once'}\n"
-         " send({'id':'write-rpc','method':'fs/write_text_file','params':{'sessionId':sid,'path':'/"
-         "approved/source.txt','content':'client resource data'}})\n"
-         " f=receive(); assert f['id']=='write-rpc' and f['result']=={}\n"
-         " send({'id':22,'method':'fs/read_text_file','params':{'sessionId':sid,'path':'/approved/"
-         "source.txt'}})\n"
-         " f=receive(); assert f['id']==22 and f['result']['content']=='client resource data'\n"
-         " send({'method':'session/"
-         "update','params':{'update':{'sessionUpdate':'agent_thought_chunk','content':{'type':'"
-         "text','text':'reason'}}}})\n"
-         "send({'method':'session/"
-         "update','params':{'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'"
-         "text','text':'ACP done'}}}})\n"
-         "send({'id':3,'result':{'stopReason':mode if mode in "
-         "['max_tokens','refusal','unexpected'] else 'end_turn'}})\n",
-         file);
+   fputs(
+       "#!/usr/bin/env python3\nimport json,sys,time\n"
+       "print('worker diagnostic is not protocol',file=sys.stderr,flush=True)\n"
+       "mode=sys.argv[1]\n"
+       "def send(value): print(json.dumps(value),flush=True)\n"
+       "def receive(): return json.loads(sys.stdin.readline())\n"
+       "f=receive(); assert f['method']=='initialize'\n"
+       "assert "
+       "f['params']['clientCapabilities']['fs']=={'readTextFile':mode=='happy','writeTextFile':"
+       "mode=='happy'}\n"
+       "send({'id':1,'result':{'protocolVersion':1}})\n"
+       "f=receive(); assert f['method']=='session/new'\n"
+       "sid='native-session' if mode=='happy' else 's'*2048\n"
+       "send({'id':2,'result':{'sessionId':sid}})\n"
+       "if mode=='blocked':\n open(sys.argv[2],'w').write('ready'); time.sleep(5); sys.exit(0)\n"
+       "f=receive(); assert f['method']=='session/prompt' and f['params']['sessionId']==sid\n"
+       "if mode=='long': assert len(f['params']['prompt'][0]['text'])==200000\n"
+       "if mode=='canonical':\n"
+       " assert f['params']['prompt']==[{'type':'text','text':'host context exact'},"
+       "{'type':'text','text':'canonical task exact'}]\n"
+       "if mode=='history':\n"
+       " p=f['params']['prompt']; assert len(p)==3 and p[0]['text']=='host context exact'\n"
+       " assert p[2]['text']=='canonical task exact'\n"
+       " h=json.loads(p[1]['text'].split('\\n',1)[1]); assert [m['role'] for m in "
+       "h]==['user','assistant','tool']\n"
+       " assert h[0]['blocks'][0]['text']=='old request'\n"
+       " assert len(h[1]['blocks'])==1 and h[1]['blocks'][0]['tool_id']=='prior-call'\n"
+       " assert h[2]['blocks'][0]['tool_id']=='prior-call' and "
+       "h[2]['blocks'][0]['content']=='prior "
+       "bytes'\n"
+       " assert 'private chain' not in p[1]['text'] and 'thinking_signature' not in p[1]['text']\n"
+       " assert 'cache_control' not in p[1]['text']\n"
+       "if mode=='happy':\n"
+       " send({'id':20,'method':'session/"
+       "request_permission','params':{'sessionId':sid,'toolCall':{'title':'Write "
+       "file'},'options':[{'optionId':'persistent','kind':'allow_always'},{'optionId':'once','"
+       "kind':'allow_once'}]}})\n"
+       " f=receive(); assert f['id']==20 and "
+       "f['result']['outcome']=={'outcome':'selected','optionId':'once'}\n"
+       " send({'id':'write-rpc','method':'fs/write_text_file','params':{'sessionId':sid,'path':'/"
+       "approved/source.txt','content':'client resource data'}})\n"
+       " f=receive(); assert f['id']=='write-rpc' and f['result']=={}\n"
+       " send({'id':22,'method':'fs/read_text_file','params':{'sessionId':sid,'path':'/approved/"
+       "source.txt'}})\n"
+       " f=receive(); assert f['id']==22 and f['result']['content']=='client resource data'\n"
+       " send({'method':'session/"
+       "update','params':{'update':{'sessionUpdate':'agent_thought_chunk','content':{'type':'"
+       "text','text':'reason'}}}})\n"
+       "send({'method':'session/"
+       "update','params':{'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'"
+       "text','text':'ACP done'}}}})\n"
+       "send({'id':3,'result':{'stopReason':mode if mode in "
+       "['max_tokens','refusal','unexpected'] else 'end_turn'}})\n",
+       file);
    assert(!fclose(file) && !chmod(script, 0700));
    cJSON *schema = cJSON_Parse("{\"type\":\"object\"}");
    aimee_tool_t resources[] = {
@@ -512,11 +548,12 @@ static void test_live_acp_ownership_and_budgets(void)
    server_control_scope_t *previous = server_control_scope_bind(scope);
    aimee_ir_session_set_sink(live_capture, NULL);
    agent_result_t result = {0};
-   int status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
+   int status = run_owned_fixture(&cfg, &result);
    if (status)
       fprintf(stderr, "live ACP failed: %d %s\n", status, result.error);
    assert(!status && result.success && !strcmp(result.response, "ACP done"));
    assert(result.canonical_response.n_content == 2);
+   assert(result.canonical_response.usage_unobserved);
    assert(result.canonical_response.content[0].type == AIMEE_BLK_THINKING);
    assert(owner.calls == 2 && owner.writes == 1 && live_requests == 1 && live_responses == 1);
    agent_result_clear_response(&result);
@@ -534,9 +571,136 @@ static void test_live_acp_ownership_and_budgets(void)
    cfg.tool_call = NULL;
    cfg.tool_context = NULL;
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s long", script);
-   assert(!provider_cli_adapter_get("acp")->execute(&cfg, &result));
+   assert(!run_owned_fixture(&cfg, &result));
    assert(result.success && !strcmp(result.response, "ACP done"));
    agent_result_clear_response(&result);
+   /* Every inherited stdio hole must preserve the exact worker protocol. */
+   for (int holes = 1; holes < 8; holes++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         inherited_stdio_holes = holes;
+         new_execution();
+         agent_result_t child_result = {0};
+         int child_rc = run_owned_fixture(&cfg, &child_result);
+         int ok = !child_rc && child_result.success && child_result.response &&
+                  !strcmp(child_result.response, "ACP done");
+         agent_result_clear_response(&child_result);
+         _exit(ok ? 0 : 1);
+      }
+      int status = 0;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+   }
+
+   pid_t high_fds = fork();
+   assert(high_fds >= 0);
+   if (!high_fds)
+   {
+      struct rlimit descriptors;
+      if (getrlimit(RLIMIT_NOFILE, &descriptors) || descriptors.rlim_max < 1200)
+         _exit(0); /* This platform cannot represent the high-descriptor case. */
+      if (descriptors.rlim_cur < 1200)
+      {
+         descriptors.rlim_cur = 1200;
+         if (setrlimit(RLIMIT_NOFILE, &descriptors))
+            _exit(2);
+      }
+      int fd = -1;
+      while (fd < 1100)
+      {
+         fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+         if (fd < 0)
+            _exit(2);
+      }
+      new_execution();
+      agent_result_t high_result = {0};
+      int rc = run_owned_fixture(&cfg, &high_result);
+      int ok = !rc && high_result.success && high_result.response &&
+               !strcmp(high_result.response, "ACP done");
+      agent_result_clear_response(&high_result);
+      _exit(ok ? 0 : 1);
+   }
+   int high_status = 0;
+   assert(waitpid(high_fds, &high_status, 0) == high_fds && WIFEXITED(high_status) &&
+          !WEXITSTATUS(high_status));
+
+   new_execution();
+   aimee_block_t context = {.type = AIMEE_BLK_TEXT, .text = "host context exact"};
+   aimee_block_t task_text = {.type = AIMEE_BLK_TEXT, .text = "canonical task exact"};
+   aimee_message_t task_message = {.role = "user", .blocks = &task_text, .n_blocks = 1};
+   aimee_request_t task = {
+       .system = &context, .n_system = 1, .messages = &task_message, .n_messages = 1};
+   cfg.canonical_request = &task;
+   cfg.user_prompt = "display projection cannot replace the original task";
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s canonical", script);
+   assert(!run_owned_fixture(&cfg, &result));
+   assert(result.success && projected_context == 1 && !projected_opaque);
+   assert(result.turns == 0); /* No claim about the external provider's generations. */
+   assert(result.canonical_response.usage_unobserved);
+   agent_result_clear_response(&result);
+   new_execution();
+   aimee_block_t prior_user = {
+       .type = AIMEE_BLK_TEXT, .text = "old request", .cache_control = "ephemeral"};
+   aimee_block_t prior_assistant[2] = {{.type = AIMEE_BLK_THINKING,
+                                        .text = "private chain",
+                                        .thinking_signature = "opaque-signature"},
+                                       {.type = AIMEE_BLK_TOOL_USE,
+                                        .tool_id = "prior-call",
+                                        .tool_name = "read_file",
+                                        .tool_input = cJSON_Parse("{\"path\":\"prior.txt\"}")}};
+   aimee_block_t prior_result = {.type = AIMEE_BLK_TOOL_RESULT,
+                                 .tool_id = "prior-call",
+                                 .tool_result = cJSON_CreateString("prior bytes")};
+   aimee_message_t prior_messages[4] = {
+       {.role = "user", .blocks = &prior_user, .n_blocks = 1},
+       {.role = "assistant", .blocks = prior_assistant, .n_blocks = 2},
+       {.role = "tool", .blocks = &prior_result, .n_blocks = 1},
+       task_message};
+   task.messages = prior_messages;
+   task.n_messages = 4;
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s history", script);
+   int history_rc = run_owned_fixture(&cfg, &result);
+   if (history_rc)
+      fprintf(stderr, "ACP history fixture: %d %s\n", history_rc, result.error);
+   assert(!history_rc && result.success && !result.tool_calls);
+   assert(projected_history == 3 && projected_context == 1 && projected_reasoning == 1 &&
+          projected_native_opaque == 1 && projected_cache == 1);
+   agent_result_clear_response(&result);
+   new_execution();
+   aimee_block_t image = {.type = AIMEE_BLK_IMAGE,
+                          .media_type = "image/png",
+                          .media_ref = "data:image/png;base64,AA=="};
+   prior_messages[0].blocks = &image;
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s blocked %s", script, marker);
+   assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED && access(marker, F_OK));
+   agent_result_clear_response(&result);
+   cJSON_Delete(prior_assistant[1].tool_input);
+   cJSON_Delete(prior_result.tool_result);
+   task.messages = &task_message;
+   task.n_messages = 1;
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s blocked %s", script, marker);
+   agent.tool_loop_timeout_ms_cap = 500;
+   for (int unsupported = 0; unsupported < 6; unsupported++)
+   {
+      new_execution();
+      task.has_max_tokens = unsupported == 0;
+      task.max_tokens = unsupported == 0 ? 1 : 0;
+      task.has_temperature = unsupported == 1;
+      cfg.no_tools = unsupported == 2;
+      cfg.native_turn_limit = unsupported == 3 ? 1 : 0;
+      agent.max_tokens = unsupported == 4 ? 1 : 0;
+      agent.max_turns = unsupported == 5 ? 1 : 0;
+      assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+      assert(!result.success && access(marker, F_OK));
+      agent_result_clear_response(&result);
+   }
+   cfg.no_tools = cfg.native_turn_limit = agent.max_tokens = agent.max_turns = 0;
+   task.has_max_tokens = task.max_tokens = task.has_temperature = 0;
+   cfg.canonical_request = NULL;
+   cfg.user_prompt = large;
+   agent.tool_loop_timeout_ms_cap = 0;
 
    const char *stops[] = {"max_tokens", "refusal", "unexpected"};
    const aimee_stop_reason_t reasons[] = {AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_CONTENT_FILTER,
@@ -545,7 +709,7 @@ static void test_live_acp_ownership_and_budgets(void)
    {
       new_execution();
       snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s %s", script, stops[i]);
-      status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
+      status = run_owned_fixture(&cfg, &result);
       assert(status == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(result.canonical_response.stop_reason == reasons[i]);
       assert(!strcmp(result.canonical_response.raw_stop_reason, stops[i]));
@@ -558,7 +722,7 @@ static void test_live_acp_ownership_and_budgets(void)
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s blocked %s", script, marker);
    agent.tool_loop_timeout_ms_cap = 500;
    long long start = util_now_ms();
-   status = provider_cli_adapter_get("acp")->execute(&cfg, &result);
+   status = run_owned_fixture(&cfg, &result);
    assert(status == AGENT_RC_CONTEXT_REFUSED && util_now_ms() - start < 2000);
    assert(!access(marker, F_OK)); /* Native peer reached the blocked-write stage. */
    unlink(marker);
@@ -569,15 +733,15 @@ static void test_live_acp_ownership_and_budgets(void)
    int attempts = 0;
    cfg.native_progress = refuse_launch;
    cfg.native_progress_context = &attempts;
-   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
    assert(attempts == 1 && access(marker, F_OK));
    cfg.native_progress = NULL;
    aimee_ir_session_fail_capture();
-   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CAPTURE_FAILED);
+   assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CAPTURE_FAILED);
    assert(access(marker, F_OK));
    new_execution();
    cfg.history = &catalog;
-   assert(provider_cli_adapter_get("acp")->execute(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(run_owned_fixture(&cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
    assert(access(marker, F_OK));
    agent_result_clear_response(&result);
    free(large);
@@ -595,15 +759,7 @@ int main(void)
    test_acp_adapter_registered();
    test_acp_not_found_for_unknown();
    test_acp_caps();
-   test_turn_text_delta();
-   test_turn_session_update_string();
-   test_turn_session_update_typed_object();
-   test_turn_tool_call_counts();
-   test_turn_result_fallback();
-   test_turn_stream_beats_result();
-   test_turn_standard_acp_terminal();
-   test_turn_error();
-   test_turn_ignores_noise();
+   test_canonical_acp_protocol();
    test_resource_owner_handoff();
    test_no_implicit_filesystem_authority();
    test_permission_uses_explicit_one_time_decision();

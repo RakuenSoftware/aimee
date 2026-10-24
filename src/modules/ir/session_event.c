@@ -1050,7 +1050,16 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
-          (!event->projection_reasoning && !event->projection_cache_controls) ||
+          event->projection_history_messages_as_text < 0 ||
+          event->projection_history_messages_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_host_context_blocks_as_text < 0 ||
+          event->projection_host_context_blocks_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_unverified_external_tool_reports < 0 ||
+          event->projection_unverified_external_tool_reports > AIMEE_IR_MAX_BLOCKS ||
+          (!event->projection_reasoning && !event->projection_cache_controls &&
+           !event->projection_history_messages_as_text &&
+           !event->projection_host_context_blocks_as_text &&
+           !event->projection_unverified_external_tool_reports) ||
           event->projection_opaque < 0 || event->projection_opaque > event->projection_reasoning ||
           !event->projection_boundary ||
           (strcmp(event->projection_boundary, "request") &&
@@ -1066,7 +1075,16 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
                                    event->projection_opaque) ||
           (event->projection_cache_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
-                                    event->projection_cache_controls)))
+                                    event->projection_cache_controls)) ||
+          (event->projection_host_context_blocks_as_text &&
+           !cJSON_AddNumberToObject(payload, "host_context_blocks_as_text",
+                                    event->projection_host_context_blocks_as_text)) ||
+          (event->projection_history_messages_as_text &&
+           !cJSON_AddNumberToObject(payload, "history_messages_as_text",
+                                    event->projection_history_messages_as_text)) ||
+          (event->projection_unverified_external_tool_reports &&
+           !cJSON_AddNumberToObject(payload, "unverified_external_tool_reports",
+                                    event->projection_unverified_external_tool_reports)))
          goto fail;
       break;
    case AIMEE_SESSION_CHILD_EXECUTION:

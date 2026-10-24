@@ -16,6 +16,8 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "provider_cli_spawn_argv", "acp_turn_consume", "acp_turn_state_t", "acp_tools",
+    "host_model_capture",
     "cli_claude_allowed_tools", "cli_claude_allowed_tools_count", "claude_build_argv",
     "claude_spawn", "claude_execute", "CLAUDE_ALLOWED_TOOLS", "CLAUDE_ARG_MAX",
     "cli_codex_parse_server_request_method", "cli_codex_approval_decision",
@@ -93,6 +95,9 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "native-control-reparse": re.compile(r"\b(?:anthropic_backend_parse|anthropic_frontend_parse|anthropic_stream_to_deltas)\s*\("),
+    "native-control-history": re.compile(r"\b(?:message|delta|harness_output_decode)\s*\("),
+    "acp-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "codex-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "delegate-model-bypass": re.compile(r"\b(?:exec\.Command(?:Context)?|[A-Za-z_]\w*\.TextResponse)\s*\("),
     "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen)\s*\("),
@@ -118,6 +123,8 @@ RULES = {
 # These consumers have completed their history/algorithm cutover. Provider
 # adapters are intentionally outside this set; newly migrated consumers join it.
 CANONICAL_FILES = {
+    "src/server/server_acp_execution.c", "src/server/server_acp_resources.c",
+    "src/server/server_provider_cli_execute.c",
     "src/posix/agent_runtime.c", "src/posix/server_compute.c", "src/server/session_compact.c",
     "src/server/router_advise.c",
     "src/server/script_tool_execution.c",
@@ -199,7 +206,15 @@ def findings(root: Path) -> list[dict]:
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
+        native_control_spans = (profile_function_spans(source, {
+            "aimee_claude_frame_ir_decode", "aimee_codex_frame_ir_decode", "aimee_codex_reply_ir_decode",
+            "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
+            if relative == "src/modules/translation/harness_ir.c" else [])
         for rule, pattern in RULES.items():
+            if rule in {"native-control-reparse", "native-control-history"} and relative != "src/modules/translation/harness_ir.c":
+                continue
+            if rule == "acp-ambient-launch" and relative != "src/server/cli_acp.c":
+                continue
             if rule == "codex-ambient-launch" and relative != "src/server/cli_codex.c":
                 continue
             if rule == "provider-probe-exec" and Path(relative).parent.as_posix() != "server-go/modules/providers":
@@ -244,6 +259,9 @@ def findings(root: Path) -> list[dict]:
             if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:
                 continue
             for match in pattern.finditer(source):
+                if rule == "native-control-history" and not any(
+                        start <= match.start() < end for start, end in native_control_spans):
+                    continue
                 if rule == "native-history-field" and not canonical and not any(
                         start <= match.start() < end for start, end in history_spans):
                     continue

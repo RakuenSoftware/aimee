@@ -62,6 +62,45 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/server/cli_codex.c", "void owned(void) { fexecve(fd, argv, environment); }")
         checker.check(self.root)
 
+    def test_unowned_acp_state_and_spawn_stay_retired(self):
+        for symbol in ("provider_cli_spawn_argv", "acp_turn_consume", "acp_turn_state_t", "acp_tools"):
+            path = self.source("src/server/renamed_acp.c", symbol + "(frame);\n")
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+
+    def test_renamed_acp_worker_cannot_restore_ambient_launch(self):
+        for invocation in ('execvp(command, arguments)', 'execlp("agent", "agent", 0)',
+                           'setenv("HOME", borrowed, 1)', 'unsetenv("AIMEE_VAULT_TOKEN")'):
+            path = self.source("src/server/cli_acp.c", "void renamed(void) { " + invocation + "; }")
+            with self.subTest(invocation=invocation), self.assertRaisesRegex(ValueError, "acp-ambient-launch"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/server/cli_acp.c", "void owned(void) { fexecve(fd, argv, environment); }")
+        checker.check(self.root)
+
+    def test_native_control_adapter_cannot_reparse_model_history(self):
+        for call in ('anthropic_backend_parse(frame, response, error, size)',
+                     'anthropic_frontend_parse(frame, request, error, size)',
+                     'anthropic_stream_to_deltas(kind, frame, state, delta, 1)'):
+            path = self.source("src/modules/translation/harness_ir.c", "int renamed(void) { return " + call + "; }")
+            with self.subTest(call=call), self.assertRaisesRegex(ValueError, "native-control-reparse"):
+                checker.check(self.root)
+            path.unlink()
+        for function in ("aimee_claude_frame_ir_decode", "aimee_codex_frame_ir_decode", "aimee_codex_reply_ir"):
+            for call in ("message(id, role, blocks, count)", "delta(id, d)", "harness_output_decode(frame, state, decode)"):
+                path = self.source("src/modules/translation/harness_ir.c", "int " + function + "(void) { return " + call + "; }")
+                with self.subTest(function=function, call=call), self.assertRaisesRegex(ValueError, "native-control-history"):
+                    checker.check(self.root)
+                path.unlink()
+        self.source("src/modules/translation/harness_ir.c", "int acp_chunk(void) { return message(id, role, blocks, count); }")
+        checker.check(self.root)  # ACP remains the actual external model boundary.
+
+    def test_native_alternate_history_mode_stays_retired(self):
+        self.source("src/modules/translation/renamed.c", "state.host_model_capture = 0;")
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
+
     def test_production_tree(self):
         checker.check(checker.ROOT)
 

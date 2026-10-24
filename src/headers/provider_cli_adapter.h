@@ -66,6 +66,7 @@ extern "C"
       const char *home;      /* parent-materialized runtime credential HOME */
       int (*native_progress)(void *context);
       void *native_progress_context;
+      const struct cli_acp_host_launch *acp_host; /* creator-owned external ACP process */
       const struct cli_claude_host_launch *claude_host;
       const struct cli_codex_host_launch *codex_host; /* host-owned native resources */
       const char *session_id;                         /* host-owned Aimee identity for MCP/hooks */
@@ -99,8 +100,6 @@ extern "C"
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);
 
-   int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
-                               int *stdout_fd, pid_t *pid_out);
    int provider_cli_split_command(const char *cli_cmd, char **argv, int max_args, char *errbuf,
                                   size_t errbuf_len);
    void provider_cli_free_tokens(char **tokens, int count);

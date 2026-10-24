@@ -120,7 +120,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    int in = -1, output = -1, status = 0, rc = -1, saw_result = 0, interrupted = 0, eof = 0,
        capture_failed = 0;
    pid_t pid = -1;
-   aimee_harness_ir_t ir = {.host_model_capture = 1};
+   aimee_harness_ir_t ir = {0};
    int profile_seen = 0;
    char *input_line = NULL;
    int initialized = !cfg->control_channel, prompt_sent = !cfg->control_channel;

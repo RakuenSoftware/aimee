@@ -570,7 +570,7 @@ server_native_containment_t *server_native_containment_open(const char *root,
    o->leaf = openat(o->root, o->name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
    if (o->leaf < 0 || fstat(o->leaf, &o->leaf_stat) ||
        text_at(o->leaf, "cgroup.type", type, sizeof type) || strcmp(type, "domain") ||
-       pipe2(o->command, O_CLOEXEC) || pipe2(o->ready, O_CLOEXEC))
+       cli_native_pipe(o->command) || cli_native_pipe(o->ready))
       goto failed;
    snprintf(o->uidmap, sizeof o->uidmap, "0 %ld 1\n", (long)geteuid());
    snprintf(o->gidmap, sizeof o->gidmap, "0 %ld 1\n", (long)getegid());

@@ -306,6 +306,11 @@ int policy_bind_session_exploration(const char *session);
 char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
                               char *result);
 int policy_load(void);
+typedef struct policy_action_scope policy_action_scope_t;
+/* Lexically suspend the current final-action owner for synchronous nested
+ * producer work. Pending JSON is moved, not copied or authorized anew. */
+int policy_action_scope_push(policy_action_scope_t **out);
+int policy_action_scope_pop(policy_action_scope_t *scope);
 void policy_action_attempt(const char *attempt);
 int policy_action_inherit(const char *session);
 int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
