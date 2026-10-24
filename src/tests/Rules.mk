@@ -863,6 +863,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
 TEST_TARGETS += $(TESTPREFIX)/unit-test-module-commands $(TESTPREFIX)/unit-test-trajectory-screen
+TEST_TARGETS += $(TESTPREFIX)/unit-test-memory-source-ref-provenance \
+                $(TESTPREFIX)/unit-test-module-source-ref \
+                $(TESTPREFIX)/unit-test-memory-reference-transport \
+                $(TESTPREFIX)/unit-test-learning-memory-transport
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-ready
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
 TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
@@ -7020,6 +7024,12 @@ $(TESTPREFIX)/unit-test-learning-memory-transport: $(OBJDIR)/tests/test_learning
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-memory-reference-transport: $(OBJDIR)/tests/test_memory_reference_transport.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-memory-source-ref-provenance: $(OBJDIR)/tests/test_memory_source_ref_provenance.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-module-source-ref: $(OBJDIR)/tests/test_module_source_ref.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory_domain.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o

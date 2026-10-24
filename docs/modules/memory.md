@@ -382,6 +382,27 @@ retired C policy or storage implementation to satisfy a legacy ABI. Both role
 supervisors require memory; removing it requires migrating those consumers
 and their event contracts rather than silently dropping recall behavior.
 
+### Opaque record references
+
+A memory owner may return `source_ref` and `state_ref` from the host-only
+`memory.runtime` record lookup with `include_version: true`. Each has exactly
+`schema_version: 1`, `scheme`, `owner`, `record`, and `version`. The last four
+fields are nonempty printable ASCII strings; `record` is the exact positive
+int64 ID in canonical decimal form. Scheme, owner, and version are opaque to the
+host. Source and state use separate schemes so ownership changes can be reported
+independently from content changes.
+
+Retrieval evidence preserves these objects in `surfaced_refs` and its legacy
+`surfaced_items` projection. A later lookup compares versions only when scheme,
+owner, and record match. Missing, malformed, or incompatible references produce
+`drift_state: unknown`. Timestamp strings remain comparable for events where
+neither side provides a new reference. Failed owner lookups disclose no current
+record fields.
+
+A reference collected by a lookup has `reference_origin: observed_lookup`.
+It does not prove that the earlier rendered text came from that source and does
+not authorize access, correction, or provider disclosure.
+
 ### Retained fidelity evidence
 
 The host-only `memory.runtime` operation `fidelity-read` reads retained

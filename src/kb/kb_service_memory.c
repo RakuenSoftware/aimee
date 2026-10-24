@@ -1,4 +1,5 @@
 #include "json_int64.h"
+#include "module_source_ref.h"
 /* kb_service_memory.c: aimee-kb dispatch handlers for the memory.*
  * RPC family (find_facts, list, get, briefing, context_block,
  * entity_profile, entity_edges, search_graph, get_episode, ask,
@@ -270,6 +271,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          cJSON *record_args = cJSON_CreateObject(), *record_reply = NULL;
          cJSON_AddStringToObject(record_args, "operation", "record");
          cJSON_AddItemToObject(record_args, "id", jo_i64_value_exact(id));
+         cJSON_AddBoolToObject(record_args, "include_version", 1);
          int fetched =
              aimee_module_commands_dispatch_internal("memory.runtime", record_args, &record_reply);
          cJSON_Delete(record_args);
@@ -279,6 +281,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
                          ? 1
                      : fetched == 1 && strcmp(jo_cstr(record_reply, "kind"), "not_found") == 0 ? 0
                                                                                                : -1;
+         if (found != 1)
+            record = NULL;
          const char *kind = jo_cstr(record, "kind"), *source = jo_cstr(record, "source_session"),
                     *version = jo_cstr(record, "updated_at");
          cJSON *src = cJSON_CreateObject();
@@ -296,6 +300,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
           * and flag drift when the source has since changed (turn_version differs
           * from the current version of a still-present source). */
          const char *turn_version = "";
+         const cJSON *captured_item = NULL;
          if (cJSON_IsArray(items))
          {
             int m = cJSON_GetArraySize(items);
@@ -306,6 +311,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
                int64_t item_id;
                if (jo_read_i64_exact(iid, &item_id) && item_id == id)
                {
+                  captured_item = it;
                   cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
                   if (cJSON_IsString(v) && v->valuestring)
                      turn_version = v->valuestring;
@@ -314,8 +320,41 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
             }
          }
          cJSON_AddStringToObject(src, "turn_version", turn_version);
-         cJSON_AddBoolToObject(src, "drifted",
-                               turn_version[0] && found == 1 && strcmp(turn_version, version) != 0);
+         const cJSON *captured_ref =
+             cJSON_GetObjectItemCaseSensitive(captured_item, "source_ref");
+         const cJSON *current_ref = cJSON_GetObjectItemCaseSensitive(record, "source_ref");
+         module_source_ref_comparison_t comparison =
+             found == 1 ? module_source_ref_compare_legacy(captured_ref, current_ref, id,
+                                                            turn_version, version)
+                        : MODULE_SOURCE_REF_UNKNOWN;
+         cJSON_AddBoolToObject(src, "drifted", comparison == MODULE_SOURCE_REF_CHANGED);
+         cJSON_AddStringToObject(src, "drift_state",
+                                 comparison == MODULE_SOURCE_REF_CHANGED ? "changed"
+                                 : comparison == MODULE_SOURCE_REF_EQUAL ? "unchanged"
+                                                                         : "unknown");
+         if (comparison == MODULE_SOURCE_REF_UNKNOWN)
+            cJSON_AddStringToObject(src, "drift_reason",
+                                    "comparable current and captured source references unavailable");
+         if (module_source_ref_valid(current_ref, id))
+            cJSON_AddItemToObject(src, "source_ref", cJSON_Duplicate(current_ref, 1));
+         if (module_source_ref_valid(captured_ref, id))
+            cJSON_AddItemToObject(src, "turn_source_ref", cJSON_Duplicate(captured_ref, 1));
+         const cJSON *captured_state =
+             cJSON_GetObjectItemCaseSensitive(captured_item, "state_ref");
+         const cJSON *current_state = cJSON_GetObjectItemCaseSensitive(record, "state_ref");
+         module_source_ref_comparison_t state_comparison =
+             found == 1 ? module_source_ref_compare(captured_state, current_state, id)
+                        : MODULE_SOURCE_REF_UNKNOWN;
+         cJSON_AddStringToObject(src, "state_drift_state",
+                                 state_comparison == MODULE_SOURCE_REF_CHANGED ? "changed"
+                                 : state_comparison == MODULE_SOURCE_REF_EQUAL ? "unchanged"
+                                                                               : "unknown");
+         cJSON_AddBoolToObject(src, "state_changed",
+                               state_comparison == MODULE_SOURCE_REF_CHANGED);
+         if (module_source_ref_valid(current_state, id))
+            cJSON_AddItemToObject(src, "state_ref", cJSON_Duplicate(current_state, 1));
+         if (module_source_ref_valid(captured_state, id))
+            cJSON_AddItemToObject(src, "turn_state_ref", cJSON_Duplicate(captured_state, 1));
          cJSON_AddItemToArray(sources, src);
          cJSON_Delete(record_reply);
       }

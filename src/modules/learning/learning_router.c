@@ -6,6 +6,7 @@
 #include "modules/kb/c/kb_store_learning.h"
 #include "dogfood.h"
 #include "cJSON.h"
+#include "json_int64.h"
 #include "integrity.h"
 #include <aimee/learning/learning.h>
 #include "log.h"
@@ -385,12 +386,14 @@ static void learning_fill_target_key(learning_signal_input_t *input)
 
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    cJSON_AddStringToObject(args, "operation", "record");
-   cJSON_AddNumberToObject(args, "id", (double)input->target_memory_id);
+   cJSON_AddItemToObject(args, "id", jo_i64_value_exact(input->target_memory_id));
    if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
    {
       const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
       const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "key"));
-      if (key)
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+      if (status && !strcmp(status, "ok") && cJSON_IsObject(record) && key)
          snprintf(input->target_key, sizeof(input->target_key), "%s", key);
    }
    cJSON_Delete(reply);
