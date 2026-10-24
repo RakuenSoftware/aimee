@@ -1,0 +1,351 @@
+/* Full delegate-worker composition. Configuration/storage services are explicit
+ * fixture peers; workspace/container acquisition, source policy, canonical
+ * capture, routing and the descriptor-launched ACP worker are production code.
+ * This executable requires the separately bound real container/egress fixture.
+ * It never invokes a provider SDK or a model. */
+#include "modules/workspace/workspace_turn.h"
+#include "agent_exec.h"
+#define AIMEE_ACP_FULL_WORKER_FIXTURE     1
+#define session_persona_get               full_unused_session_persona_get
+#define session_primary_get               full_unused_session_primary_get
+#define err_json                          full_unused_err_json
+#define persona_load                      full_unused_persona_load
+#define persona_free                      full_unused_persona_free
+#define workspace_turn_resource_identity  unused_route_resource_identity
+#define workspace_turn_bind_active        unused_route_bind_active
+#define workspace_turn_unbind_active      unused_route_unbind_active
+#define workspace_turn_active_cwd         unused_route_active_cwd
+#define workspace_turn_drift_notice       unused_route_drift_notice
+#define workspace_turn_reject_foreign_cwd unused_route_reject_foreign_cwd
+#define workspace_turn_mirror_bind        unused_route_mirror_bind
+#define workspace_turn_mirror_release     unused_route_mirror_release
+#define workspace_turn_container_bound    unused_route_container_bound
+#define agent_run_with_tools              unused_route_agent_run
+#include "test_server_acp_chat_route.c"
+#undef workspace_turn_resource_identity
+#undef workspace_turn_bind_active
+#undef workspace_turn_unbind_active
+#undef workspace_turn_active_cwd
+#undef workspace_turn_drift_notice
+#undef workspace_turn_reject_foreign_cwd
+#undef workspace_turn_mirror_bind
+#undef workspace_turn_mirror_release
+#undef workspace_turn_container_bound
+#undef agent_run_with_tools
+#undef db1_server_session_create
+#undef db1_server_session_get
+#undef db1_session_ir_append
+#undef db1_session_ir_page
+#undef db1_session_ir_running_history_load
+#include <sys/socket.h>
+#include <dirent.h>
+#undef session_persona_get
+#undef session_primary_get
+#undef err_json
+#undef persona_load
+#undef persona_free
+#include "platform_ipc.h"
+#include "platform_random.h"
+#include "vault_principal.h"
+#include "server_http_identity.h"
+#include "delegate_permissions_stub.h"
+#include <aimee/delegates/delegate_role.h>
+#include "support/delegate_role_seam_stub.h"
+#include "modules/workspace/workspace_turn.h"
+#include <aimee/delegates/delegate_backend_docker.h>
+
+/* Exact code-role metadata recording, pinned by the Go rolepolicy_test.go
+ * TestRoleIsWrite contract. Permission grants come from the existing generated
+ * ResolveRolePermissions recording; neither peer attests source or performs I/O. */
+static int full_worker_role_policy(int operation, const char *role, int a, int b, int c, int *out)
+{
+   (void)a;
+   (void)b;
+   (void)c;
+   if (!role || strcmp(role, "code") || !out ||
+       (operation != DELEGATE_ROLE_OP_BUILTIN && operation != DELEGATE_ROLE_OP_IS_WRITE))
+      return -1;
+   *out = 1;
+   return 0;
+}
+
+/* Exact in-memory DB1 service peer. It stores writer-owned canonical envelopes;
+ * source/capture/control policy and all workspace/container I/O stay real. */
+static db1_server_session_t full_sessions[32];
+static int full_session_count;
+int db1_server_session_create(const char *sid, const char *client, const char *actor)
+{
+   assert(sid && sid[0] && actor && actor[0]);
+   for (int i = 0; i < full_session_count; i++)
+      if (!strcmp(full_sessions[i].id, sid))
+         return strcmp(full_sessions[i].principal, actor) ? -1 : 0;
+   assert(full_session_count < 32);
+   db1_server_session_t *row = &full_sessions[full_session_count++];
+   snprintf(row->id, sizeof row->id, "%s", sid);
+   snprintf(row->client_type, sizeof row->client_type, "%s", client);
+   snprintf(row->principal, sizeof row->principal, "%s", actor);
+   snprintf(row->created_at, sizeof row->created_at, "owned-fixture-incarnation");
+   const char *bound = run_cmd_get_cwd();
+   acp_route_policy_reset(bound && bound[0] ? bound : workspace, actor, sid);
+   acp_route_policy_fault(5);
+   return 0;
+}
+int db1_server_session_get(const char *sid, db1_server_session_t *out)
+{
+   for (int i = 0; i < full_session_count; i++)
+      if (!strcmp(full_sessions[i].id, sid))
+      {
+         *out = full_sessions[i];
+         return 0;
+      }
+   return -1;
+}
+int db1_session_ir_append(const char *sid, const char *id, const char *turn, const char *actor,
+                          const char *payload, char sequence[32])
+{
+   db1_server_session_t owner;
+   if (db1_server_session_get(sid, &owner) || strcmp(owner.principal, actor))
+      return -1;
+   int last = 0;
+   const cJSON *existing;
+   cJSON_ArrayForEach(existing, stored_rows)
+   {
+      if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(existing, "session_id")), sid))
+         continue;
+      last++;
+      if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(existing, "event_id")), id))
+         return -1; /* This fixture never permits ambiguous duplicate commits. */
+   }
+   snprintf(sequence, 32, "%d", last + 1);
+   cJSON *row = cJSON_CreateObject();
+   assert(row && cJSON_AddNumberToObject(row, "version", 1) &&
+          cJSON_AddStringToObject(row, "session_id", sid) &&
+          cJSON_AddStringToObject(row, "sequence", sequence) &&
+          cJSON_AddStringToObject(row, "event_id", id) &&
+          cJSON_AddStringToObject(row, "turn_id", turn) &&
+          cJSON_AddStringToObject(row, "actor", actor) &&
+          cJSON_AddItemToObject(row, "event", cJSON_Parse(payload)) &&
+          cJSON_AddItemToArray(stored_rows, row));
+   return 0;
+}
+char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *actor)
+{
+   db1_server_session_t owner;
+   if (db1_server_session_get(sid, &owner) || strcmp(owner.principal, actor))
+      return NULL;
+   cJSON *page = cJSON_CreateArray();
+   assert(page);
+   const cJSON *row;
+   cJSON_ArrayForEach(
+       row, stored_rows) if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "session_id")),
+                                     sid) &&
+                             atoi(cJSON_GetStringValue(cJSON_GetObjectItem(row, "sequence"))) >
+                                 atoi(after) &&
+                             cJSON_GetArraySize(page) < limit)
+       assert(cJSON_AddItemToArray(page, cJSON_Duplicate(row, 1)));
+   char *wire = cJSON_PrintUnformatted(page);
+   cJSON_Delete(page);
+   return wire;
+}
+int db1_session_ir_running_history_load(const char *sid, const char *actor, const char *turn,
+                                        char **out)
+{
+   (void)turn;
+   char *wire = db1_session_ir_page(sid, "0", 4096, actor);
+   if (!wire)
+      return -1;
+   cJSON *page = cJSON_Parse(wire), *history = cJSON_CreateArray();
+   assert(page && history);
+   free(wire);
+   const cJSON *row;
+   cJSON_ArrayForEach(row, page)
+   {
+      const cJSON *event = cJSON_GetObjectItem(row, "event");
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(event, "kind"));
+      if (kind && !strcmp(kind, "message"))
+         assert(cJSON_AddItemToArray(history,
+                                     cJSON_Duplicate(cJSON_GetObjectItem(event, "payload"), 1)));
+   }
+   *out = cJSON_PrintUnformatted(history);
+   cJSON_Delete(page);
+   cJSON_Delete(history);
+   return *out ? 0 : -1;
+}
+
+int main(int argc, char **argv)
+{
+   if (argc > 1 && !strcmp(argv[1], "--acp-route-child"))
+      return child_main(argc, argv);
+   if (argc == 2 && !strcmp(argv[1], "mcp-serve"))
+      return cli_mcp_serve();
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_main(argc, argv);
+   assert(argc == 3 && !strcmp(argv[1], "--full-worker"));
+   const char *fixture_home = getenv("AIMEE_FULL_WORKER_HOME");
+   assert(fixture_home && fixture_home[0] == '/' && getenv("AIMEE_HOME") && getenv("HOME") &&
+          !strcmp(fixture_home, getenv("AIMEE_HOME")) && !strcmp(fixture_home, getenv("HOME")));
+   struct stat home_stat;
+   assert(!stat(fixture_home, &home_stat) && S_ISDIR(home_stat.st_mode) &&
+          home_stat.st_uid == getuid());
+   /* The runner supplies a new committed, UID-owned registered repository. */
+   struct stat st;
+   assert(!stat(argv[2], &st) && S_ISDIR(st.st_mode) && st.st_uid == getuid());
+   char *canonical = realpath(argv[2], NULL);
+   assert(canonical && strlen(canonical) < sizeof workspace);
+   strcpy(workspace, canonical);
+   free(canonical);
+   ssize_t count = readlink("/proc/self/exe", executable, sizeof executable - 1);
+   assert(count > 0 && count < (ssize_t)sizeof executable);
+   executable[count] = 0;
+   delegate_role_seam_install();
+   delegate_register_role_policy_provider(full_worker_role_policy);
+   delegate_permissions_stub_install();
+   expected_controls = 0;
+   agent_tools_register_metadata(route_tool_metadata);
+   agent_tools_register_classifier(route_tool_classify);
+   log_entries = cJSON_CreateArray();
+   stored_rows = cJSON_CreateArray();
+   assert(!config_set_memory_recall_enabled(0));
+   assert(!platform_setenv("AIMEE_CONTEXT_NO_KB", "1"));
+   assert(!config_workspace_add(workspace, "shared", "", ""));
+   assert(!delegate_backend_register(delegate_backend_docker_get()));
+   int pair[2];
+   assert(!socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair));
+   platform_peer_cred_t peer;
+   assert(!platform_ipc_peer_cred(pair[0], &peer) && peer.uid == getuid());
+   server_conn_t connection = {.fd = pair[0], .capabilities = CAPS_ALL, .peer_uid = peer.uid};
+   connection.attested_transport =
+       vault_principal_resolve(0, 0, peer.uid, NULL, 0, NULL, connection.vault_principal,
+                               sizeof connection.vault_principal);
+   assert(connection.attested_transport == ATTEST_UDS_PEERCRED);
+   assert(strlen(connection.vault_principal) < sizeof owner);
+   strcpy(owner, connection.vault_principal);
+   const char *head = "POST /v1/delegate HTTP/1.1\r\n\r\n";
+   char request_id[33];
+   assert(!platform_random_hex(request_id, 32));
+   server_http_identity_capture(pair[0], 0, head);
+   server_http_populate_request_context(pair[0], 0, head, request_id, "POST", "/v1/delegate",
+                                        connection.capabilities);
+   const request_context_t *ingress = request_context_get();
+   assert(ingress && ingress->peer_uid == (long)peer.uid &&
+          ingress->vault_transport == ATTEST_UDS_PEERCRED &&
+          !strcmp(ingress->principal, connection.vault_principal));
+   server_ctx_t server = {0};
+   cJSON *request = cJSON_CreateObject();
+   assert(!db1_server_session_create("full-worker-parent", "cli", connection.vault_principal));
+   cJSON_AddStringToObject(request, "session_id", "full-worker-parent");
+   cJSON_AddStringToObject(request, "role", "code");
+   cJSON_AddStringToObject(request, "persona", "engineer");
+   cJSON_AddStringToObject(request, "cwd", workspace);
+   cJSON_AddStringToObject(request, "prompt", "Complete the owned full worker protocol fixture.");
+   const char *agent = getenv("AIMEE_FULL_WORKER_AGENT");
+   assert(agent && agent[0] == '/' && strlen(agent) < 256);
+   assert(access(agent, X_OK) != 0); /* Image-only agent: no host availability substitute. */
+   cJSON_AddStringToObject(request, "acp_command", agent);
+   cJSON_AddNumberToObject(request, "max_turns", 0);
+   cJSON_AddNumberToObject(request, "timeout_ms", 60000);
+   cJSON_AddBoolToObject(request, "handoff_json", 0);
+   cJSON_AddBoolToObject(request, "tools", 1);
+   cJSON_AddBoolToObject(request, "provided_target", 1);
+   compute_ctx_t *context = create_compute_ctx(&server, &connection, request);
+   assert(context);
+   context->compute_executor_threads = 1;
+   delegate_worker(context);
+   char owners_path[4096];
+   assert(snprintf(owners_path, sizeof owners_path, "%s/acp-owners", fixture_home) > 0);
+   DIR *owners = opendir(owners_path);
+   assert(owners);
+   struct dirent *entry;
+   while ((entry = readdir(owners)))
+      assert(!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."));
+   assert(!closedir(owners));
+   cJSON_Delete(request);
+   close(pair[0]);
+   char wire[65536];
+   size_t used = 0;
+   for (;;)
+   {
+      struct pollfd pending = {.fd = pair[1], .events = POLLIN};
+      assert(poll(&pending, 1, 2000) > 0 && used + 1 < sizeof wire);
+      ssize_t count = read(pair[1], wire + used, sizeof wire - used - 1);
+      assert(count >= 0);
+      if (!count)
+         break;
+      used += (size_t)count;
+   }
+   wire[used] = 0;
+   close(pair[1]);
+   cJSON *result = aimee_ir_json_parse_frame(wire, used);
+   if (!result || !cJSON_IsString(cJSON_GetObjectItem(result, "status")) ||
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(result, "status")), "ok"))
+      fprintf(stderr, "actual full worker response: %s\n", wire);
+   const char *status = result ? cJSON_GetStringValue(cJSON_GetObjectItem(result, "status")) : NULL;
+   assert(status && !strcmp(status, "ok"));
+   aimee_response_t response = {0};
+   assert(!aimee_ir_response_parse(cJSON_GetObjectItem(result, "ir"), &response));
+   assert(!aimee_ir_response_complete_valid(&response));
+   char *text = aimee_ir_response_text_alloc(&response);
+   assert(text && !strcmp(text, "Full delegate worker ACP complete"));
+   assert(response.usage_unobserved && cJSON_IsFalse(cJSON_GetObjectItem(result, "cost_known")));
+   assert(cJSON_GetArraySize(stored_rows) > 0);
+   assert(acp_route_policy_writes() == 1);
+   struct
+   {
+      char id[256];
+      int result;
+   } calls[4] = {0};
+   int uses = 0, results = 0, bash = 0, last_result = -1, final_text = -1;
+   const cJSON *row;
+   cJSON_ArrayForEach(row, stored_rows)
+   {
+      const cJSON *event = cJSON_GetObjectItem(row, "event");
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(event, "kind"));
+      if (!kind || strcmp(kind, "message"))
+         continue;
+      const cJSON *message = cJSON_GetObjectItem(event, "payload"), *block;
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(message, "role"));
+      cJSON_ArrayForEach(block, cJSON_GetObjectItem(message, "blocks"))
+      {
+         const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type")),
+                    *id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_id")),
+                    *name = cJSON_GetStringValue(cJSON_GetObjectItem(block, "name")),
+                    *body = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+         int sequence = atoi(cJSON_GetStringValue(cJSON_GetObjectItem(row, "sequence")));
+         if (role && !strcmp(role, "assistant") && body && !strcmp(body, text))
+            final_text = sequence;
+         if (!id || (strncmp(id, "acp-rpc:", 8) && strncmp(id, "acp-mcp:", 8)))
+            continue;
+         if (type && !strcmp(type, "tool_use"))
+         {
+            assert(role && !strcmp(role, "assistant") && uses < 4 &&
+                   strlen(id) < sizeof calls[0].id);
+            for (int i = 0; i < uses; i++)
+               assert(strcmp(calls[i].id, id));
+            strcpy(calls[uses++].id, id);
+            bash += name && !strcmp(name, "bash");
+         }
+         if (type && !strcmp(type, "tool_result"))
+         {
+            assert(role && !strcmp(role, "tool") &&
+                   cJSON_IsFalse(cJSON_GetObjectItem(block, "is_error")));
+            int found = -1;
+            for (int i = 0; i < uses; i++)
+               if (!strcmp(calls[i].id, id))
+                  found = i;
+            assert(found >= 0 && !calls[found].result);
+            calls[found].result = 1;
+            results++;
+            last_result = sequence;
+         }
+      }
+   }
+   assert(uses == 4 && results == 4 && bash == 1 && final_text > last_result);
+
+   assert(acp_route_policy_dispatches() == 4 && acp_route_policy_outcomes() == 4);
+   free(text);
+   aimee_response_free(&response);
+   cJSON_Delete(result);
+   puts("full worker: actual local UDS -> inline selection -> container workspace -> canonical ACP "
+        "result");
+   return 0;
+}

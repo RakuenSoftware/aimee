@@ -43,6 +43,27 @@ const workspace_provider_t *workspace_provider_active(void)
 {
    return &workspace;
 }
+/* This lower fixture exercises the shared FD owner. Container ownership is
+ * exercised by the real backend/full-worker fixture, never affirmed here. */
+int workspace_turn_container_identity(char container_id[65], char image_id[72])
+{
+   (void)container_id;
+   (void)image_id;
+   abort();
+}
+int workspace_turn_container_file(const char *path, int writing, const char *content, size_t length,
+                                  int timeout_ms, char **out, size_t *out_length, int *unknown)
+{
+   (void)path;
+   (void)writing;
+   (void)content;
+   (void)length;
+   (void)timeout_ms;
+   (void)out;
+   (void)out_length;
+   (void)unknown;
+   abort();
+}
 int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
 {
    if (stale || strcmp(cwd, root_path))

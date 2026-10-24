@@ -13,6 +13,7 @@
 #include "util.h"
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
+#include "headers/scoped_file_io.h"
 #include <aimee/tools/agent_tools.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -33,6 +34,8 @@ struct server_acp_resources
    aimee_request_t catalog, mcp_catalog;
    cJSON *mcp_requests;
    char session[128], actor[256], cwd[MAX_PATH_LEN], resource[65], request_id[64];
+   char container_id[65], image_id[72];
+   const workspace_provider_t *provider;
    server_acp_bash_open_fn bash_open;
    server_acp_bash_close_fn bash_close;
    void *bash_context;
@@ -57,13 +60,17 @@ static int resource_live(server_acp_resources_t *owner)
        strcmp(request_context_session_actor(ctx), owner->actor) || !session_id() ||
        strcmp(session_id(), owner->session) || !run_cmd_get_cwd() ||
        strcmp(run_cmd_get_cwd(), owner->cwd) || !server_session_capture_accepting(owner->capture) ||
-       workspace_provider_active()->kind != WS_PROVIDER_SHARED ||
+       workspace_provider_active() != owner->provider ||
        workspace_turn_resource_identity(owner->cwd, &fd, digest))
       return 0;
    struct stat held, current;
-   int valid = fd >= 0 && !fstat(fd, &current) && !fstat(owner->root, &held) &&
-               held.st_dev == current.st_dev && held.st_ino == current.st_ino &&
-               !strcmp(digest, owner->resource);
+   char id[65], image[72];
+   int valid = !strcmp(digest, owner->resource) &&
+               (owner->provider->kind == WS_PROVIDER_CONTAINER
+                    ? fd < 0 && !workspace_turn_container_identity(id, image) &&
+                          !strcmp(id, owner->container_id) && !strcmp(image, owner->image_id)
+                    : fd >= 0 && !fstat(fd, &current) && !fstat(owner->root, &held) &&
+                          held.st_dev == current.st_dev && held.st_ino == current.st_ino);
    if (fd >= 0)
       close(fd);
    return valid;
@@ -95,14 +102,21 @@ server_acp_resources_t *server_acp_resources_open(server_session_capture_t *capt
       return NULL;
    owner->root = -1;
    owner->capture = capture;
+   owner->provider = workspace_provider_active();
    owner->capabilities = ctx->capabilities;
    snprintf(owner->request_id, sizeof owner->request_id, "%s", ctx->request_id);
    snprintf(owner->session, sizeof owner->session, "%s", source_session);
    snprintf(owner->actor, sizeof owner->actor, "%s", actor);
    snprintf(owner->cwd, sizeof owner->cwd, "%s", cwd);
    owner->sink = aimee_ir_session_get_sink(&owner->sink_context);
-   if (!owner->sink || workspace_provider_active()->kind != WS_PROVIDER_SHARED ||
-       workspace_turn_resource_identity(cwd, &owner->root, owner->resource) || owner->root < 0 ||
+   if (!owner->sink ||
+       (owner->provider->kind != WS_PROVIDER_SHARED &&
+        owner->provider->kind != WS_PROVIDER_CONTAINER) ||
+       workspace_turn_resource_identity(cwd, &owner->root, owner->resource) ||
+       (owner->provider->kind == WS_PROVIDER_CONTAINER
+            ? owner->root >= 0 ||
+                  workspace_turn_container_identity(owner->container_id, owner->image_id)
+            : owner->root < 0) ||
        !(owner->source = server_native_tool_source_open(capture, source_session, actor)))
       goto refused;
    if (agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &owner->mcp_catalog) ||
@@ -233,133 +247,62 @@ failed:
    return -1;
 }
 
-/* Walk from the already-held actual workspace. Never follow any path component
- * symlink; a parent rename cannot redirect an open directory descriptor. */
-static int resource_parent(server_acp_resources_t *owner, const char *path, char **leaf)
-{
-   size_t root = strlen(owner->cwd);
-   if (!path || strncmp(path, owner->cwd, root) || path[root] != '/' || !path[root + 1])
-      return -1;
-   char *relative = strdup(path + root + 1);
-   if (!relative)
-      return -1;
-   int fd = fcntl(owner->root, F_DUPFD_CLOEXEC, 3);
-   char *component = relative;
-   while (fd >= 0)
-   {
-      char *slash = strchr(component, '/');
-      if (slash)
-         *slash = 0;
-      if (!component[0] || !strcmp(component, ".") || !strcmp(component, ".."))
-         break;
-      if (!slash)
-      {
-         *leaf = strdup(component);
-         free(relative);
-         if (*leaf)
-            return fd;
-         close(fd);
-         return -1;
-      }
-      int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-      close(fd);
-      fd = next;
-      component = slash + 1;
-   }
-   if (fd >= 0)
-      close(fd);
-   free(relative);
-   return -1;
-}
 typedef struct
 {
    server_acp_resources_t *owner;
    char *text;
    int completed;
+   int timeout_ms;
 } resource_io_t;
+static int resource_io_live(void *context)
+{
+   return resource_live(context);
+}
 static char *resource_io(const char *name, const cJSON *args, void *context, int *is_error)
 {
    resource_io_t *io = context;
    server_acp_resources_t *owner = io->owner;
-   int writing = !strcmp(name, "write_file"), parent = -1, fd = -1, effect_started = 0;
-   char *leaf = NULL, *bytes = NULL;
-   const char *path = field(args, "path");
+   int writing = !strcmp(name, "write_file");
+   const char *path = field(args, "path"), *content = field(args, "content");
    const char *error = agent_tools_validate_file_resource(path, writing);
+   scoped_file_io_result_t raw = {0};
    *is_error = 1;
    if (error || !resource_live(owner) ||
-       (writing && (strlen(field(args, "content")) > ACP_FILE_BYTES ||
-                    !text_is_valid_utf8(field(args, "content")))) ||
-       (parent = resource_parent(owner, path, &leaf)) < 0)
+       (writing && (strlen(content) > ACP_FILE_BYTES || !text_is_valid_utf8(content))))
       goto done;
-   fd = openat(parent, leaf,
-               (writing ? O_WRONLY | O_CREAT : O_RDONLY) | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,
-               0600);
-   /* O_CREAT itself may already have changed the filesystem. A later failure
-    * is not evidence of no effect; the shared action owner journals unknown. */
-   effect_started = writing && fd >= 0;
-   struct stat st;
-   if (fd < 0 || fstat(fd, &st) || !S_ISREG(st.st_mode) || !resource_live(owner))
-      goto done;
-   if (writing)
+   int failed;
+   if (owner->provider->kind == WS_PROVIDER_CONTAINER)
    {
-      const char *content = field(args, "content");
-      size_t length = strlen(content), offset = 0;
-      if (length > ACP_FILE_BYTES || !text_is_valid_utf8(content) || ftruncate(fd, 0))
-         goto done;
-      while (offset < length)
-      {
-         if (!resource_live(owner))
-            goto done;
-         ssize_t n = write(fd, content + offset, length - offset);
-         if (n < 0 && errno == EINTR)
-            continue;
-         if (n <= 0)
-            goto done;
-         offset += (size_t)n;
-      }
-      if (fsync(fd))
-         goto done;
+      int unknown = 0;
+      failed = workspace_turn_container_file(path, writing, content, writing ? strlen(content) : 0,
+                                             io->timeout_ms, &raw.bytes, &raw.length, &unknown);
+      raw.effect_started = writing && (!failed || unknown);
    }
    else
+      failed = scoped_file_io(owner->root, owner->cwd, path, writing, content, strlen(content),
+                              resource_io_live, owner, &raw);
+   if (failed)
+      goto done;
+   if (!writing)
    {
-      if (st.st_size < 0 || (unsigned long long)st.st_size > ACP_FILE_BYTES)
+      if (strlen(raw.bytes) != raw.length || !text_is_valid_utf8(raw.bytes))
          goto done;
-      bytes = malloc(ACP_FILE_BYTES + 1);
-      if (!bytes)
-         goto done;
-      size_t length = 0;
-      for (;;)
-      {
-         if (!resource_live(owner))
-            goto done;
-         ssize_t n = read(fd, bytes + length, ACP_FILE_BYTES + 1 - length);
-         if (n < 0 && errno == EINTR)
-            continue;
-         if (n < 0 || length + (size_t)n > ACP_FILE_BYTES)
-            goto done;
-         if (!n)
-            break;
-         length += (size_t)n;
-      }
-      bytes[length] = 0;
-      if (strlen(bytes) != length || !text_is_valid_utf8(bytes))
-         goto done;
-      size_t begin = 0, end = length;
+      size_t begin = 0, end = raw.length;
       const cJSON *offset = cJSON_GetObjectItemCaseSensitive(args, "offset");
       const cJSON *limit = cJSON_GetObjectItemCaseSensitive(args, "limit");
       int skip = cJSON_IsNumber(offset) ? offset->valueint : 0;
       int take = cJSON_IsNumber(limit) ? limit->valueint : 0;
-      while (begin < length && skip > 0)
-         if (bytes[begin++] == '\n')
+      while (begin < raw.length && skip > 0)
+         if (raw.bytes[begin++] == '\n')
             skip--;
       if (take > 0)
       {
          end = begin;
-         while (end < length && take > 0)
-            if (bytes[end++] == '\n')
+         while (end < raw.length && take > 0)
+            if (raw.bytes[end++] == '\n')
                take--;
       }
-      io->text = strndup(bytes + begin, end - begin);
+      io->text = strndup(raw.bytes + begin, end - begin);
       if (!io->text)
          goto done;
    }
@@ -368,25 +311,23 @@ static char *resource_io(const char *name, const cJSON *args, void *context, int
    *is_error = 0;
    io->completed = 1;
 done:
-   free(bytes);
-   free(leaf);
-   if (fd >= 0 && close(fd))
-      *is_error = 1;
-   if (parent >= 0)
-      close(parent);
+   if (*is_error && raw.effect_started)
+      *is_error = SCOPED_WRITE_OUTCOME_UNKNOWN;
+   free(raw.bytes);
    return strdup(
-       *is_error ? (effect_started
+       *is_error ? (raw.effect_started
                         ? "error: ACP file write outcome unknown; inspect target before retrying"
                     : error ? error
                             : "error: ACP file resource refused or unavailable")
                  : "ok");
 }
+
 static int resource_execute_claimed(server_acp_resources_t *owner, const aimee_block_t *proposed,
                                     aimee_block_t *out, int mcp, int timeout_ms)
 {
    server_native_tool_claim_t claim = {0};
    aimee_tool_t definition = {0};
-   resource_io_t io = {.owner = owner};
+   resource_io_t io = {.owner = owner, .timeout_ms = timeout_ms};
    cJSON *args = NULL;
    char *wire = NULL, *receipt = NULL;
    int failed = 1, rc = -1, bash_bound = 0;

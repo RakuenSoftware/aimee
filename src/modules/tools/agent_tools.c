@@ -2,6 +2,7 @@
 #include "child_environment.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
+#include "scoped_execution.h"
 #include "aimee_home.h"
 #include "economizer.h"
 #include "log.h"
@@ -50,6 +51,10 @@ agent_tools_bash_scope_t agent_tools_bind_bash_scope(const agent_tools_bash_scop
    bash_scope = scope ? *scope : (agent_tools_bash_scope_t){0};
    return previous;
 }
+agent_tools_bash_scope_t agent_tools_bash_scope_snapshot(void)
+{
+   return bash_scope;
+}
 char *const *agent_tools_bind_bash_environment(char *const environment[])
 {
    char *const *previous = bash_scope.environment;
@@ -73,6 +78,11 @@ static int bash_delegate_cancel_requested(void)
    return (agent_request_cancelled && agent_request_cancelled()) ||
           (job_id > 0 && db1_agent_job_is_cancelled && db1_agent_job_is_cancelled(job_id)) ||
           (agent_delegation_stop_requested && agent_delegation_stop_requested(NULL, 0));
+}
+static int container_bash_progress(void *context)
+{
+   const agent_tools_bash_scope_t *scope = context;
+   return bash_delegate_cancel_requested() || (scope->progress && scope->progress(scope->context));
 }
 /* Single source of truth for the per-result MODEL-VISIBLE tool-output cap.
  * Reads tool_output_max_bytes from config (mtime-cached) and clamps it via the
@@ -771,6 +781,8 @@ char *tool_bash(const char *command, int timeout_ms)
       cJSON_AddStringToObject(r, "stdout", out);
       cJSON_AddStringToObject(r, "stderr", "");
       cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      if (exit_code == -1)
+         cJSON_AddTrueToObject(r, "effects_unknown");
       free(out);
       char *res = cJSON_PrintUnformatted(r);
       cJSON_Delete(r);
@@ -784,7 +796,7 @@ char *tool_bash(const char *command, int timeout_ms)
     * sandbox entirely (the file tools already route into the container; bash/script
     * were the hole). Run in the delegate's worktree: it is bind-mounted
     * path-identically, so the same absolute path is valid inside the container. */
-   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER)
    {
       const char *cwd = run_cmd_get_cwd();
       char *wrapped = NULL;
@@ -805,23 +817,31 @@ char *tool_bash(const char *command, int timeout_ms)
          wrapped = w.data ? safe_strdup(w.data) : NULL;
          dstr_free(&w);
       }
+      if (cwd && cwd[0] && !wrapped)
+         return safe_strdup(
+             "{\"stdout\":\"\",\"stderr\":\"cannot bind container cwd\",\"exit_code\":-1}");
       int exit_code = -1;
-      char *out =
-          ws->exec_shell_timeout
-              ? ws->exec_shell_timeout(ws, wrapped ? wrapped : command, timeout_ms, &exit_code)
-              : ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      agent_tools_bash_scope_t snapshot = agent_tools_bash_scope_snapshot();
+      delegate_exec_scope_t scope = {.environment = snapshot.environment,
+                                     .replace_environment = snapshot.replace_environment,
+                                     .progress = container_bash_progress,
+                                     .context = &snapshot};
+      char *out = ws->exec_shell_scoped
+                      ? ws->exec_shell_scoped(ws, wrapped ? wrapped : command, timeout_ms, &scope,
+                                              &exit_code)
+                      : NULL; /* Scoped execution cannot fall back to ambient or host execution. */
       free(wrapped);
       /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
        * failed/typo'd/nonexistent install is never recorded (and can't poison later
        * image builds). Best-effort, cheap pre-filtered inside observe(). */
       if (exit_code == 0)
          sandbox_learned_observe(cwd, command);
-      /* exit_code == -1 with no capture means docker exec could not run the command
-       * at all (transport failure) — distinct from a real command that exits 0 with
-       * empty output, which the container provider returns as NULL out / exit 0. */
+      /* A transport failure may follow remote effects. Only the owning runtime's
+       * immutable-container retirement can establish remote quiescence. */
       if (exit_code == -1 && !out)
-         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run "
-                            "the command in the delegate container\",\"exit_code\":-1}");
+         return safe_strdup(
+             "{\"stdout\":\"\",\"stderr\":\"delegate container execution failed; "
+             "effects may be incomplete\",\"exit_code\":-1,\"effects_unknown\":true}");
       cJSON *r = cJSON_CreateObject();
       cJSON_AddStringToObject(r, "stdout", out ? out : "");
       cJSON_AddStringToObject(r, "stderr", "");
@@ -1404,9 +1424,16 @@ char *tool_write_file(const char *path, const char *content)
       }
    }
 
-   if (ws->write_all(ws, actual_path, content, content ? strlen(content) : 0) != 0)
+   int write_status = ws->write_all(ws, actual_path, content, content ? strlen(content) : 0);
+   if (write_status != 0)
    {
       free(old_content);
+      if (write_status == SCOPED_WRITE_OUTCOME_UNKNOWN)
+      {
+         td_outcome_set("error", "effects_unknown");
+         return safe_strdup("{\"status\":\"failed\",\"effects_unknown\":true,\"error\":"
+                            "\"file write outcome unknown; inspect target before retrying\"}");
+      }
       char errbuf[512];
       snprintf(errbuf, sizeof(errbuf), "error: cannot write %s", actual_path);
       return safe_strdup(errbuf);

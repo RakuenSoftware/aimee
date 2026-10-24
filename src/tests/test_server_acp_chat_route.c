@@ -24,6 +24,15 @@
 #undef db1_execution_test_grade_record
 #undef main
 #undef agent_request_cancelled
+/* The full-worker fixture reuses the protocol child and unrelated peers, but
+ * links real workspace/runtime owners and supplies a multi-session store peer. */
+#ifdef AIMEE_ACP_FULL_WORKER_FIXTURE
+#define db1_server_session_create           full_unused_route_session_create
+#define db1_server_session_get              full_unused_route_session_get
+#define db1_session_ir_append               full_unused_route_ir_append
+#define db1_session_ir_page                 full_unused_route_ir_page
+#define db1_session_ir_running_history_load full_unused_route_history_load
+#endif
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "persona.h"
@@ -114,6 +123,70 @@ int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
    digest[64] = 0;
    return 0;
 }
+#ifndef AIMEE_ACP_FULL_WORKER_FIXTURE
+/* Shared-primary fixture: container execution is covered by the real full
+ * worker target. These dependencies must never affirm a container here. */
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
+{
+   (void)cwd;
+   (void)fd;
+   (void)digest;
+   abort();
+}
+int workspace_turn_container_identity(char id[65], char image[72])
+{
+   (void)id;
+   (void)image;
+   abort();
+}
+int workspace_turn_container_retire(void)
+{
+   abort();
+}
+int workspace_turn_container_forwarder(unsigned port)
+{
+   (void)port;
+   abort();
+}
+int workspace_turn_container_transport(const char **binary, const char **endpoint)
+{
+   (void)binary;
+   (void)endpoint;
+   abort();
+}
+int workspace_turn_container_file_owner_start(int exe, int cwd, const char *command,
+                                              int (*validate)(void *), void *context,
+                                              long long deadline)
+{
+   (void)exe;
+   (void)cwd;
+   (void)command;
+   (void)validate;
+   (void)context;
+   (void)deadline;
+   abort();
+}
+int workspace_turn_container_prepared(const char **command, const char **home, const char **mcp)
+{
+   (void)command;
+   (void)home;
+   (void)mcp;
+   abort();
+}
+int workspace_turn_container_file(const char *path, int writing, const char *content, size_t length,
+                                  int timeout, char **out, size_t *size, int *unknown)
+{
+   (void)path;
+   (void)writing;
+   (void)content;
+   (void)length;
+   (void)timeout;
+   (void)out;
+   (void)size;
+   (void)unknown;
+   abort();
+}
+#endif
 int workspace_turn_bind_active(const char *cwd)
 {
    assert(!strcmp(cwd, workspace));
@@ -811,6 +884,8 @@ static int mcp_sequence(const cJSON *servers, const char *root, int mode)
    mcp_close_child(&child);
    return 0;
 }
+
+#ifndef AIMEE_ACP_FULL_WORKER_FIXTURE
 static void mcp_probe_expired(void)
 {
    char path[1024];
@@ -843,6 +918,8 @@ static void mcp_probe_expired(void)
    mcp_close_child(&client);
    assert(acp_route_policy_dispatches() == dispatched);
 }
+
+#endif
 static int child_main(int argc, char **argv)
 {
    assert(argc == 6 && !strcmp(argv[1], "--acp-route-child") &&
@@ -1061,6 +1138,8 @@ static int route_tool_classify(const char *name, int *out)
    *out = metadata.classification;
    return 0;
 }
+
+#ifndef AIMEE_ACP_FULL_WORKER_FIXTURE
 static compute_ctx_t *route_context(const char *prompt)
 {
    compute_ctx_t *c = calloc(1, sizeof *c);
@@ -1449,3 +1528,5 @@ int main(int argc, char **argv)
         "and failure boundaries");
    return 0;
 }
+
+#endif /* !AIMEE_ACP_FULL_WORKER_FIXTURE */

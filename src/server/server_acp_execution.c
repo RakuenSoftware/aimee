@@ -10,6 +10,7 @@
 #include "server_session_capture.h"
 #include "server_session_control.h"
 #include "modules/workspace/workspace_turn.h"
+#include "modules/workspace/workspace_provider.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_exec.h"
 #include "agent_config.h"
@@ -18,9 +19,15 @@
 #include "wire_fence.h"
 #include "cli_proxy.h"
 #include "platform_random.h"
+#include "aimee_home.h"
+#include "aimee_sha256.h"
+#include "config.h"
+#include "delegate_egress_adapter.h"
+#include <aimee/core/connection/socket.h>
 #include "cJSON.h"
 #include <openssl/crypto.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -28,6 +35,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -76,8 +86,30 @@ struct acp_owner
    cJSON *mcp_servers;
    char endpoint[64];
    const char *path, *home;
+   const char *namespace_mcp;
+   server_acp_container_scope_t *container;
+   char container_id[65], image_id[72], workspace_digest[65];
    acp_shell_t *shells[3], *current_shell;
 };
+struct server_acp_container_scope
+{
+   cli_proxy_t *proxy;
+   _Atomic(acp_owner_t *) active;
+   pthread_t producer;
+   int parent, helper_fd, used, package_proxy, directory_created, socket_created;
+   struct stat helper_identity, socket_identity;
+   char socket[4096], directory[4096], token[65], helper_digest[65];
+};
+static _Thread_local server_acp_container_scope_t *container_scope;
+
+static int container_authorize(const char *method, const char *path, const char *token,
+                               void *context);
+static int container_forward(const char *method, const char *path, const char *headers,
+                             const void *body, unsigned long length, const char *session,
+                             const cli_proxy_io_t *io, void *context);
+static int container_intercept(int fd, const char *method, const char *path, const char *head,
+                               size_t length, int (*cancelled)(void *), void *cancel_context,
+                               void *context);
 
 static int same_file(const struct stat *a, const struct stat *b)
 {
@@ -94,10 +126,26 @@ static int same_executable(int fd, const struct stat *original)
 static int acp_owner_valid(void *opaque)
 {
    acp_owner_t *owner = opaque;
+   if (!owner)
+      return -1;
+   int namespace_invalid = 0;
+   if (owner->container)
+   {
+      int fd = -1;
+      char digest[65], id[65], image[72];
+      namespace_invalid =
+          owner->container != container_scope || !owner->container->used ||
+          !same_executable(owner->container->helper_fd, &owner->container->helper_identity) ||
+          workspace_turn_resource_identity(owner->cwd, &fd, digest) || fd >= 0 ||
+          strcmp(digest, owner->workspace_digest) || workspace_turn_container_identity(id, image) ||
+          strcmp(id, owner->container_id) || strcmp(image, owner->image_id);
+      if (fd >= 0)
+         close(fd);
+   }
    const request_context_t *ctx = request_context_get();
    struct stat directory, named;
    const char *cwd = run_cmd_get_cwd();
-   return !owner || !ctx || ctx != owner->context || ctx->context_refused ||
+   return namespace_invalid || !ctx || ctx != owner->context || ctx->context_refused ||
                   strcmp(ctx->vault_principal, owner->actor) ||
                   (ctx->capabilities & owner->required_caps) != owner->required_caps ||
                   ctx->vault_transport != owner->transport ||
@@ -448,7 +496,7 @@ static int acp_bash_open(const char *digest, const aimee_request_t *catalog,
       free(shell);
       return -1;
    }
-   shell->environment = calloc(10, sizeof(char *));
+   shell->environment = calloc(16, sizeof(char *));
    if (!shell->environment)
       goto failed;
    const char *names[] = {"PATH", "LANG", "HOME"};
@@ -465,6 +513,16 @@ static int acp_bash_open(const char *digest, const aimee_request_t *catalog,
    for (unsigned i = 0; i < 6; i++)
       if (!(shell->environment[i + 3] = strdup(grant_env[i])))
          goto failed;
+   if (owner->container && owner->container->package_proxy)
+   {
+      const char *proxy[] = {
+          "http_proxy=http://127.0.0.1:3129", "https_proxy=http://127.0.0.1:3129",
+          "HTTP_PROXY=http://127.0.0.1:3129", "HTTPS_PROXY=http://127.0.0.1:3129",
+          "NO_PROXY=localhost,127.0.0.1",     "no_proxy=localhost,127.0.0.1"};
+      for (unsigned i = 0; i < 6; i++)
+         if (!(shell->environment[i + 9] = strdup(proxy[i])))
+            goto failed;
+   }
    pthread_mutex_lock(&owner->mcp_lock);
    if (owner->closing || owner->shells[depth])
    {
@@ -574,6 +632,8 @@ static void acp_mcp_close(acp_owner_t *owner)
    }
    /* No callback or token remains after stop; borrowed producer state is then
     * safe to release. No detached worker borrows its request TLS. */
+   if (owner->container && atomic_load(&owner->container->active) == owner)
+      atomic_store(&owner->container->active, NULL);
    cli_proxy_stop(owner->proxy);
    owner->proxy = NULL;
    cJSON_Delete(owner->mcp_servers);
@@ -655,26 +715,48 @@ static int acp_mcp_open(acp_owner_t *owner, const char *path, const char *home)
       return -1;
    }
    owner->mcp_initialized = 1;
-   if ((owner->mcp_fd = open_command("aimee", path)) < 0 ||
-       fstat(owner->mcp_fd, &owner->mcp_executable) || platform_random_bytes(random, sizeof random))
-      return -1;
-   for (size_t i = 0; i < sizeof random; i++)
-      snprintf(owner->token + i * 2, 3, "%02x", random[i]);
-   OPENSSL_cleanse(random, sizeof random);
-   owner->proxy = cli_proxy_start_authorized(0, owner->token, owner->session, &port, acp_route,
-                                             acp_authorize, acp_mcp_forward, owner);
-   if (!owner->proxy)
-      return -1;
-   char command[128], endpoint[64];
-   snprintf(command, sizeof command, "/proc/%ld/fd/%d", (long)getpid(), owner->mcp_fd);
-   snprintf(endpoint, sizeof endpoint, "http://127.0.0.1:%u", port);
+   char command[4096], endpoint[64];
+   if (owner->container)
+   {
+      acp_owner_t *expected = NULL;
+      if (owner->container != container_scope || !owner->container->used ||
+          !owner->container->proxy || workspace_turn_container_forwarder(3131) ||
+          (owner->container->package_proxy && workspace_turn_container_forwarder(3129)) ||
+          !atomic_compare_exchange_strong(&owner->container->active, &expected, owner))
+         return -1;
+      owner->proxy = owner->container->proxy;
+      owner->container->proxy = NULL; /* Exactly one transfer; stop joins before owner teardown. */
+      snprintf(owner->token, sizeof owner->token, "%s", owner->container->token);
+      snprintf(command, sizeof command, "%s", owner->namespace_mcp ? owner->namespace_mcp : "");
+      snprintf(endpoint, sizeof endpoint, "http://127.0.0.1:3131");
+   }
+   else
+   {
+      if ((owner->mcp_fd = open_command("aimee", path)) < 0 ||
+          fstat(owner->mcp_fd, &owner->mcp_executable) ||
+          platform_random_bytes(random, sizeof random))
+         return -1;
+      for (size_t i = 0; i < sizeof random; i++)
+         snprintf(owner->token + i * 2, 3, "%02x", random[i]);
+      OPENSSL_cleanse(random, sizeof random);
+      owner->proxy = cli_proxy_start_authorized(0, owner->token, owner->session, &port, acp_route,
+                                                acp_authorize, acp_mcp_forward, owner);
+      if (!owner->proxy)
+         return -1;
+      snprintf(command, sizeof command, "/proc/%ld/fd/%d", (long)getpid(), owner->mcp_fd);
+      snprintf(endpoint, sizeof endpoint, "http://127.0.0.1:%u", port);
+   }
    snprintf(owner->endpoint, sizeof owner->endpoint, "%s", endpoint);
    owner->path = path;
    owner->home = home;
-   if (server_acp_resources_set_bash_owner(owner->resources, acp_bash_open, acp_bash_close, owner))
+   const aimee_request_t *catalog = server_acp_resources_mcp_catalog(owner->resources);
+   if (!catalog || !catalog->n_tools)
+      return owner->container ? 0 : -1;
+   if (!command[0] ||
+       server_acp_resources_set_bash_owner(owner->resources, acp_bash_open, acp_bash_close, owner))
       return -1;
    struct stat linked;
-   if (stat(command, &linked) || !same_file(&linked, &owner->mcp_executable))
+   if (!owner->container && (stat(command, &linked) || !same_file(&linked, &owner->mcp_executable)))
       return -1;
    owner->mcp_servers = cJSON_CreateArray();
    cJSON *server = cJSON_CreateObject();
@@ -732,6 +814,9 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    aimee_ir_session_sink_fn previous_sink = NULL;
    unsigned long long prompt_lease = 0;
    char home[4096] = "", home_env[4128], path_env[8192];
+   const char *container_binary = NULL, *engine_endpoint = NULL;
+   const char *container_command = NULL, *container_home = NULL, *container_mcp = NULL;
+   char *container_arguments[ACP_COMMAND_ARGS + 24] = {0};
    agent_request_creds_t credentials;
    memset(&credentials, 0, sizeof credentials);
    if (!cfg || !cfg->agent || !cfg->agent->enabled ||
@@ -850,7 +935,8 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
          int present = !strcmp(joined, cfg->system_prompt);
          free(joined);
          for (int i = 0; i < task.n_system; i++)
-            present |= !strcmp(task.system[i].text, cfg->system_prompt);
+            present |= task.system[i].type == AIMEE_BLK_TEXT && task.system[i].text &&
+                       !strcmp(task.system[i].text, cfg->system_prompt);
          if (!present)
          {
             if (task.n_system >= AIMEE_IR_MAX_BLOCKS ||
@@ -884,12 +970,27 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    failure = "ACP execution owner unavailable";
    snprintf(owner.cwd, sizeof owner.cwd, "%s", cfg->cwd);
    char workspace_identity[65];
-   if (workspace_turn_resource_identity(owner.cwd, &owner.cwd_fd, workspace_identity) ||
-       owner.cwd_fd < 0 || fstat(owner.cwd_fd, &owner.directory))
+   if (workspace_turn_resource_identity(owner.cwd, &owner.cwd_fd, workspace_identity))
    {
-      failure = "ACP requires an owned local workspace; no host execution fallback";
+      failure = "ACP requires an owned workspace; no host execution fallback";
       goto done;
    }
+   if (owner.cwd_fd < 0)
+   {
+      char source_digest[65];
+      if (!container_scope || container_scope->used ||
+          !pthread_equal(container_scope->producer, pthread_self()) ||
+          !same_executable(container_scope->helper_fd, &container_scope->helper_identity) ||
+          workspace_turn_container_identity(owner.container_id, owner.image_id) ||
+          workspace_turn_container_transport(&container_binary, &engine_endpoint) ||
+          workspace_turn_source_identity(owner.cwd, &owner.cwd_fd, source_digest))
+         goto done;
+      owner.container = container_scope;
+      owner.container->used = 1;
+      memcpy(owner.workspace_digest, workspace_identity, sizeof owner.workspace_digest);
+   }
+   if (owner.cwd_fd < 0 || fstat(owner.cwd_fd, &owner.directory))
+      goto done;
    const char *startup_path = getenv("PATH");
    if (!startup_path || !startup_path[0])
       startup_path = "/usr/local/bin:/usr/bin:/bin";
@@ -916,10 +1017,12 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    char command_error[128];
    argc = provider_cli_split_command(cfg->agent->cli_cmd, argv, ACP_COMMAND_ARGS, command_error,
                                      sizeof command_error);
-   if (argc < 0 || (owner.executable_fd = open_command(argv[0], path_env + 5)) < 0 ||
+   if (argc <= 0 ||
+       (owner.executable_fd =
+            open_command(owner.container ? container_binary : argv[0], path_env + 5)) < 0 ||
        fstat(owner.executable_fd, &owner.executable))
    {
-      failure = "ACP selected command cannot be opened as an owned executable";
+      failure = "ACP selected execution transport cannot be opened as an owned executable";
       goto done;
    }
    if (acp_owner_valid(&owner) || server_session_capture_model_enter(owner.capture, &prompt_lease))
@@ -980,26 +1083,72 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
       if (source_refused)
          goto done;
    }
-   const char *temporary = getenv("TMPDIR");
-   if (!temporary || temporary[0] != '/')
-      temporary = P_tmpdir;
-   if (snprintf(home, sizeof home, "%s/aimee-acp-XXXXXX", temporary) >= (int)sizeof home ||
-       !mkdtemp(home))
-      goto done;
+   if (owner.container)
+   {
+      failure = "ACP verified container resource preparation failed before agent launch";
+      if (workspace_turn_container_file_owner_start(owner.executable_fd, owner.cwd_fd, argv[0],
+                                                    acp_owner_valid, &owner, owner.deadline) ||
+          workspace_turn_container_prepared(&container_command, &container_home, &container_mcp) ||
+          snprintf(home, sizeof home, "%s", container_home) >= (int)sizeof home)
+         goto done;
+      owner.namespace_mcp = container_mcp;
+      snprintf(path_env, sizeof path_env, "PATH=/usr/local/bin:/usr/bin:/bin");
+   }
+   else
+   {
+      const char *temporary = getenv("TMPDIR");
+      if (!temporary || temporary[0] != '/')
+         temporary = P_tmpdir;
+      if (snprintf(home, sizeof home, "%s/aimee-acp-XXXXXX", temporary) >= (int)sizeof home ||
+          !mkdtemp(home))
+         goto done;
+   }
    snprintf(home_env, sizeof home_env, "HOME=%s", home);
    owner.resources = resources;
    const aimee_request_t *mcp_catalog = server_acp_resources_mcp_catalog(resources);
-   if ((resources && !mcp_catalog) ||
-       (mcp_catalog && mcp_catalog->n_tools && acp_mcp_open(&owner, path_env + 5, home)))
+   if ((resources && !mcp_catalog) || ((owner.container || (mcp_catalog && mcp_catalog->n_tools)) &&
+                                       acp_mcp_open(&owner, path_env + 5, home)))
    {
       failure = "ACP scoped MCP executable or listener unavailable";
       goto done;
    }
-   char *environment[] = {path_env, "LANG=C.UTF-8", home_env, NULL};
+   char *environment[10] = {path_env, "LANG=C.UTF-8", home_env, NULL};
+   if (owner.container && owner.container->package_proxy)
+   {
+      environment[3] = "http_proxy=http://127.0.0.1:3129";
+      environment[4] = "https_proxy=http://127.0.0.1:3129";
+      environment[5] = "HTTP_PROXY=http://127.0.0.1:3129";
+      environment[6] = "HTTPS_PROXY=http://127.0.0.1:3129";
+      environment[7] = "NO_PROXY=localhost,127.0.0.1";
+      environment[8] = "no_proxy=localhost,127.0.0.1";
+   }
+   char *client_environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
+                                 "HOME=/nonexistent", NULL};
+   if (owner.container)
+   {
+      size_t n = 0;
+      container_arguments[n++] = (char *)container_binary;
+      container_arguments[n++] = "--host";
+      container_arguments[n++] = (char *)engine_endpoint;
+      container_arguments[n++] = "exec";
+      container_arguments[n++] = "-i";
+      container_arguments[n++] = "--workdir";
+      container_arguments[n++] = owner.cwd;
+      container_arguments[n++] = owner.container_id;
+      container_arguments[n++] = "/usr/bin/env";
+      container_arguments[n++] = "-i";
+      for (size_t i = 0; environment[i]; i++)
+         container_arguments[n++] = environment[i];
+      container_arguments[n++] = (char *)container_command;
+      for (int i = 1; i < argc; i++)
+         container_arguments[n++] = argv[i];
+      container_arguments[n] = NULL;
+   }
    cli_acp_host_launch_t launch = {.executable_fd = owner.executable_fd,
                                    .cwd_fd = owner.cwd_fd,
-                                   .argv = argv,
-                                   .environment = environment,
+                                   .argv = owner.container ? container_arguments : argv,
+                                   .environment =
+                                       owner.container ? client_environment : environment,
                                    .cwd = owner.cwd,
                                    .mcp_servers = owner.mcp_servers,
                                    .deadline_ms = owner.deadline,
@@ -1032,6 +1181,12 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
 done:
    OPENSSL_cleanse(&credentials, sizeof credentials);
    acp_mcp_close(&owner);
+   if (owner.container && workspace_turn_container_retire())
+   {
+      rc = AGENT_RC_CAPTURE_FAILED;
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "ACP owned container retirement was not verified");
+   }
    if (previous_sink)
    {
       int failed = aimee_ir_session_capture_failed();
@@ -1078,7 +1233,7 @@ done:
       close(owner.cwd_fd);
    if (argc > 0)
       provider_cli_free_tokens(argv, argc);
-   if (home[0])
+   if (home[0] && !owner.container)
       (void)rmdir(home); /* Only this empty owned HOME; never recurse into agent-created paths. */
    if (rc || !out->success)
    {
@@ -1091,4 +1246,245 @@ done:
       return rc ? rc : AGENT_RC_CAPTURE_FAILED;
    }
    return 0;
+}
+
+static int container_authorize(const char *method, const char *path, const char *token,
+                               void *context)
+{
+   server_acp_container_scope_t *scope = context;
+   acp_owner_t *owner = atomic_load(&scope->active);
+   return owner && acp_authorize(method, path, token, owner);
+}
+static int container_forward(const char *method, const char *path, const char *headers,
+                             const void *body, unsigned long length, const char *session,
+                             const cli_proxy_io_t *io, void *context)
+{
+   server_acp_container_scope_t *scope = context;
+   acp_owner_t *owner = atomic_load(&scope->active);
+   (void)session; /* Actual attached capture, never a client-minted scope binding. */
+   return owner ? acp_mcp_forward(method, path, headers, body, length, owner->session, io, owner)
+                : acp_mcp_write(io, 403, NULL);
+}
+typedef struct
+{
+   acp_owner_t *owner;
+   int (*cancelled)(void *);
+   void *context;
+} package_wait_t;
+static int package_cancelled(void *context)
+{
+   package_wait_t *wait = context;
+   pthread_mutex_lock(&wait->owner->mcp_lock);
+   int closing = wait->owner->closing;
+   pthread_mutex_unlock(&wait->owner->mcp_lock);
+   return closing || !server_session_capture_accepting(wait->owner->capture) ||
+          util_now_ms() >= wait->owner->deadline ||
+          (wait->cancelled && wait->cancelled(wait->context));
+}
+static int container_intercept(int fd, const char *method, const char *path, const char *head,
+                               size_t length, int (*cancelled)(void *), void *cancel_context,
+                               void *context)
+{
+   if (strcmp(method, "CONNECT") && strncmp(path, "http://", 7))
+      return 0; /* Relative APIs always retain normal token/route admission. */
+   server_acp_container_scope_t *scope = context;
+   acp_owner_t *owner = atomic_load(&scope->active);
+   if (!owner || !scope->package_proxy)
+   {
+      static const char denied[] =
+          "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      (void)aimee_core_socket_write_all(fd, denied, sizeof denied - 1);
+      return 1;
+   }
+   package_wait_t wait = {.owner = owner, .cancelled = cancelled, .context = cancel_context};
+   long long remaining = owner->deadline - util_now_ms();
+   if (remaining > 0 && !package_cancelled(&wait))
+      (void)delegate_egress_adapter_serve_owned(fd, head, length, "acp-owned",
+                                                remaining > 600000 ? 600000 : (int)remaining,
+                                                package_cancelled, &wait);
+   return 1;
+}
+static int owned_private_directory(int parent, const char *name)
+{
+   if (mkdirat(parent, name, 0700) && errno != EEXIST)
+      return -1;
+   int fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   struct stat status;
+   if (fd >= 0 &&
+       (!fstat(fd, &status) && status.st_uid == getuid() && (status.st_mode & 0777) == 0700))
+      return fd;
+   if (fd >= 0)
+      close(fd);
+   return -1;
+}
+static int container_copy_helper(server_acp_container_scope_t *scope)
+{
+   int source = open("/usr/local/bin/aimee-forwarder", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+   struct stat before;
+   if (source < 0 || fstat(source, &before) || !S_ISREG(before.st_mode) || before.st_size <= 0 ||
+       before.st_size > 64 * 1024 * 1024 || !(before.st_mode & 0111))
+   {
+      if (source >= 0)
+         close(source);
+      return -1;
+   }
+   size_t length = (size_t)before.st_size;
+   const char *bytes = mmap(NULL, length, PROT_READ, MAP_PRIVATE, source, 0);
+   int destination = -1, rc = -1;
+   if (bytes == MAP_FAILED ||
+       (destination = openat(scope->parent, "owner-io",
+                             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)) < 0)
+      goto done;
+   if (fstat(destination, &scope->helper_identity))
+      goto done;
+   size_t offset = 0;
+   while (offset < length)
+   {
+      ssize_t n = write(destination, bytes + offset, length - offset);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+         goto done;
+      offset += (size_t)n;
+   }
+   if (!same_executable(source, &before) || aimee_sha256_hex(bytes, length, scope->helper_digest) ||
+       fsync(destination) || fchmod(destination, 0555) ||
+       (scope->helper_fd = openat(scope->parent, "owner-io", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)) <
+           0 ||
+       fstat(scope->helper_fd, &scope->helper_identity) ||
+       !S_ISREG(scope->helper_identity.st_mode) || scope->helper_identity.st_nlink != 1 ||
+       scope->helper_identity.st_uid != getuid() ||
+       (scope->helper_identity.st_mode & 0777) != 0555 ||
+       scope->helper_identity.st_size != before.st_size)
+      goto done;
+   rc = 0;
+done:
+   if (destination >= 0 && close(destination))
+      rc = -1;
+   if (bytes != MAP_FAILED)
+      munmap((void *)bytes, length);
+   close(source);
+   return rc;
+}
+server_acp_container_scope_t *server_acp_container_scope_open(void)
+{
+#if !defined(__linux__)
+   return NULL;
+#else
+   if (container_scope)
+      return NULL;
+   server_acp_container_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+      return NULL;
+   scope->parent = -1;
+   scope->helper_fd = -1;
+   scope->producer = pthread_self();
+   scope->package_proxy = !strcmp(config_delegate_sandbox_package_access(), "proxy");
+   atomic_init(&scope->active, NULL);
+   int home = -1, owners = -1, listener = -1;
+   char nonce[65], short_path[96];
+   const char *root = aimee_home();
+   if (!root || root[0] != '/' || platform_random_hex(nonce, 64) ||
+       platform_random_hex(scope->token, 64) ||
+       snprintf(scope->directory, sizeof scope->directory, "%s/acp-owners/%s", root, nonce) >=
+           (int)sizeof scope->directory ||
+       (home = open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
+       (owners = owned_private_directory(home, "acp-owners")) < 0 || mkdirat(owners, nonce, 0700))
+      goto failed;
+   scope->directory_created = 1;
+   if ((scope->parent = owned_private_directory(owners, nonce)) < 0 || fsync(owners) ||
+       snprintf(scope->socket, sizeof scope->socket, "%s/aimee-http.sock", scope->directory) >=
+           (int)sizeof scope->socket ||
+       snprintf(short_path, sizeof short_path, "/proc/self/fd/%d/aimee-http.sock", scope->parent) >=
+           (int)sizeof short_path ||
+       container_copy_helper(scope) || fsync(scope->parent))
+      goto failed;
+   /* The held parent is the pathname authority. This bounded proc-fd spelling
+    * also avoids AF_UNIX's 108-byte pathname limit for long configured homes. */
+   struct sockaddr_un address = {.sun_family = AF_UNIX};
+   if (strlen(short_path) >= sizeof address.sun_path)
+      goto failed;
+   memcpy(address.sun_path, short_path, strlen(short_path) + 1);
+   listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+   if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof address))
+      goto failed;
+   scope->socket_created = 1;
+   if (fstatat(scope->parent, "aimee-http.sock", &scope->socket_identity, AT_SYMLINK_NOFOLLOW) ||
+       fchmodat(scope->parent, "aimee-http.sock", 0600, 0) || listen(listener, 32))
+      goto failed;
+   scope->proxy = cli_proxy_start_owned_listener(listener, 3131, scope->token, NULL, acp_route,
+                                                 container_authorize, container_forward,
+                                                 container_intercept, scope);
+   listener = -1; /* Transferred, including failed startup. */
+   if (!scope->proxy)
+      goto failed;
+   close(owners);
+   close(home);
+   container_scope = scope;
+   return scope;
+failed:
+   if (listener >= 0)
+      close(listener);
+   if (owners >= 0)
+      close(owners);
+   if (home >= 0)
+      close(home);
+   server_acp_container_scope_close(scope);
+   return NULL;
+#endif
+}
+const char *server_acp_container_scope_socket(const server_acp_container_scope_t *scope)
+{
+   return scope && pthread_equal(scope->producer, pthread_self()) ? scope->socket : NULL;
+}
+int server_acp_container_bind(const agent_t *selected, const char *task, const char *image,
+                              const char *workspace, int read_only,
+                              server_acp_container_scope_t **scope)
+{
+   if (!scope || *scope)
+      return -1;
+   if (!selected || strcmp(selected->cli_kind, "acp"))
+      return workspace_turn_bind_container(task, image, workspace, read_only);
+   *scope = server_acp_container_scope_open();
+   return *scope ? workspace_turn_bind_container_scoped(
+                       task, image, workspace, read_only, server_acp_container_scope_socket(*scope),
+                       (*scope)->helper_digest, (*scope)->package_proxy)
+                 : -1;
+}
+void server_acp_container_scope_close(server_acp_container_scope_t *scope)
+{
+   if (!scope || !pthread_equal(scope->producer, pthread_self()))
+      return;
+   if (atomic_load(&scope->active))
+      return; /* A live turn must detach/join its callbacks before this lease. */
+   atomic_store(&scope->active, NULL);
+   cli_proxy_stop(scope->proxy);
+   if (scope->parent >= 0)
+   {
+      /* A durable acquisition journal owns its artifacts until cleanup has
+       * been independently confirmed. Preserve them across pending reaping. */
+      struct stat lease;
+      if (fstatat(scope->parent, "lease.jsonl", &lease, AT_SYMLINK_NOFOLLOW) && errno == ENOENT)
+      {
+         struct stat current;
+         if (scope->socket_created &&
+             !fstatat(scope->parent, "aimee-http.sock", &current, AT_SYMLINK_NOFOLLOW) &&
+             current.st_dev == scope->socket_identity.st_dev &&
+             current.st_ino == scope->socket_identity.st_ino)
+            unlinkat(scope->parent, "aimee-http.sock", 0);
+         if (!fstatat(scope->parent, "owner-io", &current, AT_SYMLINK_NOFOLLOW) &&
+             current.st_dev == scope->helper_identity.st_dev &&
+             current.st_ino == scope->helper_identity.st_ino)
+            unlinkat(scope->parent, "owner-io", 0);
+      }
+      close(scope->parent);
+   }
+   if (scope->helper_fd >= 0)
+      close(scope->helper_fd);
+   if (scope->directory_created)
+      rmdir(scope->directory);
+   if (container_scope == scope)
+      container_scope = NULL;
+   OPENSSL_cleanse(scope->token, sizeof scope->token);
+   free(scope);
 }

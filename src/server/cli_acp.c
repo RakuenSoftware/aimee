@@ -69,33 +69,11 @@ static void acp_proc_close(acp_proc_t *p)
 {
    if (!p)
       return;
-   if (p->in_fd >= 0)
-   {
-      close(p->in_fd);
-      p->in_fd = -1;
-   }
-   if (p->out_fd >= 0)
-   {
-      close(p->out_fd);
-      p->out_fd = -1;
-   }
-   if (p->pid > 0)
-   {
-      /* This child is deliberately unreaped until cleanup, so neither its PID
-       * nor its initial process-group identity can be recycled underneath us.
-       * This is supervision, not a claim that an opaque agent cannot escape. */
-      kill(-p->pid, SIGTERM);
-      usleep(50000);
-      kill(-p->pid, SIGKILL);
-      while (waitpid(p->pid, NULL, 0) < 0 && errno == EINTR)
-         ;
-      p->pid = 0;
-   }
-   if (p->pidfd >= 0)
-   {
-      close(p->pidfd);
-      p->pidfd = -1;
-   }
+   cli_native_stdio_t process = {
+       .in_fd = p->in_fd, .out_fd = p->out_fd, .pid = p->pid, .pidfd = p->pidfd};
+   cli_native_stdio_close(&process);
+   p->in_fd = p->out_fd = p->pidfd = -1;
+   p->pid = 0;
    free(p->buf);
    p->buf = NULL;
    p->buf_len = 0;
@@ -105,95 +83,15 @@ static void acp_proc_close(acp_proc_t *p)
 static int acp_spawn(acp_proc_t *p, const provider_cli_cfg_t *cfg)
 {
    const cli_acp_host_launch_t *host = cfg ? cfg->acp_host : NULL;
-   if (!host || !host->validate || host->validate(host->context) || host->executable_fd < 0 ||
-       host->cwd_fd < 0 || !host->argv || !host->argv[0] || !host->environment)
+   cli_native_stdio_t process;
+   if (!host || cli_native_stdio_spawn(host->executable_fd, host->cwd_fd, host->argv,
+                                       host->environment, host->validate, host->context, &process))
       return -1;
-   long descriptor_limit = sysconf(_SC_OPEN_MAX);
-   if (descriptor_limit < 4 || descriptor_limit > INT_MAX)
-      return -1;
-   int in[2], output[2], gate[2];
-   if (cli_native_pipe(in))
-      return -1;
-   if (cli_native_pipe(output))
-   {
-      close(in[0]);
-      close(in[1]);
-      return -1;
-   }
-   if (cli_native_pipe(gate))
-   {
-      close(in[0]);
-      close(in[1]);
-      close(output[0]);
-      close(output[1]);
-      return -1;
-   }
-   pid_t pid = fork();
-   if (!pid)
-   {
-      close(gate[1]);
-      char admitted = 0;
-      if (setsid() < 0 || read(gate[0], &admitted, 1) != 1 || admitted != 1)
-         _exit(126);
-      int executable = cli_native_pin_fd(host->executable_fd);
-      int directory = cli_native_pin_fd(host->cwd_fd);
-      int diagnostic = open("/dev/null", O_WRONLY | O_CLOEXEC);
-      int error_fd = diagnostic >= 0 ? cli_native_pin_fd(diagnostic) : -1;
-      if (executable < 0 || directory < 0 || error_fd < 0 || fchdir(directory) ||
-          dup2(in[0], STDIN_FILENO) < 0 || dup2(output[1], STDOUT_FILENO) < 0 ||
-          dup2(error_fd, STDERR_FILENO) < 0 || dup2(executable, 3) < 0)
-         _exit(126);
-      /* fd3 is the explicitly selected executable (also needed by script
-       * interpreters); no daemon connection/configuration descriptor survives. */
-#ifdef SYS_close_range
-      if (syscall(SYS_close_range, 4u, ~0u, 0))
-#endif
-         for (long fd = 4; fd < descriptor_limit; fd++)
-            close((int)fd);
-      fexecve(3, host->argv, host->environment);
-      _exit(127);
-   }
-   close(in[0]);
-   close(output[1]);
-   close(gate[0]);
-#ifdef SYS_pidfd_open
-   int pidfd = pid > 0 ? (int)syscall(SYS_pidfd_open, pid, 0) : -1;
-#else
-   int pidfd = -1;
-#endif
-   if (pid < 0 || host->validate(host->context)
-#ifdef SYS_pidfd_open
-       || pidfd < 0
-#endif
-   )
-   {
-      close(gate[1]);
-      close(in[1]);
-      close(output[0]);
-      if (pid > 0)
-         while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
-            ;
-      return -1;
-   }
-   char admitted = 1;
-   ssize_t released = write(gate[1], &admitted, 1);
-   close(gate[1]);
-   p->pid = pid;
-   p->pidfd = pidfd;
+   p->in_fd = process.in_fd;
+   p->out_fd = process.out_fd;
+   p->pid = process.pid;
+   p->pidfd = process.pidfd;
    p->host = host;
-   p->in_fd = in[1];
-   p->out_fd = output[0];
-   if (released != 1)
-   {
-      acp_proc_close(p);
-      return -1;
-   }
-   int flags = fcntl(p->in_fd, F_GETFL, 0);
-   if (flags < 0 || fcntl(p->in_fd, F_SETFL, flags | O_NONBLOCK))
-   {
-      acp_proc_close(p);
-      return -1;
-   }
    p->progress = cfg->native_progress;
    p->progress_context = cfg->native_progress_context;
    p->buf_cap = 65536;

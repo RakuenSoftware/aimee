@@ -740,8 +740,10 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
       {
          int failed = 1;
          result = execute(name, args, context, &failed);
-         td_outcome_set(failed || !result ? "error" : "ok",
-                        failed || !result ? "file_resource" : "");
+         td_outcome_set(failed || !result ? "error" : "ok", failed == SCOPED_WRITE_OUTCOME_UNKNOWN
+                                                                ? "effects_unknown"
+                                                            : failed || !result ? "file_resource"
+                                                                                : "");
       }
       else
          result = tool_read_file(p->valuestring, offset, limit, raw);
@@ -891,7 +893,9 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
             int failed = 1;
             result = execute(name, args, context, &failed);
             td_outcome_set(failed || !result ? "error" : "ok",
-                           failed || !result ? "file_resource" : "");
+                           failed == SCOPED_WRITE_OUTCOME_UNKNOWN ? "effects_unknown"
+                           : failed || !result                    ? "file_resource"
+                                                                  : "");
          }
          else
             result = tool_write_file(p->valuestring, content_str);
@@ -2398,7 +2402,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          /* The wrapper classifies the ordinary tool failure. */
       }
       else if (!agent_tools_effect_result_claims_success(result))
-         td_outcome_set("error", "precondition");
+      {
+         if (!agent_tools_dispatch_outcome.explicit_verdict)
+            td_outcome_set("error", "precondition");
+      }
       else
       {
          int verified = agent_tools_effect_verify_file_postcondition(name, args, dispatch_cwd);

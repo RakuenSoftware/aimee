@@ -336,6 +336,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-http \
                $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-openai-shape \
+               $(TESTPREFIX)/unit-test-scoped-file-io \
                $(TESTPREFIX)/unit-test-openai-chat-policed \
                $(TESTPREFIX)/unit-test-graph-scoring \
                $(TESTPREFIX)/unit-test-code-projection \
@@ -2910,6 +2911,8 @@ $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integra
 # The three that DO read the store back are gated on store_module_fixture, the
 # convention seven other suites here already use: bring the real module up, or
 # skip saying why.
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/modules/workspace/workspace_provider_container.o
+
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent_mcp_permissions.o $(OBJDIR)/tests/test_script_rpc_admission.o \
                       $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
                       $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
@@ -6043,10 +6046,11 @@ $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_backend_docker.o \
+                     $(OBJDIR)/cJSON.o \
                      $(OBJDIR)/modules/delegates/delegate_backend.o \
                      $(OBJDIR)/modules/delegates/delegate_backend_docker.o $(OBJDIR)/log.o \
                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \
-                     $(OBJDIR)/aimee_home.o \
+                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -7540,3 +7544,55 @@ $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audi
 
 $(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON) $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Full worker composition; requires the explicitly configured container fixture.
+$(TESTPREFIX)/unit-test-acp-full-delegate-worker: $(CORE_CODEC_LIB) $(CORE_CONNECTION_LIB) $(DB1_CLIENT_SRCS:db1_client/%.c=$(OBJDIR)/tests/acp_route_db1/%.o) $(OBJDIR)/tests/test_acp_full_delegate_worker.o $(OBJDIR)/tests/support/acp_route_policy_fixture.o \
+    $(OBJDIR)/tests/server_compute_acp_route.o $(OBJDIR)/tests/posix_compute_acp_route.o \
+    $(OBJDIR)/server/server_provider_cli_execute.o $(OBJDIR)/server/server_acp_execution.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/cli_mcp_serve.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
+    $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/server/server_http_config_routes.o \
+    $(OBJDIR)/command_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
+    $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o \
+    $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o \
+    $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o \
+    $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o \
+    $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/code_collect.o \
+    $(OBJDIR)/modules/workspace/workspace_client_diff.o \
+    $(OBJDIR)/server/cli_acp.o $(OBJDIR)/server/provider_cli_adapter.o \
+    $(OBJDIR)/server/server_acp_resources.o $(OBJDIR)/server/server_native_tool_source.o \
+    $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/agent_tools.o \
+    $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/server/liveness.o \
+    $(OBJDIR)/db1_store_ready.o $(OBJDIR)/modules/delegates/delegate_role.o \
+     \
+    $(OBJDIR)/server/execution_policy_bus.o $(OBJDIR)/server/server_governed_action.o \
+    $(OBJDIR)/modules/tools/agent_tools.o $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
+    $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/modules/tools/agent_tools_completion.o \
+    $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o \
+    $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_learning_outcome.o \
+    $(OBJDIR)/tests/acp_route_learning_peer.o $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/delegates/delegate_routing.o \
+    $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/translation/history_ir.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_ir_stream.o \
+    $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/text.o $(OBJDIR)/util.o $(filter-out $(OBJDIR)/tests/support/role_template_toolset_stub.o,$(ACP_ROUTE_SUPPORT)) $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(OBJDIR)/tests/delegate_permissions_stub.o \
+    $(OBJDIR)/tests/support/delegate_role_seam_stub.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_tls.o $(OBJDIR)/server/server_conn_io.o $(OBJDIR)/server/server_compute_owner.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_reqctx.o \
+    $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/role_templates.o $(OBJDIR)/persona.o \
+    $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/modules/delegates/delegate_backend_docker.o \
+    $(OBJDIR)/modules/workspace/workspace_runner_queue.o $(OBJDIR)/modules/workspace/workspace_runner_registry.o \
+    $(OBJDIR)/modules/workspace/workspace_provider_detached.o $(OBJDIR)/modules/workspace/workspace_mirror.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB) -Wl,-rpath,'$(shell pkg-config --variable=libdir libpq 2>$(NULLDEV))'
+
+
+# Keep the actual command parser; registry metadata is an explicit fixture peer.
+# Pure protocol peer packaged only in the task-owned full-worker sandbox image.
+# Compile in the pinned Debian builder; this is not a shipping product.
+$(TESTPREFIX)/aimee-acp-fixture-agent: tests/support/acp_full_worker_agent.c vendor/cJSON.c vendor/headers/cJSON.h
+	@mkdir -p $(dir $@)
+	$(CC) -static -O2 -Wall -Wextra -Werror -Ivendor/headers tests/support/acp_full_worker_agent.c vendor/cJSON.c -lm -o $@
+
+# Actual trusted file helper protocol; header-only lower I/O, no authority peers.
+$(OBJDIR)/tests/test_scoped_file_io.o: aimee_forwarder.c headers/scoped_file_io.h
+$(TESTPREFIX)/unit-test-scoped-file-io: $(OBJDIR)/tests/test_scoped_file_io.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)

@@ -345,7 +345,9 @@ void agent_tools_effect_finish(const char *verdict, const char *reason)
    if (g_effect_active)
    {
       ti_effect_state_t outcome = TI_EFFECT_FAILED;
-      if (strcmp(verdict, "ok") == 0)
+      if (reason && !strcmp(reason, "effects_unknown"))
+         outcome = TI_EFFECT_UNKNOWN_OUTCOME;
+      else if (strcmp(verdict, "ok") == 0)
          outcome = TI_EFFECT_SUCCEEDED;
       else if (strcmp(verdict, "refused") == 0)
          outcome = TI_EFFECT_REFUSED;

@@ -973,7 +973,7 @@ all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
-$(FORWARDER): aimee_forwarder.c
+$(FORWARDER): aimee_forwarder.c headers/scoped_file_io.h
 	$(CC) -static -O2 -Wall -Wextra -Werror -o $@ $<
 ifneq ($(HAVE_GO),1)
 	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-runtime-web (browser UI)."

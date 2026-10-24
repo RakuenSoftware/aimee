@@ -111,6 +111,25 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
 
 int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
                                   int workspace_read_only);
+/* Same mandatory acquisition with a private producer-owned control listener.
+ * The caller must retain that listener until unbind has retired the container. */
+int workspace_turn_bind_container_scoped(const char *task_id, const char *image,
+                                         const char *workspace, int workspace_read_only,
+                                         const char *control_socket,
+                                         const char *control_helper_sha256, int package_proxy);
+/* Only the actual current verified container resource owner can supply/retire this
+ * process namespace. No config-selectable provider or caller ID is accepted. */
+int workspace_turn_container_identity(char container_id[65], char image_id[72]);
+int workspace_turn_container_retire(void);
+int workspace_turn_container_forwarder(unsigned port);
+int workspace_turn_container_transport(const char **binary, const char **engine_endpoint);
+int workspace_turn_container_file_owner_start(int executable_fd, int cwd_fd,
+                                              const char *selected_command, int (*validate)(void *),
+                                              void *context, long long deadline_ms);
+int workspace_turn_container_prepared(const char **command, const char **home,
+                                      const char **mcp_command);
+int workspace_turn_container_file(const char *path, int writing, const char *content, size_t length,
+                                  int timeout_ms, char **out, size_t *out_length, int *unknown);
 
 /* Returns 1 when this thread's turn is bound to a delegate's OWN container
  * (workspace_turn_bind_container succeeded and has not yet been unbound), 0

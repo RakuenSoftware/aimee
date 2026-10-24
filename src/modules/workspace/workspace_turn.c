@@ -906,8 +906,10 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
    return 0;
 }
 
-int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
-                                  int workspace_read_only)
+int workspace_turn_bind_container_scoped(const char *task_id, const char *image,
+                                         const char *workspace, int workspace_read_only,
+                                         const char *control_socket,
+                                         const char *control_helper_sha256, int package_proxy)
 {
    if (!task_id || !task_id[0])
       return 0;
@@ -962,8 +964,12 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        .hibernate_on_exit = 0,
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
-       .pkg_proxy = (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
-       .require_isolation = 1};
+       .pkg_proxy = control_socket
+                        ? package_proxy
+                        : (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
+       .require_isolation = 1,
+       .control_socket = control_socket,
+       .control_helper_sha256 = control_helper_sha256};
    void *state = NULL;
    int arc = b->acquire(b, task_id, &bcfg, &state);
    if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
@@ -1017,6 +1023,13 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    return 1;
 }
 
+int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
+                                  int workspace_read_only)
+{
+   return workspace_turn_bind_container_scoped(task_id, image, workspace, workspace_read_only, NULL,
+                                               NULL, 0);
+}
+
 void workspace_turn_set_default_workspace_for_test(const char *workspace)
 {
    snprintf(t_test_default_workspace, sizeof(t_test_default_workspace), "%s",
@@ -1036,6 +1049,68 @@ int workspace_turn_container_bound(void)
    if (s_container_bound_test_override >= 0)
       return s_container_bound_test_override;
    return t_turn_container_backend != NULL && workspace_provider_active() == &t_turn_container.base;
+}
+
+static int owned_docker_container(void)
+{
+   return workspace_provider_active() == &t_turn_container.base && t_turn_container_backend &&
+          t_turn_container_backend->owned_resources &&
+          t_turn_container_backend->owned_resources->identity &&
+          t_turn_container_backend->owned_resources->retire &&
+          t_turn_container_backend->owned_resources->forwarder &&
+          t_turn_container_backend->owned_resources->transport &&
+          t_turn_container_backend->owned_resources->file_owner_start &&
+          t_turn_container_backend->owned_resources->prepared &&
+          t_turn_container_backend->owned_resources->file && t_turn_container_state &&
+          t_turn_container_epoch[0];
+}
+int workspace_turn_container_identity(char container_id[65], char image_id[72])
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->identity(
+                                         t_turn_container_state, container_id, image_id)
+                                   : -1;
+}
+int workspace_turn_container_retire(void)
+{
+   return owned_docker_container()
+              ? t_turn_container_backend->owned_resources->retire(t_turn_container_state)
+              : -1;
+}
+int workspace_turn_container_forwarder(unsigned port)
+{
+   return owned_docker_container()
+              ? t_turn_container_backend->owned_resources->forwarder(t_turn_container_state, port)
+              : -1;
+}
+int workspace_turn_container_transport(const char **binary, const char **engine_endpoint)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->transport(
+                                         t_turn_container_state, binary, engine_endpoint)
+                                   : -1;
+}
+int workspace_turn_container_file_owner_start(int executable_fd, int cwd_fd,
+                                              const char *selected_command, int (*validate)(void *),
+                                              void *context, long long deadline_ms)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->file_owner_start(
+                                         t_turn_container_state, executable_fd, cwd_fd,
+                                         selected_command, validate, context, deadline_ms)
+                                   : -1;
+}
+int workspace_turn_container_prepared(const char **command, const char **home,
+                                      const char **mcp_command)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->prepared(
+                                         t_turn_container_state, command, home, mcp_command)
+                                   : -1;
+}
+int workspace_turn_container_file(const char *path, int writing, const char *content, size_t length,
+                                  int timeout_ms, char **out, size_t *out_length, int *unknown)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->file(
+                                         t_turn_container_state, path, writing, content, length,
+                                         timeout_ms, out, out_length, unknown)
+                                   : -1;
 }
 
 void workspace_turn_unbind_active(void)

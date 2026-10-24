@@ -8,6 +8,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "db1_client/db1.h"
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
+#include "server_acp_execution.h"
 #include "server_compute_impl.h"
 #include "agent_config.h"
 #include <aimee/gateway/gateway_policy.h>
@@ -778,6 +779,7 @@ static void delegate_worker_run(void *arg)
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
    char turn_root[MAX_PATH_LEN] = "", source_cwd[MAX_PATH_LEN] = "";
    workspace_turn_scope_t *source_workspace = NULL;
+   server_acp_container_scope_t *acp_container = NULL;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -1721,9 +1723,9 @@ static void delegate_worker_run(void *arg)
     * A WFE implement slice normally owns a dedicated per-slice worktree, so
     * container_ws points at that tree read-write. */
    int container_bound =
-       detached_bound
-           ? -1
-           : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
+       detached_bound ? -1
+                      : server_acp_container_bind(target_agent, deleg_id, sbx_image_arg,
+                                                  container_ws, container_ws_ro, &acp_container);
 
    if (cost_limit_failed)
    {
@@ -1776,6 +1778,8 @@ static void delegate_worker_run(void *arg)
     * isolation refusal (<0) already tore the container down and set no active binding. */
    if (container_bound > 0)
       workspace_turn_unbind_active();
+   server_acp_container_scope_close(acp_container);
+   acp_container = NULL;
    (void)db1_delegation_spawn_complete(deleg_id);
 
    if (rc == 0 && delegate_project_completed_result(&result, handoff_json) != 0)
@@ -2051,6 +2055,7 @@ static void delegate_worker_run(void *arg)
     * the exit has already sent its own error response; the success path returns
     * above and never falls through. */
 delegate_fail:
+   server_acp_container_scope_close(acp_container);
    run_cmd_set_cwd(NULL);
    free(resolved_prompt);
    free(template_sys_prompt);

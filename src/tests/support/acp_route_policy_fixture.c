@@ -110,6 +110,14 @@ cJSON *aimee_module_json_call(uint32_t event, uint32_t stage, cJSON *request, si
                 !strcmp(text(args, "command"),
                         "aimee --json tool call bash --arguments '{\"command\":\"aimee --json tool "
                         "call read_file path=owned.txt raw=true\"}'");
+   /* Full container worker: one exact read-only installed-CLI wrapper. This is
+    * only the external policy peer's recording; actual source/action/I/O stay real. */
+   if (fixture_fault == 5 && event == AIMEE_EXECUTION_POLICY_EVENT_TOOL &&
+       stage == AIMEE_EXECUTION_POLICY_STAGE_TOOL && principal_matches() &&
+       !strcmp(text(request, "tool"), "bash"))
+      allowed = !strcmp(text(args, "command"),
+                        "/usr/local/bin/aimee --json tool call read_file --arguments "
+                        "'{\"path\":\"full-worker.txt\",\"raw\":true}'");
    if (fixture_fault == 2 && !strcmp(text(request, "tool"), "write_file"))
       allowed = 0;
    cJSON *reply = cJSON_CreateObject();

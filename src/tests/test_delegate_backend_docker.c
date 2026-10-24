@@ -2,6 +2,12 @@
  * and fake-docker round trips for the docker backend. */
 
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +28,7 @@
  * records what it was asked and answers "isolated" so the flow proceeds; a case
  * that needs a refusal sets g_fake_isolation_refuse. */
 static int g_fake_isolation_refuse;
+static char fake_exec_environment[4096];
 static int g_fake_isolation_calls;
 static char g_fake_isolation_report[4096];
 static int g_fake_isolation_probe_failed;
@@ -370,6 +377,31 @@ static void test_docker_absolute_in_workspace_path_accepted(void)
    snprintf(sibling, sizeof(sibling), "%s-evil/x.txt", g_fixture_workspace);
    assert(b->write_file(b, state, sibling, "x") == -1);
 
+   /* These names must remain literal data through ordinary shell-backed I/O. */
+   const char *literal = "parent $'\n/$(touch FILE_IO_MUST_NOT_EXECUTE).txt";
+   assert(!b->write_file(b, state, literal, "literal bytes\n"));
+   char physical[1024], sentinel[1024], alias[1024];
+   snprintf(physical, sizeof physical, "%s/%s", g_fixture_workspace, literal);
+   snprintf(sentinel, sizeof sentinel, "%s/FILE_IO_MUST_NOT_EXECUTE", g_fixture_workspace);
+   assert(!access(physical, F_OK) && access(sentinel, F_OK));
+   snprintf(alias, sizeof alias, "./parent $'\n//$(touch FILE_IO_MUST_NOT_EXECUTE).txt");
+   content = NULL;
+   assert(!b->read_file(b, state, alias, 0, 0, &content));
+   assert(content && !strcmp(content, "literal bytes\n"));
+   free(content);
+   char **entries = NULL;
+   assert(b->list_dir(b, state, "./parent $'\n", &entries) == 1);
+   assert(!strcmp(entries[0], "$(touch FILE_IO_MUST_NOT_EXECUTE).txt"));
+   free(entries[0]);
+   free(entries);
+   snprintf(alias, sizeof alias, "%s/.", literal);
+   content = NULL;
+   assert(b->read_file(b, state, alias, 0, 0, &content) == -1 && !content);
+   assert(b->write_file(b, state, alias, "must not truncate") == -1);
+   FILE *actual = fopen(physical, "r");
+   assert(actual && fgetc(actual) == 'l');
+   fclose(actual);
+
    teardown_docker_fileio_state(b, state);
    printf("  PASS: test_docker_absolute_in_workspace_path_accepted\n");
 }
@@ -443,6 +475,8 @@ static const char *write_fake_docker_fixture(void)
    snprintf(path, sizeof(path), "/tmp/aimee-fake-docker-%d.sh", (int)getpid());
    char state_dir[256];
    snprintf(state_dir, sizeof(state_dir), "/tmp/aimee-fake-docker-state-%d", (int)getpid());
+   snprintf(fake_exec_environment, sizeof fake_exec_environment, "%s/exec-client-environment",
+            state_dir);
    mkdir(state_dir, 0700);
 
    FILE *f = fopen(path, "w");
@@ -502,8 +536,12 @@ static const char *write_fake_docker_fixture(void)
            "  exec)\n"
            "    # docker exec -i <name> bash -c <cmd>; LAST argv is the\n"
            "    # b64-wrapped command. Run it locally via bash.\n"
-           "    cmd=\"${@: -1}\"\n"
-           "    exec bash -c \"$cmd\"\n"
+           "    printf '%%s' \"${AIMEE_CONTAINER_PARENT_SECRET-unset}\" > "
+           "\"$STATE_DIR/exec-client-environment\"\n"
+           "    shift # exec\n"
+           "    if [ \"$1\" = -i ]; then shift; fi\n"
+           "    shift # exact container name\n"
+           "    exec \"$@\"\n"
            "    ;;\n"
            "  *)\n"
            "    exit 99\n"
@@ -722,6 +760,118 @@ static void test_docker_exec_runs_through_fake(void)
    printf("  PASS: test_docker_exec_runs_through_fake\n");
 }
 
+typedef struct
+{
+   pthread_t producer;
+   char ready[4096], release[4096];
+   int calls, fail;
+} exec_progress_t;
+static int actual_exec_progress(void *context)
+{
+   exec_progress_t *progress = context;
+   assert(pthread_equal(progress->producer, pthread_self()));
+   progress->calls++;
+   if (access(progress->ready, F_OK))
+      return 0;
+   if (progress->fail)
+      return -1;
+   FILE *release = fopen(progress->release, "w");
+   assert(release && fclose(release) == 0);
+   return 0;
+}
+static void test_scoped_exec_environment_progress_and_high_fds(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
+   delegate_backend_t *backend = delegate_backend_docker_get();
+   setenv("AIMEE_DOCKER_BIN", write_fake_docker_fixture(), 1);
+   setenv("AIMEE_CONTAINER_PARENT_SECRET", "must-stay-parent", 1);
+   delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
+   void *state = NULL;
+   assert(!backend->acquire(backend, "task-scoped-exec", &cfg, &state));
+   assert(backend->exec_scoped);
+   char *environment[] = {"PATH=/usr/bin:/bin", "SCOPED_TOKEN=owned 'quotes' $literal", NULL};
+   delegate_exec_scope_t scope = {.environment = environment, .replace_environment = 1};
+   char out[4096] = {0}, error[4096] = {0};
+   delegate_exec_result_t result = {.stdout_buf = out,
+                                    .stdout_cap = sizeof out,
+                                    .stderr_buf = error,
+                                    .stderr_cap = sizeof error};
+   assert(!backend->exec_scoped(
+       backend, state,
+       "printf '%s:%s' \"$SCOPED_TOKEN\" \"${AIMEE_CONTAINER_PARENT_SECRET-unset}\"", 2000, &scope,
+       &result));
+   assert(result.exit_code == 0 && !strcmp(out, "owned 'quotes' $literal:unset"));
+   assert(!strcmp(getenv("AIMEE_CONTAINER_PARENT_SECRET"), "must-stay-parent"));
+   assert(!getenv("SCOPED_TOKEN"));
+   FILE *client_environment = fopen(fake_exec_environment, "r");
+   char client_secret[64] = {0};
+   assert(client_environment && fgets(client_secret, sizeof client_secret, client_environment));
+   assert(!fclose(client_environment) && !strcmp(client_secret, "unset"));
+   for (int mask = 1; mask < 8; mask++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         for (int fd = 0; fd < 3; fd++)
+            if (mask & (1 << fd))
+               close(fd);
+         int rc = backend->exec_scoped(backend, state, "printf stdio-safe", 2000, &scope, &result);
+         _exit(rc || result.exit_code || strcmp(out, "stdio-safe") ? 1 : 0);
+      }
+      int status = 0;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   }
+   exec_progress_t progress = {.producer = pthread_self()};
+   snprintf(progress.ready, sizeof progress.ready, "%s/container-progress-ready-%d",
+            platform_tmpdir(), getpid());
+   snprintf(progress.release, sizeof progress.release, "%s/container-progress-release-%d",
+            platform_tmpdir(), getpid());
+   unlink(progress.ready);
+   unlink(progress.release);
+   scope.progress = actual_exec_progress;
+   scope.context = &progress;
+   char command[9000];
+   snprintf(command, sizeof command,
+            "exec 1>&- 2>&-; : > '%s'; while [ ! -f '%s' ]; do sleep 0.01; done", progress.ready,
+            progress.release);
+   assert(!backend->exec_scoped(backend, state, command, 2000, &scope, &result));
+   assert(result.exit_code == 0 && progress.calls > 1);
+   unlink(progress.ready);
+   unlink(progress.release);
+   progress.calls = 0;
+   progress.fail = 1;
+   assert(backend->exec_scoped(backend, state, command, 2000, &scope, &result) < 0);
+   assert(result.exit_code == -1 && progress.calls > 1 && result.latency_ms < 1800);
+   errno = 0;
+   assert(waitpid(-1, NULL, WNOHANG) == -1 && errno == ECHILD); /* Local transport joined only. */
+   unlink(progress.ready);
+   unlink(progress.release);
+   int descriptors[FD_SETSIZE + 32], count = 0;
+   do
+   {
+      assert(count < (int)(sizeof descriptors / sizeof descriptors[0]));
+      descriptors[count] = open("/dev/null", O_RDONLY);
+      assert(descriptors[count] >= 0);
+   } while (descriptors[count++] < FD_SETSIZE + 8);
+   scope.progress = NULL;
+   scope.context = NULL;
+   assert(!backend->exec_scoped(backend, state, "printf high-fd", 2000, &scope, &result));
+   assert(result.exit_code == 0 && !strcmp(out, "high-fd"));
+   for (int i = 0; i < count; i++)
+      close(descriptors[i]);
+   backend->release(backend, state, 0);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   unsetenv("AIMEE_CONTAINER_PARENT_SECRET");
+   puts("  PASS: scoped remote env, producer progress after output close, local cancellation join "
+        "and high FDs");
+}
+
 static void test_docker_exec_propagates_nonzero_exit(void)
 {
    delegate_backend_reset_for_test();
@@ -771,10 +921,11 @@ static void test_docker_exec_timeout_kills_inner_command(void)
    assert(snprintf(command, sizeof(command), "sleep 2; : > %s", sentinel) < (int)sizeof(command));
    char out[256] = {0}, err[256] = {0};
    delegate_exec_result_t r = {0, 0, out, sizeof(out), err, sizeof(err)};
-   assert(b->exec(b, state, command, 500, &r) == 0);
-   assert(r.exit_code != 0);
+   int rc = b->exec(b, state, command, 500, &r);
+   assert(rc == 0 || rc == -1);
+   assert(r.exit_code != 0 && (rc == 0 || r.exit_code == -1));
    assert(r.latency_ms < 1500);
-   usleep(750000);
+   usleep(2100000); /* Observe beyond the child's actual two-second effect. */
    assert(access(sentinel, F_OK) != 0);
 
    b->release(b, state, 0);
@@ -1233,8 +1384,115 @@ static void test_reap_aged_removes_only_old(void)
    printf("  PASS: test_reap_aged_removes_only_old\n");
 }
 
+/* Failure-only peer: no create or affirmative isolation verdict. This tests
+ * custody transfer/backpressure and reaping, while the Go tests own journal
+ * attestation and the real-daemon fixture owns actual retirement. */
+static int line_count(const char *path)
+{
+   FILE *file = fopen(path, "r");
+   int count = 0, c;
+   if (!file)
+      return 0;
+   while ((c = fgetc(file)) != EOF)
+      count += c == '\n';
+   fclose(file);
+   return count;
+}
+static void test_owned_cleanup_custody_capacity_and_reaping(void)
+{
+   setup_fake_egress_fixture();
+   setenv("AIMEE_DOCKER_BIN", write_fake_docker_fixture(), 1);
+   char base[512], helper[600], acquisitions[600], cleanups[600], allow[600], endpoint[600];
+   snprintf(base, sizeof base, "%s/acp-cleanup-%d", platform_tmpdir(), (int)getpid());
+   assert(!mkdir(base, 0700));
+   snprintf(helper, sizeof helper, "%s/helper", base);
+   snprintf(acquisitions, sizeof acquisitions, "%s/acquired", base);
+   snprintf(cleanups, sizeof cleanups, "%s/cleaned", base);
+   snprintf(allow, sizeof allow, "%s/allow", base);
+   snprintf(endpoint, sizeof endpoint, "unix://%s/aimee-http.sock", g_fixture_home);
+   setenv("DOCKER_HOST", endpoint, 1);
+   FILE *file = fopen(helper, "w");
+   assert(file);
+   fprintf(
+       file,
+       "#!/bin/sh\ncase \"$1\" in\nacquire) printf 'attempt\\n' >> '%s'; exit 1;;\n"
+       "cleanup-lease) printf 'attempt\\n' >> '%s'; [ -f '%s' ] || exit 1; "
+       "printf '%%s\\n' "
+       "'{\"schema\":\"aimee.container-cleanup.v1\",\"removed\":false,\"no_container\":true}';;\n"
+       "*) exit 9;;\nesac\n",
+       acquisitions, cleanups, allow);
+   assert(!fclose(file) && !chmod(helper, 0700));
+   setenv("AIMEE_DELEGATE_EGRESS_BIN", helper, 1);
+   delegate_backend_t *backend = delegate_backend_docker_get();
+   char scopes[17][640], sockets[17][700];
+   for (int i = 0; i < 17; i++)
+   {
+      snprintf(scopes[i], sizeof scopes[i], "%s/%064d", base, i);
+      assert(!mkdir(scopes[i], 0700));
+      snprintf(sockets[i], sizeof sockets[i], "%s/aimee-http.sock", scopes[i]);
+      int parent = open(scopes[i], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+      assert(parent >= 0 && sock >= 0);
+      struct sockaddr_un address = {.sun_family = AF_UNIX};
+      snprintf(address.sun_path, sizeof address.sun_path, "/proc/self/fd/%d/aimee-http.sock",
+               parent);
+      assert(!bind(sock, (struct sockaddr *)&address, sizeof address));
+      close(sock);
+      int helper_fd = openat(parent, "owner-io", O_WRONLY | O_CREAT | O_EXCL, 0555);
+      assert(helper_fd >= 0 && write(helper_fd, "owned", 5) == 5 && !close(helper_fd));
+      close(parent);
+      delegate_backend_config_t cfg = {0};
+      cfg.workspace = g_fixture_workspace;
+      cfg.control_socket = sockets[i];
+      cfg.control_helper_sha256 =
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      void *state = NULL;
+      assert(backend->acquire(backend, "failure-only", &cfg, &state) ==
+             DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+      assert(!state);
+   }
+   assert(line_count(acquisitions) == 16 && line_count(cleanups) == 16);
+   char last_lease[768];
+   for (int i = 0; i < 16; i++)
+   {
+      snprintf(last_lease, sizeof last_lease, "%s/lease.jsonl", scopes[i]);
+      assert(!access(last_lease, F_OK) && !access(sockets[i], F_OK));
+   }
+   snprintf(last_lease, sizeof last_lease, "%s/lease.jsonl", scopes[16]);
+   assert(access(last_lease, F_OK) == -1 && errno == ENOENT);
+   file = fopen(allow, "w");
+   assert(file && !fclose(file));
+   for (int i = 0; i < 16; i++)
+      (void)delegate_backend_docker_reap_aged(3600);
+   assert(line_count(cleanups) == 32);
+   (void)delegate_backend_docker_reap_aged(3600);
+   assert(line_count(cleanups) == 32); /* Removed custody never runs twice. */
+   delegate_backend_config_t immediate = {
+       .workspace = g_fixture_workspace,
+       .control_socket = sockets[16],
+       .control_helper_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
+   void *state = NULL;
+   assert(backend->acquire(backend, "normal-cleanup", &immediate, &state) ==
+              DELEGATE_ACQUIRE_REFUSED_ISOLATION &&
+          !state);
+   assert(line_count(acquisitions) == 17 && line_count(cleanups) == 33);
+   for (int i = 0; i < 17; i++)
+      assert(access(scopes[i], F_OK) == -1 && errno == ENOENT);
+   unlink(helper);
+   unlink(acquisitions);
+   unlink(cleanups);
+   unlink(allow);
+   assert(!rmdir(base));
+   unsetenv("DOCKER_HOST");
+   unsetenv("AIMEE_DELEGATE_EGRESS_BIN");
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   puts("  PASS: cleanup custody retained/reaped once; capacity refuses before helper launch");
+}
+
 int main(void)
 {
+   test_owned_cleanup_custody_capacity_and_reaping();
    test_remove_orphans_accepts_only_container_ids();
    test_reap_aged_removes_only_old();
    printf("delegate_backend_docker:\n");
@@ -1248,6 +1506,7 @@ int main(void)
    test_acquire_refuses_when_egress_helper_refuses();
    test_release_hibernate_keeps_container();
    test_docker_exec_runs_through_fake();
+   test_scoped_exec_environment_progress_and_high_fds();
    test_docker_exec_propagates_nonzero_exit();
    test_docker_exec_timeout_kills_inner_command();
    test_docker_exec_set_cwd_prefixes_subsequent_calls();

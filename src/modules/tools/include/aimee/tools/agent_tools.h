@@ -102,7 +102,8 @@ char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
 /* Private host file-resource executor. It runs only for read_file/write_file,
  * after the same admitted-schema, role, guardrail and final-action owners as
  * ordinary dispatch. The callback receives the final owner-normalized args;
- * its explicit error flag is authoritative, never the bytes being read. */
+ * its explicit error flag is authoritative, never the bytes being read. A write
+ * may return SCOPED_WRITE_OUTCOME_UNKNOWN when completion is not confirmed. */
 typedef char *(*agent_tool_file_resource_fn)(const char *name, const struct cJSON *arguments,
                                              void *context, int *is_error);
 char *dispatch_tool_file_resource_ctx_status(const struct aimee_tool *admitted,
@@ -118,7 +119,8 @@ int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
 
 /* Host-only shell environment. Prepared/owned by the caller until the shell
  * joins; only the forked child installs it. Never changes process environ.
- * Container/detached providers do not inherit host transport capabilities. */
+ * Containers receive this scope only through an explicit scoped resource call;
+ * ambient host transport capabilities are never copied into the container. */
 typedef struct
 {
    char *const *environment;
@@ -129,6 +131,7 @@ typedef struct
 /* Lexical producer-thread scope; all borrowed data lives until the child joins.
  * A failing progress callback cancels and joins the child, never grants control. */
 agent_tools_bash_scope_t agent_tools_bind_bash_scope(const agent_tools_bash_scope_t *scope);
+agent_tools_bash_scope_t agent_tools_bash_scope_snapshot(void);
 char *const *agent_tools_bind_bash_environment(char *const environment[]);
 
 /* Complete registry-owned canonical catalog. Exposure preserves the selected
@@ -286,9 +289,9 @@ typedef struct
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
                             /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
-                            /* "effect_contract" | "precondition" | "postcondition"        */
-   const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
-                            /* "outbound:sse" | "served"                    */
+   /* "effect_contract" | "precondition" | "postcondition" | "effects_unknown" */
+   const char *mode; /* "internal" | "outbound" | "outbound:stdio" | */
+                     /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;
 typedef void (*agent_tool_completion_cb_t)(const char *tool, const agent_tool_completion_t *outcome,
                                            void *ud);
