@@ -272,3 +272,31 @@ journal and exact-CID cleanup (including anonymous volumes) pass 732 normal and
 732 race tests with two explicit optional skips per lane. Legacy helper mode
 remains compatible. This does not claim the still-private C container cutover is
 installed or fully qualified. Evidence: `/var/tmp/aimee-go-owner-main-732/proof.json`.
+
+Latest integration checkpoint (not completion): `522d038cf` resolves ACP executable
+eligibility in the producer-selected container namespace, while preserving host,
+primary, syntax, health and credential checks. Five normal and five sanitizer
+targets pass on the main worktree. `1933e65b9` preserves unknown opening stream
+usage and routes Chat-to-Anthropic output through the existing canonical response
+assembler; native observed streaming remains incremental. Ten normal and ten
+sanitizer targets pass with unchanged source inputs. It also fixes the existing
+cache-write/cache-read argument inversion in that ingress accounting call.
+Evidence: `/var/tmp/aimee-routing-main-combined-proof/proof.json` and
+`/var/tmp/aimee-stream-main-522d-proof/proof.json`.
+
+The fresh full Go normal/race run exposed exact-mode fixture assumptions under
+umask `077`: three measured-helper fixtures were created as `0500` instead of `0555`.
+The strict production owner correctly refused them. The test-only correction sets
+the intended mode explicitly. The full rerun passes normal and race lanes with
+4,183 server-Go tests, 43 control-web tests and 291 runtime-web tests per lane;
+336 server-Go tests retain explicit optional skips. Module input bytes and modes
+were unchanged during the run. Evidence:
+`/var/tmp/aimee-current-go-full-private-modes/proof.json`. Original failed receipts
+are retained at `/var/tmp/aimee-current-go-full-522d/proof.json`.
+
+A further active aggregate consumer gap is under repair: metrics can show known
+spend subtotals without identifying calls with unknown usage. Preserve the known
+subtotal and derive incomplete-usage reporting from the existing audit usage kind;
+do not fabricate a complete bill or introduce a competing history owner. The full
+container-worker guest proof, final composed build, fresh installation, retained
+installation upgrade, browser replay and bounded native recall remain required.
