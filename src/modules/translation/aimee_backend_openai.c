@@ -272,7 +272,20 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
    if (ir->metadata)
       cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1));
    if (ir->stream)
+   {
       cJSON_AddBoolToObject(out, "stream", 1);
+      /* Anthropic's required opening usage must come from the completed Chat
+       * observation. Same-wire client stream options retain their own owner. */
+      if (ir->frontend == AIMEE_WIRE_ANTHROPIC)
+      {
+         cJSON *options = cJSON_AddObjectToObject(out, "stream_options");
+         if (!options || !cJSON_AddBoolToObject(options, "include_usage", 1))
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
+      }
+   }
 
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
    /* system blocks -> leading system messages, one per block (round-trip stable

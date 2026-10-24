@@ -114,6 +114,29 @@ static void test_unobserved_stream_usage(void)
                 !delta[0].usage_out);
       cJSON_Delete(frame);
    }
+   /* Initial output is a progress observation, never a final total. */
+   for (int final_observed = 0; final_observed <= 1; final_observed++)
+   {
+      anthropic_backend_stream_state_t source;
+      anthropic_backend_stream_state_init(&source);
+      cJSON *frame = cJSON_Parse("{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":"
+                                 "20,\"output_tokens\":3}}}");
+      aimee_delta_t result[2];
+      assert(anthropic_stream_to_deltas("message_start", frame, &source, result, 2) == 1);
+      assert(!result[0].usage_unobserved && result[0].usage_out == 3);
+      cJSON_Delete(frame);
+      frame = cJSON_Parse(
+          final_observed
+              ? "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}"
+              : "{\"delta\":{\"stop_reason\":\"end_turn\"}}");
+      assert(anthropic_stream_to_deltas("message_delta", frame, &source, result, 2) >= 0);
+      cJSON_Delete(frame);
+      frame = cJSON_Parse("{}");
+      assert(anthropic_stream_to_deltas("message_stop", frame, &source, result, 2) == 1);
+      assert(result[0].usage_unobserved == !final_observed && !result[0].usage_out);
+      assert(result[0].usage_in == (final_observed ? 20 : 0));
+      cJSON_Delete(frame);
+   }
    anthropic_stream_state_t client = {0};
    assert(!anthropic_delta_render(delta, &client, "id", "model"));
    assert(anthropic_delta_emit(delta, &client, "id", "model", NULL, NULL) < 0);
@@ -122,6 +145,28 @@ static void test_unobserved_stream_usage(void)
 int main(void)
 {
    test_unobserved_stream_usage();
+   /* A role-only Chat opening cannot claim observed input zero on Anthropic. */
+   for (int observed = 0; observed <= 1; observed++)
+   {
+      openai_stream_state_t source;
+      openai_stream_state_init(&source);
+      cJSON *chunk =
+          cJSON_Parse(observed ? "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}],\"usage\":{"
+                                 "\"prompt_tokens\":0,\"completion_tokens\":0}}"
+                               : "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}");
+      aimee_delta_t opening[4];
+      assert(openai_chunk_to_deltas(chunk, &source, opening, 4) == 1);
+      assert(opening[0].usage_unobserved == !observed);
+      anthropic_stream_state_t frontend = {0};
+      char *frame = anthropic_delta_render(opening, &frontend, "id", "model");
+      assert((frame != NULL) == observed && frontend.started == observed);
+      free(frame);
+      g_emit_acc[0] = 0;
+      assert((anthropic_delta_emit(opening, &frontend, "id", "model", emit_collect, NULL) > 0) ==
+             observed);
+      assert((g_emit_acc[0] != 0) == observed);
+      cJSON_Delete(chunk);
+   }
    printf("ir-stream: ");
    openai_stream_state_t ost;
    openai_stream_state_init(&ost);
@@ -129,8 +174,9 @@ int main(void)
    char acc[4096] = "";
 
    /* text streaming */
-   feed("{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}", &ost, &ast, acc,
-        sizeof acc);
+   feed("{\"choices\":[{\"delta\":{"
+        "\"role\":\"assistant\",\"content\":\"Hel\"}}]}",
+        &ost, &ast, acc, sizeof acc);
    feed("{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}", &ost, &ast, acc, sizeof acc);
    /* a tool call, id+name then streamed arguments */
    feed("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
@@ -144,8 +190,9 @@ int main(void)
         "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4}}",
         &ost, &ast, acc, sizeof acc);
 
-   /* the accumulated Anthropic SSE must be well-formed + carry the content */
-   assert(strstr(acc, "event: message_start"));
+   /* A Chat role-only opening has unknown usage and cannot render message_start.
+    * Standalone block/terminal render cells still retain their exact content. */
+   assert(!strstr(acc, "event: message_start"));
    assert(strstr(acc, "\"type\":\"content_block_start\"") && strstr(acc, "\"type\":\"text\""));
    assert(strstr(acc, "\"type\":\"text_delta\",\"text\":\"Hel\""));
    assert(strstr(acc, "\"type\":\"text_delta\",\"text\":\"lo\""));
@@ -155,9 +202,8 @@ int main(void)
    assert(strstr(acc, "\"type\":\"content_block_stop\""));
    assert(strstr(acc, "\"stop_reason\":\"tool_use\""));
    assert(strstr(acc, "event: message_stop"));
-   /* exactly one message_start event (not re-emitted per chunk) */
-   char *ms = strstr(acc, "event: message_start");
-   assert(ms && !strstr(ms + 1, "event: message_start"));
+   /* Only a complete canonical response can supply the deferred opening usage. */
+   assert(!ast.started);
 
    /* The callback-emit path (anthropic_delta_emit, the live-relay sink) must
     * produce byte-identical framed SSE to anthropic_delta_render (shared builder). */
@@ -165,8 +211,9 @@ int main(void)
    openai_stream_state_init(&ost2);
    anthropic_stream_state_t ast2 = {0};
    g_emit_acc[0] = '\0';
-   feed_emit("{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}", &ost2,
-             &ast2);
+   feed_emit("{\"choices\":[{\"delta\":{"
+             "\"role\":\"assistant\",\"content\":\"Hel\"}}]}",
+             &ost2, &ast2);
    feed_emit("{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}", &ost2, &ast2);
    feed_emit("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
              "\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}]}}]}",

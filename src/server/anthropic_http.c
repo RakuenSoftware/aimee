@@ -217,6 +217,24 @@ static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
    return driver_is_anthropic(driver) ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
 }
 
+static int messages_response_projection(const aimee_response_t *response)
+{
+   aimee_message_t message = {
+       .role = "assistant", .blocks = response->content, .n_blocks = response->n_content};
+   aimee_request_t view = {.messages = &message, .n_messages = 1};
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(&view, AIMEE_WIRE_ANTHROPIC, &projection);
+   if (aimee_ir_session_emit_projection(response->model, projection.omitted_reasoning_blocks,
+                                        projection.omitted_opaque_state_blocks, "response"))
+      return -1;
+   if (projection.omitted_reasoning_blocks)
+      LOG_INFO(
+          "translation.projection",
+          "wire=anthropic omitted_reasoning=%d omitted_opaque_state=%d canonical_response=retained",
+          projection.omitted_reasoning_blocks, projection.omitted_opaque_state_blocks);
+   return response->error_message ? -1 : 0;
+}
+
 /* Native response decoding owns the full typed result until policy and the
  * explicit client render boundary finish. Invalid frames never use a fallback. */
 static int messages_decode_response(const char *frame, const delegate_driver_t *driver,
@@ -234,20 +252,7 @@ static int messages_decode_response(const char *frame, const delegate_driver_t *
    }
    if (aimee_ir_session_emit_buffered_response(out, NULL))
       return -1;
-   aimee_message_t message = {
-       .role = "assistant", .blocks = out->content, .n_blocks = out->n_content};
-   aimee_request_t view = {.messages = &message, .n_messages = 1};
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(&view, AIMEE_WIRE_ANTHROPIC, &projection);
-   if (aimee_ir_session_emit_projection(out->model, projection.omitted_reasoning_blocks,
-                                        projection.omitted_opaque_state_blocks, "response"))
-      return -1;
-   if (projection.omitted_reasoning_blocks)
-      LOG_INFO(
-          "translation.projection",
-          "wire=anthropic omitted_reasoning=%d omitted_opaque_state=%d canonical_response=retained",
-          projection.omitted_reasoning_blocks, projection.omitted_opaque_state_blocks);
-   return out->error_message ? -1 : 0;
+   return messages_response_projection(out);
 }
 
 static const char *messages_stop_reason(const aimee_response_t *response)
@@ -822,13 +827,8 @@ typedef struct
 {
    sse_parser_t parser;
    openai_stream_state_t ir_ost;
-   anthropic_stream_state_t ir_ast;
-   server_http_sse_event_emit emit;
-   void *emit_ctx;
+   aimee_ir_response_builder_t assembled;
    const char *msg_id;
-   const char *model;
-   long ir_usage_out; /* tapped from the TURN_STOP delta for the cost row */
-   int ir_usage_unobserved;
    int ir_failed;
 } prov_stream_ctx_t;
 
@@ -856,6 +856,20 @@ static int messages_publish_delta(const char *message_id, const aimee_delta_t *d
    return aimee_ir_session_emit(&event);
 }
 
+/* Preserve original source deltas, but defer this wire's required numeric usage
+ * until the canonical assembler has the completed provider observation. */
+static int prov_accept_delta(prov_stream_ctx_t *stream, const aimee_delta_t *delta)
+{
+   if (aimee_ir_response_builder_apply(&stream->assembled, delta) ||
+       messages_publish_delta(stream->msg_id, delta))
+   {
+      aimee_ir_session_fail_capture();
+      stream->ir_failed = 1;
+      return -1;
+   }
+   return 0;
+}
+
 static int prov_line_cb(const char *line, size_t len, void *ud)
 {
    prov_stream_ctx_t *c = (prov_stream_ctx_t *)ud;
@@ -877,22 +891,8 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
                c->ir_failed = 1;
                return -1;
             }
-            if (n)
-            {
-               if (messages_publish_delta(c->msg_id, &terminal))
-               {
-                  c->ir_failed = 1;
-                  return -1;
-               }
-               c->ir_usage_out = terminal.usage_out;
-               c->ir_usage_unobserved = terminal.usage_unobserved;
-               if (anthropic_delta_emit(&terminal, &c->ir_ast, c->msg_id, c->model, c->emit,
-                                        c->emit_ctx) < 0)
-               {
-                  c->ir_failed = 1;
-                  return -1;
-               }
-            }
+            if (n && prov_accept_delta(c, &terminal))
+               return -1;
             return 0;
          }
          cJSON *chunk = aimee_ir_json_parse_frame(p, data_length);
@@ -921,26 +921,11 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
                return -1;
             }
             for (int i = 0; i < n; i++)
-            {
-               if (messages_publish_delta(c->msg_id, &deltas[i]))
+               if (prov_accept_delta(c, &deltas[i]))
                {
-                  c->ir_failed = 1;
                   cJSON_Delete(chunk);
                   return -1;
                }
-               if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
-               {
-                  c->ir_usage_out = deltas[i].usage_out;
-                  c->ir_usage_unobserved = deltas[i].usage_unobserved;
-               }
-               if (anthropic_delta_emit(&deltas[i], &c->ir_ast, c->msg_id, c->model, c->emit,
-                                        c->emit_ctx) < 0)
-               {
-                  c->ir_failed = 1;
-                  cJSON_Delete(chunk);
-                  return -1;
-               }
-            }
             cJSON_Delete(chunk);
          }
          else
@@ -1213,9 +1198,8 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
    return status;
 }
 
-/* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
- * through the neutral IR-delta model, synthesize a clean close if the upstream
- * cut off early, and record cost. Extracted from messages_stream(). */
+/* Chat usage arrives after its content. Assemble canonical deltas before
+ * replaying Anthropic SSE so its first frame carries observed input usage. */
 /* Returns the upstream HTTP status, so the caller can tell a payload the
  * provider rejected from a stream that merely ended. */
 static int messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
@@ -1228,11 +1212,7 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
    memset(&pc, 0, sizeof pc);
    sse_parser_init(&pc.parser);
    openai_stream_state_init(&pc.ir_ost);
-   pc.ir_usage_unobserved = 1;
-   pc.emit = emit;
-   pc.emit_ctx = ctx;
    pc.msg_id = msg_id;
-   pc.model = model;
    int ir_status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, prov_chunk_cb, &pc,
                                           ag->timeout_ms, extra[0] ? extra : NULL, ag->provider,
                                           ag->model, WIRE_FENCE_OPENAI_CHAT);
@@ -1240,40 +1220,38 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
    if (ir_status == HTTP_RETRY_ADMISSION_REFUSED)
    {
       messages_stream_pipeline_error(emit, ctx);
+      aimee_ir_response_builder_free(&pc.assembled);
       return ir_status;
    }
-   if (pc.ir_failed || !pc.ir_ost.stopped)
+   if (!pc.ir_failed && ir_status == 200 && !pc.ir_ost.stopped)
    {
       aimee_delta_t terminal;
-      int n =
-          pc.ir_failed || ir_status != 200 ? -1 : openai_stream_finish(&pc.ir_ost, &terminal, 1);
-      if (n > 0)
-      {
-         if (messages_publish_delta(msg_id, &terminal))
-         {
-            terminal = (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
-                                       .error_message = "Canonical stream persistence failed"};
-            ir_status = -1;
-         }
-         pc.ir_usage_out = terminal.usage_out;
-         pc.ir_usage_unobserved = terminal.usage_unobserved;
-         if (anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx) < 0)
-            ir_status = -1;
-      }
-      else if (n < 0)
-      {
-         terminal =
-             (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
-                             .error_message = "Provider stream ended before its completion event"};
-         anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx);
-         ir_status = -1;
-      }
+      int n = openai_stream_finish(&pc.ir_ost, &terminal, 1);
+      if (n < 0 || (n > 0 && prov_accept_delta(&pc, &terminal)))
+         pc.ir_failed = 1;
+   }
+   if (pc.ir_failed || ir_status != 200 || !pc.assembled.complete ||
+       messages_response_projection(&pc.assembled.response) ||
+       messages_emit_response(&pc.assembled.response, msg_id, model, emit, ctx))
+   {
+      aimee_delta_t error = {
+          .type = AIMEE_DELTA_ERROR,
+          .error_message = "Provider stream failed canonical admission or has no observed usage"};
+      anthropic_stream_state_t state = {0};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
+      ir_status = -1;
    }
    if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          ag->name, ag->model, model, NULL, (int)pc.ir_ost.usage_in, (int)pc.ir_usage_out,
-          (int)pc.ir_ost.usage_cache_read, (int)pc.ir_ost.usage_cache_write, "anthropic-ingress",
-          pc.ir_usage_unobserved ? "unobserved" : (ir_status == 200 ? "realized" : "partial"));
+   {
+      const aimee_response_t *response = &pc.assembled.response;
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL, (int)response->usage_in,
+                                (int)response->usage_out, (int)response->usage_cache_write,
+                                (int)response->usage_cache_read, "anthropic-ingress",
+                                !pc.assembled.complete || response->usage_unobserved
+                                    ? "unobserved"
+                                    : (ir_status == 200 ? "realized" : "partial"));
+   }
+   aimee_ir_response_builder_free(&pc.assembled);
    return ir_status;
 }
 

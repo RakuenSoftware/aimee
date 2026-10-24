@@ -108,6 +108,11 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       if (d)
       {
          d->type = AIMEE_DELTA_TURN_START;
+         d->usage_in = st->usage_in;
+         d->usage_out = st->usage_out;
+         d->usage_cache_read = st->usage_cache_read;
+         d->usage_cache_write = st->usage_cache_write;
+         wire_unknown_delta_usage(d, st->usage_seen);
          st->started = 1;
       }
    }
@@ -329,6 +334,7 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
          return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_TURN_START;
+      out[0].usage_unobserved = 1; /* messageStart contains no usage observation. */
       return 1;
    }
 
@@ -549,6 +555,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       if (aimee_ir_read_usage(usage, "output_tokens", &st->pending_usage_out) < 0)
          return -1;
       st->usage_fields |= wire_usage_fields(usage, "input_tokens", "output_tokens") & 1;
+      out[0].usage_unobserved = wire_usage_fields(usage, "input_tokens", "output_tokens") != 3;
       out[0].usage_out = st->pending_usage_out;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_cache_read = st->pending_cache_read;
@@ -782,7 +789,8 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
 {
    if (!d)
       return 0;
-   if (d->type == AIMEE_DELTA_TURN_STOP && d->usage_unobserved)
+   if ((d->type == AIMEE_DELTA_TURN_START || d->type == AIMEE_DELTA_TURN_STOP) &&
+       d->usage_unobserved)
       return -1; /* Required numeric usage has no truthful projection on this wire. */
    if (d->refusal &&
        (d->type != AIMEE_DELTA_TURN_STOP || d->stop_reason != AIMEE_STOP_CONTENT_FILTER ||

@@ -36,7 +36,9 @@ int main(void)
       converse_stream_state_init(&st);
       int n = run("messageStart", "{\"role\":\"assistant\"}", &st, d, 8, &pl);
       assert(n == 1);
-      assert(d[0].type == AIMEE_DELTA_TURN_START);
+      assert(d[0].type == AIMEE_DELTA_TURN_START && d[0].usage_unobserved);
+      anthropic_stream_state_t client = {0};
+      assert(!anthropic_delta_render(d, &client, "message", "model") && !client.started);
       cJSON_Delete(pl);
    }
 

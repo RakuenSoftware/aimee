@@ -43,6 +43,7 @@ static char *g_last_body;
 static char *g_last_extra; /* upstream extra-header block from the last post */
 static int g_stream_status = 200;
 static const char *g_stream_payload;
+static int g_provider_active, g_provider_emits;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
 static int g_proof_gated = 0;
@@ -237,8 +238,11 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    free(g_last_body);
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
-   if (g_stream_payload && callback &&
-       callback(g_stream_payload, strlen(g_stream_payload), userdata) != 0)
+   g_provider_active = 1;
+   int failed = g_stream_payload && callback &&
+                callback(g_stream_payload, strlen(g_stream_payload), userdata) != 0;
+   g_provider_active = 0;
+   if (failed)
       return -1;
    return g_stream_status;
 }
@@ -432,6 +436,7 @@ static void system_prompt_driver_caps(const agent_t *agent, driver_caps_t *caps)
 
 static void cap_emit(void *ctx, const char *event, const char *data_json)
 {
+   g_provider_emits += g_provider_active;
    emit_capture_t *cap = (emit_capture_t *)ctx;
    assert(cap->count < EMIT_CAP_MAX);
    snprintf(cap->events[cap->count], sizeof(cap->events[cap->count]), "%s", event);
@@ -493,6 +498,9 @@ static void test_unknown_usage_has_no_anthropic_success_projection(void)
          errors += !strcmp(cap.events[i], "error");
       }
       assert(stopped == known && (known || errors));
+      assert(known || (cap.count == 1 && !strcmp(cap.events[0], "error")));
+      if (known)
+         assert(strstr(cap.data[0], "\"input_tokens\":0"));
    }
    const delegate_driver_t anthropic = {.name = "anthropic"};
    for (int known = 0; known <= 1; known++)
@@ -503,7 +511,7 @@ static void test_unknown_usage_has_no_anthropic_success_projection(void)
       g_stream_payload =
           known ? "event: message_start\ndata: "
                   "{\"message\":{\"id\":\"usage-zero\",\"role\":\"assistant\",\"usage\":{\"input_"
-                  "tokens\":0}}}\n\nevent: message_delta\ndata: "
+                  "tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: "
                   "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}"
                   "\n\nevent: message_stop\ndata: {}\n\n"
                 : "event: message_start\ndata: "
@@ -519,10 +527,97 @@ static void test_unknown_usage_has_no_anthropic_success_projection(void)
          errors += !strcmp(cap.events[i], "error");
       }
       assert(stopped == known && (known || errors));
+      assert(known || (cap.count == 1 && !strcmp(cap.events[0], "error")));
+      if (known)
+         assert(strstr(cap.data[0], "\"input_tokens\":0"));
    }
    reset_capture();
    g_driver = NULL;
    PASS("unknown usage cannot become Anthropic success or realized zero cost");
+}
+
+static void test_native_opening_usage_requires_observed_pair(void)
+{
+   const char *usage[] = {"",
+                          ",\"usage\":null",
+                          ",\"usage\":{}",
+                          ",\"usage\":{\"input_tokens\":0}",
+                          ",\"usage\":{\"output_tokens\":0}",
+                          ",\"usage\":{\"input_tokens\":null,\"output_tokens\":0}",
+                          ",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"cache_read_input_"
+                          "tokens\":7,\"cache_creation_input_tokens\":5}",
+                          ",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}"};
+   for (size_t i = 0; i < sizeof usage / sizeof *usage; i++)
+   {
+      emit_capture_t cap = {0};
+      native_ir_stream_ctx_t stream = {.emit = cap_emit, .emit_ctx = &cap, .model = "model"};
+      anthropic_backend_stream_state_init(&stream.backend);
+      sse_parser_init(&stream.parser);
+      char frame[512];
+      snprintf(frame, sizeof frame,
+               "event: message_start\ndata: "
+               "{\"message\":{\"id\":\"native-start\",\"role\":\"assistant\"%s}}\n\n",
+               usage[i]);
+      int rc = native_ir_chunk_cb(frame, strlen(frame), &stream);
+      assert((rc == 0) == (i >= 6));
+      assert(cap.count == (i >= 6));
+      if (i == 6)
+         assert(strstr(cap.data[0], "\"input_tokens\":20") &&
+                strstr(cap.data[0], "\"output_tokens\":3") &&
+                strstr(cap.data[0], "\"cache_read_input_tokens\":7") &&
+                strstr(cap.data[0], "\"cache_creation_input_tokens\":5"));
+      if (i == 7)
+         assert(strstr(cap.data[0], "\"input_tokens\":0"));
+      /* Native admission counts only final output observation at message_delta. */
+      assert(!(stream.backend.usage_fields & 2));
+      sse_parser_free(&stream.parser);
+      free(stream.data);
+      free(stream.message_id);
+      aimee_ir_response_builder_free(&stream.assembled);
+   }
+   PASS("native initial usage requires actual pair before incremental first frame");
+}
+
+static void test_chat_assembly_retains_tools_reasoning_and_usage(void)
+{
+   const char *frames =
+       "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"private "
+       "thought\"}}]}\n\n"
+       "data: "
+       "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"original-call-id\","
+       "\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"source.c\\\"}\"}}]},"
+       "\"finish_reason\":\"tool_calls\"}]}\n\n"
+       "data: "
+       "{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":6,\"prompt_tokens_"
+       "details\":{\"cached_tokens\":7},\"completion_tokens_details\":{\"reasoning_tokens\":4}}}"
+       "\n\n"
+       "data: [DONE]\n\n";
+   prov_stream_ctx_t stream = {.msg_id = "source"};
+   sse_parser_init(&stream.parser);
+   openai_stream_state_init(&stream.ir_ost);
+   assert(!prov_chunk_cb(frames, strlen(frames), &stream));
+   const aimee_response_t *response = &stream.assembled.response;
+   assert(stream.assembled.complete && !response->usage_unobserved);
+   assert(response->usage_in == 20 && response->usage_out == 6 && response->usage_cache_read == 7 &&
+          response->usage_reasoning == 4);
+   assert(response->n_content == 2 && response->content[0].type == AIMEE_BLK_THINKING &&
+          !strcmp(response->content[0].text, "private thought"));
+   const aimee_block_t *tool = &response->content[1];
+   assert(tool->type == AIMEE_BLK_TOOL_USE && !strcmp(tool->tool_id, "original-call-id") &&
+          !strcmp(tool->tool_name, "read_file") &&
+          !strcmp(cJSON_GetStringValue(obj(tool->tool_input, "path")), "source.c"));
+   emit_capture_t cap = {0};
+   assert(!messages_emit_response(response, "source", "model", cap_emit, &cap));
+   int saw_tool = 0, saw_args = 0;
+   for (int i = 0; i < cap.count; i++)
+   {
+      saw_tool |= strstr(cap.data[i], "original-call-id") != NULL;
+      saw_args |= strstr(cap.data[i], "source.c") != NULL;
+   }
+   assert(saw_tool && saw_args && !strcmp(cap.events[cap.count - 1], "message_stop"));
+   sse_parser_free(&stream.parser);
+   aimee_ir_response_builder_free(&stream.assembled);
+   PASS("canonical Chat assembly retains full tool arguments, reasoning and observed cache usage");
 }
 
 static void test_explicit_unknown_model_is_rejected(void)
@@ -551,7 +646,7 @@ static void test_explicit_unknown_model_is_rejected(void)
 static const char *native_empty_stream =
     "event: message_start\ndata: "
     "{\"type\":\"message_start\",\"message\":{\"id\":\"native-id\",\"role\":\"assistant\","
-    "\"usage\":{\"input_tokens\":0}}}\n\n"
+    "\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n"
     "event: message_delta\ndata: "
     "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_"
     "tokens\":0}}\n\n"
@@ -584,6 +679,7 @@ static void test_native_ir_fragmentation_and_persistence(void)
    const char *frames =
        "event: message_start\r\ndata: "
        "{\"message\":{\"id\":\"opaque-id\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":120,"
+       "\"output_tokens\":3,"
        "\"cache_creation_input_tokens\":30,\"cache_read_input_tokens\":10}}}\r\n\r\n"
        "event: content_block_start\ndata: "
        "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"initial\"}}\n\n"
@@ -684,7 +780,8 @@ static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
        "event: message_stop\ndata: {}\n\n",
        "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
        "event: message_start\ndata: "
-       "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}\n\n",
+       "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}"
+       "\n\n",
        "event: message_start\ndata: "
        "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":1e300}}}\n\n",
        "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\nevent: "
@@ -1153,7 +1250,7 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
        "event: message_start\n"
        "data: "
        "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_"
-       "tokens\":0}}}\n\n"
+       "tokens\":0,\"output_tokens\":0}}}\n\n"
        "event: content_block_start\n"
        "data: {\"type\":\"content_block_start\",\"index\":0,"
        "\"content_block\":{\"type\":\"text\"}}\n\n"
@@ -1178,7 +1275,7 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
        "event: message_start\n"
        "data: "
        "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_"
-       "tokens\":0}}}\n\n"
+       "tokens\":0,\"output_tokens\":0}}}\n\n"
        "event: content_block_start\n"
        "data: {\"type\":\"content_block_start\",\"index\":0,"
        "\"content_block\":{\"type\":\"thinking\"}}\n\n"
@@ -1204,7 +1301,7 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
    g_stream_payload = "event: message_start\n"
                       "data: "
                       "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{"
-                      "\"input_tokens\":0}}}\n\n"
+                      "\"input_tokens\":0,\"output_tokens\":0}}}\n\n"
                       "event: content_block_start\n"
                       "data: {\"type\":\"content_block_start\",\"index\":0,"
                       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
@@ -1355,12 +1452,14 @@ static void test_messages_stream_openai_family_translates(void)
    reset_capture();
    memset(&cap, 0, sizeof(cap));
    g_driver = &openai;
-   g_stream_payload = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
-                      "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
-                      "data: "
-                      "{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,"
-                      "\"prompt_tokens_details\":{\"cached_tokens\":12}}}\n\n"
-                      "data: [DONE]\n\n";
+   g_provider_emits = 0;
+   g_stream_payload =
+       "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"}}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+       "data: "
+       "{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,"
+       "\"prompt_tokens_details\":{\"cached_tokens\":12}}}\n\n"
+       "data: [DONE]\n\n";
    assert(messages_stream("{\"model\":\"ignored\",\"system\":\"SYS\","
                           "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
                           "\"stream\":true}",
@@ -1371,11 +1470,14 @@ static void test_messages_stream_openai_family_translates(void)
    assert(strcmp(obj(cJSON_GetArrayItem((cJSON *)messages, 0), "role")->valuestring, "system") ==
           0);
    assert(cJSON_IsTrue(obj(sent, "stream")));
+   assert(cJSON_IsTrue(obj(obj(sent, "stream_options"), "include_usage")));
    assert(cap.count >= 2);
    assert(strcmp(cap.events[0], "message_start") == 0);
    assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
-   assert(strstr(cap.data[cap.count - 2], "\"input_tokens\":20") &&
-          strstr(cap.data[cap.count - 2], "\"cache_read_input_tokens\":12"));
+   assert(!g_provider_emits); /* No fabricated initial usage before terminal observation. */
+   assert(strstr(cap.data[0], "\"input_tokens\":20") &&
+          strstr(cap.data[0], "\"cache_read_input_tokens\":12"));
+   assert(strstr(cap.data[cap.count - 2], "\"output_tokens\":2"));
    cJSON_Delete(sent);
    memset(&cap, 0, sizeof cap);
    g_stream_payload = "data: {\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}]}\n\n";
@@ -1387,6 +1489,30 @@ static void test_messages_stream_openai_family_translates(void)
       assert(strcmp(cap.events[i], "message_stop"));
    reset_capture();
    PASS("messages_stream_openai_family_translates");
+}
+
+static void test_same_wire_chat_stream_options_keep_exact_client_bytes(void)
+{
+   const char *options[] = {"", ",\"stream_options\":{\"include_usage\":false}",
+                            ",\"stream_options\":{\"include_usage\":true}"};
+   for (size_t i = 0; i < sizeof options / sizeof *options; i++)
+   {
+      char frame[256];
+      snprintf(frame, sizeof frame,
+               "{ "
+               "\"model\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+               "\"stream\":true%s }",
+               options[i]);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_OPENAI_CHAT, &request,
+                                        error, sizeof error));
+      char *rendered = aimee_backend_render_wire(&request, AIMEE_WIRE_OPENAI_CHAT);
+      assert(rendered && !strcmp(rendered, frame));
+      free(rendered);
+      aimee_request_free(&request);
+   }
+   PASS("same-wire client true/false/omitted stream options retain exact bytes");
 }
 
 static void test_messages_stream_chatgpt_buffered_replays_responses(void)
@@ -1809,6 +1935,9 @@ int main(void)
    test_messages_buffered_system_prompt_driver_no_duplicate_system();
    test_messages_buffered_capability_does_not_override_wire();
    test_messages_stream_openai_family_translates();
+   test_same_wire_chat_stream_options_keep_exact_client_bytes();
+   test_native_opening_usage_requires_observed_pair();
+   test_chat_assembly_retains_tools_reasoning_and_usage();
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
    test_memory_refusal_blocks_provider_dispatch();

@@ -2,9 +2,11 @@
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static aimee_ir_response_builder_t observed;
+static aimee_delta_t opening;
 static aimee_responses_frontend_t *frontend;
 static int client_deltas, client_done;
 static void capture(void *context, const char *name, const char *json)
@@ -22,6 +24,8 @@ static int sink(void *context, const aimee_delta_t *delta)
 {
    int *count = context;
    (*count)++;
+   if (delta->type == AIMEE_DELTA_TURN_START)
+      opening = *delta;
    /* The adapter must leave client completion to the durable host owner. */
    assert(delta->type != AIMEE_DELTA_TURN_STOP);
    int rc = aimee_ir_response_builder_apply(&observed, delta);
@@ -94,8 +98,39 @@ static void refusal_projection(void)
    aimee_ir_response_builder_free(&canonical);
 }
 
+static void initial_usage_observation(void)
+{
+   const char *usage[] = {
+       "",
+       ",\"usage\":null",
+       ",\"usage\":{}",
+       ",\"usage\":{\"input_tokens\":0}",
+       ",\"usage\":{\"output_tokens\":0}",
+       ",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}",
+       ",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"input_tokens_details\":{\"cached_"
+       "tokens\":7},\"output_tokens_details\":{\"reasoning_tokens\":2}}"};
+   for (size_t i = 0; i < sizeof usage / sizeof *usage; i++)
+   {
+      aimee_ir_response_builder_free(&observed);
+      aimee_responses_stream_t *stream = aimee_responses_stream_new();
+      assert(stream);
+      int count = 0;
+      char frame[512];
+      snprintf(frame, sizeof frame, "{\"response\":{\"id\":\"r\",\"status\":\"in_progress\"%s}}",
+               usage[i]);
+      assert(!event(stream, "response.created", frame, &count));
+      assert(count == 1 && opening.usage_unobserved == (i < 5));
+      if (i == 6)
+         assert(opening.usage_in == 20 && opening.usage_out == 3 && opening.usage_cache_read == 7 &&
+                opening.usage_reasoning == 2);
+      aimee_responses_stream_free(stream);
+   }
+   aimee_ir_response_builder_free(&observed);
+}
+
 int main(void)
 {
+   initial_usage_observation();
    refusal_projection();
    int count;
    aimee_response_t final = {0};

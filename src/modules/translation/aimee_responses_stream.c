@@ -3,6 +3,7 @@
 #include <aimee/translation/aimee_ir_stream.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
+#include "usage_observation.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -346,9 +347,23 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
        snprintf(grown + stream->bytes, size + name + 32, "event: %s\ndata: %s\n\n", event, json);
    free(json);
    stream->bytes += (size_t)count;
-   if (!stream->builder.started &&
-       publish(stream, (aimee_delta_t){.type = AIMEE_DELTA_TURN_START}, sink, context))
-      return -1;
+   if (!stream->builder.started)
+   {
+      const cJSON *response = cJSON_GetObjectItemCaseSensitive(payload, "response");
+      const cJSON *usage = cJSON_GetObjectItemCaseSensitive(response, "usage");
+      aimee_delta_t opening = {.type = AIMEE_DELTA_TURN_START};
+      if (aimee_ir_read_usage(usage, "input_tokens", &opening.usage_in) ||
+          aimee_ir_read_usage(usage, "output_tokens", &opening.usage_out) ||
+          aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details"),
+                              "cached_tokens", &opening.usage_cache_read) ||
+          aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details"),
+                              "reasoning_tokens", &opening.usage_reasoning))
+         return -1;
+      wire_unknown_delta_usage(&opening,
+                               wire_usage_fields(usage, "input_tokens", "output_tokens") == 3);
+      if (publish(stream, opening, sink, context))
+         return -1;
+   }
    if (!strcmp(event, "response.output_item.added"))
    {
       int index = index_value(payload, "output_index");
