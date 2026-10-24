@@ -345,6 +345,14 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
       return -1;
    if (!presence_turn_host_own(c->presence_session, c->presence_turn_id))
       return -1;
+   const cJSON *replies = NULL, *field;
+   cJSON_ArrayForEach(field, c->req)
+      if (field->string && !strcmp(field->string, "control_replies"))
+      {
+         if (replies || !cJSON_IsBool(field))
+            return -1;
+         replies = field;
+      }
    db1_server_session_t row;
    int found = db1_server_session_get(session, &row);
    if (found == 0 && strcmp(row.principal, c->vault_principal))
@@ -359,6 +367,8 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    c->ir_controls = server_control_scope_open(c->ir_session, c->ir_turn, c->vault_principal);
    if (!c->ir_controls)
       return -1;
+   if (cJSON_IsFalse(replies))
+      server_control_scope_disable_replies(c->ir_controls);
    c->ir_previous_controls = server_control_scope_bind(c->ir_controls);
    c->ir_capture =
        server_session_capture_open(c->ir_session, c->ir_turn, c->vault_principal, c->ir_session);

@@ -665,7 +665,8 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
                              .system_prompt = system,
                              .user_prompt = prompt,
                              .primary = 1,
-                             .control_channel = c->ir_delivery,
+                             .control_channel = c->ir_delivery &&
+                                                server_control_scope_can_reply(c->ir_controls),
                              .session_id = c->ir_session,
                              .native_progress = chat_native_progress,
                              .native_progress_context = c};

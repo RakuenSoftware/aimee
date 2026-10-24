@@ -213,8 +213,42 @@ static void host_control_reservation(void)
    server_control_scope_close(scope);
 }
 
+static int disabled_record_calls;
+static int record_disabled(const char *session, const char *turn, const char *principal,
+                           const aimee_session_event_t *event)
+{
+   (void)session; (void)turn; (void)principal; (void)event;
+   disabled_record_calls++;
+   return 0;
+}
+static void headless_control_scope(void)
+{
+   server_control_scope_t *scope = server_control_scope_open("headless", "turn", "alice");
+   assert(scope && server_control_scope_can_reply(scope));
+   server_control_scope_disable_replies(scope);
+   server_control_scope_disable_replies(scope); /* Restriction is idempotent, never an enable. */
+   assert(!server_control_scope_can_reply(scope) && !server_control_scope_failed(scope));
+   assert(!server_control_scope_bind(scope));
+   server_control_scope_t *lease = NULL;
+   assert(!server_control_scope_capture("headless", "alice", &lease) && lease == scope);
+   server_control_scope_release(lease); /* Native/capture ownership remains available. */
+   cJSON *request = cJSON_Parse("{\"tool\":\"write_file\",\"input\":{}}"),
+         *reply = cJSON_Parse("{\"decision\":\"allow\"}");
+   assert(server_control_register(scope, "p", "permission", request) < 0);
+   assert(server_control_reserve(scope, "q", "question", request) < 0);
+   assert(server_control_register_recorded(scope, "r", "permission", request, record_disabled) < 0);
+   assert(!disabled_record_calls && server_control_reply("headless", "turn:p", "alice", reply) == 1);
+   cJSON_Delete(request);
+   cJSON_Delete(reply);
+   server_control_scope_close(scope);
+   scope = server_control_scope_open("browser", "turn", "alice");
+   assert(scope && server_control_scope_can_reply(scope)); /* No cross-scope inheritance. */
+   server_control_scope_close(scope);
+}
+
 int main(void)
 {
+   headless_control_scope();
    private_execution_alias();
    host_control_reservation();
    unrelated_scope_remains_responsive();

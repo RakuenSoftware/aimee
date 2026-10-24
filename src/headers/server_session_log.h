@@ -7,9 +7,11 @@ typedef struct server_session_log server_session_log_t;
 /* 0 installed, 1 no session or an existing primary owner, -1 refused. */
 int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out);
 /* Actual selected registration, supplied only by the admitted host runtime.
- * Missing project/job identity keeps ordinary execution observational/unbound. */
+ * Missing project/job identity keeps ordinary execution observational/unbound.
+ * control_replies is an explicit producer capability (0/1); a disabled parent
+ * cannot be re-enabled by a child. Existing primary capture is never modified. */
 int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
-                                      const char *provider, const char *model,
+                                      const char *provider, const char *model, int control_replies,
                                       server_session_log_t **out);
 /* Restores the calling task's sink; capture failure remains sticky. */
 int server_session_log_finish(server_session_log_t *scope, int success, const char *error);

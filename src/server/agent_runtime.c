@@ -276,8 +276,10 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    server_session_log_t *log_scope = NULL;
+   /* Internal attempts have no reply subscriber. An existing headed primary
+    * capture is preserved by begin_selected rather than restricted in place. */
    int capture = server_session_log_begin_selected(role, request ? NULL : user_prompt, ag->name,
-                                                   ag->provider, ag->model, &log_scope);
+                                                   ag->provider, ag->model, 0, &log_scope);
    int rc;
    if (capture < 0)
    {

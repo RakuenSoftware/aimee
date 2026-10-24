@@ -155,15 +155,17 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
 }
 int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out)
 {
-   return server_session_log_begin_selected(role, prompt, NULL, NULL, NULL, out);
+   return server_session_log_begin_selected(role, prompt, NULL, NULL, NULL, 1, out);
 }
 int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
-                                      const char *provider, const char *model,
+                                      const char *provider, const char *model, int control_replies,
                                       server_session_log_t **out)
 {
    if (!out)
       return -1;
    *out = NULL;
+   if (control_replies != 0 && control_replies != 1)
+      return -1;
    agent_request_creds_t attestation;
    agent_request_creds_snapshot(&attestation);
    if (!attestation.session_id[0])
@@ -207,6 +209,9 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
                                                          scope->principal, attestation.session_id);
    if (!scope->controls)
       goto fail;
+   server_control_scope_t *parent_controls = server_control_scope_current();
+   if (!control_replies || (parent_controls && !server_control_scope_can_reply(parent_controls)))
+      server_control_scope_disable_replies(scope->controls);
    scope->previous_controls = server_control_scope_bind(scope->controls);
    scope->capture = server_session_capture_open(scope->session, scope->turn, scope->principal,
                                                 attestation.session_id);

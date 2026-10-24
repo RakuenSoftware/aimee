@@ -579,9 +579,50 @@ static void canonical_turn_and_external_cancel(void)
    }
 }
 
+static void explicit_control_reply_capability(void)
+{
+   const char *valid[] = {"{}", "{\"control_replies\":true}", "{\"control_replies\":false}"};
+   for (unsigned i = 0; i < sizeof valid / sizeof valid[0]; i++)
+   {
+      compute_ctx_t c = context();
+      c.req = cJSON_Parse(valid[i]);
+      assert(!server_chat_ir_begin(&c, "session-one", "source owned headless capability"));
+      assert(server_control_scope_can_reply(c.ir_controls) == (i != 2));
+      assert(c.ir_capture && !server_session_capture_failed(c.ir_capture));
+      server_control_scope_t *lease = NULL;
+      assert(!server_control_scope_capture("session-one", "alice", &lease) && lease == c.ir_controls);
+      server_control_scope_release(lease);
+      cJSON *request = cJSON_Parse("{\"tool\":\"write_file\",\"input\":{}}");
+      int reserved = server_control_reserve(c.ir_controls, "capability", "permission", request);
+      assert((reserved == 0) == (i != 2));
+      cJSON_Delete(request);
+      cJSON_Delete(c.req);
+      c.req = NULL;
+      cleanup(&c);
+   }
+   const char *invalid[] = {"null", "0", "1", "\"false\"", "[]", "{}"};
+   for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      compute_ctx_t c = context();
+      c.req = cJSON_CreateObject();
+      assert(cJSON_AddItemToObject(c.req, "control_replies", cJSON_Parse(invalid[i])));
+      assert(server_chat_ir_begin(&c, "session-one", "invalid capability") < 0);
+      assert(!c.ir_capture && !c.ir_controls && !cJSON_GetArraySize(log_entries));
+      cJSON_Delete(c.req);
+      cleanup(&c);
+   }
+   compute_ctx_t c = context();
+   c.req = cJSON_Parse("{\"control_replies\":true,\"control_replies\":false}");
+   assert(server_chat_ir_begin(&c, "session-one", "ambiguous capability") < 0);
+   assert(!c.ir_capture && !c.ir_controls && !cJSON_GetArraySize(log_entries));
+   cJSON_Delete(c.req);
+   cleanup(&c);
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   explicit_control_reply_capability();
    canonical_turn_and_external_cancel();
    failed_steering_admission_is_observation_only();
    native_failure_terminal_survives_lost_subscriber();

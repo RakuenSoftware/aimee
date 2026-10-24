@@ -535,11 +535,11 @@ static void source_bound_selected_delegate(void)
    run_cmd_set_cwd("/approved/workspace");
    server_session_log_t *scope = NULL;
    assert(!server_session_log_begin_selected("review", "actual selected attempt", "selected-agent",
-                                             "actual-provider", "actual-model", &scope));
+                                             "actual-provider", "actual-model", 1, &scope));
    assert(verified_appends == 1 && delegate_experiences == 0);
    server_session_log_t *nested = NULL;
    assert(!server_session_log_begin_selected("review", "same-role synchronous nested call",
-                                             "selected-agent", "actual-provider", "actual-model",
+                                             "selected-agent", "actual-provider", "actual-model", 1,
                                              &nested));
    model_reply();
    assert(!server_session_log_finish(nested, 1, NULL));
@@ -582,14 +582,14 @@ static void source_bound_selected_delegate(void)
    cJSON_Delete(running);
    job_matches = 0;
    assert(!server_session_log_begin_selected("nested-role", "nested model call", "selected-agent",
-                                             "actual-provider", "actual-model", &scope));
+                                             "actual-provider", "actual-model", 1, &scope));
    model_reply();
    assert(!server_session_log_finish(scope, 1, NULL));
    assert(verified_appends == 2 && delegate_experiences == 1);
    job_matches = 1;
    workspace_held = 0;
    assert(!server_session_log_begin_selected("review", "unheld workspace", "selected-agent",
-                                             "actual-provider", "actual-model", &scope));
+                                             "actual-provider", "actual-model", 1, &scope));
    model_reply();
    assert(!server_session_log_finish(scope, 1, NULL));
    assert(verified_appends == 2 && delegate_experiences == 1);
@@ -602,7 +602,7 @@ static void source_bound_selected_delegate(void)
    attest("crash-learning-parent", "alice");
    job = 902;
    assert(!server_session_log_begin_selected("review", "terminal publication interrupted",
-                                             "selected-agent", "actual-provider", "actual-model",
+                                             "selected-agent", "actual-provider", "actual-model", 1,
                                              &scope));
    parent = find("crash-learning-parent");
    running = cJSON_Duplicate(cJSON_GetArrayItem(parent->events, 0), 1);
@@ -623,6 +623,50 @@ static void source_bound_selected_delegate(void)
    assert(delegate_experiences == 1);
    cJSON_Delete(running);
    run_cmd_set_cwd(NULL);
+}
+
+static void child_control_reply_capability(void)
+{
+   /* Begin a distinct fixture after the prior deliberate terminal-store failure. */
+   aimee_ir_session_set_sink(NULL, NULL);
+   for (int parent_enabled = 0; parent_enabled <= 1; parent_enabled++)
+      for (int producer_enabled = 0; producer_enabled <= 1; producer_enabled++)
+      {
+         attest("capability-parent", "alice");
+         job = 1800 + 2 * parent_enabled + producer_enabled;
+         server_control_scope_t *parent =
+             server_control_scope_open("capability-parent", "parent-turn", "alice");
+         assert(parent && !server_control_scope_bind(parent));
+         if (!parent_enabled)
+            server_control_scope_disable_replies(parent);
+         server_session_log_t *scope = NULL;
+         assert(!server_session_log_begin_selected("review", "explicit child capability",
+                   "selected-agent", "actual-provider", "actual-model", producer_enabled, &scope));
+         server_control_scope_t *child = server_control_scope_current();
+         assert(child && child != parent);
+         assert(server_control_scope_can_reply(child) == (parent_enabled && producer_enabled));
+         assert(server_control_scope_can_reply(parent) == parent_enabled);
+         cJSON *request = cJSON_Parse("{\"tool\":\"write_file\",\"input\":{}}");
+         assert((server_control_reserve(child, "capability", "permission", request) == 0) ==
+                (parent_enabled && producer_enabled));
+         cJSON_Delete(request);
+         model_reply();
+         assert(!server_session_log_finish(scope, 1, NULL));
+         assert(server_control_scope_current() == parent);
+         assert(server_control_scope_can_reply(parent) == parent_enabled);
+         server_control_scope_close(parent);
+      }
+   attest("capability-headed", "alice");
+   server_control_scope_t *headed =
+       server_control_scope_open("capability-headed", "headed-turn", "alice");
+   assert(headed && !server_control_scope_bind(headed));
+   aimee_ir_session_set_sink(parent_sink, &parent_events);
+   server_session_log_t *scope = NULL;
+   assert(server_session_log_begin_selected(NULL, "existing browser owner", "selected-agent",
+              "actual-provider", "actual-model", 0, &scope) == 1 && !scope);
+   assert(server_control_scope_current() == headed && server_control_scope_can_reply(headed));
+   aimee_ir_session_set_sink(NULL, NULL);
+   server_control_scope_close(headed);
 }
 
 int main(void)
@@ -775,6 +819,7 @@ int main(void)
    assert(server_session_log_begin("review", "different suffix", &scope) < 0 && !scope);
    aimee_ir_session_set_sink(NULL, NULL);
    source_bound_selected_delegate();
+   child_control_reply_capability();
    cJSON_Delete(experience_source);
    for (int i = 0; i < count; i++)
    {

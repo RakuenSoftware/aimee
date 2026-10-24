@@ -21,7 +21,7 @@ struct server_control_scope
 {
    char session[128], execution_session[128], turn[128], principal[VAULT_PRINCIPAL_MAX];
    unsigned count, references;
-   atomic_int closed, failed, unknown_effect_denied;
+   atomic_int closed, failed, unknown_effect_denied, replies_disabled;
    pthread_mutex_t mutex;
    struct pending_control *pending;
    struct server_control_scope *next;
@@ -64,6 +64,7 @@ server_control_scope_t *server_control_scope_open_execution(const char *session,
    atomic_init(&scope->closed, 0);
    atomic_init(&scope->failed, 0);
    atomic_init(&scope->unknown_effect_denied, 0);
+   atomic_init(&scope->replies_disabled, 0);
    snprintf(scope->session, sizeof scope->session, "%s", session);
    snprintf(scope->execution_session, sizeof scope->execution_session, "%s", execution_session);
    snprintf(scope->turn, sizeof scope->turn, "%s", turn);
@@ -190,6 +191,19 @@ static int record_control(server_control_scope_t *scope, struct pending_control 
       atomic_store(&scope->failed, 1);
    return result;
 }
+void server_control_scope_disable_replies(server_control_scope_t *scope)
+{
+   if (!scope)
+      return;
+   pthread_mutex_lock(&scope->mutex);
+   atomic_store(&scope->replies_disabled, 1);
+   pthread_mutex_unlock(&scope->mutex);
+}
+int server_control_scope_can_reply(const server_control_scope_t *scope)
+{
+   return scope && !atomic_load(&scope->closed) && !atomic_load(&scope->failed) &&
+          !atomic_load(&scope->replies_disabled);
+}
 int server_control_register(server_control_scope_t *scope, const char *id, const char *kind,
                             const cJSON *request)
 {
@@ -198,7 +212,7 @@ int server_control_register(server_control_scope_t *scope, const char *id, const
 static int register_control(server_control_scope_t *scope, const char *id, const char *kind,
                             const cJSON *request, server_control_record_fn record, int reserved)
 {
-   if (!scope || !id || !id[0] || strlen(id) > 1024 || !kind || !kind[0] ||
+   if (!server_control_scope_can_reply(scope) || !id || !id[0] || strlen(id) > 1024 || !kind || !kind[0] ||
        !cJSON_IsObject(request) || !aimee_ir_json_unique(request))
       return -1;
    struct pending_control *p = calloc(1, sizeof *p);
@@ -217,7 +231,7 @@ static int register_control(server_control_scope_t *scope, const char *id, const
       return -1;
    }
    pthread_mutex_lock(&scope->mutex);
-   int valid = !atomic_load(&scope->closed) && !atomic_load(&scope->failed);
+   int valid = server_control_scope_can_reply(scope);
    for (struct pending_control *old = scope->pending; old; old = old->next)
       if (!strcmp(old->id, id))
       {

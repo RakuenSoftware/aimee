@@ -225,6 +225,15 @@ int main(void)
    test_answer("{\"decision\":\"cancel\"}", "error: question cancelled");
    reset();
    assert(!server_control_scope_bind(worker_scope));
+   server_control_scope_disable_replies(worker_scope);
+   char *headless = server_session_question("Which workspace?", 5);
+   assert(headless && strstr(headless, "could not durably publish") && !requests && !responses);
+   free(headless);
+   assert(!server_control_scope_failed(worker_scope));
+   assert(server_control_scope_bind(NULL) == worker_scope);
+   server_control_scope_close(worker_scope);
+   reset();
+   assert(!server_control_scope_bind(worker_scope));
    actor = "webuser:mallory";
    char *result = server_session_question("Which workspace?", 1);
    assert(result && strstr(result, "owner does not match") && !requests);
