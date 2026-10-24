@@ -7518,7 +7518,7 @@ $(TESTPREFIX)/unit-test-server-acp-chat-route: $(CORE_CODEC_LIB) $(CORE_CONNECTI
     $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_ir_stream.o \
     $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/text.o $(OBJDIR)/util.o $(ACP_ROUTE_SUPPORT)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB) -Wl,-rpath,'$(shell pkg-config --variable=libdir libpq 2>$(NULLDEV))'
 
 
 # Keep the actual command parser; registry metadata is an explicit fixture peer.
