@@ -36,6 +36,16 @@ class IRBypassTests(unittest.TestCase):
                     checker.check(self.root)
                 path.unlink()
 
+    def test_unread_delegate_mailboxes_and_detached_router_stay_retired(self):
+        for name in ("agent_collect_tool_prompts", "router_advise_turn", "delegation_mailbox_t", "mailbox_acquire",
+                     "mailbox_find", "mailbox_wait", "mailbox_reply", "mailbox_release",
+                     "mailbox_put", "tl_mailbox"):
+            for relative in ("src/server/reintroduced_mailbox.c", "src/headers/reintroduced_mailbox.h"):
+                path = self.source(relative, f"void {name}(void);\n")
+                with self.subTest(name=name, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
     def test_parallel_openai_success_shapers_cannot_return(self):
         for name in ('openai_request_double', 'openai_request_int', 'openai_format_chat_completion', 'openai_format_chat_completion_reason', 'openai_format_response', 'openai_format_response_status', 'openai_format_run', 'openai_format_responses_delta', 'openai_format_responses_completed', 'openai_format_responses_incomplete', 'openai_responses_message_item', 'openai_responses_function_call_item', 'openai_format_responses_msg_item_added', 'openai_format_responses_msg_item_done', 'openai_format_responses_fc_item_added', 'openai_format_responses_fc_item_done', 'openai_format_responses_fc_args_delta', 'openai_format_responses_fc_args_done', 'openai_format_responses_completed_items'):
             for relative in ("src/server/reintroduced_shape.c", "src/headers/reintroduced_shape.h"):

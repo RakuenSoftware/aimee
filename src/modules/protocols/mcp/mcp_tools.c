@@ -1086,28 +1086,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                        s));
    }
 
-   /* delegate_reply */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *did = cJSON_AddObjectToObject(p, "delegation_id");
-      cJSON_AddStringToObject(did, "type", "string");
-      cJSON_AddStringToObject(did, "description", "ID of the delegation to reply to");
-      cJSON *ct = cJSON_AddObjectToObject(p, "content");
-      cJSON_AddStringToObject(ct, "type", "string");
-      cJSON_AddStringToObject(ct, "description", "Reply content for the delegate");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("delegation_id"));
-      cJSON_AddItemToArray(req, cJSON_CreateString("content"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, mcp_tool_new("delegate_reply",
-                                               "Reply to a delegate that has requested input. "
-                                               "The delegate will receive this as the response "
-                                               "to its request_input call.",
-                                               s));
-   }
-
    /* record_attempt */
    {
       cJSON *s = cJSON_CreateObject();

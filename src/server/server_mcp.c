@@ -60,7 +60,6 @@
 #include "agent_help_data.h"
 int agent_load_config(agent_config_t *cfg);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* printf-append into buf at pos, returning the new pos clamped to [0, cap].
  * snprintf returns the would-be length, so the raw `pos += snprintf(...)` idiom
@@ -2270,24 +2269,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (strcmp(tool, "roundtable_review") == 0)
    {
       int rc = handle_mcp_roundtable_review(conn, jargs);
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return rc;
-   }
-
-   /* Delegate reply: forward to existing handler */
-   if (strcmp(tool, "delegate_reply") == 0)
-   {
-      cJSON *dreq = cJSON_CreateObject();
-      cJSON_AddStringToObject(dreq, "method", "delegate.reply");
-      cJSON *jid = cJSON_GetObjectItemCaseSensitive(jargs, "delegation_id");
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "content");
-      if (cJSON_IsString(jid))
-         cJSON_AddStringToObject(dreq, "delegation_id", jid->valuestring);
-      if (cJSON_IsString(jc))
-         cJSON_AddStringToObject(dreq, "content", jc->valuestring);
-      int rc = handle_delegate_reply(ctx, conn, dreq);
-      cJSON_Delete(dreq);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;

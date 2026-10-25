@@ -263,7 +263,6 @@ static void owner_tools(int alice)
    delegate_scope = (server_delegate_scope_t){.depth = alice ? 2 : 0};
    if (alice)
       strcpy(delegate_scope.parent, "parent-alice");
-   delegate_scope.mailbox = alice ? &alice_workspace : NULL;
    if (alice)
       agent_source_authority_tls_set(1, "/source/alice", "src/alice.c\n");
    else
@@ -305,7 +304,7 @@ static void restored_probe(void)
    assert(!run_cmd_get_cwd() && !session_id_override_active());
    assert(!agent_get_durable_job_id() && !workspace && !effect_authorized &&
           !server_session_capture_current());
-   assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
+   assert(!delegate_scope.depth && !delegate_scope.parent[0]);
    agent_source_authority_snapshot_t previous = {0};
    assert(!agent_source_authority_tls_capture_checked(&previous));
    assert(!previous.active && !previous.authority && !previous.root[0] && !previous.paths);
@@ -788,7 +787,6 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(current_mirror == &fixture_mirror);
    assert(delegate_scope.depth == (alice ? 2 : 0));
    assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
-   assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));
    assert(!effect_authorized);
    assert(server_session_capture_current() == atomic_load(&expected_capture));
    assert(server_control_scope_current() ==

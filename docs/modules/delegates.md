@@ -155,7 +155,7 @@ the actual execution path binds that backend.
 
 ## Surfaces
 
-Surfaces include `aimee delegate`, native/MCP delegation tools, `/v1/delegate/*` routes, mailbox and status
+Surfaces include `aimee delegate`, native/MCP delegation tools, `/v1/delegate/*` routes, canonical question controls and status
 events, agent/delegate logs, backend/image diagnostics, provider results, and workflow/roundtable seams.
 Tool calls, vault values, workspaces, routing policy, and audit storage remain owned dependencies even
 when their user-facing commands participate in a delegate journey.
@@ -180,7 +180,7 @@ credentialless effective environment containing the sole bus endpoint.
 
 A caller submits a `delegate` role/task; routing selects an eligible configured agent; policy and budgets authorize
 the run; a provider driver and execution/workspace backend conduct bounded turns and tools; messages and
-evidence are recorded; liveness drives a terminal result; and the result returns through CLI/API, mailbox,
+evidence are recorded; liveness drives a terminal result; and the result returns through CLI/API,
 workflow, gateway, or roundtable. Retries remain within the same identity, policy, vault scope, workspace,
 and audit boundaries while reacquiring credentials through the authorized vault path when required.
 
@@ -221,9 +221,15 @@ must redact prompts, secrets, command environments, and private tool results.
 ## Compatibility
 
 CLI/API request and result envelopes, role names, provider-driver capabilities, backend lifecycle,
-mailbox/status events, job state, tool evidence, budget semantics, and workspace/source authority are
+canonical controls/status events, job state, tool evidence, budget semantics, and workspace/source authority are
 compatibility contracts. Moving server/root orchestration into `src/modules/delegates` must preserve
 build/link targets, durable jobs, and supported in-flight recovery behavior.
+
+The legacy `/v1/delegate/reply` route always returns an unavailable error. It cannot
+identify or authorize a canonical pending question. MCP does not advertise or dispatch
+`delegate_reply`; answers use the operator-only `/v1/chat/control-reply` route with
+the exact session and turn-qualified request ID. Headless delegates retain their
+existing refusal when no reply-enabled canonical control scope exists.
 
 ## Extension and removal
 

@@ -201,8 +201,8 @@ thinking signatures, redacted content and initial tool input survive this bounda
 fails with a typed error; an EOF cannot manufacture a successful end-of-turn. Other request/response
 bypasses described above still require cutover.
 
-The Anthropic HTTP native builder attaches its original body with
-`aimee_frontend_parse_native_frame` before rendering. Its existing context-injection option selects
+The Anthropic HTTP native builder parses its original body with
+`aimee_frontend_parse_wire` and admits the canonical request before rendering. Its existing context-injection option selects
 the shared canonical stage runner; disabling injection does not bypass canonical admission. Exact
 body replay is selected only after comparing the host-adjusted typed request with the original.
 

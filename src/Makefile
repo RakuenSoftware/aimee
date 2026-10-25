@@ -341,7 +341,7 @@ IR_BASE_SRCS = modules/ir/aimee_ir.c
 HOOK_IR_SRCS = modules/translation/hook_ir.c
 IR_CONTRACT_SRCS = $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/response_codec.c modules/ir/request_codec.c modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
 
-CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c execution_plan_list.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c execution_plan_list.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             wire_fence.c modules/economizer/economizer_module_client.c platform_random.c artifact_trust.c hook_session_token.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_group_tool.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
@@ -553,14 +553,14 @@ CLIENT_RUNNER_OBJS = $(OBJDIR)/modules/workspace/workspace_provider_detached.o $
 # way out to its MCP consumer. It is in CORE_SRCS, but the client links an explicit
 # object set rather than all of CORE_OBJS, and it appears in no other list this
 # binary consumes -- so this is an addition, not a second definition.
-CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
+CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
 # Canonical identity is filesystem/Git-only; the thin client never links the
 # workspace discovery/context or server store graph.
 WORKSPACE_IDENTITY_OBJS = $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o $(OBJDIR)/yaml.o
 ifneq ($(OS),Windows_NT)
 CLIENT_SUPPORT_OBJS += $(WORKSPACE_IDENTITY_OBJS)
 endif
-CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o
+CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
@@ -1891,16 +1891,6 @@ $(OBJDIR)/server/server_mcp.o: server/server_mcp.c server/server_mcp_surface.c s
 # agent_help_data.h has been atomically generated.
 $(OBJDIR)/server/server_mcp_call_table.o $(OBJDIR)/server/server_mcp_ast_grep.o: agent_help_data.h
 
-TOOL_PROMPT_FILES := $(sort $(wildcard tool_prompts/*.md))
-
-tool_prompts_data.h: $(TOOL_PROMPT_FILES) gen_tool_prompts.py
-	@tmp='$@.$$$$.tmp'; \
-	python3 gen_tool_prompts.py "$$tmp" && mv "$$tmp" $@
-
-$(OBJDIR)/server/agent_policy.o: server/agent_policy.c tool_prompts_data.h
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
 SCHEMA_FILES := modules/kb/c/schema.sql modules/kb/c/schema_sqlite.sql
 
 schema_data.h: $(SCHEMA_FILES) gen_schema.py
@@ -2146,7 +2136,7 @@ clean:
 	       tests/fuzz_kb_mgmt_jwks_publication \
 	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
 	       tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config \
-	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
+	       coverage.info coverage-report agent_help_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
 # produces identical results everywhere. Override with CLANG_FORMAT=... if

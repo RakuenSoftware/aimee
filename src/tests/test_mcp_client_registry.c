@@ -599,7 +599,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 56
+#define MCP_TOOLS_GOLDEN_COUNT 55
 #ifdef AIMEE_WINDOWS
 #define MCP_LSP_GOLDEN "lsp {col,command,file,line,workspace} req:command\n"
 #else
@@ -617,7 +617,6 @@ static void test_osv_offline_cache_miss_allows(void)
    "dashboard_metrics {} req:\n"                                                                   \
    "delegate {branch,cwd,handoff_json,persona,prompt,role,scope,tools,via} "                       \
    "req:persona,prompt,role\n"                                                                     \
-   "delegate_reply {content,delegation_id} req:content,delegation_id\n"                            \
    "delegate_status {job_id} req:job_id\n"                                                         \
    "describe_tool {name} req:name\n"                                                               \
    "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} "             \
@@ -750,6 +749,7 @@ static void test_tools_list_surface(void)
    cJSON_ArrayForEach(entry, flat_metadata)
    {
       const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+      assert(strcmp(name, "delegate_reply"));
       aimee_tool_metadata_t metadata = aimee_tools_catalog_metadata(name);
       if (!aimee_tool_metadata_valid(&metadata))
          fprintf(stderr, "missing served MCP policy metadata: %s\n", name ? name : "(null)");

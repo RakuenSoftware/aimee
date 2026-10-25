@@ -441,6 +441,13 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       assert(conn->capabilities == CAP_DELEGATE);
       assert(!owner->caller_authorization[0] && !owner->request_budget_present);
    }
+   if (!strcmp(g_disp_method, "delegate.reply"))
+   {
+      cJSON *request = cJSON_Parse(g_disp_body);
+      int rc = handle_delegate_reply(ctx, conn, request);
+      cJSON_Delete(request);
+      return rc;
+   }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
@@ -1049,6 +1056,32 @@ static void test_stream_handoff_retains_attested_owner(void)
    close(pair[1]);
 }
 
+/* Transport-only error serializer; the compatibility decision is production code. */
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   (void)request_id;
+   cJSON *error = cJSON_CreateObject();
+   cJSON_AddStringToObject(error, "status", "error");
+   cJSON_AddStringToObject(error, "message", message);
+   char *encoded = cJSON_PrintUnformatted(error);
+   cJSON_Delete(error);
+   assert(encoded);
+   int result = dprintf(conn->fd, "%s\n", encoded);
+   free(encoded);
+   return result < 0 ? -1 : 0;
+}
+
+static void test_retired_delegate_reply_route(void)
+{
+   const char *body = "{\"delegation_id\":\"active\",\"content\":\"answer\"}";
+   char response[2048];
+   server_http_identity_clear();
+   int status = server_http_route("POST", "/v1/delegate/reply", body, (int)strlen(body), response,
+                                  sizeof response);
+   assert(status >= 400 && strstr(response, "delegate.reply is unavailable"));
+   assert(!strstr(response, "\"status\":\"ok\""));
+}
+
 static void test_operator_control_reply_route(void)
 {
    server_control_scope_t *scope =
@@ -1453,6 +1486,7 @@ int main(void)
 {
    test_history_open_precedes_sse_headers();
    test_stream_handoff_retains_attested_owner();
+   test_retired_delegate_reply_route();
    test_operator_control_reply_route();
    test_operator_exact_cancel_route();
    extern int server_http_declared_status(const char *json);

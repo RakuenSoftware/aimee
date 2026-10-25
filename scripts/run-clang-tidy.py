@@ -100,7 +100,7 @@ def main():
         parser.error('--jobs must be positive')
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         parser.error('shard count must be positive and index must be in range')
-    generated = subprocess.run(['make', 'agent_help_data.h', 'tool_prompts_data.h',
+    generated = subprocess.run(['make', 'agent_help_data.h',
         'schema_data.h', 'kb/http/openapi_data.h', 'server/openapi_server_data.h'],
         cwd=ROOT / 'src', text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if generated.returncode:

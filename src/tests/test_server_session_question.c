@@ -1,5 +1,7 @@
 #include "server_session_question.h"
 #include "server_compute_internal.h"
+#include "server_delegate_scope.h"
+const char *delegation_active_id(void);
 #include "server_session_control.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/delegations.h"
@@ -23,28 +25,15 @@ static cJSON *last_response;
 static server_control_scope_t *worker_scope;
 static char *worker_result;
 static int wait_seconds = 2;
-static int legacy_mode, legacy_questions, legacy_replies;
-delegation_mailbox_t g_mailboxes[MAX_ACTIVE_DELEGATIONS];
-pthread_mutex_t g_mailbox_lock = PTHREAD_MUTEX_INITIALIZER;
 char *delegation_request_input(const char *question);
-int db1_delegation_message_record(const char *delegation_id, const char *direction,
-                                  const char *content)
+static int refused_replies;
+int server_send_error(server_conn_t *conn, const char *error, const char *detail)
 {
-   assert(legacy_mode && !strcmp(delegation_id, "test-delegate"));
-   pthread_mutex_lock(&lock);
-   if (!strcmp(direction, "delegate_to_parent"))
-   {
-      assert(!strcmp(content, "Which workspace?"));
-      legacy_questions++;
-   }
-   else
-   {
-      assert(!strcmp(direction, "parent_to_delegate") && !strcmp(content, "legacy answer"));
-      legacy_replies++;
-   }
-   pthread_cond_broadcast(&ready);
-   pthread_mutex_unlock(&lock);
-   return 0;
+   (void)conn;
+   (void)detail;
+   assert(strstr(error, "delegate.reply is unavailable") && strstr(error, "operator"));
+   refused_replies++;
+   return -1;
 }
 const char *session_id(void)
 {
@@ -160,57 +149,20 @@ static void test_answer(const char *reply_text, const char *expected)
    assert(requests == 1 && responses == 1 && !server_control_scope_failed(worker_scope));
    server_control_scope_close(worker_scope);
 }
-static void test_delegate_mailbox_wait(void)
+static void test_delegate_scope(void)
 {
-   delegation_mailbox_t *mailbox = mailbox_acquire("test-delegate");
-   assert(mailbox);
-   tl_mailbox = mailbox;
-   char *result = delegation_request_input("Which workspace?");
-   assert(result && strstr(result, "owned canonical execution control scope"));
-   free(result);
-   tl_mailbox = NULL;
-   assert(!legacy_questions && !legacy_replies);
-   char answer[64] = "unchanged";
-   struct timespec before, after;
-   assert(!clock_gettime(CLOCK_MONOTONIC, &before));
-   assert(mailbox_wait(mailbox, answer, sizeof answer, 1) < 0);
-   assert(!clock_gettime(CLOCK_MONOTONIC, &after));
-   long long elapsed =
-       (long long)(after.tv_sec - before.tv_sec) * 1000000000 + after.tv_nsec - before.tv_nsec;
-   assert(elapsed >= 900000000 && !strcmp(answer, "unchanged"));
-   assert(!mailbox_reply(mailbox, "legacy answer"));
-   atomic_store(&cancelled, 1);
-   assert(mailbox_wait(mailbox, answer, sizeof answer, 300) < 0);
-   assert(!strcmp(answer, "unchanged"));
-   atomic_store(&cancelled, 0);
-   assert(!mailbox_wait(mailbox, answer, sizeof answer, 0));
-   assert(!strcmp(answer, "legacy answer"));
-   assert(mailbox_wait(mailbox, answer, sizeof answer, 0) < 0);
-   mailbox_release(mailbox);
-}
-
-static void test_retired_mailbox_lease(void)
-{
-   delegation_mailbox_t *old = mailbox_acquire("retired-delegate");
-   delegation_mailbox_t *lease = mailbox_find("retired-delegate");
-   assert(old && lease == old);
-   mailbox_release(old);
-   assert(!mailbox_find("retired-delegate"));
-   delegation_mailbox_t *next = mailbox_acquire("next-delegate");
-   assert(next && next != old);
-   int refused = mailbox_reply(lease, "late answer for old delegate");
-   assert(refused == 1);
-   char answer[64] = "unchanged";
-   int absent = mailbox_wait(next, answer, sizeof answer, 0);
-   assert(absent < 0 && !strcmp(answer, "unchanged"));
-   mailbox_put(lease);
-   delegation_mailbox_t *replacement = mailbox_acquire("replacement-delegate");
-   assert(replacement == old);
-   int queued = mailbox_reply(replacement, "replacement answer");
-   int delivered = mailbox_wait(replacement, answer, sizeof answer, 0);
-   assert(!queued && !delivered && !strcmp(answer, "replacement answer"));
-   mailbox_release(replacement);
-   mailbox_release(next);
+   server_delegate_scope_t outer = {.parent = "outer", .depth = 2}, saved;
+   server_delegate_scope_restore(&outer);
+   server_delegate_scope_capture(&saved);
+   assert(saved.depth == 2 && !strcmp(saved.parent, "outer"));
+   server_delegate_scope_t inner = {.parent = "inner", .depth = 3};
+   server_delegate_scope_restore(&inner);
+   assert(!strcmp(delegation_active_id(), "inner"));
+   server_delegate_scope_restore(&saved);
+   assert(!strcmp(delegation_active_id(), "outer"));
+   server_delegate_scope_t empty = {0};
+   server_delegate_scope_restore(&empty);
+   assert(!delegation_active_id());
 }
 
 int main(void)
@@ -288,8 +240,11 @@ int main(void)
       assert(requests == 1 && responses == response_failure);
       server_control_scope_close(worker_scope);
    }
-   test_delegate_mailbox_wait();
-   test_retired_mailbox_lease();
+   cJSON *legacy = cJSON_Parse("{\"delegation_id\":\"active\",\"content\":\"answer\"}");
+   assert(handle_delegate_reply(NULL, NULL, legacy) < 0);
+   cJSON_Delete(legacy);
+   assert(handle_delegate_reply(NULL, NULL, NULL) < 0 && refused_replies == 2);
+   test_delegate_scope();
    free(worker_result);
    cJSON_Delete(last_response);
    puts("host questions: durable request/reply, scoped ownership, cancellation and storage refusal "

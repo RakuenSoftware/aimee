@@ -2626,9 +2626,15 @@ paths:
         "503": { description: Management control plane is not configured }
   /delegate/reply:
     post:
-      summary: Reply to a delegate
+      deprecated: true
+      summary: Refuse the retired delegate reply protocol
+      description: >
+        Compatibility endpoint only; no reply is delivered or acknowledged.
+        Canonical pending questions are answered by an authenticated browser
+        operator through /chat/control-reply using the exact session_id and
+        turn-qualified request_id. Delegation IDs do not authorize answers.
       requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Reply accepted, content: { application/json: { schema: { type: object } } } } }
+      responses: { "502": { description: Retired reply protocol is unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } }
   /delegate/launch:
     post:
       summary: Launch a delegate job (async, returns job_id)

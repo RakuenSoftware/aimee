@@ -151,6 +151,19 @@ def main():
         next(model for model in models if model["name"] == "ir-live-run")["context_window"] = 131072
         models_path.write_text(json.dumps(dict(default_agent="ir-live-a", default_delegate="ir-live-a", fallback_chain=[], models=models)))
         sid = api("/v1/sessions/create", {"client_type": "ir-integration"})["session_id"]
+        # Legacy reply identifiers do not identify a canonical pending question.
+        # Exercise the actual HTTP and MCP dispatchers, not a local queue peer.
+        before_reply = len(observed)
+        legacy = dict(delegation_id="active", content="undeliverable answer", session_id=sid)
+        refusal = api("/v1/delegate/reply", legacy, expected=502)
+        assert "delegate.reply is unavailable" in refusal, refusal
+        for tool, arguments in (("delegate_reply", legacy),
+                                ("call_tool", dict(name="delegate_reply", arguments=legacy))):
+            refusal = api("/v1/mcp/call", dict(tool=tool, arguments=arguments,
+                                              session_id=sid), expected=502)
+            assert "unknown MCP tool: delegate_reply" in refusal, refusal
+        assert len(observed) == before_reply
+        print("retired delegate replies: HTTP refuses; direct/bridged MCP unknown; no provider calls")
         attachment = api(f"/v1/sessions/{sid}/attach", {"surface": "webchat", "owner": f"uid:{os.getuid()}"})["attach_id"]
         live = []
         sequence = 0

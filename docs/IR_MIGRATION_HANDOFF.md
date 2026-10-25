@@ -22,6 +22,20 @@ in `OWNERS.md`.
 
 ## Current implementation and qualified checkpoint
 
+Recovered on 2026-10-25 from local session
+`01a14bc2-2fb8-7751-95af-afed5428382a`, whose last saved action was at
+02:49 UTC. Continue in this worktree and branch; the main repository checkout
+is an unrelated branch. The recovered session's full internal IR objective,
+code-reduction requirement and `.252` authorization remain in force.
+
+The latest native/lint-qualified checkpoint is `641fe8ea4`: 700 normal and
+700 ASan/UBSan invocations (697 unique binaries per lane), with all 76 lint
+checks passing. The sanitizer receipt completed before the crash:
+`/var/tmp/aimee-final-retirement-native-qualification/san/proof.json`.
+This does not qualify subsequent patches or a final installed image. Both
+retained `.252` installations were independently found healthy after recovery;
+they still run the previously recorded d851 and 199 images below.
+
 The last fully qualified source checkpoint is
 `19911237b0cff2f66edf9de4b943be99768bf38c`, tree
 `c770deae4f752af62d3057f14f45833b7449a447`, version
@@ -113,13 +127,38 @@ No source/test assertion was weakened to fix that harness error. Receipts:
 Only obsolete helpers' own test cases are retired; active PTY/native/OAuth,
 business description/liveness and prompt-budget targets remain.
 
-A remaining registered ingress is under review: `delegate_reply` still queues
-into a legacy mailbox, while production questions now wait through the canonical
-control owner. Do not claim this cutover complete or acknowledge an undelivered
-reply. Trace and repair the supported tool/HTTP contract with exact control
-identity and delegation/source authority; add no ambient permission or question
-authority. Final genuine native replay, separate latest-source empty install,
-original retained-history upgrade and fresh source-bound CI remain required.
+The recovered delegate-reply repair removes the unread mailbox and its MCP
+advertisement. The retained HTTP compatibility route explicitly refuses instead
+of acknowledging an undeliverable answer; supported questions continue through
+the canonical operator control endpoint. Independent review and 12 focused
+normal/sanitizer invocations pass, including root-namespace control authorization
+and duplicate-reply rejection. The old handler probe reproduces false success.
+Receipts: `/var/tmp/aimee-delegate-reply-proof/recovered-focused-proof.json` and
+`/var/tmp/aimee-delegate-reply-proof/recovered-independent-review.json`.
+
+The unused per-message router and detached classifier are also retired. All
+five active routing bodies remain byte-identical; actual router/autonomous tests,
+IR bypass guard and mutation tests pass. Receipt:
+`/var/tmp/aimee-router-retirement-proof/recovered-review.json`.
+The IR guard now refuses reintroduction of those retired entries and mailboxes.
+Recovery also retires the uncalled CLI Markdown renderer and unused tool-prompt
+collector/embedded-table generator, including their solely owned tests and build
+registrations. Current CLI output and streaming code, all 14 retained policy
+functions, active registry/catalog behavior and the eight authored tool notes
+remain byte-identical. The renderer removes 1,054 production source/header lines;
+the collector removes 93. Make/CMake thin-client builds, canonical CLI stream,
+three retained policy/tool/ACP targets normally and under ASan/UBSan, module
+ownership and registration checks pass. Receipts:
+`/var/tmp/aimee-markdown-retirement-proof/review.json` and
+`/var/tmp/aimee-tool-prompts-proof/`. The published native-frame parsing API is
+retained; its stale live-builder documentation was corrected.
+Combined-source qualification remains required. The first recovered integration
+attempt refused before test execution because its saved custom OBJDIR did not
+match the harness's fixed paths. It is preserved under
+`/var/tmp/aimee-delegate-reply-integration/`; the standard-OBJDIR rerun is under
+`/var/tmp/aimee-delegate-reply-integration-recovered-defaultobj/`.
+Final genuine native replay, separate latest-source empty install, original
+retained-history upgrade and fresh source-bound CI remain required.
 
 ## Implemented behavior and current work
 

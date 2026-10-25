@@ -550,7 +550,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/delivery_target.c
     ${AIMEE_SRC_DIR}/text.c
     ${AIMEE_SRC_DIR}/render.c
-    ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/json_fluent.c
     ${AIMEE_SRC_DIR}/log.c
     ${AIMEE_SRC_DIR}/shutdown_forensics.c
@@ -1391,7 +1390,6 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/history.c
-    ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_iface.c
@@ -1539,21 +1537,10 @@ endif()
 # components built EXCLUSIVELY via `make -C src` (see src/Makefile); their CMake
 # targets were removed because CMake's source lists are not maintained for the
 # full server build (they drifted ~188 files behind src/Makefile) and no CI gate
-# ever built them. The block below is the agent tool-prompt / DB schema codegen
+# ever built them. The block below is the DB schema codegen
 # and the unit-test suite, which the thin-client-only profile
 # (-DAIMEE_THIN_CLIENT=ON) skips.
 if(NOT AIMEE_THIN_CLIENT)
-
-set(TOOL_PROMPTS_HEADER "${AIMEE_SRC_DIR}/tool_prompts_data.h")
-file(GLOB TOOL_PROMPT_FILES CONFIGURE_DEPENDS "${AIMEE_SRC_DIR}/tool_prompts/*.md")
-add_custom_command(
-    OUTPUT "${TOOL_PROMPTS_HEADER}"
-    COMMAND "${Python3_EXECUTABLE}" "${AIMEE_SRC_DIR}/gen_tool_prompts.py" "${TOOL_PROMPTS_HEADER}"
-    DEPENDS "${AIMEE_SRC_DIR}/gen_tool_prompts.py" ${TOOL_PROMPT_FILES}
-    COMMENT "Generating tool_prompts_data.h from src/tool_prompts"
-)
-add_custom_target(tool_prompts_header DEPENDS "${TOOL_PROMPTS_HEADER}")
-add_dependencies(aimee-agent tool_prompts_header)
 
 # Generate schema_data.h from tier schema SQL. modules/db1/db_schema.c and
 # modules/kb/c/db_schema.c includes this header to embed its tier schemas as C

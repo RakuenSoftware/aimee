@@ -1,6 +1,6 @@
 /* delegate_run_phases.c: self-contained phases lifted out of delegate_worker
  * (server_compute.c) to keep that file under the line cap. Verbatim moves; none
- * touch the worker's thread-local run state (delegation depth/parent, mailbox,
+ * touch the worker's thread-local run state (delegation depth/parent,
  * session override) — those stay in server_compute.c's delegate_run_ctx.
  *
  *   delegate_file_snapshot / _changed - mtime+size snapshot of a named path

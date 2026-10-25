@@ -4120,8 +4120,7 @@ static void test_delegation_error_guidance(void)
    assert(delegation_error_guidance("no agent available for role 'xyzzy'", buf, sizeof(buf)) == 1);
    assert(strstr(buf, "valid role") != NULL);
 
-   assert(delegation_error_guidance("missing delegation_id or content", buf, sizeof(buf)) == 1);
-   assert(strstr(buf, "delegate_reply") != NULL);
+   assert(delegation_error_guidance("missing delegation_id or content", buf, sizeof(buf)) == 0);
 
    assert(delegation_error_guidance("delegation depth limit exceeded (3/3)", buf, sizeof(buf)) ==
           1);

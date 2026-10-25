@@ -70,10 +70,6 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-/* Delegation mailbox: allows delegates to pause and receive parent replies */
-
-delegation_mailbox_t g_mailboxes[MAX_ACTIVE_DELEGATIONS];
-pthread_mutex_t g_mailbox_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_delegate_id_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned long g_delegate_id_seq = 0;
 static void delegate_generate_id(char *out, size_t cap)
@@ -508,7 +504,6 @@ static void delegate_request_parent_context(cJSON *jdepth, cJSON *jparent, int *
  * the save/restore lives in one place instead of being copied per exit. */
 typedef struct
 {
-   delegation_mailbox_t *mb;
    int saved_depth;
    char saved_parent[64];
    char saved_env_depth[32];
@@ -520,8 +515,6 @@ typedef struct
 static void delegate_run_ctx_enter(delegate_run_ctx_t *c, const char *deleg_id, const char *sid,
                                    int current_depth, const char *source_env_root)
 {
-   c->mb = mailbox_acquire(deleg_id);
-   tl_mailbox = c->mb;
    session_id_set_override(sid);
 
    c->saved_depth = tl_delegation_depth;
@@ -565,8 +558,6 @@ static void delegate_run_ctx_restore(delegate_run_ctx_t *c)
    snprintf(tl_parent_delegation_id, sizeof(tl_parent_delegation_id), "%s", c->saved_parent);
 
    session_id_clear_override();
-   tl_mailbox = NULL;
-   mailbox_release(c->mb);
 }
 
 /* Build the delegate result envelope from a finished run. Mirrors the two
@@ -2427,39 +2418,5 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    delegate_ensemble_result_free(&result);
-   return server_send_ok(conn, resp);
-}
-
-int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "delegation_id");
-   cJSON *jcontent = cJSON_GetObjectItemCaseSensitive(req, "content");
-
-   if (!cJSON_IsString(jid) || !cJSON_IsString(jcontent))
-   {
-      char augmented[1024];
-      delegation_augment_error("missing delegation_id or content", augmented, sizeof(augmented));
-      return server_send_error(conn, augmented, NULL);
-   }
-
-   delegation_mailbox_t *mb = mailbox_find(jid->valuestring);
-   if (!mb)
-   {
-      char augmented[1024];
-      delegation_augment_error("no active delegation with that ID", augmented, sizeof(augmented));
-      return server_send_error(conn, augmented, NULL);
-   }
-
-   int queued = mailbox_reply(mb, jcontent->valuestring);
-   mailbox_put(mb);
-   if (queued)
-   {
-      char augmented[1024];
-      delegation_augment_error("delegation closed before the reply was queued", augmented,
-                               sizeof(augmented));
-      return server_send_error(conn, augmented, NULL);
-   }
-   cJSON *resp = jo_ok();
    return server_send_ok(conn, resp);
 }

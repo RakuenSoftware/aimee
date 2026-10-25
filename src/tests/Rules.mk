@@ -183,7 +183,7 @@ TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(KB_STORE_TEST
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
                  $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
-                 $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/tests/support/obs_durable_stub.o $(OBJDIR)/modules/vault/runtime_secret.o
+                 $(OBJDIR)/json_fluent.o $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/tests/support/obs_durable_stub.o $(OBJDIR)/modules/vault/runtime_secret.o
 TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
 # The two DB1 domains the daemon stopped linking: their callers reach them over
@@ -254,14 +254,14 @@ TEST_MEMORY_TRANSPORT_OBJS = $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_regi
 $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-cmd-onboard \
 $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-mcp-native-dispatch \
 $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
-$(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
+$(TESTPREFIX)/unit-test-notes \
 $(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: $(TEST_MEMORY_TRANSPORT_OBJS) $(OBJDIR)/modules/translation/aimee_frontend_openai.o
 
 $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/transport.o \
                                       $(OBJDIR)/tests/support/interaction_events_stub.o
 
 $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
-$(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
+$(TESTPREFIX)/unit-test-notes \
 $(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: \
     $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/db1_client/telemetry.o $(OBJDIR)/db1_client/transport.o
 
@@ -576,7 +576,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-request-context \
                $(TESTPREFIX)/unit-test-response-dedup \
                $(TESTPREFIX)/unit-test-anthropic-shape \
-               $(TESTPREFIX)/unit-test-tool-prompts \
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
                $(TESTPREFIX)/unit-test-agent-error-retryable \
@@ -682,7 +681,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-cmd-config \
                $(TESTPREFIX)/unit-test-tool-validation \
                $(TESTPREFIX)/unit-test-turn-narration \
-               $(TESTPREFIX)/unit-test-markdown \
                $(TESTPREFIX)/unit-test-kb-export \
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
@@ -1957,10 +1955,6 @@ learning-citation-eval: $(TESTPREFIX)/learning-implicit-replay
 
 
 $(TESTPREFIX)/unit-test-render: $(OBJDIR)/tests/test_render.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-markdown: $(OBJDIR)/tests/test_markdown.o $(OBJDIR)/markdown.o \
-                                   $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOCK) \
@@ -4633,11 +4627,6 @@ $(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJD
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 unit-test-token-audit-load: $(TESTPREFIX)/unit-test-token-audit-load
-
-$(TESTPREFIX)/unit-test-tool-prompts: $(OBJDIR)/tests/test_tool_prompts.o \
-                              $(OBJDIR)/server/agent_policy.o $(OBJDIR)/dstr.o \
-                              $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_token_budget.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -7449,7 +7438,7 @@ $(TESTPREFIX)/unit-test-server-acp-resources: $(OBJDIR)/tests/test_server_acp_re
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(OBJDIR)/tests/acp_resource_validator.o: server/agent_policy.c tool_prompts_data.h
+$(OBJDIR)/tests/acp_resource_validator.o: server/agent_policy.c
 	@mkdir -p $(@D)
 	$(CC) $(C_FLAGS) -Dtool_policy_metadata=unused_acp_fixture_policy_metadata -c -o $@ $<
 
@@ -7671,3 +7660,6 @@ $(TESTPREFIX)/unit-test-kb-client-memory \
 $(TESTPREFIX)/unit-test-kb-client-search \
 $(TESTPREFIX)/unit-test-server-acp-chat-route \
 $(TESTPREFIX)/unit-test-workspace-add-noscan: $(WORKSPACE_IDENTITY_OBJS)
+
+# Exercise the real retired delegate reply compatibility handler through HTTP.
+$(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/server/server_compute_mailbox.o $(OBJDIR)/server/server_session_question.o

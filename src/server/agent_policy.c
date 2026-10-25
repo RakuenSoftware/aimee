@@ -24,30 +24,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "tool_prompts_data.h"
-
-/* Look up an embedded per-tool prompt by tool name. Returns NULL if no file
- * exists for this tool in src/tool_prompts/. The table is generated at build
- * time from src/tool_prompts/ and sorted alphabetically. */
-static const char *tool_prompts_lookup_embedded(const char *name)
-{
-   if (!name)
-      return NULL;
-   int lo = 0, hi = TOOL_PROMPTS_EMBEDDED_COUNT - 1;
-   while (lo <= hi)
-   {
-      int mid = (lo + hi) / 2;
-      int cmp = strcmp(TOOL_PROMPTS_EMBEDDED[mid].name, name);
-      if (cmp == 0)
-         return TOOL_PROMPTS_EMBEDDED[mid].prompt;
-      if (cmp < 0)
-         lo = mid + 1;
-      else
-         hi = mid - 1;
-   }
-   return NULL;
-}
-
 static int validate_against_schema(const char *args_json, const cJSON *schema, char *err_out,
                                    size_t err_len)
 {
@@ -268,74 +244,6 @@ int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char
       return -1;
    }
    return 0;
-}
-
-/* --- Tool prompt collection --- */
-
-/* Collect usage prompts from all enabled tools that have a non-empty tool_prompt.
- * Returns a heap-allocated string of the form:
- *
- *   ## Tool Usage Notes
- *
- *   ### bash
- *   <prompt>
- *
- *   ### read_file
- *   <prompt>
- *
- * Returns NULL if no tools have prompts or the DB is unavailable. Caller must free(). */
-struct tool_prompts_ctx
-{
-   dstr_t out;
-   int count;
-};
-
-static int collect_tool_prompts_cb(const char *name, const char *prompt, void *user)
-{
-   struct tool_prompts_ctx *ctx = (struct tool_prompts_ctx *)user;
-   if (!prompt || !*prompt)
-      prompt = tool_prompts_lookup_embedded(name);
-   if (!prompt || !*prompt)
-      return 0;
-
-   if (ctx->count == 0)
-      dstr_append_str(&ctx->out, "## Tool Usage Notes\n");
-
-   dstr_appendf(&ctx->out, "\n### %s\n%s\n", name, prompt);
-   ctx->count++;
-   return 0;
-}
-
-char *agent_collect_tool_prompts(void)
-{
-   struct tool_prompts_ctx ctx = {0};
-   dstr_init(&ctx.out);
-
-   /* Pull all enabled tool prompts via aimee-kb (KB_STORE owner). */
-   char *envelope = kb_client_tool_registry_snapshot_json();
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *prompts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "prompts") : NULL;
-   if (cJSON_IsArray(prompts))
-   {
-      cJSON *p;
-      cJSON_ArrayForEach(p, prompts)
-      {
-         cJSON *name_j = cJSON_GetObjectItemCaseSensitive(p, "name");
-         cJSON *prompt_j = cJSON_GetObjectItemCaseSensitive(p, "prompt");
-         const char *name = cJSON_IsString(name_j) ? name_j->valuestring : "";
-         const char *prompt = cJSON_IsString(prompt_j) ? prompt_j->valuestring : "";
-         collect_tool_prompts_cb(name, prompt, &ctx);
-      }
-   }
-   cJSON_Delete(resp);
-
-   if (ctx.count == 0)
-   {
-      dstr_free(&ctx.out);
-      return NULL;
-   }
-   return dstr_steal(&ctx.out);
 }
 
 /* --- Execution trace --- */
