@@ -607,6 +607,17 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c
     ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  # Match Make's progress-owner fixture: only durable-store calls are peers.
+  add_library(test_server_native_job_progress OBJECT ../server/agent_tasks.c)
+  target_include_directories(test_server_native_job_progress PRIVATE
+    $<TARGET_PROPERTY:test_server_native_runtime,INCLUDE_DIRECTORIES>)
+  target_compile_definitions(test_server_native_job_progress PRIVATE
+    db1_agent_job_get=fixture_job_get
+    db1_agent_job_free=fixture_job_free
+    db1_agent_job_heartbeat_ext=fixture_job_heartbeat_ext)
+  target_compile_options(test_server_native_job_progress PRIVATE -ffunction-sections -fdata-sections)
+  target_sources(test_server_native_runtime PRIVATE ../wire_fence.c
+    $<TARGET_OBJECTS:test_server_native_job_progress>)
   target_link_libraries(test_server_native_runtime PRIVATE
     aimee-core-connection Threads::Threads OpenSSL::Crypto m)
   target_compile_options(test_server_native_runtime PRIVATE -ffunction-sections -fdata-sections)
