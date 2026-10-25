@@ -80,6 +80,19 @@ them. Preserve that protection and all provider/source/cache fences.
 Current-image evidence covers the retained upgrade and restart; clean-install
 qualification below remains historical.
 
+The final blocked audit rechecks all 285 rows, native state, credentials, SDK
+binaries and products against the last qualification snapshot: unchanged, with
+zero SDK processes or active native reservations. Anthropic's current
+[error reference](https://code.claude.com/docs/en/errors#usage-policy-refusal)
+explains that these refusals evaluate the full conversation and can recur after
+resume. Its
+[Agent SDK subscription guidance](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+permits subscription usage for the SDK and third-party apps; do not misdiagnose
+this as an unsupported login. No actionable source defect is established.
+Completion remains blocked on acceptance of cold saved-history requests. Do not
+delete preserved history, change source/cache fences, or silently substitute a
+different model to label the failed qualification successful.
+
 The final state has 285 IR rows, all 216 pre-upgrade rows unchanged. All nine
 services across the three retained projects are healthy; no SDK process or
 native reservation remains active. The explicit credential replacement above
