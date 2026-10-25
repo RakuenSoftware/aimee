@@ -6,6 +6,7 @@
 #include <aimee/core/types/panel_result.h>
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 #include "roundtable_types.h" /* ensemble_panel_t */
 
 typedef enum
@@ -49,9 +50,9 @@ typedef enum
 
 typedef struct aimee_panel_provider
 {
-   int (*aggregate)(agent_config_t *agents, const ensemble_panel_t *panel, const char *prompt,
-                    aimee_panel_aggregate_result_t *out);
-   int (*run)(agent_config_t *agents, const ensemble_panel_t *panel, const char *task,
+   int (*aggregate)(agent_config_t *agents, const ensemble_panel_t *panel,
+                    const aimee_request_t *request, aimee_panel_aggregate_result_t *out);
+   int (*run)(agent_config_t *agents, const ensemble_panel_t *panel, const aimee_request_t *request,
               const aimee_panel_options_t *options, aimee_panel_result_t *out);
    void (*release)(aimee_panel_result_t *result);
 } aimee_panel_provider_t;
@@ -66,10 +67,11 @@ int aimee_panel_provider_available(void);
 /* Inputs are borrowed for the duration of the call. On failure, outputs are
  * zeroed. A successful panel result owns artifact through the provider and must
  * be released exactly once with aimee_panel_result_release before unregister. */
-int aimee_panel_aggregate(agent_config_t *agents, const ensemble_panel_t *panel, const char *prompt,
-                          aimee_panel_aggregate_result_t *out);
-int aimee_panel_run(agent_config_t *agents, const ensemble_panel_t *panel, const char *task,
-                    const aimee_panel_options_t *options, aimee_panel_result_t *out);
+int aimee_panel_aggregate(agent_config_t *agents, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, aimee_panel_aggregate_result_t *out);
+int aimee_panel_run(agent_config_t *agents, const ensemble_panel_t *panel,
+                    const aimee_request_t *request, const aimee_panel_options_t *options,
+                    aimee_panel_result_t *out);
 void aimee_panel_result_release(aimee_panel_result_t *result);
 
 #endif /* AIMEE_DELEGATES_PANEL_PROVIDER_H */

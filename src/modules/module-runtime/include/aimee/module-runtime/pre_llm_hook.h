@@ -8,7 +8,7 @@
  *
  * PRE_LLM_CALL:
  *   - Called just before each LLM request is sent.
- *   - May return ephemeral context text appended to the user message.
+ *   - May return ephemeral context for a separate evidence block in owned IR.
  *   - The system prompt is NEVER passed to or modified by these hooks —
  *     this preserves the byte-stable prefix required for prompt caching.
  */
@@ -43,14 +43,6 @@ extern "C"
     * modify it; callers pass only the user message.
     * Returns the number of hooks whose output was included (≥ 0). */
    int plugin_chook_run_pre_llm(const char *user_msg, char *ephemeral_out, size_t out_len);
-
-   /* Apply PRE_LLM_CALL hooks to user_msg.
-    * If any hook returned ephemeral context, returns a heap-allocated string
-    * "user_msg\nephemeral_ctx"; caller must free() it.
-    * If no hooks fired or all returned empty/error, returns NULL (caller uses
-    * user_msg unchanged — no free needed).
-    * The system_prompt is NEVER passed in or modified. */
-   char *plugin_chook_apply_pre_llm(const char *user_msg);
 
    /* Reset the registry (for tests only). */
    void plugin_chook_reset(void);

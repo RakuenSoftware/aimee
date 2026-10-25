@@ -22,6 +22,35 @@ components:
         Required for `/v1/*` over TCP. Unix-domain-socket access is
         authorised by filesystem permissions and needs no token.
   schemas:
+    ProposalDraftRequest:
+      type: object
+      description: >
+        Internal clients supply message as canonical IR. Legacy external text
+        imports once at this public endpoint. Supplying both forms is refused.
+        The host assigns context authority and the proposal drafting policy.
+      oneOf:
+        - required: [message]
+          not: { required: [prompt] }
+        - required: [prompt]
+          not: { required: [message] }
+      properties:
+        message:
+          type: object
+          required: [role, blocks]
+          properties:
+            role: { type: string, enum: [user] }
+            blocks:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items:
+                type: object
+                required: [type, text]
+                properties:
+                  type: { type: string, enum: [text] }
+                  text: { type: string, minLength: 1, description: At least 8 UTF-8 bytes }
+        model: { type: string, description: Optional configured HTTP delegate name }
+        prompt: { type: string, minLength: 1, deprecated: true, description: Legacy external text import only; at least 8 UTF-8 bytes }
     HealthResponse:
       type: object
       properties:
@@ -2768,7 +2797,7 @@ paths:
   /model/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
   /model/generate:
     post:
@@ -2866,7 +2895,7 @@ paths:
   /agent/draft:
     post:
       summary: Roster draft (deprecated alias of /model/draft)
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /agent/setup:
     post:

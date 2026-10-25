@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 #define SKILL_MAX_SIZE         (100 * 1024) /* max bytes per skill file */
 #define SKILL_MAX_SKILLS       64           /* max skills returned by list */
@@ -60,13 +61,12 @@ typedef struct
    char route[SKILL_TRIAL_ROUTE_MAX];
 } skill_trial_usage_t;
 
-/* The runner returns a heap response owned by the evaluator. It must execute a
+/* The runner returns owned canonical output to the evaluator. It must execute a
  * tool-free text trial; any reported tool/effect attempt makes the trial
  * inconclusive. */
-typedef int (*skill_trial_runner_fn)(void *ctx, const char *system_prompt, const char *prompt,
-                                     int max_tokens, char **response_out,
-                                     skill_trial_usage_t *usage_out, char *errbuf,
-                                     size_t errbuf_len);
+typedef int (*skill_trial_runner_fn)(void *ctx, const aimee_request_t *request,
+                                     aimee_response_t *response_out, skill_trial_usage_t *usage_out,
+                                     char *errbuf, size_t errbuf_len);
 
 typedef struct
 {

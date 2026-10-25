@@ -2448,7 +2448,11 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &panel, prompt, &result);
+   aimee_request_t input = {0};
+   int rc = aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3)
+                ? AGENT_RC_CONTEXT_REFUSED
+                : delegate_ensemble_run(&acfg, &panel, &input, &result);
+   aimee_request_free(&input);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);

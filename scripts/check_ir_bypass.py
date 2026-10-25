@@ -18,7 +18,7 @@ LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
-    "agent_build_request",
+    "agent_build_request", "plugin_chook_apply_pre_llm",
     "agent_tools_dispatch_owned",
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
@@ -174,6 +174,10 @@ RULES = {
     "unqualified-learning-prompt": re.compile(r"\bdb1_delegate_learning_inject_prompt\s*\("),
     "provider-probe-exec": re.compile(r"\bexec\.(?:Command|CommandContext)\s*\("),
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
+    "raw-model-contract": re.compile(
+        r"\(\s*\*\s*skill_trial_runner_fn\s*\)\s*\(\s*void\s*\*\s*\w+\s*,\s*const\s+char\s*\*|"
+        r"\(\s*\*\s*roadmap_model_fn\s*\)\s*\(\s*const\s+char\s*\*|"
+        r"\b(?:delegate_ensemble_run|aimee_panel_(?:run|aggregate))\s*\([^)]*const\s+char\s*\*\s*(?:prompt|task)\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
     "native-tool-reparse": re.compile(r"\b(?:openai_ir_parse_tool|anthropic_ir_parse_tool)\s*\("),

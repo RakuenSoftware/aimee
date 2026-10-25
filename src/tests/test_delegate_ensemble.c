@@ -3,6 +3,7 @@
 #include "delegate_ensemble.h"
 #include "delegate_ensemble_internal.h" /* parse_model_json_lenient */
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include "model_registry.h"
 #include <assert.h>
 #include <math.h>
@@ -16,6 +17,67 @@
 /* Deadline for test_roundtable_deadline_returns_best_so_far. Paired with the
  * g_parallel_mode == 4 sleep below, which must be comfortably longer. */
 #define ROUNDTABLE_DEADLINE_TEST_MS 200
+
+static char *g_fixture_request_view;
+static const char *fixture_request_view(const aimee_request_t *request)
+{
+   size_t size = 1;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+         if (request->messages[i].blocks[j].text)
+            size += strlen(request->messages[i].blocks[j].text) + 2;
+   free(g_fixture_request_view);
+   g_fixture_request_view = malloc(size);
+   assert(g_fixture_request_view);
+   aimee_ir_last_user_text(request, g_fixture_request_view, size);
+   return g_fixture_request_view;
+}
+
+static int fixture_ensemble_run(agent_config_t *agents, const ensemble_panel_t *panel,
+                                const char *text, delegate_ensemble_result_t *out)
+{
+   if (!text)
+      return delegate_ensemble_run(agents, panel, NULL, out);
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, NULL, text, 0, 0.3));
+   int rc = delegate_ensemble_run(agents, panel, &request, out);
+   aimee_request_free(&request);
+   return rc;
+}
+
+static const aimee_request_t *g_expected_task;
+static int g_task_copies, g_task_syntheses;
+static void assert_task_custody(const aimee_request_t *request, int synthesis)
+{
+   if (!g_expected_task)
+      return;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
+   assert(request->has_temperature && request->temperature == 0.0);
+   assert(request->has_max_tokens && request->max_tokens == 128);
+   const aimee_message_t *got = &request->messages[0], *want = &g_expected_task->messages[0];
+   assert(got->n_blocks == want->n_blocks + synthesis);
+   for (int i = 0; i < want->n_blocks; i++)
+   {
+      aimee_message_t left = {.role = "user", .blocks = &got->blocks[i], .n_blocks = 1};
+      aimee_message_t right = {.role = "user", .blocks = &want->blocks[i], .n_blocks = 1};
+      cJSON *a = aimee_ir_message_json(&left), *b = aimee_ir_message_json(&right);
+      assert(a && b && cJSON_Compare(a, b, 1));
+      assert((!got->blocks[i].raw && !want->blocks[i].raw) ||
+             cJSON_Compare(got->blocks[i].raw, want->blocks[i].raw, 1));
+      cJSON_Delete(a);
+      cJSON_Delete(b);
+   }
+   if (synthesis)
+   {
+      const aimee_block_t *notes = &got->blocks[want->n_blocks];
+      assert(notes->context.origin == AIMEE_CTX_ORIGIN_MODEL &&
+             notes->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+             notes->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      g_task_syntheses++;
+   }
+   else
+      g_task_copies++;
+}
 
 static int
     g_usage_mode; /* 1=panel unknown, 2=synthesis unknown, 3=observed zero, 4=scorer unknown */
@@ -146,6 +208,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
    {
+      assert_task_custody(&tasks[i].request, 0);
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
                tasks[i].agent ? tasks[i].agent : "(null)");
       snprintf(g_captured_personas[i], sizeof(g_captured_personas[i]), "%s",
@@ -234,8 +297,9 @@ static int is_synthesis_prompt(const char *p);
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const aimee_request_t *request, agent_result_t *out)
 {
+   assert_task_custody(request, 1);
    const char *system_prompt = request->n_system ? request->system[0].text : NULL;
-   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
    int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
    double temperature = request->has_temperature ? request->temperature : 0.3;
 
@@ -338,8 +402,9 @@ static int is_synthesis_prompt(const char *p)
 int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
               agent_result_t *out)
 {
+   assert_task_custody(request, 1);
    const char *system_prompt = request->n_system ? request->system[0].text : NULL;
-   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
    int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
    double temperature = request->has_temperature ? request->temperature : 0.3;
 
@@ -489,7 +554,7 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                        agent_result_t *out)
 {
    const char *system_prompt = request->n_system ? request->system[0].text : NULL;
-   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
    int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
 
    (void)cfg;
@@ -610,13 +675,56 @@ static void reset_modes(void)
 
 /* --- tests --- */
 
+static void test_ensemble_preserves_original_ir(void)
+{
+   reset_modes();
+   ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+   agent_config_t config = make_acfg();
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "Inspect the evidence."},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/a.png",
+                              .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                          .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                          .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                          .model_visible = 1},
+                              .message_group = 7}};
+   blocks[1].raw = cJSON_CreateObject();
+   cJSON_AddStringToObject(blocks[1].raw, "opaque_fixture", "retained");
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   aimee_request_t request = {.messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.0,
+                              .has_max_tokens = 1,
+                              .max_tokens = 128};
+   for (int count = 1; count <= 2; count++)
+   {
+      message.n_blocks = count;
+      cJSON *snapshot = aimee_ir_request_json(&request);
+      assert(snapshot);
+      g_expected_task = &request;
+      g_task_copies = g_task_syntheses = 0;
+      delegate_ensemble_result_t result = {0};
+      assert(!delegate_ensemble_run(&config, &panel, &request, &result) && result.success);
+      assert(g_task_copies == panel.reference_count && g_task_syntheses == 1);
+      cJSON *after = aimee_ir_request_json(&request);
+      assert(after && cJSON_Compare(snapshot, after, 1));
+      cJSON_Delete(after);
+      cJSON_Delete(snapshot);
+      delegate_ensemble_result_free(&result);
+   }
+   cJSON_Delete(blocks[1].raw);
+   g_expected_task = NULL;
+}
+
 static void test_ensemble_basic(void)
 {
    reset_modes();
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&acfg, &cfg, "what is 2+2?", &result);
+   int rc = fixture_ensemble_run(&acfg, &cfg, "what is 2+2?", &result);
    assert(rc == 0);
    assert(result.success == 1);
    assert(!result.degraded);
@@ -636,7 +744,7 @@ static void test_ensemble_min_successful_degradation(void)
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&acfg, &cfg, "hard question?", &result);
+   int rc = fixture_ensemble_run(&acfg, &cfg, "hard question?", &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(!result.cost_capped);
@@ -655,7 +763,7 @@ static void test_ensemble_cost_cap(void)
    ensemble_panel_t cfg = make_cfg(1, 2, 0.001);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&acfg, &cfg, "expensive question", &result);
+   int rc = fixture_ensemble_run(&acfg, &cfg, "expensive question", &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
    assert(!result.degraded);
@@ -669,7 +777,7 @@ static void test_ensemble_cost_uses_model_registry_prices(void)
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_priced_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&acfg, &cfg, "priced question", &result);
+   int rc = fixture_ensemble_run(&acfg, &cfg, "priced question", &result);
    assert(rc == 0);
    /* 3 refs at 50 input + 50 output each, plus aggregator at 200 input + 100 output:
     * (350 * $1/MTok) + (250 * $3/MTok) = $0.0011. The old flat fallback would be
@@ -711,7 +819,7 @@ static void test_delegate_cost_estimate_uses_token_tracker(void)
 static void test_ensemble_null_args(void)
 {
    delegate_ensemble_result_t result = {0};
-   assert(delegate_ensemble_run(NULL, NULL, NULL, &result) == -1);
+   assert(fixture_ensemble_run(NULL, NULL, NULL, &result) == -1);
    assert(delegate_ensemble_cost_usd(NULL) == 0.0);
    printf("  test_ensemble_null_args: ok\n");
    delegate_ensemble_result_free(&result);
@@ -728,7 +836,7 @@ static void test_ensemble_routes_to_distinct_agents(void)
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&acfg, &cfg, "route check", &result);
+   int rc = fixture_ensemble_run(&acfg, &cfg, "route check", &result);
    assert(rc == 0);
    assert(g_captured_count == 3);
    assert(strcmp(g_captured_agents[0], "model-a") == 0);
@@ -1377,7 +1485,7 @@ static void test_implicit_panel_ignores_legacy_roster_and_caps_two(void)
 
    reset_modes();
    delegate_ensemble_result_t result = {0};
-   assert(delegate_ensemble_run(&acfg, &cfg, "exercise every filled panel seat", &result) == 0);
+   assert(fixture_ensemble_run(&acfg, &cfg, "exercise every filled panel seat", &result) == 0);
    assert(result.participants_total == 2);
    assert(result.participants_failed == 0);
    printf("  test_implicit_panel_ignores_legacy_roster_and_caps_two: ok\n");
@@ -2060,14 +2168,14 @@ static void test_refused_native_participants_cannot_synthesize_success(void)
    ensemble_panel_t panel = make_cfg(1, 2, 10.0);
    agent_config_t config = make_acfg();
    delegate_ensemble_result_t result = {0};
-   int rc = delegate_ensemble_run(&config, &panel, "review", &result);
+   int rc = fixture_ensemble_run(&config, &panel, "review", &result);
    assert(rc == 0);
    assert(!result.success && !result.canonical_response && result.participants_failed == 3);
    assert(g_aggregator_calls == 0);
    delegate_ensemble_result_free(&result);
    reset_modes();
    g_parallel_mode = 13; /* complete model bytes, failed capture/execution */
-   rc = delegate_ensemble_run(&config, &panel, "review", &result);
+   rc = fixture_ensemble_run(&config, &panel, "review", &result);
    assert(rc == 0 && !result.success && !result.canonical_response);
    assert(g_aggregator_calls == 0 && result.participants_failed == 3);
    delegate_ensemble_result_free(&result);
@@ -2120,7 +2228,7 @@ static void test_unknown_usage_cost_and_spend(void)
       g_usage_mode = 1;
       ensemble_panel_t panel = make_cfg(1, 2, bounded ? 10.0 : 0.0);
       delegate_ensemble_result_t result = {0};
-      assert(!delegate_ensemble_run(&acfg, &panel, "unknown panel usage", &result));
+      assert(!fixture_ensemble_run(&acfg, &panel, "unknown panel usage", &result));
       assert(result.success && isnan(delegate_ensemble_cost_usd(&result)));
       assert_cost_json_null(result.cost_usd);
       assert(result.cost_capped == bounded);
@@ -2205,6 +2313,7 @@ int main(void)
    test_one_seat_panel_skips_chair_pass();
    test_ensemble_null_args();
    test_ensemble_basic();
+   test_ensemble_preserves_original_ir();
    test_ensemble_cost_cap();
    test_ensemble_cost_uses_model_registry_prices();
    test_delegate_cost_estimate_uses_token_tracker();
@@ -2252,6 +2361,7 @@ int main(void)
    test_roundtable_malformed_review_json_repair_counts_successful();
    test_roundtable_cancellation_stops();
    test_roundtable_deadline_returns_best_so_far();
+   free(g_fixture_request_view);
    printf("all tests passed\n");
    return 0;
 }

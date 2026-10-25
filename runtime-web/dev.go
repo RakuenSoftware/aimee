@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
-	"io"
+	"encoding/json"
 	"net/http"
 	"time"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 // POST /api/dev/submit {proposal_md, workflow?, repo?} — autonomous-development
@@ -36,7 +38,7 @@ func (s *server) handleDevSubmit(w http.ResponseWriter, r *http.Request) {
 // full generation latency (there is no async job to poll).
 const draftTimeout = 95 * time.Second
 
-// POST /api/proposal/draft {prompt, model?} — "Draft with a delegate": a single
+// POST /api/proposal/draft {message, model?} — "Draft with a delegate": a single
 // tool-free LLM completion (server-side agent.draft) that returns {text, agent}.
 // Proxied under the webuser identity (CAP_DELEGATE, like /api/dev/submit) with an
 // extended timeout since it holds the request open for the model latency.
@@ -45,10 +47,21 @@ func (s *server) handleProposalDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	const maxBody = 1 << 20
-	body, _ := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-	if len(body) > maxBody {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+	body, ok := readBoundedBody(w, r, 1<<20)
+	if !ok {
+		return
+	}
+	var envelope struct {
+		Message json.RawMessage `json:"message"`
+		Model   string          `json:"model,omitempty"`
+	}
+	var message canonical.Message
+	if !canonical.Decode(body, &envelope) || !canonical.ValidMessage(envelope.Message) ||
+		!canonical.Decode(envelope.Message, &message) || message.Role != "user" ||
+		len(message.Blocks) != 1 || message.Blocks[0].Type != "text" ||
+		message.Blocks[0].Text == nil || len(*message.Blocks[0].Text) < 8 ||
+		message.Blocks[0].CacheControl != nil || message.Blocks[0].CacheTTL != nil {
+		writeJSONError(w, http.StatusBadRequest, "draft requires a canonical user text message")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), draftTimeout+5*time.Second)

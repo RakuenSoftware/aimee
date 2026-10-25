@@ -27,6 +27,8 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
    assert(request->n_messages == 1 && request->messages[0].n_blocks == 1);
    assert(!strcmp(request->messages[0].role, "user"));
    assert(!strcmp(request->messages[0].blocks[0].text, "Draft subject: {\"opaque\":1} 雪"));
+   assert(request->messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(request->messages[0].blocks[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
    assert(request->has_max_tokens && request->max_tokens == 4096);
    assert(request->has_temperature && request->temperature == 0.3);
    assert(!request->n_tools);
@@ -317,6 +319,22 @@ int main(void)
    assert(!handle_agent_draft(NULL, NULL, draft));
    assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
    terminal = AIMEE_STOP_MAX_TOKENS;
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "status")), "error"));
+   assert(!field(reply, "text"));
+   cJSON_DeleteItemFromObjectCaseSensitive(draft, "prompt");
+   aimee_block_t draft_block = {.type = AIMEE_BLK_TEXT,
+                                .text = "Draft subject: {\"opaque\":1} 雪",
+                                .context = {.origin = AIMEE_CTX_ORIGIN_PLATFORM,
+                                            .authority = AIMEE_CTX_AUTH_POLICY,
+                                            .trust = AIMEE_CTX_TRUST_VERIFIED,
+                                            .model_visible = 1}};
+   aimee_message_t draft_message = {.role = "user", .blocks = &draft_block, .n_blocks = 1};
+   assert(cJSON_AddItemToObject(draft, "message", aimee_ir_message_json(&draft_message)));
+   terminal = AIMEE_STOP_END_TURN;
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
+   cJSON_AddStringToObject(draft, "prompt", "ambiguous legacy prompt");
    assert(!handle_agent_draft(NULL, NULL, draft));
    assert(!strcmp(cJSON_GetStringValue(field(reply, "status")), "error"));
    assert(!field(reply, "text"));

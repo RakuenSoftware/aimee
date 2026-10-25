@@ -7,6 +7,7 @@
 #include "delegate_ensemble_internal.h"
 #include "aimee.h"
 #include "delegate_ensemble.h"
+#include "ensemble_request.h"
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "config.h"
@@ -528,11 +529,12 @@ static int build_synthesis_prompt(char *buf, size_t cap, const char *original_pr
 }
 
 static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
-                          const char *synthesis_prompt, long deadline_abs_ms, agent_result_t *out)
+                          const char *synthesis_prompt, long deadline_abs_ms, agent_result_t *out,
+                          const aimee_request_t *source)
 {
    memset(out, 0, sizeof(*out));
    aimee_request_t request = {0};
-   if (aimee_ir_request_from_text(&request, NULL, synthesis_prompt, 0, 0.3))
+   if (ensemble_synthesis_request(source, synthesis_prompt, &request))
       return AGENT_RC_CONTEXT_REFUSED;
 
    /* deadline_abs_ms (absolute CLOCK_MONOTONIC ms; 0 = UNBOUNDED) caps the FALLBACK
@@ -927,7 +929,7 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
       return -1;
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   int rc = run_aggregator(acfg, panel, full, 0, &res);
+   int rc = run_aggregator(acfg, panel, full, 0, &res, NULL);
    free(full);
    if (cost_usd)
       *cost_usd += result_token_cost(acfg, &res, panel->aggregator);
@@ -1753,11 +1755,13 @@ void ensemble_panel_from_config(ensemble_panel_t *out)
    snprintf(out->turns, sizeof(out->turns), "%s", config_roundtable_turns());
 }
 
-int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
-                          delegate_ensemble_result_t *out)
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, delegate_ensemble_result_t *out)
 {
-   if (!acfg || !panel || !prompt || !out)
+   if (!acfg || !panel || !out || aimee_ir_request_admit(request) || request->model ||
+       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user"))
       return -1;
+   const char *prompt = "The original task is supplied with this synthesis request.";
 
    memset(out, 0, sizeof(*out));
 
@@ -1775,7 +1779,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
        * This is what makes the ensemble an ensemble of *diverse* models. */
       tasks[i].role = NULL;
       tasks[i].agent = panel->reference_models[i];
-      (void)aimee_ir_request_from_text(&tasks[i].request, NULL, prompt, 0, 0.3);
+      (void)aimee_ir_request_clone(request, &tasks[i].request);
    }
 
    agent_result_t results[ENSEMBLE_MAX_REFS];
@@ -1862,7 +1866,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
       agent_result_clear_response(&results[i]);
 
    agent_result_t agg_result = {0};
-   int agg_rc = run_aggregator(acfg, panel, synthesis_buf, 0, &agg_result);
+   int agg_rc = run_aggregator(acfg, panel, synthesis_buf, 0, &agg_result, request);
    free(synthesis_buf);
    out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
 
@@ -2273,7 +2277,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                agent_result_t chair_res = {0};
                memset(&chair_res, 0, sizeof(chair_res));
                long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res) == 0 &&
+               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res, NULL) ==
+                       0 &&
                    chair_res.response && chair_res.response[0])
                {
                   int chair_changed = 0;
@@ -2325,7 +2330,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       /* Bound synthesis by the roundtable's own deadline so the fallback loop
        * cannot run long past it (the panel already respects this deadline). */
       long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-      int agg_rc = run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result);
+      int agg_rc =
+          run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result, NULL);
       free(synthesis_prompt);
       out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])

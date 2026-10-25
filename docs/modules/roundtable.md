@@ -35,6 +35,13 @@ existing consumer also fails until the ratchet is reduced in the same change.
 Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
 `AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 
+The aggregate entry point accepts a canonical request. Reference seats receive
+owned IR clones; synthesis extends the original task instead of rebuilding it
+from a text projection. Text/image blocks, context metadata, opaque sidecars and
+explicit sampling controls remain intact. Synthesis notes are appended as a
+separate unverified model-evidence block. Generated round instructions and
+business artifacts are separate from the original message owner.
+
 ## Dependencies and consumers
 
 - `audit`: records panel selection, model calls, verification, chair decisions, and outcomes.

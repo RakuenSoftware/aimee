@@ -4266,6 +4266,7 @@ $(TESTPREFIX)/unit-test-delegate-permissions: $(OBJDIR)/tests/test_delegate_perm
 # "required core without roundtable" set; rule restored after the module
 # restructuring dropped it.
 $(TESTPREFIX)/unit-test-panel-provider: $(OBJDIR)/tests/test_panel_provider.o \
+                                       $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/modules/delegates/panel_provider.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4439,6 +4440,7 @@ $(TESTPREFIX)/unit-test-role-templates: $(OBJDIR)/tests/test_role_templates.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-skill: $(OBJDIR)/tests/test_skill.o \
+                               $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                $(OBJDIR)/modules/skills/skill.o $(OBJDIR)/modules/skills/skill_rollback.o \
                                $(OBJDIR)/modules/skills/skill_trigger_policy.o $(TEST_CORE_OBJS) \
                                $(OBJDIR)/dstr.o
@@ -5016,8 +5018,8 @@ $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegat
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_delegate_ensemble.o \
-                                       $(OBJDIR)/modules/roundtable/delegate_ensemble.o $(OBJDIR)/modules/roundtable/delegate_ensemble_review.o \
+$(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_delegate_ensemble.o \
+                                       $(OBJDIR)/modules/roundtable/delegate_ensemble.o $(OBJDIR)/modules/roundtable/ensemble_request.o $(OBJDIR)/modules/roundtable/delegate_ensemble_review.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_verify.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_chair.o \
                                        $(OBJDIR)/server/evidence_replay.o \
@@ -6801,6 +6803,7 @@ $(TESTPREFIX)/unit-test-kb-releases-db: $(OBJDIR)/tests/test_kb_releases_db.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-roadmap-decompose: $(OBJDIR)/tests/test_roadmap_decompose.o \
+                     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                      $(OBJDIR)/modules/roadmap/roadmap_decompose.o \
                      $(OBJDIR)/kb/roadmap.o \
                      $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
@@ -6854,6 +6857,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
 	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/platform_random.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/artifact_trust.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_build.o \
+                                       $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                                        $(OBJDIR)/server/agent_request_build.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \

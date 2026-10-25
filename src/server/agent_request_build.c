@@ -11,6 +11,7 @@
 #include "model_registry.h"        /* model_capability_get, MODEL_CAP_* */
 #include "model_sampling.h"        /* typed sampling resolution */
 #include "config.h"
+#include <aimee/module-runtime/pre_llm_hook.h>
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
@@ -47,14 +48,64 @@ cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t 
    return body;
 }
 
+/* Hook callbacks inspect a text view; their context never replaces user IR. */
+int agent_prepare_plain_request_hooks(const aimee_request_t *request, aimee_request_t *out)
+{
+   if (aimee_ir_request_admit(request) || request->n_messages != 1 ||
+       strcmp(request->messages[0].role, "user"))
+      return -1;
+   if (!plugin_chook_pre_llm_count())
+      return 0;
+   size_t capacity = 1;
+   const aimee_message_t *source = &request->messages[0];
+   for (int i = 0; i < source->n_blocks; i++)
+      if (source->blocks[i].type == AIMEE_BLK_TEXT && source->blocks[i].text)
+         capacity += strlen(source->blocks[i].text) + 2;
+   char *view = malloc(capacity);
+   if (!view)
+      return -1;
+   aimee_ir_last_user_text(request, view, capacity);
+   char context[4096] = "";
+   int included = plugin_chook_run_pre_llm(view, context, sizeof context);
+   free(view);
+   if (included <= 0 || !context[0])
+      return 0;
+   if (aimee_ir_request_clone(request, out))
+      return -1;
+   aimee_message_t *message = &out->messages[0];
+   aimee_block_t *blocks =
+       realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      goto fail;
+   message->blocks = blocks;
+   aimee_block_t *added = &blocks[message->n_blocks++];
+   *added = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(context)};
+   if (!added->text)
+      goto fail;
+   aimee_ir_block_set_context(added, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   out->mutated = 1;
+   if (aimee_ir_request_admit(out))
+      goto fail;
+   return 1;
+fail:
+   aimee_request_free(out);
+   return -1;
+}
+
 /* Apply the host plain-turn profile to an owned IR clone, then render only
  * at this provider boundary. The caller's message and context remain intact. */
 cJSON *agent_build_host_request_ir(const agent_t *agent, const aimee_request_t *request)
 {
    if (!agent || !agent_request_with_tools_supported(request) || request->model ||
-       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user") ||
-       request->messages[0].n_blocks != 1 || request->messages[0].blocks[0].type != AIMEE_BLK_TEXT)
+       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user"))
       return NULL;
+   for (int i = 0; i < request->messages[0].n_blocks; i++)
+      if (request->messages[0].blocks[i].type != AIMEE_BLK_TEXT ||
+          request->messages[0].blocks[i].raw || request->messages[0].blocks[i].cache_control ||
+          request->messages[0].blocks[i].cache_ttl)
+         return NULL;
    aimee_request_t ir = {0};
    if (aimee_ir_request_clone(request, &ir))
       return NULL;

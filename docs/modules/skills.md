@@ -34,6 +34,11 @@ configuration files with skill surfaces remain orchestration or consumer boundar
 duplicate skill implementations. The source-level liveness and public-API cleanup audit is recorded in
 `docs/validation/core-modularization-slice-33.md`.
 
+The model trial callback borrows a canonical `aimee_request_t` and returns an owned
+`aimee_response_t`. The case owner constructs IR at prompt origin and derives its
+scoring text view only from complete successful canonical output. Incomplete
+model output cannot become a passing business artifact.
+
 ## Dependencies and consumers
 
 - `config`: supplies dispatch, index, lifecycle, and evaluation policy for skills.

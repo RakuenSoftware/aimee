@@ -223,38 +223,23 @@ static agent_t *skill_server_select_agent(agent_config_t *config, const char *re
    return NULL;
 }
 
-static int skill_server_trial_run(void *opaque, const char *system_prompt, const char *prompt,
-                                  int max_tokens, char **response_out,
-                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+static int skill_server_trial_run(void *opaque, const aimee_request_t *request,
+                                  aimee_response_t *response_out, skill_trial_usage_t *usage_out,
+                                  char *errbuf, size_t errbuf_len)
 {
    skill_server_trial_runner_t *runner = opaque;
    agent_result_t result = {0};
-   memset(&result, 0, sizeof(result));
-   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = (char *)system_prompt};
-   aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = (char *)prompt};
-   aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
-   aimee_request_t request = {.system = &system,
-                              .n_system = system_prompt && system_prompt[0] ? 1 : 0,
-                              .messages = &message,
-                              .n_messages = 1,
-                              .has_max_tokens = max_tokens > 0,
-                              .max_tokens = max_tokens,
-                              .has_temperature = 1,
-                              .temperature = 0.0};
-   aimee_ir_classify_context(&request);
-   if (agent_generate(&runner->config, runner->agent_name, &request, &result) != 0 ||
+   if (agent_generate(&runner->config, runner->agent_name, request, &result) != 0 ||
        aimee_ir_response_complete_text_valid(&result.canonical_response))
    {
       snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
       agent_result_clear_response(&result);
       return -1;
    }
-   *response_out = agent_result_take_text(&result);
-   if (!*response_out)
-   {
-      snprintf(errbuf, errbuf_len, "failed to project canonical model response");
-      return -1;
-   }
+   *response_out = result.canonical_response;
+   memset(&result.canonical_response, 0, sizeof result.canonical_response);
+   free(result.response);
+   result.response = NULL;
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = result.prompt_tokens;
    usage_out->completion_tokens = result.completion_tokens;

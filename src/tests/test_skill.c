@@ -1104,21 +1104,28 @@ typedef struct
    int calls;
    int no_effect;
    int tool_attempt;
+   int incomplete;
 } executable_eval_runner_t;
 
-static int executable_eval_runner(void *opaque, const char *system_prompt, const char *prompt,
-                                  int max_tokens, char **response_out,
-                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+static int executable_eval_runner(void *opaque, const aimee_request_t *request,
+                                  aimee_response_t *response_out, skill_trial_usage_t *usage_out,
+                                  char *errbuf, size_t errbuf_len)
 {
-   (void)prompt;
-   (void)max_tokens;
    (void)errbuf;
    (void)errbuf_len;
    executable_eval_runner_t *runner = opaque;
-   int treatment = strstr(system_prompt, "### ACTIVE SKILL:") != NULL;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
+   assert(request->has_temperature && request->temperature == 0.0);
+   assert(request->has_max_tokens && request->max_tokens == 128);
+   assert(request->n_system == 1 && request->system[0].type == AIMEE_BLK_TEXT);
+   int treatment = strstr(request->system[0].text, "### ACTIVE SKILL:") != NULL;
    runner->order[runner->calls++] = treatment;
-   *response_out = strdup(runner->no_effect || treatment ? "I reviewed first."
-                                                         : "I changed it without review.");
+   int rc = aimee_ir_response_from_text(
+       response_out,
+       runner->no_effect || treatment ? "I reviewed first." : "I changed it without review.",
+       "test/model");
+   if (runner->incomplete)
+      response_out->stop_reason = AIMEE_STOP_MAX_TOKENS;
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = 10;
    usage_out->completion_tokens = 5;
@@ -1126,7 +1133,7 @@ static int executable_eval_runner(void *opaque, const char *system_prompt, const
    usage_out->cost_usd = 0.01;
    usage_out->tool_calls = runner->tool_attempt;
    snprintf(usage_out->route, sizeof(usage_out->route), "test/model");
-   return *response_out ? 0 : -1;
+   return rc;
 }
 
 static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
@@ -1179,6 +1186,11 @@ static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
    assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
    assert(!result.passed && result.inconclusive);
    assert(strstr(result.first_failure, "tool or external-effect") != NULL);
+
+   memset(&runner, 0, sizeof(runner));
+   runner.incomplete = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && result.inconclusive && result.calls == 0);
 
    rm_rf(root);
    free(root);

@@ -44,6 +44,57 @@ status descriptions below: `/var/tmp/aimee-ir-browser-final-recovery/summary.jso
 `/var/tmp/aimee-local-claude-recovery/`, `/var/tmp/aimee-local-claude-tools/`, and
 `/var/tmp/aimee-local-claude-continuation/`.
 
+## Follow-up message-contract audit
+
+The first browser recovery did not establish whole-project IR completion. The
+follow-up audit found and repaired the remaining direct prompt-tuple model
+contracts in ensemble aggregation, skill model callbacks, roadmap decomposition
+callbacks and the optional panel facade. Requests and responses now retain IR
+across these contracts. The ensemble clones the original request for its seats
+and extends that task for synthesis; text/image blocks, provenance, inert opaque
+sidecars and explicit zero-temperature settings are preserved. Incomplete model
+output cannot become scoring text or a validated roadmap artifact.
+
+The same audit removed the plain hook text reconstruction API. Hooks inspect a
+read-only text view and their output becomes a separate unverified evidence
+block in an owned IR request, retained through fallback. Plain HTTP host
+profiles admit multiple text blocks without collapsing them. Synthesis notes
+also stay in their own model-evidence block; the original task's text and
+context authority are unchanged. No hook output inherits task authority.
+
+Proposal drafting also had a plain-prompt hop from the frontend through
+runtime-web. The frontend now constructs a Message, the web backend validates
+and forwards the exact canonical body under the authenticated actor, and the C
+owner adds its drafting policy. Client context authority is cleared at public
+admission. The public API retains an explicit legacy text import branch; an
+ambiguous message-plus-prompt request refuses. OpenAPI describes both cases.
+
+The audit traces messages through these owners:
+
+| Path | Internal contract and boundary |
+| --- | --- |
+| Browser chat and proposal drafting | Frontend Message; canonical admission in runtime-web and C; durable IR history |
+| Model core, routing, retry, tools and native sessions | Request/Message/Response; canonical JSON history is an IR encoding; native wire codecs remain in translation/native owners |
+| C/Go delegates, workflow execution, panels and coordination queue | Canonical requests/messages; new queue storage has an explicit IR marker; legacy text imports only at storage read |
+| Ensemble and auxiliary model callbacks | Canonical input/output; business text derives only after complete response admission |
+| KB/curator/fact extraction | Canonical curator Request/Response; source leases, corpus records and job configuration remain domain data before prompt creation |
+| Policy, economizer and presentation | Catalog/policy and display views retain the original message owner; they are not replacement transcripts |
+| Provider APIs, native SDKs, CLI input and legacy archives | Explicit external/import codecs; no internal provider-history auto-detection |
+
+The other `Prompt`/`SystemPrompt` search hits were traced: workflow catalog
+entries are authored templates; regression selection and named-file drift use
+read-only task/response views; MemoryFactWork carries leased corpus data and
+configuration before curator request construction; economizer messages are
+canonical IR JSON and its system text is a policy/measurement view. Speech and
+embedding task contracts are domain operations, not substitute conversation
+representations. No unrelated inference schema was introduced.
+
+Current qualification remains attached to its exact runtime source in
+`/var/tmp/aimee-ir-browser-final-recovery/summary.json`; a completed browser
+recovery on the prior image is not proof that these later code changes are
+installed. No learning workflow, new installation or KB setup belongs to this
+verification.
+
 ## Recovery scope, 2026-10-25
 
 Exactly two goals govern this work:
@@ -626,3 +677,12 @@ The host-profile/roundtable change passes focused normal and ASAN/UBSAN tests
 (request rendering, context refusal, provider attempts, agent and ensemble), all
 38 public ACP route cases in both lanes, 45 bypass-guard tests and changed-owner
 checks. These are controlled checks, not successful live Claude session proof.
+The follow-up changes pass normal and ASAN/UBSAN request rendering, hook,
+context-refusal, provider-attempt, agent, ensemble, panel, skill-callback,
+roadmap-callback and generation-boundary checks. The actual 38-case ACP public
+route passes in both lanes. The 47-case IR bypass guard, ownership/module/line
+checks, generated docs and both API conformance checks pass. Proposal-draft
+transport checks pass normally and under Go race instrumentation; frontend
+TypeScript and its existing workflow-action checks pass. Browser runtime
+qualification for the follow-up source is recorded separately in the current
+proof pointer after its exact image upgrade.

@@ -125,36 +125,48 @@ static void test_extract_json_no_object(void)
 /* ---- stub models ---- */
 
 /* Always returns the well-formed decomposition. */
-static int stub_good(const char *prompt, char **out, void *ud)
+static int stub_good(const aimee_request_t *request, aimee_response_t *out, void *ud)
 {
-   (void)prompt;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
    (void)ud;
-   *out = strdup(GOOD_DECOMP);
-   return *out ? 0 : -1;
+   return aimee_ir_response_from_text(out, GOOD_DECOMP, "test/model");
 }
 
 /* Returns invalid JSON on first call, then the good decomp. */
-static int stub_bad_then_good(const char *prompt, char **out, void *ud)
+static int stub_bad_then_good(const aimee_request_t *request, aimee_response_t *out, void *ud)
 {
-   (void)prompt;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
    int *call = (int *)ud;
    (*call)++;
    if (*call == 1)
    {
-      *out = strdup("{\"bad\":\"missing units\"}");
-      return *out ? 0 : -1;
+      return aimee_ir_response_from_text(out, "{\"bad\":\"missing units\"}", "test/model");
    }
-   *out = strdup(GOOD_DECOMP);
-   return *out ? 0 : -1;
+   return aimee_ir_response_from_text(out, GOOD_DECOMP, "test/model");
 }
 
 /* Always fails. */
-static int stub_fail(const char *prompt, char **out, void *ud)
+static int stub_fail(const aimee_request_t *request, aimee_response_t *out, void *ud)
 {
-   (void)prompt;
+   assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
    (void)out;
    (void)ud;
    return -1;
+}
+
+static int stub_incomplete(const aimee_request_t *request, aimee_response_t *out, void *ud)
+{
+   int rc = stub_good(request, out, ud);
+   out->stop_reason = AIMEE_STOP_MAX_TOKENS;
+   return rc;
+}
+
+static void test_run_refuses_incomplete_model_output(void)
+{
+   char *out = NULL, error[256] = "";
+   assert(roadmap_decompose_run("goal", NULL, NULL, stub_incomplete, NULL, 2, &out, error,
+                                sizeof error) == -1);
+   assert(!out && strstr(error, "model call failed"));
 }
 
 /* ---- 5. decompose_run succeeds on first attempt ---- */
@@ -213,6 +225,7 @@ static void test_run_no_model(void)
 
 int main(void)
 {
+   test_run_refuses_incomplete_model_output();
    printf("roadmap_decompose:\n");
    test_build_prompt_includes_goal();
    test_build_prompt_includes_prior_err();

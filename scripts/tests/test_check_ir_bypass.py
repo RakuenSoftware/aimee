@@ -424,6 +424,28 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ir_ctx_status(admitted, args, timeout, &failed);')
         checker.check(self.root)
 
+    def test_plain_hooks_cannot_rebuild_original_user_text(self):
+        self.source("src/server/agent_runtime.c", 'plugin_chook_apply_pre_llm(user_text);')
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
+        self.source("src/server/agent_runtime.c", 'agent_prepare_plain_request_hooks(request, &owned);')
+        checker.check(self.root)
+
+    def test_auxiliary_model_contracts_cannot_pass_raw_prompt_tuples(self):
+        declarations = (
+            'typedef int (*skill_trial_runner_fn)(void *ctx, const char *system, const char *prompt);',
+            'typedef int (*roadmap_model_fn)(const char *prompt, char **output, void *ctx);',
+            'int delegate_ensemble_run(config_t *cfg, panel_t *panel, const char *prompt, result_t *out);',
+            'int aimee_panel_run(config_t *cfg, panel_t *panel, const char *task, result_t *out);',
+        )
+        for declaration in declarations:
+            path = self.source("src/new_module/model.h", declaration)
+            with self.assertRaisesRegex(ValueError, "raw-model-contract"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/new_module/model.h", 'typedef int (*skill_trial_runner_fn)(void *ctx, const aimee_request_t *request, aimee_response_t *out, char *errbuf);')
+        checker.check(self.root)
+
     def test_plain_execution_cannot_rebuild_from_prompt_tuple(self):
         for relative in ("src/server/agent_runtime.c", "src/other_module/new.c"):
             path = self.source(relative, 'agent_build_request(agent, system, text, 128, 0.3);')

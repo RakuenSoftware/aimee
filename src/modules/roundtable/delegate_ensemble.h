@@ -23,8 +23,8 @@ typedef aimee_panel_aggregate_result_t delegate_ensemble_result_t;
 /* Fill *out from the live config. */
 void ensemble_panel_from_config(ensemble_panel_t *out);
 
-int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
-                          delegate_ensemble_result_t *out);
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, delegate_ensemble_result_t *out);
 
 /* Releases owned canonical output, retaining scalar/display diagnostics. */
 void delegate_ensemble_result_free(delegate_ensemble_result_t *result);

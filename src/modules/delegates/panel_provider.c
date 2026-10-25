@@ -37,17 +37,17 @@ int aimee_panel_provider_available(void)
    return active_provider != NULL;
 }
 
-int aimee_panel_aggregate(agent_config_t *agents, const ensemble_panel_t *panel, const char *prompt,
-                          aimee_panel_aggregate_result_t *out)
+int aimee_panel_aggregate(agent_config_t *agents, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, aimee_panel_aggregate_result_t *out)
 {
    if (!out)
       return AIMEE_PANEL_PROVIDER_INVALID;
    memset(out, 0, sizeof(*out));
-   if (!agents || !panel || !prompt)
+   if (!agents || !panel || !request || !request->n_messages || aimee_ir_request_admit(request))
       return AIMEE_PANEL_PROVIDER_INVALID;
    if (!active_provider)
       return AIMEE_PANEL_PROVIDER_UNAVAILABLE;
-   if (active_provider->aggregate(agents, panel, prompt, out) != 0)
+   if (active_provider->aggregate(agents, panel, request, out) != 0)
    {
       memset(out, 0, sizeof(*out));
       return AIMEE_PANEL_PROVIDER_ERROR;
@@ -55,17 +55,18 @@ int aimee_panel_aggregate(agent_config_t *agents, const ensemble_panel_t *panel,
    return AIMEE_PANEL_PROVIDER_OK;
 }
 
-int aimee_panel_run(agent_config_t *agents, const ensemble_panel_t *panel, const char *task,
-                    const aimee_panel_options_t *options, aimee_panel_result_t *out)
+int aimee_panel_run(agent_config_t *agents, const ensemble_panel_t *panel,
+                    const aimee_request_t *request, const aimee_panel_options_t *options,
+                    aimee_panel_result_t *out)
 {
    if (!out)
       return AIMEE_PANEL_PROVIDER_INVALID;
    memset(out, 0, sizeof(*out));
-   if (!agents || !panel || !task)
+   if (!agents || !panel || !request || !request->n_messages || aimee_ir_request_admit(request))
       return AIMEE_PANEL_PROVIDER_INVALID;
    if (!active_provider)
       return AIMEE_PANEL_PROVIDER_UNAVAILABLE;
-   if (active_provider->run(agents, panel, task, options, out) != 0 || !out->artifact)
+   if (active_provider->run(agents, panel, request, options, out) != 0 || !out->artifact)
    {
       if (out->artifact)
          active_provider->release(out);

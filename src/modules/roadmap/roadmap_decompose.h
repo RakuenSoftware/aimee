@@ -13,17 +13,18 @@
 #define DEC_ROADMAP_DECOMPOSE_H 1
 
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-   /* Model hook: given a fully-formed prompt, produce the model's raw text
-    * reply heap-allocated in *out_text (caller frees). Return 0 on success,
-    * -1 on error. Kept injectable so the decompose orchestration is
-    * unit-testable without a live model. */
-   typedef int (*roadmap_model_fn)(const char *prompt, char **out_text, void *ud);
+   /* Model hook: canonical input and owned canonical output. Return 0 on
+    * success, -1 on error. The domain validator derives its JSON text view
+    * only after complete output has been admitted. */
+   typedef int (*roadmap_model_fn)(const aimee_request_t *request, aimee_response_t *response,
+                                   void *ud);
 
    /* Build the decomposition prompt for a goal. prior_err (may be NULL/empty)
     * is the validation failure from the previous attempt, fed back so the

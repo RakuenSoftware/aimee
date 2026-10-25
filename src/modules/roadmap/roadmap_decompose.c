@@ -199,10 +199,17 @@ int roadmap_decompose_run(const char *goal, const char *planning_depth, const ch
          continue;
       }
 
-      char *text = NULL;
-      int mrc = model(prompt, &text, ud);
+      aimee_request_t request = {0};
+      aimee_response_t response = {0};
+      int mrc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.3);
+      if (!mrc)
+         mrc = model(&request, &response, ud);
+      aimee_request_free(&request);
       free(prompt);
-      prompt = NULL;
+      char *text = !mrc && !aimee_ir_response_complete_text_valid(&response)
+                       ? aimee_ir_response_text_alloc(&response)
+                       : NULL;
+      aimee_response_free(&response);
 
       if (mrc != 0 || !text)
       {

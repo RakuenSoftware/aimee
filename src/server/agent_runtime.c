@@ -231,12 +231,15 @@ static int host_request_supported(const aimee_request_t *request, int use_tools)
       return 0;
    const aimee_message_t *message = &request->messages[0];
    for (int i = 0; i < message->n_blocks; i++)
-      if (message->blocks[i].type != AIMEE_BLK_TEXT && message->blocks[i].type != AIMEE_BLK_IMAGE &&
-          message->blocks[i].type != AIMEE_BLK_DOCUMENT)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if ((block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
+           block->type != AIMEE_BLK_DOCUMENT) ||
+          (!use_tools && (block->type != AIMEE_BLK_TEXT || block->cache_control ||
+                          block->cache_ttl || block->raw)))
          return 0;
-   return use_tools || (message->n_blocks == 1 && message->blocks[0].type == AIMEE_BLK_TEXT &&
-                        !message->blocks[0].cache_control && !message->blocks[0].cache_ttl &&
-                        !message->blocks[0].raw);
+   }
+   return 1;
 }
 
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
@@ -968,25 +971,22 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
 
 /* --- Request/response (simple, non-tool path) --- */
 
-static int text_prompt_token_estimate(const char *system_prompt, const char *user_prompt)
-{
-   size_t len = 0;
-   if (system_prompt)
-      len += strlen(system_prompt);
-   if (user_prompt)
-      len += strlen(user_prompt);
-   return (int)(len / 4) + 1;
-}
-
 static void track_simple_anthropic_payload_rewrite(const delegate_driver_t *driver,
-                                                   const agent_t *agent, const char *system_prompt,
-                                                   const char *user_prompt)
+                                                   const agent_t *agent,
+                                                   const aimee_request_t *request)
 {
+   size_t length = 0;
+   for (int i = 0; i < request->n_system; i++)
+      if (request->system[i].text)
+         length += strlen(request->system[i].text);
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+         if (request->messages[i].blocks[j].text)
+            length += strlen(request->messages[i].blocks[j].text);
    driver_caps_t caps;
    delegate_get_caps(driver, agent, &caps);
-   payload_rewrite_track_request(system_prompt, NULL,
-                                 text_prompt_token_estimate(system_prompt, user_prompt),
-                                 caps.context_limit);
+   payload_rewrite_track_request(request->n_system ? request->system[0].text : NULL, NULL,
+                                 (int)(length / 4) + 1, caps.context_limit);
 }
 
 /* All native output crosses the same entry adapters as the tool runtime. The
@@ -1080,7 +1080,6 @@ static int agent_execute_plain_request(const agent_t *agent, const aimee_request
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
-   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
    char query[4096];
    aimee_ir_last_user_text(request, query, sizeof query);
    const char *user_prompt = request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
@@ -1122,27 +1121,16 @@ static int agent_execute_plain_request(const agent_t *agent, const aimee_request
       snprintf(out->error, sizeof(out->error), "%s", why ? why : "auth resolution failed");
       return -1;
    }
-   /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
-   char *augmented_prompt = !host_text_profile ? NULL : plugin_chook_apply_pre_llm(user_prompt);
-   const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
+   /* Hook text is evidence in an owned IR block; the original task stays intact. */
    aimee_request_t prepared = {0};
-   if (augmented_prompt)
+   if (host_text_profile && agent_prepare_plain_request_hooks(request, &prepared) < 0)
    {
-      if (aimee_ir_request_clone(request, &prepared))
-      {
-         free(augmented_prompt);
-         snprintf(out->error, sizeof out->error, "cannot prepare canonical hook context");
-         return AGENT_RC_CONTEXT_REFUSED;
-      }
-      free(prepared.messages[0].blocks[0].text);
-      prepared.messages[0].blocks[0].text = augmented_prompt;
-      augmented_prompt = NULL;
-      effective_user = prepared.messages[0].blocks[0].text;
-      prepared.mutated = 1;
+      snprintf(out->error, sizeof out->error, "cannot prepare canonical hook context");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
    const aimee_request_t *execution = prepared.n_messages ? &prepared : request;
    if (host_text_profile && is_anthropic_provider(agent))
-      track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
+      track_simple_anthropic_payload_rewrite(driver, agent, execution);
    cJSON *req = !host_text_profile ? agent_build_plain_request_ir(agent, execution)
                                    : agent_build_host_request_ir(agent, execution);
    char *body = cJSON_PrintUnformatted(req);
@@ -1225,7 +1213,7 @@ static int agent_execute_plain_request(const agent_t *agent, const aimee_request
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
       if (host_text_profile && is_anthropic_provider(&fb_agent))
-         track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
+         track_simple_anthropic_payload_rewrite(driver, &fb_agent, execution);
       cJSON *fb_req = !host_text_profile ? agent_build_plain_request_ir(&fb_agent, execution)
                                          : agent_build_host_request_ir(&fb_agent, execution);
       char *fb_body = cJSON_PrintUnformatted(fb_req);

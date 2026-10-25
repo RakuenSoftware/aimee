@@ -27,7 +27,8 @@
     "src/modules/roundtable/roundtable_seat_resolve.c",
     "src/modules/roundtable/roundtable_verify.c",
     "src/modules/roundtable/roundtable_review_panel.c",
-    "src/modules/roundtable/module_adapter.c"
+    "src/modules/roundtable/module_adapter.c",
+    "src/modules/roundtable/ensemble_request.c"
   ],
   "go_sources": [
     "server-go/modules/roundtable/chunk.go",
@@ -78,7 +79,8 @@
     "src/modules/roundtable/roundtable_preset.h",
     "src/modules/roundtable/roundtable_seat_resolve.h",
     "src/modules/roundtable/roundtable_types.h",
-    "src/modules/roundtable/roundtable_verify.h"
+    "src/modules/roundtable/roundtable_verify.h",
+    "src/modules/roundtable/ensemble_request.h"
   ],
   "tests": [
     "src/tests/test_delegate_ensemble.c",

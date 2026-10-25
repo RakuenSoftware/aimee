@@ -16,6 +16,7 @@
 #include <sys/types.h>
 
 #include "agent_request_build.h"
+#include <aimee/module-runtime/pre_llm_hook.h>
 #include "model_provider.h"
 #include "model_registry.h"
 #include "agent_config.h"
@@ -356,11 +357,85 @@ static void test_owned_plain_request_preserves_input(void)
    puts("owned plain input preserves evidence provenance, exact controls and configured target OK");
 }
 
+static int fixture_context_hook(const char *view, char *out, size_t size, void *user)
+{
+   (void)user;
+   assert(strstr(view, "Original task") && strstr(view, "Evidence 雪"));
+   assert(!strstr(view, "private host policy"));
+   snprintf(out, size, "Ephemeral hook evidence");
+   return 0;
+}
+
+static void test_plain_hook_context_is_separate_ir_evidence(void)
+{
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = "private host policy"};
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT,
+                              .text = "Original task",
+                              .message_group = 2,
+                              .context = {.origin = AIMEE_CTX_ORIGIN_USER,
+                                          .authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                          .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                          .model_visible = 1}},
+                             {.type = AIMEE_BLK_TEXT,
+                              .text = "Evidence 雪",
+                              .message_group = 3,
+                              .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                          .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                          .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                          .model_visible = 1}}};
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = 1,
+                            .messages = &message,
+                            .n_messages = 1,
+                            .has_temperature = 1,
+                            .temperature = 0.0,
+                            .has_max_tokens = 1,
+                            .max_tokens = 128},
+                   prepared = {0};
+   cJSON *snapshot = aimee_ir_request_json(&input);
+   assert(snapshot);
+   plugin_chook_reset();
+   assert(!plugin_chook_register_pre_llm(fixture_context_hook, NULL));
+   assert(agent_prepare_plain_request_hooks(&input, &prepared) == 1);
+   assert(prepared.n_messages == 1 && prepared.messages[0].n_blocks == 3);
+   for (int i = 0; i < 2; i++)
+   {
+      cJSON *old = aimee_ir_block_json(&blocks[i]);
+      cJSON *copy = aimee_ir_block_json(&prepared.messages[0].blocks[i]);
+      assert(old && copy && cJSON_Compare(old, copy, 1));
+      cJSON_Delete(old);
+      cJSON_Delete(copy);
+   }
+   const aimee_block_t *context = &prepared.messages[0].blocks[2];
+   assert(!strcmp(context->text, "Ephemeral hook evidence"));
+   assert(context->context.origin == AIMEE_CTX_ORIGIN_MEMORY &&
+          context->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          context->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   agent_t agent = mk_agent("openai", "configured-model");
+   cJSON *native = agent_build_host_request_ir(&agent, &prepared);
+   assert(native);
+   char *rendered = cJSON_PrintUnformatted(native);
+   assert(rendered && strstr(rendered, blocks[0].text) && strstr(rendered, blocks[1].text) &&
+          strstr(rendered, context->text));
+   free(rendered);
+   cJSON_Delete(native);
+   cJSON *after = aimee_ir_request_json(&input);
+   assert(after && cJSON_Compare(snapshot, after, 1));
+   cJSON_Delete(after);
+   cJSON_Delete(snapshot);
+   aimee_request_free(&prepared);
+   plugin_chook_reset();
+   assert(!agent_prepare_plain_request_hooks(&input, &prepared) && !prepared.n_messages);
+   puts("plain hooks preserve original IR spans and append separate unverified evidence OK");
+}
+
 int main(void)
 {
    init_config_home();
    set_thinking(0, 2048);
    test_owned_plain_request_preserves_input();
+   test_plain_hook_context_is_separate_ir_evidence();
    printf("agent_request_build golden:\n");
 
    /* Anthropic Messages wire: system + user as typed text blocks, max_tokens, then

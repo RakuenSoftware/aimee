@@ -238,3 +238,7 @@ contracts, proving a live caller rather than registry-only tests. Deep-dive self
 backends, fallbacks, and wrappers with definition/caller and supported-journey evidence before retention;
 test-only self-consumption is not liveness. Delegates cannot be optional because routing agents requires
 the delegation contract.
+
+The optional panel provider borrows canonical requests for both execution and
+aggregation. Its facade forwards the admitted request without reconstructing a
+prompt tuple; artifact ownership and release remain with the provider.
