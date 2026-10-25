@@ -40,21 +40,51 @@ All 29 combined C targets pass normal and ASAN/UBSAN builds. The 51-case IR guar
 ownership, DB1 contract, line and generated-doc checks pass, alongside the earlier
 Go compile/race, frontend TypeScript and browser/channel/IR tests.
 
-Full retained-session runtime qualification remains incomplete: Anthropic
-refuses the historical ORBIT conversation with a provider policy error. Three
-live attempts are retained, including an unchanged retry and a request about
-the word supplied by the user. HTTP reaches the provider; the SDK reports a
-`reasoning_extraction` policy refusal. That history has no thinking blocks.
-Reviewed source preserves authenticated IR and filters hidden/restricted blocks;
-no corresponding source defect was found. Do not claim that this retained
-conversation resumed successfully or that its old native handle was reused.
-Do not bypass provider, credential, source or cache fences to change this result.
+The installed passive browser check replays closed permission and question
+histories exactly, including known-error/unknown-effect ordering, at 1280, 390
+and 320 pixels. Resolved controls have no reply actions; idle and reload issue
+no model send, control reply or cancel. There is no page error or overflow.
+An isolated installed channel preserves one authenticated canonical message,
+Unicode and literal JSON-looking text through send, GET, SSE and reload. Its
+uniquely tagged row remains for inspection; other channel metadata is unchanged.
+These checks use no model. Receipts:
+`/var/tmp/aimee-ir-current-passive-c0c2f6eb2-r3/proof.json` and
+`/var/tmp/aimee-ir-current-channel-c0c2f6eb2/proof.json`.
 
-The final state has 252 IR rows, all 216 pre-upgrade rows unchanged. Credentials,
-grants, SDK binaries, products and TLS remain exact during the browser checks;
-all nine services across the three retained projects are healthy. No SDK process
-or native reservation remains active. The proof pointer deliberately records
-`completion:false` and the outstanding provider refusal:
+Ordinary restart and native recall now pass on the current revision. After the
+old imported OAuth expired, provider refresh returned HTTP 429 before launching
+the SDK. The fresh local Claude login was imported through the normal
+authenticated browser Vault API; no secret was logged. With that current
+credential, a new default session completes a real `read_file`. Restart then
+preserves all 278 existing IR rows, the complete native cache, credentials,
+grants and SDK binaries. The following browser turn recalls the README without
+tools, reloads the same session and is observed using `--resume` with the same
+registered native handle. Credential, grant, SDK, product and TLS state remains
+exact throughout that successful turn. Evidence is in
+`/var/tmp/aimee-ir-parallel-c0c2f6eb2-stable-resume-ui/resume-proof.json`.
+
+Full runtime qualification remains incomplete. Cold continuation after profile
+or credential requalification receives Anthropic policy refusals. This affects
+the historical ORBIT conversation and the first new session after explicit
+credential rotation; a bounded documentation task is refused too. The SDK
+reports `reasoning_extraction` for the inspected historical refusal. That
+conversation has no thinking blocks. Do not describe the historical conversation
+as successfully resumed or claim its prior native handle was reused.
+
+Read-only investigation verifies exact history/cache preservation across
+restart and normal separation of credential lineages. Rotation intentionally
+selects a cold native scope, with no stale-token fallback or old-handle reuse.
+No actionable source defect was found. Effective provider bodies are deliberately
+excluded from sensitive bus capture; private capture inspection cannot recover
+them. Preserve that protection and all provider/source/cache fences.
+Current-image evidence covers the retained upgrade and restart; clean-install
+qualification below remains historical.
+
+The final state has 285 IR rows, all 216 pre-upgrade rows unchanged. All nine
+services across the three retained projects are healthy; no SDK process or
+native reservation remains active. The explicit credential replacement above
+means credential constancy must not be claimed across the entire continuation
+audit. The proof pointer deliberately retains `completion:false`:
 `/var/tmp/aimee-ir-browser-final-recovery/summary.json`.
 Detailed receipts are under `/var/tmp/aimee-ir-parallel-c0c2f6eb2-*`.
 Historical success statements below apply only to their recorded revisions.
@@ -62,7 +92,7 @@ Historical success statements below apply only to their recorded revisions.
 ## Parallel audit coverage
 
 The second independent pass traces production callers, not only existing IR
-users. It found additional active contracts and is repairing them together:
+users. It found additional active contracts and repaired them together:
 
 | Owner | Canonical internal path |
 | --- | --- |
