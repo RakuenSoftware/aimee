@@ -1261,7 +1261,7 @@ fi
 # bytes whether reached over the always-on Unix socket or the optional localhost
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
-TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
+TCP_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-tcp-XXXXXX") || true
 mkdir -p "$TCP_HOME/.config/aimee/modules.d/server"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
