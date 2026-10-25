@@ -20,6 +20,51 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
+## Active parallel audit
+
+The installed browser qualification below remains valid for source `31e2c4b95`.
+Whole-project completion is still pending. The new independent audit found
+remaining roundtable task, auxiliary router, delegate context, interrupt and
+channel message contracts. Parallel repairs and combined-source verification
+are in progress; historical completion statements do not qualify these changes.
+
+## Parallel audit coverage
+
+The second independent pass traces production callers, not only existing IR
+users. It found additional active contracts and is repairing them together:
+
+| Owner | Canonical internal path |
+| --- | --- |
+| `server_compute.c`, `delegate_prompt.c`, `agent_coord.c` | Original delegate Message retained; file, diff, graph and memory evidence occupy separate blocks; root mapping and handoff instructions are host policy; repair retains the full assistant response |
+| `delegate_ensemble.c`, `ensemble_request.c`, `wfe_live_panel.c` | Full task Request and history retained through participants, scorers, compression, repair, questions, chair and apply; generated context never replaces task blocks |
+| Go `ir/repair_request.go`, engine and panel consumers | Structured retries clone the original Request and retain typed assistant output before adding host repair policy |
+| `aux_router.c` | Canonical Request/Response across routing; public aux-test text imports only at ingress |
+| Browser channels and interrupt | Canonical Message across frontend, web backend, store and continuation; explicit transactional channel archive import |
+| Peer registry, `peerwire`, `peer_client` | Canonical Message body across send/reply/ask/channel, inbox ownership and C/Go transport; external text imports are explicit |
+| Manual ensemble DB1 family and MCP | Canonical Message input and versioned conversation archive; canonical next Request; text preview only at external MCP egress |
+| Cron scheduler | Authored task is an IR origin; script output and prior run context remain separate evidence; nullable `output_ir` distinguishes new canonical results from literal legacy `output` |
+
+The C canonical Message codec also now preserves the Go `_compaction_boundary`
+history marker through serialization and deep cloning; it is typed internal
+history metadata, not provider content.
+
+The source census covers C headers and production sources under `src`, Go
+contracts/consumers under `server-go` and `runtime-web`, and frontend live
+message creation, transport, persistence and replay. Searches include all
+request constructors and execution entrypoints, function-pointer model
+contracts, string `Prompt`/`Message`/`Text` DTOs, persisted context/history fields,
+and all callers of the discovered contracts. The bypass guard also scans web
+sources and protects the newly migrated core, panel, delegate and peer owners.
+It is a regression guard, not a substitute for this caller audit.
+
+Explicit non-message views retain their separate owners: numeric tool-call
+metrics and job status projections, evaluation artifacts, workflow templates
+and immutable proposal artifacts, leased memory/corpus records, catalog policy
+views, extracted document text and speech/embedding domain results. These do
+not replace canonical conversation history. Provider/native SDK codecs,
+external API text imports and marked legacy storage imports remain conversion
+boundaries. Opaque native cache state remains owned by the native-session owner.
+
 ## Current browser recovery outcome
 
 Runtime source `31e2c4b95` is installed on retained QA

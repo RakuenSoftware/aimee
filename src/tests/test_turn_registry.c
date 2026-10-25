@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "turn_registry.h"
+#include "server.h"
+#include <aimee/ir/session_event.h>
 
 /* --- stub for presence_session_owner (turn_registry_cancel's authz check) --- */
 static char g_stub_owner[64];
@@ -133,38 +135,112 @@ static void test_reaped(void)
    printf("ok: mark_reaped\n");
 }
 
+static cJSON *steer_message(const char *text)
+{
+   cJSON *message = cJSON_CreateObject(), *blocks = cJSON_AddArrayToObject(message, "blocks"),
+         *block = cJSON_CreateObject();
+   cJSON_AddStringToObject(message, "role", "user");
+   cJSON_AddStringToObject(block, "type", "text");
+   cJSON_AddStringToObject(block, "text", text);
+   cJSON_AddItemToArray(blocks, block);
+   return message;
+}
 static void test_steer_set_take(void)
 {
-   char *msg = NULL;
-   assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* nothing pending */
-   assert(chat_steer_set("sess-S", "focus on the parser") == 0);
-   assert(chat_steer_take("sess-S", &msg) == 1);
-   assert(msg && strcmp(msg, "focus on the parser") == 0);
-   free(msg);
+   cJSON *msg = NULL, *first = steer_message("first"), *second = steer_message("second");
+   assert(!chat_steer_take("sess-S", &msg) && !msg);
+   assert(!chat_steer_set("sess-S", first));
+   assert(chat_steer_take("sess-S", &msg) && cJSON_Compare(first, msg, 1));
+   assert(msg != first);
+   cJSON_Delete(msg);
    msg = NULL;
-   assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* cleared by take */
-   /* a newer steer supersedes an untaken one */
-   assert(chat_steer_set("sess-S", "first") == 0);
-   assert(chat_steer_set("sess-S", "second") == 0);
-   assert(chat_steer_take("sess-S", &msg) == 1 && msg && strcmp(msg, "second") == 0);
-   free(msg);
-   /* invalid args fail */
-   assert(chat_steer_set(NULL, "x") == -1);
+   assert(!chat_steer_take("sess-S", &msg));
+   assert(!chat_steer_set("sess-S", first));
+   assert(!chat_steer_set("sess-S", second));
+   assert(chat_steer_take("sess-S", &msg) && cJSON_Compare(second, msg, 1));
+   cJSON_Delete(msg);
+   assert(chat_steer_set(NULL, first) == -1);
    assert(chat_steer_set("sess-S", NULL) == -1);
-   /* per-session isolation */
-   char *ma = NULL, *mb = NULL;
-   chat_steer_set("sess-A", "a");
-   chat_steer_set("sess-B", "b");
-   assert(chat_steer_take("sess-A", &ma) == 1 && ma && strcmp(ma, "a") == 0);
-   assert(chat_steer_take("sess-B", &mb) == 1 && mb && strcmp(mb, "b") == 0);
-   free(ma);
-   free(mb);
-   /* clear drops an untaken steer */
-   chat_steer_set("sess-C", "c");
+   cJSON *ma = NULL, *mb = NULL;
+   chat_steer_set("sess-A", first);
+   chat_steer_set("sess-B", second);
+   assert(chat_steer_take("sess-A", &ma) && cJSON_Compare(first, ma, 1));
+   assert(chat_steer_take("sess-B", &mb) && cJSON_Compare(second, mb, 1));
+   cJSON_Delete(ma);
+   cJSON_Delete(mb);
+   chat_steer_set("sess-C", first);
    chat_steer_clear("sess-C");
-   msg = NULL;
-   assert(chat_steer_take("sess-C", &msg) == 0);
-   printf("ok: steer_set_take\n");
+   assert(!chat_steer_take("sess-C", &msg));
+   cJSON_Delete(first);
+   cJSON_Delete(second);
+   printf("ok: canonical steer_set_take\n");
+}
+
+static char interrupt_error[128];
+int handle_chat_interrupt(server_ctx_t *,server_conn_t *,cJSON *);
+int server_send_error(server_conn_t *conn,const char *message,const char *request_id)
+{ (void)conn;(void)request_id;snprintf(interrupt_error,sizeof interrupt_error,"%s",message);return -1; }
+int server_send_response(server_conn_t *conn,cJSON *response)
+{ (void)conn;assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response,"interrupted")));return 0; }
+static void test_interrupt_privileged_webuser_stays_owner_bound(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"aimee_session_id\":\"interrupt-owner\",\"message\":{\"role\":\"user\","
+                   "\"blocks\":[{\"type\":\"text\",\"text\":\"steer exactly once\"}]}}");
+   assert(request);
+   snprintf(g_stub_owner, sizeof g_stub_owner, "webuser:alice");
+   server_conn_t conn = {0};
+   conn.capabilities = CAPS_ALL;
+   snprintf(conn.vault_principal, sizeof conn.vault_principal, "webuser:bob");
+   turn_entry_t *turn = turn_registry_publish("interrupt-owner", "turn");
+   assert(turn);
+   assert(handle_chat_interrupt(NULL, &conn, request) < 0);
+   assert(strstr(interrupt_error, "not the session owner"));
+   assert(!turn_entry_cancelled(turn));
+   cJSON *queued = NULL;
+   assert(!chat_steer_take("interrupt-owner", &queued));
+   snprintf(conn.vault_principal, sizeof conn.vault_principal, "webuser:alice");
+   assert(!handle_chat_interrupt(NULL, &conn, request));
+   assert(turn_entry_cancelled(turn));
+   assert(chat_steer_take("interrupt-owner", &queued));
+   assert(cJSON_Compare(queued, cJSON_GetObjectItemCaseSensitive(request, "message"), 1));
+   cJSON_Delete(queued);
+   turn_registry_clear(turn);
+   turn = turn_registry_publish("interrupt-owner", "admin-turn");
+   assert(turn);
+   conn.vault_principal[0] = 0;
+   assert(!handle_chat_interrupt(NULL, &conn, request));
+   assert(turn_entry_cancelled(turn));
+   assert(chat_steer_take("interrupt-owner", &queued));
+   cJSON_Delete(queued);
+   turn_registry_clear(turn);
+   cJSON_Delete(request);
+   request=cJSON_CreateObject();assert(request);
+   assert(cJSON_AddStringToObject(request, "aimee_session_id", "interrupt-owner"));
+   const char *legacy = "literal text \"quoted\"\n雪 {\"role\":malformed}";
+   assert(cJSON_AddStringToObject(request, "message", legacy));
+   turn = turn_registry_publish("interrupt-owner", "legacy-turn");
+   assert(turn);
+   snprintf(conn.vault_principal, sizeof conn.vault_principal, "webuser:bob");
+   assert(handle_chat_interrupt(NULL, &conn, request) < 0);
+   assert(!turn_entry_cancelled(turn));
+   assert(!chat_steer_take("interrupt-owner", &queued));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "message")));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(request,"message",cJSON_CreateString(legacy)));
+   snprintf(conn.vault_principal, sizeof conn.vault_principal, "webuser:alice");
+   assert(!handle_chat_interrupt(NULL, &conn, request));
+   assert(turn_entry_cancelled(turn));
+   assert(chat_steer_take("interrupt-owner", &queued));
+   aimee_message_t imported = {0};
+   assert(!aimee_ir_message_parse(queued, &imported));
+   assert(!strcmp(imported.role, "user") && imported.n_blocks == 1 &&
+          imported.blocks[0].type == AIMEE_BLK_TEXT && !strcmp(imported.blocks[0].text, legacy));
+   aimee_message_free(&imported);
+   cJSON_Delete(queued);
+   turn_registry_clear(turn);
+   cJSON_Delete(request);
+   printf(
+       "ok: production interrupt binds privileged webuser to owner and imports public text once\n");
 }
 
 static void test_shutdown_fences_late_turns(void)
@@ -192,6 +268,7 @@ int main(void)
    test_cancel_all();
    test_reaped();
    test_steer_set_take();
+   test_interrupt_privileged_webuser_stays_owner_bound();
    test_shutdown_fences_late_turns(); /* persistent fence: must be last */
    printf("all turn_registry tests passed\n");
    return 0;

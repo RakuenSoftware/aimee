@@ -2015,6 +2015,8 @@ $(TESTPREFIX)/unit-test-presence: $(OBJDIR)/tests/test_presence.o \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-turn-registry: $(OBJDIR)/tests/test_turn_registry.o \
+                                       $(OBJDIR)/server/server_session.o $(OBJDIR)/json_fluent.o \
+                                       $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
 	                               $(OBJDIR)/server/turn_registry.o \
 	                               $(OBJDIR)/core/turn_integrity/turn_integrity.o \
 	                               $(OBJDIR)/aimee_sha256.o \
@@ -4054,7 +4056,8 @@ $(TESTPREFIX)/unit-test-kb-sidecar-admission: $(OBJDIR)/tests/test_kb_sidecar_ad
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
-                                      $(OBJDIR)/modules/ir/aimee_ir.o \
+                                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
+                                      $(OBJDIR)/modules/ir/response_codec.o \
                                       $(OBJDIR)/server/server_cron.o \
                                       $(OBJDIR)/util.o \
                                       $(OBJDIR)/server/trigger_scheduler.o \
@@ -4195,6 +4198,7 @@ $(TESTPREFIX)/unit-test-core-connect-budget: \
 $(TESTPREFIX)/unit-test-peer-client: \
                       $(OBJDIR)/tests/test_peer_client.o \
                       $(OBJDIR)/peer_client/peer_client.o \
+                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o \
                       $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
@@ -4660,13 +4664,13 @@ $(TESTPREFIX)/unit-test-agent-error-retryable: $(OBJDIR)/tests/test_agent_error_
 
 $(TESTPREFIX)/unit-test-delegate-handoff: $(OBJDIR)/tests/test_delegate_handoff.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
-                                       $(TEST_CORE_OBJS)
+                                       $(PROVIDER_IR_OBJS) $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-dispatch-reliability: \
                                        $(OBJDIR)/tests/test_delegate_dispatch_reliability.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
-                                       $(TEST_CORE_OBJS)
+                                       $(PROVIDER_IR_OBJS) $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-curator-code-unit: \
@@ -5009,13 +5013,13 @@ $(TESTPREFIX)/unit-test-delegate-credentials: \
 $(TESTPREFIX)/unit-test-delegate-economics: $(OBJDIR)/tests/test_delegate_economics.o \
                                        $(OBJDIR)/modules/delegates/delegate_economics.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
-                                       $(TEST_CORE_OBJS)
+                                       $(PROVIDER_IR_OBJS) $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegate_patch_coordinator.o \
                                        $(OBJDIR)/modules/delegates/delegate_patch_coordinator.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
-                                       $(TEST_CORE_OBJS)
+                                       $(PROVIDER_IR_OBJS) $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_delegate_ensemble.o \

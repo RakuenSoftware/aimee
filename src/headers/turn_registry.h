@@ -27,6 +27,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#include "cJSON.h"
 #include "presence.h" /* PRESENCE_SESSION_ID_MAX / _TURN_ID_MAX / PRESENCE_MAX */
 #include <aimee/core/turn_integrity.h>
 
@@ -104,15 +105,15 @@ extern "C"
    int turn_registry_is_shutting_down(void);
 
    /* --- pending-steer store (chat.interrupt) ---
-    * One pending steering message per session. chat.interrupt stashes the
-    * message (and cancels the in-flight turn); the worker that ran the cancelled
+    * One pending canonical IR Message per session. chat.interrupt stashes the
+    * owned message (and cancels the in-flight turn); the worker that ran the cancelled
     * turn takes it and dispatches it as the next, server-initiated turn. */
    /* Returns 0 on success, -1 if the message could not be stored (OOM or the
     * table is full) — the caller must then NOT report a queued steer. */
-   int chat_steer_set(const char *session_id, const char *message);
-   /* Take + clear the pending steer. Returns 1 with *out_message (malloc'd,
-    * caller frees) if one was pending, 0 otherwise. */
-   int chat_steer_take(const char *session_id, char **out_message);
+   int chat_steer_set(const char *session_id, const cJSON *message);
+   /* Take + clear the pending steer. Returns 1 with *out_message (owned,
+    * caller cJSON_Deletes) if one was pending, 0 otherwise. */
+   int chat_steer_take(const char *session_id, cJSON **out_message);
    void chat_steer_clear(const char *session_id);
 
 #ifdef __cplusplus

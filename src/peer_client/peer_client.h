@@ -1,6 +1,6 @@
 /* peer_client.h: the server's side of peer messaging.
  *
- * The aimee module (principal ref 31) serves four stages and, until this file
+ * The aimee module (principal ref 30) serves four stages and, until this file
  * existed, NOTHING in the product called any of them. The module was validated
  * on hardware by a probe binary written for the purpose, which is a test of the
  * engine and not of the feature: no agent had ever sent a message to another
@@ -13,6 +13,7 @@
 #ifndef AIMEE_PEER_CLIENT_H
 #define AIMEE_PEER_CLIENT_H
 
+#include <aimee/ir/aimee_ir.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -75,6 +76,8 @@ extern "C"
     * exactly this wide rather than reading a prefix of a wider one, because a
     * short row and a truncated row are indistinguishable once accepted. */
 #define PEER_CLIENT_MESSAGE_WIDTH 11
+#define PEER_CLIENT_BODY_PREFIX   "aimee.message.v1\n"
+#define PEER_CLIENT_BODY_MAX      65536u
 
    typedef struct
    {
@@ -88,17 +91,17 @@ extern "C"
       int hop;
       int is_reply;
       char *sent_at;
-      char *text;
+      aimee_message_t body;
    } peer_client_message_t;
 
-   /* Send `text` from `from` to `to`. On PEER_CLIENT_OK, `stamped` (when not
+   /* Send canonical `body` from `from` to `to`. On PEER_CLIENT_OK, `stamped` (when not
     * NULL) receives the module's re-stamped envelope -- its provenance, not the
     * caller's claim about it -- and the caller frees it with
     * peer_client_message_free. On PEER_CLIENT_REFUSED, *status names the no. */
-   peer_client_result_t peer_client_send(const char *from, const char *to, const char *text,
-                                         const char *conversation_id, int expect_reply,
-                                         peer_client_message_t *stamped, uint32_t *status,
-                                         int *transport);
+   peer_client_result_t peer_client_send(const char *from, const char *to,
+                                         const aimee_message_t *body, const char *conversation_id,
+                                         int expect_reply, peer_client_message_t *stamped,
+                                         uint32_t *status, int *transport);
 
    /* An opaque handle identifying the message a reply answers.
     *
@@ -126,7 +129,8 @@ extern "C"
    /* Answer the message a handle names. `from` is the replying session; the
     * registry re-stamps provenance, so a forged handle cannot impersonate --
     * it can only misdirect the reply, which is the caller's own business. */
-   peer_client_result_t peer_client_reply(const char *from, const char *handle, const char *text,
+   peer_client_result_t peer_client_reply(const char *from, const char *handle,
+                                          const aimee_message_t *body,
                                           peer_client_message_t *stamped, uint32_t *status,
                                           int *transport);
 
@@ -154,6 +158,8 @@ extern "C"
    peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, int *dropped,
                                               uint32_t *status, int *transport);
 
+   /* Model-facing projections must refuse a body whose context cannot be exposed. */
+   int peer_client_message_model_visible(const peer_client_message_t *message);
    void peer_client_message_free(peer_client_message_t *m);
    void peer_client_messages_free(peer_client_message_t *m, size_t count);
 

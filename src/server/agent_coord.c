@@ -31,7 +31,8 @@ static int path_within_root(const char *project_root, const char *abs_path)
    return abs_path[root_len] == '/' || abs_path[root_len] == '\0';
 }
 
-char *resolve_file_references(const char *prompt, const char *project_root)
+static char *resolve_file_references_impl(const char *prompt, const char *project_root,
+                                          int context_only)
 {
    if (!prompt)
       return NULL;
@@ -46,7 +47,9 @@ char *resolve_file_references(const char *prompt, const char *project_root)
    {
       if (*p != '@')
       {
-         dstr_append_char(&out, *p++);
+         if (!context_only)
+            dstr_append_char(&out, *p);
+         p++;
          continue;
       }
 
@@ -56,7 +59,9 @@ char *resolve_file_references(const char *prompt, const char *project_root)
        * diffs/code carried in the prompt are never corrupted. */
       if (!*path_start || !is_path_char(*path_start) || *path_start == '@')
       {
-         dstr_append_char(&out, *p++);
+         if (!context_only)
+            dstr_append_char(&out, *p);
+         p++;
          continue;
       }
 
@@ -66,7 +71,9 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       size_t path_len = (size_t)(path_end - path_start);
       if (path_len == 0 || path_len >= FILE_REF_PATH_MAX)
       {
-         dstr_append_char(&out, *p++);
+         if (!context_only)
+            dstr_append_char(&out, *p);
+         p++;
          continue;
       }
 
@@ -96,8 +103,11 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       FILE *f = (!escapes && in_root) ? fopen(abs_path, "r") : NULL;
       if (!f)
       {
-         dstr_append_char(&out, '@');
-         dstr_append(&out, rel_path, path_len);
+         if (!context_only)
+         {
+            dstr_append_char(&out, '@');
+            dstr_append(&out, rel_path, path_len);
+         }
          p = path_end;
          continue;
       }
@@ -116,8 +126,11 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       if (!content)
       {
          fclose(f);
-         dstr_append_char(&out, '@');
-         dstr_append(&out, rel_path, path_len);
+         if (!context_only)
+         {
+            dstr_append_char(&out, '@');
+            dstr_append(&out, rel_path, path_len);
+         }
          p = path_end;
          continue;
       }
@@ -142,6 +155,16 @@ char *resolve_file_references(const char *prompt, const char *project_root)
    if (!result)
       result = strdup("");
    return result;
+}
+
+char *resolve_file_references(const char *prompt, const char *project_root)
+{
+   return resolve_file_references_impl(prompt, project_root, 0);
+}
+
+char *resolve_file_reference_context(const char *prompt, const char *project_root)
+{
+   return resolve_file_references_impl(prompt, project_root, 1);
 }
 
 /* --- Delegate Token Budget --- */

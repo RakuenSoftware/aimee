@@ -55,7 +55,7 @@ class IRBypassTests(unittest.TestCase):
                 path.unlink()
 
     def test_dormant_parallel_c_execution_cannot_return(self):
-        for name in ('agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
+        for name in ('cron_build_job_prompt', 'cron_run_llm_prompt', 'platform_delegate_run_background', 'platform_trace_run_task', 'agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
             for relative in ("src/server/reintroduced_runner.c", "src/headers/reintroduced_runner.h"):
                 path = self.source(relative, f"int {name}(void);\n")
                 with self.subTest(name=name, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
@@ -436,6 +436,8 @@ class IRBypassTests(unittest.TestCase):
             'typedef int (*skill_trial_runner_fn)(void *ctx, const char *system, const char *prompt);',
             'typedef int (*roadmap_model_fn)(const char *prompt, char **output, void *ctx);',
             'int delegate_ensemble_run(config_t *cfg, panel_t *panel, const char *prompt, result_t *out);',
+            'int delegate_roundtable_run(config_t *cfg, panel_t *panel, const char *task, result_t *out);',
+            'char *aux_call(const char *name, const char *prompt, int max_tokens);',
             'int aimee_panel_run(config_t *cfg, panel_t *panel, const char *task, result_t *out);',
         )
         for declaration in declarations:
@@ -445,6 +447,33 @@ class IRBypassTests(unittest.TestCase):
             path.unlink()
         self.source("src/new_module/model.h", 'typedef int (*skill_trial_runner_fn)(void *ctx, const aimee_request_t *request, aimee_response_t *out, char *errbuf);')
         checker.check(self.root)
+
+    def test_delegate_worker_is_guarded_but_numeric_public_metrics_are_views(self):
+        path = self.source("src/server/server_compute.c", 'void delegate_build_result_response(void) { counter("tool_calls", count); }')
+        checker.check(self.root)
+        path.write_text('void delegate_worker_run(void) { lookup(message, "tool_calls"); }')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
+    def test_internal_steer_contract_cannot_revert_to_text(self):
+        for declaration in (
+            'int chat_steer_set(const char *session, const char *message);',
+            'int chat_steer_take(const char *session, char **out_message);',
+            'int server_chat_ir_replace_steer(cJSON *request, const char *message);',
+        ):
+            path = self.source("src/headers/steer.h", declaration)
+            with self.assertRaisesRegex(ValueError, "raw-steer-contract"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/headers/steer.h", 'int chat_steer_set(const char *session, const cJSON *message);')
+        checker.check(self.root)
+
+    def test_retired_apis_are_guarded_in_web_sources_too(self):
+        for relative in ("runtime-web/adapter.go", "frontend/src/adapter.ts"):
+            path = self.source(relative, 'agent_build_request(agent, system, text, 128, 0.3);')
+            with self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
 
     def test_plain_execution_cannot_rebuild_from_prompt_tuple(self):
         for relative in ("src/server/agent_runtime.c", "src/other_module/new.c"):

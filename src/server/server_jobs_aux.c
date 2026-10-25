@@ -1,6 +1,7 @@
 /* server/server_jobs_aux.c: RPC handlers for durable delegate jobs and aux routing. */
 #include "aimee.h"
 #include "aux_router.h"
+#include <aimee/ir/session_event.h>
 #include "db1_client/db1.h"
 #include <aimee/delegates/delegate_role.h>
 #include "server.h"
@@ -421,14 +422,22 @@ int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                "aimee.yaml)",
                                NULL);
 
-   char *result = aux_call(jtask->valuestring, jprompt->valuestring, max_tokens);
-   if (!result)
+   aimee_request_t input = {0};
+   aimee_response_t result = {0};
+   int rc = aimee_ir_request_from_text(&input, NULL, jprompt->valuestring, max_tokens, 0.0);
+   if (!rc)
+      rc = aux_call(jtask->valuestring, &input, &result);
+   aimee_request_free(&input);
+   if (rc)
       return server_send_error(conn, "aux_call failed", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "task", jtask->valuestring);
-   cJSON_AddStringToObject(resp, "response", result);
-   free(result);
+   char *text = aimee_ir_response_text_alloc(&result);
+   cJSON_AddStringToObject(resp, "response", text ? text : "");
+   cJSON_AddItemToObject(resp, "ir", aimee_ir_response_json(&result));
+   free(text);
+   aimee_response_free(&result);
 
    return server_send_ok(conn, resp);
 }

@@ -18,6 +18,8 @@
  * Files larger than FILE_REF_MAX_SIZE are truncated with a [TRUNCATED] marker.
  * Caller must free() the returned string. Returns NULL only on allocation failure. */
 char *resolve_file_references(const char *prompt, const char *project_root);
+/* Read referenced files as evidence without copying or rewriting the task. */
+char *resolve_file_reference_context(const char *prompt, const char *project_root);
 
 /* Delegate token budget: limit system prompt size before dispatching.
  * Default budget is 20K tokens (~80K chars). Progressive truncation priority:

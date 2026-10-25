@@ -105,12 +105,15 @@ cJSON *aimee_ir_message_json(const aimee_message_t *message)
    if (!message || !message->role || !message->role[0] || message->n_blocks < 0 ||
        message->n_blocks > 4096 || (message->n_blocks && !message->blocks))
       return NULL;
-   if (message->content_scalar != 0 && message->content_scalar != 1)
+   if ((message->content_scalar != 0 && message->content_scalar != 1) ||
+       (message->compaction_boundary != 0 && message->compaction_boundary != 1))
       return NULL;
    cJSON *out = cJSON_CreateObject(), *blocks = cJSON_CreateArray();
    if (!out || !blocks || !add_string(out, "role", message->role))
       goto fail;
    if (message->content_scalar && !cJSON_AddBoolToObject(out, "content_scalar", 1))
+      goto fail;
+   if (message->compaction_boundary && !cJSON_AddBoolToObject(out, "_compaction_boundary", 1))
       goto fail;
    for (int i = 0; i < message->n_blocks; i++)
    {
@@ -274,6 +277,10 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
    if (scalar && !cJSON_IsBool(scalar))
       goto fail;
    out->content_scalar = cJSON_IsTrue(scalar);
+   const cJSON *boundary = cJSON_GetObjectItemCaseSensitive(json, "_compaction_boundary");
+   if (boundary && !cJSON_IsBool(boundary))
+      goto fail;
+   out->compaction_boundary = cJSON_IsTrue(boundary);
    int count = cJSON_GetArraySize(blocks);
    if (count)
    {
@@ -308,8 +315,6 @@ cJSON *aimee_ir_history_clone(const cJSON *messages)
          goto fail;
       cJSON *copy = aimee_ir_message_json(&message);
       aimee_message_free(&message);
-      if (copy && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "_compaction_boundary")))
-         cJSON_AddBoolToObject(copy, "_compaction_boundary", 1);
       if (!copy || !cJSON_AddItemToArray(out, copy))
       {
          cJSON_Delete(copy);

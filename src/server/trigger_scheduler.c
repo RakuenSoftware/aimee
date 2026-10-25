@@ -39,7 +39,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CRON_CONTEXT_OUTPUT_LIMIT 8192
 #define PROPOSALS_DEFAULT_DIR     "docs/proposals/pending"
 #define PROPOSALS_MAX_ENTRIES     512
 #define PROPOSALS_GIT_MAX_OUT     (256 * 1024)
@@ -994,91 +993,6 @@ int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
    if (n < 0)
       return -1;
    return n;
-}
-
-static int cron_append_bytes(char *buf, size_t bufsz, size_t *used, const char *src, size_t n)
-{
-   if (!used || !src)
-      return -1;
-
-   size_t start = *used;
-   if (buf && bufsz > 0 && start < bufsz)
-   {
-      size_t room = bufsz - start - 1;
-      size_t copy = n < room ? n : room;
-      memcpy(buf + start, src, copy);
-      buf[start + copy] = '\0';
-   }
-   *used += n;
-   return 0;
-}
-
-static int cron_append_literal(char *buf, size_t bufsz, size_t *used, const char *src)
-{
-   return cron_append_bytes(buf, bufsz, used, src ? src : "", src ? strlen(src) : 0);
-}
-
-static int cron_append_output_block(char *buf, size_t bufsz, size_t *used, const char *label,
-                                    const char *text, size_t limit)
-{
-   if (!text || !text[0])
-      return 0;
-
-   size_t len = strlen(text);
-   const char *body = text;
-   int truncated = 0;
-   if (limit > 0 && len > limit)
-   {
-      body = text + (len - limit);
-      len = limit;
-      truncated = 1;
-   }
-
-   if (cron_append_literal(buf, bufsz, used, "\n") != 0 ||
-       cron_append_literal(buf, bufsz, used, label) != 0 ||
-       cron_append_literal(buf, bufsz, used, "\n") != 0)
-      return -1;
-   if (truncated && cron_append_literal(buf, bufsz, used, "[truncated to last 8192 bytes]\n") != 0)
-      return -1;
-   if (cron_append_bytes(buf, bufsz, used, body, len) != 0)
-      return -1;
-   if (len == 0 || body[len - 1] != '\n')
-      return cron_append_literal(buf, bufsz, used, "\n");
-   return 0;
-}
-
-int cron_build_job_prompt(char *buf, size_t bufsz, const char *prompt, const char *workdir,
-                          const char *skills_csv, const char *prior_output,
-                          const char *script_output, const char *deliver_target)
-{
-   if (!buf || bufsz == 0)
-      return -1;
-   buf[0] = '\0';
-
-   char preamble[2048];
-   int preamble_len =
-       cron_build_context_preamble(preamble, sizeof(preamble), workdir, skills_csv, deliver_target);
-   if (preamble_len < 0)
-      return -1;
-
-   size_t used = 0;
-   if (cron_append_bytes(buf, bufsz, &used, preamble, strlen(preamble)) != 0)
-      return -1;
-   if (cron_append_output_block(buf, bufsz, &used, "SCRIPT_OUTPUT:", script_output, 0) != 0)
-      return -1;
-   if (cron_append_output_block(buf, bufsz, &used, "PRIOR JOB OUTPUT:", prior_output,
-                                CRON_CONTEXT_OUTPUT_LIMIT) != 0)
-      return -1;
-   const char *job_prompt = prompt && prompt[0] ? prompt : "";
-   size_t job_prompt_len = strlen(job_prompt);
-   if (cron_append_literal(buf, bufsz, &used, "\nJOB PROMPT:\n") != 0 ||
-       cron_append_literal(buf, bufsz, &used, job_prompt) != 0)
-      return -1;
-   if ((job_prompt_len == 0 || job_prompt[job_prompt_len - 1] != '\n') &&
-       cron_append_literal(buf, bufsz, &used, "\n") != 0)
-      return -1;
-
-   return used > (size_t)INT_MAX ? INT_MAX : (int)used;
 }
 
 static void trigger_scheduler_fire_rule(const trigger_rule_t *rule)

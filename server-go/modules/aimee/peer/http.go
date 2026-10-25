@@ -55,10 +55,35 @@ type httpAPI struct {
 	opts HTTPOptions
 }
 
+// External HTTP responses retain the historical text display alongside IR.
+func externalPeerJSON(value any) any {
+	switch v := value.(type) {
+	case Message:
+		return struct {
+			Message
+			Text string `json:"text"`
+		}{v, v.DisplayText()}
+	case []Message:
+		out := make([]any, len(v))
+		for i, m := range v {
+			out[i] = externalPeerJSON(m)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, item := range v {
+			out[k] = externalPeerJSON(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(externalPeerJSON(v))
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
@@ -169,7 +194,7 @@ func (h *httpAPI) send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.WaitMS <= 0 {
-		m, err := h.reg.Send(from, to, req.Text, SendOptions{
+		m, err := h.reg.Send(from, to, ImportExternalText(req.Text), SendOptions{
 			ConversationID: req.ConversationID, Hop: req.Hop,
 		})
 		if err != nil {
@@ -187,7 +212,7 @@ func (h *httpAPI) send(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), wait)
 	defer cancel()
 
-	reply, askID, err := h.reg.Ask(ctx, from, to, req.Text)
+	reply, askID, err := h.reg.Ask(ctx, from, to, ImportExternalText(req.Text))
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -221,7 +246,7 @@ func (h *httpAPI) reply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	m, err := h.reg.Reply(from, req.To, req.Text)
+	m, err := h.reg.Reply(from, req.To, ImportExternalText(req.Text))
 	if err != nil {
 		writeErr(w, statusFor(err), err.Error())
 		return

@@ -1026,7 +1026,7 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
               </span>
             )}
             <span
-              dangerouslySetInnerHTML={{ __html: renderWithMentions(m.text) }}
+              dangerouslySetInnerHTML={{ __html: renderWithMentions(m.message.blocks.map(block => block.text ?? '').join('\n')) }}
             />
           </div>
         ))}
@@ -1776,7 +1776,7 @@ export default function Chat() {
       if (disposed) return;
       try {
         const msg = JSON.parse(ev.data) as ChannelMessage;
-        if (typeof msg.sender !== 'string' || typeof msg.text !== 'string') return;
+        if (typeof msg.sender !== 'string') return;
         setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(prev[activeChannel] ?? [], [msg]) }));
       } catch { /* ignore malformed frames */ }
     });
@@ -1811,7 +1811,7 @@ export default function Chat() {
       await fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ speaker: 'user', text }),
+        body: JSON.stringify({ message: { role: 'user', blocks: [{ type: 'text', text }] } satisfies Message }),
       });
     } catch { /* ignore */ }
   }

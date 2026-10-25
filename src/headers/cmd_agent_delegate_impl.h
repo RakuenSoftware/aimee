@@ -98,6 +98,16 @@ char *delegate_handoff_append_contract(const char *prompt, const char *packet_id
 /* Build a one-shot repair prompt for a malformed handoff. */
 char *delegate_handoff_repair_prompt(const char *previous_response, const char *validation_error);
 
+/* Append separately classified host/model context to the canonical task. */
+int delegate_request_add_context(aimee_request_t *request, const char *text,
+                                 aimee_context_origin_t origin,
+                                 aimee_context_authority_t authority);
+
+int delegate_request_add_response(aimee_request_t *request, const aimee_response_t *response);
+int delegate_request_map_root(aimee_request_t *request, const char *operator_root,
+                              const char *delegate_root);
+size_t delegate_request_text_bytes(const aimee_request_t *request);
+
 /* Validate delegate_result_v1 JSON text.  When |owned_files_json| is a non-empty
  * JSON array, changed files outside that list are reported as supervisor-review
  * items.  If |require_verification| is true, status=done without a passed test is
@@ -113,27 +123,6 @@ int delegate_handoff_validate_text(const char *text, const char *owned_files_jso
                                    int require_verification, delegate_handoff_validation_t *out);
 
 void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_validation_t *v);
-
-/* Platform-specific background dispatch.
- * POSIX: forks; parent prints task info and returns; child runs agent and _exit()s.
- * Windows: prints task info, runs agent synchronously, frees effective_prompt/file_prompt,
- *          and returns.
- * The caller should return immediately after this call. */
-void platform_delegate_run_background(
-    const char *tasks_dir, const char *task_id, const char *result_path, int json_output,
-    agent_config_t *cfg, const char *role, const char *sys_prompt, const char *final_prompt,
-    int max_tokens, int force_tools, const char *original_cwd, const char *delegate_git_root,
-    const char *delegate_work_name, int keep_worktree, const char *launch_worktree_path,
-    const char *launch_head, const char *parent_worktree_path, const char *parent_worktree_head,
-    const char *parent_worktree_fingerprint, char *effective_prompt, char *file_prompt);
-
-/* Platform-specific background task dispatch for cmd_dispatch.
- * POSIX: forks; parent returns 0; child runs agent and _exit()s.
- *        Returns -1 on fork failure (caller should skip this task).
- * Windows: runs agent synchronously and returns 0. */
-int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *sys,
-                            const char *prompt, int task_timeout, int use_tools,
-                            const char *result_path, int task_idx);
 
 /* ---- Named-file drift detection (delegate_prompt.c) ---- */
 

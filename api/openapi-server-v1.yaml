@@ -5341,7 +5341,8 @@ paths:
         the server auto-continues as the next, server-initiated turn (streamed
         to the session's /events presence stream). Owner-authorized like
         chat.graceful_cancel. When no turn is in flight, nothing is queued and
-        `interrupted` is false. Requires CAP_CHAT.
+        `interrupted` is false. Internal clients send canonical IR. Legacy external text imports once
+        at this public endpoint. The host assigns context authority. Requires CAP_CHAT.
       requestBody:
         required: true
         content:
@@ -5351,7 +5352,20 @@ paths:
               required: [aimee_session_id, message]
               properties:
                 aimee_session_id: { type: string }
-                message: { type: string }
+                message:
+                  oneOf:
+                    - type: string
+                      minLength: 1
+                      description: Legacy external text import only
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object, description: Canonical text, image or document block }
       responses:
         "200":
           description: Interrupt accepted

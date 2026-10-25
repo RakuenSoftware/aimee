@@ -659,8 +659,9 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 	var result DelegateResult
 	var content []byte
 	var validationErr error
+	input := canonical.TaskRequest(paramString(req.Node, "persona", "architect"), prompt)
 	for attempt := 1; attempt <= 3; attempt++ {
-		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(paramString(req.Node, "persona", "architect"), prompt), Workdir: req.WorkItem.Repo})
+		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: input, Workdir: req.WorkItem.Repo})
 		if validationErr != nil {
 			return StepResult{}, validationErr
 		}
@@ -679,7 +680,11 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		// the artifact. The changed prompt is part of DelegateRequest and therefore
 		// receives a distinct durable job key. Do not byte-truncate the artifact:
 		// silent byte limits were the original non-convergence failure mode.
-		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + delegateText(result)
+		nextInput, repairErr := canonical.RepairRequest(input, result.Output, "YOUR PREVIOUS RESPONSE WAS INVALID ("+validationErr.Error()+"). Repair the preceding assistant artifact and return one complete JSON object only. Do not truncate or omit any field.")
+		if repairErr != nil {
+			return StepResult{}, repairErr
+		}
+		input = nextInput
 	}
 	if validationErr != nil {
 		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil

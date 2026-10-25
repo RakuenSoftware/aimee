@@ -75,8 +75,8 @@ static long wfe_panel_seat_wait_secs(void)
  * (severity/category/location/summary/recommendation + replayable evidence). */
 #define REVIEW_TASK_FORMAT                                                                         \
    "Review the CHANGE UNDER REVIEW below AGAINST the ORIGINAL REQUEST below.\n\n"                  \
-   "FOCUS: %s\n\nORIGINAL REQUEST:\n%s\n\n"                                                        \
-   "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"                                          \
+   "FOCUS: %s\n\n"                                                                                 \
+   "The original request and change under review are supplied as separate evidence blocks.\n\n"    \
    "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "               \
    "The diff shows what CHANGED; it does not show whether the change is REAL. Look "               \
    "the rest up — do not infer it from the diff:\n"                                                \
@@ -93,7 +93,7 @@ static long wfe_panel_seat_wait_secs(void)
    "For every item, location is \"file:line\" from the change wherever possible, and a "           \
    "blocking severity REQUIRES reproducible factual evidence about this code."
 
-static char *build_review_task(const wfe_review_packet_t *pkt)
+static int build_review_task(const wfe_review_packet_t *pkt, aimee_request_t *out)
 {
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
@@ -101,22 +101,29 @@ static char *build_review_task(const wfe_review_packet_t *pkt)
    const char *diff = (pkt->diff && pkt->diff[0])
                           ? pkt->diff
                           : "(no code diff — review the plan/proposal artifact against the ask)";
-   /* The former buffer already used strlen() of the complete request and diff,
-    * despite formatting only 4000 request bytes. Exact sizing therefore reduces
-    * allocation while making silent content truncation impossible. */
-   int needed = snprintf(NULL, 0, REVIEW_TASK_FORMAT, focus, proposal, diff);
+   /* Stored proposal and diff are domain evidence, never new task authority. */
+   int needed = snprintf(NULL, 0, REVIEW_TASK_FORMAT, focus);
    if (needed < 0)
-      return NULL;
-   size_t cap = (size_t)needed + 1;
-   char *buf = malloc(cap);
-   if (!buf)
-      return NULL;
-   if (snprintf(buf, cap, REVIEW_TASK_FORMAT, focus, proposal, diff) != needed)
-   {
-      free(buf);
-      return NULL;
-   }
-   return buf;
+      return -1;
+   char *instructions = malloc((size_t)needed + 1);
+   if (!instructions)
+      return -1;
+   snprintf(instructions, (size_t)needed + 1, REVIEW_TASK_FORMAT, focus);
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = instructions},
+                             {.type = AIMEE_BLK_TEXT, .text = "\n\nORIGINAL REQUEST:\n"},
+                             {.type = AIMEE_BLK_TEXT, .text = (char *)proposal},
+                             {.type = AIMEE_BLK_TEXT, .text = "\n\nCHANGE UNDER REVIEW:\n"},
+                             {.type = AIMEE_BLK_TEXT, .text = (char *)diff}};
+   for (int i = 0; i < 5; i++)
+      aimee_ir_block_set_context(&blocks[i],
+                                 i == 0 ? AIMEE_CTX_ORIGIN_PLATFORM : AIMEE_CTX_ORIGIN_MEMORY,
+                                 i == 0 ? AIMEE_CTX_AUTH_TASK_INSTRUCTION : AIMEE_CTX_AUTH_EVIDENCE,
+                                 i == 0 ? AIMEE_CTX_TRUST_VERIFIED : AIMEE_CTX_TRUST_UNVERIFIED,
+                                 AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 5};
+   int rc = aimee_ir_request_from_message(out, NULL, &message, 0, -1);
+   free(instructions);
+   return rc;
 }
 
 #undef REVIEW_TASK_FORMAT
@@ -141,8 +148,8 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   char *task = build_review_task(pkt);
-   if (!task)
+   aimee_request_t task = {0};
+   if (build_review_task(pkt, &task))
       return WFE_PANEL_UNREACHABLE;
 
    /* Deadline-bounded attempts: re-resolve seats and re-run the panel while
@@ -226,7 +233,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       char previous_cwd_copy[MAX_PATH_LEN];
       snprintf(previous_cwd_copy, sizeof previous_cwd_copy, "%s", previous_cwd ? previous_cwd : "");
       run_cmd_set_cwd(pkt->workdir);
-      int roundtable_rc = delegate_roundtable_run(&acfg, &panel, task, &opts, &rt);
+      int roundtable_rc = delegate_roundtable_run(&acfg, &panel, &task, &opts, &rt);
       run_cmd_set_cwd(previous_cwd_copy[0] ? previous_cwd_copy : NULL);
       if (roundtable_rc != 0)
       {
@@ -280,7 +287,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       break;
    }
 
-   free(task);
+   aimee_request_free(&task);
    return rc_final;
 }
 

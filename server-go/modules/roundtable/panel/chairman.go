@@ -76,7 +76,10 @@ func RunChairman(ctx context.Context, delegates Delegates, run Run, panel Panel,
 	// top. Give it the same one attempt, on the same participant.
 	if parseErr != nil {
 		repair := request
-		repair.Input = canonical.TaskRequest(repair.Persona, panelResponseRepairPrompt(run.ID, reviewed.Hash, artifactStage, text))
+		repair.Input, err = canonical.RepairRequest(request.Input, result.Output, panelResponseRepairPrompt(run.ID, reviewed.Hash, artifactStage))
+		if err != nil {
+			return feedback, analysis.Approvals, cost, costUnknown, "chairman repair refused: " + err.Error(), false
+		}
 		repair.DurableSlot = chairmanDurableSlot(run) + ":repair:1"
 		repaired := delegates.One(ctx, run, repair)
 		repairedText, repairErr := repaired.semanticText()

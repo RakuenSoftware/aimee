@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -98,6 +99,15 @@ func main() {
 	fmt.Printf("attached to %s as principal %d/%d\n\n", socket, principalClass, principalRef)
 
 	call := func(stage, op uint32, cells []string) (peerwire.Status, []string, error) {
+		// CLI probe literals enter the canonical body wire at this external origin.
+		if (stage == peerwire.StageDelivery && op == peerwire.OpSend || stage == peerwire.StageChannel && op == peerwire.OpChannelSend) && len(cells) > 2 {
+			cells = append([]string(nil), cells...)
+			raw, err := json.Marshal(peer.ImportExternalText(cells[2]))
+			if err != nil {
+				return 0, nil, err
+			}
+			cells[2] = peerwire.BodyPrefix + string(raw)
+		}
 		frame, err := peerwire.EncodeRequest(op, cells)
 		if err != nil {
 			return 0, nil, err
@@ -282,7 +292,7 @@ func main() {
 		fmt.Sprintf("status=%v (want bad_request)", status))
 
 	corruptRow := append([]string{"probe-A"},
-		peerwire.MessageCells(peer.Message{ID: "m1"})...)
+		peerwire.MessageCells(peer.Message{ID: "m1", Body: peer.ImportExternalText("fixture")})...)
 	corruptRow[1+9] = "yesterday" // sent_at
 	status, _, err = call(peerwire.StageDelivery, peerwire.OpReply, corruptRow)
 	check("a corrupt timestamp cell is refused, not read as absent",
@@ -413,7 +423,7 @@ func deliveryChecks(ctx context.Context, caller *bus.ConcurrentModuleCaller,
 	remaining, taken, takeErr := peerwire.TakeReply(cells)
 	check("DELIVERED: the recipient drains the sender's exact text",
 		err == nil && status == peerwire.StatusOK && takeErr == nil &&
-			len(taken) == 1 && taken[0].Text == body && taken[0].FromSession == sessionA,
+			len(taken) == 1 && taken[0].DisplayText() == body && taken[0].FromSession == sessionA,
 		fmt.Sprintf("status=%v remaining=%d rows=%d err=%v", status, remaining, len(taken), takeErr))
 
 	check("the drain reports nothing left behind", takeErr == nil && remaining == 0,

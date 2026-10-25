@@ -10,6 +10,8 @@
  * helpers below are the same aimee_db1_put_u32/get_u32 the store's clients use.
  */
 #include "peer_client.h"
+#include <aimee/ir/session_event.h>
+#include "cJSON.h"
 
 #include "db1_module_api.h"
 
@@ -28,11 +30,11 @@
  * A module's identity and the kinds it answers on are ONE fact, and writing
  * 12033 here would be a second copy of it free to drift when the aimee module
  * is folded into db1's ref. Derived, the renumber lands in one place. */
-#define PEER_PRINCIPAL_REF     31u
+#define PEER_PRINCIPAL_REF     30u
 #define PEER_EVENT_KIND(stage) (4096u + PEER_PRINCIPAL_REF * 256u + (uint32_t)(stage))
 
-#define PEER_STAGE_DELIVERY 1u
-#define PEER_STAGE_INBOX    2u
+#define PEER_STAGE_DELIVERY 20u
+#define PEER_STAGE_INBOX    21u
 
 #define PEER_OP_SEND       1u
 #define PEER_OP_REPLY      2u
@@ -43,12 +45,12 @@
 
 /* Response capacity, derived from the module's own ceilings rather than picked.
  *
- * peer.MaxTextBytes is 8192 and peerwire.MessageWidth is 11, so one row is one
- * text cell plus ten identifier-ish cells. PEER_CELL_MAX bounds those ten
+ * peer.MaxBodyBytes bounds canonical Message JSON; each row contains its
+ * versioned body cell plus ten identifier-ish cells. PEER_CELL_MAX bounds those ten
  * generously; a reply whose cell exceeds it overruns the buffer, the bus call
  * fails, and this client reports a TRANSPORT failure -- which is the honest
  * answer, because a reply it could not receive is not a refusal. */
-#define PEER_TEXT_MAX 8192u
+#define PEER_TEXT_MAX (PEER_CLIENT_BODY_MAX + sizeof(PEER_CLIENT_BODY_PREFIX) - 1u)
 #define PEER_CELL_MAX 1024u
 #define PEER_ROW_BYTES                                                                             \
    ((uint32_t)(PEER_CLIENT_MESSAGE_WIDTH - 1) * (4u + PEER_CELL_MAX) + 4u + PEER_TEXT_MAX)
@@ -402,6 +404,131 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
 
 /* ── message rows ─────────────────────────────────────────────────────────── */
 
+/* Versioned canonical Message framing, never heuristic legacy-text admission. */
+static char *body_cell(const aimee_message_t *body)
+{
+   aimee_request_t request = {.messages = (aimee_message_t *)body, .n_messages = 1};
+   if (!body || aimee_ir_request_admit(&request))
+      return NULL;
+   cJSON *json = aimee_ir_message_json(body);
+   char *raw = json ? cJSON_PrintUnformatted(json) : NULL;
+   cJSON_Delete(json);
+   if (!raw)
+      return NULL;
+   size_t size = strlen(raw);
+   char *cell =
+       size <= PEER_CLIENT_BODY_MAX ? malloc(sizeof(PEER_CLIENT_BODY_PREFIX) + size) : NULL;
+   if (cell)
+      snprintf(cell, sizeof(PEER_CLIENT_BODY_PREFIX) + size, "%s%s", PEER_CLIENT_BODY_PREFIX, raw);
+   free(raw);
+   return cell;
+}
+
+static int body_parse(const char *cell, aimee_message_t *out)
+{
+   size_t prefix = sizeof(PEER_CLIENT_BODY_PREFIX) - 1;
+   if (!cell || strncmp(cell, PEER_CLIENT_BODY_PREFIX, prefix) ||
+       strlen(cell + prefix) > PEER_CLIENT_BODY_MAX)
+      return -1;
+   cJSON *json = cJSON_ParseWithOpts(cell + prefix, NULL, 1);
+   int rc = !json || !aimee_ir_json_unique(json) || aimee_ir_message_parse(json, out);
+   cJSON_Delete(json);
+   if (!rc)
+   {
+      aimee_request_t request = {.messages = out, .n_messages = 1};
+      rc = aimee_ir_request_admit(&request);
+   }
+   return rc ? -1 : 0;
+}
+
+static int canonical_keys_known(const cJSON *source, const cJSON *canonical)
+{
+   const cJSON *field;
+   cJSON_ArrayForEach(field, source)
+   {
+      if (!field->string || !cJSON_HasObjectItem(canonical, field->string))
+         return 0;
+   }
+   return 1;
+}
+
+/* Domain objects remain opaque. Recognize nested IR only through its owner codec,
+ * and reject unknown keys rather than treating arbitrary context fields as IR. */
+static int nested_canonical_visible(const cJSON *value, int *recognized)
+{
+   *recognized = 0;
+   if (!cJSON_IsObject(value))
+      return 1;
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "type"));
+   if (!type)
+      return 1;
+   cJSON *wrapper = cJSON_CreateObject();
+   cJSON *copy = cJSON_Duplicate(value, 1);
+   if (!wrapper || !copy)
+   {
+      cJSON_Delete(wrapper);
+      cJSON_Delete(copy);
+      *recognized = 1;
+      return 0;
+   }
+   cJSON_AddStringToObject(wrapper, "role", strcmp(type, "tool_result") ? "assistant" : "user");
+   cJSON *blocks = cJSON_AddArrayToObject(wrapper, "blocks");
+   cJSON_AddItemToArray(blocks, copy);
+   aimee_message_t parsed = {0};
+   if (aimee_ir_message_parse(wrapper, &parsed))
+   {
+      cJSON_Delete(wrapper);
+      return 1;
+   }
+   cJSON *canonical = aimee_ir_block_json(&parsed.blocks[0]);
+   int known = canonical && canonical_keys_known(value, canonical);
+   const cJSON *source_context = cJSON_GetObjectItemCaseSensitive(value, "context");
+   if (known && source_context)
+      known = canonical_keys_known(source_context,
+                                   cJSON_GetObjectItemCaseSensitive(canonical, "context"));
+   aimee_request_t request = {.messages = &parsed, .n_messages = 1};
+   known = known && !aimee_ir_request_admit(&request);
+   int visible = 1;
+   if (known)
+   {
+      *recognized = 1;
+      peer_client_message_t message = {.body = parsed};
+      visible = peer_client_message_model_visible(&message);
+   }
+   cJSON_Delete(canonical);
+   aimee_message_free(&parsed);
+   cJSON_Delete(wrapper);
+   return visible;
+}
+
+static int opaque_model_visible(const cJSON *value)
+{
+   if (!value)
+      return 1;
+   int recognized = 0;
+   int visible = nested_canonical_visible(value, &recognized);
+   if (recognized)
+      return visible;
+   const cJSON *child;
+   cJSON_ArrayForEach(child, value) if (!opaque_model_visible(child)) return 0;
+   return 1;
+}
+
+int peer_client_message_model_visible(const peer_client_message_t *message)
+{
+   if (!message)
+      return 0;
+   for (int i = 0; i < message->body.n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->body.blocks[i];
+      if (!block->context.model_visible ||
+          block->context.sensitivity >= AIMEE_CTX_SENS_RESTRICTED ||
+          !opaque_model_visible(block->tool_input) || !opaque_model_visible(block->tool_result))
+         return 0;
+   }
+   return 1;
+}
+
 void peer_client_message_free(peer_client_message_t *m)
 {
    if (!m)
@@ -414,7 +541,7 @@ void peer_client_message_free(peer_client_message_t *m)
    free(m->from_label);
    free(m->origin_session);
    free(m->sent_at);
-   free(m->text);
+   aimee_message_free(&m->body);
    memset(m, 0, sizeof(*m));
 }
 
@@ -432,6 +559,8 @@ void peer_client_messages_free(peer_client_message_t *m, size_t count)
  * cell this consumes is NULLed in the source array. */
 static int row_take(char **cells, peer_client_message_t *m)
 {
+   if (body_parse(cells[10], &m->body))
+      return -1;
    m->id = cells[0];
    m->correlation_id = cells[1];
    m->conversation_id = cells[2];
@@ -440,9 +569,8 @@ static int row_take(char **cells, peer_client_message_t *m)
    m->from_label = cells[5];
    m->origin_session = cells[6];
    m->sent_at = cells[9];
-   m->text = cells[10];
    for (int i = 0; i < PEER_CLIENT_MESSAGE_WIDTH; ++i)
-      if (i != 7 && i != 8)
+      if (i != 7 && i != 8 && i != 10)
          cells[i] = NULL;
    /* hop and is_reply travel as text like every other cell. A hop that does not
       parse is a malformed row rather than hop zero: defaulting it would make a
@@ -471,7 +599,7 @@ static int row_take(char **cells, peer_client_message_t *m)
 
 /* ── operations ───────────────────────────────────────────────────────────── */
 
-peer_client_result_t peer_client_send(const char *from, const char *to, const char *text,
+peer_client_result_t peer_client_send(const char *from, const char *to, const aimee_message_t *body,
                                       const char *conversation_id, int expect_reply,
                                       peer_client_message_t *stamped, uint32_t *status,
                                       int *transport)
@@ -482,22 +610,30 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       *transport = AIMEE_MODULE_CALL_OK;
    if (stamped)
       memset(stamped, 0, sizeof(*stamped));
-   if (!from || !to || !text)
+   if (!from || !to || !body)
    {
       if (transport)
          *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
-   /* from, to, text, conversation_id, hop, expect_reply */
+   char *encoded = body_cell(body);
+   if (!encoded)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      return PEER_CLIENT_TRANSPORT;
+   }
+   /* from, to, canonical body, conversation_id, hop, expect_reply */
    /* "1"/"0", which is what peerwire.Btoa writes. Atob accepts "true"/"false"
       too, so this cell worked either way -- and that is precisely why writing
       the other spelling was not caught: one lenient reader kept a second
       grammar alive on the wire until the strict direction met it. */
    const char *fields[6] = {
-       from, to, text, conversation_id ? conversation_id : "", "0", expect_reply ? "1" : "0"};
+       from, to, encoded, conversation_id ? conversation_id : "", "0", expect_reply ? "1" : "0"};
    struct reply r;
    peer_client_result_t rc =
        call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r, transport);
+   free(encoded);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
@@ -513,17 +649,18 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
          *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
-   if (stamped)
+   peer_client_message_t checked = {0};
+   peer_client_message_t *result = stamped ? stamped : &checked;
+   if (row_take(r.cells, result) != 0)
    {
-      if (row_take(r.cells, stamped) != 0)
-      {
-         peer_client_message_free(stamped);
-         reply_free(&r);
-         if (transport)
-            *transport = AIMEE_MODULE_CALL_PROTOCOL;
-         return PEER_CLIENT_TRANSPORT;
-      }
+      peer_client_message_free(result);
+      reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+      return PEER_CLIENT_TRANSPORT;
    }
+   if (!stamped)
+      peer_client_message_free(&checked);
    reply_free(&r);
    return PEER_CLIENT_OK;
 }
@@ -590,9 +727,9 @@ static int reply_handle_split(const char *handle, char *scratch, size_t scratch_
    return 0;
 }
 
-peer_client_result_t peer_client_reply(const char *from, const char *handle, const char *text,
-                                       peer_client_message_t *stamped, uint32_t *status,
-                                       int *transport)
+peer_client_result_t peer_client_reply(const char *from, const char *handle,
+                                       const aimee_message_t *body, peer_client_message_t *stamped,
+                                       uint32_t *status, int *transport)
 {
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
@@ -600,7 +737,7 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
       *transport = AIMEE_MODULE_CALL_OK;
    if (stamped)
       memset(stamped, 0, sizeof(*stamped));
-   if (!from || !handle || !text)
+   if (!from || !handle || !body)
    {
       if (transport)
          *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -620,29 +757,36 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
       return PEER_CLIENT_REFUSED;
    }
 
+   char *encoded = body_cell(body);
+   if (!encoded)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      return PEER_CLIENT_TRANSPORT;
+   }
    char hopbuf[16];
    snprintf(hopbuf, sizeof(hopbuf), "%d", hop);
-   /* from, then the answered message as a full row. The reply's TEXT rides in
-      the row's text cell -- that is the module's contract, and the registry
+   /* From, then the answered envelope and canonical reply body. The registry
       re-stamps provenance either way, so a forged row cannot impersonate. The
       cells Reply does not read travel empty rather than invented. */
    const char *fields[1 + PEER_CLIENT_MESSAGE_WIDTH] = {
-       from,    /* replying session */
-       part[0], /* id */
-       part[1], /* correlation_id */
-       part[2], /* conversation_id */
-       part[3], /* from_session -- who the reply goes to */
-       "",      /* from_owner: re-stamped */
-       "",      /* from_label: re-stamped */
-       part[4], /* origin_session */
-       hopbuf,  /* hop: the reply carries hop + 1, computed by the module */
-       "0",     /* is_reply on the ANSWERED message */
-       "",      /* sent_at: empty is a zero time */
-       text};   /* the reply itself */
+       from,     /* replying session */
+       part[0],  /* id */
+       part[1],  /* correlation_id */
+       part[2],  /* conversation_id */
+       part[3],  /* from_session -- who the reply goes to */
+       "",       /* from_owner: re-stamped */
+       "",       /* from_label: re-stamped */
+       part[4],  /* origin_session */
+       hopbuf,   /* hop: the reply carries hop + 1, computed by the module */
+       "0",      /* is_reply on the ANSWERED message */
+       "",       /* sent_at: empty is a zero time */
+       encoded}; /* the canonical reply itself */
 
    struct reply r;
    peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_REPLY, fields,
                                         1 + PEER_CLIENT_MESSAGE_WIDTH, &r, transport);
+   free(encoded);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
@@ -656,14 +800,18 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
          *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
-   if (stamped && row_take(r.cells, stamped) != 0)
+   peer_client_message_t checked = {0};
+   peer_client_message_t *result = stamped ? stamped : &checked;
+   if (row_take(r.cells, result) != 0)
    {
-      peer_client_message_free(stamped);
+      peer_client_message_free(result);
       reply_free(&r);
       if (transport)
          *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
+   if (!stamped)
+      peer_client_message_free(&checked);
    reply_free(&r);
    return PEER_CLIENT_OK;
 }

@@ -6385,7 +6385,7 @@
       "family": "agent_work",
       "id": 49,
       "name": "cron_job_record_run",
-      "c_name": "db1_cron_job_record_run",
+      "c_name": "db1_cron_job_record_run_ir",
       "c_params": [
         "job_id",
         "status",
@@ -6393,7 +6393,8 @@
         "delivered",
         "output",
         "error",
-        "output_hash"
+        "output_hash",
+        "output_ir"
       ],
       "c_returns": "int64",
       "wire_format": "db1-fields-v2",
@@ -6439,6 +6440,11 @@
           },
           {
             "name": "output_hash",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "output_ir",
             "type": "text",
             "required": false
           }
@@ -6531,11 +6537,13 @@
       "family": "agent_work",
       "id": 52,
       "name": "cron_job_latest_output",
-      "c_name": "db1_cron_job_latest_output",
+      "c_name": "db1_cron_job_latest_snapshot",
       "c_params": [
-        "job_id"
+        "job_id",
+        "output_out",
+        "output_ir_out"
       ],
-      "c_returns": "text",
+      "c_returns": "int",
       "wire_format": "db1-fields-v2",
       "scope": "global",
       "transaction": "none",
@@ -6560,9 +6568,13 @@
           {
             "name": "output",
             "type": "text"
+          },
+          {
+            "name": "output_ir",
+            "type": "text"
           }
         ],
-        "max_bytes": 262144
+        "max_bytes": 2097216
       }
     },
     {
@@ -16912,7 +16924,7 @@
             ]
           },
           {
-            "name": "prompt",
+            "name": "request_ir",
             "type": "text",
             "alloc": 1048576
           },
@@ -16933,7 +16945,7 @@
       "c_params": [
         "id",
         "sender",
-        "text",
+        "message_ir",
         "out"
       ],
       "transaction": "single",
@@ -16959,9 +16971,9 @@
             "required": false
           },
           {
-            "name": "text",
+            "name": "message_ir",
             "type": "text",
-            "required": false
+            "required": true
           }
         ]
       },
@@ -17039,7 +17051,7 @@
             ]
           },
           {
-            "name": "prompt",
+            "name": "request_ir",
             "type": "text",
             "alloc": 1048576
           },
@@ -27921,7 +27933,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {
@@ -28167,7 +28179,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {
@@ -28209,7 +28221,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       },
       "host_only": true
     },
@@ -28240,7 +28252,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {

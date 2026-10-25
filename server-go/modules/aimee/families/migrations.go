@@ -125,6 +125,7 @@ var schemaHistory = []struct {
 	{51, "schema_workflow_execution_scope.sql"},
 	{52, "schema_agent_job_observation.sql"},
 	{53, "schema_coord_message_ir.sql"},
+	{54, "schema_cron_output_ir.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

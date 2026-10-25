@@ -1,6 +1,7 @@
 package peerwire
 
 import (
+	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"os"
 	"regexp"
 	"strconv"
@@ -183,4 +184,35 @@ func TestCClientSpeaksTheSameBooleanGrammar(t *testing.T) {
 // reads source text is not also a guard on how that source is wrapped.
 func collapseSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func TestCClientPinsCanonicalBodyVersionAndStages(t *testing.T) {
+	header := cHeaderText(t)
+	if !strings.Contains(collapseSpace(header), `#define PEER_CLIENT_BODY_PREFIX "aimee.message.v1\n"`) || BodyPrefix != "aimee.message.v1\n" {
+		t.Fatal("canonical peer body discriminator drift")
+	}
+	implementation := cImplText(t)
+	goSource, err := os.ReadFile("../serve.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goRef := regexp.MustCompile(`const PrincipalRef = (\d+)`).FindStringSubmatch(string(goSource))
+	cRef := regexp.MustCompile(`define PEER_PRINCIPAL_REF\s+(\d+)u`).FindStringSubmatch(implementation)
+	if len(goRef) != 2 || len(cRef) != 2 || goRef[1] != cRef[1] {
+		t.Fatalf("C/Go peer principal drift: %v / %v", cRef, goRef)
+	}
+	for name, want := range map[string]uint32{"DELIVERY": StageDelivery, "INBOX": StageInbox} {
+		re := regexp.MustCompile(`define PEER_STAGE_` + name + `\s+(\d+)u`)
+		match := re.FindStringSubmatch(implementation)
+		if len(match) != 2 {
+			t.Fatalf("missing C stage %s", name)
+		}
+		got, _ := strconv.ParseUint(match[1], 10, 32)
+		if uint32(got) != want {
+			t.Fatalf("C stage %s=%d, Go=%d", name, got, want)
+		}
+	}
+	if !strings.Contains(collapseSpace(header), "#define PEER_CLIENT_BODY_MAX 65536u") || peer.MaxBodyBytes != 65536 {
+		t.Fatal("canonical peer body byte bound drift")
+	}
 }

@@ -67,8 +67,10 @@ package peer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"sort"
 	"strings"
 	"sync"
@@ -169,7 +171,7 @@ var (
 	ErrDirectoryRefused = errors.New("peer: directory refused the request")
 )
 
-// Message is one peer message and its envelope. Everything before Text is
+// Message is one peer message and its envelope. Everything before Body is
 // stamped by the registry; a sender supplies only the body.
 type Message struct {
 	ID             string `json:"message_id"`
@@ -183,18 +185,18 @@ type Message struct {
 	// exhausts an allowance someone is watching rather than the appliance's.
 	// Send stamps the sender; Reply propagates whatever it is answering, so
 	// the origin survives every hop.
-	OriginSession string    `json:"origin_session"`
-	Hop           int       `json:"hop"`
-	IsReply       bool      `json:"is_reply"`
-	SentAt        time.Time `json:"sent_at"`
-	Text          string    `json:"text"`
+	OriginSession string            `json:"origin_session"`
+	Hop           int               `json:"hop"`
+	IsReply       bool              `json:"is_reply"`
+	SentAt        time.Time         `json:"sent_at"`
+	Body          canonical.Message `json:"body"`
 }
 
 // Preview is the bounded excerpt carried on a live notification. It is
-// explicitly an excerpt, never the message: Text remains authoritative.
+// explicitly an excerpt, never the message: Body remains authoritative.
 //
 // PreviewBytes is a BYTE bound, but the cut is taken at a rune boundary. A
-// plain m.Text[:PreviewBytes] splits a multi-byte character whenever one
+// plain m.DisplayText()[:PreviewBytes] splits a multi-byte character whenever one
 // straddles the limit, and the resulting invalid UTF-8 travels into a live
 // notification and from there into a reader's context. Peer message bodies are
 // the most likely thing in this system to contain multi-byte characters, so the
@@ -203,15 +205,127 @@ type Message struct {
 // Backing off to the boundary means a preview can be up to three bytes shorter
 // than the bound. That is the correct trade: the bound exists to stop a
 // notification growing without limit, not to be met exactly.
+// DisplayText is a read-only excerpt projection, never a message transport.
+func (m Message) DisplayText() string {
+	var out strings.Builder
+	for _, block := range m.Body.Blocks {
+		if block.Type == "text" && block.Text != nil {
+			out.WriteString(*block.Text)
+		}
+	}
+	return out.String()
+}
+
+// ModelVisible checks the projection boundary without rewriting transport IR.
+func (m Message) ModelVisible() bool {
+	var nested func(any) bool
+	nested = func(value any) bool {
+		switch v := value.(type) {
+		case map[string]any:
+			// Only validated canonical nodes give a key named context IR meaning.
+			raw, err := json.Marshal(v)
+			if err != nil {
+				return false
+			}
+			if canonical.ValidBlock(raw) {
+				var block canonical.Block
+				if !canonical.Decode(raw, &block) {
+					return false
+				}
+				return (Message{Body: canonical.Message{Role: "user", Blocks: []canonical.Block{block}}}).ModelVisible()
+			}
+			for _, child := range v {
+				if !nested(child) {
+					return false
+				}
+			}
+		case []any:
+			for _, child := range v {
+				if !nested(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for _, block := range m.Body.Blocks {
+		if block.Context == nil || !block.Context.ModelVisible || block.Context.Sensitivity >= 3 {
+			return false
+		}
+		for _, raw := range []json.RawMessage{block.Input, block.Content} {
+			if len(raw) == 0 {
+				continue
+			}
+			var value any
+			if json.Unmarshal(raw, &value) != nil || !nested(value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (m Message) Preview() string {
-	if len(m.Text) <= PreviewBytes {
-		return m.Text
+	if !m.ModelVisible() {
+		return "[Peer body refused: context is hidden or restricted.]"
+	}
+	text := m.DisplayText()
+	if len(text) <= PreviewBytes {
+		return text
 	}
 	cut := PreviewBytes
-	for cut > 0 && !utf8.RuneStart(m.Text[cut]) {
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
-	return m.Text[:cut]
+	return text[:cut]
+}
+
+// ImportExternalText admits the legacy HTTP/CLI text body at its external origin.
+func ImportExternalText(text string) canonical.Message {
+	return canonical.Message{Role: "user", Blocks: []canonical.Block{{Type: "text", Text: &text,
+		Context: &canonical.Context{Origin: 7, Authority: 1, Trust: 2, Sensitivity: 1, ModelVisible: true, RevisionEpoch: "0"}}}}
+}
+
+// Canonical framing has overhead and escapes: retain the 8 KiB text allowance,
+// with a separate bound for structured payloads and their serialized envelope.
+const MaxBodyBytes = 64 * 1024
+
+func AdmitBody(body canonical.Message) (canonical.Message, error) {
+	raw, err := json.Marshal(body)
+	if err != nil || !canonical.ValidMessage(raw) {
+		return canonical.Message{}, ErrBadRequest
+	}
+	if len(raw) > MaxBodyBytes {
+		return canonical.Message{}, ErrTooLong
+	}
+	texts := 0
+	meaningful := false
+	for _, b := range body.Blocks {
+		if b.Text != nil {
+			texts += len(*b.Text)
+			meaningful = meaningful || strings.TrimSpace(*b.Text) != ""
+		}
+		if b.Type != "text" {
+			meaningful = true
+		}
+	}
+	if texts > MaxTextBytes {
+		return canonical.Message{}, ErrTooLong
+	}
+	if !meaningful {
+		return canonical.Message{}, ErrBadRequest
+	}
+	messages, err := canonical.DecodeMessages(append(append([]byte{'['}, raw...), ']'))
+	if err != nil {
+		return canonical.Message{}, ErrBadRequest
+	}
+	return messages[0], nil
+}
+func cloneMessage(m Message) Message {
+	raw, _ := json.Marshal(m.Body)
+	m.Body = canonical.Message{}
+	_ = json.Unmarshal(raw, &m.Body)
+	return m
 }
 
 // DirEntry is one row of the peer directory — enough for a model to choose who
@@ -715,7 +829,7 @@ func (r *Registry) closesCycle(from, to string) bool {
 }
 
 type deliverSpec struct {
-	text           string
+	body           canonical.Message
 	conversationID string
 	correlationID  string
 	originSession  string
@@ -753,7 +867,7 @@ func (r *Registry) deliver(from, to *session, spec deliverSpec) (Message, error)
 		Hop:           spec.hop,
 		IsReply:       spec.isReply,
 		SentAt:        r.opts.now(),
-		Text:          spec.text,
+		Body:          spec.body,
 	}
 	if spec.correlateSelf {
 		m.CorrelationID = m.ID
@@ -767,7 +881,7 @@ func (r *Registry) deliver(from, to *session, spec deliverSpec) (Message, error)
 		m.OriginSession = from.id
 	}
 
-	to.inbox = append(to.inbox, m)
+	to.inbox = append(to.inbox, cloneMessage(m))
 	to.lastSeen = r.opts.now()
 	r.cond.Broadcast()
 	return m, nil
@@ -776,7 +890,7 @@ func (r *Registry) deliver(from, to *session, spec deliverSpec) (Message, error)
 // notify runs the live-notification hook outside the lock.
 func (r *Registry) notify(sessionID string, m Message) {
 	if r.opts.Notify != nil {
-		r.opts.Notify(sessionID, m)
+		r.opts.Notify(sessionID, cloneMessage(m))
 	}
 }
 
@@ -805,16 +919,6 @@ type SendOptions struct {
 	// behind forever, or every later ask along that path is refused as a cycle
 	// that no longer exists.
 	WaitExpiry time.Duration
-}
-
-func validateText(text string) error {
-	if strings.TrimSpace(text) == "" {
-		return ErrBadRequest
-	}
-	if len(text) > MaxTextBytes {
-		return ErrTooLong
-	}
-	return nil
 }
 
 // admit makes a session usable here on the strength of the DIRECTORY, creating
@@ -867,7 +971,7 @@ func (r *Registry) admit(sessionID string) (*session, error) {
 // Send delivers a message and returns immediately. It never takes the
 // receiver's turn: the message waits in the inbox until the receiver drains it,
 // so a turn in flight is neither interrupted nor raced.
-func (r *Registry) Send(from, to, text string, opts SendOptions) (Message, error) {
+func (r *Registry) Send(from, to string, body canonical.Message, opts SendOptions) (Message, error) {
 	if from == "" || to == "" {
 		return Message{}, ErrBadRequest
 	}
@@ -876,8 +980,10 @@ func (r *Registry) Send(from, to, text string, opts SendOptions) (Message, error
 		// wasting turns. Refuse it outright.
 		return Message{}, ErrSelf
 	}
-	if err := validateText(text); err != nil {
+	if admitted, err := AdmitBody(body); err != nil {
 		return Message{}, err
+	} else {
+		body = admitted
 	}
 
 	// Admitted before the lock is taken, because admission may consult the
@@ -917,7 +1023,7 @@ func (r *Registry) Send(from, to, text string, opts SendOptions) (Message, error
 		return Message{}, ErrCycle
 	}
 	m, err := r.deliver(fromS, toS, deliverSpec{
-		text: text, conversationID: opts.ConversationID, hop: opts.Hop,
+		body: body, conversationID: opts.ConversationID, hop: opts.Hop,
 		correlateSelf: opts.ExpectReply,
 	})
 	if err == nil && opts.ExpectReply {
@@ -934,15 +1040,17 @@ func (r *Registry) Send(from, to, text string, opts SendOptions) (Message, error
 // Reply answers a message taken from an inbox, routing back to its sender with
 // its correlation and conversation ids at the next hop — so a waiting Ask wakes
 // and a ping-pong still burns the hop budget.
-func (r *Registry) Reply(from string, to Message, text string) (Message, error) {
+func (r *Registry) Reply(from string, to Message, body canonical.Message) (Message, error) {
 	if from == "" || to.FromSession == "" {
 		return Message{}, ErrBadRequest
 	}
 	if from == to.FromSession {
 		return Message{}, ErrSelf
 	}
-	if err := validateText(text); err != nil {
+	if admitted, err := AdmitBody(body); err != nil {
 		return Message{}, err
+	} else {
+		body = admitted
 	}
 	corr := to.CorrelationID
 	if corr == "" {
@@ -978,7 +1086,7 @@ func (r *Registry) Reply(from string, to Message, text string) (Message, error) 
 		return Message{}, ErrNoPeer
 	}
 	m, err := r.deliver(fromS, toS, deliverSpec{
-		text:           text,
+		body:           body,
 		conversationID: to.ConversationID,
 		correlationID:  corr,
 		originSession:  to.OriginSession,
@@ -1005,15 +1113,17 @@ func (r *Registry) Reply(from string, to Message, text string) (Message, error) 
 // question's id, the question stays in the peer's inbox, and a late reply lands
 // in this session's inbox still carrying the original correlation id — so the
 // answer is recoverable rather than lost.
-func (r *Registry) Ask(ctx context.Context, from, to, text string) (Message, string, error) {
+func (r *Registry) Ask(ctx context.Context, from, to string, body canonical.Message) (Message, string, error) {
 	if from == "" || to == "" {
 		return Message{}, "", ErrBadRequest
 	}
 	if from == to {
 		return Message{}, "", ErrCycle // waiting on yourself is the smallest cycle
 	}
-	if err := validateText(text); err != nil {
+	if admitted, err := AdmitBody(body); err != nil {
 		return Message{}, "", err
+	} else {
+		body = admitted
 	}
 
 	r.mu.Lock()
@@ -1036,7 +1146,7 @@ func (r *Registry) Ask(ctx context.Context, from, to, text string) (Message, str
 		r.mu.Unlock()
 		return Message{}, "", ErrCycle
 	}
-	q, err := r.deliver(fromS, toS, deliverSpec{text: text, correlateSelf: true})
+	q, err := r.deliver(fromS, toS, deliverSpec{body: body, correlateSelf: true})
 	if err != nil {
 		r.mu.Unlock()
 		return Message{}, "", err
@@ -1112,7 +1222,9 @@ func (r *Registry) Inbox(sessionID string) []Message {
 		return nil
 	}
 	out := make([]Message, len(s.inbox))
-	copy(out, s.inbox)
+	for i, m := range s.inbox {
+		out[i] = cloneMessage(m)
+	}
 	return out
 }
 

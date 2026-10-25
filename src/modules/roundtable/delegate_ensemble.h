@@ -45,8 +45,9 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
  * chair/verify headers need the result type). The delegate_roundtable_* entry
  * points below still produce and free those types. */
 
-int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                            const roundtable_opts_t *opts, roundtable_result_t *out);
+int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                            const aimee_request_t *task, const roundtable_opts_t *opts,
+                            roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json

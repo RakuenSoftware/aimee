@@ -250,13 +250,20 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 
 /* Preparing a continuation is atomic from the dispatcher's perspective: failure
  * leaves the old request alone, and the caller must never dispatch it. */
-int server_chat_ir_replace_steer(cJSON *request, const char *message)
+int server_chat_ir_replace_steer(cJSON *request, const cJSON *message)
 {
-   if (!cJSON_IsObject(request) || !message || !message[0])
+   aimee_message_t input = {0};
+   if (!cJSON_IsObject(request) || aimee_ir_message_parse(message, &input))
       return -1;
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)message};
-   aimee_message_t input = {.role = "user", .blocks = &block, .n_blocks = 1};
-   cJSON *replacement = aimee_ir_message_json(&input);
+   int valid = input.role && !strcmp(input.role, "user") && input.n_blocks > 0;
+   for (int i = 0; i < input.n_blocks; ++i)
+      valid = valid &&
+              (input.blocks[i].type == AIMEE_BLK_TEXT || input.blocks[i].type == AIMEE_BLK_IMAGE ||
+               input.blocks[i].type == AIMEE_BLK_DOCUMENT);
+   aimee_message_free(&input);
+   if (!valid)
+      return -1;
+   cJSON *replacement = cJSON_Duplicate(message, 1);
    if (!replacement)
       return -1;
    if (!cJSON_ReplaceItemInObjectCaseSensitive(request, "message", replacement))
@@ -269,13 +276,16 @@ int server_chat_ir_replace_steer(cJSON *request, const char *message)
 
 /* Execution diagnostics never become user-message history. Retain a bounded,
  * escaped observation of the rejected input without authorizing its execution. */
-int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message)
+int server_chat_ir_reject_steer(const char *session, const char *actor, const cJSON *input)
 {
    static const char reason[] = "Steering continuation was not dispatched; no model or tool "
                                 "executed. Send it again explicitly.";
    db1_server_session_owner_t registered;
-   if (!session || !session[0] || !actor || !actor[0] || !message || !message[0] ||
+   if (!session || !session[0] || !actor || !actor[0] || !cJSON_IsObject(input) ||
        db1_server_session_owner_get(session, &registered) || strcmp(registered.principal, actor))
+      return -1;
+   char *message = cJSON_PrintUnformatted(input);
+   if (!message)
       return -1;
    size_t length = strlen(message), preview_length = length < 1536 ? length : 1536;
    while (preview_length && ((unsigned char)message[preview_length] & 0xc0) == 0x80)
@@ -286,7 +296,11 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
    unsigned char hash[EVP_MAX_MD_SIZE];
    unsigned int hash_length = 0;
    if (!EVP_Digest(message, length, hash, &hash_length, EVP_sha256(), NULL) || hash_length != 32)
+   {
+      free(message);
       return -1;
+   }
+   free(message);
    for (size_t i = 0; i < 32; i++)
       snprintf(digest + 2 * i, 3, "%02x", hash[i]);
    cJSON *diagnostic = cJSON_CreateObject();

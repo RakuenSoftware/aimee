@@ -10,6 +10,7 @@
 #include "config.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include <aimee/ir/session_event.h>
 #include "db1_client/db1_cron_jobs.h"
 #include "db1_client/db1_trigger.h"
 #include "db1_client/pipelines.h"
@@ -18,7 +19,13 @@
 #include "platform_test_util.h"
 #include "../server_cron.h"
 
-static char g_prior_output[16384];
+static char g_prior_output[65536];
+static char g_prior_ir[65536];
+static char g_stored_output[65536];
+static aimee_request_t g_request;
+static int g_add_thinking;
+static int g_prior_read_failed;
+static int g_large_sidecar;
 static char g_last_hash[64];
 static char g_last_output[16384];
 static char g_output_a[16384];
@@ -36,6 +43,12 @@ static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void reset_state(void)
 {
+   aimee_request_free(&g_request);
+   g_stored_output[0] = 0;
+   g_prior_ir[0] = 0;
+   g_add_thinking = 0;
+   g_prior_read_failed = 0;
+   g_large_sidecar = 0;
    g_prior_output[0] = '\0';
    g_last_hash[0] = '\0';
    g_last_output[0] = '\0';
@@ -111,6 +124,27 @@ int db1_cron_job_record_run(const char *job_id, const char *status, int silent, 
    return run_id;
 }
 
+int db1_cron_job_record_run_ir(const char *id, const char *status, int silent, int delivered,
+                               const char *output, const char *error, const char *hash,
+                               const char *ir)
+{
+   pthread_mutex_lock(&g_state_lock);
+   snprintf(g_stored_output, sizeof g_stored_output, "%s", ir ? ir : "");
+   pthread_mutex_unlock(&g_state_lock);
+   return db1_cron_job_record_run(id, status, silent, delivered, output, error, hash);
+}
+int db1_cron_job_latest_snapshot(const char *job_id, char **output, char **ir)
+{
+   (void)job_id;
+   *output = NULL;
+   *ir = NULL;
+   if (g_prior_read_failed)
+      return -1;
+   *output = strdup(g_prior_output);
+   *ir = g_prior_ir[0] ? strdup(g_prior_ir) : NULL;
+   return 0;
+}
+
 char *db1_cron_jobs_list_json(void)
 {
    return strdup("[]");
@@ -145,6 +179,7 @@ int agent_load_config(agent_config_t *cfg)
 int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
               agent_result_t *out)
 {
+   assert(!aimee_ir_request_clone(request, &g_request));
    const char *system_prompt = request->n_system ? request->system[0].text : NULL;
    const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
    int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
@@ -159,6 +194,29 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
                                       g_agent_response ? g_agent_response : "", "fixture") == 0);
    out->canonical_response.raw = cJSON_Parse("{\"opaque\":\"retain-until-output-boundary\"}");
    assert(out->canonical_response.raw);
+   if (g_large_sidecar)
+   {
+      char *large = malloc(1024u * 1024u + 1);
+      assert(large);
+      memset(large, 'x', 1024u * 1024u);
+      large[1024u * 1024u] = 0;
+      assert(cJSON_AddStringToObject(out->canonical_response.raw, "large", large));
+      free(large);
+   }
+   if (g_add_thinking)
+   {
+      aimee_response_t *response = &out->canonical_response;
+      response->content = realloc(response->content, 2 * sizeof *response->content);
+      assert(response->content);
+      response->content[1] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                             .text = strdup("source reasoning"),
+                                             .thinking_signature = strdup("opaque signature")};
+      response->n_content = 2;
+      aimee_ir_block_set_context(&response->content[1], AIMEE_CTX_ORIGIN_MODEL,
+                                 AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNTRUSTED,
+                                 AIMEE_CTX_SENS_CONFIDENTIAL, 1, "source-domain", "source-scope",
+                                 42);
+   }
    out->response = strdup(g_agent_response ? g_agent_response : "");
    out->success = !g_agent_rc;
    if (g_agent_rc)
@@ -317,8 +375,11 @@ static void test_context_from_injects_prior_output(void)
    cJSON *resp = NULL;
    assert(cron_run_config_job(&job, &resp) == 0);
    cJSON_Delete(resp);
-   assert(strstr(g_agent_prompt, "PRIOR JOB OUTPUT:") != NULL);
-   assert(strstr(g_agent_prompt, "pve unreachable") != NULL);
+   assert(!strcmp(g_agent_prompt,job.prompt));
+   assert(g_request.messages[0].n_blocks==2);
+   assert(strstr(g_request.messages[0].blocks[1].text,"pve unreachable"));
+   assert(g_request.messages[0].blocks[1].context.authority==AIMEE_CTX_AUTH_EVIDENCE);
+   assert(g_request.messages[0].blocks[1].context.origin==AIMEE_CTX_ORIGIN_MEMORY);
 }
 
 static void test_when_context_contains_skips_absent_substring(void)
@@ -535,8 +596,121 @@ static void test_parallel_workdir_jobs_are_serialized(void)
    platform_test_rmrf(dir_b);
 }
 
+static void test_canonical_output_replay_and_source_fences(void)
+{
+   reset_state();
+   cron_job_t job = base_job("llm");
+   g_add_thinking = 1;
+   cJSON *resp = NULL;
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(strstr(g_stored_output, "\"kind\":\"response\""));
+   assert(strstr(g_stored_output, "retain-until-output-boundary"));
+   cJSON *snapshot = cJSON_Parse(g_stored_output);
+   assert(snapshot);
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(snapshot, "value");
+   const cJSON *thinking_json =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(value, "blocks"), 1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(thinking_json, "context"), "model_visible")));
+   cJSON_Delete(snapshot);
+   char *stored = strdup(g_stored_output);
+   reset_state();
+   snprintf(g_prior_ir, sizeof g_prior_ir, "%s", stored);
+   free(stored);
+   snprintf(job.context_from, sizeof job.context_from, "earlier");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_request.messages[0].blocks[0].text, job.prompt));
+   assert(g_request.messages[0].n_blocks == 3);
+   aimee_block_t *thinking = &g_request.messages[0].blocks[2];
+   assert(thinking->type == AIMEE_BLK_THINKING && !strcmp(thinking->text, "source reasoning") &&
+          !strcmp(thinking->thinking_signature, "opaque signature"));
+   assert(thinking->context.origin == AIMEE_CTX_ORIGIN_MODEL &&
+          thinking->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          thinking->context.trust == AIMEE_CTX_TRUST_UNTRUSTED &&
+          thinking->context.sensitivity == AIMEE_CTX_SENS_CONFIDENTIAL &&
+          thinking->context.revision_epoch == 42 && !thinking->context.model_visible);
+   assert(!strcmp(thinking->context.revision_scope, "source-scope"));
+   reset_state();
+   g_large_sidecar = 1;
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_last_status, "failed"));
+   assert(strstr(g_last_error, "1 MiB"));
+   cJSON *bounded = cJSON_Parse(g_stored_output);
+   assert(bounded && strstr(g_stored_output, "\"kind\":\"script\""));
+   cJSON_Delete(bounded);
+   reset_state();
+   g_prior_read_failed = 1;
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_last_status, "failed"));
+   assert(!g_agent_prompt[0]);
+   reset_state();
+   snprintf(job.context_from, sizeof job.context_from, "earlier");
+   snprintf(g_prior_ir, sizeof g_prior_ir, "{malformed");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_last_status, "failed"));
+   assert(!g_agent_prompt[0]);
+   reset_state();
+   snprintf(g_prior_output, sizeof g_prior_output,
+            "{\"schema\":\"aimee.response.v1\",malformed literal}");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(g_request.messages[0].n_blocks == 2);
+   assert(!strcmp(g_request.messages[0].blocks[1].text, g_prior_output));
+   reset_state();
+   snprintf(g_prior_output, sizeof g_prior_output, "AIMEE_CRON_RESPONSE_IR_V1\n{malformed");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_request.messages[0].blocks[1].text, g_prior_output));
+}
+static void test_script_marker_and_large_script_evidence_remain_literal(void)
+{
+   reset_state();
+   cron_job_t job = base_job("script");
+   snprintf(job.script, sizeof job.script, "printf 'AIMEE_CRON_RESPONSE_IR_V1\\n{literal}'");
+   cJSON *resp = NULL;
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(strstr(g_stored_output, "\"kind\":\"script\""));
+   char *stored = strdup(g_stored_output);
+   reset_state();
+   snprintf(g_prior_ir, sizeof g_prior_ir, "%s", stored);
+   free(stored);
+   job = base_job("llm");
+   snprintf(job.context_from, sizeof job.context_from, "script-job");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_request.messages[0].blocks[1].text, "AIMEE_CRON_RESPONSE_IR_V1\n{literal}"));
+   reset_state();
+   job = base_job("hybrid");
+   snprintf(job.script, sizeof job.script, "printf '%%020000d' 0");
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_last_status, "complete"));
+   assert(!strcmp(g_agent_prompt, job.prompt));
+   assert(strlen(g_request.messages[0].blocks[1].text) == 20000);
+   assert(g_request.messages[0].blocks[1].context.origin == AIMEE_CTX_ORIGIN_TOOL);
+   reset_state();
+   job = base_job("llm");
+   snprintf(job.context_from, sizeof job.context_from, "oversized");
+   memset(g_prior_output, 'x', 8193);
+   g_prior_output[8193] = 0;
+   assert(!cron_run_config_job(&job, &resp));
+   cJSON_Delete(resp);
+   assert(!strcmp(g_last_status, "complete"));
+   assert(g_request.messages[0].n_blocks == 2);
+   assert(strlen(g_request.messages[0].blocks[1].text) == 8193);
+   assert(!strcmp(g_agent_prompt, job.prompt));
+}
+
 int main(void)
 {
+   test_canonical_output_replay_and_source_fences();
+   test_script_marker_and_large_script_evidence_remain_literal();
    test_llm_silent_response_records_no_delivery();
    test_llm_failure_releases_owned_error_response();
    test_llm_only_if_changed_dedupes_final_output();
@@ -547,5 +721,6 @@ int main(void)
    test_job_does_not_move_the_process_cwd();
    test_parallel_workdir_jobs_are_serialized();
    printf("cron runtime tests passed\n");
+   aimee_request_free(&g_request);
    return 0;
 }

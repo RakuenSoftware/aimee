@@ -2,7 +2,6 @@ package panel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -118,9 +117,10 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if !strings.Contains(fixtureInputText(repair.Input), "Preserve its analysis and findings") || !strings.Contains(fixtureInputText(repair.Input), "exactly one JSON object") {
 		t.Fatalf("repair prompt=%q", fixtureInputText(repair.Input))
 	}
-	quotedInvalid, _ := json.Marshal(agents.invalid)
-	if !strings.Contains(fixtureInputText(repair.Input), "PREVIOUS_RESPONSE_JSON_STRING\n"+string(quotedInvalid)+"\nEND_PREVIOUS_RESPONSE_JSON_STRING") {
-		t.Fatalf("repair prompt omitted or altered complete invalid response: %q", fixtureInputText(repair.Input))
+	if len(repair.Input.Messages) != 3 || repair.Input.Messages[1].Role != "assistant" ||
+		repair.Input.Messages[1].Blocks[0].Text == nil || *repair.Input.Messages[1].Blocks[0].Text != agents.invalid ||
+		repair.Input.Messages[0].Blocks[0].Text == nil || *repair.Input.Messages[0].Blocks[0].Text != "review" {
+		t.Fatalf("repair lost canonical task or complete assistant response: %+v", repair.Input.Messages)
 	}
 }
 

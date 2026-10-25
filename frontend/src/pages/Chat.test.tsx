@@ -289,18 +289,23 @@ describe('canonical browser chat', () => {
     const ordinaryFetch = fetchMock.getMockImplementation()!;
     let resolveHistory!: (response: Response) => void;
     const history = new Promise<Response>(resolve => { resolveHistory = resolve; });
-    fetchMock.mockImplementation((url: string) => url === '/api/channels/room/messages' ? history.then(response => response.clone()) : ordinaryFetch(url));
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/channels/room/messages' ? history.then(response => response.clone()) : ordinaryFetch(url, init));
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
     const source = sources.findLast(source => !source.closed && source.url.includes('/channels/room/events'))!;
-    const second = { id: '2', sender: 'user', text: 'Live channel message' };
+    const second = { id: '2', sender: 'user', message: { role: 'user', blocks: [{ type: 'text', text: 'Live channel message' }] } };
     await act(async () => {
       source.listeners.get('message')?.({ data: JSON.stringify(second) });
       source.listeners.get('message')?.({ data: JSON.stringify(second) });
-      resolveHistory(new Response(JSON.stringify({ messages: [{ id: '1', sender: 'user', text: 'Saved channel message' }, second] })));
+      resolveHistory(new Response(JSON.stringify({ messages: [{ id: '1', sender: 'user', message: { role: 'user', blocks: [{ type: 'text', text: 'Saved channel message' }] } }, second] })));
     });
     expect(screen.getAllByText('Live channel message')).toHaveLength(1);
     expect(screen.getAllByText('Saved channel message')).toHaveLength(1);
+    fireEvent.change(screen.getByPlaceholderText(/^Message #room/), { target: { value: 'Canonical channel send' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Message #room/), { key: 'Enter' });
+    await act(async () => {});
+    const post = fetchMock.mock.calls.find(([url, init]) => url === '/api/channels/room/messages' && init?.method === 'POST');
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Canonical channel send' }] } });
   });
 
   it('hides unsupported branching instead of offering a mutation that always fails', async () => {

@@ -668,12 +668,11 @@ static void chat_stream_worker_pooled(void *arg)
    /* Accepted steering is either dispatched once with its actual message or
     * retained as an explicit failed admission. It must never resend the old
     * request after a clone/replacement failure, nor vanish on a busy handoff. */
-   char *steer_msg = NULL;
+   cJSON *steer_msg = NULL;
    if (sid[0] && chat_steer_take(sid, &steer_msg) && steer_msg)
    {
       int dispatched = 0;
-      char *clean = chat_sanitize_message_transcript_tail(steer_msg);
-      if (steer_tmpl && !server_chat_ir_replace_steer(steer_tmpl, clean ? clean : steer_msg))
+      if (steer_tmpl && !server_chat_ir_replace_steer(steer_tmpl, steer_msg))
       {
          /* Only the saved attested request context can authorize this input. */
          request_context_restore(&steer_request);
@@ -687,7 +686,6 @@ static void chat_stream_worker_pooled(void *arg)
                compute_ctx_free(nctx);
          }
       }
-      free(clean);
       if (!dispatched)
       {
          int recorded = !server_chat_ir_reject_steer(sid, steer_principal, steer_msg);
@@ -698,7 +696,7 @@ static void chat_stream_worker_pooled(void *arg)
                              "{\"status\":\"failed\",\"durable\":false,\"reason\":\"continuation_"
                              "not_dispatched\"}");
       }
-      free(steer_msg);
+      cJSON_Delete(steer_msg);
    }
    cJSON_Delete(steer_tmpl);
    request_context_snapshot_clear(&steer_request);

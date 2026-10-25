@@ -664,23 +664,14 @@ static cJSON *delegate_build_result_response(
    return resp;
 }
 
-/* Append an owned context `block` to the delegate system prompt, taking ownership
- * (frees `block` and, on a successful concat, the previous template buffer).
- * No-op when block is NULL. Shared by the code-context / graph-context / tier
- * injectors so the ownership dance lives in one place. */
-static void delegate_append_owned_block(const char **system_prompt, char **template_sys_prompt,
-                                        char *block)
+/* Context providers produce domain evidence; admit it as its own IR block. */
+static int delegate_append_owned_context(aimee_request_t *request, char *block,
+                                         aimee_context_origin_t origin,
+                                         aimee_context_authority_t authority)
 {
-   if (!block)
-      return;
-   char *combined = delegate_prompt_append_block(*system_prompt, block);
-   if (combined)
-   {
-      free(*template_sys_prompt);
-      *template_sys_prompt = combined;
-      *system_prompt = combined;
-   }
+   int rc = delegate_request_add_context(request, block, origin, authority);
    free(block);
+   return rc;
 }
 
 /* Convert a USD ceiling into a conservative total-token ceiling after routing,
@@ -784,6 +775,7 @@ static void delegate_worker_run(void *arg)
     * principal for a vaulted credential, so its 429-cooldown is per-principal. */
    char leased_principal[VAULT_PRINCIPAL_MAX] = "";
    char credential_state_path[MAX_PATH_LEN] = "";
+   aimee_request_t request = {0};
    char *resolved_prompt = NULL;
    char *template_sys_prompt = NULL;
    char delegate_worktree_path[MAX_PATH_LEN] = "";
@@ -1289,9 +1281,7 @@ static void delegate_worker_run(void *arg)
    /* Resolve @path/to/file references in the delegate prompt */
    if (strchr(prompt, '@'))
    {
-      resolved_prompt = resolve_file_references(prompt, cwd[0] ? cwd : ".");
-      if (resolved_prompt)
-         prompt = resolved_prompt;
+      resolved_prompt = resolve_file_reference_context(prompt, cwd[0] ? cwd : ".");
    }
    /* Read, not resolved: delegate_perms was established when the role was
     * validated, above. The worktree plan and the container spec both consume
@@ -1369,24 +1359,6 @@ static void delegate_worker_run(void *arg)
       goto delegate_fail;
    }
 
-   /* Rewrite operator-cwd absolute paths so provider/tool writes stay isolated. */
-   if (!delegate_shared_worktree && delegate_worktree_path[0] && cwd[0] == '/' &&
-       strcmp(cwd, delegate_worktree_path) != 0)
-   {
-      int occurrences = 0;
-      char *rewritten =
-          delegate_rewrite_prompt_cwd(prompt, cwd, delegate_worktree_path, &occurrences);
-      if (rewritten)
-      {
-         free(resolved_prompt);
-         resolved_prompt = rewritten;
-         prompt = resolved_prompt;
-         aimee_log(LOG_INFO, "delegate",
-                   "rewrote %d operator-cwd path(s) in prompt to delegate worktree (id=%s)",
-                   occurrences, deleg_id);
-      }
-   }
-
    char launch_worktree_path[MAX_PATH_LEN] = "", parent_worktree_path[MAX_PATH_LEN] = "";
    snprintf(launch_worktree_path, sizeof(launch_worktree_path), "%s",
             delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : "."));
@@ -1406,34 +1378,24 @@ static void delegate_worker_run(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   /* This is delegate_worker's sole parent-diff evidence injection point.
-    * Ground read-only inspection roles in parent diff evidence unless the
-    * caller supplied the complete review target inline. In that case an
-    * unrelated current-worktree diff is competing evidence and can make a
-    * plan reviewer incorrectly demand implementation. */
-   if (!caller_provided_target)
+   if (aimee_ir_request_from_message(&request, system_prompt, &cctx->ir_input, max_tokens, 0.3) ||
+       (!delegate_shared_worktree &&
+        delegate_request_map_root(&request, cwd, delegate_worktree_path)) ||
+       delegate_request_add_context(&request, resolved_prompt, AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                    AIMEE_CTX_AUTH_EVIDENCE) ||
+       (!caller_provided_target &&
+        delegate_append_owned_context(
+            &request,
+            delegate_prepend_parent_diff_evidence("", role, delegate_allows_writes, cwd, deleg_id),
+            AIMEE_CTX_ORIGIN_TOOL, AIMEE_CTX_AUTH_EVIDENCE)) ||
+       delegate_append_owned_context(&request, delegate_inject_code_context(prompt),
+                                     AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE) ||
+       delegate_append_owned_context(&request, delegate_inject_graph_context(prompt, cwd),
+                                     AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE))
    {
-      char *evidence = delegate_prepend_parent_diff_evidence(prompt, role, delegate_allows_writes,
-                                                             cwd, deleg_id);
-      if (evidence)
-      {
-         free(resolved_prompt);
-         resolved_prompt = evidence;
-         prompt = resolved_prompt;
-      }
+      delegation_compute_error(cctx, "cannot admit canonical delegate context");
+      goto delegate_fail;
    }
-
-   /* Automatic context injection: query the code index for terms in the prompt
-    * and append a ## Context block so the delegate starts with relevant snippets
-    * already loaded. Silently skips if kb is unreachable. */
-   delegate_append_owned_block(&system_prompt, &template_sys_prompt,
-                               delegate_inject_code_context(prompt));
-
-   /* §7 graph-informed delegation (opt-in, fail-open): prepend the structural
-    * neighborhood (callers/dependencies) of the files the task references so the
-    * delegate sees the blast radius of a shared interface up front. */
-   delegate_append_owned_block(&system_prompt, &template_sys_prompt,
-                               delegate_inject_graph_context(prompt, cwd));
 
    /* Legacy goal-only approach rows have no authenticated principal/project or
     * live canonical source binding. They cannot become delegate prompt context.
@@ -1525,13 +1487,15 @@ static void delegate_worker_run(void *arg)
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    char *handoff_prompt = NULL;
-   const char *run_prompt = prompt;
    int parent_write_guard_active = 0;
    if (handoff_json)
    {
-      handoff_prompt = delegate_handoff_append_contract(prompt, NULL);
-      if (handoff_prompt)
-         run_prompt = handoff_prompt;
+      handoff_prompt = delegate_handoff_append_contract("", NULL);
+      if (!handoff_prompt)
+      {
+         delegation_compute_error(cctx, "cannot allocate delegate handoff policy");
+         goto delegate_fail;
+      }
    }
    /* Reuse independently admitted configured-test receipts for this host actor
     * and registered project. Historical tests never imply semantic task success. */
@@ -1574,7 +1538,15 @@ static void delegate_worker_run(void *arg)
             if (block && block[0] && ticket && request_context_set_source_release(ticket) == 0)
             {
                (void)request_context_require_memory_receipt();
-               delegate_append_owned_block(&system_prompt, &template_sys_prompt, strdup(block));
+               if (delegate_request_add_context(&request, block, AIMEE_CTX_ORIGIN_MEMORY,
+                                                AIMEE_CTX_AUTH_EVIDENCE))
+               {
+                  cJSON_Delete(rendered);
+                  cJSON_Delete(assembly);
+                  free(handoff_prompt);
+                  delegation_compute_error(cctx, "cannot admit canonical memory context");
+                  goto delegate_fail;
+               }
             }
          }
          cJSON_Delete(rendered);
@@ -1587,10 +1559,10 @@ static void delegate_worker_run(void *arg)
    if (max_cost_usd != 0.0)
    {
       size_t input_bytes =
-          strlen(run_prompt ? run_prompt : "") + strlen(system_prompt ? system_prompt : "");
+          delegate_request_text_bytes(&request) + strlen(handoff_prompt ? handoff_prompt : "");
       /* One byte per token is a conservative tokenizer-independent ceiling.
        * Reserve additional input for tool schemas/provider framing that is not
-       * present in the two prompt strings. */
+       * present in the canonical text blocks. */
       const size_t framing_tokens = 32768;
       int input_tokens = input_bytes > (size_t)(INT_MAX - (int)framing_tokens)
                              ? INT_MAX
@@ -1664,8 +1636,14 @@ static void delegate_worker_run(void *arg)
                     ? "; DIVERGED from file-tool root "
                     : "",
                 (shell_root && file_root && strcmp(shell_root, file_root) != 0) ? file_root : "");
-      delegate_append_owned_block(&system_prompt, &template_sys_prompt,
-                                  delegate_bound_root_notice(shell_root, file_root, root_kind));
+      if (delegate_append_owned_context(
+              &request, delegate_bound_root_notice(shell_root, file_root, root_kind),
+              AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY))
+      {
+         delegation_compute_error(cctx, "cannot admit delegate root policy");
+         free(handoff_prompt);
+         goto delegate_fail;
+      }
    }
 
    /* Every delegate runs its shell and file ops inside its own verified container.
@@ -1758,17 +1736,14 @@ static void delegate_worker_run(void *arg)
        * scopes. Container mounts complement these checks; clearing this guard
        * also resets write capability and loses the managed revision root. */
       server_delegate_heartbeat_begin(cctx->background_job_id);
-      aimee_request_t request = {0};
-      aimee_block_t content = cctx->ir_input.blocks[0];
-      content.text = (char *)run_prompt;
-      aimee_message_t message = cctx->ir_input;
-      message.blocks = &content;
-      rc = aimee_ir_request_from_message(&request, system_prompt, &message, max_tokens, 0.3)
+      request.max_tokens = max_tokens;
+      request.has_max_tokens = max_tokens > 0;
+      rc = delegate_request_add_context(&request, handoff_prompt, AIMEE_CTX_ORIGIN_PLATFORM,
+                                        AIMEE_CTX_AUTH_POLICY)
                ? AGENT_RC_CONTEXT_REFUSED
                : delegate_run_with_credential_retry(
                      &acfg, target_agent, role, &request, force_tools, delegate_allows_writes,
                      leased_cred_name, sizeof leased_cred_name, credential_state_path, &result);
-      aimee_request_free(&request);
       server_delegate_heartbeat_end();
    }
 
@@ -1824,15 +1799,18 @@ static void delegate_worker_run(void *arg)
       (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
       if (!handoff_validation.valid)
       {
-         char *repair_prompt =
-             delegate_handoff_repair_prompt(result.response, handoff_validation.error);
+         char *repair_prompt = delegate_handoff_repair_prompt("", handoff_validation.error);
          if (repair_prompt)
          {
             agent_result_t repaired = {0};
             memset(&repaired, 0, sizeof(repaired));
             aimee_request_t repair_request = {0};
-            int repair_rc = aimee_ir_request_from_text(&repair_request, system_prompt,
-                                                       repair_prompt, max_tokens, 0.3)
+            int repair_rc = aimee_ir_request_clone(&request, &repair_request) ||
+                                    delegate_request_add_response(&repair_request,
+                                                                  &result.canonical_response) ||
+                                    delegate_request_add_context(&repair_request, repair_prompt,
+                                                                 AIMEE_CTX_ORIGIN_PLATFORM,
+                                                                 AIMEE_CTX_AUTH_POLICY)
                                 ? AGENT_RC_CONTEXT_REFUSED
                                 : delegate_run_attempt(&acfg, role, &repair_request, force_tools,
                                                        delegate_allows_writes, &repaired);
@@ -1969,6 +1947,7 @@ static void delegate_worker_run(void *arg)
 
    agent_result_clear_response(&result);
    free(handoff_prompt);
+   aimee_request_free(&request);
    free(resolved_prompt);
    free(template_sys_prompt);
    compute_respond(cctx, resp);
@@ -2065,6 +2044,7 @@ delegate_fail:
    if (server_delegate_container_plan_close(execution_plan))
       container_quiescent = 0;
    run_cmd_set_cwd(NULL);
+   aimee_request_free(&request);
    free(resolved_prompt);
    free(template_sys_prompt);
    if (target_agent && leased_cred_name[0])

@@ -786,6 +786,7 @@ int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out)
       const aimee_message_t *original = &source->messages[i];
       copy.n_messages = i + 1;
       message->content_scalar = original->content_scalar;
+      message->compaction_boundary = original->compaction_boundary;
       if (clone_string(&message->role, original->role) ||
           clone_json(&message->raw, original->raw) ||
           clone_blocks(&message->blocks, &message->n_blocks, original->blocks, original->n_blocks))
@@ -1118,7 +1119,8 @@ static int request_equal(const aimee_request_t *a, const aimee_request_t *b, int
       return 0;
    for (int i = 0; i < a->n_messages; i++)
    {
-      if ((wire && a->messages[i].content_scalar != b->messages[i].content_scalar) ||
+      if (a->messages[i].compaction_boundary != b->messages[i].compaction_boundary ||
+          (wire && a->messages[i].content_scalar != b->messages[i].content_scalar) ||
           !str_eq(a->messages[i].role, b->messages[i].role))
          return 0;
       if (!blocks_eq(a->messages[i].blocks, a->messages[i].n_blocks, b->messages[i].blocks,
@@ -1601,7 +1603,8 @@ int aimee_ir_request_admit(const aimee_request_t *request)
           message->n_blocks < 0 || message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
           (message->n_blocks && !message->blocks))
          return -1;
-      if (message->content_scalar != 0 && message->content_scalar != 1)
+      if ((message->content_scalar != 0 && message->content_scalar != 1) ||
+          (message->compaction_boundary != 0 && message->compaction_boundary != 1))
          return -1;
       for (int j = 0; j < message->n_blocks; j++)
       {

@@ -495,28 +495,36 @@ static void *refuse_json_allocation(size_t size)
 static void failed_steering_admission_is_observation_only(void)
 {
    compute_ctx_t reset = context();
+   cJSON *input = cJSON_Parse("{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"new "
+                              "action\"},{\"type\":\"image\",\"media_ref\":\"https://"
+                              "example.invalid/image.png\",\"media_type\":\"image/png\"}]}");
+   assert(input);
    cJSON *request = cJSON_Parse("{\"message\":\"old action\"}");
    assert(request);
    cJSON_Hooks hooks = {.malloc_fn = refuse_json_allocation, .free_fn = free};
    cJSON_InitHooks(&hooks);
-   assert(server_chat_ir_replace_steer(request, "new action") < 0);
+   assert(server_chat_ir_replace_steer(request, input) < 0);
    cJSON_InitHooks(NULL);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "message")), "old action"));
-   assert(server_chat_ir_replace_steer(NULL, "new action") < 0);
+   assert(server_chat_ir_replace_steer(NULL, input) < 0);
    cJSON *missing = cJSON_CreateObject();
-   assert(server_chat_ir_replace_steer(missing, "new action") < 0);
+   assert(server_chat_ir_replace_steer(missing, input) < 0);
    cJSON_Delete(missing);
-   assert(!server_chat_ir_replace_steer(request, "new action"));
+   assert(!server_chat_ir_replace_steer(request, input));
    aimee_message_t steered = {0};
    assert(!aimee_ir_message_parse(cJSON_GetObjectItem(request, "message"), &steered));
-   assert(steered.n_blocks == 1 && !strcmp(steered.blocks[0].text, "new action"));
+   assert(steered.n_blocks == 2 && !strcmp(steered.blocks[0].text, "new action"));
    aimee_message_free(&steered);
    cJSON_Delete(request);
 
-   assert(server_chat_ir_reject_steer("session-one", "mallory", "old action") < 0);
+   assert(server_chat_ir_reject_steer("session-one", "mallory", input) < 0);
    assert(!cJSON_GetArraySize(log_entries));
    const char *message = "new action \"quoted\"\nnot executed";
-   assert(!server_chat_ir_reject_steer("session-one", "alice", message));
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(input, "blocks"), 0), "text",
+       cJSON_CreateString(message));
+   char *serialized = cJSON_PrintUnformatted(input);
+   assert(!server_chat_ir_reject_steer("session-one", "alice", input));
    assert(cJSON_GetArraySize(log_entries) == 2);
    for (int i = 0; i < 2; i++)
       assert(!strcmp(
@@ -528,7 +536,8 @@ static void failed_steering_admission_is_observation_only(void)
    cJSON *diagnostic = cJSON_Parse(error);
    assert(diagnostic && cJSON_IsFalse(cJSON_GetObjectItem(diagnostic, "dispatched")));
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic, "submitted_input_preview")),
-                  message));
+                  serialized));
+   free(serialized);
    assert(strlen(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic, "submitted_input_sha256"))) ==
           64);
    assert(cJSON_IsFalse(cJSON_GetObjectItem(diagnostic, "submitted_input_truncated")));
@@ -538,19 +547,26 @@ static void failed_steering_admission_is_observation_only(void)
    memset(long_input, 'x', sizeof long_input - 1);
    memcpy(long_input + 1535, "雪", 3);
    long_input[sizeof long_input - 1] = 0;
-   assert(!server_chat_ir_reject_steer("session-one", "alice", long_input));
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(input, "blocks"), 0), "text",
+       cJSON_CreateString(long_input));
+   serialized = cJSON_PrintUnformatted(input);
+   assert(!server_chat_ir_reject_steer("session-one", "alice", input));
    terminal = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 1), "payload");
    diagnostic = cJSON_Parse(cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "error")));
    assert(diagnostic && cJSON_IsTrue(cJSON_GetObjectItem(diagnostic, "submitted_input_truncated")));
    assert(strlen(cJSON_GetStringValue(
-              cJSON_GetObjectItem(diagnostic, "submitted_input_preview"))) == 1535);
-   assert(cJSON_GetObjectItem(diagnostic, "submitted_input_bytes")->valuedouble == 4095);
+              cJSON_GetObjectItem(diagnostic, "submitted_input_preview"))) <= 1536);
+   assert(cJSON_GetObjectItem(diagnostic, "submitted_input_bytes")->valuedouble ==
+          strlen(serialized));
+   free(serialized);
    cJSON_Delete(diagnostic);
    cleanup(&reset);
    fail_store = 1;
-   assert(server_chat_ir_reject_steer("session-one", "alice", message) < 0);
+   assert(server_chat_ir_reject_steer("session-one", "alice", input) < 0);
    assert(!cJSON_GetArraySize(log_entries));
    cleanup(&reset);
+   cJSON_Delete(input);
 }
 
 static int externally_cancel(const char *actor, const char *session, const char *turn,

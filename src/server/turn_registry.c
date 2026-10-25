@@ -222,7 +222,7 @@ int turn_registry_is_shutting_down(void)
 typedef struct
 {
    char session_id[PRESENCE_SESSION_ID_MAX];
-   char *message;
+   cJSON *message;
    int in_use;
 } steer_slot_t;
 
@@ -238,11 +238,11 @@ static steer_slot_t *steer_find_locked(const char *session_id)
    return NULL;
 }
 
-int chat_steer_set(const char *session_id, const char *message)
+int chat_steer_set(const char *session_id, const cJSON *message)
 {
    if (!session_id || !session_id[0] || !message)
       return -1;
-   char *copy = strdup(message);
+   cJSON *copy = cJSON_Duplicate(message, 1);
    if (!copy)
       return -1;
    pthread_mutex_lock(&g_lock);
@@ -259,16 +259,16 @@ int chat_steer_set(const char *session_id, const char *message)
          }
    if (slot)
    {
-      free(slot->message); /* a newer steer supersedes an untaken one */
+      cJSON_Delete(slot->message); /* a newer steer supersedes an untaken one */
       slot->message = copy;
       copy = NULL;
    }
    pthread_mutex_unlock(&g_lock);
-   free(copy);           /* non-NULL only when the table was full */
+   cJSON_Delete(copy);   /* non-NULL only when the table was full */
    return slot ? 0 : -1; /* -1 => caller must report interrupted=false */
 }
 
-int chat_steer_take(const char *session_id, char **out_message)
+int chat_steer_take(const char *session_id, cJSON **out_message)
 {
    if (out_message)
       *out_message = NULL;
@@ -289,7 +289,7 @@ int chat_steer_take(const char *session_id, char **out_message)
 
 void chat_steer_clear(const char *session_id)
 {
-   char *msg = NULL;
+   cJSON *msg = NULL;
    (void)chat_steer_take(session_id, &msg);
-   free(msg);
+   cJSON_Delete(msg);
 }

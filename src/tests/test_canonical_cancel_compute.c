@@ -6,7 +6,7 @@
 #include "turn_registry.h"
 #include "presence.h"
 #include "modules/workspace/workspace_turn.h"
-static inline int no_steering(const char *sid, char **out)
+static inline int no_steering(const char *sid, cJSON **out)
 {
    (void)sid;
    *out = NULL;

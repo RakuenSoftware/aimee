@@ -164,7 +164,7 @@ func TestHandlerAskAnswered(t *testing.T) {
 		deadline := time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) {
 			if got := r.Take("B", 1); len(got) == 1 {
-				r.Reply("B", got[0], "yes")
+				r.Reply("B", got[0], ImportExternalText("yes"))
 				return
 			}
 			time.Sleep(2 * time.Millisecond)
@@ -217,7 +217,7 @@ func TestHandlerErrorStatuses(t *testing.T) {
 	}
 	// Inbox full → 429, a budget signal rather than a client error.
 	for i := 0; i < InboxMax; i++ {
-		if _, err := r.Send("A", "B", "fill", SendOptions{}); err != nil {
+		if _, err := r.Send("A", "B", ImportExternalText("fill"), SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}

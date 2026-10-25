@@ -49,6 +49,10 @@ static void roundtrip(void)
    aimee_request_t first = {0}, second = {0};
    assert(!aimee_ir_request_parse(input, &first));
    assert(first.n_messages == 3 && first.n_tools == 3 && first.n_system == 1);
+   first.messages[0].compaction_boundary = 1;
+   aimee_request_t clone = {0};
+   assert(!aimee_ir_request_clone(&first, &clone) && clone.messages[0].compaction_boundary);
+   aimee_request_free(&clone);
    assert(first.messages[0].content_scalar && first.has_parallel_tool_calls &&
           !first.parallel_tool_calls);
    assert(first.tools[1].n_children == 1 && first.tools[2].provider_wire == AIMEE_WIRE_ANTHROPIC);
@@ -57,6 +61,7 @@ static void roundtrip(void)
    cJSON_Delete(input); /* Every decoded allocation is owned independently. */
    cJSON *encoded = aimee_ir_request_json(&first);
    assert(encoded && !aimee_ir_request_parse(encoded, &second));
+   assert(second.messages[0].compaction_boundary);
    cJSON *again = aimee_ir_request_json(&second);
    char *a = cJSON_PrintUnformatted(encoded), *b = cJSON_PrintUnformatted(again);
    assert(a && b && !strcmp(a, b) && strstr(a, "9007199254740993"));

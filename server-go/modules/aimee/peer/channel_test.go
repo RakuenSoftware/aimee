@@ -61,7 +61,7 @@ func TestChannelSendFansOut(t *testing.T) {
 		}
 	}
 
-	out, err := r.ChannelSend("A", "review", "look at this", SendOptions{})
+	out, err := r.ChannelSend("A", "review", ImportExternalText("look at this"), SendOptions{})
 	if err != nil {
 		t.Fatalf("ChannelSend: %v", err)
 	}
@@ -111,16 +111,16 @@ func TestChannelSendRequiresMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := r.ChannelSend("A", "review", "hi", SendOptions{}); !errors.Is(err, ErrNotMember) {
+	if _, err := r.ChannelSend("A", "review", ImportExternalText("hi"), SendOptions{}); !errors.Is(err, ErrNotMember) {
 		t.Fatalf("non-member send: %v; want ErrNotMember", err)
 	}
 	if r.Len("B") != 0 {
 		t.Error("a non-member's message was delivered anyway")
 	}
-	if _, err := r.ChannelSend("A", "nosuch", "hi", SendOptions{}); !errors.Is(err, ErrNoChannel) {
+	if _, err := r.ChannelSend("A", "nosuch", ImportExternalText("hi"), SendOptions{}); !errors.Is(err, ErrNoChannel) {
 		t.Errorf("missing channel: %v; want ErrNoChannel", err)
 	}
-	if _, err := r.ChannelSend("ghost", "review", "hi", SendOptions{}); !errors.Is(err, ErrUnknownSender) {
+	if _, err := r.ChannelSend("ghost", "review", ImportExternalText("hi"), SendOptions{}); !errors.Is(err, ErrUnknownSender) {
 		t.Errorf("unknown sender: %v; want ErrUnknownSender", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestChannelSendReportsPartialDelivery(t *testing.T) {
 		}
 	}
 
-	out, err := r.ChannelSend("A", "mixed", "hello all", SendOptions{})
+	out, err := r.ChannelSend("A", "mixed", ImportExternalText("hello all"), SendOptions{})
 	if err != nil {
 		t.Fatalf("ChannelSend: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestChannelSendReportsPartialDelivery(t *testing.T) {
 	if err := r.Grant("uid:1000", "uid:2000"); err != nil {
 		t.Fatal(err)
 	}
-	out, _ = r.ChannelSend("A", "mixed", "second try", SendOptions{})
+	out, _ = r.ChannelSend("A", "mixed", ImportExternalText("second try"), SendOptions{})
 	for _, d := range out {
 		if !d.Delivered() {
 			t.Errorf("after grant %s: %v", d.Session, d.Err)
@@ -191,7 +191,7 @@ func TestChannelObeysTheSameBounds(t *testing.T) {
 
 	r.SetMaxHops(2)
 	// hop 0 -> delivered at 1; hop 1 -> delivered at 2 == ceiling, refused.
-	out, err := r.ChannelSend("A", "c", "at the edge", SendOptions{Hop: 1})
+	out, err := r.ChannelSend("A", "c", ImportExternalText("at the edge"), SendOptions{Hop: 1})
 	if err != nil {
 		t.Fatalf("ChannelSend: %v", err)
 	}
@@ -202,11 +202,11 @@ func TestChannelObeysTheSameBounds(t *testing.T) {
 
 	// Inbox bound applies per recipient.
 	for i := 0; i < InboxMax; i++ {
-		if _, err := r.Send("A", "B", "fill", SendOptions{}); err != nil {
+		if _, err := r.Send("A", "B", ImportExternalText("fill"), SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	out, _ = r.ChannelSend("A", "c", "overflow", SendOptions{})
+	out, _ = r.ChannelSend("A", "c", ImportExternalText("overflow"), SendOptions{})
 	if len(out) != 1 || !errors.Is(out[0].Err, ErrInboxFull) {
 		t.Fatalf("full inbox: %+v; want ErrInboxFull", out)
 	}
@@ -231,7 +231,7 @@ func TestChannelDropsDepartedSessions(t *testing.T) {
 		t.Fatalf("members after departure = %v; want [A B]", got)
 	}
 
-	out, err := r.ChannelSend("A", "c", "still here?", SendOptions{})
+	out, err := r.ChannelSend("A", "c", ImportExternalText("still here?"), SendOptions{})
 	if err != nil {
 		t.Fatalf("ChannelSend: %v", err)
 	}

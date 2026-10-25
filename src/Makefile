@@ -282,7 +282,7 @@ ifeq ($(OS),Windows_NT)
         windows/history.c windows/server_main.c \
         windows/cli_client.c windows/cli_main.c \
         windows/events.c windows/cmd_infra.c \
-        windows/cmd_agent_delegate.c windows/cmd_describe.c \
+        windows/cmd_describe.c \
         windows/cmd_hooks.c windows/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
@@ -297,7 +297,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
-        posix/cmd_agent_delegate.c posix/cmd_describe.c \
+        posix/cmd_describe.c \
         posix/cmd_hooks.c posix/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
@@ -312,7 +312,7 @@ else
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
-        posix/cmd_agent_delegate.c posix/cmd_describe.c \
+        posix/cmd_describe.c \
         posix/cmd_hooks.c posix/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \

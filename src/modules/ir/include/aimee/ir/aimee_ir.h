@@ -159,6 +159,7 @@ typedef struct
    int n_blocks;
    int content_scalar; /* observed scalar-text form; retained as transport provenance */
    struct cJSON *raw;  /* sidecar */
+   int compaction_boundary; /* canonical history marker; never provider content */
 } aimee_message_t;
 
 typedef enum

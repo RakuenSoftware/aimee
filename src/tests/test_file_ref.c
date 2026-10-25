@@ -176,6 +176,20 @@ static void test_at_without_path_literal(void)
    printf("  at_without_path_literal: ok\n");
 }
 
+static void test_reference_evidence_excludes_original_task(void)
+{
+   write_file("evidence.txt", "untrusted file content");
+   char *evidence = resolve_file_reference_context("TASK_AUTHORITY @evidence.txt suffix", g_tmpdir);
+   assert(evidence && strstr(evidence, "--- @evidence.txt ---"));
+   assert(strstr(evidence, "untrusted file content"));
+   assert(!strstr(evidence, "TASK_AUTHORITY") && !strstr(evidence, "suffix"));
+   free(evidence);
+   evidence = resolve_file_reference_context("TASK_AUTHORITY @missing.txt @ @@", g_tmpdir);
+   assert(evidence && !evidence[0]);
+   free(evidence);
+   printf("  reference_evidence_excludes_original_task: ok\n");
+}
+
 int main(void)
 {
    printf("test_file_ref:\n");
@@ -183,6 +197,7 @@ int main(void)
    setup_tmpdir();
 
    test_valid_reference_inlined();
+   test_reference_evidence_excludes_original_task();
    test_no_references_passthrough();
    test_nonexistent_file_literal();
    test_path_outside_project_literal();

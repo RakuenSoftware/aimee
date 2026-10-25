@@ -811,7 +811,9 @@ func TestStructuredCorrectiveSynthesisIncludesCompleteInvalidResponse(t *testing
 		t.Fatalf("requests=%d", len(agents.requests))
 	}
 	repairPrompt := fixtureInputText(agents.requests[1].Input)
-	if !strings.Contains(repairPrompt, invalid) || !strings.Contains(repairPrompt, "PREVIOUS RESPONSE WAS INVALID") {
+	if !strings.Contains(repairPrompt, "PREVIOUS RESPONSE WAS INVALID") || len(agents.requests[1].Input.Messages) != 3 ||
+		agents.requests[1].Input.Messages[1].Role != "assistant" || agents.requests[1].Input.Messages[1].Blocks[0].Text == nil ||
+		*agents.requests[1].Input.Messages[1].Blocks[0].Text != invalid {
 		t.Fatalf("repair prompt omitted complete invalid artifact or validation feedback: %q", repairPrompt)
 	}
 }

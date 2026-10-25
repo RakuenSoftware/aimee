@@ -9,11 +9,5 @@ int cron_when_context_contains_allows(const char *prior_output, const char *need
 /* Returns bytes that would be written, snprintf-style; n >= bufsz means truncated. */
 int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
                                 const char *skills_csv, const char *deliver_target);
-/* Build the full LLM prompt for an llm/hybrid cron job. Prior job output is
- * capped to the proposal's 8 KiB context_from budget. */
-int cron_build_job_prompt(char *buf, size_t bufsz, const char *prompt, const char *workdir,
-                          const char *skills_csv, const char *prior_output,
-                          const char *script_output, const char *deliver_target);
-
 void trigger_scheduler_init(void);
 void trigger_scheduler_shutdown(void);

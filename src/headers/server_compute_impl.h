@@ -117,8 +117,8 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 /* Failed continuation admission is an execution diagnostic, never model history. */
-int server_chat_ir_replace_steer(cJSON *request, const char *message);
-int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
+int server_chat_ir_replace_steer(cJSON *request, const cJSON *message);
+int server_chat_ir_reject_steer(const char *session, const char *actor, const cJSON *message);
 int server_chat_ir_prepare_turn(compute_ctx_t *cctx);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const aimee_message_t *message);
 int server_chat_ir_progress(compute_ctx_t *cctx);

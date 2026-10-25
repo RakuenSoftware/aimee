@@ -686,70 +686,6 @@ static void test_cron_context_preamble_sanitizes_fields(void)
    printf("  PASS: test_cron_context_preamble_sanitizes_fields\n");
 }
 
-static void test_cron_job_prompt_assembles_context_blocks(void)
-{
-   char buf[4096];
-   int n = cron_build_job_prompt(buf, sizeof(buf), "Summarize issues.", "/repo", "kb-health",
-                                 "previous alert", "script says OK", "telegram:home");
-   assert(n > 0);
-   assert(strstr(buf, "=== Cron context ===") != NULL);
-   assert(strstr(buf, "WORKDIR: /repo") != NULL);
-   assert(strstr(buf, "SKILLS: kb-health") != NULL);
-   assert(strstr(buf, "DELIVERY_TARGET: telegram:home") != NULL);
-   char *script = strstr(buf, "SCRIPT_OUTPUT:\nscript says OK\n");
-   char *prior = strstr(buf, "PRIOR JOB OUTPUT:\nprevious alert\n");
-   char *prompt = strstr(buf, "JOB PROMPT:\nSummarize issues.\n");
-   assert(script != NULL);
-   assert(prior != NULL);
-   assert(prompt != NULL);
-   assert(script < prior);
-   assert(prior < prompt);
-   printf("  PASS: test_cron_job_prompt_assembles_context_blocks\n");
-}
-
-static void test_cron_job_prompt_omits_empty_optional_blocks(void)
-{
-   char buf[2048];
-   assert(cron_build_job_prompt(buf, sizeof(buf), "Check status.", NULL, NULL, "", NULL, NULL) > 0);
-   assert(strstr(buf, "SCRIPT_OUTPUT:") == NULL);
-   assert(strstr(buf, "PRIOR JOB OUTPUT:") == NULL);
-   assert(strstr(buf, "JOB PROMPT:\nCheck status.\n") != NULL);
-   printf("  PASS: test_cron_job_prompt_omits_empty_optional_blocks\n");
-}
-
-static void test_cron_job_prompt_caps_prior_output_to_8k_tail(void)
-{
-   size_t total = 9000;
-   char *prior = malloc(total + 1);
-   assert(prior != NULL);
-   memset(prior, 'a', total);
-   prior[100] = 'H';
-   prior[total - 1] = 'Z';
-   prior[total] = '\0';
-
-   char *buf = malloc(12000);
-   assert(buf != NULL);
-   int n = cron_build_job_prompt(buf, 12000, "Act.", "/repo", "ops", prior, NULL, "local");
-   assert(n > 0);
-   assert(strstr(buf, "[truncated to last 8192 bytes]") != NULL);
-   assert(strstr(buf, "H") == NULL);
-   assert(strstr(buf, "Z\n\nJOB PROMPT:\nAct.") != NULL);
-   free(buf);
-   free(prior);
-   printf("  PASS: test_cron_job_prompt_caps_prior_output_to_8k_tail\n");
-}
-
-static void test_cron_job_prompt_reports_truncation_like_snprintf(void)
-{
-   char tiny[32];
-   int n =
-       cron_build_job_prompt(tiny, sizeof(tiny), "Act.", "/repo", "ops", "prior", NULL, "local");
-   assert(n >= (int)sizeof(tiny));
-   assert(tiny[sizeof(tiny) - 1] == '\0');
-   assert(cron_build_job_prompt(NULL, 0, "Act.", NULL, NULL, NULL, NULL, NULL) == -1);
-   printf("  PASS: test_cron_job_prompt_reports_truncation_like_snprintf\n");
-}
-
 static void test_parse_ls_tree_valid_multiline(void)
 {
    const char *out =
@@ -1332,10 +1268,6 @@ int main(void)
    test_cron_context_preamble_includes_operational_guidance();
    test_cron_context_preamble_defaults_and_truncation();
    test_cron_context_preamble_sanitizes_fields();
-   test_cron_job_prompt_assembles_context_blocks();
-   test_cron_job_prompt_omits_empty_optional_blocks();
-   test_cron_job_prompt_caps_prior_output_to_8k_tail();
-   test_cron_job_prompt_reports_truncation_like_snprintf();
    test_parse_ls_tree_valid_multiline();
    test_parse_ls_tree_filters_non_md_and_non_blob();
    test_parse_ls_tree_empty_and_garbage();

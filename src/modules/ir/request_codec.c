@@ -276,8 +276,8 @@ int aimee_ir_request_parse(const cJSON *json, aimee_request_t *out)
    for (int i = 0; i < result.n_messages; i++)
    {
       const cJSON *m = cJSON_GetArrayItem(messages, i);
-      if (FIELDS(m, "role", "blocks", "content_scalar") || blocks_shape(get(m, "blocks")) ||
-          aimee_ir_message_parse(m, &result.messages[i]))
+      if (FIELDS(m, "role", "blocks", "content_scalar", "_compaction_boundary") ||
+          blocks_shape(get(m, "blocks")) || aimee_ir_message_parse(m, &result.messages[i]))
          goto fail;
    }
    for (int i = 0; i < result.n_tools; i++)

@@ -434,21 +434,22 @@ func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		AimeeSessionID string `json:"aimee_session_id"`
-		Message        string `json:"message"`
+		AimeeSessionID string          `json:"aimee_session_id"`
+		Message        json.RawMessage `json:"message"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	var message canonical.Message
+	if err != nil || !canonical.Decode(raw, &req) || req.AimeeSessionID == "" || !canonical.ValidMessage(req.Message) || !canonical.Decode(req.Message, &message) || message.Role != "user" || len(message.Blocks) == 0 {
+		http.Error(w, "canonical user message and aimee_session_id required", http.StatusBadRequest)
 		return
 	}
-	if req.AimeeSessionID == "" || req.Message == "" {
-		http.Error(w, `{"error":"aimee_session_id and message required"}`, http.StatusBadRequest)
-		return
+	for _, block := range message.Blocks {
+		if block.Type != "text" && block.Type != "image" && block.Type != "document" {
+			http.Error(w, "unsupported user content", http.StatusBadRequest)
+			return
+		}
 	}
-	body, _ := json.Marshal(map[string]string{
-		"aimee_session_id": req.AimeeSessionID,
-		"message":          req.Message,
-	})
+	body, _ := json.Marshal(req)
 	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost,
 		"/v1/chat/interrupt", body)
 	if err != nil {

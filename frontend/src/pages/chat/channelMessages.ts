@@ -1,7 +1,8 @@
+import { validateHistoryMessage, type Message } from '../../ir/session';
 export interface ChannelMessage {
   id?: string;
   sender: string;
-  text: string;
+  message: Message;
   created_at?: string;
 }
 
@@ -9,6 +10,7 @@ export interface ChannelMessage {
 export function mergeChannelMessages(existing: ChannelMessage[], incoming: ChannelMessage[]): ChannelMessage[] {
   const ids = new Set<string>();
   const messages = [...existing, ...incoming].filter(message => {
+    try { validateHistoryMessage(message.message); } catch { return false; }
     if (!message.id || !/^[1-9]\d*$/.test(message.id)) return true;
     if (ids.has(message.id)) return false;
     ids.add(message.id);

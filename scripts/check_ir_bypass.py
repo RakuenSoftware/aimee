@@ -19,6 +19,8 @@ RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/c
 RETIRED = (
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
     "agent_build_request", "plugin_chook_apply_pre_llm",
+    "platform_delegate_run_background", "platform_trace_run_task",
+    "cron_build_job_prompt", "cron_run_llm_prompt",
     "agent_tools_dispatch_owned",
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
@@ -176,8 +178,12 @@ RULES = {
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "raw-model-contract": re.compile(
         r"\(\s*\*\s*skill_trial_runner_fn\s*\)\s*\(\s*void\s*\*\s*\w+\s*,\s*const\s+char\s*\*|"
+        r"\baux_call\s*\([^)]*const\s+char\s*\*\s*(?:prompt|input)\b|"
         r"\(\s*\*\s*roadmap_model_fn\s*\)\s*\(\s*const\s+char\s*\*|"
-        r"\b(?:delegate_ensemble_run|aimee_panel_(?:run|aggregate))\s*\([^)]*const\s+char\s*\*\s*(?:prompt|task)\b"),
+        r"\b(?:delegate_(?:ensemble|roundtable)_run|aimee_panel_(?:run|aggregate))\s*\([^)]*const\s+char\s*\*\s*(?:prompt|task)\b"),
+    "raw-steer-contract": re.compile(
+        r"\b(?:chat_steer_set|server_chat_ir_(?:replace|reject)_steer)\s*\([^)]*const\s+char\s*\*\s*message\b|"
+        r"\bchat_steer_take\s*\([^)]*char\s*\*\s*\*\s*out_message\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
     "native-tool-reparse": re.compile(r"\b(?:openai_ir_parse_tool|anthropic_ir_parse_tool)\s*\("),
@@ -197,7 +203,10 @@ CANONICAL_FILES = {
     "src/server/server_acp_execution.c", "src/server/server_acp_resources.c",
     "src/server/server_provider_cli_execute.c",
     "src/posix/agent_runtime.c", "src/posix/server_compute.c", "src/server/session_compact.c",
-    "src/server/router_advise.c",
+    "src/server/router_advise.c", "src/server/server_compute.c",
+    "src/server/aux_router.c", "src/server/server_cron.c",
+    "src/modules/roundtable/delegate_ensemble.c", "src/modules/roundtable/ensemble_request.c",
+    "src/modules/delegates/delegate_prompt.c",
     "src/server/script_tool_execution.c",
     "src/server/agent_request_build.c",
     "src/server/server_session_log.c", "src/server/server_chat_ir.c",
@@ -217,7 +226,9 @@ CANONICAL_MODEL_FILES = {
     "src/modules/kb-synthesis/kb_curator_synthesize.c",
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
-CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
+CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/",
+                   "server-go/modules/aimee/peer/", "server-go/modules/roundtable/panel/",
+                   "server-go/internal/engine/", "server-go/delegate/")
 # String-only tool entries are retired throughout production C.
 CANONICAL_PROFILE_FUNCTIONS = {
     "agent_prepare_request_ir", "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
@@ -252,13 +263,13 @@ def profile_function_spans(source: str, names=None) -> list[tuple[int, int]]:
 
 
 def sources(root: Path):
-    for tree in ("src", "server-go"):
+    for tree in ("src", "server-go", "runtime-web", "frontend/src"):
         for path in sorted((root / tree).rglob("*")):
             relative = path.relative_to(root).as_posix()
-            if path.suffix not in {".c", ".h", ".go"} or not path.is_file():
+            if path.suffix not in {".c", ".h", ".go", ".ts", ".tsx"} or not path.is_file():
                 continue
             parts = path.relative_to(root).parts
-            if any(part in {"tests", "testdata", "vendor", "build", "tmp"} for part in parts) or path.name.endswith("_test.go"):
+            if any(part in {"tests", "testdata", "vendor", "build", "tmp"} for part in parts) or path.name.endswith(("_test.go", ".test.ts", ".test.tsx")):
                 continue
             yield relative, path
 
@@ -271,6 +282,11 @@ def findings(root: Path) -> list[dict]:
         source = without_comments(original)
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
+        # Public delegate result/view metadata uses a numeric tool_calls counter,
+        # not provider-native assistant/tool history. The worker remains guarded.
+        view_spans = (profile_function_spans(source, {
+            "compute_terminal_outcome", "delegate_build_result_response"})
+            if relative == "src/server/server_compute.c" else [])
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         native_control_spans = (profile_function_spans(source, {
@@ -326,6 +342,9 @@ def findings(root: Path) -> list[dict]:
             for match in pattern.finditer(source):
                 if rule == "native-control-history" and not any(
                         start <= match.start() < end for start, end in native_control_spans):
+                    continue
+                if rule == "native-history-field" and any(
+                        start <= match.start() < end for start, end in view_spans):
                     continue
                 if rule == "native-history-field" and not canonical and not any(
                         start <= match.start() < end for start, end in history_spans):

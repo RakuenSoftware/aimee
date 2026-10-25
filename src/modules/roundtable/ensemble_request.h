@@ -4,4 +4,8 @@
 /* Generated synthesis instructions extend an owned task, preserving its blocks. */
 int ensemble_synthesis_request(const aimee_request_t *task, const char *instructions,
                                aimee_request_t *out);
+/* Preserve task custody and explicit controls; persona is platform policy. */
+int ensemble_continuation_request(const aimee_request_t *task, const char *persona,
+                                  const char *context, int max_tokens, double temperature,
+                                  aimee_request_t *out);
 #endif

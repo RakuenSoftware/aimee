@@ -40,7 +40,6 @@ type Analysis struct {
 type seatOutcome struct {
 	seat        Seat
 	result      panelResponse
-	raw         string
 	cost        float64
 	costUnknown bool
 	err         error
@@ -73,19 +72,26 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 	delegated := delegates.Group(ctx, run, requests)
 	outcomes := make([]seatOutcome, len(seats))
 	repairIndexes := make([]int, 0, len(seats))
+	repairInputs := make(map[int]*canonical.Request)
 	for i, call := range delegated {
 		text, admissionErr := call.semanticText()
 		parsed, err := parsePanelResponse(text, admissionErr)
 		seat := seats[i]
 		seat.Participant = call.Participant
-		outcomes[i] = seatOutcome{seat: seat, result: parsed, raw: text, cost: call.CostUSD,
+		outcomes[i] = seatOutcome{seat: seat, result: parsed, cost: call.CostUSD,
 			costUnknown: call.CostUnknown, err: err, category: call.FailureCategory,
 			detail: call.FailureDetail, replayLost: call.ReplayLost}
 		// A verdict that contradicts its own findings carries no more reviewable
 		// signal than unparseable text, so it earns the same one repair attempt.
 		// Without this it was charged against the artifact having never been retried.
 		if admissionErr == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
-			repairIndexes = append(repairIndexes, i)
+			input, repairErr := canonical.RepairRequest(requests[i].Input, call.Output, panelResponseRepairPrompt(run.ID, artifactHash, artifactStage))
+			if repairErr != nil {
+				outcomes[i].err = repairErr
+			} else {
+				repairInputs[i] = input
+				repairIndexes = append(repairIndexes, i)
+			}
 		}
 	}
 	if len(repairIndexes) > 0 && run.CostLimitUSD > 0 {
@@ -106,7 +112,7 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 				Role:        delegateRole,
 				Persona:     seat.Persona,
 				Participant: seat.Participant,
-				Input:       canonical.TaskRequest(seat.Persona, panelResponseRepairPrompt(run.ID, artifactHash, artifactStage, outcomes[outcomeIndex].raw)),
+				Input:       repairInputs[outcomeIndex],
 				// Preserve the review delegate's tool-capable transport: a CLI-backed
 				// agent has no HTTP request URL, and tools:false would send its
 				// continuation down the simple path instead.

@@ -638,7 +638,7 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
    return -1;
 }
 
-static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
+static char *build_round_prompt(const char *artifact, const char *peer_notes,
                                 roundtable_mode_t mode, int round, const char *brief,
                                 const char *context, int require_evidence)
 {
@@ -743,9 +743,10 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
       context_block = owned_context_block;
    }
 
-   size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
-                   strlen(brief_block) + strlen(context_block) + strlen(mode_task) +
-                   strlen(ev_verdict) + strlen(role_hint) + strlen(head_note) + 512;
+   size_t needed = strlen("The original task is supplied in the original input blocks.") +
+                   strlen(artifact) + strlen(peer_notes) + strlen(brief_block) +
+                   strlen(context_block) + strlen(mode_task) + strlen(ev_verdict) +
+                   strlen(role_hint) + strlen(head_note) + 512;
    char *prompt = malloc(needed);
    if (!prompt)
    {
@@ -758,7 +759,8 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
        "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
        "TASK:\n%s\n\n%sCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
        "ROUND %d INSTRUCTION:\n%s%s\n",
-       role_hint, head_note, task ? task : "", context_block, artifact[0] ? artifact : "(none yet)",
+       role_hint, head_note, "The original task is supplied in the original input blocks.",
+       context_block, artifact[0] ? artifact : "(none yet)",
        peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task, ev_verdict);
 
    free(owned_brief_block);
@@ -766,12 +768,12 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    return prompt;
 }
 
-static char *build_round_synthesis_prompt(const char *task, const char *prior_artifact,
-                                          const agent_result_t *results, const int *order,
-                                          const char (*names)[128], int count,
+static char *build_round_synthesis_prompt(const char *prior_artifact, const agent_result_t *results,
+                                          const int *order, const char (*names)[128], int count,
                                           roundtable_mode_t mode)
 {
-   size_t cap = 8192 + strlen(task ? task : "") + strlen(prior_artifact ? prior_artifact : "");
+   size_t cap = 8192 + strlen("The original task is supplied in the original input blocks.") +
+                strlen(prior_artifact ? prior_artifact : "");
    for (int i = 0; i < count; i++)
       if (results[i].response)
          cap += strlen(results[i].response) + 512;
@@ -782,10 +784,10 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
    const char *frame = mode == ROUNDTABLE_REVIEW
                            ? "You are consolidating peer reviews from an agent roundtable."
                            : "You are consolidating draft revisions from an agent roundtable.";
-   int n =
-       snprintf(buf + pos, cap - pos,
-                "%s\n\nTASK:\n%s\n\nPRIOR SHARED ARTIFACT:\n%s\n\nPARTICIPANT OUTPUTS:\n\n", frame,
-                task ? task : "", prior_artifact && prior_artifact[0] ? prior_artifact : "(none)");
+   int n = snprintf(buf + pos, cap - pos,
+                    "%s\n\nTASK:\n%s\n\nPRIOR SHARED ARTIFACT:\n%s\n\nPARTICIPANT OUTPUTS:\n\n",
+                    frame, "The original task is supplied in the original input blocks.",
+                    prior_artifact && prior_artifact[0] ? prior_artifact : "(none)");
    if (n < 0 || (size_t)n >= cap - pos)
    {
       free(buf);
@@ -830,13 +832,13 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
    return buf;
 }
 
-static int run_quality_scorer(agent_config_t *acfg, const char *task, const char *artifact,
-                              double *cost_usd)
+static int run_quality_scorer(agent_config_t *acfg, const aimee_request_t *task,
+                              const char *artifact, double *cost_usd)
 {
    char *prompt = xasprintf3(
        "Score this roundtable artifact from 0 to 100 for how well it satisfies the task. "
        "Reply with only the integer score.\n\nTASK:\n",
-       task ? task : "", "\n\nARTIFACT:\n");
+       "The original task is supplied in the original input blocks.", "\n\nARTIFACT:\n");
    if (!prompt)
       return artifact ? (int)strlen(artifact) : 0;
    char *full = xasprintf3(prompt, artifact ? artifact : "", "\n");
@@ -849,7 +851,7 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    int score = artifact ? (int)strlen(artifact) : 0;
    aimee_request_t request = {0};
    int run_rc =
-       aimee_ir_request_from_text(&request, NULL, full, 512, 0.3)
+       ensemble_continuation_request(task, NULL, full, 512, 0.3, &request)
            ? AGENT_RC_CONTEXT_REFUSED
            : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &score_result);
    aimee_request_free(&request);
@@ -867,13 +869,13 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    return score;
 }
 
-static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, const char *prev,
-                                    const char *next, double *cost_usd)
+static int run_convergence_tiebreak(agent_config_t *acfg, const aimee_request_t *task,
+                                    const char *prev, const char *next, double *cost_usd)
 {
    char *prompt =
        xasprintf3("Judge whether this roundtable artifact has converged. Reply only as JSON "
                   "{\"completion\":N} where N is 0-100.\n\nTASK:\n",
-                  task ? task : "", "\n\nPREVIOUS:\n");
+                  "The original task is supplied in the original input blocks.", "\n\nPREVIOUS:\n");
    char *p2 = prompt ? xasprintf3(prompt, prev ? prev : "", "\n\nCURRENT:\n") : NULL;
    free(prompt);
    char *full = p2 ? xasprintf3(p2, next ? next : "", "\n") : NULL;
@@ -884,7 +886,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    memset(&res, 0, sizeof(res));
    int completion = 0;
    aimee_request_t request = {0};
-   int run_rc = aimee_ir_request_from_text(&request, NULL, full, 512, 0.3)
+   int run_rc = ensemble_continuation_request(task, NULL, full, 512, 0.3, &request)
                     ? AGENT_RC_CONTEXT_REFUSED
                     : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &res);
    aimee_request_free(&request);
@@ -905,8 +907,9 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    return completion >= 90;
 }
 
-static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                             char **artifact, char **peer_notes, double *cost_usd)
+static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel,
+                             const aimee_request_t *task, char **artifact, char **peer_notes,
+                             double *cost_usd)
 {
    /* Nothing to compress if there is no carryover. The `!*x` checks reject a NULL
     * string pointer; the `!(*x)[0]` checks also reject an allocated-but-EMPTY
@@ -920,7 +923,7 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
        "Summarize this roundtable context forward so the next participants can continue without "
        "losing decisions, blockers, or concrete edits. Preserve the current artifact first, then "
        "compact peer notes.\n\nTASK:\n",
-       task ? task : "", "\n\nCURRENT ARTIFACT:\n");
+       "The original task is supplied in the original input blocks.", "\n\nCURRENT ARTIFACT:\n");
    char *p2 = prompt ? xasprintf3(prompt, *artifact, "\n\nPEER NOTES:\n") : NULL;
    free(prompt);
    char *full = p2 ? xasprintf3(p2, *peer_notes, "\n") : NULL;
@@ -929,7 +932,7 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
       return -1;
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   int rc = run_aggregator(acfg, panel, full, 0, &res, NULL);
+   int rc = run_aggregator(acfg, panel, full, 0, &res, task);
    free(full);
    if (cost_usd)
       *cost_usd += result_token_cost(acfg, &res, panel->aggregator);
@@ -1023,7 +1026,7 @@ static void parse_question_answers(const char *text, const roundtable_opts_t *op
    out->coverage_gap_count = gi;
 }
 
-static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
+static void answer_roundtable_questions(agent_config_t *acfg, const aimee_request_t *task,
                                         const roundtable_opts_t *opts, roundtable_result_t *out)
 {
    if (!acfg || !opts || !out || !out->artifact || opts->question_count <= 0)
@@ -1050,8 +1053,9 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
        "Answer the caller's roundtable review questions from the consolidated review. Return only "
        "JSON shaped {\"answered_questions\":[{\"question\":\"...\",\"answer\":\"...\","
        "\"evidence\":\"...\",\"answered\":true}],\"coverage_gaps\":[\"...\"]}.\n\nTASK:\n";
-   size_t n =
-       strlen(prefix) + strlen(task ? task : "") + strlen(out->artifact) + strlen(qjson) + 80;
+   size_t n = strlen(prefix) +
+              strlen("The original task is supplied in the original input blocks.") +
+              strlen(out->artifact) + strlen(qjson) + 80;
    char *prompt = (char *)malloc(n);
    if (!prompt)
    {
@@ -1060,12 +1064,12 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
       return;
    }
    snprintf(prompt, n, "%s%s\n\nQUESTIONS:\n%s\n\nCONSOLIDATED REVIEW:\n%s\n", prefix,
-            task ? task : "", qjson, out->artifact);
+            "The original task is supplied in the original input blocks.", qjson, out->artifact);
    free(qjson);
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    aimee_request_t request = {0};
-   int run_rc = aimee_ir_request_from_text(&request, NULL, prompt, 1024, 0.3)
+   int run_rc = ensemble_continuation_request(task, NULL, prompt, 1024, 0.3, &request)
                     ? AGENT_RC_CONTEXT_REFUSED
                     : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &res);
    aimee_request_free(&request);
@@ -1081,7 +1085,8 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
 }
 
 static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *panel, int participant,
-                              const char *bad_text, agent_result_t *fixed, double *cost_usd)
+                              const aimee_request_t *task, const char *bad_text,
+                              agent_result_t *fixed, double *cost_usd)
 {
    if (!acfg || !panel || participant < 0 || participant >= panel->reference_count || !fixed)
       return -1;
@@ -1100,7 +1105,7 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
    memset(&res, 0, sizeof(res));
    aimee_request_t request = {0};
    int rc =
-       aimee_ir_request_from_text(&request, NULL, prompt, 512, 0.2)
+       ensemble_continuation_request(task, NULL, prompt, 512, 0.2, &request)
            ? AGENT_RC_CONTEXT_REFUSED
            : agent_run_named(acfg, panel->reference_models[participant], "review", &request, &res);
    aimee_request_free(&request);
@@ -1190,10 +1195,11 @@ static char *panel_persona_prompt(roundtable_mode_t mode, int model_index)
    return sys;
 }
 
-static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                              const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, const char *brief, const char *context,
-                              agent_result_t *results, int deadline_ms)
+static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *panel,
+                              const aimee_request_t *task, const char *artifact,
+                              const char *peer_notes, roundtable_mode_t mode, int round,
+                              const char *brief, const char *context, agent_result_t *results,
+                              int deadline_ms)
 {
    int ref_count = panel->reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -1204,12 +1210,10 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
    memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context,
+      prompts[i] = build_round_prompt(artifact, peer_notes, mode, round, brief, context,
                                       panel->require_evidence);
       if (!prompts[i])
          goto fail;
-      /* Per-participant persona is the system prompt (draft: engineer; review:
-       * the diverse lineup); the round prompt still drives the output shape. */
       personas[i] = panel_persona_prompt(mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       /* Reviewers get aimee. A panelist holding only a diff cannot answer the
@@ -1225,8 +1229,8 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
       tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
       tasks[i].require_initial_tool_call = (mode == ROUNDTABLE_REVIEW && panel->require_evidence);
       tasks[i].agent = panel->reference_models[i];
-      if (aimee_ir_request_from_text(&tasks[i].request, personas[i], prompts[i], 0,
-                                     0.3 + (0.05 * i)))
+      if (ensemble_continuation_request(task, personas[i], prompts[i], 0, 0.3 + (0.05 * i),
+                                        &tasks[i].request))
          goto fail;
    }
    /* deadline_ms bounds the panel barrier so one hung panelist can't wedge the
@@ -1285,9 +1289,9 @@ fail:
 }
 
 static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *panel,
-                                const char *task, const char *artifact, char **peer_notes,
-                                roundtable_mode_t mode, int round, const char *brief,
-                                const char *context, agent_result_t *results)
+                                const aimee_request_t *task, const char *artifact,
+                                char **peer_notes, roundtable_mode_t mode, int round,
+                                const char *brief, const char *context, agent_result_t *results)
 {
    int ref_count = panel->reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -1298,15 +1302,14 @@ static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *pa
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context,
+      char *prompt = build_round_prompt(artifact, *peer_notes, mode, round, brief, context,
                                         panel->require_evidence);
       if (!prompt)
          return -1;
-      /* Persona binds to the stable model index `i`, not the shuffled slot. */
       char *persona = panel_persona_prompt(mode, i);
       memset(&results[i], 0, sizeof(results[i]));
       aimee_request_t request = {0};
-      if (!aimee_ir_request_from_text(&request, persona, prompt, 0, 0.3 + (0.05 * i)))
+      if (!ensemble_continuation_request(task, persona, prompt, 0, 0.3 + (0.05 * i), &request))
       {
          if (mode == ROUNDTABLE_REVIEW)
          {
@@ -1758,8 +1761,7 @@ void ensemble_panel_from_config(ensemble_panel_t *out)
 int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                           const aimee_request_t *request, delegate_ensemble_result_t *out)
 {
-   if (!acfg || !panel || !out || aimee_ir_request_admit(request) || request->model ||
-       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user"))
+   if (!acfg || !panel || !out || aimee_ir_request_admit(request))
       return -1;
    const char *prompt = "The original task is supplied with this synthesis request.";
 
@@ -1958,10 +1960,11 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
    return dstr_steal(&s);
 }
 
-int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                            const roundtable_opts_t *opts, roundtable_result_t *out)
+int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                            const aimee_request_t *task, const roundtable_opts_t *opts,
+                            roundtable_result_t *out)
 {
-   if (!acfg || !panel || !task || !out)
+   if (!acfg || !panel || !out || aimee_ir_request_admit(task))
       return -1;
    memset(out, 0, sizeof(*out));
 
@@ -2049,13 +2052,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                       "observed cost is available",
                       out->cost_usd + preflight, panel->max_cost_usd);
       }
-      /* Compress only the ACCUMULATED CARRYOVER (artifact + peer_notes), never the
-       * task. The task is the fixed, incompressible review target / draft brief;
-       * counting it here made any single-shot review whose target exceeds ~22 KB
-       * trip summarize_forward on round 1 (carryover empty), which burned an
-       * aggregator call against the panel deadline, falsely flagged the run
-       * truncated+degraded, and starved the panelists into an empty (items:0)
-       * result. Carryover only, so a large task passes through to the panel intact. */
+      /* Compress carryover only; original task IR stays intact on every continuation. */
       if (strlen(artifact) + strlen(peer_notes) > 22000)
       {
          if (summarize_forward(acfg, panel, task, &artifact, &peer_notes, &out->cost_usd) == 0)
@@ -2131,7 +2128,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                   break;
                }
                if (!cost_limit_reached(panel, out->cost_usd) &&
-                   repair_review_json(acfg, panel, i, results[i].response, &fixed,
+                   repair_review_json(acfg, panel, i, task, results[i].response, &fixed,
                                       &out->cost_usd) == 0 &&
                    parse_review_issue_keys(fixed.response, cur_review_keys, &cur_review_key_count,
                                            64) == 0)
@@ -2277,7 +2274,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                agent_result_t chair_res = {0};
                memset(&chair_res, 0, sizeof(chair_res));
                long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res, NULL) ==
+               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res, task) ==
                        0 &&
                    chair_res.response && chair_res.response[0])
                {
@@ -2314,7 +2311,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          order[i] = i;
       shuffle_indices(order, ref_count);
       char *synthesis_prompt = build_round_synthesis_prompt(
-          task, artifact, results, order, panel->reference_models, ref_count, local.mode);
+          artifact, results, order, panel->reference_models, ref_count, local.mode);
       for (int i = 0; i < ref_count; i++)
          agent_result_clear_response(&results[i]);
       if (!synthesis_prompt)
@@ -2331,7 +2328,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
        * cannot run long past it (the panel already respects this deadline). */
       long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
       int agg_rc =
-          run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result, NULL);
+          run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result, task);
       free(synthesis_prompt);
       out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
@@ -2445,9 +2442,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
    if (local.mode == ROUNDTABLE_REVIEW && local.apply_review && !out->cost_capped &&
        best_artifact && best_artifact[0])
    {
-      char *apply_prompt =
-          xasprintf3("Apply this consolidated review to produce the final draft.\n\nTASK:\n",
-                     task ? task : "", "\n\nREVIEW:\n");
+      char *apply_prompt = xasprintf3(
+          "Apply this consolidated review to produce the final draft.\n\nTASK:\n",
+          "The original task is supplied in the original input blocks.", "\n\nREVIEW:\n");
       char *full = apply_prompt ? xasprintf3(apply_prompt, best_artifact, "\n") : NULL;
       free(apply_prompt);
       if (full)
@@ -2456,7 +2453,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          memset(&apply_result, 0, sizeof(apply_result));
          aimee_request_t request = {0};
          int run_rc =
-             aimee_ir_request_from_text(&request, NULL, full, 4096, 0.3)
+             ensemble_continuation_request(task, NULL, full, 4096, 0.3, &request)
                  ? AGENT_RC_CONTEXT_REFUSED
                  : agent_run_with_tools_write_enforce(acfg, "draft", &request, 0, &apply_result);
          aimee_request_free(&request);

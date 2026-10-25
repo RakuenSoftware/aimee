@@ -340,8 +340,33 @@ static void test_refusal_terminal_json(void)
    cJSON_Delete(json);
 }
 
+static void test_compaction_boundary_roundtrip(void)
+{
+   cJSON *json = cJSON_Parse("{\"role\":\"user\",\"_compaction_boundary\":true,\"blocks\":[{"
+                             "\"type\":\"text\",\"text\":\"history\"}]}");
+   aimee_message_t message = {0};
+   assert(json && !aimee_ir_message_parse(json, &message) && message.compaction_boundary);
+   cJSON *encoded = aimee_ir_message_json(&message);
+   assert(encoded &&
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(encoded, "_compaction_boundary")));
+   cJSON_Delete(encoded);
+   aimee_message_free(&message);
+   cJSON *history = cJSON_CreateArray();
+   assert(history && cJSON_AddItemToArray(history, cJSON_Duplicate(json, 1)));
+   cJSON *copy = aimee_ir_history_clone(history);
+   assert(copy && !aimee_ir_message_parse(cJSON_GetArrayItem(copy, 0), &message) &&
+          message.compaction_boundary);
+   aimee_message_free(&message);
+   cJSON_Delete(copy);
+   cJSON_Delete(history);
+   cJSON_ReplaceItemInObjectCaseSensitive(json, "_compaction_boundary", cJSON_CreateString("true"));
+   assert(aimee_ir_message_parse(json, &message) == -1);
+   cJSON_Delete(json);
+}
+
 int main(void)
 {
+   test_compaction_boundary_roundtrip();
    test_refusal_terminal_json();
    test_verification_proofs();
    test_response_snapshot();
