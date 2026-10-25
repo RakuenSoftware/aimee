@@ -5,6 +5,7 @@
 int tts_enabled(void);
 
 /* Synthesize `text` to an audio file. On success, *out_path_out is set to a
- * malloc'd path string (caller must free) pointing to the audio file (wav or
- * mp3 depending on provider). Returns 0 on success, -1 on error. */
+ * malloc'd unique path string pointing to an owned audio file (wav or mp3
+ * depending on provider). Caller must unlink the file and free the path.
+ * Returns 0 on success, -1 on error with *out_path_out set to NULL. */
 int tts_synthesize(const char *text, char **out_path_out);

@@ -26,7 +26,8 @@ func embedHTTPTimeout() time.Duration {
 }
 
 // EmbedBatch makes one request and publishes no vectors unless every row has
-// the requested width. Non-HTTP embedders use the caller's single-text fallback.
+// one nonzero width within MaxDim. Non-HTTP embedders use the caller's
+// single-text fallback.
 func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, request EmbedRequest) EmbedResponse {
 	if !EmbedIsHTTP(request.BaseURL) || request.MaxDim <= 0 || len(request.Texts) == 0 {
 		return EmbedResponse{Error: "embed: invalid batch request"}
@@ -68,8 +69,9 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 		return fail("embed: invalid batch row count")
 	}
 	vectors := make([][]float32, len(raw))
+	dim := len(raw[0])
 	for i, row := range raw {
-		if len(row) != request.MaxDim {
+		if dim == 0 || dim > request.MaxDim || len(row) != dim {
 			return fail("embed: invalid batch vector width")
 		}
 		vectors[i] = make([]float32, len(row))
@@ -85,7 +87,7 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 		}
 	}
 	breaker.reportSuccess(now)
-	return EmbedResponse{Vectors: vectors, Dim: request.MaxDim}
+	return EmbedResponse{Vectors: vectors, Dim: dim}
 }
 
 // EmbedDimension owns the configured program's --dim protocol as well as the

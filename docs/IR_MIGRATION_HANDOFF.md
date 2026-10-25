@@ -22,6 +22,51 @@ in `OWNERS.md`.
 
 ## Current implementation and qualified checkpoint
 
+The user clarified the architectural scope on 2026-10-25: **“A message is an
+IR.”** Different task payloads stay in their existing messages. Do not invent a
+parallel inference schema, or exempt speech, recognition and embedding messages
+merely because their payloads differ from conversation content.
+
+Recovery checkpoint `6afbaf919` adds only the reviewed ownership-ledger update
+to `b517daa71`; all other 10,218 tracked entries are identical. Its 76 lint
+checks pass and its `.252` producer has all 87 products and 19 modules. It has
+not been deployed. The b517 normal and ASan/UBSan lanes each ran 698 invocations:
+695 passed inside private temporary storage, and the three binaries sensitive
+to root ownership passed unchanged on the host. Both original suite exit-2
+receipts are preserved; this is composed coverage, not a uniform full-suite
+pass. There were no sanitizer diagnostics and 35 explicit prerequisite notices
+per lane. Receipts:
+`/var/tmp/aimee-recovered-ir-b517-private-tmp-qualification-r3/final-index.json`,
+`/var/tmp/aimee-recovered-ir-6afb-lint/`, and
+`/var/tmp/aimee-internal-ir-live-8168/candidate-6afbaf919/`.
+
+The continuation repairs additional active message-consumer defects:
+
+- Speech uploads bytes and decodes complete transcript text instead of passing
+  vendor JSON into chat. Local CLI arguments/results and concurrent temporary
+  outputs retain their own boundaries. TTS preserves structured request fields
+  and complete binary audio rather than truncating JSON or using `strlen`.
+- The common buffered HTTP reader refuses incomplete declared/chunked bodies
+  before copying or publishing them. Binary requests/responses retain explicit
+  lengths. Windows header conversions preserve complete fields and refuse
+  conversion/header failures; local Windows checks use the exact function
+  source with controlled WinHTTP peers, not a real Windows runtime.
+- OCR/TSR messages use strict framing and atomic payload admission, retaining
+  documented optional defaults and empty results while refusing invalid or
+  silently truncated text, geometry and cell data.
+- Embedding consumers preserve the actual dimension separately from row count
+  and buffer stride, and honor decline/truncation facts before publishing a
+  complete vector. Go batch generation retains the actual bounded width and
+  the public client admits the existing batch/dimension payload variants.
+
+These repairs require combined-source qualification and a new exact image
+before final installed validation. Focused evidence is under
+`/var/tmp/aimee-stt-proof/`, `/var/tmp/aimee-tts-boundary-proof/`,
+`/var/tmp/aimee-http-framing-proof/followup/`,
+`/var/tmp/aimee-sidecar-admission-proof/`, and
+`/var/tmp/aimee-embed-consumer-evidence/`. The 6afb image is a checkpoint,
+not evidence that these later repairs were deployed.
+
 Recovered on 2026-10-25 from local session
 `01a14bc2-2fb8-7751-95af-afed5428382a`, whose last saved action was at
 02:49 UTC. Continue in this worktree and branch; the main repository checkout

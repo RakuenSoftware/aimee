@@ -179,6 +179,10 @@ $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o 
                  $(OBJDIR)/modules/vault/runtime_secret.o $(PLATFORM_BASIC_OBJS) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
+$(TESTPREFIX)/unit-test-http-response-framing: $(OBJDIR)/tests/test_http_response_framing.o \
+    $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
+	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
+
 TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
@@ -508,6 +512,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-gateway-telegram \
                $(TESTPREFIX)/unit-test-gateway-ntfy-webhook \
                $(TESTPREFIX)/unit-test-gateway-stt-pairing \
+               $(TESTPREFIX)/unit-test-gateway-stt \
+               $(TESTPREFIX)/unit-test-gateway-tts \
+               $(TESTPREFIX)/unit-test-embed-result \
+               $(TESTPREFIX)/unit-test-kb-sidecar-admission \
                $(TESTPREFIX)/unit-test-mcp-gateway-tools \
                $(TESTPREFIX)/unit-test-report-enrichment \
                $(TESTPREFIX)/unit-test-curator-profile \
@@ -534,6 +542,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-http-send-guard \
+               $(TESTPREFIX)/unit-test-http-response-framing \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
                $(TESTPREFIX)/unit-test-webuser-runtime \
@@ -4019,6 +4028,7 @@ $(TESTPREFIX)/unit-test-mcp-gateway-tools: $(OBJDIR)/tests/test_mcp_gateway_tool
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pairing.o \
+                                             $(OBJDIR)/modules/ir/aimee_ir.o \
                                              $(OBJDIR)/gateway/stt.o \
                                              $(OBJDIR)/gateway/pairing.o \
                                              $(OBJDIR)/gateway/mirror.o \
@@ -4033,6 +4043,22 @@ $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pa
                                              $(GATEWAY_PLATFORM_OBJS) \
                                              $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
+
+$(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/test_gateway_stt.o \
+    $(OBJDIR)/gateway/stt.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/test_gateway_tts.o \
+    $(OBJDIR)/gateway/tts.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-embed-result: $(OBJDIR)/tests/test_embed_result.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lm
+
+$(TESTPREFIX)/unit-test-kb-sidecar-admission: $(OBJDIR)/tests/test_kb_sidecar_admission.o \
+    $(OBJDIR)/kb/kb_ocr_sidecar.o $(OBJDIR)/kb/kb_tsr_sidecar.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/util.o $(OBJDIR)/core/codec/base64.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
                                       $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -4585,6 +4611,7 @@ $(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-doc-pdf: $(OBJDIR)/tests/test_kb_doc_pdf.o \
+                               $(OBJDIR)/modules/ir/aimee_ir.o \
                                $(OBJDIR)/kb/kb_doc_pdf.o \
                                $(OBJDIR)/kb/kb_tsr_sidecar.o \
                                $(OBJDIR)/kb/kb_ocr_sidecar.o \

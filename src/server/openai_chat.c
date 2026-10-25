@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* openai_chat.c: inference-backed handlers for the OpenAI-compatible
  * /v1/chat/completions and /v1/completions routes.
  *
@@ -518,8 +519,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                     &embed_0_reply);
       cJSON_Delete(embed_0_args);
-      int d = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vecs[i],
-                             EMBED_MAX_DIM);
+      int d = embed_reply_vector(embed_0_reply, vecs[i], EMBED_MAX_DIM);
       cJSON_Delete(embed_0_reply);
       if (d <= 0)
       {

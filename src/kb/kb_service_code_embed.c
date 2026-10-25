@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* src/kb/kb_service_code_embed.c: KB-side code embedding refresh.
  *
  * All writes to code_embeddings run through this KB-side module; server and
@@ -88,10 +89,9 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
    cJSON_AddItemToObject(args, "texts", cJSON_CreateStringArray(texts, n));
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
    cJSON_Delete(args);
-   int batch_count =
-       jo_float_matrix(cJSON_GetObjectItemCaseSensitive(reply, "vectors"), vecs, n, embed_dim);
+   int batch_dim = embed_reply_matrix(reply, vecs, n, embed_dim);
    cJSON_Delete(reply);
-   if (batch_count == n)
+   if (batch_dim == embed_dim)
    {
       wrote = n;
    }
@@ -111,8 +111,7 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
          (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                        &embed_0_reply);
          cJSON_Delete(embed_0_args);
-         int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), slot,
-                                  embed_dim);
+         int dim = embed_reply_vector(embed_0_reply, slot, embed_dim);
          cJSON_Delete(embed_0_reply);
          if (dim != embed_dim)
          {

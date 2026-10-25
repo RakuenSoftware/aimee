@@ -17,6 +17,7 @@
 
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb.h"
@@ -801,8 +802,7 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                     &embed_0_reply);
       cJSON_Delete(embed_0_args);
-      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                               EMBED_MAX_DIM);
+      int dim = embed_reply_vector(embed_0_reply, vec, EMBED_MAX_DIM);
       cJSON_Delete(embed_0_reply);
       if (dim > 0)
       {
@@ -1011,8 +1011,7 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args,
                                                     &embed_1_reply);
       cJSON_Delete(embed_1_args);
-      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), vec,
-                               EMBED_MAX_DIM);
+      int dim = embed_reply_vector(embed_1_reply, vec, EMBED_MAX_DIM);
       cJSON_Delete(embed_1_reply);
       /* Payload reconstruction reads kb_documents, so it needs a fresh short
        * project scope after the embedder round-trip. The fenced helper opens

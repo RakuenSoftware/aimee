@@ -40,6 +40,7 @@
  * was handed so the test can assert content extraction. */
 static int g_embed_dim = 384; /* dims to emit (set per test) */
 static int g_embed_calls;
+static int g_embed_truncated;
 static int g_embed_max_dim;
 static char g_embed_last_text[4096];
 
@@ -52,6 +53,9 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    g_embed_calls++;
    snprintf(g_embed_last_text, sizeof(g_embed_last_text), "%s", jo_cstr(args, "text"));
    int dim = g_embed_dim;
+   cJSON_AddNumberToObject(*result, "dim", dim);
+   if (g_embed_truncated)
+      cJSON_AddBoolToObject(*result, "truncated", 1);
    cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
    for (int i = 0; i < dim; ++i)
       cJSON_AddItemToArray(vector, cJSON_CreateNumber((float)(i % 7) * 0.01f));
@@ -125,6 +129,25 @@ static void test_embed_wrong_dim(void)
    printf("  test_embed_wrong_dim: PASS\n");
 }
 
+static void test_embed_truncated(void)
+{
+   open_db();
+   g_embed_dim = 384;
+   g_embed_truncated = 1;
+   g_embed_calls = 0;
+
+   char id[64];
+   seed_evidence(id, sizeof(id), "{\"content\":\"truncated evidence\"}");
+   assert(kb_evidence_embed_drain(8, MEMORY_EMBED_TEST_FIXTURE) == 1);
+   assert(g_embed_calls == 1);
+   /* A full-width vector still fails when the owner reports lost components. */
+   assert(kb_store_evidence_ops_count("ok") == 0);
+   assert(kb_store_evidence_ops_count("failed") == 1);
+   assert(kb_store_evidence_ops_count("pending") == 0);
+   g_embed_truncated = 0;
+   printf("  test_embed_truncated: PASS\n");
+}
+
 /* ---- 3. drain batch --------------------------------------------------- */
 static void test_embed_drain_batch(void)
 {
@@ -186,6 +209,7 @@ int main(void)
    assert(setenv("EMBEDDER_DIMS", "384", 1) == 0);
    test_embed_success();
    test_embed_wrong_dim();
+   test_embed_truncated();
    test_embed_drain_batch();
    test_embed_configured_width(768, 768);
    test_embed_configured_width(1024, 1024);

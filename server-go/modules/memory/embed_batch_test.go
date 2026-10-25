@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestEmbedBatchParity(t *testing.T) {
 	if response = EmbedBatch(t.Context(), 1, executor, request); response.Error != "" || executor.endpoint != "http://embedder/embed_batch?input_type=query" {
 		t.Fatal(response)
 	}
-	for _, reply := range []string{`[[1,2,3]]`, `[[1,2],[1,2],[1,2],[1,2]]`, `[[1,2,3],[1,2,3],[1,2,3],[1,2,1e39]]`, `[[1,2,null],[1,2,3],[1,2,3],[1,2,3]]`, `[null,null,null,null]`, `null`} {
+	for _, reply := range []string{`[[1,2,3]]`, `[[1,2],[1,2,3],[1,2],[1,2]]`, `[[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4]]`, `[[1,2,3],[1,2,3],[1,2,3],[1,2,1e39]]`, `[[1,2,null],[1,2,3],[1,2,3],[1,2,3]]`, `[null,null,null,null]`, `[[],[],[],[]]`, `null`} {
 		resetBreaker(t)
 		executor.reply = reply
 		response = EmbedBatch(t.Context(), 1, executor, request)
@@ -80,6 +81,62 @@ func TestEmbedBatchParity(t *testing.T) {
 		if embedHTTPTimeout() < time.Minute {
 			t.Fatal(value)
 		}
+	}
+}
+
+func TestEmbedBatchUsesActualDimension(t *testing.T) {
+	resetBreaker(t)
+	executor := &batchExecutor{reply: `[[0.25,0.5,0.75],[1.25,1.5,1.75]]`}
+	request := EmbedRequest{Operation: "batch", BaseURL: "http://embedder", Texts: []string{"alpha", "beta"}, MaxDim: 8}
+	// Exercise the production handler and client as well as the batch parser.
+	client := clientForHandler(t, NewHandler(executor))
+	response, err := client.Embed(t.Context(), 73, request)
+	want := [][]float32{{.25, .5, .75}, {1.25, 1.5, 1.75}}
+	if err != nil || response.Error != "" || response.Dim != 3 || !reflect.DeepEqual(response.Vectors, want) || executor.calls != 1 {
+		t.Fatalf("batch: %+v, %v; calls=%d", response, err, executor.calls)
+	}
+}
+
+func TestEmbedBatchWidthFailureAndRecovery(t *testing.T) {
+	resetBreaker(t)
+	executor := &batchExecutor{reply: `[[1,2,3],[4,5]]`}
+	request := EmbedRequest{BaseURL: "http://embedder", Texts: []string{"alpha", "beta"}, MaxDim: 8, NowMS: 1000}
+	for range breakerThreshold {
+		response := EmbedBatch(t.Context(), 1, executor, request)
+		if response.Error == "" || response.Dim != 0 || len(response.Vectors) != 0 {
+			t.Fatalf("malformed batch published vectors: %+v", response)
+		}
+	}
+	calls := executor.calls
+	if response := EmbedBatch(t.Context(), 1, executor, request); !response.Unavailable || response.RetryAfterMS <= 0 || executor.calls != calls {
+		t.Fatalf("width failures did not suppress call: %+v, calls=%d", response, executor.calls)
+	}
+	request.NowMS = 100000
+	executor.reply = `[[1,2,3],[4,5,6]]`
+	if response := EmbedBatch(t.Context(), 1, executor, request); response.Error != "" || response.Unavailable || response.Dim != 3 {
+		t.Fatalf("narrower recovery probe failed: %+v", response)
+	}
+	if response := EmbedBatch(t.Context(), 1, executor, request); response.Error != "" || response.Unavailable || executor.calls != calls+2 {
+		t.Fatalf("successful narrower probe did not close breaker: %+v", response)
+	}
+}
+
+func TestClientDimensionThroughOwner(t *testing.T) {
+	resetBreaker(t)
+	for _, test := range []struct {
+		name, baseURL string
+		vector        []float32
+	}{
+		{"program", "printf '3\\n'; #", nil},
+		{"HTTP", "http://embedder", []float32{.25, .5, .75}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := clientForHandler(t, NewHandler(&batchExecutor{reply: `[0.25,0.5,0.75]`}))
+			response, err := client.Embed(t.Context(), 73, EmbedRequest{Operation: "dimension", BaseURL: test.baseURL, MaxDim: 8})
+			if err != nil || response.Error != "" || response.Dim != 3 || !reflect.DeepEqual(response.Vector, test.vector) {
+				t.Fatalf("dimension: %+v, %v", response, err)
+			}
+		})
 	}
 }
 func TestEmbedCommandIsHostOnly(t *testing.T) {

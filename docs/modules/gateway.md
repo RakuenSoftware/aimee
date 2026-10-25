@@ -105,6 +105,30 @@ journey; disabling them must leave direct headless API/CLI operation intact.
 
 ## Tests and failure behavior
 
+Speech adapters preserve the message boundary: provider and local Whisper JSON
+is decoded into transcript text before it becomes user content. The API path
+uploads the actual file bytes as multipart data. Local Whisper uses literal
+arguments and an owned JSON result file; console progress is not transcript
+content. Invalid, incomplete, or oversized transcripts fail without publishing
+partial text. `AIMEE_GATEWAY_STT_MODEL` can select the model; the existing local
+and OpenAI defaults remain `base` and `whisper-1`, while Groq uses
+`whisper-large-v3-turbo`.
+
+TTS serializes text, voice, and model fields as JSON at the provider boundary.
+Its binary HTTP result retains an explicit byte length, including embedded NULs.
+OpenAI requests MP3 and Kokoro requests WAV. Each successful call returns an
+independent temporary file owned by the caller, which must unlink it after
+delivery. Empty audio, partial writes, and provider failures do not return a
+successful path. Local espeak receives text on stdin rather than in a shell
+command. Temporary speech outputs honor `TMPDIR`.
+
+The external contracts are documented in the
+[OpenAI transcription reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create),
+[Groq speech reference](https://console.groq.com/docs/speech-to-text), and
+[OpenAI speech output guide](https://developers.openai.com/api/docs/guides/text-to-speech).
+Focused speech fixtures use controlled HTTP/process peers, including binary
+audio and local CLI result files; they do not claim paid-provider inference.
+
 The gateway descriptor owns the direct `src/tests/test_gateway_pipeline.c`,
 `src/tests/test_gateway_policy.c`, and `src/tests/test_gateway_p4_delegate.c` contracts.
 `test_gateway.c`, platform tests, `test_gateway_mutate_wire.c`,

@@ -445,6 +445,13 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
+/* Binary-safe content-type POST. Both wire boundaries are explicit lengths;
+ * the owned response also has a trailing NUL for compatibility, outside its
+ * reported length. On failure the response is NULL and its length is zero. */
+int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
+                                       const char *content_type, const void *body, size_t body_len,
+                                       char **response_buf, size_t *response_len, int timeout_ms,
+                                       const char *extra_headers);
 int agent_http_delete(const char *url, const char *auth_header, int timeout_ms);
 
 /* Retry-After (seconds) parsed from the most recent buffered HTTP response on
