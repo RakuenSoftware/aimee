@@ -569,3 +569,17 @@ A failed latest admitted generation cannot transfer an earlier final/cache.
 - Resolve or accurately expose the actual selected-provider startup failure.
 - Run checks appropriate to changed owners; preserve existing branch/history and
   supported behavior. No learning, PR/authentication detours, `.100` or KB setup.
+
+### Queue storage source discriminator
+
+The final audit found that writing canonical JSON into the legacy `prompt`
+column made JSON-looking historical user text ambiguous. That intermediate
+implementation was never deployed. Migration 53 adds nullable `message_ir`
+without changing recorded migrations or legacy prompts. New writes use only
+that column. Reads select its presence explicitly: NULL imports the entire old
+prompt literally as user text; present IR is validated and retained exactly,
+with no fallback to old text on invalid IR. The 1 MiB byte limit is enforced by
+the owner and column constraint. Focused tests exercise the actual add/dispatch
+handlers, canonical custody, literal valid/malformed JSON legacy prompts, and
+invalid IR refusal. Browser recovery remains incomplete until the selected real
+provider completes a session; the recorded Claude OAuth HTTP 429 is not success.
