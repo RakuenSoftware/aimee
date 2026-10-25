@@ -41,44 +41,6 @@ static void test_execute_rejects_missing_inputs(void)
    assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
 }
 
-static void test_parse_token_usage_extracts_input_output(void)
-{
-   const char *line = "{\"method\":\"thread/tokenUsage/updated\",\"params\":{"
-                      "\"tokenUsage\":{\"last\":{\"inputTokens\":1234,\"outputTokens\":56}}}}";
-   int p = -1, c = -1;
-   assert(cli_codex_parse_token_usage(line, &p, &c) == 1);
-   assert(p == 1234);
-   assert(c == 56);
-}
-
-static void test_parse_token_usage_missing_fields_default_zero(void)
-{
-   const char *line = "{\"method\":\"thread/tokenUsage/updated\",\"params\":{"
-                      "\"tokenUsage\":{\"last\":{\"inputTokens\":42}}}}";
-   int p = -1, c = -1;
-   assert(cli_codex_parse_token_usage(line, &p, &c) == 1);
-   assert(p == 42);
-   assert(c == 0);
-}
-
-static void test_parse_token_usage_skips_other_methods(void)
-{
-   const char *line = "{\"method\":\"item/completed\",\"params\":{}}";
-   int p = -1, c = -1;
-   assert(cli_codex_parse_token_usage(line, &p, &c) == 0);
-   /* On miss, helpers leave caller's vars alone — we use sentinel -1 to
-    * verify that. */
-   assert(p == -1);
-   assert(c == -1);
-}
-
-static void test_parse_token_usage_null_outparams_ok(void)
-{
-   const char *line = "{\"method\":\"thread/tokenUsage/updated\",\"params\":{"
-                      "\"tokenUsage\":{\"last\":{\"inputTokens\":7,\"outputTokens\":8}}}}";
-   assert(cli_codex_parse_token_usage(line, NULL, NULL) == 1);
-}
-
 static void test_parse_error_notification_unwraps_nested_message(void)
 {
    const char *line =
@@ -376,37 +338,6 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    assert(rc == -1);
    assert(strstr(out.error, "fixture-args:") != NULL);
    unlink(path);
-}
-
-static void test_parse_tool_action_counts_non_agent_items(void)
-{
-   /* Any item/completed whose type isn't agentMessage is a tool action
-    * (shell exec, file edit, web fetch, ...). Counting these unblocks
-    * the "1 turn 0 tools" reporting bug — tool_calls was always 0. */
-   const char *shell = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                       "\"item\":{\"type\":\"localShellCall\",\"command\":\"ls\"}}}";
-   const char *edit = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                      "\"item\":{\"type\":\"fileEdit\",\"path\":\"foo.c\"}}}";
-   const char *fetch = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                       "\"item\":{\"type\":\"webFetch\",\"url\":\"x\"}}}";
-   assert(cli_codex_parse_tool_action(shell) == 1);
-   assert(cli_codex_parse_tool_action(edit) == 1);
-   assert(cli_codex_parse_tool_action(fetch) == 1);
-}
-
-static void test_parse_tool_action_skips_agent_message(void)
-{
-   const char *agent = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                       "\"item\":{\"type\":\"agentMessage\",\"text\":\"hi\"}}}";
-   assert(cli_codex_parse_tool_action(agent) == 0);
-}
-
-static void test_parse_tool_action_skips_other_methods(void)
-{
-   const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{}}";
-   assert(cli_codex_parse_tool_action(line) == 0);
-   assert(cli_codex_parse_tool_action("not json") == 0);
-   assert(cli_codex_parse_tool_action(NULL) == 0);
 }
 
 typedef struct
@@ -1271,22 +1202,6 @@ int main(int argc, char **argv)
    puts("canonical history: typed adoption, resume protocol and refusal before model turn "
         "passed");
 
-   printf("test_parse_token_usage_extracts_input_output... ");
-   test_parse_token_usage_extracts_input_output();
-   printf("OK\n");
-
-   printf("test_parse_token_usage_missing_fields_default_zero... ");
-   test_parse_token_usage_missing_fields_default_zero();
-   printf("OK\n");
-
-   printf("test_parse_token_usage_skips_other_methods... ");
-   test_parse_token_usage_skips_other_methods();
-   printf("OK\n");
-
-   printf("test_parse_token_usage_null_outparams_ok... ");
-   test_parse_token_usage_null_outparams_ok();
-   printf("OK\n");
-
    printf("test_parse_error_notification_unwraps_nested_message... ");
    test_parse_error_notification_unwraps_nested_message();
    printf("OK\n");
@@ -1317,18 +1232,6 @@ int main(int argc, char **argv)
 
    printf("test_spawn_failure_captures_stderr_and_exit_status... ");
    test_spawn_failure_captures_stderr_and_exit_status();
-   printf("OK\n");
-
-   printf("test_parse_tool_action_counts_non_agent_items... ");
-   test_parse_tool_action_counts_non_agent_items();
-   printf("OK\n");
-
-   printf("test_parse_tool_action_skips_agent_message... ");
-   test_parse_tool_action_skips_agent_message();
-   printf("OK\n");
-
-   printf("test_parse_tool_action_skips_other_methods... ");
-   test_parse_tool_action_skips_other_methods();
    printf("OK\n");
 
    test_owned_stdio_holes();

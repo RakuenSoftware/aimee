@@ -8,7 +8,9 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import socket
+import socketserver
 import ssl
 import subprocess
 import tempfile
@@ -496,6 +498,118 @@ def network_mcp_bootstrap_check(binary: pathlib.Path) -> None:
             thread.join(timeout=1)
 
 
+def workspace_served_root_check(binary: pathlib.Path, modes=(True, False, "malformed")) -> None:
+    """Capture the actual HTTP/UDS body after normal served-spec discovery."""
+    definitions = (pathlib.Path(__file__).resolve().parents[1] /
+                   "src/server/cli_argspec_defs_data.h").read_text()
+    row = re.search(r'\{"workspace\.add",\s*((?:"(?:\\.|[^"\\])*"\s*)+)\}', definitions)
+    assert row, "shipping workspace.add argument spec is missing"
+    spec = json.loads("".join(json.loads(token) for token in
+                             re.findall(r'"(?:\\.|[^"\\])*"', row.group(1))))
+    # The server still owns unrelated metadata fields; path finalization must
+    # not replace the served body with the compiled fallback.
+    spec["fields"].append({"json": "served_canary", "from": "const", "type": "const_bool", "value": True})
+
+    class WorkspaceHandler(http.server.BaseHTTPRequestHandler):
+        def respond(self) -> None:
+            size = int(self.headers.get("Content-Length", "0"))
+            request = json.loads(self.rfile.read(size)) if size else None
+            self.server.paths.append(self.path)
+            status = 200
+            if self.path == "/v1/cli/manifest":
+                body = {"manifest_version": 1, "routes": [
+                    {"op": "workspace.add", "verb": "POST", "path": "/v1/workspaces"}],
+                    "marshal": [{"method": "workspace.add", "args": self.server.spec}]
+                    if self.server.served else []}
+            elif self.path == "/v1/workspaces":
+                self.server.bodies.append(request)
+                if request.get("root"):
+                    body = {"path": request["root"], "workspace_state": "registered"}
+                else:
+                    status = 400
+                    body = {"status": "error", "message": "missing root_hint"}
+            else:
+                status = 404
+                body = {"status": "error", "message": "unexpected fixture route"}
+            raw = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        do_GET = respond
+        do_POST = respond
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    class UdsHttpServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+
+    with tempfile.TemporaryDirectory(prefix="aws-") as tmp:
+        root = pathlib.Path(tmp)
+        repo = root / "caller"
+        repo.mkdir()
+        server = UdsHttpServer(str(root / "http.sock"), WorkspaceHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for served in modes:
+                server.served = served
+                server.spec = json.loads(json.dumps(spec))
+                if served == "malformed":
+                    del server.spec["fields"][-1]["type"]
+                cases = [
+                    (["add", ".", "--provider", "shared", "--no-scan"], str(repo) + "/.", 0),
+                    (["add", "--provider", "mirror", "../sibling with spaces", "--remote",
+                      "git@example:r", "--head", ".", "--no-scan"],
+                     str(repo) + "/../sibling with spaces", 2),
+                    (["add", "/virtual/not-created", "--provider", "detached"],
+                     "/virtual/not-created", 0),
+                    (["add"], None, None),
+                    (["add", "x" * 8192], None, None),
+                ]
+                for ordinal, (command, expected, index) in enumerate(cases):
+                    home = root / (str(served) + "-" + str(ordinal))
+                    home.mkdir()
+                    env = dict(os.environ, HOME=str(home), AIMEE_HOME=str(home),
+                               AIMEE_API_ENDPOINT="unix:" + str(root / "http.sock"),
+                               AIMEE_NO_CLIENT_INTEGRATIONS="1")
+                    for key in ("AIMEE_NATIVE_CLI", "AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN",
+                                "AIMEE_API_BEARER", "AIMEE_SESSION_ID", "AIMEE_HOOK_CLIENT"):
+                        env.pop(key, None)
+                    server.bodies, server.paths = [], []
+                    result = subprocess.run([str(binary), "--json", "workspace", *command],
+                                            env=env, cwd=repo, capture_output=True,
+                                            text=True, timeout=20)
+                    if ordinal == 4:
+                        assert result.returncode != 0 and not server.bodies
+                        assert "client's cwd" in result.stderr
+                        continue
+                    assert len(server.bodies) == 1, (served, command, result.returncode, result.stdout, result.stderr, server.paths)
+                    request = server.bodies[0]
+                    if expected is None:
+                        assert result.returncode != 0 and "root" not in request
+                        assert json.loads(result.stdout)["message"] == "missing root_hint"
+                        continue
+                    assert result.returncode == 0, (served, command, result.stdout, result.stderr)
+                    assert request["root"] == expected, ("client-relative root", served, request)
+                    assert request["args"][index] == expected, request
+                    assert json.loads(result.stdout)["path"] == expected
+                    assert request.get("served_canary", False) is (served is True)
+                    if ordinal == 0:
+                        assert request["provider"] == "shared" and request["scan"] is False
+                    if ordinal == 1:
+                        assert request["provider"] == "mirror" and request["scan"] is False
+                        assert request["remote"] == "git@example:r" and request["head"] == "."
+                        assert request["args"][6] == ".", request
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=pathlib.Path)
@@ -576,6 +690,7 @@ def main() -> int:
     native_main_check(binary)
     network_authority_check(binary)
     network_mcp_bootstrap_check(binary)
+    workspace_served_root_check(binary)
     if args.native_proxy_fixture:
         subprocess.run([str(args.native_proxy_fixture.resolve()), str(binary)],
                        check=True, timeout=30)

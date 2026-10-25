@@ -2128,8 +2128,19 @@ static void test_native_supervised_execution(const agent_t *selected,
                 strstr(source, "wire-call:original") && !strstr(source, "\"name\":\"read_file\""));
          free(source);
       }
+      int committed_calls, committed_successes;
+      /* Only persisted canonical outcomes count. Canceled, refused-before-claim,
+       * uncertain-effect and duplicate callbacks cannot create SDK counters. */
+      server_native_runtime_quiesce(runtime);
+      server_native_runtime_tool_counts(runtime, &committed_calls, &committed_successes);
+      int expected_committed = mode != 6 && !(mode >= 4 && mode != 9 && mode < 10);
+      assert(committed_calls == expected_committed);
+      assert(committed_successes == (expected_committed && mode != 1 && mode != 2 && mode != 3));
       rc = server_native_runtime_execute_tool(&call, &result, runtime);
       assert(rc == -1 && dispatch_count == before + dispatched + (mode == 10));
+      int replay_calls, replay_successes;
+      server_native_runtime_tool_counts(runtime, &replay_calls, &replay_successes);
+      assert(replay_calls == committed_calls && replay_successes == committed_successes);
       aimee_block_free_contents(&result);
       cJSON_Delete(input);
       agent_set_request_cancel(NULL);

@@ -118,6 +118,10 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
 void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime);
 void server_native_runtime_quiesce(server_native_runtime_t *runtime);
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out);
+/* Committed canonical tool results, read after callback quiescence. SDK item
+ * notifications and nested CLI requests do not invent model tool calls. */
+void server_native_runtime_tool_counts(const server_native_runtime_t *runtime, int *calls,
+                                       int *successful);
 void server_native_runtime_close(server_native_runtime_t *runtime);
 
 #endif

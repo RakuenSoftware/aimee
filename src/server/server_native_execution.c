@@ -1323,6 +1323,8 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
       return -1;
    }
    server_native_runtime_quiesce(execution->runtime);
+   server_native_runtime_tool_counts(execution->runtime, &out->tool_calls,
+                                     &out->successful_tool_calls);
    aimee_response_t original = {0};
    cJSON *history = NULL;
    int valid = execution->cache && execution->native_id[0] &&
@@ -1372,6 +1374,8 @@ static void native_execution_diagnostic(native_execution_t *execution, agent_res
       return;
    }
    server_native_runtime_quiesce(execution->runtime);
+   server_native_runtime_tool_counts(execution->runtime, &out->tool_calls,
+                                     &out->successful_tool_calls);
    aimee_response_t original = {0};
    if (server_native_runtime_result(execution->runtime, &original))
       return;
@@ -1518,6 +1522,9 @@ int server_native_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *o
    int rc = !strcmp(execution->selected.cli_kind, "claude")
                 ? native_claude_execute(execution, &owned, out)
                 : codex_provider_cli_adapter.execute(&owned, out);
+   /* SDK display metadata has no accounting authority, including when custody
+    * cannot quiesce. Only the committed host owner may supply these counters. */
+   out->tool_calls = out->successful_tool_calls = 0;
    if (server_native_runtime_turn_limit_reached(execution->runtime))
    {
       server_native_runtime_quiesce(execution->runtime);

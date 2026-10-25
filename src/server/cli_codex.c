@@ -837,53 +837,6 @@ static cJSON *cli_codex_text_input_array(const char *text)
    return input;
 }
 
-int cli_codex_parse_tool_action(const char *line)
-{
-   if (!line)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
-      return 0;
-   int rc = 0;
-   cJSON *method = cJSON_GetObjectItemCaseSensitive(obj, "method");
-   if (cJSON_IsString(method) && strcmp(method->valuestring, "item/completed") == 0)
-   {
-      cJSON *params = cJSON_GetObjectItemCaseSensitive(obj, "params");
-      cJSON *item = cJSON_GetObjectItemCaseSensitive(params, "item");
-      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (cJSON_IsString(type) && strcmp(type->valuestring, "agentMessage") != 0)
-         rc = 1;
-   }
-   cJSON_Delete(obj);
-   return rc;
-}
-
-int cli_codex_parse_token_usage(const char *line, int *prompt, int *completion)
-{
-   if (!line)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
-      return 0;
-   int rc = 0;
-   cJSON *method = cJSON_GetObjectItemCaseSensitive(obj, "method");
-   if (cJSON_IsString(method) && strcmp(method->valuestring, "thread/tokenUsage/updated") == 0)
-   {
-      cJSON *params = cJSON_GetObjectItemCaseSensitive(obj, "params");
-      cJSON *usage = cJSON_GetObjectItemCaseSensitive(params, "tokenUsage");
-      cJSON *last = cJSON_GetObjectItemCaseSensitive(usage, "last");
-      cJSON *in = cJSON_GetObjectItemCaseSensitive(last, "inputTokens");
-      cJSON *outk = cJSON_GetObjectItemCaseSensitive(last, "outputTokens");
-      if (prompt)
-         *prompt = cJSON_IsNumber(in) ? in->valueint : 0;
-      if (completion)
-         *completion = cJSON_IsNumber(outk) ? outk->valueint : 0;
-      rc = 1;
-   }
-   cJSON_Delete(obj);
-   return rc;
-}
-
 static char *cli_codex_copy_error_text(const char *raw)
 {
    if (!raw || !raw[0])
@@ -1530,8 +1483,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cJSON_Delete(resp);
    }
 
-   /* 4. Drain notifications until turn/completed. Collect the final
-    * agentMessage text and the latest tokenUsage along the way. */
+   /* 4. Drain transport notifications until turn/completed. The host owns
+    * canonical model usage and committed tool outcomes. */
    for (;;)
    {
       /* The quiet poll keeps stderr drained while Codex is silent. Any
@@ -1551,17 +1504,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cli_codex_drain_stderr(&c);
       if (cli_codex_handle_server_request(&c, line))
          continue;
-      if (cli_codex_parse_tool_action(line))
-         out->tool_calls++;
-
-      int p = 0, cmpl = 0;
-      if (cli_codex_parse_token_usage(line, &p, &cmpl))
-      {
-         out->prompt_tokens = p;
-         out->completion_tokens = cmpl;
-         continue;
-      }
-
       char *err_text = NULL;
       if (cli_codex_parse_error_message(line, &err_text))
       {

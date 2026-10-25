@@ -201,6 +201,51 @@ int cli_ws_project_identity(const char *remote, const char *bearer, const char *
 #endif
 }
 
+/* Workspace paths belong to the client even when served metadata builds the
+ * body. Keep the REST root and the legacy argv carrier in agreement, without
+ * resolving virtual absolute mirror/detached roots on the client filesystem. */
+cJSON *cli_workspace_finalize_root(cJSON *req, int argc, char **argv, const char *root_arg)
+{
+   const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "root"));
+   if (!root || !root[0] || aimee_path_is_absolute(root))
+      return req;
+   char absolute[4096], cwd[4096];
+   if (!getcwd(cwd, sizeof cwd))
+      goto invalid_root;
+   int n = snprintf(absolute, sizeof absolute, "%s/%s", cwd, root);
+   if (n < 0 || (size_t)n >= sizeof absolute)
+      goto invalid_root;
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
+   if (args)
+   {
+      int index = -1;
+      for (int i = 0; root_arg && i < argc; i++)
+         if (argv[i] == root_arg)
+            index = i;
+      const char *carried = cJSON_GetStringValue(cJSON_GetArrayItem(args, index));
+      if (!carried || strcmp(carried, root) != 0)
+         goto invalid_root;
+      cJSON *value = cJSON_CreateString(absolute);
+      if (!value || !cJSON_ReplaceItemInArray(args, index, value))
+      {
+         cJSON_Delete(value);
+         goto invalid_root;
+      }
+   }
+   cJSON *value = cJSON_CreateString(absolute);
+   if (!value || !cJSON_ReplaceItemInObjectCaseSensitive(req, "root", value))
+   {
+      cJSON_Delete(value);
+      goto invalid_root;
+   }
+   return req;
+invalid_root:
+   fprintf(stderr, "aimee: workspace root cannot be resolved from the client's cwd\n");
+   marshal_request_note_reported();
+   cJSON_Delete(req);
+   return NULL;
+}
+
 /* workspace.add: keep the {method,args} body the socket dispatch parses, but also
  * surface root + provider as top-level fields so the first-class REST route
  * POST /v1/workspaces (which reads {root, provider}) accepts the same body when
@@ -220,33 +265,11 @@ cJSON *marshal_workspace_add(int argc, char **argv)
    cli_args_parse(argc, argv, ws_bool_flags, &opts);
    if (opts.pos_count > 0)
    {
-      const char *root = opts.positional[0];
-      char absolute[4096], cwd[4096];
-      if (root[0] && !aimee_path_is_absolute(root))
+      if (!cJSON_AddStringToObject(req, "root", opts.positional[0]))
       {
-         /* The server may have a different cwd, including over local HTTP UDS.
-          * Preserve virtual absolute mirror/detached roots without statting them. */
-         if (!getcwd(cwd, sizeof cwd))
-            goto invalid_root;
-         int n = snprintf(absolute, sizeof absolute, "%s/%s", cwd, root);
-         if (n < 0 || (size_t)n >= sizeof absolute)
-            goto invalid_root;
-         cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
-         for (int i = 0; i < argc; i++)
-            if (argv[i] == root)
-            {
-               cJSON *value = cJSON_CreateString(absolute);
-               if (!value || !cJSON_ReplaceItemInArray(args, i, value))
-               {
-                  cJSON_Delete(value);
-                  goto invalid_root;
-               }
-               break;
-            }
-         root = absolute;
+         cJSON_Delete(req);
+         return NULL;
       }
-      if (!cJSON_AddStringToObject(req, "root", root))
-         goto invalid_root;
    }
    const char *prov = cli_args_get(&opts, "provider");
    if (prov)
@@ -273,11 +296,8 @@ cJSON *marshal_workspace_add(int argc, char **argv)
     * body it saw before. */
    if (cli_args_has_flag(&opts, "no-scan"))
       cJSON_AddBoolToObject(req, "scan", 0);
-   return req;
-invalid_root:
-   fprintf(stderr, "aimee: workspace root cannot be resolved from the client's cwd\n");
-   cJSON_Delete(req);
-   return NULL;
+   return cli_workspace_finalize_root(req, argc, argv,
+                                      opts.pos_count > 0 ? opts.positional[0] : NULL);
 }
 
 cJSON *marshal_workspace_prepare(int argc, char **argv)

@@ -61,6 +61,7 @@ struct server_native_runtime
    aimee_response_t last_response;
    long usage[5]; /* Successful committed model completions in this execution. */
    int last_complete;
+   int tool_results, successful_tool_results;
    int model_turn_limit, admitted_model_turns;
    atomic_int model_turn_limit_reached;
    int owns_request, bound_registry, n_bindings, service_source;
@@ -903,6 +904,12 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
                                   .native_owner = runtime->native_owner};
    if (aimee_ir_session_emit(&event))
       goto done;
+   pthread_mutex_lock(&runtime->cli_lock);
+   if (runtime->tool_results < INT_MAX)
+      runtime->tool_results++;
+   if (!is_error && runtime->successful_tool_results < INT_MAX)
+      runtime->successful_tool_results++;
+   pthread_mutex_unlock(&runtime->cli_lock);
    aimee_block_free_contents(work->result);
    *work->result = result;
    memset(&result, 0, sizeof result);
@@ -2224,6 +2231,13 @@ int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_r
       result.error_message = "native model generation turn cap reached";
    }
    return aimee_ir_response_clone(&result, out);
+}
+void server_native_runtime_tool_counts(const server_native_runtime_t *runtime, int *calls,
+                                       int *successful)
+{
+   /* The execution owner reads only after callback quiescence. */
+   *calls = runtime ? runtime->tool_results : 0;
+   *successful = runtime ? runtime->successful_tool_results : 0;
 }
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {

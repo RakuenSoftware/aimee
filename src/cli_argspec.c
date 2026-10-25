@@ -258,6 +258,14 @@ int cli_argspec_supported(const cJSON *spec)
          return 0;
       if (!known_type(field_str(f, "type")))
          return 0;
+      const char *type = field_str(f, "type");
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(f, "value");
+      if (!strcmp(from, SRC_CONST) &&
+          (!type || (strcmp(type, TYPE_CONST) && strcmp(type, TYPE_CONST_BOOL))))
+         return 0;
+      if (type && ((!strcmp(type, TYPE_CONST) && !cJSON_IsString(value)) ||
+                   (!strcmp(type, TYPE_CONST_BOOL) && !cJSON_IsBool(value))))
+         return 0;
       if (!known_empty(field_str(f, "empty")))
          return 0;
       {
@@ -879,6 +887,11 @@ cJSON *cli_argspec_build(const char *method, const cJSON *spec, int argc, char *
       cJSON_Delete(req);
       return NULL;
    }
+   /* Metadata selects the body; client-owned workspace path semantics stay
+    * shared with the compiled fallback rather than becoming a served program. */
+   if (!strcmp(method, "workspace.add") || !strcmp(method, "workspace.prepare"))
+      return cli_workspace_finalize_root(req, argc, argv,
+                                         opts.pos_count > 0 ? opts.positional[0] : NULL);
    return req;
 }
 

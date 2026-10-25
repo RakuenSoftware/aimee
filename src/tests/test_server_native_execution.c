@@ -613,6 +613,14 @@ void server_native_runtime_close(server_native_runtime_t *r)
       joined = 1;
    }
 }
+static int fixture_host_calls, fixture_host_successes;
+void server_native_runtime_tool_counts(const server_native_runtime_t *r, int *calls,
+                                       int *successful)
+{
+   assert(r == &runtime);
+   *calls = fixture_host_calls;
+   *successful = fixture_host_successes;
+}
 int server_native_runtime_result(const server_native_runtime_t *r, aimee_response_t *out)
 {
    assert(r == &runtime && joined && child_closed);
@@ -774,6 +782,8 @@ static int sdk_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
    int rc = sdk_peer(cfg->codex_host);
    assert(!cfg->bind_session("native-result", cfg->bind_context));
    out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
+   out->tool_calls = 999; /* SDK display metadata is not a host execution receipt. */
+   out->successful_tool_calls = 998;
    out->success = !rc;
    return mode == 15 || mode == 16 || mode == 18 ? -1 : rc;
 }
@@ -1079,6 +1089,8 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    child_closed = 1;
    out->success = 1;
    out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
+   out->tool_calls = 999; /* SDK display metadata is not a host execution receipt. */
+   out->successful_tool_calls = 998;
    return 0;
 }
 
@@ -1103,6 +1115,7 @@ static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   fixture_host_calls = fixture_host_successes = 0;
    owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
    expected_wire = AIMEE_WIRE_RESPONSES;
    expected_provider = expected_endpoint = expected_auth = NULL;
@@ -1240,6 +1253,7 @@ int main(int argc, char **argv)
           scenario == 0 || scenario == 6 || scenario == 7 || scenario == 8 || scenario == 10;
       assert((rc == 0) == success && out.success == success && !retained);
       assert(restored == 1 && !strcmp(parent_role, "parent"));
+      assert(out.tool_calls == 0 && out.successful_tool_calls == 0);
       if (private_home[0])
       {
          assert(access(private_home, F_OK));
@@ -1250,6 +1264,7 @@ int main(int argc, char **argv)
       {
          assert(!strcmp(out.response, "ORIGINAL canonical output"));
          assert(out.prompt_tokens == 73 && out.completion_tokens == 29);
+         assert(out.tool_calls == 0 && out.successful_tool_calls == 0);
          assert(out.cache_read_tokens == 11 && out.cache_write_tokens == 7);
          assert(terminal && !completed && !aborted && !closed);
          char lease_error[512];
@@ -1538,6 +1553,16 @@ int main(int argc, char **argv)
    assert(!server_native_session_reconcile("destination", "actor", "turn", recovery_error));
    assert(finished_reservation == 1 && !recovered && !strcmp(observed_epoch, "0"));
    old_completed = 0;
+   /* External runtime peer reports its already committed canonical outcomes;
+    * these replace contradictory SDK display counters, rather than adding to them. */
+   reset(0);
+   fixture_host_calls = 2;
+   fixture_host_successes = 1;
+   agent_result_t host_counted = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &host_counted));
+   assert(host_counted.tool_calls == 2 && host_counted.successful_tool_calls == 1);
+   agent_result_clear_response(&host_counted);
+   finish(1);
    /* The optional qualified path must reserve before HOME and finish only
     * after the real canonical terminal and exact boundary quiescence. */
    reset(0);
@@ -1560,7 +1585,8 @@ int main(int argc, char **argv)
    quiescence_failure = 1;
    agent_result_t retained_boundary = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &retained_boundary) < 0);
-   assert(terminal && reserved && !runtime_closed);
+   assert(terminal && reserved && !runtime_closed && sdk_calls == 1);
+   assert(retained_boundary.tool_calls == 0 && retained_boundary.successful_tool_calls == 0);
    finish(0);
    assert(!runtime_closed && !completed && !aborted && !finished_reservation);
    atomic_store(&quiescence_failure, 0);

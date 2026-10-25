@@ -46,19 +46,6 @@ extern "C"
     * otherwise. They never block, never touch the filesystem, and are
     * safe to call on partial / unrelated frames (returns 0). */
 
-   /* If `line` is an `item/completed` notification whose `params.item.type`
-    * is anything OTHER than `agentMessage` (i.e. a tool action like a
-    * shell exec, file edit, or web fetch), return 1 so the caller can
-    * count it as a tool call. Returns 0 for non-matching lines, parse
-    * errors, or items that ARE agentMessages. */
-   int cli_codex_parse_tool_action(const char *line);
-
-   /* If `line` is a `thread/tokenUsage/updated` notification, copy the
-    * `params.tokenUsage.last.{inputTokens, outputTokens}` values into
-    * *prompt and *completion and return 1. Either out-param may be
-    * NULL. Missing sub-fields are silently treated as zero. */
-   int cli_codex_parse_token_usage(const char *line, int *prompt, int *completion);
-
    /* If `line` carries a Codex app-server error notification or a failed
     * turn/completed error, copy a human-readable error into *out_text
     * (caller frees) and return 1. Nested Responses API JSON errors are

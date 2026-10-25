@@ -91,6 +91,7 @@ cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
 cJSON *marshal_tool_call(int argc, char **argv);
 cJSON *marshal_agent_args(const char *method, int argc, char **argv);
+cJSON *cli_workspace_finalize_root(cJSON *req, int argc, char **argv, const char *root_arg);
 cJSON *marshal_workspace_add(int argc, char **argv);
 cJSON *marshal_workspace_prepare(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);
