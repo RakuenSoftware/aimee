@@ -22,7 +22,7 @@ typedef struct
 /* The spawn_delegate capability for the skill-review job: build the delegate request + compute
  * ctx from (role, brief) and submit it to an on-demand delegate worker. Mirrors the coord
  * dispatcher's adapter (server_coord_dispatcher.c). Records the outcome in the backing. */
-static int skill_review_spawn_delegate(void *ctx, const char *role, const char *brief)
+static int skill_review_spawn_delegate(void *ctx, const char *role, const aimee_message_t *message)
 {
    skill_review_backing_t *b = (skill_review_backing_t *)ctx;
    if (!b)
@@ -32,7 +32,13 @@ static int skill_review_spawn_delegate(void *ctx, const char *role, const char *
    if (!req)
       return -1;
    cJSON_AddStringToObject(req, "role", role && role[0] ? role : "review");
-   cJSON_AddStringToObject(req, "prompt", brief ? brief : "");
+   cJSON *input = aimee_ir_message_json(message);
+   if (!input || !cJSON_AddItemToObject(req, "message", input))
+   {
+      cJSON_Delete(input);
+      cJSON_Delete(req);
+      return -1;
+   }
    cJSON_AddTrueToObject(req, "handoff_json");
    compute_ctx_t *cctx = calloc(1, sizeof(compute_ctx_t));
    if (!cctx)
@@ -89,8 +95,10 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    gw_turn_capabilities_t caps = {&backing, skill_review_spawn_delegate, NULL};
    char turn_id[64];
    snprintf(turn_id, sizeof(turn_id), "skill-review-%s", session_id);
-   if (gw_orch_delegates_run(&caps, turn_id, "review", prompt, skill_review_delegates_enabled()) !=
-       0)
+   aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = prompt};
+   aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+   if (gw_orch_delegates_run(&caps, turn_id, "review", &message,
+                             skill_review_delegates_enabled()) != 0)
    {
       /* Module disabled (or catalog build failed): no spawn attempted. A disabled module is an
        * intentional operator choice, not a failure. */

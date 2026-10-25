@@ -3,6 +3,7 @@ package families
 import (
 	"context"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -277,6 +278,34 @@ func coordJobCreate(ctx context.Context, q store.Queryer, f []string) (uint32, [
 	return store.StatusOK, []string{store.I64toa(id)}, nil
 }
 
+// New queue writes are canonical IR. Legacy prompt rows are imported only at
+// this storage read boundary; valid canonical bytes and opaque fields stay exact.
+func coordTaskMessage(raw string, legacy bool) (string, bool) {
+	if raw == "" {
+		return "", false
+	}
+	if canonical.ValidMessage(json.RawMessage(raw)) {
+		var header struct {
+			Role string `json:"role"`
+		}
+		if json.Unmarshal([]byte(raw), &header) != nil || header.Role != "user" {
+			return "", false
+		}
+		return raw, true
+	}
+	if !legacy {
+		return "", false
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &object) == nil &&
+		(object["role"] != nil || object["blocks"] != nil) {
+		return "", false // malformed canonical input is never reinterpreted as text
+	}
+	encoded, err := json.Marshal(canonical.Message{Role: "user",
+		Blocks: []canonical.Block{{Type: "text", Text: &raw}}})
+	return string(encoded), err == nil && canonical.ValidMessage(encoded)
+}
+
 func coordTaskAdd(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	jobID, ok := store.Atoi64(f[0])
 	if !ok || jobID <= 0 {
@@ -298,9 +327,13 @@ func coordTaskAdd(ctx context.Context, q store.Queryer, f []string) (uint32, []s
 	if persona == "" {
 		persona = "engineer"
 	}
+	message, valid := coordTaskMessage(f[4], false)
+	if !valid && !(f[4] == "" && stepID > 0) {
+		return store.StatusInvalid, nil, nil
+	}
 	var id int64
 	if err := q.QueryRow(ctx, coordTaskAddSQL,
-		jobID, stepID, files, role, f[4], f[5], persona).Scan(&id); err != nil {
+		jobID, stepID, files, role, message, f[5], persona).Scan(&id); err != nil {
 		return store.StatusFailed, nil, err
 	}
 	return store.StatusOK, []string{store.I64toa(id)}, nil
@@ -502,5 +535,9 @@ func coordTaskGetDispatch(ctx context.Context, q store.Queryer, f []string) (uin
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}
-	return store.StatusOK, []string{role, prompt, files, cwd, persona}, nil
+	message, valid := coordTaskMessage(prompt, true)
+	if !valid {
+		return store.StatusInvalid, nil, nil
+	}
+	return store.StatusOK, []string{role, message, files, cwd, persona}, nil
 }

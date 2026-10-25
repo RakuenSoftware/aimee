@@ -657,7 +657,9 @@ static int wfe_delegate_dispatch(const char *workdir, const char *role, const ch
    char err[256] = "";
    struct timespec t0 = {0, 0}, t1 = {0, 0};
    int ok0 = clock_gettime(CLOCK_MONOTONIC, &t0) == 0;
-   int rc = g_delegate->run(wd, role, prompt, artifact_path, out_commit_sha, err, sizeof err);
+   aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = (char *)prompt};
+   aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+   int rc = g_delegate->run(wd, role, &message, artifact_path, out_commit_sha, err, sizeof err);
    int ok1 = clock_gettime(CLOCK_MONOTONIC, &t1) == 0;
    if (out_cost) /* a failed turn still consumed wall-clock -> still costs */
       *out_cost = (ok0 && ok1) ? wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +

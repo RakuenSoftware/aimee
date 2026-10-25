@@ -5049,7 +5049,7 @@
         "step_id",
         "files_json",
         "role",
-        "prompt",
+        "message",
         "cwd",
         "persona"
       ],
@@ -5086,7 +5086,7 @@
             "required": false
           },
           {
-            "name": "prompt",
+            "name": "message_json",
             "type": "text",
             "required": false
           },
@@ -5917,8 +5917,7 @@
         "task_id",
         "role_out",
         "role_cap",
-        "prompt_out",
-        "prompt_cap",
+        "message_out",
         "files_out",
         "files_cap",
         "cwd_out",
@@ -5954,9 +5953,9 @@
             "width": "DB1_COORD_ROLE_LEN"
           },
           {
-            "name": "prompt",
+            "name": "message_json",
             "type": "text",
-            "width": "DB1_COORD_PROMPT_LEN"
+            "width": "DB1_COORD_MESSAGE_LEN"
           },
           {
             "name": "files",

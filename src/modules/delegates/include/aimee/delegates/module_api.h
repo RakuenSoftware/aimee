@@ -1078,10 +1078,11 @@ static inline int aimee_delegates_noopwrite_response_decode(const uint8_t *in, s
  * the coord job, and the task rows stays with the caller, which owns the
  * database. */
 
-#define AIMEE_DELEGATES_EVENT_LAUNCHPLAN          6675u
-#define AIMEE_DELEGATES_STAGE_LAUNCHPLAN          19u
-#define AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC  0x514c5044u /* "DPLQ" */
-#define AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC 0x534c5044u /* "DPLS" */
+#define AIMEE_DELEGATES_EVENT_LAUNCHPLAN         6675u
+#define AIMEE_DELEGATES_STAGE_LAUNCHPLAN         19u
+#define AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC 0x514c5044u /* "DPLQ" */
+#define AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC                                                  \
+   0x494c5044u /* "DPLI": canonical launch message IR */
 
 /* A bounded append cursor. Once it overflows it stays overflowed, so a caller
  * may build the whole request and check once at the end rather than after every

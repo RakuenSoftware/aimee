@@ -17,6 +17,9 @@
 #include <aimee/core/event_bus/module_client.h>
 #include "db1_client/db1_module_api.h"
 #include "db1_client/wm.h"
+#include "db1_client/coord_jobs.h"
+#include <aimee/ir/session_event.h>
+#include "cJSON.h"
 #include "db1_client/server_sessions.h"
 
 /* --- the stubbed bus ------------------------------------------------------ */
@@ -94,9 +97,62 @@ static aimee_module_call_result_t metadata_reply(const void *request, uint32_t r
    return AIMEE_MODULE_CALL_OK;
 }
 
+static int coord_mode, coord_calls;
+static char *coord_message;
+static aimee_module_call_result_t coord_reply(const void *request, void *response,
+                                              uint32_t capacity, uint32_t *length)
+{
+   const uint8_t *input = request;
+   uint32_t op = aimee_db1_get_u32(input), count = aimee_db1_get_u32(input + 4);
+   coord_calls++;
+   const char *cells[5] = {"42"};
+   uint32_t n = 1;
+   if (op == AIMEE_DB1_OP_COORD_TASK_ADD)
+   {
+      assert(count == 7);
+      size_t at = 8;
+      for (uint32_t i = 0; i < count; i++)
+      {
+         uint32_t size = aimee_db1_get_u32(input + at);
+         at += 4;
+         if (i == 4)
+            assert(size == strlen(coord_message) && !memcmp(input + at, coord_message, size));
+         at += size;
+      }
+   }
+   else
+   {
+      assert(op == AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH && count == 1);
+      cells[0] = "review";
+      cells[1] = coord_mode == 2 ? "{\"role\":\"user\",\"blocks\":\"bad\"}" : coord_message;
+      cells[2] = "[]";
+      cells[3] = "/work";
+      cells[4] = "engineer";
+      n = 5;
+   }
+   uint8_t *out = response;
+   assert(capacity >= 8);
+   aimee_db1_put_u32(out, AIMEE_DB1_STATUS_OK);
+   aimee_db1_put_u32(out + 4, n);
+   size_t at = 8;
+   for (uint32_t i = 0; i < n; i++)
+   {
+      size_t size = strlen(cells[i]);
+      assert(at + 4 + size <= capacity);
+      aimee_db1_put_u32(out + at, (uint32_t)size);
+      at += 4;
+      memcpy(out + at, cells[i], size);
+      at += size;
+   }
+   *length = (uint32_t)at;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 int obs_bus_module_available(uint32_t event_kind)
 {
-   assert(event_kind == (metadata_mode ? AIMEE_DB1_EVENT_SESSIONS : AIMEE_DB1_EVENT_CONVERSATION));
+   assert(event_kind == (coord_mode      ? AIMEE_DB1_EVENT_AGENT_WORK
+                         : metadata_mode ? AIMEE_DB1_EVENT_SESSIONS
+                                         : AIMEE_DB1_EVENT_CONVERSATION));
    return stub_available;
 }
 
@@ -118,7 +174,14 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    (void)trace_id;
    (void)cancelled;
    (void)cancel_context;
-   assert(event_kind == (metadata_mode ? AIMEE_DB1_EVENT_SESSIONS : AIMEE_DB1_EVENT_CONVERSATION));
+   assert(event_kind == (coord_mode      ? AIMEE_DB1_EVENT_AGENT_WORK
+                         : metadata_mode ? AIMEE_DB1_EVENT_SESSIONS
+                                         : AIMEE_DB1_EVENT_CONVERSATION));
+   if (coord_mode)
+   {
+      assert(stage_id == AIMEE_DB1_STAGE_AGENT_WORK && deadline_ns);
+      return coord_reply(request_body, response_body, response_capacity, response_len);
+   }
    if (metadata_mode)
    {
       assert(stage_id == AIMEE_DB1_STAGE_SESSIONS && deadline_ns);
@@ -542,8 +605,49 @@ static void test_complete_session_metadata(void)
    metadata_mode = 0;
 }
 
+static void test_coord_queue_canonical_message_round_trip(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "task 雪\nquoted: \"task\""},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/input.png"}};
+   aimee_message_t source = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   cJSON *expected = aimee_ir_message_json(&source);
+   assert(expected);
+   coord_message = cJSON_PrintUnformatted(expected);
+   assert(coord_message);
+   coord_mode = 1;
+   coord_calls = 0;
+   assert(db1_coord_job_add_task(7, 0, "[]", "review", &source, "/work", "engineer") == 42);
+   aimee_message_t loaded = {0};
+   char role[32], files[32], cwd[64], persona[32];
+   assert(!db1_coord_task_get_dispatch(42, role, sizeof role, &loaded, files, sizeof files, cwd,
+                                       sizeof cwd, persona, sizeof persona));
+   cJSON *actual = aimee_ir_message_json(&loaded);
+   assert(actual && cJSON_Compare(expected, actual, 1));
+   cJSON_Delete(actual);
+   aimee_message_free(&loaded);
+   assert(coord_calls == 2 && !strcmp(role, "review") && !strcmp(cwd, "/work"));
+   source.raw = cJSON_CreateObject();
+   assert(source.raw);
+   assert(db1_coord_job_add_task(7, 0, "[]", "review", &source, "/work", "engineer") < 0);
+   assert(coord_calls == 2);
+   cJSON_Delete(source.raw);
+   source.raw = NULL;
+   coord_mode = 2;
+   assert(db1_coord_task_get_dispatch(42, role, sizeof role, &loaded, files, sizeof files, cwd,
+                                      sizeof cwd, persona, sizeof persona) != 0);
+   aimee_message_free(&loaded);
+   free(coord_message);
+   cJSON_Delete(expected);
+   coord_mode = 0;
+   puts("coord queue client: full text/image IR round trip; malformed reply and sidecar loss "
+        "refused");
+}
+
 int main(void)
 {
+   test_coord_queue_canonical_message_round_trip();
    test_complete_session_metadata();
    printf("db1_conversation_client:\n");
    test_a_column_fills_the_callers_rows();

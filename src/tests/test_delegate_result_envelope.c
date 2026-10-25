@@ -440,8 +440,32 @@ static void test_handoff_repair_accounting(void)
    agent_result_clear_response(&repair);
 }
 
+static void test_delegate_queue_input_is_ir(void)
+{
+   compute_ctx_t context = {0};
+   context.req = cJSON_Parse("{\"prompt\":\"External CLI task text\"}");
+   assert(context.req && delegate_input_admit(&context, 0) != 0);
+   assert(!context.ir_input.role);
+   assert(!delegate_input_admit(&context, 1));
+   assert(!cJSON_GetObjectItem(context.req, "prompt"));
+   assert(cJSON_IsObject(cJSON_GetObjectItem(context.req, "message")));
+   assert(!strcmp(context.ir_input.role, "user"));
+   assert(!strcmp(context.ir_input.blocks[0].text, "External CLI task text"));
+   assert(!delegate_input_admit(&context, 0));
+   aimee_message_free(&context.ir_input);
+   cJSON_Delete(context.req);
+   context = (compute_ctx_t){0};
+   context.req = cJSON_Parse("{\"message\":{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\","
+                             "\"text\":\"not a task\"}]}}");
+   assert(context.req && delegate_input_admit(&context, 0) != 0);
+   aimee_message_free(&context.ir_input);
+   cJSON_Delete(context.req);
+   puts("delegate queue: legacy text converts only at external ingress; worker requires user IR");
+}
+
 int main(void)
 {
+   test_delegate_queue_input_is_ir();
    test_handoff_repair_accounting();
    test_terminal_consumers();
    test_worker_projection();

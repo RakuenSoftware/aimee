@@ -1614,7 +1614,7 @@ cJSON *tool_job_start(cJSON *args)
    int added = 0;
    for (int i = 0; i < plan.step_count; i++)
    {
-      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "engineer") > 0)
+      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", NULL, "", "engineer") > 0)
          added++;
    }
 

@@ -8,6 +8,7 @@
 #define DEC_DB1_COORD_JOBS_H 1
 
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -20,13 +21,12 @@ extern "C"
 #define DB1_COORD_FILES_LEN    2048
 #define DB1_COORD_ROLE_LEN     32
 #define DB1_COORD_CWD_LEN      512
-/* A dispatched prompt crosses the module boundary, so its width is the
-   contract's rather than each caller's. */
-#define DB1_COORD_PROMPT_LEN   16384
-#define DB1_COORD_RESULT_LEN   4096
-#define DB1_COORD_ERROR_LEN    1024
-#define DB1_COORD_MAX_TASKS    64
-#define DB1_COORD_DEFAULT_PAR  3
+/* One complete canonical message plus its terminating NUL; matches Go IR admission. */
+#define DB1_COORD_MESSAGE_LEN (1024 * 1024 + 1)
+#define DB1_COORD_RESULT_LEN  4096
+#define DB1_COORD_ERROR_LEN   1024
+#define DB1_COORD_MAX_TASKS   64
+#define DB1_COORD_DEFAULT_PAR 3
 
 /* Sentinel plan_id for an AD-HOC coord job — one the workflow engine enqueues to
  * orchestrate a single delegate with no execution-plan decomposition behind it.
@@ -65,7 +65,7 @@ extern "C"
 
    int db1_coord_job_create(int plan_id, int max_concurrent);
    int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role,
-                              const char *prompt, const char *cwd, const char *persona);
+                              const aimee_message_t *message, const char *cwd, const char *persona);
    int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out);
    int db1_coord_job_complete_task(int task_id, const char *result);
    int db1_coord_job_fail_task(int task_id, const char *error);
@@ -89,10 +89,10 @@ extern "C"
    int db1_coord_job_list_recent(db1_coord_job_t *out, int max);
    /* List IDs of coord jobs with pending or running tasks (needs dispatch work). */
    int db1_coord_job_list_active_ids(int *out_ids, int max);
-   /* Read the dispatch fields (role, prompt, files, cwd, persona) for a single task.
-    * Returns 0 on success. */
-   int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out,
-                                   size_t prompt_cap, char *files_out, size_t files_cap,
+   /* Read the dispatch fields (role, canonical message, files, cwd, persona) for a single task.
+    * Returns 0 on success; the caller frees message_out with aimee_message_free. */
+   int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap,
+                                   aimee_message_t *message_out, char *files_out, size_t files_cap,
                                    char *cwd_out, size_t cwd_cap, char *persona_out,
                                    size_t persona_cap);
 

@@ -47,7 +47,7 @@ typedef struct
 /* The spawn_delegate capability for coord tasks: build the delegate request + compute ctx from
  * (role, brief) and the backing, then submit to an on-demand delegate worker. Returns 0/-1 and
  * also records it in the backing so the dispatcher can release+retry a refused claim. */
-static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
+static int coord_spawn_delegate(void *ctx, const char *role, const aimee_message_t *message)
 {
    coord_spawn_backing_t *b = (coord_spawn_backing_t *)ctx;
    if (!b)
@@ -72,7 +72,13 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
       cJSON_AddTrueToObject(req, "tools");
       cJSON_AddNumberToObject(req, "max_turns_cap", COORD_WRITE_MAX_TURNS);
    }
-   cJSON_AddStringToObject(req, "prompt", brief ? brief : "");
+   cJSON *input = aimee_ir_message_json(message);
+   if (!input || !cJSON_AddItemToObject(req, "message", input))
+   {
+      cJSON_Delete(input);
+      cJSON_Delete(req);
+      return -1;
+   }
    /* Persona (the delegate's identity, required for every delegate) is carried on
     * the coord task now — the orchestrator that enqueued it (coord planner or the
     * workflow engine) named it. Default to engineer for legacy rows. */
@@ -128,25 +134,25 @@ static int coord_delegates_enabled(void)
  * hook rather than an inline imperative call (see gw_orch_delegates). Lives here (its only
  * caller) rather than in server_compute.c. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd,
-                                       const char *persona, const char *claim_owner,
-                                       int require_handoff)
+                                       const aimee_message_t *message, const char *files_json,
+                                       const char *cwd, const char *persona,
+                                       const char *claim_owner, int require_handoff)
 {
-   if (!ctx || task_id <= 0 || !prompt || !prompt[0])
+   if (!ctx || task_id <= 0 || !message || !message->role || strcmp(message->role, "user") ||
+       message->n_blocks < 1)
       return -1;
    coord_spawn_backing_t backing = {ctx,        task_id, claim_owner,     persona,
                                     files_json, cwd,     require_handoff, -1};
    gw_turn_capabilities_t caps = {&backing, coord_spawn_delegate, NULL};
    char turn_id[48];
    snprintf(turn_id, sizeof(turn_id), "coord-task-%d", task_id);
-   if (gw_orch_delegates_run(&caps, turn_id, role, prompt, coord_delegates_enabled()) != 0)
+   if (gw_orch_delegates_run(&caps, turn_id, role, message, coord_delegates_enabled()) != 0)
       return -1; /* delegates module disabled -> not dispatched; caller releases + retries */
    return backing.spawn_rc; /* 0 spawned, -1 refused (ceiling/pool full) */
 }
 
 #define COORD_POLL_INTERVAL_SECS 10
 #define COORD_MAX_ACTIVE_JOBS    32
-#define COORD_PROMPT_MAX         DB1_COORD_PROMPT_LEN
 #define COORD_FILES_MAX          DB1_COORD_FILES_LEN
 #define COORD_CWD_MAX            DB1_COORD_CWD_LEN
 #define COORD_ROLE_MAX           DB1_COORD_ROLE_LEN
@@ -277,25 +283,17 @@ static int dispatcher_sweep(void)
             break; /* no more claimable tasks for this job */
 
          char role[COORD_ROLE_MAX] = "";
-         char prompt[COORD_PROMPT_MAX] = "";
+         aimee_message_t message = {0};
          char files[COORD_FILES_MAX] = "";
          char cwd[COORD_CWD_MAX] = "";
          char persona[COORD_ROLE_MAX] = "";
-         if (db1_coord_task_get_dispatch(task_id, role, sizeof(role), prompt, sizeof(prompt), files,
+         if (db1_coord_task_get_dispatch(task_id, role, sizeof(role), &message, files,
                                          sizeof(files), cwd, sizeof(cwd), persona,
                                          sizeof(persona)) != 0)
          {
+            aimee_message_free(&message);
             db1_coord_job_fail_task_owned(task_id, g_claim_owner,
                                           "dispatcher could not read task dispatch fields");
-            continue;
-         }
-
-         if (!prompt[0])
-         {
-            db1_coord_job_fail_task_owned(task_id, g_claim_owner,
-                                          "task has no stored prompt; cannot dispatch");
-            LOG_WARN("coord_dispatcher", "coord task #%d (job #%d) has empty prompt — failing task",
-                     task_id, job_id);
             continue;
          }
 
@@ -303,19 +301,21 @@ static int dispatcher_sweep(void)
           * WFE job (WFE_COORD_PLAN_ID) does not — its delegate returns free-form
           * output that the workflow engine reads raw. */
          int require_handoff = (job.plan_id != WFE_COORD_PLAN_ID);
-         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd, persona,
+         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, &message, files, cwd, persona,
                                                 g_claim_owner, require_handoff) != 0)
          {
             /* Pool full — release the claim and retry next sweep. */
             db1_coord_job_release_task(task_id);
             LOG_INFO("coord_dispatcher", "coord task #%d (job #%d): compute pool full, will retry",
                      task_id, job_id);
+            aimee_message_free(&message);
             break;
          }
 
          LOG_INFO("coord_dispatcher", "dispatched coord task #%d (job #%d, role=%s)", task_id,
                   job_id, role[0] ? role : "execute");
          dispatched++;
+         aimee_message_free(&message);
       }
    }
    return dispatched;

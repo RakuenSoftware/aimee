@@ -472,7 +472,10 @@ int main(int argc, char **argv)
    cJSON_AddStringToObject(request, "role", full_worker_role());
    cJSON_AddStringToObject(request, "persona", "engineer");
    cJSON_AddStringToObject(request, "cwd", workspace);
-   cJSON_AddStringToObject(request, "prompt", "Complete the owned full worker protocol fixture.");
+   aimee_block_t task_text = {.type = AIMEE_BLK_TEXT,
+                              .text = "Complete the owned full worker protocol fixture."};
+   aimee_message_t task_message = {.role = "user", .blocks = &task_text, .n_blocks = 1};
+   cJSON_AddItemToObject(request, "message", aimee_ir_message_json(&task_message));
    const char *agent = getenv("AIMEE_FULL_WORKER_AGENT");
    assert(agent && agent[0] == '/' && strlen(agent) < 256);
    assert(access(agent, X_OK) != 0); /* Image-only agent: no host availability substitute. */

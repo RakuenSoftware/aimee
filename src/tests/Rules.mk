@@ -4974,7 +4974,9 @@ $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \
                                        $(OBJDIR)/db1_client/sessions.o \
                                        $(OBJDIR)/db1_client/conversation.o $(OBJDIR)/db1_client/transport.o \
-                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
+                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o \
+                                       $(OBJDIR)/db1_client/agent_work.o \
+                                       $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 

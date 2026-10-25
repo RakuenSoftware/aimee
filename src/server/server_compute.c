@@ -717,6 +717,36 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
    return 0;
 }
 
+/* The internal worker requires IR. Only the external launch ingress may import
+ * the legacy CLI/tool text field, before that request enters the queue. */
+static int delegate_input_admit(compute_ctx_t *cctx, int external_text)
+{
+   cJSON *input = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
+   cJSON *text = cJSON_GetObjectItemCaseSensitive(cctx->req, "prompt");
+   if (!input && external_text && cJSON_IsString(text))
+   {
+      aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = text->valuestring};
+      aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+      input = aimee_ir_message_json(&message);
+      if (!input || !cJSON_AddItemToObject(cctx->req, "message", input))
+      {
+         cJSON_Delete(input);
+         return -1;
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "prompt");
+      text = NULL;
+   }
+   if (!input || text || (!cctx->ir_input.role && aimee_ir_message_parse(input, &cctx->ir_input)))
+      return -1;
+   const aimee_message_t *message = &cctx->ir_input;
+   if (!message->role || strcmp(message->role, "user") || message->n_blocks != 1 ||
+       message->blocks[0].type != AIMEE_BLK_TEXT || !message->blocks[0].text ||
+       message->blocks[0].raw || message->blocks[0].cache_control || message->blocks[0].cache_ttl)
+      return -1;
+   memset(&cctx->ir_input.blocks[0].context, 0, sizeof cctx->ir_input.blocks[0].context);
+   return 0;
+}
+
 static void delegate_worker_run(void *arg)
 {
    aimee_ir_session_begin_task();
@@ -770,7 +800,6 @@ static void delegate_worker_run(void *arg)
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
-   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
    cJSON *jmaxcost = cJSON_GetObjectItemCaseSensitive(req, "max_cost_usd");
    cJSON *jsystem = cJSON_GetObjectItemCaseSensitive(req, "system_prompt");
@@ -796,7 +825,12 @@ static void delegate_worker_run(void *arg)
    cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
-   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+   if (delegate_input_admit(cctx, 0))
+   {
+      delegation_compute_error(cctx, "delegate task requires a canonical user text message");
+      goto delegate_fail;
+   }
+   const char *prompt = cctx->ir_input.blocks[0].text;
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
@@ -1725,7 +1759,21 @@ static void delegate_worker_run(void *arg)
        * also resets write capability and loses the managed revision root. */
       server_delegate_heartbeat_begin(cctx->background_job_id);
       aimee_request_t request = {0};
-      rc = aimee_ir_request_from_text(&request, system_prompt, run_prompt, max_tokens, 0.3)
+      aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system_prompt};
+      aimee_block_t content = cctx->ir_input.blocks[0];
+      content.text = (char *)run_prompt;
+      aimee_message_t message = cctx->ir_input;
+      message.blocks = &content;
+      aimee_request_t view = {.system = &policy,
+                              .n_system = system_prompt && system_prompt[0] ? 1 : 0,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_max_tokens = max_tokens > 0,
+                              .max_tokens = max_tokens > 0 ? max_tokens : 0,
+                              .has_temperature = 1,
+                              .temperature = 0.3};
+      aimee_ir_classify_context(&view);
+      rc = aimee_ir_request_clone(&view, &request)
                ? AGENT_RC_CONTEXT_REFUSED
                : delegate_run_with_credential_retry(
                      &acfg, target_agent, role, &request, force_tools, delegate_allows_writes,
@@ -2178,11 +2226,17 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       return -1;
    }
 
+   if (delegate_input_admit(cctx, 1))
+   {
+      compute_ctx_free(cctx);
+      if (err)
+         snprintf(err, errn, "delegate task requires a canonical user text message");
+      return -1;
+   }
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
-   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    const char *requested_role = cJSON_IsString(jrole) ? jrole->valuestring : "execute";
    const char *role = delegate_role_canonicalize(requested_role);
-   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+   const char *prompt = cctx->ir_input.blocks[0].text;
 
    /* Canonicalization fails CLOSED: with no delegates module registered it
       answers "" for every role, by design. That empty string used to travel on
@@ -2213,11 +2267,12 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
          snprintf(err, errn, "missing prompt");
       return -1;
    }
-   if (strlen(prompt) < 20)
+   size_t prompt_length = strlen(prompt);
+   if (prompt_length < 20)
    {
-      compute_ctx_free(cctx);
       if (err)
-         snprintf(err, errn, "prompt too short (%zu chars)", strlen(prompt));
+         snprintf(err, errn, "prompt too short (%zu chars)", prompt_length);
+      compute_ctx_free(cctx);
       return -1;
    }
 

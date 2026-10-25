@@ -101,6 +101,37 @@ PostgreSQL and is not a passing database result. Owner checks pass with existing
 line warnings. Workflow/coord and compatibility-projection dataflow audit and a
 successful real browser completion are still outstanding.
 
+QA browser now runs `483dc6edc` (image
+`sha256:3c0903fcab9a93e2aaec547c48d6d5928744bcc9548b2c21a9b056edccea7b44`).
+The canonical build and all 87 installed products/19 modules qualify. All 170
+pre-upgrade IR rows and native/cache/private authority/grants/SDK/jobs survived;
+public TLS renewal retained its key and all private material. One duplicate local
+upgrade-controller invocation refused at existing-state mkdir before any mutation;
+the original successful upgrade receipt is retained on the guest and locally.
+The normal new real Claude browser attempt failed with the verified error
+"Claude sign-in refresh was rate limited (HTTP 429). Try again later."
+The same session reloaded without page errors. All 170 prior rows remain and the
+failed turn adds exactly 3 (173 total); SDK/native active counts remain zero.
+No successful real completion, continuation or tool turn is established.
+Receipts: `/var/tmp/aimee-ir-browser-483dc6edc-native-ui/result.json` and
+`after-ui-summary.json`; all ordinary services were restored after the build.
+
+The next source change makes orchestration spawn capabilities carry canonical
+messages and requires IR at the delegate worker. Legacy CLI/tool text converts
+at the external launch ingress before queueing. Workflow providers and durable
+coord task writers/readers now carry messages; Go admits only canonical new
+writes and imports legacy prompt rows explicitly at the storage read. Canonical
+bytes remain exact. Launch-plan module replies carry canonical message JSON with
+a distinct response magic, so old raw-prompt replies refuse. Native sidecars are
+refused by the sidecar-free queue contract rather than silently discarded.
+The real C client round trip preserves text/image blocks and rejects malformed
+replies. Normal and sanitizer client/queue/admission/orchestration checks pass;
+Go delegates/store-family normal and race checks pass; workflow block checks pass
+with their fixture initial branch made explicit. No real PostgreSQL queue/model
+execution is claimed by these protocol checks. Owner and DB1 contract checks pass.
+Remaining audit includes Go engine/roundtable prompt-tuple DTOs and actual model
+message boundaries; do not mark the whole migration complete.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload
