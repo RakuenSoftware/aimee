@@ -156,6 +156,20 @@ it('replays unsupported request settings as a read-only provider boundary notice
   expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
 });
 
+it('shows omitted empty assistant envelopes without deleting canonical history', () => {
+  const initial = emptySession('s');
+  const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'empty-assistant', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'claude', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, omitted_empty_messages: 1 } } };
+  const state = reduceSession(initial, report);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain("1 empty assistant message remains in history and was omitted from claude's input");
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
+});
+
 it('replays ACP fidelity as read-only notices without changing message or control authority', () => {
   const initial = emptySession('s');
   const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'acp-context', turn_id: 't', actor: 'alice',
@@ -200,7 +214,7 @@ it('keeps ACP prior-history context fidelity outside message and tool authority'
 });
 
 it('rejects malformed or empty ACP fidelity counts at the durable replay boundary', () => {
-  for (const field of ['omitted_request_controls', 'host_context_blocks_as_text', 'history_messages_as_text', 'unverified_external_tool_reports']) {
+  for (const field of ['omitted_empty_messages', 'omitted_request_controls', 'host_context_blocks_as_text', 'history_messages_as_text', 'unverified_external_tool_reports']) {
     for (const count of [-1, 0, 0.5, 4097, Number.MAX_SAFE_INTEGER + 1, null, '1']) {
       const invalid = { version: 1, session_id: 's', sequence: '1', event_id: 'bad-projection', turn_id: 't', actor: 'alice',
         event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,

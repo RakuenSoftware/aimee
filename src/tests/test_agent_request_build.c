@@ -569,7 +569,7 @@ static void test_canonical_history_egress_projection(void)
 
 typedef struct
 {
-   int events, controls, reject;
+   int events, controls, empty, reject;
 } projection_fixture_t;
 
 static int fixture_projection_sink(const aimee_session_event_t *event, void *context)
@@ -578,12 +578,14 @@ static int fixture_projection_sink(const aimee_session_event_t *event, void *con
    assert(event->kind == AIMEE_SESSION_PROJECTION &&
           !strcmp(event->projection_boundary, "request"));
    assert(!event->projection_reasoning && !event->projection_opaque &&
-          !event->projection_cache_controls && event->projection_request_controls > 0);
+          !event->projection_cache_controls &&
+          (event->projection_request_controls > 0 || event->projection_empty_messages > 0));
    cJSON *encoded = aimee_ir_session_event_json(event);
    assert(encoded);
    cJSON_Delete(encoded);
    fixture->events++;
    fixture->controls = event->projection_request_controls;
+   fixture->empty = event->projection_empty_messages;
    return fixture->reject;
 }
 
@@ -623,6 +625,29 @@ static void test_host_control_projection_capture(void)
    aimee_ir_session_set_sink(NULL, NULL);
    aimee_ir_session_begin_task();
    aimee_request_free(&input);
+   aimee_block_t words[] = {{.type = AIMEE_BLK_TEXT, .text = "old task"},
+                            {.type = AIMEE_BLK_TEXT, .text = "continue task"}};
+   aimee_message_t history[] = {{.role = "user", .blocks = &words[0], .n_blocks = 1},
+                                {.role = "assistant"},
+                                {.role = "user", .blocks = &words[1], .n_blocks = 1}};
+   aimee_request_t historical = {.messages = history, .n_messages = 3};
+   cJSON *historical_before = aimee_ir_request_json(&historical);
+   agent = mk_agent("anthropic", "configured-claude");
+   for (int rejected = 0; rejected < 2; rejected++)
+   {
+      fixture = (projection_fixture_t){.reject = rejected};
+      aimee_ir_session_set_sink(fixture_projection_sink, &fixture);
+      body = agent_build_host_request_ir(&agent, &historical);
+      assert(fixture.events == 1 && fixture.empty == 1 && !fixture.controls);
+      assert(rejected ? !body && aimee_ir_session_capture_failed() : body != NULL);
+      cJSON_Delete(body);
+      aimee_ir_session_set_sink(NULL, NULL);
+      aimee_ir_session_begin_task();
+      cJSON *after = aimee_ir_request_json(&historical);
+      assert(after && cJSON_Compare(historical_before, after, 1));
+      cJSON_Delete(after);
+   }
+   cJSON_Delete(historical_before);
    puts("actual omitted host controls report exact canonical projection counts and require active "
         "capture OK");
 }

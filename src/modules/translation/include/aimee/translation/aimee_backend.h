@@ -30,6 +30,7 @@ typedef struct
    int omitted_reasoning_blocks;
    int omitted_opaque_state_blocks;
    int omitted_cache_controls;
+   int omitted_empty_messages;
 } aimee_wire_projection_report_t;
 /* Only translation-created host layout extensions belong in a prepared
  * execution profile. Whole native conversations/selectors cannot be profiles. */
@@ -41,6 +42,8 @@ int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
 void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
                                      aimee_wire_projection_report_t *report);
 int anthropic_ir_block_replayable(const aimee_block_t *block);
+/* Historical assistant envelopes with no blocks cannot become Anthropic content. */
+int anthropic_ir_omitted_empty_messages(const aimee_request_t *request);
 
 /* A local replay fence from the actual sent Anthropic request. No credentials or
  * provider state; signatures remain opaque and are still verified upstream. */

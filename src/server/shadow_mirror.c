@@ -482,7 +482,7 @@ void shadow_mirror_dispatch_admitted(const aimee_request_t *owner)
       if (!legacy)
          aimee_backend_projection_report(request, wire, &projection);
       if (!projection.omitted_reasoning_blocks && !projection.omitted_opaque_state_blocks &&
-          !projection.omitted_cache_controls)
+          !projection.omitted_cache_controls && !projection.omitted_empty_messages)
          body = legacy ? mirror_text_request(request) : aimee_backend_render_wire(request, wire);
    }
    if (!body)

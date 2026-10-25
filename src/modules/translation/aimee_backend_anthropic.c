@@ -695,7 +695,8 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
                    restore_native_section(out, ir->raw, "system");
       left = (aimee_request_t){.messages = ir->messages, .n_messages = ir->n_messages};
       right = (aimee_request_t){.messages = original.messages, .n_messages = original.n_messages};
-      failed |= aimee_ir_request_wire_equal(&left, &right) &&
+      failed |= !anthropic_ir_omitted_empty_messages(ir) &&
+                aimee_ir_request_wire_equal(&left, &right) &&
                 restore_native_section(out, ir->raw, "messages");
       left = (aimee_request_t){.tools = ir->tools, .n_tools = ir->n_tools};
       right = (aimee_request_t){.tools = original.tools, .n_tools = original.n_tools};
@@ -717,6 +718,26 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
    return native_overlay(ir->raw, out, fields, sizeof fields / sizeof fields[0]);
 }
 
+static int last_native_user(const aimee_request_t *request)
+{
+   for (int i = request->n_messages - 1; i >= 0; i--)
+      if (request->messages[i].role &&
+          (!strcmp(request->messages[i].role, "user") || !strcmp(request->messages[i].role, "tool")))
+         return i;
+   return -1;
+}
+
+int anthropic_ir_omitted_empty_messages(const aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   int last = last_native_user(request), omitted = 0;
+   for (int i = 0; i < last; i++)
+      omitted += !request->messages[i].n_blocks && request->messages[i].role &&
+                 !strcmp(request->messages[i].role, "assistant");
+   return omitted;
+}
+
 static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
@@ -728,7 +749,8 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
     * unknown native settings. Verify the typed payload against its entry
     * snapshot as well as the mutation flag: a stage forgetting to report an
     * edit must never cause stale user/tool content to be replayed. */
-   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && ir->cache_policy == AIMEE_CACHE_DEFAULT)
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && ir->cache_policy == AIMEE_CACHE_DEFAULT &&
+       !anthropic_ir_omitted_empty_messages(ir))
    {
       aimee_request_t original = {0};
       char error[128];
@@ -821,8 +843,12 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
          mark_cache_prefix(sys);
    }
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
+   int last_user = last_native_user(ir);
    for (int i = 0; i < ir->n_messages; i++)
    {
+      if (i < last_user && !ir->messages[i].n_blocks && ir->messages[i].role &&
+          !strcmp(ir->messages[i].role, "assistant"))
+         continue; /* An observed empty assistant stays canonical, never fabricated native text. */
       cJSON *m = cJSON_CreateObject();
       const char *role = ir->messages[i].role;
       cJSON_AddStringToObject(m, "role", role && strcmp(role, "tool") ? role : "user");
@@ -1028,6 +1054,13 @@ void aimee_anthropic_projection_report(const aimee_request_t *request,
                                        aimee_wire_projection_report_t *report)
 {
    memset(report, 0, sizeof *report);
+   aimee_request_t visible = {0};
+   const aimee_request_t *view = request;
+   if (aimee_ir_request_needs_model_projection(request) &&
+       !aimee_ir_request_project_model(request, &visible))
+      view = &visible;
+   report->omitted_empty_messages = anthropic_ir_omitted_empty_messages(view);
+   aimee_request_free(&visible);
    report->omitted_cache_controls = !!request->prompt_cache_key +
                                     !!request->prompt_cache_retention +
                                     !!request->prompt_cache_options;

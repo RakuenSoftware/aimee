@@ -5843,6 +5843,7 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
+                                 $(OBJDIR)/modules/ir/request_codec.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                 $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \

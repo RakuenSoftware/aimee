@@ -563,9 +563,10 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
    }
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&projected, wire, &projection);
-   if (aimee_ir_session_emit_projection_controls(
-           projected.model, projection.omitted_reasoning_blocks,
-           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
+   if (aimee_ir_session_emit_projection_full(projected.model, projection.omitted_reasoning_blocks,
+                                             projection.omitted_opaque_state_blocks,
+                                             projection.omitted_cache_controls,
+                                             projection.omitted_empty_messages, "request"))
       goto done;
    rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&projected)
               : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&projected)

@@ -582,10 +582,10 @@ static char *anthropic_build_prov_body(aimee_request_t *request, aimee_wire_t wi
    char *body = aimee_backend_render_wire(request, wire);
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(request, wire, &projection);
-   if (body &&
-       aimee_ir_session_emit_projection_controls(
-           request->model, projection.omitted_reasoning_blocks,
-           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
+   if (body && aimee_ir_session_emit_projection_full(
+                   request->model, projection.omitted_reasoning_blocks,
+                   projection.omitted_opaque_state_blocks, projection.omitted_cache_controls,
+                   projection.omitted_empty_messages, "request"))
    {
       free(body);
       return NULL;

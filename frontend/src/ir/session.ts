@@ -53,7 +53,7 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
-export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number; omitted_request_controls?: number; host_context_blocks_as_text?: number; history_messages_as_text?: number; unverified_external_tool_reports?: number };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number; omitted_request_controls?: number; omitted_empty_messages?: number; host_context_blocks_as_text?: number; history_messages_as_text?: number; unverified_external_tool_reports?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 /** Host custody metadata. Browser schema admission grants no execution authority. */
 export type DelegateLearningBinding = {
@@ -291,11 +291,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const report = event.payload;
       if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks < 0 ||
           !Number.isSafeInteger(report.omitted_cache_controls ?? 0) || (report.omitted_cache_controls ?? 0) < 0 ||
+          (report.omitted_empty_messages !== undefined && (!Number.isSafeInteger(report.omitted_empty_messages) || report.omitted_empty_messages < 0 || report.omitted_empty_messages > 4096)) ||
           (report.omitted_request_controls !== undefined && (!Number.isSafeInteger(report.omitted_request_controls) || report.omitted_request_controls < 0 || report.omitted_request_controls > 4096)) ||
           (report.host_context_blocks_as_text !== undefined && (!Number.isSafeInteger(report.host_context_blocks_as_text) || report.host_context_blocks_as_text < 0 || report.host_context_blocks_as_text > 4096)) ||
           (report.history_messages_as_text !== undefined && (!Number.isSafeInteger(report.history_messages_as_text) || report.history_messages_as_text < 0 || report.history_messages_as_text > 4096)) ||
           (report.unverified_external_tool_reports !== undefined && (!Number.isSafeInteger(report.unverified_external_tool_reports) || report.unverified_external_tool_reports < 0 || report.unverified_external_tool_reports > 4096)) ||
-          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0 && (report.omitted_request_controls ?? 0) === 0 &&
+          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0 && (report.omitted_request_controls ?? 0) === 0 && (report.omitted_empty_messages ?? 0) === 0 &&
             (report.host_context_blocks_as_text ?? 0) === 0 && (report.history_messages_as_text ?? 0) === 0 && (report.unverified_external_tool_reports ?? 0) === 0) ||
           !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
           report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');

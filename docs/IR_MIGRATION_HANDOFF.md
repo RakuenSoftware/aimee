@@ -22,6 +22,35 @@ in `OWNERS.md`.
 
 ## Current qualification
 
+The goal is active. The earlier whole-task blocked classification was premature:
+independent validation and exact request inspection remained possible. A live
+scoped debugger interception now captured the exact cold provider body before
+transport, without headers or credentials; all nine intercepted SDK attempts
+were denied transport, then the scoped SDK was interrupted and the debugger
+detached. Service health, zero active native reservations and unchanged prior
+history were verified. The private body is 48,771 bytes; its safe structural
+receipt is `/var/tmp/aimee-ir-c0-live-wire-probe-v2/body-structure.json`.
+
+Production codec comparison proves its historical nine- and thirteen-message
+prefixes match stored canonical history after the normal tool-to-Anthropic-user
+conversion. There is no hidden reasoning, mismatched tool pair or reconstructed
+task. The actual body does contain three historical empty assistant envelopes.
+A correction now omits those unsupported native envelopes only at Anthropic
+egress, preserving canonical history and emitting `omitted_empty_messages` in
+the existing canonical projection receipt. Native raw-byte and overlay shortcuts
+cannot resurrect omitted envelopes; a rejected required receipt prevents HTTP
+transport. Current-turn/prefill behavior is unchanged. Focused normal/sanitizer,
+Go race and frontend checks pass. Combined-source image and runtime qualification
+for this correction remain pending; c0 evidence below is historical to it.
+
+A separate exact-final-source clean installation is being prepared on the owned
+VM with fresh isolated identity, credentials, database and volumes, verified free
+ports and monitored capacity. Existing retained projects remain intact. Both
+pinned vendor SDK packages will be staged as hash-verified external artifacts
+before first entrypoint startup so normal prewarming requires no downloads.
+This is planned qualification, not an executed clean-boot claim. No KB or learning
+workflow is introduced.
+
 The parallel source audit and repairs are complete and committed through runtime
 `c0c2f6eb25977ff2a208e78b1587a7c9a971c6ba`. That exact revision is installed at
 `https://192.168.0.67:8447`, image

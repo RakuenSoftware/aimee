@@ -4,7 +4,7 @@ import "testing"
 
 func TestExternalACPProjectionRequiresActualBoundedObservations(t *testing.T) {
 	base := `{"kind":"projection","payload":{"model":"external-acp","boundary":"request","omitted_reasoning_blocks":0,"omitted_opaque_state_blocks":0,`
-	for _, field := range []string{"omitted_request_controls", "host_context_blocks_as_text", "unverified_external_tool_reports", "history_messages_as_text"} {
+	for _, field := range []string{"omitted_empty_messages", "omitted_request_controls", "host_context_blocks_as_text", "unverified_external_tool_reports", "history_messages_as_text"} {
 		other := "host_context_blocks_as_text"
 		if field == other {
 			other = "unverified_external_tool_reports"

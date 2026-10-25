@@ -844,6 +844,21 @@ int main(void)
    settings.projection_request_controls = AIMEE_IR_MAX_BLOCKS + 1;
    assert(!aimee_ir_session_event_json(&settings));
 
+   aimee_session_event_t empty = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = "anthropic",
+                                  .projection_boundary = "request",
+                                  .projection_empty_messages = 1};
+   cJSON *empty_json = aimee_ir_session_event_json(&empty);
+   assert(empty_json &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(empty_json, "payload"), "omitted_empty_messages")
+                  ->valueint == 1);
+   cJSON_Delete(empty_json);
+   empty.projection_empty_messages = -1;
+   assert(!aimee_ir_session_event_json(&empty));
+   empty.projection_empty_messages = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&empty));
+   empty.projection_empty_messages = 0;
+   assert(!aimee_ir_session_event_json(&empty));
    puts("IR session event tests passed");
    return 0;
 }

@@ -58,6 +58,7 @@ typedef struct
    int projection_host_context_blocks_as_text, projection_unverified_external_tool_reports;
    int projection_history_messages_as_text;
    int projection_request_controls;
+   int projection_empty_messages;
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
@@ -123,6 +124,9 @@ void aimee_ir_session_begin_task(void);
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection_full(const char *model, int reasoning, int opaque,
+                                          int cache_controls, int empty_messages,
+                                          const char *boundary);
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary);
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,

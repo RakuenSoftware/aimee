@@ -1529,8 +1529,93 @@ static void policy_role_message_evidence_projects_as_user(void)
    puts("  system/developer message evidence projects as user, policy order/source retained OK");
 }
 
+static void test_historical_empty_assistant_wire_projection(void)
+{
+   const char *frame =
+       "{\"model\":\"m\",\"max_tokens\":64,\"metadata\":{\"user_id\":\"sdk-correlation\",\"host_"
+       "marker\":\"preserved\"},"
+       "\"future_provider_setting\":{\"opaque\":9007199254740993},\"messages\":["
+       "{\"role\":\"user\",\"content\":\"start\",\"message_extension\":\"preserved\"},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read_"
+       "file\",\"input\":{\"path\":\"file\"}}]},"
+       "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\","
+       "\"content\":[{\"type\":\"text\",\"text\":\"literal result\"}]}]},"
+       "{\"role\":\"user\",\"content\":\"continue\"}]}";
+   aimee_request_t source = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_ANTHROPIC, &source, error,
+                                     sizeof error));
+   cJSON *before = aimee_ir_request_json(&source), *raw = cJSON_Duplicate(source.raw, 1);
+   for (int direct = 0; direct < 2; direct++)
+   {
+      char *wire = NULL;
+      cJSON *body = direct ? anthropic_backend_build(&source) : NULL;
+      if (!direct)
+      {
+         wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+         body = wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
+      }
+      assert(body);
+      cJSON *messages = cJSON_GetObjectItemCaseSensitive(body, "messages");
+      assert(cJSON_GetArraySize(messages) == 4);
+      cJSON *original_messages = cJSON_GetObjectItemCaseSensitive(source.raw, "messages");
+      for (int i = 0; i < 4; i++)
+         assert(cJSON_Compare(cJSON_GetArrayItem(messages, i),
+                              cJSON_GetArrayItem(original_messages, i ? i + 3 : 0), 1));
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(body, "metadata"),
+                           cJSON_GetObjectItemCaseSensitive(source.raw, "metadata"), 1));
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(body, "future_provider_setting"),
+                           cJSON_GetObjectItemCaseSensitive(source.raw, "future_provider_setting"),
+                           1));
+      char *encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, "9007199254740993"));
+      free(encoded);
+      free(wire);
+      cJSON_Delete(body);
+   }
+   char *original_role = source.messages[5].role;
+   source.messages[5].role = "tool";
+   char *tool_wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+   cJSON *tool_body = tool_wire ? aimee_ir_json_parse_frame(tool_wire, strlen(tool_wire)) : NULL;
+   assert(tool_body && !strcmp(source.messages[5].role, "tool"));
+   const cJSON *native_result =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(tool_body, "messages"), 2);
+   const cJSON *original_result =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(source.raw, "messages"), 5);
+   assert(cJSON_Compare(native_result, original_result, 1));
+   source.messages[5].role = original_role;
+   free(tool_wire);
+   cJSON_Delete(tool_body);
+   aimee_wire_projection_report_t report;
+   aimee_backend_projection_report(&source, AIMEE_WIRE_ANTHROPIC, &report);
+   assert(report.omitted_empty_messages == 3 && !report.omitted_reasoning_blocks &&
+          !report.omitted_opaque_state_blocks);
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(after && cJSON_Compare(before, after, 1) && cJSON_Compare(raw, source.raw, 1) &&
+          source.raw_length == strlen(frame) && !memcmp(source.raw_bytes, frame, strlen(frame)));
+   cJSON_Delete(after);
+   cJSON_Delete(before);
+   cJSON_Delete(raw);
+   aimee_request_free(&source);
+   const char *prefill = "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"task\"},{"
+                         "\"role\":\"assistant\",\"content\":[]}]}";
+   assert(!aimee_frontend_parse_wire(prefill, strlen(prefill), AIMEE_WIRE_ANTHROPIC, &source, error,
+                                     sizeof error));
+   assert(!anthropic_ir_omitted_empty_messages(&source));
+   char *wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+   assert(wire && !strcmp(wire, prefill));
+   free(wire);
+   aimee_request_free(&source);
+   puts("historical empty assistant projection preserves native opaque data and source bytes; "
+        "final prefill is unchanged OK");
+}
+
 int main(void)
 {
+   test_historical_empty_assistant_wire_projection();
    policy_role_message_evidence_projects_as_user();
    classified_host_context_keeps_source_history();
    test_external_claude_observation_import();

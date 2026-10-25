@@ -1084,6 +1084,8 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
+          event->projection_empty_messages < 0 ||
+          event->projection_empty_messages > AIMEE_IR_MAX_BLOCKS ||
           event->projection_request_controls < 0 ||
           event->projection_request_controls > AIMEE_IR_MAX_BLOCKS ||
           event->projection_history_messages_as_text < 0 ||
@@ -1093,7 +1095,7 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           event->projection_unverified_external_tool_reports < 0 ||
           event->projection_unverified_external_tool_reports > AIMEE_IR_MAX_BLOCKS ||
           (!event->projection_reasoning && !event->projection_cache_controls &&
-           !event->projection_request_controls &&
+           !event->projection_request_controls && !event->projection_empty_messages &&
            !event->projection_history_messages_as_text &&
            !event->projection_host_context_blocks_as_text &&
            !event->projection_unverified_external_tool_reports) ||
@@ -1113,6 +1115,9 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           (event->projection_cache_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
                                     event->projection_cache_controls)) ||
+          (event->projection_empty_messages &&
+           !cJSON_AddNumberToObject(payload, "omitted_empty_messages",
+                                    event->projection_empty_messages)) ||
           (event->projection_request_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_request_controls",
                                     event->projection_request_controls)) ||
@@ -1517,13 +1522,22 @@ int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaqu
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary)
 {
-   if (!reasoning && !opaque && !cache_controls)
+   return aimee_ir_session_emit_projection_full(model, reasoning, opaque, cache_controls, 0,
+                                                boundary);
+}
+
+int aimee_ir_session_emit_projection_full(const char *model, int reasoning, int opaque,
+                                          int cache_controls, int empty_messages,
+                                          const char *boundary)
+{
+   if (!reasoning && !opaque && !cache_controls && !empty_messages)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = model && model[0] ? model : "selected model",
                                   .projection_boundary = boundary,
                                   .projection_reasoning = reasoning,
                                   .projection_opaque = opaque,
-                                  .projection_cache_controls = cache_controls};
+                                  .projection_cache_controls = cache_controls,
+                                  .projection_empty_messages = empty_messages};
    return aimee_ir_session_emit(&event);
 }

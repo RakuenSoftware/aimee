@@ -1906,8 +1906,63 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }
 
+static int empty_projection_count, reject_empty_projection;
+static int capture_empty_projection(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_PROJECTION || !event->projection_empty_messages)
+      return 0;
+   assert(event->projection_empty_messages == 1 && !event->projection_reasoning &&
+          !event->projection_opaque && !event->projection_cache_controls);
+   cJSON *json = aimee_ir_session_event_json(event);
+   assert(json);
+   cJSON_Delete(json);
+   empty_projection_count++;
+   return reject_empty_projection;
+}
+static void test_native_empty_assistant_projection_requires_capture(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   const char *request =
+       "{\"model\":\"m\",\"max_tokens\":32,\"metadata\":{\"user_id\":\"sdk-correlation\"},"
+       "\"messages\":["
+       "{\"role\":\"user\",\"content\":\"old task\"},{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"user\",\"content\":\"continue now\"}]}";
+   for (int rejected = 0; rejected < 2; rejected++)
+   {
+      reset_capture();
+      g_driver = &driver;
+      empty_projection_count = 0;
+      reject_empty_projection = rejected;
+      aimee_ir_session_set_sink(capture_empty_projection, NULL);
+      char response[8192];
+      int status = messages_buffered(request, response, sizeof response);
+      assert(empty_projection_count == 1);
+      if (rejected)
+         assert(status == 500 && !g_post_count && aimee_ir_session_capture_failed());
+      else
+      {
+         assert(status == 200 && g_post_count == 1);
+         cJSON *sent = parse(g_last_body), *original = parse(request);
+         const cJSON *messages = obj(sent, "messages");
+         assert(cJSON_GetArraySize(messages) == 2 &&
+                cJSON_Compare(cJSON_GetArrayItem(messages, 0),
+                              cJSON_GetArrayItem(obj(original, "messages"), 0), 1) &&
+                cJSON_Compare(cJSON_GetArrayItem(messages, 1),
+                              cJSON_GetArrayItem(obj(original, "messages"), 2), 1) &&
+                cJSON_Compare(obj(sent, "metadata"), obj(original, "metadata"), 1));
+         cJSON_Delete(sent);
+         cJSON_Delete(original);
+      }
+      aimee_ir_session_set_sink(NULL, NULL);
+   }
+   reset_capture();
+   PASS("native_empty_assistant_projection_requires_capture");
+}
+
 int main(void)
 {
+   test_native_empty_assistant_projection_requires_capture();
    test_native_provenance_is_rechecked_at_actual_egress();
    test_canonical_economizer_restore_resends_once();
    test_native_count_admits_before_dispatch();

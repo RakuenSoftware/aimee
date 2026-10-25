@@ -59,6 +59,14 @@ cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t 
       body = is_chatgpt_provider(agent)     ? responses_backend_build(&owned)
              : is_anthropic_provider(agent) ? anthropic_backend_build(&owned)
                                             : openai_backend_build(&owned);
+   if (body && is_anthropic_provider(agent) &&
+       aimee_ir_session_emit_projection_full(agent->name[0] ? agent->name : agent->model, 0, 0, 0,
+                                             anthropic_ir_omitted_empty_messages(&owned),
+                                             "request"))
+   {
+      cJSON_Delete(body);
+      body = NULL;
+   }
    aimee_request_free(&owned);
    return body;
 }
@@ -148,7 +156,7 @@ static int omitted_number(const cJSON *body, const char *key, int present, doubl
 /* Count actual source-control losses at the completed provider boundary. Host
  * defaults are not losses, and block/cache projection has its own counters. */
 static int host_control_projection(const agent_t *agent, const aimee_request_t *source,
-                                   const cJSON *body)
+                                   const aimee_request_t *projected, const cJSON *body)
 {
    int omitted =
        omitted_number(body, is_chatgpt_provider(agent) ? "max_output_tokens" : "max_tokens",
@@ -175,12 +183,14 @@ static int host_control_projection(const agent_t *agent, const aimee_request_t *
    omitted += source->output_format.kind > AIMEE_OUTPUT_TEXT &&
               !cJSON_HasObjectItem(body, "response_format") &&
               !cJSON_HasObjectItem(text, "format") && !cJSON_HasObjectItem(output, "format");
-   if (!omitted)
+   int empty = is_anthropic_provider(agent) ? anthropic_ir_omitted_empty_messages(projected) : 0;
+   if (!omitted && !empty)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = agent->name[0] ? agent->name : agent->model,
                                   .projection_boundary = "request",
-                                  .projection_request_controls = omitted};
+                                  .projection_request_controls = omitted,
+                                  .projection_empty_messages = empty};
    return aimee_ir_session_emit(&event);
 }
 
@@ -348,7 +358,7 @@ cJSON *agent_build_host_request_ir(const agent_t *agent, const aimee_request_t *
    cJSON *req = is_resp   ? responses_backend_build(&ir)
                 : is_anth ? anthropic_backend_build_plain(&ir, cache_marking)
                           : openai_backend_build_plain(&ir);
-   if (req && host_control_projection(agent, request, req))
+   if (req && host_control_projection(agent, request, &ir, req))
    {
       cJSON_Delete(req);
       req = NULL;

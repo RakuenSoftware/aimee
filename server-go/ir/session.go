@@ -271,13 +271,14 @@ func ValidSessionEvent(encoded []byte) bool {
 			History         json.RawMessage `json:"history_messages_as_text,omitempty"`
 			HostContext     json.RawMessage `json:"host_context_blocks_as_text,omitempty"`
 			RequestControls json.RawMessage `json:"omitted_request_controls,omitempty"`
+			EmptyMessages   json.RawMessage `json:"omitted_empty_messages,omitempty"`
 			ExternalTools   json.RawMessage `json:"unverified_external_tool_reports,omitempty"`
 		}
 		if !Decode(e.Payload, &projection) {
 			return false
 		}
-		counts := [4]int64{}
-		for i, raw := range []json.RawMessage{projection.HostContext, projection.ExternalTools, projection.History, projection.RequestControls} {
+		counts := [5]int64{}
+		for i, raw := range []json.RawMessage{projection.HostContext, projection.ExternalTools, projection.History, projection.RequestControls, projection.EmptyMessages} {
 			if len(raw) != 0 && (bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || !Decode(raw, &counts[i])) {
 				return false
 			}
@@ -288,8 +289,8 @@ func ValidSessionEvent(encoded []byte) bool {
 			*projection.Reasoning >= 0 && *projection.Reasoning <= 9007199254740991 &&
 			projection.CacheControls >= 0 && projection.CacheControls <= 9007199254740991 &&
 			counts[0] >= 0 && counts[0] <= 4096 &&
-			counts[1] >= 0 && counts[1] <= 4096 && counts[2] >= 0 && counts[2] <= 4096 && counts[3] >= 0 && counts[3] <= 4096 &&
-			(*projection.Reasoning > 0 || projection.CacheControls > 0 || counts[0] > 0 || counts[1] > 0 || counts[2] > 0 || counts[3] > 0) &&
+			counts[1] >= 0 && counts[1] <= 4096 && counts[2] >= 0 && counts[2] <= 4096 && counts[3] >= 0 && counts[3] <= 4096 && counts[4] >= 0 && counts[4] <= 4096 &&
+			(*projection.Reasoning > 0 || projection.CacheControls > 0 || counts[0] > 0 || counts[1] > 0 || counts[2] > 0 || counts[3] > 0 || counts[4] > 0) &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "child_execution":
 		var child ChildExecutionPayload

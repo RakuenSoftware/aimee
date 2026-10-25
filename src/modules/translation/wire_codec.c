@@ -177,7 +177,9 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
    int native_transport =
        wire != AIMEE_WIRE_RESPONSES ||
        (request->stream && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request->raw, "store")));
-   if (native_transport && request->frontend == wire && request->raw_bytes &&
+   if (native_transport &&
+       !(wire == AIMEE_WIRE_ANTHROPIC && anthropic_ir_omitted_empty_messages(request)) &&
+       request->frontend == wire && request->raw_bytes &&
        request->cache_policy == AIMEE_CACHE_DEFAULT)
    {
       aimee_request_t original = {0};
