@@ -686,3 +686,11 @@ transport checks pass normally and under Go race instrumentation; frontend
 TypeScript and its existing workflow-action checks pass. Browser runtime
 qualification for the follow-up source is recorded separately in the current
 proof pointer after its exact image upgrade.
+
+The final browser check also found the default still set to a stopped historical
+test alias. The authenticated model management API now sets
+`ir-native-d851-recall` as the configured default; its tools remain enabled with
+max_turns=20. The runtime-web roster had discarded `default_agent` despite the
+Chat UI expecting it. The proxy now preserves that validated string alongside
+both roster keys, so an unpinned session displays its actual configured primary.
+Existing model-route tests cover the restored metadata contract.
