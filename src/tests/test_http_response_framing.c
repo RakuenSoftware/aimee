@@ -43,7 +43,7 @@ static void response(const char *name, const void *wire, size_t wire_length, int
    }
    else
    {
-      assert(status == expected_status && length == expected_length);
+      assert(status == expected_status && length == expected_length && body);
       assert(!length || (body && !memcmp(body, expected_body, length)));
       assert(!body || body[length] == '\0');
       if (!strcmp(name, "fixed binary"))
@@ -77,6 +77,48 @@ int main(int argc, char **argv)
         200, "a\0b\0c", 5, 0);
    CASE("empty chunked response", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
         200, "", 0, 0);
+   CASE("header values are not Transfer-Encoding fields",
+        "HTTP/1.1 200 OK\r\nX-Debug: Transfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\nabc",
+        200, "abc", 3, 0);
+   CASE("chunked token uses complete field value",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunkedness\r\nContent-Length: 3\r\n\r\nabc", 200,
+        "abc", 3, 0);
+   CASE("chunked optional whitespace and case",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: \tChUnKeD \t\r\n\r\n3\r\nabc\r\n0\r\n\r\n", 200,
+        "abc", 3, 0);
+   CASE("header values are not Content-Length fields",
+        "HTTP/1.1 200 OK\r\nX-Trace: Content-Length: 0\r\nContent-Length: 3\r\n\r\nabc", 200, "abc",
+        3, 0);
+   CASE("large header substring cannot select body length",
+        "HTTP/1.1 200 OK\r\nX-Trace: Content-Length: 999\r\nContent-Length: 3\r\n\r\nabc", 200,
+        "abc", 3, 0);
+   CASE("case and optional whitespace", "HTTP/1.1 200 OK\r\ncOnTeNt-LeNgTh: \t003 \t\r\n\r\nabc",
+        200, "abc", 3, 0);
+   CASE("identical repeated Content-Length",
+        "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Length: 003\r\n\r\nabc", 200, "abc", 3, 0);
+   CASE("identical Content-Length list", "HTTP/1.1 200 OK\r\nContent-Length: 3, 003\r\n\r\nabc",
+        200, "abc", 3, 0);
+   const char *bad_lengths[] = {
+       "garbage", "", "   ", "-1", "+0", "3junk", "3.0", "18446744073709551616", "0,", "1,2"};
+   for (size_t i = 0; i < sizeof bad_lengths / sizeof bad_lengths[0]; i++)
+   {
+      char wire[256];
+      int n = snprintf(wire, sizeof wire, "HTTP/1.1 200 OK\r\nContent-Length: %s\r\n\r\nabc",
+                       bad_lengths[i]);
+      assert(n > 0 && (size_t)n < sizeof wire);
+      response("malformed Content-Length", wire, (size_t)n, -1, NULL, 0, 0);
+   }
+   CASE("conflicting repeated Content-Length",
+        "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab", -1, NULL, 0, 0);
+   http_conn_t unused = {.fd = -1};
+   parsed_url_t url = {0};
+   snprintf(url.host, sizeof url.host, "fixture");
+   snprintf(url.path, sizeof url.path, "/");
+   volatile size_t impossible_length = SIZE_MAX;
+   assert(send_request(&unused, "POST", &url, "application/octet-stream", NULL, NULL, "fixture",
+                       "x", impossible_length) < 0);
+   assert(send_request(&unused, "POST", &url, "application/octet-stream", NULL, NULL, "fixture",
+                       "x", impossible_length - 4096) < 0);
    CASE("short declared body", "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc", -1, NULL, 0, 0);
    CASE("short chunk header", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3", -1, NULL, 0,
         0);

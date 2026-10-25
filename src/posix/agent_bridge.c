@@ -494,7 +494,7 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
    /* Preserve complete supported headers rather than silently truncating a
     * caller's version/beta or scoped SDK transport metadata. */
    size_t extra_size = extra_headers ? strlen(extra_headers) : 0;
-   if (extra_size > 8192 || body_len > SIZE_MAX - extra_size - 4096)
+   if (extra_size > 8192 || (!body && body_len))
       return -1;
    int forwarded_user_agent = 0;
    for (const char *line = extra_headers ? extra_headers : ""; *line;)
@@ -518,21 +518,46 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
       }
       line = next ? next + 1 : line + strlen(line);
    }
-   size_t cap = 4096 + body_len + extra_size;
+   /* Fixed framing includes the terminator and decimal size_t Content-Length.
+    * Budget every caller-controlled field; newline normalization can expand
+    * extra headers from LF to CRLF, hence their doubled byte allowance. */
+   size_t cap = 4096;
+   const size_t lengths[] = {body_len,
+                             extra_size * 2,
+                             strlen(method),
+                             strlen(url->path),
+                             strlen(url->host),
+                             content_type ? strlen(content_type) : 0,
+                             auth_header ? strlen(auth_header) : 0,
+                             user_agent ? strlen(user_agent) : 0};
+   for (size_t i = 0; i < sizeof lengths / sizeof lengths[0]; i++)
+   {
+      if (lengths[i] > SIZE_MAX - cap)
+         return -1;
+      cap += lengths[i];
+   }
    char *req = malloc(cap);
    if (!req)
       return -1;
 
-   int off = snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n", method,
-                      url->path, url->host);
-   if (off < 0 || (size_t)off >= cap)
-      off = (int)(cap - 1);
+   int first = snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n", method,
+                        url->path, url->host);
+   if (first < 0 || (size_t)first >= cap)
+   {
+      free(req);
+      return -1;
+   }
+   size_t off = (size_t)first;
 
    if (user_agent && !forwarded_user_agent)
    {
       int n = snprintf(req + off, cap - (size_t)off, "User-Agent: %s\r\n", user_agent);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    if (content_type && content_type[0])
@@ -544,15 +569,23 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
        * 400 before parsing the body. Prefix the field name when it is absent. */
       const char *prefix = strchr(content_type, ':') ? "" : "Content-Type: ";
       int n = snprintf(req + off, cap - (size_t)off, "%s%s\r\n", prefix, content_type);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    if (auth_header && auth_header[0])
    {
       int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", auth_header);
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    /* Append extra headers, one per line.
@@ -583,7 +616,7 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
                return -1;
             }
             memcpy(req + off, line, length);
-            off += (int)length;
+            off += length;
             memcpy(req + off, "\r\n", 2);
             off += 2;
          }
@@ -596,15 +629,24 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
          n = snprintf(req + off, cap - (size_t)off, "Content-Length: %zu\r\n\r\n", body_len);
       else
          n = snprintf(req + off, cap - (size_t)off, "\r\n");
-      if (n > 0 && (size_t)off + (size_t)n < cap)
-         off += n;
+      if (n < 0 || (size_t)n >= cap - off)
+      {
+         free(req);
+         return -1;
+      }
+      off += (size_t)n;
    }
 
    /* Append body */
-   if (body && body_len > 0 && (size_t)off + body_len <= cap)
+   if (body && body_len > 0)
    {
+      if (body_len > cap - off)
+      {
+         free(req);
+         return -1;
+      }
       memcpy(req + off, body, body_len);
-      off += (int)body_len;
+      off += body_len;
    }
 
    int rc;
@@ -642,8 +684,54 @@ int agent_http_last_retry_after(void)
    return g_last_retry_after;
 }
 
+/* Parse only actual Content-Length field lines. Identical repeated/list
+ * values are legal; conflicting, signed, empty or overflowing values are not. */
+static int http_response_length(const char *headers, size_t *length)
+{
+   int found = 0;
+   for (const char *line = headers; *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      if (end - line >= 15 && !strncasecmp(line, "Content-Length:", 15))
+      {
+         const char *value = line + 15;
+         for (;;)
+         {
+            while (value < end && (*value == ' ' || *value == '\t'))
+               value++;
+            if (value == end || *value < '0' || *value > '9')
+               return -1;
+            size_t number = 0;
+            do
+            {
+               unsigned digit = (unsigned)(*value++ - '0');
+               if (number > (SIZE_MAX - digit) / 10)
+                  return -1;
+               number = number * 10 + digit;
+            } while (value < end && *value >= '0' && *value <= '9');
+            if (found && number != *length)
+               return -1;
+            *length = number;
+            found = 1;
+            while (value < end && (*value == ' ' || *value == '\t'))
+               value++;
+            if (value == end)
+               break;
+            if (*value++ != ',')
+               return -1;
+         }
+      }
+      if (!*end)
+         break;
+      line = end + 2;
+   }
+   return found;
+}
+
 static int parse_response_headers(char *buf, size_t len, size_t *header_end, int *chunked,
-                                  size_t *content_length)
+                                  size_t *content_length, int *has_content_length)
 {
    *chunked = 0;
    *content_length = 0;
@@ -669,29 +757,36 @@ static int parse_response_headers(char *buf, size_t len, size_t *header_end, int
    /* Null-terminate headers for easy searching */
    *hdr_end = '\0';
 
-   /* Check for Transfer-Encoding: chunked (case-insensitive scan) */
-   for (char *p = buf; *p; p++)
+   /* A header value mentioning another field must not select a decoder. Only
+    * the actual supported transfer-coding token, with optional OWS, is chunked. */
+   for (const char *line = buf; *line;)
    {
-      if ((*p == 'T' || *p == 't') && strncasecmp(p, "Transfer-Encoding:", 18) == 0)
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      if (end - line >= 18 && !strncasecmp(line, "Transfer-Encoding:", 18))
       {
-         char *val = p + 18;
-         while (*val == ' ')
-            val++;
-         if (strncasecmp(val, "chunked", 7) == 0)
-            *chunked = 1;
+         const char *value = line + 18;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         while (end > value && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+         *chunked = end - value == 7 && !strncasecmp(value, "chunked", 7);
          break;
       }
+      if (!*end)
+         break;
+      line = end + 2;
    }
 
-   /* Check for Content-Length */
-   for (char *p = buf; *p; p++)
+   int has_length = http_response_length(buf, content_length);
+   if (has_length < 0)
    {
-      if ((*p == 'C' || *p == 'c') && strncasecmp(p, "Content-Length:", 15) == 0)
-      {
-         *content_length = (size_t)atoll(p + 15);
-         break;
-      }
+      *hdr_end = '\r';
+      return -1;
    }
+   if (has_content_length)
+      *has_content_length = has_length;
 
    /* Check for Retry-After (seconds; the provider APIs send a delta, not a date).
     * Match at a header-line start (line begin or just after a "\r\n") so it does
@@ -766,6 +861,7 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
    size_t header_end = 0;
    int chunked = 0;
    size_t content_length = 0;
+   int has_content_length = 0;
    int status = -1;
 
    while (!headers_done)
@@ -797,7 +893,8 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
          headers_done = 1;
    }
 
-   status = parse_response_headers(buf, len, &header_end, &chunked, &content_length);
+   status = parse_response_headers(buf, len, &header_end, &chunked, &content_length,
+                                   &has_content_length);
    if (status < 0)
    {
       free(buf);
@@ -967,6 +1064,14 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
       }
 
       free(buf);
+      if (!body)
+      {
+         /* An empty completed body still owns a trailing NUL, like fixed-length
+          * and close-delimited responses. NULL remains a failure output. */
+         body = calloc(1, 1);
+         if (!body)
+            return -1;
+      }
       *out_body = body;
       *out_len = body_len;
    }
@@ -974,9 +1079,6 @@ static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *ou
    {
       /* Content-Length or read-until-close */
       size_t body_so_far = len - header_end;
-      char length_header[32];
-      http_header_value(buf, header_end, "Content-Length", length_header, sizeof length_header);
-      int has_content_length = length_header[0] != '\0';
       size_t target = content_length;
 
       if (has_content_length)
@@ -1116,7 +1218,7 @@ static int http_read_response_stream(http_conn_t *conn, agent_http_stream_cb cal
    size_t header_end = 0;
    int chunked = 0;
    size_t content_length = 0;
-   int status = parse_response_headers(buf, len, &header_end, &chunked, &content_length);
+   int status = parse_response_headers(buf, len, &header_end, &chunked, &content_length, NULL);
    if (status < 0)
    {
       free(buf);

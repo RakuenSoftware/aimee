@@ -21,6 +21,7 @@ typedef struct
    int binary_response, chunked_response, binary_request;
    const char *nested_url;
    const char *expected_headers;
+   const char *expected_content_type, *expected_auth;
 } peer_t;
 
 static void *serve(void *opaque)
@@ -30,7 +31,7 @@ static void *serve(void *opaque)
    assert(fd >= 0);
    struct timeval timeout = {5, 0};
    assert(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0);
-   char request[4096] = {0};
+   char request[65536] = {0};
    for (;;)
    {
       ssize_t n = recv(fd, request + p->received, sizeof(request) - p->received - 1, 0);
@@ -54,7 +55,15 @@ static void *serve(void *opaque)
          char *body = strstr(request, "\r\n\r\n");
          assert(body && !memcmp(body + 4, bytes, sizeof(bytes)));
          assert(strstr(request, "\r\nContent-Length: 4\r\n"));
-         assert(strstr(request, "\r\nContent-Type: application/octet-stream\r\n"));
+         if (p->expected_content_type)
+            assert(strstr(request, p->expected_content_type));
+         else
+            assert(strstr(request, "\r\nContent-Type: application/octet-stream\r\n"));
+         if (p->expected_auth)
+         {
+            const char *auth = strstr(request, p->expected_auth);
+            assert(auth && !strncmp(auth + strlen(p->expected_auth), "\r\n", 2));
+         }
       }
       else
          assert(strstr(request, "\r\n\r\n{}"));
@@ -221,6 +230,32 @@ int main(void)
       free(body);
       finish(&provider);
    }
+   /* Each header exceeded the old unaccounted 4096-byte request scratch budget. */
+   char *type = malloc(10001), *auth = malloc(12001), *type_line = malloc(10019);
+   assert(type && auth && type_line);
+   memcpy(type, "audio/", 6);
+   memset(type + 6, 'c', 9994);
+   type[10000] = 0;
+   memcpy(auth, "Authorization: Bearer ", 22);
+   memset(auth + 22, 'k', 11978);
+   auth[12000] = 0;
+   snprintf(type_line, 10019, "\r\nContent-Type: %s\r\n", type);
+   peer_t large_headers = {.binary_request = 1,
+                           .binary_response = 1,
+                           .expected_content_type = type_line,
+                           .expected_auth = auth};
+   start(&large_headers);
+   const char upload[] = {'A', '\0', 'B', (char)0xff};
+   char *audio = NULL;
+   size_t audio_length = 0;
+   assert(agent_http_post_content_type_bytes(large_headers.url, auth, type, upload, sizeof upload,
+                                             &audio, &audio_length, 3000, NULL) == 200);
+   assert(audio && audio_length == 5 && !memcmp(audio, "{}\0{}", 5));
+   free(audio);
+   finish(&large_headers);
+   free(type_line);
+   free(type);
+   free(auth);
    char *invalid_body = (char *)1;
    size_t invalid_length = 99;
    assert(agent_http_post_content_type_bytes("invalid", NULL, NULL, NULL, 1, &invalid_body,
