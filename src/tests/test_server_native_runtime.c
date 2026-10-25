@@ -10,6 +10,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_source_authority.h"
 #include "agent_tasks.h"
+#include "db1_client/agent_jobs.h"
 #include "server_delegate_scope.h"
 #include "server_session_control.h"
 #include "server_session_capture.h"
@@ -59,7 +60,7 @@ int server_native_delegate_source_runtime_consume(const agent_t *selected,
 }
 
 static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];
-static _Thread_local int job_id, effect_authorized, scope_admitted;
+static _Thread_local int effect_authorized, scope_admitted;
 static void restored_probe(void);
 static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
@@ -114,13 +115,56 @@ void session_id_set_override(const char *sid)
       scope_admitted = 0;
    }
 }
-void agent_set_durable_job(int id)
+/* Explicit durable-store peer for synthetic transport facts below. Every
+ * other protocol lane still refuses unexpected HTTP accounting writes. */
+static atomic_int transport_fact_active, transport_fact_expected, transport_fact_seen;
+static int persisted_job_counts[23];
+static pthread_mutex_t job_store_lock = PTHREAD_MUTEX_INITIALIZER;
+int fixture_job_get(int id, db1_agent_job_t *out)
 {
-   job_id = id;
+   assert(id == 11 || id == 22);
+   pthread_mutex_lock(&job_store_lock);
+   *out = (db1_agent_job_t){.id = id, .api_call_count = persisted_job_counts[id]};
+   pthread_mutex_unlock(&job_store_lock);
+   return 0;
 }
-int agent_get_durable_job_id(void)
+void fixture_job_free(db1_agent_job_t *out)
 {
-   return job_id;
+   (void)out;
+}
+void fixture_job_heartbeat_ext(int id, const char *tool, int count)
+{
+   assert(atomic_load(&transport_fact_active) && id == 11 && tool && !tool[0]);
+   assert(atomic_fetch_add(&transport_fact_seen, 1) < atomic_load(&transport_fact_expected));
+   pthread_mutex_lock(&job_store_lock);
+   assert(count == persisted_job_counts[id] + 1);
+   persisted_job_counts[id] = count;
+   pthread_mutex_unlock(&job_store_lock);
+}
+static int transport_fact_begin(int attempts)
+{
+   assert(attempts >= 0 && attempts <= 2 && !atomic_load(&transport_fact_active));
+   atomic_store(&transport_fact_expected, attempts);
+   atomic_store(&transport_fact_seen, 0);
+   atomic_store(&transport_fact_active, 1);
+   return agent_job_progress_transport_attempts();
+}
+static void transport_fact_end(int before, int attempts)
+{
+   assert(atomic_load(&transport_fact_seen) == attempts);
+   assert(agent_job_progress_transport_attempts() == before + attempts);
+   atomic_store(&transport_fact_active, 0);
+}
+static void emit_synthetic_transport_facts(int status)
+{
+   assert(atomic_load(&transport_fact_active));
+   int attempts = atomic_load(&transport_fact_expected);
+   wire_fence_transport_observer_t observer =
+       wire_fence_transport_observer_bind((wire_fence_transport_observer_t){0});
+   (void)wire_fence_transport_observer_bind(observer);
+   assert(!attempts || observer.completed);
+   for (int i = 0; i < attempts; i++)
+      observer.completed(observer.context, i + 1 == attempts ? status : -1);
 }
 /* Workspace ownership is an explicit peer mock here; the actual descriptor,
  * cross-thread restoration and replacement tests live in test_workspace_turn. */
@@ -215,7 +259,7 @@ static void owner_tools(int alice)
    agent_tools_set_snap_id(alice ? 71 : 91);
    run_cmd_set_cwd(alice ? "/work/alice" : "/work/bob");
    workspace = alice ? &alice_workspace : &bob_workspace;
-   job_id = alice ? 11 : 22;
+   agent_set_durable_job(alice ? 11 : 22);
    delegate_scope = (server_delegate_scope_t){.depth = alice ? 2 : 0};
    if (alice)
       strcpy(delegate_scope.parent, "parent-alice");
@@ -236,7 +280,7 @@ static _Thread_local const agent_request_cancel_scope_t *current_cancel_scope;
 static _Thread_local char identity[VAULT_PRINCIPAL_MAX];
 static _Thread_local int protocol_captured;
 static pthread_mutex_t ids_mutex = PTHREAD_MUTEX_INITIALIZER;
-static char seen_ids[128][64];
+static char seen_ids[192][64];
 static int seen_count;
 static void probe_replay_scope(const char *path);
 static atomic_int source_missing, source_tampered, source_recreated;
@@ -259,7 +303,8 @@ static void restored_probe(void)
    assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
    assert(agent_tools_get_turn() == -1 && !agent_tools_get_snap_id());
    assert(!run_cmd_get_cwd() && !session_id_override_active());
-   assert(!job_id && !workspace && !effect_authorized && !server_session_capture_current());
+   assert(!agent_get_durable_job_id() && !workspace && !effect_authorized &&
+          !server_session_capture_current());
    assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
    agent_source_authority_snapshot_t previous = {0};
    assert(!agent_source_authority_tls_capture_checked(&previous));
@@ -621,7 +666,10 @@ int server_http_route_allowed_caps(int tcp, uint32_t caps, const char *method, c
       return 0;
    if (!strcmp(path, "/v1/chat/control") || !strcmp(path, "/v1/config/set"))
       return 1; /* Parent authority must still be outside the child surface. */
-   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages")) ? (caps & CAP_CHAT) != 0
+   /* The real route descriptor also grants count_tokens only under CAP_CHAT. */
+   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages") ||
+           !strcmp(path, "/v1/messages/count_tokens"))
+              ? (caps & CAP_CHAT) != 0
           : !strcmp(path, "/v1/mcp/call") ? (caps & CAP_TOOL_EXECUTE) != 0
                                           : 0;
 }
@@ -735,7 +783,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(agent_tools_get_snap_id() == (alice ? 71 : 91));
    assert(!strcmp(run_cmd_get_cwd(), alice ? "/work/alice" : "/work/bob"));
    assert(!strcmp(session_id(), owner->session_key));
-   assert(job_id == (alice ? 11 : 22));
+   assert(agent_get_durable_job_id() == (alice ? 11 : 22));
    assert(workspace == (alice ? &alice_workspace : &bob_workspace));
    assert(current_mirror == &fixture_mirror);
    assert(delegate_scope.depth == (alice ? 2 : 0));
@@ -833,6 +881,7 @@ struct server_native_replay
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
     flat_bound_probe, preframe_error_probe, buffered_refusal_probe;
 #include "support/native_sdk_metadata_fixture.h"
+static atomic_int usage_probe_active, usage_probe_kind, usage_probe_buffered, preframe_known_prefix;
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -938,6 +987,49 @@ static int probe_original_tool(void)
    /* A final full snapshot must not create a second claimable original call. */
    return mode == 3 ? probe_tool_snapshot(name, space, arguments) : 0;
 }
+static void probe_usage_response(void)
+{
+   if (atomic_load(&transport_fact_active))
+      emit_synthetic_transport_facts(200); /* Typed peer input, not real HTTP proof. */
+   int kind = atomic_load(&usage_probe_kind);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "original usage response"};
+   aimee_response_t response = {.role = "assistant",
+                                .content = &block,
+                                .n_content = 1,
+                                .stop_reason = AIMEE_STOP_END_TURN,
+                                .usage_unobserved = kind < 0,
+                                .usage_in = kind > 0 ? 7 : 0,
+                                .usage_out = kind > 0 ? 5 : 0,
+                                .usage_cache_read = kind > 0 ? 3 : 0,
+                                .usage_cache_write = kind > 0 ? 2 : 0,
+                                .usage_reasoning = kind > 0 ? 1 : 0};
+   if (atomic_load(&usage_probe_buffered))
+   {
+      assert(!aimee_ir_session_emit_buffered_response(&response, "usage-response"));
+      return;
+   }
+   aimee_delta_t deltas[] = {
+       {.type = AIMEE_DELTA_TURN_START},
+       {.type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_TEXT, .block_id = 0},
+       {.type = AIMEE_DELTA_BLOCK_DELTA, .block_id = 0, .text_delta = block.text},
+       {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
+       {.type = AIMEE_DELTA_TURN_STOP,
+        .stop_reason = response.stop_reason,
+        .usage_unobserved = response.usage_unobserved,
+        .usage_in = response.usage_in,
+        .usage_out = response.usage_out,
+        .usage_cache_read = response.usage_cache_read,
+        .usage_cache_write = response.usage_cache_write,
+        .usage_reasoning = response.usage_reasoning}};
+   for (unsigned i = 0; i < sizeof deltas / sizeof *deltas; i++)
+   {
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
+                                     .role = "assistant",
+                                     .message_id = "usage-response",
+                                     .delta = &deltas[i]};
+      assert(!aimee_ir_session_emit(&event));
+   }
+}
 static void probe_replay_scope(const char *path)
 {
    aimee_frontend_state_scope_t state_guard = aimee_frontend_bind_state_guard(NULL, NULL);
@@ -946,7 +1038,8 @@ static void probe_replay_scope(const char *path)
    aimee_frontend_bind_request_owner(request_owner_scope.guard, request_owner_scope.context);
    void *sink_context = NULL;
    aimee_ir_session_sink_fn installed_sink = aimee_ir_session_get_sink(&sink_context);
-   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
+   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages") ||
+       !strcmp(path, "/v1/messages/count_tokens"))
    {
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
@@ -1067,6 +1160,16 @@ static void probe_replay_scope(const char *path)
          }
       }
       aimee_request_free(&request);
+      if (!strcmp(path, "/v1/messages/count_tokens"))
+      {
+         emit_synthetic_transport_facts(200); /* Auxiliary send is not a model generation. */
+         return;
+      }
+      if (atomic_load(&usage_probe_active))
+      {
+         probe_usage_response();
+         return;
+      }
       if (atomic_load(&buffered_refusal_probe))
       {
          /* Real buffered ingress emits MESSAGE then terminal metadata without
@@ -1084,6 +1187,7 @@ static void probe_replay_scope(const char *path)
       }
       if (atomic_load(&preframe_error_probe))
       {
+         emit_synthetic_transport_facts(-1); /* Actual TCP producer is tested separately. */
          /* Actual ingress emits this host diagnostic when transport fails
           * before any vendor message_start. It is not an assistant message. */
          aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
@@ -1496,7 +1600,8 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
     * model callbacks themselves still cannot manufacture completion. */
    assert(atomic_load(&preframe_error_probe));
    assert(!strcmp(session, "private-child") && !strcmp(turn, "native-turn") &&
-          !strcmp(actor, "webuser:alice") && !strcmp(sequence, "3"));
+          !strcmp(actor, "webuser:alice") &&
+          !strcmp(sequence, atomic_load(&preframe_known_prefix) ? "8" : "3"));
    const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
    const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status"));
@@ -1568,9 +1673,11 @@ static void test_retained_capture(const agent_t *selected, const request_context
    }
 }
 
-static void test_native_preframe_error(const agent_t *selected, const request_context_t *owner)
+static void test_native_transport_usage(const agent_t *selected, const request_context_t *owner,
+                                        int attempts, int known_prefix, int auxiliary)
 {
    owner_tools(1);
+   atomic_store(&preframe_known_prefix, known_prefix);
    aimee_tool_t function = {.name = "read_file"};
    aimee_tool_t space = {
        .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
@@ -1593,37 +1700,180 @@ static void test_native_preframe_error(const agent_t *selected, const request_co
    captured_rows = cJSON_CreateArray();
    atomic_store(&owned_profile_probe, 1);
    atomic_store(&snapshot_generation, 1);
-   atomic_store(&preframe_error_probe, 1);
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
    assert(!server_session_capture_append(capture, &started, NULL, NULL));
    char response[1024];
-   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   if (known_prefix)
+   {
+      atomic_store(&usage_probe_active, 1);
+      atomic_store(&usage_probe_kind, 1);
+      atomic_store(&usage_probe_buffered, 0);
+      int baseline = transport_fact_begin(1);
+      request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+      transport_fact_end(baseline, 1);
+      atomic_store(&usage_probe_active, 0);
+   }
+   int rows_before_error = cJSON_GetArraySize(captured_rows);
+   assert(rows_before_error == (known_prefix ? 6 : 1));
+   char *prefix_record =
+       known_prefix ? cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 5)) : NULL;
+   assert(!known_prefix || prefix_record);
+   atomic_store(&preframe_error_probe, !auxiliary);
+   int baseline = transport_fact_begin(attempts);
+   request(runtime, auxiliary ? "/v1/messages/count_tokens" : "/v1/messages",
+           server_native_runtime_token(runtime), response);
+   transport_fact_end(baseline, attempts);
    assert(!server_session_capture_failed(capture));
+   assert(server_native_runtime_model_turns(runtime) < 0); /* Callback owner still live. */
    server_native_runtime_quiesce(runtime);
+   assert(server_native_runtime_model_turns(runtime) == known_prefix + !auxiliary);
    aimee_response_t original = {0};
-   assert(server_native_runtime_result(runtime, &original) < 0);
+   server_native_usage_t usage = {0};
+   assert(!server_native_runtime_usage(runtime, &usage));
+   assert(usage.unobserved == (!auxiliary && attempts > 0));
+   assert(usage.input == (known_prefix ? 7 : 0) && usage.output == (known_prefix ? 5 : 0));
+   int status = server_native_runtime_result(runtime, &original);
+   if (auxiliary)
+   {
+      assert(known_prefix && !status && !original.usage_unobserved);
+      assert(original.usage_in == 7 && original.usage_out == 5);
+      assert(original.n_content == 1 &&
+             !strcmp(original.content[0].text, "original usage response"));
+      assert(cJSON_GetArraySize(captured_rows) == rows_before_error);
+   }
+   else
+      assert(status < 0 && !original.content); /* Never transfer the prior terminal. */
+   aimee_response_free(&original);
    server_native_tool_claim_t claim = {0};
    assert(server_native_runtime_claim_reference(runtime, "invented-call", "aimee", "read_file",
                                                 &claim) < 0);
-   aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
-                                   .execution_status = "failed",
-                                   .execution_error =
-                                       "Provider transport failed before first frame"};
-   assert(!server_session_capture_append(capture, &failed, NULL, NULL));
-   assert(!server_session_capture_accepting(capture));
-   assert(cJSON_GetArraySize(captured_rows) == 3);
-   char *wire = cJSON_PrintUnformatted(captured_rows);
-   assert(wire && strstr(wire, "Provider transport failed before first frame") &&
-          strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
-   free(wire);
+   if (!auxiliary)
+   {
+      aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
+                                      .execution_status = "failed",
+                                      .execution_error =
+                                          "Provider transport failed before first frame"};
+      assert(!server_session_capture_append(capture, &failed, NULL, NULL));
+      assert(!server_session_capture_accepting(capture));
+      assert(cJSON_GetArraySize(captured_rows) == rows_before_error + 2);
+      char *wire = cJSON_PrintUnformatted(captured_rows);
+      assert(wire && strstr(wire, "Provider transport failed before first frame") &&
+             strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
+      free(wire);
+   }
+   if (prefix_record)
+   {
+      char *retained = cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 5));
+      assert(retained && !strcmp(prefix_record, retained));
+      free(retained);
+      free(prefix_record);
+   }
    server_native_runtime_close(runtime);
    server_session_capture_close(capture);
    atomic_store(&expected_capture, NULL);
    atomic_store(&owned_profile_probe, 0);
    atomic_store(&snapshot_generation, 0);
    atomic_store(&preframe_error_probe, 0);
+   atomic_store(&preframe_known_prefix, 0);
    cJSON_Delete(captured_rows);
    captured_rows = NULL;
+}
+
+static void test_native_aggregate_usage(const agent_t *selected, const request_context_t *owner)
+{
+   const int sequences[][2] = {{-1, 1}, {1, -1}, {-1, 0}, {0, 0}, {0, 1}, {1, 1}, {2, 1}};
+   for (int transport = 0; transport < 4; transport++)
+      for (unsigned vector = 0; vector < sizeof sequences / sizeof *sequences; vector++)
+      {
+         owner_tools(1);
+         aimee_tool_t function = {.name = "read_file"};
+         aimee_tool_t space = {
+             .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+         aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+         aimee_request_t profile = {.model = "selected-model",
+                                    .frontend = AIMEE_WIRE_ANTHROPIC,
+                                    .tools = &space,
+                                    .n_tools = 1,
+                                    .system = &system,
+                                    .n_system = 1,
+                                    .prompt_cache_key = "",
+                                    .mutated = 1};
+         server_session_capture_t *capture = server_session_capture_open(
+             "private-child", "native-turn", "webuser:alice", "session-a");
+         assert(capture && !server_session_capture_bind(capture));
+         server_native_runtime_t *runtime =
+             server_native_runtime_open_request(selected, owner, "session-a", &profile);
+         assert(runtime && server_session_capture_bind(NULL) == capture);
+         atomic_store(&expected_capture, capture);
+         captured_rows = cJSON_CreateArray();
+         atomic_store(&owned_profile_probe, 1);
+         atomic_store(&snapshot_generation, 1);
+         atomic_store(&usage_probe_active, 1);
+         aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION,
+                                          .execution_status = "running"};
+         assert(!server_session_capture_append(capture, &started, NULL, NULL));
+         for (int turn = 0; turn < 2; turn++)
+         {
+            atomic_store(&usage_probe_kind, sequences[vector][turn]);
+            atomic_store(&usage_probe_buffered, (transport >> turn) & 1);
+            char response[1024];
+            int attempts = sequences[vector][turn] > 1 ? 2 : 1;
+            int baseline = transport_fact_begin(attempts);
+            request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+            transport_fact_end(baseline, attempts);
+            assert(strstr(response, "200 OK") && !server_session_capture_failed(capture));
+         }
+         int stops = 0;
+         const cJSON *row;
+         cJSON_ArrayForEach(row, captured_rows)
+         {
+            const cJSON *payload = cJSON_GetObjectItemCaseSensitive(row, "payload");
+            const char *type =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "type"));
+            if (!type || strcmp(type, "TURN_STOP"))
+               continue;
+            assert(stops < 2);
+            const cJSON *usage = cJSON_GetObjectItemCaseSensitive(payload, "usage_in");
+            int kind = sequences[vector][stops++];
+            assert(kind < 0 ? !usage
+                            : cJSON_IsNumber(usage) && usage->valuedouble == (kind ? 7 : 0));
+         }
+         assert(stops == 2);
+         char *before = cJSON_PrintUnformatted(captured_rows);
+         server_native_runtime_quiesce(runtime);
+         aimee_response_t aggregate = {0};
+         assert(!server_native_runtime_result(runtime, &aggregate));
+         int unknown =
+             sequences[vector][0] < 0 || sequences[vector][1] < 0 || sequences[vector][0] > 1;
+         server_native_usage_t usage = {0};
+         assert(!server_native_runtime_usage(runtime, &usage));
+         int subtotal = (sequences[vector][0] > 0) + (sequences[vector][1] > 0);
+         assert(usage.unobserved == unknown && usage.input == 7 * subtotal &&
+                usage.output == 5 * subtotal && usage.cache_read == 3 * subtotal &&
+                usage.cache_write == 2 * subtotal && usage.reasoning == subtotal);
+         int known = unknown ? 0 : (sequences[vector][0] > 0) + (sequences[vector][1] > 0);
+         assert(aggregate.usage_unobserved == unknown);
+         assert(aggregate.usage_in == 7 * known && aggregate.usage_out == 5 * known);
+         assert(aggregate.usage_cache_read == 3 * known &&
+                aggregate.usage_cache_write == 2 * known && aggregate.usage_reasoning == known);
+         assert(!aimee_ir_response_complete_valid(&aggregate) && aggregate.n_content == 1 &&
+                !strcmp(aggregate.content[0].text, "original usage response"));
+         char *after = cJSON_PrintUnformatted(captured_rows);
+         assert(before && after && !strcmp(before, after));
+         free(before);
+         free(after);
+         aimee_response_free(&aggregate);
+         server_native_runtime_close(runtime);
+         server_session_capture_close(capture);
+         atomic_store(&expected_capture, NULL);
+         atomic_store(&owned_profile_probe, 0);
+         atomic_store(&snapshot_generation, 0);
+         atomic_store(&usage_probe_active, 0);
+         cJSON_Delete(captured_rows);
+         captured_rows = NULL;
+      }
+   puts("native aggregate usage: unknown taint, observed zero, mixed stream/buffer and original "
+        "records passed");
 }
 
 static void test_native_buffered_refusal(const agent_t *selected, const request_context_t *owner)
@@ -2409,7 +2659,8 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
          assert(!pthread_join(responder, NULL));
       assert(atomic_load(&dispatch_count) ==
              before + (mode == 0 || mode == 3 || mode == 4 || mode == 5 || mode == 9));
-      assert(!server_session_capture_current() && workspace == &bob_workspace && job_id == 22);
+      assert(!server_session_capture_current() && workspace == &bob_workspace &&
+             agent_get_durable_job_id() == 22);
       if (mode == 4 || mode == 5 || mode == 10)
       {
          assert(cJSON_IsObject(cJSON_GetObjectItem(rpc, "error")));
@@ -2878,7 +3129,12 @@ int main(void)
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
-   test_native_preframe_error(&selected, &a);
+   test_native_transport_usage(&selected, &a, 0, 0, 0);
+   test_native_transport_usage(&selected, &a, 1, 0, 0);
+   test_native_transport_usage(&selected, &a, 0, 1, 0);
+   test_native_transport_usage(&selected, &a, 1, 1, 0);
+   test_native_transport_usage(&selected, &a, 1, 1, 1);
+   test_native_aggregate_usage(&selected, &a);
    test_native_buffered_refusal(&selected, &a);
    test_native_turn_limit(&selected, &a);
    test_native_original_catalog(&selected, &a);
@@ -2902,6 +3158,7 @@ int main(void)
    agent_tools_denied_set(NULL, 0);
    puts("native runtime: owned actor/model/permissions/source, resource leases and cancellation "
         "passed");
+   agent_set_durable_job(0);
    server_control_scope_close(alice_controls);
    cJSON_Delete(source_rows);
    return 0;

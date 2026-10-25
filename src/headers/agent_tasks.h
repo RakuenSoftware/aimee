@@ -2,6 +2,7 @@
 #define DEC_AGENT_TASKS_H 1
 
 #include "agent_types.h"
+#include "wire_fence.h"
 
 typedef struct
 {
@@ -30,10 +31,31 @@ typedef struct
 /* Durable jobs.
  *
  * agent_set_durable_job publishes the active job id to the agent runtime.
- * The runtime calls db1_agent_job_update / db1_agent_job_heartbeat
- * directly, so callers no longer hand in a DB connection. */
+ * Its retained progress owner serializes transport counts and heartbeat writes. */
 void agent_set_durable_job(int job_id);
 int agent_get_durable_job_id(void);
+
+/* One actual job owns progress across dispatch retries and joined callbacks.
+ * begin requires the persisted counter and a held owner before provider work.
+ * The legacy setter preserves its prior binding if a new owner cannot be held;
+ * shipping positive job starts use checked begin. */
+typedef struct agent_job_progress agent_job_progress_t;
+int agent_durable_job_begin(int job_id);
+agent_job_progress_t *agent_job_progress_capture(void); /* retained, may be NULL */
+void agent_job_progress_release(agent_job_progress_t *progress);
+/* bind retains the supplied owner and transfers the old TLS reference out.
+ * restore consumes that reference after releasing the temporary binding. */
+typedef struct
+{
+   agent_job_progress_t *previous;
+   wire_fence_transport_observer_t observer, previous_transport;
+   int transport_bound;
+} agent_job_progress_binding_t;
+agent_job_progress_binding_t agent_job_progress_bind(agent_job_progress_t *progress);
+void agent_job_progress_restore(agent_job_progress_binding_t previous);
+void agent_job_progress_heartbeat(const char *current_tool);
+void agent_job_progress_observe_transport(int attempts);
+int agent_job_progress_transport_attempts(void);
 
 /* Result cache lives in src/db1/caches.h (db1_agent_cache_*). */
 

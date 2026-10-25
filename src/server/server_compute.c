@@ -742,7 +742,13 @@ static void delegate_worker_run(void *arg)
          compute_ctx_free(cctx);
          return;
       }
-      agent_set_durable_job(cctx->background_job_id);
+      if (agent_durable_job_begin(cctx->background_job_id))
+      {
+         db1_agent_job_update(cctx->background_job_id, "failed", 0,
+                              "cannot establish delegate job progress owner");
+         compute_ctx_free(cctx);
+         return;
+      }
    }
    /* Cleanup-relevant state, hoisted + zero-initialised so the single
     * delegate_fail: error path releases exactly what was acquired — each

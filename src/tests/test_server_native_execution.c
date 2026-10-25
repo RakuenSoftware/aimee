@@ -52,6 +52,7 @@ static request_context_t owner;
 static server_session_terminal_action_fn terminal;
 static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
+static int fixture_usage_unknown, fixture_usage_prefix;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
 static int refuse_runtime;
 static int expected_turn_limit;
@@ -621,6 +622,22 @@ void server_native_runtime_tool_counts(const server_native_runtime_t *r, int *ca
    *calls = fixture_host_calls;
    *successful = fixture_host_successes;
 }
+int server_native_runtime_usage(const server_native_runtime_t *r, server_native_usage_t *out)
+{
+   assert(r == &runtime && joined && child_closed);
+   *out = (server_native_usage_t){.unobserved = fixture_usage_unknown};
+   if (fixture_usage_prefix)
+      *out = (server_native_usage_t){.input = fixture_usage_prefix == 2 ? LONG_MAX : 7,
+                                     .output = 5,
+                                     .cache_read = 3,
+                                     .cache_write = 2,
+                                     .reasoning = 1,
+                                     .unobserved = fixture_usage_unknown};
+   else if (!fixture_usage_unknown && mode != 3)
+      *out = (server_native_usage_t){.input = 73, .output = 29, .cache_read = 11, .cache_write = 7};
+   return 0;
+}
+
 int server_native_runtime_result(const server_native_runtime_t *r, aimee_response_t *out)
 {
    assert(r == &runtime && joined && child_closed);
@@ -661,6 +678,11 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
    out->usage_out = 29;
    out->usage_cache_read = 11;
    out->usage_cache_write = 7;
+   if (fixture_usage_unknown)
+   {
+      out->usage_unobserved = 1;
+      out->usage_in = out->usage_out = out->usage_cache_read = out->usage_cache_write = 0;
+   }
    out->stop_reason = mode == 4                  ? AIMEE_STOP_TOOL_USE
                       : mode == 12 || mode == 15 ? AIMEE_STOP_CONTENT_FILTER
                       : mode == 13               ? AIMEE_STOP_MAX_TOKENS
@@ -1115,6 +1137,7 @@ static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   fixture_usage_unknown = fixture_usage_prefix = 0;
    fixture_host_calls = fixture_host_successes = 0;
    owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
    expected_wire = AIMEE_WIRE_RESPONSES;
@@ -1282,6 +1305,72 @@ int main(int argc, char **argv)
       }
       agent_result_clear_response(&out);
    }
+   for (int diagnostic = 0; diagnostic < 2; diagnostic++)
+   {
+      reset(diagnostic ? 12 : 0);
+      fixture_usage_unknown = 1;
+      aimee_response_t canonical = {0};
+      cfg.canonical_response = &canonical;
+      agent_result_t unknown = {0};
+      int rc = provider_cli_adapter_host_execute(&cfg, &unknown);
+      assert(diagnostic ? rc < 0 && !unknown.success : !rc && unknown.success);
+      assert(agent_result_usage_is_unobserved(&unknown) && canonical.usage_unobserved);
+      assert(!unknown.prompt_tokens && !unknown.completion_tokens && !unknown.cache_read_tokens &&
+             !unknown.cache_write_tokens && !canonical.usage_in && !canonical.usage_out);
+      assert(unknown.canonical_response.n_content == 1 &&
+             !strcmp(unknown.canonical_response.content[0].text, "ORIGINAL canonical output"));
+      assert(canonical.stop_reason ==
+             (diagnostic ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_END_TURN));
+      if (!diagnostic)
+         finish(1);
+      assert(!retained && closed == 1);
+      aimee_response_free(&canonical);
+      agent_result_clear_response(&unknown);
+      cfg.canonical_response = NULL;
+   }
+   reset(3); /* Typed runtime peer: uncertain send, no canonical final response. */
+   fixture_usage_unknown = 1;
+   aimee_response_t absent = {0};
+   cfg.canonical_response = &absent;
+   agent_result_t incomplete = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &incomplete) < 0);
+   assert(!incomplete.success && agent_result_usage_is_unobserved(&incomplete));
+   assert(!incomplete.canonical_response.content && !absent.content && !incomplete.response);
+   assert(!incomplete.prompt_tokens && !incomplete.completion_tokens);
+   agent_result_clear_response(&incomplete);
+   cfg.canonical_response = NULL;
+   for (int unknown = 0; unknown < 2; unknown++)
+   {
+      reset(3);
+      fixture_usage_unknown = unknown;
+      fixture_usage_prefix = 1;
+      agent_result_t subtotal = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &subtotal) < 0 && !subtotal.success);
+      assert(subtotal.usage_unobserved == unknown && !subtotal.canonical_response.content);
+      assert(subtotal.prompt_tokens == 7 && subtotal.completion_tokens == 5 &&
+             subtotal.cache_read_tokens == 3 && subtotal.cache_write_tokens == 2);
+      agent_result_clear_response(&subtotal);
+   }
+   reset(0);
+   fixture_usage_unknown = 1;
+   fixture_usage_prefix = 1;
+   agent_result_t partial_usage = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &partial_usage));
+   assert(partial_usage.success && partial_usage.prompt_tokens == 7 &&
+          partial_usage.completion_tokens == 5 && partial_usage.usage_unobserved);
+   assert(partial_usage.canonical_response.usage_unobserved &&
+          !partial_usage.canonical_response.usage_in &&
+          !partial_usage.canonical_response.usage_out);
+   finish(1);
+   agent_result_clear_response(&partial_usage);
+   reset(3);
+   fixture_usage_unknown = 1;
+   fixture_usage_prefix = 2;
+   agent_result_t bounded_usage = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &bounded_usage) < 0);
+   assert(bounded_usage.prompt_tokens == INT_MAX && bounded_usage.usage_unobserved &&
+          !bounded_usage.canonical_response.content);
+   agent_result_clear_response(&bounded_usage);
    /* A legitimate container namespace identity may have no host execution FD.
     * The real factory retains canonical history and gives the owned fake SDK
     * its independently held private workspace, never a source-FD substitution. */
@@ -1587,6 +1676,8 @@ int main(int argc, char **argv)
    assert(provider_cli_adapter_host_execute(&cfg, &retained_boundary) < 0);
    assert(terminal && reserved && !runtime_closed && sdk_calls == 1);
    assert(retained_boundary.tool_calls == 0 && retained_boundary.successful_tool_calls == 0);
+   assert(agent_result_usage_is_unobserved(&retained_boundary) &&
+          !retained_boundary.canonical_response.content);
    finish(0);
    assert(!runtime_closed && !completed && !aborted && !finished_reservation);
    atomic_store(&quiescence_failure, 0);

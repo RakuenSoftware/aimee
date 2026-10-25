@@ -1,3 +1,17 @@
+$(OBJDIR)/tests/job_progress_result_cache.o: server/agent_result_cache.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_agent_cache_get=fixture_cache_get -Ddb1_agent_cache_put=fixture_cache_put -c -o $@ $<
+
+# Only durable-store boundaries are peers; the actual tool runtime and HTTP run.
+$(OBJDIR)/tests/job_progress_agent_runtime.o: posix/agent_runtime.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_agent_job_is_cancelled=fixture_job_is_cancelled -Ddb1_agent_job_update=fixture_job_update -c -o $@ $<
+
+# Exercise the actual progress owner with explicit external durable-store peers.
+$(OBJDIR)/tests/agent_job_progress_owner.o: server/agent_tasks.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Ddb1_agent_job_get=fixture_job_get -Ddb1_agent_job_free=fixture_job_free -Ddb1_agent_job_heartbeat_ext=fixture_job_heartbeat_ext -c -o $@ $<
+
 
 # The daemon no longer links DB1's connection lifecycle -- see DB1_SRCS in the
 # Makefile for why. Tests still need it: they open ":memory:" and link the
@@ -988,7 +1002,7 @@ $(TESTPREFIX)/unit-test-server-native-cli: $(OBJDIR)/tests/test_server_native_cl
     $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS)) $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
-$(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
+$(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/wire_fence.o \
     $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/server/server_native_history.o $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/server_session_question.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
@@ -1723,7 +1737,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_st
 
 $(OBJDIR)/tests/test_script_rpc_admission.o: C_FLAGS += -Imodules/execution-policy/include
 
-$(TESTPREFIX)/unit-test-script-runner: $(OBJDIR)/tests/test_script_runner.o \
+$(TESTPREFIX)/unit-test-script-runner: $(OBJDIR)/tests/test_script_runner.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/wire_fence.o \
                       $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o \
                       $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o \
                       $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/log.o $(OBJDIR)/aimee_home.o \
@@ -7409,6 +7423,7 @@ $(OBJDIR)/tests/source-runtime-real-credentials.o: modules/vault/agent_credentia
 	$(CC) $(C_FLAGS) -Dagent_api_connection_credentials=unused_source_api_connection_credentials -Dagent_claude_connection_credentials=unused_source_claude_connection_credentials -Dagent_codex_connection_credentials=unused_source_codex_connection_credentials -c -o $@ $<
 
 $(TESTPREFIX)/unit-test-native-service-runtime-source: $(OBJDIR)/tests/test_native_service_runtime_source.o \
+    $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/wire_fence.o \
     $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/server/server_native_history.o $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/server_session_question.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
@@ -7545,7 +7560,7 @@ $(TESTPREFIX)/unit-test-acp-service-source: $(OBJDIR)/tests/test_acp_service_sou
 $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audit.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/token_tracker.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON) $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
+$(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(filter-out $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o,$(AGENT_CONTEXT_REFUSAL_TEST_COMMON)) $(OBJDIR)/tests/job_progress_agent_runtime.o $(OBJDIR)/tests/job_progress_result_cache.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Full worker composition; requires the explicitly configured container fixture.

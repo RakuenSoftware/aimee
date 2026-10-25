@@ -12,6 +12,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_source_authority.h"
 #include "agent_tasks.h"
+#include "wire_fence.h"
 #include "server_delegate_scope.h"
 #include "server_session_control.h"
 #include "server_session_capture.h"
@@ -60,6 +61,7 @@ struct server_native_runtime
    aimee_request_t request_profile;
    aimee_response_t last_response;
    long usage[5]; /* Successful committed model completions in this execution. */
+   int usage_unobserved;
    int last_complete;
    int tool_results, successful_tool_results;
    int model_turn_limit, admitted_model_turns;
@@ -78,6 +80,7 @@ struct server_native_runtime
    workspace_turn_mirror_lease_t *mirror;
    char cwd[MAX_PATH_LEN];
    int job_id, api_key_source, claude_source;
+   agent_job_progress_t *job_progress;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
@@ -171,7 +174,20 @@ typedef struct
    aimee_ir_response_builder_t builder;
    char *message_id, *source_message;
    char source_first[32], source_digest[65];
+   int transport_attempts, completed_responses;
+   wire_fence_transport_observer_t previous_transport;
 } native_model_capture_t;
+
+static void native_transport_completed(void *context, int status)
+{
+   native_model_capture_t *capture = context;
+   if (capture->transport_attempts < INT_MAX)
+      capture->transport_attempts++;
+   else
+      capture->runtime->usage_unobserved = 1;
+   if (capture->previous_transport.completed)
+      capture->previous_transport.completed(capture->previous_transport.context, status);
+}
 
 static int native_tool_in_catalog(const native_model_capture_t *capture, const aimee_block_t *call)
 {
@@ -327,6 +343,7 @@ static int native_original_result(native_model_capture_t *capture,
       view.usage_cache_read = event->delta->usage_cache_read;
       view.usage_cache_write = event->delta->usage_cache_write;
       view.usage_reasoning = event->delta->usage_reasoning;
+      view.usage_unobserved = event->delta->usage_unobserved;
    }
    long usage[] = {view.usage_in, view.usage_out, view.usage_cache_read, view.usage_cache_write,
                    view.usage_reasoning};
@@ -343,8 +360,13 @@ static int native_original_result(native_model_capture_t *capture,
    {
       runtime->last_complete = stop || capture->builder.complete;
       if (stop)
+      {
+         runtime->usage_unobserved |= view.usage_unobserved;
+         if (capture->completed_responses < INT_MAX)
+            capture->completed_responses++;
          for (unsigned i = 0; i < sizeof usage / sizeof usage[0]; i++)
             runtime->usage[i] += usage[i];
+      }
    }
    return rc;
 }
@@ -1287,6 +1309,7 @@ static int native_perform(const char *method, const char *path, const char *head
          free(input);
          return -1;
       }
+      runtime->last_complete = 0; /* A new generation cannot publish the prior terminal. */
       if (runtime->admitted_model_turns < INT_MAX)
          runtime->admitted_model_turns++;
    }
@@ -1298,7 +1321,7 @@ static int native_perform(const char *method, const char *path, const char *head
    const workspace_provider_t *previous_workspace = workspace_provider_active();
    const workspace_turn_mirror_lease_t *previous_mirror =
        workspace_turn_mirror_bind(runtime->mirror);
-   int previous_job = agent_get_durable_job_id();
+   agent_job_progress_binding_t previous_job = agent_job_progress_bind(runtime->job_progress);
    char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
    const char *cwd = run_cmd_get_cwd();
    snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
@@ -1312,7 +1335,6 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_source_authority_tls_restore(&bound_source);
    server_delegate_scope_restore(&runtime->delegate);
    workspace_provider_set_active(runtime->workspace);
-   agent_set_durable_job(runtime->job_id);
    run_cmd_set_cwd(runtime->cwd);
    session_id_set_override(runtime->session);
    request_context_snapshot_t previous_request;
@@ -1443,6 +1465,9 @@ static int native_perform(const char *method, const char *path, const char *head
    native_mcp_stage(&diagnostic, "dispatch", NATIVE_MCP_STAGE_BEGIN);
    const server_native_runtime_t *previous_forward = forward_runtime;
    forward_runtime = runtime;
+   if (request_locked)
+      model_capture.previous_transport = wire_fence_transport_observer_bind(
+          (wire_fence_transport_observer_t){native_transport_completed, &model_capture});
    if (work)
       rc = work->cli   ? native_cli_dispatch(runtime, work, io)
            : work->rpc ? native_mcp_dispatch(runtime, work, io, &diagnostic)
@@ -1451,6 +1476,12 @@ static int native_perform(const char *method, const char *path, const char *head
    {
       io->response_started(io->context);
       rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
+   }
+   if (request_locked)
+   {
+      (void)wire_fence_transport_observer_bind(model_capture.previous_transport);
+      if (model_capture.transport_attempts > model_capture.completed_responses)
+         runtime->usage_unobserved = 1;
    }
    forward_runtime = previous_forward;
    native_mcp_stage(&diagnostic, "dispatch", rc ? NATIVE_MCP_STAGE_FAILED : NATIVE_MCP_STAGE_OK);
@@ -1498,7 +1529,7 @@ restore:
    server_delegate_scope_restore(&previous_delegate);
    workspace_turn_mirror_bind(previous_mirror);
    workspace_provider_set_active(previous_workspace);
-   agent_set_durable_job(previous_job);
+   agent_job_progress_restore(previous_job);
    run_cmd_set_cwd(previous_cwd);
    server_session_capture_bind(previous_capture);
    session_id_set_override(previous_session);
@@ -1778,6 +1809,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    }
    runtime->workspace = workspace_provider_active();
    runtime->job_id = agent_get_durable_job_id();
+   runtime->job_progress = agent_job_progress_capture();
    server_delegate_scope_capture(&runtime->delegate);
    const char *cwd = run_cmd_get_cwd();
    snprintf(runtime->cwd, sizeof runtime->cwd, "%s", cwd ? cwd : "");
@@ -2219,11 +2251,12 @@ int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_r
         !server_native_runtime_turn_limit_reached(runtime)))
       return -1;
    aimee_response_t result = runtime->last_response;
-   result.usage_in = runtime->usage[0];
-   result.usage_out = runtime->usage[1];
-   result.usage_cache_read = runtime->usage[2];
-   result.usage_cache_write = runtime->usage[3];
-   result.usage_reasoning = runtime->usage[4];
+   result.usage_unobserved = runtime->usage_unobserved;
+   result.usage_in = runtime->usage_unobserved ? 0 : runtime->usage[0];
+   result.usage_out = runtime->usage_unobserved ? 0 : runtime->usage[1];
+   result.usage_cache_read = runtime->usage_unobserved ? 0 : runtime->usage[2];
+   result.usage_cache_write = runtime->usage_unobserved ? 0 : runtime->usage[3];
+   result.usage_reasoning = runtime->usage_unobserved ? 0 : runtime->usage[4];
    if (server_native_runtime_turn_limit_reached(runtime))
    {
       if (!result.refusal)
@@ -2232,6 +2265,20 @@ int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_r
    }
    return aimee_ir_response_clone(&result, out);
 }
+int server_native_runtime_usage(const server_native_runtime_t *runtime, server_native_usage_t *out)
+{
+   if (!runtime || !out || !runtime->owns_request ||
+       !pthread_equal(runtime->producer, pthread_self()) || runtime->listener)
+      return -1;
+   *out = (server_native_usage_t){.input = runtime->usage[0],
+                                  .output = runtime->usage[1],
+                                  .cache_read = runtime->usage[2],
+                                  .cache_write = runtime->usage[3],
+                                  .reasoning = runtime->usage[4],
+                                  .unobserved = runtime->usage_unobserved};
+   return 0;
+}
+
 void server_native_runtime_tool_counts(const server_native_runtime_t *runtime, int *calls,
                                        int *successful)
 {
@@ -2267,6 +2314,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    agent_tools_scope_destroy_owned(&runtime->tools);
    agent_source_authority_snapshot_destroy(&runtime->source);
    workspace_turn_mirror_release(runtime->mirror);
+   agent_job_progress_release(runtime->job_progress);
    OPENSSL_cleanse(runtime, sizeof *runtime);
    free(runtime);
 }

@@ -1128,12 +1128,14 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
                                    : strstr(url, "/responses")  ? WIRE_FENCE_OPENAI_RESPONSES
                                                                 : WIRE_FENCE_OPENAI_CHAT;
    wire_fence_observation_t observation = {0};
+   agent_job_progress_heartbeat("model");
    int http_status =
        wire_fence_revalidate_sources() != 0
            ? HTTP_RETRY_ADMISSION_REFUSED
            : wire_fence_post_observed(url, auth_header, body, strlen(body), &response_body,
                                       agent->timeout_ms, extra_headers, ra, rb, rm, agent->provider,
                                       agent->model, session_id(), wire_route, &observation);
+   agent_job_progress_heartbeat("");
    out->usage_unobserved |=
        observation.transport_attempts > 1 ||
        (observation.transport_attempts && (http_status != 200 || !response_body));
@@ -1181,12 +1183,14 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
             return AGENT_RC_CAPTURE_FAILED;
          }
          observation = (wire_fence_observation_t){0};
+         agent_job_progress_heartbeat("model");
          http_status = wire_fence_revalidate_sources() != 0
                            ? HTTP_RETRY_ADMISSION_REFUSED
                            : wire_fence_post_observed(
                                  url, auth_header, fb_body, strlen(fb_body), &response_body,
                                  agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
                                  fb_agent.model, session_id(), wire_route, &observation);
+         agent_job_progress_heartbeat("");
          out->usage_unobserved |=
              observation.transport_attempts > 1 ||
              (observation.transport_attempts && (http_status != 200 || !response_body));

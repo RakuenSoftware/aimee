@@ -118,6 +118,15 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
 void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime);
 void server_native_runtime_quiesce(server_native_runtime_t *runtime);
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out);
+/* Read-only accounting projection, independent of latest response completion.
+ * Known subtotals survive uncertain later sends; canonical unknown aggregates
+ * still publish zero numeric fields. Only the quiesced producer may read it. */
+typedef struct
+{
+   long input, output, cache_read, cache_write, reasoning;
+   int unobserved;
+} server_native_usage_t;
+int server_native_runtime_usage(const server_native_runtime_t *runtime, server_native_usage_t *out);
 /* Committed canonical tool results, read after callback quiescence. SDK item
  * notifications and nested CLI requests do not invent model tool calls. */
 void server_native_runtime_tool_counts(const server_native_runtime_t *runtime, int *calls,

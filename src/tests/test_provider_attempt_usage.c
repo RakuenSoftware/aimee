@@ -26,6 +26,109 @@
 #include "agent_admission.h"
 #include "provider_cli_adapter.h"
 
+#include "agent_tasks.h"
+#include "db1_client/agent_jobs.h"
+#include <limits.h>
+static int job_store_count, job_store_failure, job_store_writes;
+static char job_store_tool[64];
+static int job_refuse_at_model, job_model_phases;
+static int observer_probe;
+static void progress_observer_probe(void *context, int status)
+{
+   assert(context == &observer_probe && status == 200);
+   observer_probe++;
+}
+int fixture_job_get(int id, db1_agent_job_t *out)
+{
+   *out = (db1_agent_job_t){.id = id, .api_call_count = job_store_count};
+   return job_store_failure ? -1 : 0;
+}
+int fixture_job_is_cancelled(int id)
+{
+   assert(id == 91);
+   return 0;
+}
+void fixture_job_update(int id, const char *status, int cursor, const char *result)
+{
+   assert(id == 91 && status && cursor >= 0);
+   (void)result;
+}
+void fixture_job_free(db1_agent_job_t *out)
+{
+   (void)out;
+}
+void fixture_job_heartbeat_ext(int id, const char *tool, int count)
+{
+   assert(id == 91 && tool && count >= job_store_count);
+   job_store_count = count;
+   snprintf(job_store_tool, sizeof job_store_tool, "%s", tool);
+   if (!strcmp(tool, "model") && ++job_model_phases == job_refuse_at_model)
+   {
+      request_context_t refused = {.context_refused = 1};
+      request_context_set(&refused);
+   }
+   job_store_writes++;
+}
+static void *progress_callback(void *held)
+{
+   agent_job_progress_binding_t previous = agent_job_progress_bind(held);
+   assert(agent_get_durable_job_id() == 91);
+   for (int i = 0; i < 20; i++)
+      agent_job_progress_observe_transport(1);
+   agent_job_progress_restore(previous);
+   assert(!agent_get_durable_job_id());
+   return NULL;
+}
+static void test_progress_lifetime(void)
+{
+   wire_fence_transport_observer_t outer_observer = wire_fence_transport_observer_bind(
+       (wire_fence_transport_observer_t){progress_observer_probe, &observer_probe});
+   job_store_count = 13;
+   assert(!agent_durable_job_begin(91));
+   agent_job_progress_t *held = agent_job_progress_capture();
+   agent_job_progress_binding_t nested = agent_job_progress_bind(held);
+   assert(!agent_durable_job_begin(92));
+   agent_set_durable_job(0);
+   agent_job_progress_restore(nested);
+   assert(agent_get_durable_job_id() == 91);
+   wire_fence_transport_observer_t actual =
+       wire_fence_transport_observer_bind((wire_fence_transport_observer_t){0});
+   actual.completed(actual.context, 200);
+   (void)wire_fence_transport_observer_bind(actual);
+   assert(job_store_count == 14); /* one notification, even same-owner rebind */
+   agent_set_durable_job(0);
+   actual = wire_fence_transport_observer_bind((wire_fence_transport_observer_t){0});
+   assert(actual.completed == progress_observer_probe && actual.context == &observer_probe);
+   actual.completed(actual.context, 200);
+   assert(observer_probe == 1);
+   (void)wire_fence_transport_observer_bind(actual);
+   assert(!agent_durable_job_begin(91));
+
+   agent_set_durable_job(0);
+   pthread_t a, b;
+   assert(!pthread_create(&a, NULL, progress_callback, held));
+   assert(!pthread_create(&b, NULL, progress_callback, held));
+   assert(!pthread_join(a, NULL) && !pthread_join(b, NULL));
+   agent_job_progress_release(held);
+   assert(job_store_count == 54);
+   assert(!agent_durable_job_begin(91)); /* actual persisted baseline */
+   assert(agent_job_progress_transport_attempts() == 54);
+   int writes = job_store_writes;
+   agent_job_progress_observe_transport(0);
+   assert(job_store_writes == writes);
+   job_store_failure = 1;
+   assert(agent_durable_job_begin(92) == -1 && agent_get_durable_job_id() == 91);
+   job_store_failure = 0;
+   agent_set_durable_job(0);
+   job_store_count = INT_MAX - 1;
+   assert(!agent_durable_job_begin(91));
+   agent_job_progress_observe_transport(3);
+   agent_job_progress_observe_transport(1);
+   assert(job_store_count == INT_MAX);
+   agent_set_durable_job(0);
+   (void)wire_fence_transport_observer_bind(outer_observer);
+}
+
 /* This peer refuses execution. It observes the real guarded dispatcher's live
  * admission slot; it never affirms a source/host/model or starts a child. */
 static int admission_probe_active, admission_probe_calls;
@@ -200,6 +303,114 @@ static const char known_zero[] =
 static const char unknown_usage[] =
     "{\"model\":\"gpt-4o\",\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":"
     "\"assistant\",\"content\":\"Unknown usage.\"}}]}";
+#include "agent_result_cache.h"
+#include <aimee/translation/aimee_backend.h>
+static char *cached_response;
+char *fixture_cache_get(const char *role, const char *key)
+{
+   assert(!strcmp(role, "summarize") && key && *key);
+   return strdup(cached_response);
+}
+void fixture_cache_put(const char *role, const char *key, const char *value)
+{
+   (void)role;
+   (void)key;
+   (void)value;
+   abort();
+}
+static void test_cached_result_no_transport(void)
+{
+   aimee_response_t response = {0};
+   char error[128];
+   assert(!aimee_backend_parse_wire(known_zero, strlen(known_zero), AIMEE_WIRE_OPENAI_CHAT,
+                                    &response, error, sizeof error));
+   cJSON *json = aimee_ir_response_json(&response);
+   cached_response = cJSON_PrintUnformatted(json);
+   assert(cached_response);
+   cJSON_Delete(json);
+   aimee_response_free(&response);
+   job_store_count = 11;
+   assert(!agent_durable_job_begin(91));
+   int writes = job_store_writes;
+   agent_result_t result = {0};
+   assert(agent_result_cache_read("summarize", "fixture-key", &result));
+   assert(result.cache_hit && result.success && job_store_count == 11 &&
+          job_store_writes == writes && agent_job_progress_transport_attempts() == 11);
+   agent_result_clear_response(&result);
+   free(cached_response);
+   cached_response = NULL;
+   agent_set_durable_job(0);
+}
+static int progress_stream(const char *bytes, size_t length, void *context)
+{
+   (void)bytes;
+   *(size_t *)context += length;
+   return 0;
+}
+static void test_actual_stream_progress(void)
+{
+   char url[128];
+   int listener = listening_peer(url), statuses[] = {200};
+   const char *bodies[] = {known_zero};
+   pid_t child = serve_peer(listener, statuses, bodies, 1);
+   job_store_count = 5;
+   assert(!agent_durable_job_begin(91));
+   size_t bytes = 0;
+   assert(wire_fence_post_stream(url, "", "{}", 2, progress_stream, &bytes, 1000, "", "openai",
+                                 "gpt-4o", WIRE_FENCE_OPENAI_CHAT) == 200);
+   assert(bytes && job_store_count == 6);
+   join_peer(child, listener);
+   request_context_t refused = {.context_refused = 1};
+   request_context_set(&refused);
+   assert(wire_fence_post_stream("http://127.0.0.1:1", "", "{}", 2, progress_stream, &bytes, 1000,
+                                 "", "openai", "gpt-4o",
+                                 WIRE_FENCE_OPENAI_CHAT) == HTTP_RETRY_ADMISSION_REFUSED);
+   request_context_clear();
+   assert(job_store_count == 6);
+   agent_set_durable_job(0);
+}
+static void test_plain_refusal_clears_phase(void)
+{
+   for (int fallback = 0; fallback < 2; fallback++)
+   {
+      char url[128];
+      int listener = listening_peer(url);
+      pid_t child = 0;
+      int statuses[] = {400};
+      const char *bodies[] = {"{}"};
+      if (fallback)
+         child = serve_peer(listener, statuses, bodies, 1);
+      agent_t agent = {0};
+      strcpy(agent.name, "phase-clear");
+      strcpy(agent.model, "gpt-4o");
+      strcpy(agent.provider, "openai");
+      strcpy(agent.auth_type, "none");
+      strcpy(agent.endpoint, url);
+      if (fallback)
+         strcpy(agent.fallback_model, "fallback-model");
+      agent.timeout_ms = 1000;
+      request_context_snapshot_t previous;
+      request_context_snapshot(&previous);
+      job_store_count = 3;
+      assert(!agent_durable_job_begin(91));
+      job_refuse_at_model = fallback + 1;
+      job_model_phases = 0;
+      agent_result_t result = {0};
+      assert(agent_execute(&agent, "system", "task", 128, 0, &result) == AGENT_RC_CONTEXT_REFUSED);
+      assert(job_model_phases == fallback + 1 && job_store_count == 3 + fallback &&
+             !job_store_tool[0]);
+      job_refuse_at_model = 0;
+      request_context_restore(&previous);
+      agent_set_durable_job(0);
+      agent_result_clear_response(&result);
+      struct pollfd pending = {.fd = listener, .events = POLLIN};
+      assert(poll(&pending, 1, 0) == 0);
+      if (fallback)
+         join_peer(child, listener);
+      else
+         close(listener);
+   }
+}
 static void test_actual_executor_observations(int only_mode)
 {
    const int statuses[][2] = {{200, 0}, {400, 0},   {204, 0}, {500, 200},
@@ -207,7 +418,10 @@ static void test_actual_executor_observations(int only_mode)
    const char *bodies[][2] = {{"not-json", NULL},   {"{}", NULL},       {"", NULL},
                               {"{}", known_zero},   {known_zero, NULL}, {"{}", known_zero},
                               {unknown_usage, NULL}};
-   for (int execution = 0; execution < 2; execution++)
+   job_store_count = 7;
+   assert(!agent_durable_job_begin(91));
+   int expected_attempts = 7;
+   for (int execution = 1; execution >= 0; execution--)
       for (int mode = 0; mode < 7; mode++)
       {
          if (only_mode >= 0 && mode != only_mode)
@@ -230,6 +444,9 @@ static void test_actual_executor_observations(int only_mode)
          int rc = execution ? agent_execute(&agent, "system", "task", 128, 0, &result)
                             : agent_execute_with_tools_for_role(&agent, &network, NULL, "system",
                                                                 "task", 128, 0, &result);
+         expected_attempts += count;
+         assert(job_store_count == expected_attempts);
+         assert(agent_job_progress_transport_attempts() == expected_attempts);
          assert((rc == 0 && result.success) == (mode >= 3));
          assert(agent_result_usage_is_unobserved(&result) == (mode != 4));
          if (mode >= 3)
@@ -240,6 +457,10 @@ static void test_actual_executor_observations(int only_mode)
          agent_result_clear_response(&result);
          join_peer(child, listener);
       }
+   agent_set_durable_job(0);
+   assert(!agent_durable_job_begin(91));
+   assert(agent_job_progress_transport_attempts() == expected_attempts);
+   agent_set_durable_job(0);
    puts("provider attempts: plain and tool HTTP decode/status/empty/retry/fallback unknown, first "
         "knownzero "
         "remains known");
@@ -520,10 +741,12 @@ static void test_retry_owner_known_usage_boundaries(void)
 int main(int argc, char **argv)
 {
    int only_mode = -1;
+   int progress_only = argc == 2 && !strcmp(argv[1], "progress-buffered");
    int lifecycle_only = argc == 2 && !strcmp(argv[1], "dispatch-lifecycle");
    if (argc == 2)
    {
-      assert(lifecycle_only || !strcmp(argv[1], "bad-json") || !strcmp(argv[1], "retry-only"));
+      assert(progress_only || lifecycle_only || !strcmp(argv[1], "bad-json") ||
+             !strcmp(argv[1], "retry-only"));
       only_mode = !strcmp(argv[1], "bad-json") ? 0 : 3;
    }
    else
@@ -539,11 +762,20 @@ int main(int argc, char **argv)
    assert(!platform_setenv("AIMEE_CONTEXT_NO_KB", "1"));
    assert(!config_set_memory_recall_enabled(0));
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
+   if (progress_only)
+   {
+      test_actual_executor_observations(4);
+      return 0;
+   }
    if (lifecycle_only)
    {
       test_actual_routing_retry_usage();
       return 0;
    }
+   test_progress_lifetime();
+   test_actual_stream_progress();
+   test_cached_result_no_transport();
+   test_plain_refusal_clears_phase();
    test_dispatch_resource_refusal();
    test_actual_routing_retry_usage();
    test_retry_owner_known_usage_boundaries();

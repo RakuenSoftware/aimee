@@ -1314,15 +1314,31 @@ refused:
    native_execution_close(execution);
    return NULL;
 }
+static void native_execution_project_usage(server_native_runtime_t *runtime, agent_result_t *out)
+{
+   server_native_usage_t usage;
+   if (server_native_runtime_usage(runtime, &usage))
+   {
+      out->usage_unobserved = 1;
+      return;
+   }
+   out->usage_unobserved |= usage.unobserved;
+   out->prompt_tokens = usage.input > INT_MAX ? INT_MAX : (int)usage.input;
+   out->completion_tokens = usage.output > INT_MAX ? INT_MAX : (int)usage.output;
+   out->cache_read_tokens = usage.cache_read > INT_MAX ? INT_MAX : (int)usage.cache_read;
+   out->cache_write_tokens = usage.cache_write > INT_MAX ? INT_MAX : (int)usage.cache_write;
+}
 static int native_execution_result(native_execution_t *execution, agent_result_t *out,
                                    aimee_response_t *canonical)
 {
    if (execution->containment && server_native_containment_quiesce(execution->containment, 1000))
    {
+      out->usage_unobserved = 1; /* Unverified custody cannot establish complete spend. */
       server_native_runtime_deactivate_hold_port(execution->runtime);
       return -1;
    }
    server_native_runtime_quiesce(execution->runtime);
+   native_execution_project_usage(execution->runtime, out);
    server_native_runtime_tool_counts(execution->runtime, &out->tool_calls,
                                      &out->successful_tool_calls);
    aimee_response_t original = {0};
@@ -1344,10 +1360,6 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
    }
    agent_result_clear_response(out);
    out->response = text;
-   out->prompt_tokens = (int)original.usage_in;
-   out->completion_tokens = (int)original.usage_out;
-   out->cache_read_tokens = (int)original.usage_cache_read;
-   out->cache_write_tokens = (int)original.usage_cache_write;
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             original.raw_stop_reason ? original.raw_stop_reason
                                      : aimee_stop_reason_name(original.stop_reason));
@@ -1370,10 +1382,12 @@ static void native_execution_diagnostic(native_execution_t *execution, agent_res
       return;
    if (execution->containment && server_native_containment_quiesce(execution->containment, 1000))
    {
+      out->usage_unobserved = 1; /* No attempt count or canonical response is invented. */
       server_native_runtime_deactivate_hold_port(execution->runtime);
       return;
    }
    server_native_runtime_quiesce(execution->runtime);
+   native_execution_project_usage(execution->runtime, out);
    server_native_runtime_tool_counts(execution->runtime, &out->tool_calls,
                                      &out->successful_tool_calls);
    aimee_response_t original = {0};
@@ -1387,12 +1401,6 @@ static void native_execution_diagnostic(native_execution_t *execution, agent_res
    }
    out->canonical_response = original;
    out->response = aimee_ir_response_text_alloc(&original);
-   out->prompt_tokens = original.usage_in > INT_MAX ? INT_MAX : (int)original.usage_in;
-   out->completion_tokens = original.usage_out > INT_MAX ? INT_MAX : (int)original.usage_out;
-   out->cache_read_tokens =
-       original.usage_cache_read > INT_MAX ? INT_MAX : (int)original.usage_cache_read;
-   out->cache_write_tokens =
-       original.usage_cache_write > INT_MAX ? INT_MAX : (int)original.usage_cache_write;
 }
 static int native_claude_init(const cJSON *frame, void *context)
 {

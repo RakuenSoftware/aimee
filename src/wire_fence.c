@@ -299,17 +299,37 @@ refused:
    return -1;
 }
 
-static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+static _Thread_local wire_fence_transport_observer_t transport_observer;
+wire_fence_transport_observer_t
+wire_fence_transport_observer_bind(wire_fence_transport_observer_t observer)
 {
-   wire_attempt_t *attempt = opaque;
-   if (status != HTTP_RETRY_ADMISSION_REFUSED && attempt->transport_attempts < INT_MAX)
-      attempt->transport_attempts++;
+   wire_fence_transport_observer_t previous = transport_observer;
+   transport_observer = observer;
+   return previous;
+}
+static void wire_transport_completed(int status)
+{
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && transport_observer.completed)
+      transport_observer.completed(transport_observer.context, status);
+}
+
+static void wire_attempt_receipt(wire_attempt_t *attempt, int status, const char *response,
+                                 size_t length)
+{
    if (attempt->attempt[0] &&
        (!ingress_preinject_observe_attempt ||
         ingress_preinject_observe_attempt(attempt->attempt, status, response, length) != 0))
       fputs(
           "provider receipt observation unavailable; admitted attempt outcome remains unresolved\n",
           stderr);
+}
+static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+{
+   wire_attempt_t *attempt = opaque;
+   wire_transport_completed(status);
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && attempt->transport_attempts < INT_MAX)
+      attempt->transport_attempts++;
+   wire_attempt_receipt(attempt, status, response, length);
 }
 
 int wire_fence_post_observed(const char *url, const char *auth_header, const void *body,
@@ -373,13 +393,17 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
    if (wire_attempt_before(&attempt, body, body_len) != 0)
       return HTTP_RETRY_ADMISSION_REFUSED;
    if (!attempt.attempt[0])
-      return agent_http_post_stream_bytes(url, auth_header, body, body_len, callback, userdata,
-                                          timeout_ms, extra_headers);
+   {
+      int status = agent_http_post_stream_bytes(url, auth_header, body, body_len, callback,
+                                                userdata, timeout_ms, extra_headers);
+      wire_transport_completed(status);
+      return status;
+   }
    wire_stream_t stream = {.digest = EVP_MD_CTX_new(), .callback = callback, .context = userdata};
    if (!stream.digest || EVP_DigestInit_ex(stream.digest, EVP_sha256(), NULL) != 1)
    {
       EVP_MD_CTX_free(stream.digest);
-      wire_attempt_after(&attempt, -1, NULL, 0);
+      wire_attempt_receipt(&attempt, -1, NULL, 0);
       last_error = "unavailable";
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
@@ -394,6 +418,7 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
                                                   extra_headers, &guard)
            : agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
                                           &stream, timeout_ms, extra_headers);
+   wire_transport_completed(status);
    unsigned char raw[32];
    unsigned int length = 0;
    char digest[65];

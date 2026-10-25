@@ -51,6 +51,17 @@ extern "C"
    /* Relay the source owner's current admission before resending frozen bytes. */
    int wire_fence_revalidate_sources(void);
 
+   /* Lexical consumer of actual HTTP transport outcomes, never SDK generations.
+    * The binding is producer-thread-local; owners retain/rebind its context for
+    * joined callbacks and restore the returned previous binding. */
+   typedef struct
+   {
+      void (*completed)(void *context, int status);
+      void *context;
+   } wire_fence_transport_observer_t;
+   wire_fence_transport_observer_t
+   wire_fence_transport_observer_bind(wire_fence_transport_observer_t observer);
+
    typedef struct
    {
       /* Transport invocations with uncertain deliveries, not verified model

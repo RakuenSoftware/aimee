@@ -51,9 +51,10 @@ extern "C"
        * distinguish in-tool stalls (legitimate long bash) from idle stalls
        * (model wedged with no API call). */
       char current_tool[DB1_AJ_TOOL_LEN];
-      /* api_call_count: monotonic count of provider API calls made. A heartbeat
-       * with the same (current_tool, api_call_count) across polls means
-       * forward progress has stalled. */
+      /* api_call_count: monotonic model-transport HTTP invocations with uncertain delivery,
+       * excluding explicit no-send refusals; not SDK generations or billed calls.
+       * A heartbeat with the same (current_tool, api_call_count) across polls
+       * means forward progress has stalled. */
       int api_call_count;
       double cost_usd;
       /* 0 means no measurement is available, never "the job was free". */
@@ -87,8 +88,9 @@ extern "C"
 
    /* UPDATE heartbeat_at/updated_at=now AND current_tool, api_call_count.
     * current_tool may be "" or NULL when the delegate is between tool
-    * calls (waiting on the model). api_call_count is a monotonic counter
-    * of provider API calls made by this delegate; pass the current value.
+    * calls (waiting on the model). api_call_count counts model-transport HTTP invocations
+    * with uncertain delivery, excluding explicit no-send refusals; pass the
+    * current cumulative value, not SDK generations or assumed billed calls.
     * Used by the runtime to write per-tool-call heartbeats so stale-state
     * detection can distinguish idle stalls from in-tool stalls. */
    void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);

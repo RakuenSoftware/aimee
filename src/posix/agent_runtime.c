@@ -133,7 +133,6 @@ static void finish_final_tool_violation(agent_result_t *out, const agent_t *agen
  * header through the runtime's already-large include set. */
 void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result);
 void db1_agent_job_heartbeat(int job_id);
-void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);
 int db1_agent_job_is_cancelled(int job_id);
 int db1_delegation_spawn_stop_reason(const char *delegation_id, char *out, size_t out_sz);
 
@@ -945,7 +944,8 @@ native_provider_http:
    int total_calls = 0;
    int successful_tool_calls = 0;
    long canonical_usage[5] = {0};
-   int api_call_count = 0; /* Saturating transport attempts, not model generations; heartbeat. */
+   int api_call_count =
+       0; /* Per-invocation diagnostic attempt identity, not durable job progress. */
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
@@ -1319,12 +1319,7 @@ native_provider_http:
       int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
       int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
 
-      {
-         int dj = agent_get_durable_job_id();
-         if (dj > 0)
-            db1_agent_job_heartbeat_ext(dj, final_text_only_turn ? "final_response" : "model",
-                                        api_call_count);
-      }
+      agent_job_progress_heartbeat(final_text_only_turn ? "final_response" : "model");
       int economizer_active = config_present() && econ_mode_current() != ECON_MODE_OFF;
       wire_fence_route_t wire_route = anthropic                   ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                       : chatgpt                   ? WIRE_FENCE_OPENAI_RESPONSES
@@ -1363,11 +1358,7 @@ native_provider_http:
       out->usage_unobserved |=
           observation.transport_attempts > 1 ||
           (observation.transport_attempts && (http_status != 200 || !response_body));
-      {
-         int dj = agent_get_durable_job_id();
-         if (dj > 0)
-            db1_agent_job_heartbeat_ext(dj, "", api_call_count);
-      }
+      agent_job_progress_heartbeat("");
       free(body);
       wire_fence_destroy(wire_snapshot);
 
@@ -1398,11 +1389,7 @@ native_provider_http:
          cJSON_Delete(fb_req);
          if (fb_body)
          {
-            {
-               int dj = agent_get_durable_job_id();
-               if (dj > 0)
-                  db1_agent_job_heartbeat_ext(dj, "model", api_call_count);
-            }
+            agent_job_progress_heartbeat("model");
             wire_fence_t *fb_snapshot = NULL;
             wire_fence_bytes_t fb_wire_body;
             wire_rc = wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
@@ -1437,11 +1424,7 @@ native_provider_http:
             out->usage_unobserved |=
                 observation.transport_attempts > 1 ||
                 (observation.transport_attempts && (http_status != 200 || !response_body));
-            {
-               int dj = agent_get_durable_job_id();
-               if (dj > 0)
-                  db1_agent_job_heartbeat_ext(dj, "", api_call_count);
-            }
+            agent_job_progress_heartbeat("");
             free(fb_body);
             wire_fence_destroy(fb_snapshot);
          }
@@ -2131,12 +2114,7 @@ native_provider_http:
             continue;
          }
 
-         {
-            int dj = agent_get_durable_job_id();
-            if (dj > 0)
-               db1_agent_job_heartbeat_ext(dj, aimee_ir_response_tool(&response, i)->tool_name,
-                                           api_call_count);
-         }
+         agent_job_progress_heartbeat(aimee_ir_response_tool(&response, i)->tool_name);
          agent_tools_set_effect_authorized(1);
          int tool_result_error = 1;
          char *result_str = dispatch_tool_call_ir_ctx_status(advertised, tool_arguments[i],
@@ -2158,11 +2136,7 @@ native_provider_http:
             goto ir_capture_failed;
          }
          result_str = agent_economize_fresh_tool_result(result_str);
-         {
-            int dj = agent_get_durable_job_id();
-            if (dj > 0)
-               db1_agent_job_heartbeat_ext(dj, "", api_call_count);
-         }
+         agent_job_progress_heartbeat("");
 
          /* Execution and receipt owners supply the outcome. A refusal or an
           * unconfirmed receipt is never evidence, regardless of its text. */
@@ -2315,7 +2289,7 @@ native_provider_http:
          /* current_tool="" — between tool dispatches, the model is awaiting
           * the next response. The heartbeat_ext path keeps api_call_count
           * fresh on the row so external pollers can see forward progress. */
-         db1_agent_job_heartbeat_ext(durable_job_id, "", api_call_count);
+         agent_job_progress_heartbeat("");
       }
    }
 

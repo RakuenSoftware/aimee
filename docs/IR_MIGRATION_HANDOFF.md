@@ -22,57 +22,46 @@ in `OWNERS.md`.
 
 ## Current source and qualification
 
-Production checkpoint: `a36db17c1950941cfbcfc3404e1c4567b7ff7dda`, tree
-`16fced6f520cc9c636c1b5c6ecc7251eb12106f9`. Subsequent changes correct only test
-fixtures: complete canonical context serialization and an explicit delegation
-state service peer. They add no production authority or validation exceptions.
+The composed source after merge 017e89520 contains the repairs below. Its
+final whole-source and installed-image checks remain outstanding. These are
+earlier source-specific qualification checkpoints, not a completed migration.
 
-The exact a36 full native suite passes 702 normal and 702 ASan/UBSan/leak
-invocations, 699 unique binaries per lane, with 35 explicit optional prerequisite
-notices in each lane. All 76 lint checks pass. Make shipping server linkage and
-the CMake default-all thin-client build pass, with actual a36 version metadata.
-The source remained clean and byte-identical during those checks. Compiler
-scratch uses owned disk directories under `/var/tmp`; runtime fixtures retain
-short isolated `/tmp` paths. Original failed link/format runs are retained, along
-with their explicit corrections. Evidence:
-`/var/tmp/aimee-final-resource-qualification-r2/local-index.json` and
-`/var/tmp/aimee-shipping-a36/`.
+Checkpoint `7db3f9c67e1e5add544ae9b07ab5bf4de2fc8f2e`, tree
+`bf73f238948be72daef6458fa290307b171e23d7`, is pushed to the same branch. This
+checkpoint is not migration completion. Commit 95c3ffecf adds qualified served-
+metadata workspace paths and canonical native tool counts, retiring duplicate SDK
+usage/tool display parsers. The branch also includes current testing 35418e47e
+through clean merge 017e89520; its eight Rust module-runtime tests pass.
+Later fixes must receive source-specific
+qualification; do not relabel older binaries or live cases as a new source.
 
-Whole Go normal/race passes 4,230 server tests, 43 control-web tests and 291
-runtime-web tests per lane; 337 server tests have explicit optional skips. All
-production Go inputs join exactly to this qualification. The corrected fixtures
-also pass the fresh real-PostgreSQL history/learning/native/selection/metrics
-pattern: 109 normal and 109 race cases, no skips. Partial/null context test data
-was replaced using the actual canonical serializer; all 154 existing privacy,
-ownership and fidelity assertions remain. The private restricted database/role
-were removed and PostgreSQL stopped. Evidence:
-`/var/tmp/aimee-final-resource-qualification/go/proof.json` and
-`/var/tmp/aimee-pg-search-diagnosis/final-index.json`.
+The checkpoint passes 702 normal and 702 ASan/UBSan/leak native invocations
+(699 unique binaries per lane), all 76 lint checks, shipping Make linkage and
+CMake default-all thin-client build. Each native lane retains 35 explicit
+optional-prerequisite notices. Whole Go normal/race passes 4,281 server pass
+events, 291 runtime-web and 43 control-web cases per lane; the server retains
+337 explicit skips. Exporters pass 24 cases. The private PostgreSQL history,
+learning, native, selection and metrics pattern passes 109 normal and 109 race
+cases with no skips; its database/role were dropped and server stopped.
 
-Independent local workflow-equivalent review passes 47 of 48 checks. The one
-remaining difference is the promotion-only public-surface baseline; integration
-work must not re-freeze it. Descriptor/schema, documentation, ownership, source
-boundary, mutation, exporter and composed proposal-history checks pass. This is
-local evidence, not fresh GitHub CI or production-promotion approval. Evidence:
-`/var/tmp/aimee-final-source-review-a36/final-index.json`.
+Full `make -C src -j2 CC=gcc integration-tests` passes 172/172 and its subsequent
+checks, with 27 explicit unavailable-service checks. Actual installed local
+Codex 0.163.0 and Claude 2.1.227 binaries use controlled HTTP fixtures in this
+suite; it does not establish genuine paid-provider or live Docker coverage.
+Independent workflow-equivalent checks pass 47/48 commands; the remaining
+promotion-only surface baseline must not be re-frozen on this integration
+branch. These are local checks, not fresh GitHub CI or promotion approval.
 
-The aggregate-metrics checkpoint passes 510 frontend tests, typecheck and both
-production builds; 18 normal and 18 race PostgreSQL assertions pass without skips.
-Evidence: `/var/tmp/aimee-metrics-main-05dc/proof.json`.
+A clean, locked frontend installation uses SmoothGUI 0.12.3, passes 510 tests,
+`npm run check` and both production builds. Its 149 tracked frontend inputs
+match this checkpoint. The ignored main-worktree node_modules had 0.11.0;
+only the clean-install receipt establishes the tested dependency version.
+Upstream package metadata also reports 0.12.3 at the recorded observation.
 
-A genuine local Claude SDK 2.1.310 two-turn journey uses the normal private Vault,
-registered CLI-owned project, server/native factory and canonical history. The
-second prompt omits the random nonce, and the assistant recalls it exactly using
-the same opaque native UUID. Both admitted generations complete without retries,
-fallback or forced credential refresh; observed usage and the original native
-cache archive are retained. Relevant owner inputs join to checkpoint `8be13dd50`.
-Evidence: `/var/tmp/aimee-genuine-claude-endpoint-1933-proof/genuine-proof.json`.
-This is one real native case, not final-image or all-service qualification.
-
-Claude launch now disables the two bundled SDK plugins through supported
-`--settings`; the strict zero-plugin admission guard remains unchanged. Actual
-SDK 2.1.177 and 2.1.310 initialization both qualify that setting. No opaque caches
-were deleted or synthesized.
+Hashed source-specific receipts are joined in
+`/var/tmp/aimee-checkpoint-7db3-root/index.json`. Native, Go, source-review,
+PostgreSQL, integration, CMake and frontend receipts remain separate so their
+scope and skips are visible. Failed cases remain retained.
 
 ## Implemented behavior and current work
 
@@ -85,8 +74,7 @@ have been retired. External adapters remain at protocol boundaries.
 
 Unknown usage remains distinct from observed zero through decoding, streaming,
 wire output, retries/fallbacks, token audit, roundtables, cache metadata and metrics.
-Metrics show known subtotals together with incomplete-usage counts. Current dirty
-changes additionally preserve credential retries and failed handoff-repair usage,
+Metrics show known subtotals together with incomplete-usage counts. The implemented retry accounting additionally preserves credential retries and failed handoff-repair usage,
 including prior successful generations, cache facts and latency. Focused normal,
 sanitizer and causal old-source failures are retained under
 `/var/tmp/aimee-credential-usage-retry-proof/`,
@@ -173,52 +161,108 @@ is clear; Make links, CMake changed-object builds and module gates pass. Proofs:
 `/var/tmp/aimee-ordinary-final-proof/qualified.json`,
 `/var/tmp/aimee-ordinary-portability-proof/go-proof.json` and
 `/var/tmp/aimee-ordinary-resource-independent-review.json`.
-Actual ordinary-container execution and Docker crash/rebind recovery still
-need their joint live qualification; earlier private-owner recovery receipts are
-retained at `/var/tmp/aimee-recovery-proof/qualified.json`.
+Actual ordinary-container execution, known-CID retirement and create-response-gap
+recovery have checkpoint qualification under
+`/var/tmp/aimee-acp-container-final-proof/ordinary-gap-final-proof.json`. Earlier
+private-owner recovery receipts remain at
+`/var/tmp/aimee-recovery-proof/qualified.json`; neither is a new final-image claim.
 
-## Retained `.252` runtime and required live work
+## Retained `.252` runtime and live work
 
-Host `192.168.1.252`, retained VM8168, guest `192.168.0.67`.
-Compose project `aimee-internal-ir-fresh-601aff47e`, API8745/web8445.
-Installed source remains `fb0d0f82635d6b0a2e20a55696aa35ee83523940`, tree
-`36ea38743b25ec9d856c7d21e4c1a75860046e5b`, image
-`sha256:540759735c93e4f683331545c33a46fd6cb183cca4defecaf206c35598e6a478`.
-Its 87 products and 19 modules match its original source archive. It began as a
-genuine empty installation at `601aff47e`; subsequent deployments are upgrades,
-not new clean installs.
+Host `192.168.1.252`, retained VM8168, guest `192.168.0.67`. The supported
+manual-review hold protects only this VM until explicit user cleanup. Its owned
+disk was expanded online from 64 to 84 GiB with root/EFI identities unchanged;
+resource gates remain 9 GiB free disk and 3 GiB MemAvailable. No foreign VM,
+volume, cache or reaper policy was removed or weakened.
 
-Preserve this VM, volumes, authority, grants, protected workspace files, 128 IR
-records, five native sessions and complete SDK caches/binaries for manual review.
-Keep the failed native first-Send history and its actual OAuth-refresh refusal;
-do not retry/rewrite it into a success. The task retention controller lives on
-host `.252`. Task-only unused build-cache reclamation preserved protected assets;
-latest seal: `/var/tmp/aimee-acp-container-proof/after-final-resource-reclamation-seal.json`.
-Never print credentials or reset application data to make validation pass.
+Original Compose project `aimee-internal-ir-fresh-601aff47e`, API8745/web8445,
+remains at d851, image
+`sha256:a8198936540f98237f950726a0e7327a905235843f1687b93a08804db3ff24e2`.
+Its original 128 IR records, five native sessions, opaque SDK caches/binaries,
+authority, grants and protected workspace files remain exact. It began as a
+genuinely empty installation at 601aff47e; subsequent deployments are upgrades.
+Keep the failed first native OAuth-refresh refusal as failed history.
 
-After the coherent source is qualified, build the final 87-product/19-module
-candidate, perform a normal same-volume upgrade and a separate latest clean
-installation. Validate installed CLI ACP/MCP/nested read, implicit-cwd project
-lookup, browser permission/question replies and replay without duplicate effects,
-old-error placement, later success, mobile input and unknown latest usage. Run a
-bounded real model/history/recall journey. Qualify configured-test learning grades,
-restart and scoped later reuse without a KB; process/model success is not a grade.
-Seal original history/cache/authority prefixes and identify actual new records.
+Separate project `aimee-internal-ir-fresh-d8511ad41`, API8747/web8447, started
+with zero sessions/IR/native caches at d851. It is now upgraded to 7db, image
+`sha256:855b36754d0d1e91f923f2a97e1b80cf90f5be400fa5a2a4236eba6e0097c3b1`.
+Its prior 118 IR rows and caches/authority/grants survived that upgrade exactly;
+later live jobs add genuine new history. This is not a clean 7db installation.
+Both app inventories match 87 products and 19 modules.
+
+Actual d851 browser testing passes normal login/project clone, pending question
+reload and one reply, known/error/unknown usage placement, normal Steer and one
+permission Allow with one real 36-byte file write. Desktop and 390/320px views
+fit, and passive reload/idle does not replay effects. Controlled HTTP model cases
+are labelled controlled; the genuine installed Claude 2.1.177 recall case uses
+two sends, the same opaque native UUID, two-to-four history messages and observed
+cache-write 17385 followed by cache-read 17385, with no retries or tools. Original
+closed-permission history also passes zero-Send replay checks. Screenshots and
+private canonical/cache seals remain under
+`/var/tmp/aimee-internal-ir-live-8168/fresh-d8511ad41/` and
+`/var/tmp/aimee-internal-ir-live-8168/upgrade-fb0-to-d851/`.
+
+Actual 7db live validation exposed two defects whose source repairs are now
+implemented; matching-image live positives remain required:
+
+- Relative `workspace add .` still registers the server cwd. Served argument
+  metadata bypasses the corrected compiled marshaller. The failed registration
+  was removed normally and the exact original registry restored; no index query
+  was issued. The shared served/compiled workspace-root finalizer, malformed metadata refusal
+  and actual HTTP/UDS regression pass normal/SAN plus all 76 lint checks. Do not claim implicit scope fixed
+  until installed same-basename A-to-B-to-A lookup passes without `--project`.
+- A tool-free readonly validation job completed and cold-acquired the default
+  Ubuntu image through the normal daemon, with actual CID lifecycle/retirement
+  proof, but reported api_call_count=0 despite one observed HTTP response. That historical accounting assertion remains failed; do not rewrite it. The
+  retained durable-job progress owner now counts observed HTTP-client outcomes
+  across plain/tool-loop, retry/fallback and joined native/script callbacks,
+  initializes from the real stored baseline and serializes count plus DB writes.
+  Actual HTTP focused normal/SAN tests, cache/no-send and scope/lifetime cases
+  pass. A new installed one-call case must report one observed call.
+
+Actual normal readonly `validate` training has business DONE, canonical COMPLETED
+and a protected configured-test grade on 7db. Normal restart preserves 145 prior rows and native caches/authority/grants;
+a new parent successfully reuses the protected grade in actual server-owned
+system/developer context, while the foreign-project lookup returns none. The
+three controlled HTTP requests (two train, one reuse) omit usage, and cost stays
+unknown. The normal provider process is stopped and all actual CIDs retired.
+Proof: `/var/tmp/aimee-learning-live-validate-7db-0aa039e8e41cad58/final-learning-seal.json`. Earlier failures are preserved:
+mandatory sandbox refusal; Docker optional Healthcheck inspection; absent default
+image; missing genuine verification configuration; and the correctly rejected
+no-file-changes code-role job. A configured-tests-only grade from that last job
+is not business or semantic success. The correct verifier config owner is
+Aimee home `projects/<main-repo-basename>/project.yaml`, normally generated from
+the actual Makefile, not an invented `.aimee/project.yaml` verification block.
+
+Further review found native aggregation discarded earlier unknown-usage facts
+and could retain a stale prior completion after a later preframe failure. The
+aggregate repair passes 24 mixed streamed/buffered sequences, normal/SAN and
+all lint checks. The failure-boundary wrapper passes focused normal/SAN tests: only
+observed model-transport invocations taint missing completion usage; typed
+quiesced diagnostics preserve known subtotals without manufacturing a model
+response. Auxiliary count_tokens calls do not invalidate a prior completion.
+A failed latest admitted generation cannot transfer an earlier final/cache.
 
 ## Remaining completion checks
 
-- Qualify actual Docker crash/rebind recovery and the ordinary image path using
-  only task-owned resources, preserving the existing declared-volume refusal and
-  original volumes. Both a36 worker modes already have actual CID/cleanup proof.
-- Run combined normal/sanitizer checks and fresh whole Go/race qualification on
-  the final source, all required lint/module gates, and actual shipping builds.
-- Complete final-image retained upgrade, separate clean install and the live
-  browser/CLI/native/learning checks above. Label service prerequisites, platform
-  checks and provider refusals precisely; do not claim all-platform coverage.
-- Recompute production size using the existing counting rules. At `ae63ad600`,
-  production is +449 lines against cleanup baseline `03d881e0e` and +5,438 against
-  testing `251536ddb`. Genuine retirements exist, but the requested overall code
-  reduction has not been established. Do not change the census, minify code or
-  remove supported guards to improve this number.
-- Update this handoff, push the completed work to the same branch, and bind fresh
-  CI and live evidence to the actual final source. No more PR/auth detours.
+- Finish composition qualification of the native failure/usage projection and
+  shared job progress owner; keep original per-generation facts and failure
+  history. Preserve metadata precedence, cache/no-send, retry/fallback and full
+  callback-scope restoration; add no authority or guard exceptions.
+- Preserve the source-bound 7db learning/restart/scoped-reuse positive and all
+  failed history; qualify the relevant final-source installation changes.
+- Freeze the repaired source, qualify the affected normal/sanitizer and full
+  required gates, build its real 87-product/19-module image, then perform the
+  retained original-volume upgrade and a separate latest-source empty install.
+  Validate installed CLI scope, native recall, controls/replay/mobile and
+  learning on the proper source. Keep optional/platform/provider limits visible.
+- Requested overall production-code reduction is not established. At 7db the
+  unchanged census is +1,929 physical production lines against cleanup baseline
+  03d881e0e and +6,918 against testing 251536ddb. At 95c3ffecf they are +1,917
+  and +6,906 respectively under the identical counting rules. Subsequent source
+  must receive a fresh census. Substantial obsolete paths were
+  retired, but ownership and container support added more. Do not change counting
+  rules, minify code or delete supported behavior to manufacture a reduction.
+- Update this handoff with actual final evidence, keep work on the same branch,
+  and obtain source-bound fresh CI when implementation is complete. No PR/auth
+  detours, no `.100` actions, no KB instance, no claim of 100% while work remains.
