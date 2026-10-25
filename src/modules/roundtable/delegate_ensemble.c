@@ -256,8 +256,7 @@ static void ensemble_fold_cost(const agent_config_t *acfg, const agent_result_t 
  * in-process agent call. delegate_worker stays the async-job path; this is its
  * synchronous sibling. A non-empty name routes by name; NULL routes by role. */
 static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out)
+                               const aimee_request_t *request, agent_result_t *out)
 {
    agent_t *ag = (agent_name && agent_name[0]) ? agent_find(acfg, agent_name) : NULL;
    char leased_cred[MAX_CRED_NAME_LEN] = "";
@@ -284,13 +283,8 @@ static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, con
          leased = 1;
       }
    }
-   aimee_request_t request = {0};
-   int rc =
-       aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature)
-           ? AGENT_RC_CONTEXT_REFUSED
-       : (agent_name && agent_name[0]) ? agent_run_named(acfg, agent_name, role, &request, out)
-                                       : agent_run(acfg, role, &request, out);
-   aimee_request_free(&request);
+   int rc = (agent_name && agent_name[0]) ? agent_run_named(acfg, agent_name, role, request, out)
+                                          : agent_run(acfg, role, request, out);
    if (rc == 0 && ensemble_project_result(out) != 0)
       rc = -1;
    ensemble_fold_cost(acfg, out, agent_name);
@@ -537,6 +531,9 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
                           const char *synthesis_prompt, long deadline_abs_ms, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   aimee_request_t request = {0};
+   if (aimee_ir_request_from_text(&request, NULL, synthesis_prompt, 0, 0.3))
+      return AGENT_RC_CONTEXT_REFUSED;
 
    /* deadline_abs_ms (absolute CLOCK_MONOTONIC ms; 0 = UNBOUNDED) caps the FALLBACK
     * FAN-OUT below. Without it a flaky/empty primary aggregator followed by N
@@ -574,26 +571,36 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
       if (!at)
       {
          primary_name = agg;
-         if (delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
-                 0 &&
-             out->response && out->response[0])
+         if (delegate_run_inline(&agg_cfg, agg, "review", &request, out) == 0 && out->response &&
+             out->response[0])
+         {
+            aimee_request_free(&request);
             return 0;
+         }
       }
       else
       {
          const char *role = (at[1]) ? at + 1 : "review";
-         if (delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
-             out->response && out->response[0])
+         if (delegate_run_inline(&agg_cfg, NULL, role, &request, out) == 0 && out->response &&
+             out->response[0])
+         {
+            aimee_request_free(&request);
             return 0;
+         }
       }
    }
-   else if (delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
-                0 &&
-            out->response && out->response[0])
+   else if (delegate_run_inline(&agg_cfg, NULL, "review", &request, out) == 0 && out->response &&
+            out->response[0])
+   {
+      aimee_request_free(&request);
       return 0;
+   }
 
    if (panel->max_cost_usd > 0.0 && agent_result_usage_is_unobserved(out))
+   {
+      aimee_request_free(&request);
       return -1;
+   }
 
    /* Fallback: try one alternate panelist. Synthesis/repair is bounded overhead,
     * never authority to retry across an arbitrarily large configured roster. */
@@ -616,14 +623,16 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
       int usage_unobserved = agent_result_usage_is_unobserved(out);
       agent_result_clear_response(out);
       memset(out, 0, sizeof(*out));
-      if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
-          out->response && out->response[0])
+      if (delegate_run_inline(&agg_cfg, cand, "review", &request, out) == 0 && out->response &&
+          out->response[0])
       {
          out->usage_unobserved |= usage_unobserved;
+         aimee_request_free(&request);
          return 0;
       }
       out->usage_unobserved |= usage_unobserved;
    }
+   aimee_request_free(&request);
    return -1;
 }
 

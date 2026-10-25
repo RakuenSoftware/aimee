@@ -27,7 +27,7 @@
 #include <aimee/ir/session_event.h>
 #include "agent_request_shaping.h"
 #include "agent_result_cache.h"
-#include "agent_request_build.h" /* agent_build_request + provider predicates */
+#include "agent_request_build.h" /* canonical builders + provider predicates */
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
@@ -221,10 +221,8 @@ const agent_dispatch_scope_t *agent_dispatch_scope_current(void)
    return dispatch_scope;
 }
 
-static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
-                                       const char *user_prompt, int max_tokens, double temperature,
-                                       agent_result_t *out, const aimee_request_t *request,
-                                       int host_text_profile);
+static int agent_execute_plain_request(const agent_t *agent, const aimee_request_t *request,
+                                       agent_result_t *out, int host_text_profile);
 
 static int host_request_supported(const aimee_request_t *request, int use_tools)
 {
@@ -260,20 +258,6 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
       snprintf(out->error, sizeof out->error, "unsupported canonical execution request");
       return AGENT_RC_CONTEXT_REFUSED;
    }
-   const char *system_prompt = request->n_system && request->system[0].type == AIMEE_BLK_TEXT
-                                   ? request->system[0].text
-                                   : NULL;
-   char query[4096];
-   aimee_ir_last_user_text(request, query, sizeof query);
-   const char *user_prompt = request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
-                                     request->messages[0].blocks[0].type == AIMEE_BLK_TEXT
-                                 ? request->messages[0].blocks[0].text
-                             : query[0] ? query
-                                        : "Continue the admitted conversation.";
-   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
-   double temperature = request->has_temperature ? request->temperature
-                        : host_text_profile      ? -1
-                                                 : 0.3;
    /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
     * the precondition (net != NULL when use_tools) so a future caller that flips
     * use_tools without supplying a network fails cleanly instead of crashing. */
@@ -399,8 +383,7 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
                                            delegate_role_result_cache_enabled(role)
                                        ? role
                                        : NULL;
-               rc = agent_execute_plain_request(ag, system_prompt, user_prompt, max_tokens,
-                                                temperature, out, request, host_text_profile);
+               rc = agent_execute_plain_request(ag, request, out, host_text_profile);
                result_cache_role = previous_cache_role;
             }
          }
@@ -1079,10 +1062,8 @@ static void parse_response(const char *body, const agent_t *agent,
 
 /* --- Simple (non-tool) execution --- */
 
-static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
-                                       const char *user_prompt, int max_tokens, double temperature,
-                                       agent_result_t *out, const aimee_request_t *request,
-                                       int host_text_profile)
+static int agent_execute_plain_request(const agent_t *agent, const aimee_request_t *request,
+                                       agent_result_t *out, int host_text_profile)
 {
    memset(out, 0, sizeof(*out));
    /* A refused route arrives here as NULL, and the three reads below would fault
@@ -1099,6 +1080,14 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   const char *user_prompt = request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
+                                     request->messages[0].blocks[0].type == AIMEE_BLK_TEXT
+                                 ? request->messages[0].blocks[0].text
+                             : query[0] ? query
+                                        : "Continue the admitted conversation.";
    if (!user_prompt || !user_prompt[0])
    {
       snprintf(out->error, sizeof(out->error), "empty prompt");
@@ -1134,21 +1123,33 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
       return -1;
    }
    /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
-   char *augmented_prompt =
-       request && !host_text_profile ? NULL : plugin_chook_apply_pre_llm(user_prompt);
+   char *augmented_prompt = !host_text_profile ? NULL : plugin_chook_apply_pre_llm(user_prompt);
    const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
-   /* Build request body — derive the output cap from the model when unpinned. */
-   int tok = agent_request_max_tokens(agent, max_tokens);
-   if ((!request || host_text_profile) && is_anthropic_provider(agent))
+   aimee_request_t prepared = {0};
+   if (augmented_prompt)
+   {
+      if (aimee_ir_request_clone(request, &prepared))
+      {
+         free(augmented_prompt);
+         snprintf(out->error, sizeof out->error, "cannot prepare canonical hook context");
+         return AGENT_RC_CONTEXT_REFUSED;
+      }
+      free(prepared.messages[0].blocks[0].text);
+      prepared.messages[0].blocks[0].text = augmented_prompt;
+      augmented_prompt = NULL;
+      effective_user = prepared.messages[0].blocks[0].text;
+      prepared.mutated = 1;
+   }
+   const aimee_request_t *execution = prepared.n_messages ? &prepared : request;
+   if (host_text_profile && is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = request && !host_text_profile
-                    ? agent_build_plain_request_ir(agent, request)
-                    : agent_build_request(agent, system_prompt, effective_user, tok, temperature);
+   cJSON *req = !host_text_profile ? agent_build_plain_request_ir(agent, execution)
+                                   : agent_build_host_request_ir(agent, execution);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
    {
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       snprintf(out->error, sizeof(out->error), "failed to build request");
       return -1;
    }
@@ -1158,7 +1159,7 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
        aimee_anthropic_replay_prepare(body, strlen(body), &sent_replay))
    {
       free(body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
       aimee_ir_session_fail_capture();
       return AGENT_RC_CAPTURE_FAILED;
@@ -1170,7 +1171,7 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
        agent_result_cache_read(result_cache_role, cache_key, out))
    {
       free(body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       return 0;
    }
 
@@ -1204,7 +1205,7 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
       out->usage_unobserved |= observation.transport_attempts != 0;
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       return -1;
    }
 
@@ -1223,12 +1224,10 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
       snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
-      if ((!request || host_text_profile) && is_anthropic_provider(&fb_agent))
+      if (host_text_profile && is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
-      cJSON *fb_req =
-          request && !host_text_profile
-              ? agent_build_plain_request_ir(&fb_agent, request)
-              : agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
+      cJSON *fb_req = !host_text_profile ? agent_build_plain_request_ir(&fb_agent, execution)
+                                         : agent_build_host_request_ir(&fb_agent, execution);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -1237,7 +1236,7 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
              aimee_anthropic_replay_prepare(fb_body, strlen(fb_body), &sent_replay))
          {
             free(fb_body);
-            free(augmented_prompt);
+            aimee_request_free(&prepared);
             snprintf(out->error, sizeof out->error, "cannot bind fallback native replay prefix");
             aimee_ir_session_fail_capture();
             return AGENT_RC_CAPTURE_FAILED;
@@ -1257,7 +1256,7 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
          free(fb_body);
       }
    }
-   free(augmented_prompt);
+   aimee_request_free(&prepared);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
       out->usage_unobserved |= observation.transport_attempts != 0;
@@ -2239,8 +2238,5 @@ int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_re
       snprintf(out->error, sizeof out->error, "unsupported canonical completion request");
       return AGENT_RC_CONTEXT_REFUSED;
    }
-   return agent_execute_plain_request(
-       agent, request->n_system ? request->system[0].text : NULL,
-       request->messages[0].blocks[0].text, request->has_max_tokens ? request->max_tokens : 0,
-       request->has_temperature ? request->temperature : -1, out, request, 1);
+   return agent_execute_plain_request(agent, request, out, 1);
 }

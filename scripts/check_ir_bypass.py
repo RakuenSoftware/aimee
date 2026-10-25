@@ -18,6 +18,7 @@ LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
+    "agent_build_request",
     "agent_tools_dispatch_owned",
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",

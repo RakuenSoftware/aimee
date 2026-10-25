@@ -1,5 +1,5 @@
 /* test_agent_request_build.c -- golden byte-stability for the single canonical
- * request builder (agent_build_request; the legacy per-provider hand-builders were
+ * request builder (agent_build_host_request_ir; the legacy per-provider hand-builders were
  * deleted). agent_execute originates provider requests through the IR + per-provider
  * backend; the OUTBOUND bytes must stay stable because Anthropic (and OpenAI) prompt-
  * cache on them. These goldens pin the exact canonical wire per provider so any
@@ -87,10 +87,20 @@ static agent_t mk_agent(const char *provider, const char *model)
    return a;
 }
 
+static cJSON *build_fixture(const agent_t *agent, const char *system, const char *user,
+                            int max_tokens, double temperature)
+{
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, system, user, max_tokens, temperature));
+   cJSON *body = agent_build_host_request_ir(agent, &request);
+   aimee_request_free(&request);
+   return body;
+}
+
 static void golden(const char *provider, const char *model, const char *expect)
 {
    agent_t a = mk_agent(provider, model);
-   cJSON *req = agent_build_request(&a, "You are helpful.", "deploy the release", 100, 0.7);
+   cJSON *req = build_fixture(&a, "You are helpful.", "deploy the release", 100, 0.7);
    assert(req && "builder returned NULL");
    char *got = cJSON_PrintUnformatted(req);
    assert(got);
@@ -153,7 +163,7 @@ static cJSON *build_with_thinking(const char *provider, const char *model, int e
 {
    set_thinking(enabled, budget_tokens);
    agent_t a = mk_agent(provider, model);
-   cJSON *req = agent_build_request(&a, "You are helpful.", "deploy the release", max_tokens, 0.7);
+   cJSON *req = build_fixture(&a, "You are helpful.", "deploy the release", max_tokens, 0.7);
    assert(req && "builder returned NULL");
    return req;
 }
@@ -218,7 +228,7 @@ static void test_thinking_skips_anthropic_compatible_third_party(void)
    agent_t a = mk_agent("anthropic", "MiniMax-M3");
    snprintf(a.catalog_provider, sizeof a.catalog_provider, "minimax");
    set_thinking(1, 2048);
-   cJSON *req = agent_build_request(&a, "You are helpful.", "deploy the release", 100, 0.7);
+   cJSON *req = build_fixture(&a, "You are helpful.", "deploy the release", 100, 0.7);
    assert(req);
    assert(!cJSON_GetObjectItemCaseSensitive(req, "thinking") &&
           "a third-party model on the anthropic wire must not receive thinking config");
@@ -262,8 +272,8 @@ static void test_typed_sampling_in_plain_requests(void)
    {
       agent_t agent = mk_agent(providers[i], i == 2 ? "k3" : "qwen3.gguf");
       agent.recommended_sampling = 1;
-      cJSON *request = agent_build_request(&agent, "stable<aimee-context>volatile", "inspect", 100,
-                                           i == 2 ? 0.2 : -1);
+      cJSON *request =
+          build_fixture(&agent, "stable<aimee-context>volatile", "inspect", 100, i == 2 ? 0.2 : -1);
       assert(request);
       const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(request, "temperature");
       assert(cJSON_IsNumber(temperature) && temperature->valuedouble == (i == 2 ? 1.0 : 0.6));
@@ -324,6 +334,17 @@ static void test_owned_plain_request_preserves_input(void)
       cJSON_Delete(after);
       cJSON_Delete(body);
       free(encoded);
+      aimee_request_t host = input;
+      host.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
+      body = agent_build_host_request_ir(&agent, &host);
+      assert(body);
+      encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, evidence.text) && strstr(encoded, policy.text));
+      after = aimee_ir_request_json(&input);
+      assert(after && cJSON_Compare(snapshot, after, 1));
+      cJSON_Delete(after);
+      cJSON_Delete(body);
+      free(encoded);
    }
    agent_t agent = mk_agent("openai", "configured-model");
    input.stream = 1;
@@ -338,6 +359,7 @@ static void test_owned_plain_request_preserves_input(void)
 int main(void)
 {
    init_config_home();
+   set_thinking(0, 2048);
    test_owned_plain_request_preserves_input();
    printf("agent_request_build golden:\n");
 

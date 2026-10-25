@@ -583,3 +583,22 @@ the owner and column constraint. Focused tests exercise the actual add/dispatch
 handlers, canonical custody, literal valid/malformed JSON legacy prompts, and
 invalid IR refusal. Browser recovery remains incomplete until the selected real
 provider completes a session; the recorded Claude OAuth HTTP 429 is not success.
+
+### Plain completion host profile
+
+The final source audit found one additional round trip in HTTP plain execution:
+IR was projected into system/user strings and rebuilt by the host-profile
+builder. Execution and provider rendering now accept the canonical request;
+hooks edit an owned IR clone reused by the fallback. The host renderer clones
+IR and applies cache/sampling/thinking settings without rebuilding messages.
+External Anthropic system cache splitting retains context and authored grouping.
+The old string-tuple builder is retired by the global bypass guard. Roundtable
+synthesis admits one IR request at origin and retains it across aggregator
+fallbacks. Golden provider bytes and hook/fallback refusal behavior are checked.
+Focused tests need the pinned Go config fixture/defaults from the Makefile;
+without them this binary's isolated accessors use fallback values rather than
+its authored fixture configuration. Such a run is not golden qualification.
+The host-profile/roundtable change passes focused normal and ASAN/UBSAN tests
+(request rendering, context refusal, provider attempts, agent and ensemble), all
+38 public ACP route cases in both lanes, 45 bypass-guard tests and changed-owner
+checks. These are controlled checks, not successful live Claude session proof.

@@ -17,12 +17,8 @@ extern "C"
    int is_chatgpt_provider(const agent_t *agent);
    int is_anthropic_provider(const agent_t *agent);
 
-   /* Build the provider request for a plain (system, user) agent turn via the
-    * canonical IR + per-provider backend. Returns a malloc'd cJSON (caller frees) or
-    * NULL on build failure. This is the single builder -- the legacy per-provider
-    * hand-builders were deleted. */
-   struct cJSON *agent_build_request(const agent_t *agent, const char *system_prompt,
-                                     const char *user_prompt, int max_tokens, double temperature);
+   /* Host cache/sampling preparation preserves the input IR on an owned clone. */
+   struct cJSON *agent_build_host_request_ir(const agent_t *agent, const aimee_request_t *request);
    /* Already admitted tool-free input retains its blocks and provenance. */
    struct cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t *request);
 

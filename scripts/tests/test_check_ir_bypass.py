@@ -424,6 +424,15 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ir_ctx_status(admitted, args, timeout, &failed);')
         checker.check(self.root)
 
+    def test_plain_execution_cannot_rebuild_from_prompt_tuple(self):
+        for relative in ("src/server/agent_runtime.c", "src/other_module/new.c"):
+            path = self.source(relative, 'agent_build_request(agent, system, text, 128, 0.3);')
+            with self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/server/agent_runtime.c", 'agent_build_host_request_ir(agent, request);')
+        checker.check(self.root)
+
     def test_plain_consumer_cannot_patch_native_profiles(self):
         for function in ("model_sampling_apply_openai", "model_sampling_apply_anthropic",
                          "agent_anthropic_set_system", "agent_request_shape_openai_messages"):

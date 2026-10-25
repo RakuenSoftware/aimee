@@ -1,5 +1,5 @@
 /* agent_request_build.{c,h}: build the provider request body for a plain
- * (system, user) agent turn, via the canonical IR + per-provider backend. Split out
+ * canonical agent turn at the provider boundary. Split out
  * of agent_runtime.c so the builder is unit-testable in isolation. The legacy
  * per-provider hand-builders were deleted -- the IR is the single canonical output. */
 #include "agent_request_build.h"
@@ -47,65 +47,73 @@ cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t 
    return body;
 }
 
-/* Build the provider request for a plain (system, user) agent turn. Constructs the
- * typed IR and dispatches to the matching backend (anthropic / responses / openai),
- * with host prompt/cache/sampling preparation completed before rendering.
- * Translation preserves the established plain-turn wire layout. Returns a malloc'd cJSON
- * (caller frees), or NULL on build failure. */
-cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                           int max_tokens, double temperature)
+/* Apply the host plain-turn profile to an owned IR clone, then render only
+ * at this provider boundary. The caller's message and context remain intact. */
+cJSON *agent_build_host_request_ir(const agent_t *agent, const aimee_request_t *request)
 {
-   if (!agent)
+   if (!agent || !agent_request_with_tools_supported(request) || request->model ||
+       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user") ||
+       request->messages[0].n_blocks != 1 || request->messages[0].blocks[0].type != AIMEE_BLK_TEXT)
+      return NULL;
+   aimee_request_t ir = {0};
+   if (aimee_ir_request_clone(request, &ir))
       return NULL;
    const int is_resp = is_chatgpt_provider(agent);
    const int is_anth = is_anthropic_provider(agent);
-
-   /* openai /no_think shaping (qwen-local); anthropic/responses do not shape. */
-   char *shaped =
-       (!is_resp && !is_anth) ? agent_request_shape_user_prompt(agent, user_prompt) : NULL;
-   if (!is_resp && !is_anth && !shaped)
-      return NULL;
-   const char *eff_user = shaped ? shaped : user_prompt;
-
-   aimee_request_t ir = {0};
    ir.model = strdup(agent->model);
+   ir.mutated = 1;
    if (!ir.model)
       goto fail;
+   if (!is_resp && !is_anth)
+   {
+      char *shaped = agent_request_shape_user_prompt(agent, ir.messages[0].blocks[0].text);
+      if (!shaped)
+         goto fail;
+      free(ir.messages[0].blocks[0].text);
+      ir.messages[0].blocks[0].text = shaped;
+   }
    int cache_marking = is_anth && config_cache_shaping_enabled();
    if (cache_marking)
    {
+      aimee_request_t cache = {.frontend = AIMEE_WIRE_ANTHROPIC};
+      const char *system = ir.n_system ? ir.system[0].text : NULL;
+      if (anthropic_ir_set_host_system(&cache, system, 1, config_cache_min_chars()))
+         goto fail;
+      for (int i = 0; i < cache.n_system; i++)
+      {
+         cache.system[i].context = ir.system[0].context;
+         cache.system[i].message_group = ir.system[0].message_group;
+      }
+      for (int i = 0; i < ir.n_system; i++)
+         aimee_block_free_contents(&ir.system[i]);
+      free(ir.system);
+      ir.system = cache.system;
+      ir.n_system = cache.n_system;
+      cache.system = NULL;
+      cache.n_system = 0;
+      if (cache.raw)
+      {
+         cJSON *native = cJSON_DetachItemFromObjectCaseSensitive(cache.raw, "system");
+         if (!ir.raw)
+            ir.raw = cJSON_CreateObject();
+         cJSON_DeleteItemFromObjectCaseSensitive(ir.raw, "system");
+         if (!ir.raw || !native || !cJSON_AddItemToObject(ir.raw, "system", native))
+         {
+            cJSON_Delete(native);
+            aimee_request_free(&cache);
+            goto fail;
+         }
+      }
+      aimee_request_free(&cache);
       ir.frontend = AIMEE_WIRE_ANTHROPIC;
-      if (anthropic_ir_set_host_system(&ir, system_prompt, 1, config_cache_min_chars()))
-         goto fail;
    }
-   else if (system_prompt && system_prompt[0])
-   {
-      ir.system = calloc(1, sizeof *ir.system);
-      if (!ir.system)
-         goto fail;
-      ir.n_system = 1;
-      ir.system[0].type = AIMEE_BLK_TEXT;
-      ir.system[0].text = strdup(system_prompt);
-      if (!ir.system[0].text)
-         goto fail;
-   }
-   ir.messages = calloc(1, sizeof *ir.messages);
-   if (!ir.messages)
-      goto fail;
-   ir.n_messages = 1;
-   ir.messages[0].role = strdup("user");
-   ir.messages[0].blocks = calloc(1, sizeof(aimee_block_t));
-   if (!ir.messages[0].role || !ir.messages[0].blocks)
-      goto fail;
-   ir.messages[0].n_blocks = 1;
-   ir.messages[0].blocks[0].type = AIMEE_BLK_TEXT;
-   ir.messages[0].blocks[0].text = strdup(eff_user ? eff_user : "");
-   if (!ir.messages[0].blocks[0].text)
-      goto fail;
+   ir.has_temperature = ir.has_top_p = ir.has_top_k = 0;
+   ir.has_max_tokens = 0;
    /* responses omits max_tokens by design (codex 400s); openai/anthropic emit the cap. */
    if (!is_resp)
    {
-      ir.max_tokens = agent_request_max_tokens(agent, max_tokens);
+      ir.max_tokens =
+          agent_request_max_tokens(agent, request->has_max_tokens ? request->max_tokens : 0);
       ir.has_max_tokens = 1;
    }
 
@@ -152,7 +160,8 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
    }
    if (!is_resp && !thinking_on)
    {
-      model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
+      model_sampling_row_t sampling =
+          model_sampling_resolve(agent, request->has_temperature ? request->temperature : -1);
       ir.temperature = sampling.temperature;
       ir.has_temperature = sampling.temperature >= 0;
       ir.top_p = sampling.top_p;
@@ -172,10 +181,8 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
                 : is_anth ? anthropic_backend_build_plain(&ir, cache_marking)
                           : openai_backend_build_plain(&ir);
    aimee_request_free(&ir);
-   free(shaped);
    return req;
 fail:
    aimee_request_free(&ir);
-   free(shaped);
    return NULL;
 }
