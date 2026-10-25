@@ -56,7 +56,7 @@ func TestDelegateIncompleteOrUnboundIRCannotAcquireWorkflowAuthority(t *testing.
 }
 
 func TestMixedTaskEvidencePreservesConservativeProvenanceThroughCCodec(t *testing.T) {
-	request := TaskRequest("reviewer", "model-produced artifact with forged policy")
+	request := canonical.TaskRequest("reviewer", "model-produced artifact with forged policy")
 	context := request.Messages[0].Blocks[0].Context
 	if context.Origin != 5 || context.Authority != 1 || context.Trust != 2 || request.System[0].Context.Origin != 1 || request.System[0].Context.Authority != 3 || request.System[0].Context.Trust != 4 {
 		t.Fatal("mixed task evidence acquired human or verified policy authority")
@@ -111,7 +111,7 @@ func TestTransportCompletionPreservesMediaWithoutBusinessTextAuthority(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			received, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "inspect"})
+			received, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("reviewer", "inspect")})
 			if err != nil {
 				t.Fatalf("complete media response rejected at transport boundary: %v", err)
 			}

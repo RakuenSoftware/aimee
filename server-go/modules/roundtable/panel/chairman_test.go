@@ -22,7 +22,7 @@ func chairmanResponse(body string) string {
 func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	wantHash := chairmanRun().Reviewed.Hash
 	agents := &discussionTestAgents{respond: func(request SeatRequest) (string, error) {
-		if request.Selector != "codex" || request.Persona != "chairman" || request.MaxTurnsCap != delegateMaxTurnsCap || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") || !strings.Contains(request.Prompt, "plurality, format, or existence is never original-request drift") || !strings.Contains(request.Prompt, `"artifact_hash":"`+wantHash+`"`) {
+		if request.Selector != "codex" || request.Persona != "chairman" || request.MaxTurnsCap != delegateMaxTurnsCap || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(fixtureInputText(request.Input), "BEGIN_CHAIRMAN_DATA") || !strings.Contains(fixtureInputText(request.Input), "plurality, format, or existence is never original-request drift") || !strings.Contains(fixtureInputText(request.Input), `"artifact_hash":"`+wantHash+`"`) {
 			t.Fatalf("chairman request=%+v", request)
 		}
 		return chairmanResponse(`"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":" Approve ","findings":[]}`), nil
@@ -39,9 +39,9 @@ func TestChairmanReceivesFrozenDiffEvidenceContract(t *testing.T) {
 	run.Reviewed.Stage = "frozen_diff"
 	artifact := run.Reviewed
 	agents := &discussionTestAgents{respond: func(request SeatRequest) (string, error) {
-		if !strings.Contains(request.Prompt, "patch does not embed those logs or metadata") ||
-			!strings.Contains(request.Prompt, "use its tools to verify a material operational requirement") {
-			t.Fatalf("chairman did not receive frozen-diff evidence contract: %s", request.Prompt)
+		if !strings.Contains(fixtureInputText(request.Input), "patch does not embed those logs or metadata") ||
+			!strings.Contains(fixtureInputText(request.Input), "use its tools to verify a material operational requirement") {
+			t.Fatalf("chairman did not receive frozen-diff evidence contract: %s", fixtureInputText(request.Input))
 		}
 		return fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, run.ID, artifact.Hash), nil
 	}}

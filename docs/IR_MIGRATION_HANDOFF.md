@@ -132,6 +132,21 @@ execution is claimed by these protocol checks. Owner and DB1 contract checks pas
 Remaining audit includes Go engine/roundtable prompt-tuple DTOs and actual model
 message boundaries; do not mark the whole migration complete.
 
+Go workflow/roundtable delegate DTOs now carry `*ir.Request` (`Input`) rather
+than `Prompt`. Seat producers and workflow executors construct IR at their text
+origins with the existing conservative task policy/provenance constructor, moved
+from delegate transport into `server-go/ir`. Adapters forward the same request.
+A transport fixture verifies text/image blocks, opaque request metadata and
+explicit zero temperature unchanged and caller input unmutated; empty requests
+refuse before transport. Normal/race delegate/engine/roundtable checks and the
+actual Go-to-C provenance codec check pass. All server-go packages compile with
+`go test ./... -run '^$'`; other module fixtures were migrated to the moved factory.
+Initial engine test failures were Unix socket path length under the long build
+TMPDIR; rerun with short `/var/tmp/ai-ir` passes. Owner checks pass. Audit remaining
+internal tool invocation/message consumers before asserting full-project completion.
+Read-only installed Claude SDK constants match the configured token endpoint;
+no endpoint/header/token/grant change or further model attempt was made.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload

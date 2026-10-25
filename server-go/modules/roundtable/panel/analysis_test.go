@@ -115,12 +115,12 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if !repair.Tools || repair.MaxTurnsCap != delegateMaxTurnsCap || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
 		t.Fatalf("repair request did not preserve tool-capable transport as a bounded continuation: %+v", repair)
 	}
-	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {
-		t.Fatalf("repair prompt=%q", repair.Prompt)
+	if !strings.Contains(fixtureInputText(repair.Input), "Preserve its analysis and findings") || !strings.Contains(fixtureInputText(repair.Input), "exactly one JSON object") {
+		t.Fatalf("repair prompt=%q", fixtureInputText(repair.Input))
 	}
 	quotedInvalid, _ := json.Marshal(agents.invalid)
-	if !strings.Contains(repair.Prompt, "PREVIOUS_RESPONSE_JSON_STRING\n"+string(quotedInvalid)+"\nEND_PREVIOUS_RESPONSE_JSON_STRING") {
-		t.Fatalf("repair prompt omitted or altered complete invalid response: %q", repair.Prompt)
+	if !strings.Contains(fixtureInputText(repair.Input), "PREVIOUS_RESPONSE_JSON_STRING\n"+string(quotedInvalid)+"\nEND_PREVIOUS_RESPONSE_JSON_STRING") {
+		t.Fatalf("repair prompt omitted or altered complete invalid response: %q", fixtureInputText(repair.Input))
 	}
 }
 

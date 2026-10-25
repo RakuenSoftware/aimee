@@ -413,8 +413,8 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 	if err == nil || agents.calls != 1 {
 		t.Fatalf("failed verification retry bypassed delegate: calls=%d err=%v", agents.calls, err)
 	}
-	if !strings.Contains(agents.last.Prompt, "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
-		t.Fatalf("repair delegate did not receive verifier failure: %q", agents.last.Prompt)
+	if !strings.Contains(fixtureInputText(agents.last.Input), "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
+		t.Fatalf("repair delegate did not receive verifier failure: %q", fixtureInputText(agents.last.Input))
 	}
 	if verifier.calls != verifierCalls {
 		t.Fatalf("failed verification retry replayed verifier: calls=%d, want %d", verifier.calls, verifierCalls)

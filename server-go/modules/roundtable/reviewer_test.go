@@ -254,7 +254,7 @@ func TestReviewBindsTheVerdictToTheRunAndArtifact(t *testing.T) {
 		t.Fatal("no seat was convened")
 	}
 	for _, request := range seats.requests {
-		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
+		if !strings.Contains(fixtureInputText(request.Input), "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("seat received another run's artifact: %+v", request)
 		}
 	}

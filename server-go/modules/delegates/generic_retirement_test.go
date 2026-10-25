@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	contract "github.com/JBailes/aimee/server-go/delegate"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,7 @@ func TestUnstructuredModelRefusesBeforeProcessOrWorkspace(t *testing.T) {
 	for _, kind := range []string{"generic", "unknown"} {
 		t.Run(kind, func(t *testing.T) {
 			executor, marker, work := retiredModelFixture(t, kind)
-			request := contract.Invocation{Version: contract.WireVersion, Model: "legacy", Role: "code", Persona: "engineer", Tools: true, MaxTurns: 0, Workdir: work, Input: contract.TaskRequest("engineer", "write task")}
+			request := contract.Invocation{Version: contract.WireVersion, Model: "legacy", Role: "code", Persona: "engineer", Tools: true, MaxTurns: 0, Workdir: work, Input: canonical.TaskRequest("engineer", "write task")}
 			result := executor.Execute(context.Background(), request)
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Error("unstructured model command executed before canonical refusal")
@@ -88,7 +89,7 @@ func TestRetiredDefaultNeverRunsAndCanonicalFallbackStillNeedsHost(t *testing.T)
 			t.Fatalf("canonical fallback lost: %+v %v", chosen, err)
 		}
 	}
-	request := contract.Invocation{Version: contract.WireVersion, Model: "legacy", Role: "code", Persona: "engineer", Tools: true, MaxTurns: 0, Input: contract.TaskRequest("engineer", "write task")}
+	request := contract.Invocation{Version: contract.WireVersion, Model: "legacy", Role: "code", Persona: "engineer", Tools: true, MaxTurns: 0, Input: canonical.TaskRequest("engineer", "write task")}
 	if result := executor.Execute(t.Context(), request); result.Status != "failed" || !strings.Contains(result.Error, "unsupported") {
 		t.Fatalf("unsupported missing-workspace executed: %+v", result)
 	}

@@ -68,7 +68,7 @@ func TestBusWireOmitsCallerLifecycleState(t *testing.T) {
 	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
-		Delegate: "codex", Prompt: "review this", Workdir: "/repo", Tools: true,
+		Delegate: "codex", Input: canonical.TaskRequest("security", "review this"), Workdir: "/repo", Tools: true,
 		WorkItemID: "wi-1", Stage: "gate", ExecutionVersion: "v7", RetryTag: "retry",
 		DurableSlot: "seat-2", Participant: "opaque", ReplayOnly: false})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestBusWireOmitsCallerLifecycleState(t *testing.T) {
 func TestReplayOnlyDoesNotLaunchStatelessDelegate(t *testing.T) {
 	client := &BusClient{caller: &recordingCaller{}, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer",
-		Prompt: "work", ReplayOnly: true})
+		Input: canonical.TaskRequest("engineer", "work"), ReplayOnly: true})
 	if !errors.Is(err, ErrDelegateReplayUnavailable) {
 		t.Fatalf("replay-only error = %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCostLimitFailsBeforeDispatch(t *testing.T) {
 	caller := &recordingCaller{}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
-		Prompt: "review this", MaxCostUSD: 0.25})
+		Input: canonical.TaskRequest("security", "review this"), MaxCostUSD: 0.25})
 	if !errors.Is(err, ErrDelegateCostLimitUnsupported) {
 		t.Fatalf("cost limit error = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestDelegateResultPreservesCallerLocalParticipant(t *testing.T) {
 	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
-		Prompt: "review this", Participant: "seat-security"})
+		Input: canonical.TaskRequest("security", "review this"), Participant: "seat-security"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestDelegateResultPreservesCallerLocalParticipant(t *testing.T) {
 }
 
 func TestDispatchBoundaryClassifiesBusAndReplyFailures(t *testing.T) {
-	request := DelegateRequest{Role: "review", Persona: "security", Prompt: "review"}
+	request := DelegateRequest{Role: "review", Persona: "security", Input: canonical.TaskRequest("security", "review")}
 	for _, preDispatch := range []error{
 		bus.ErrModuleCallCapabilityAbsent,
 		bus.ErrModuleCallRejected,
@@ -159,8 +159,8 @@ func TestDelegateGroupPlansDiversityAndKeepsParticipantContinuityLocal(t *testin
 	caller := &groupRoutingCaller{plannedModels: []string{"review-a", "review-b"}}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	requests := []DelegateRequest{
-		{Role: "review", Persona: "security", Prompt: "one"},
-		{Role: "review", Persona: "qa", Prompt: "two", Participant: "review-b"},
+		{Role: "review", Persona: "security", Input: canonical.TaskRequest("security", "one")},
+		{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "two"), Participant: "review-b"},
 	}
 	results := client.DelegateGroup(t.Context(), requests)
 	if len(results) != 2 || results[0].Participant != "review-a" ||
@@ -185,7 +185,7 @@ func TestDelegateGroupPlansDiversityAndKeepsParticipantContinuityLocal(t *testin
 func TestDelegateGroupPreservesCapacityFromTheModuleBoundary(t *testing.T) {
 	caller := &groupRoutingCaller{planError: "group saturated: " + ErrDelegateCapacity.Error()}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	results := client.DelegateGroup(t.Context(), []DelegateRequest{{Role: "review", Persona: "qa", Prompt: "review"}})
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")}})
 	if len(results) != 1 || !errors.Is(results[0].Err, ErrDelegateCapacity) ||
 		!IsCapacityBackpressure(results[0].Err) || errors.Is(results[0].Err, ErrDelegateTerminal) {
 		t.Fatalf("group capacity lost its load classification: %+v", results)
@@ -196,7 +196,7 @@ func TestDelegateResultPreservesCapacityWaitDeadline(t *testing.T) {
 	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
 		Error: ErrDelegateCapacityDeadline.Error()}}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 	if !errors.Is(err, ErrDelegateCapacityDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, ErrDelegateTerminal) {
 		t.Fatalf("capacity wait deadline was collapsed into execution failure: %v", err)
@@ -209,7 +209,7 @@ func TestDelegateResultPreservesExecutionDeadline(t *testing.T) {
 			Kind: TerminationExecutionDeadline, ExecutionTimeoutMS: 1000, ElapsedMS: 999,
 		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 	if !errors.Is(err, ErrDelegateExecutionDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, ErrDelegateCapacityDeadline) || errors.Is(err, ErrDelegateTerminal) {
 		t.Fatalf("execution deadline was collapsed into another failure: %v", err)
@@ -228,7 +228,7 @@ func TestDelegateResultPreservesTurnCapDiagnostic(t *testing.T) {
 			ExecutionTimeoutMS: 1000, ElapsedMS: 1250, Detail: "bounded detail",
 		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 	if !errors.Is(err, ErrDelegateTurnCap) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, ErrDelegateTerminal) {
 		t.Fatalf("turn cap was collapsed into another failure: %v", err)
@@ -246,7 +246,7 @@ func TestDelegateResultPreservesProducerCancellation(t *testing.T) {
 			Kind: TerminationCancelled, ExecutionTimeoutMS: 1000, ElapsedMS: 250,
 		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 	if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		IsCapacityDeadline(err) || IsExecutionDeadline(err) || errors.Is(err, ErrDelegateTerminal) {
 		t.Fatalf("producer cancellation was retyped: %v", err)
@@ -267,7 +267,7 @@ func TestDelegateResultRejectsMalformedTermination(t *testing.T) {
 			caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
 				Error: ErrDelegateTurnCap.Error(), Termination: termination}}
 			client := &BusClient{caller: caller, deadline: time.Second}
-			_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+			_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 			if err == nil || !strings.Contains(err.Error(), "invalid terminal result") ||
 				errors.Is(err, ErrDelegateTurnCap) {
 				t.Fatalf("malformed termination was accepted: %v", err)
@@ -279,7 +279,7 @@ func TestDelegateResultRejectsMalformedTermination(t *testing.T) {
 func TestDelegateCallerCancellationIsNotRetypedAsDeadline(t *testing.T) {
 	caller := &recordingCaller{err: context.Canceled}
 	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review")})
 	if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		IsCapacityDeadline(err) || IsExecutionDeadline(err) {
 		t.Fatalf("caller cancellation was retyped at the module/client boundary: %v", err)
@@ -330,7 +330,7 @@ func TestFailedCanonicalResponseDiagnosticIsNotDiscarded(t *testing.T) {
 	output.Raw = json.RawMessage(`{"provider_metadata":{"retained":true}}`)
 	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed", Error: "native execution failed", Response: "forged success", Output: output, CostKnown: true, CostUSD: 0.25}}
 	client, _ := NewClient(caller, time.Second)
-	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Prompt: "plan"})
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Input: canonical.TaskRequest("engineer", "plan")})
 	var execution *DelegateExecutionError
 	if !errors.As(err, &execution) || !execution.Dispatched || !execution.CostKnown || execution.CostUSD != 0.25 {
 		t.Fatalf("failed execution accounting lost: %v", err)
@@ -403,7 +403,7 @@ func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
 			}
 			caller.result = response
 			client, _ := NewClient(caller, time.Second)
-			result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Prompt: "plan"})
+			result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Input: canonical.TaskRequest("engineer", "plan")})
 			if err == nil || errors.Is(err, ErrDelegateOutputLimit) != wantLimit {
 				t.Fatalf("canonical classification mismatch: kind=%s error=%v", kind, err)
 			}
@@ -431,5 +431,44 @@ func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
 				t.Fatal("failed envelope acquired business text")
 			}
 		})
+	}
+}
+
+func TestDelegateForwardsFullCanonicalInput(t *testing.T) {
+	call := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
+	client, err := NewClient(call, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := canonical.TaskRequest("qa", "Inspect the image")
+	input.Messages[0].ContentScalar = false
+	input.Messages[0].Blocks = append(input.Messages[0].Blocks, canonical.Block{Type: "image", MediaType: "image/png", MediaRef: "https://fixture.invalid/input.png"})
+	input.Metadata = json.RawMessage(`{"opaque":{"number":7,"unicode":"雪"}}`)
+	zero := 0.0
+	input.Temperature = &zero
+	before, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: input}); err != nil {
+		t.Fatal(err)
+	}
+	var invocation Invocation
+	if err := json.Unmarshal(call.request, &invocation); err != nil {
+		t.Fatal(err)
+	}
+	received, err := json.Marshal(invocation.Input)
+	if err != nil || string(received) != string(before) {
+		t.Fatalf("canonical input changed: %s", received)
+	}
+	after, _ := json.Marshal(input)
+	if string(after) != string(before) {
+		t.Fatal("caller-owned input was mutated")
+	}
+	for _, empty := range []*canonical.Request{nil, canonical.TaskRequest("qa", "")} {
+		call.request = nil
+		if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Input: empty}); err == nil || call.request != nil {
+			t.Fatal("empty task reached transport")
+		}
 	}
 }

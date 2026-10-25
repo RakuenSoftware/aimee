@@ -44,7 +44,7 @@ func hostResult(text string) contract.InvocationResult {
 	return contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "done", Output: output, History: []canonical.Message{{Role: "assistant", Blocks: []canonical.Block{output.Blocks[0].Block}}}}
 }
 func nativeInvocation() contract.Invocation {
-	return contract.Invocation{Version: contract.WireVersion, Operation: "fixture-operation", Role: "review", Persona: "reviewer", Input: contract.TaskRequest("reviewer", "review"), ExecutionScope: strings.Repeat("a", 64), Tools: true, MaxTurns: 2, ExecutionTimeoutMS: 5000}
+	return contract.Invocation{Version: contract.WireVersion, Operation: "fixture-operation", Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("reviewer", "review"), ExecutionScope: strings.Repeat("a", 64), Tools: true, MaxTurns: 2, ExecutionTimeoutMS: 5000}
 }
 func TestAllNativeAliasesUseCanonicalHostWithoutDirectSDKFallback(t *testing.T) {
 	for _, kind := range []string{"claude", "claude-code", "codex"} {

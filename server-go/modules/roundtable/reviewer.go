@@ -141,7 +141,7 @@ func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.Delegat
 		Persona:        seat.Persona,
 		Delegate:       seat.Selector,
 		Participant:    seat.Participant,
-		Prompt:         seat.Prompt,
+		Input:          seat.Input,
 		Workdir:        run.Workdir,
 		Tools:          seat.Tools,
 		MaxTurnsCap:    seat.MaxTurnsCap,

@@ -40,7 +40,7 @@ type DelegateRequest struct {
 	Persona              string
 	Delegate             string
 	Participant          string
-	Prompt               string
+	Input                *canonical.Request
 	Workdir              string
 	Tools                bool
 	WorkItemID           string
@@ -305,6 +305,24 @@ func NewClient(caller StageCaller, deadline time.Duration) (*BusClient, error) {
 	return &BusClient{caller: caller, deadline: deadline}, nil
 }
 
+func delegateHasInput(input *canonical.Request) bool {
+	if input == nil || !input.Valid() {
+		return false
+	}
+	for _, message := range input.Messages {
+		if message.Role != "user" {
+			continue
+		}
+		for _, block := range message.Blocks {
+			if block.Type == "image" || block.Type == "document" ||
+				block.Type == "text" && block.Text != nil && *block.Text != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -321,8 +339,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		// dispatch instead of accepting a ceiling the producer cannot enforce.
 		return DelegateResult{}, ErrDelegateCostLimitUnsupported
 	}
-	if request.Role == "" || request.Persona == "" || request.Prompt == "" {
-		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
+	if request.Role == "" || request.Persona == "" || !delegateHasInput(request.Input) {
+		return DelegateResult{}, errors.New("delegate role, persona, and canonical input are required")
 	}
 	deadline := c.deadline
 	if contextDeadline, ok := ctx.Deadline(); ok {
@@ -341,7 +359,7 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		}
 	}
 	wire := Invocation{Version: WireVersion, Operation: request.WorkItemID, ExecutionScope: request.ExecutionScope, Role: request.Role, Persona: request.Persona,
-		Model: request.Delegate, Input: TaskRequest(request.Persona, request.Prompt), Workdir: request.Workdir,
+		Model: request.Delegate, Input: request.Input, Workdir: request.Workdir,
 		Tools: request.Tools, MaxTurns: request.MaxTurnsCap,
 		ExecutionTimeoutMS: max(1, deadline.Milliseconds())}
 	body, err := json.Marshal(wire)

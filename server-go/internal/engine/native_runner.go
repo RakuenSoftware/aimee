@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/JBailes/aimee/server-go/bus"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panelwire"
 	"os"
 	"os/exec"
@@ -558,7 +559,7 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		}
 		return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: string(output)}, nil
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: firstNonempty(paramString(req.Node, "persona", ""), block.Persona), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: firstNonempty(paramString(req.Node, "persona", ""), block.Persona), Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(firstNonempty(paramString(req.Node, "persona", ""), block.Persona), prompt), Workdir: workdir, Tools: true})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -595,7 +596,7 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 		encoded, _ := json.Marshal(req.Feedback)
 		prompt += "\n\nPRIOR REVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(paramString(req.Node, "persona", "architect"), prompt), Workdir: req.WorkItem.Repo})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -659,7 +660,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 	var content []byte
 	var validationErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
+		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(paramString(req.Node, "persona", "architect"), prompt), Workdir: req.WorkItem.Repo})
 		if validationErr != nil {
 			return StepResult{}, validationErr
 		}
@@ -876,7 +877,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// implement/document are native branch-producing blocks regardless of the
 		// custom block registry's Produces metadata. This pre-step is committed here,
 		// and the completed implementation is verified before the step advances.
-		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true, AcceptPartial: true})
+		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Input: canonical.TaskRequest(paramString(req.Node, "test_persona", "qa"), testPrompt), Workdir: workdir, Tools: true, AcceptPartial: true})
 		if testErr != nil {
 			return StepResult{}, testErr
 		}
@@ -894,7 +895,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// independently committed and verified by the Go native runner". Record the
 	// pre-delegate HEAD so that promise can actually be checked below.
 	baseHead, baseHeadErr := gitText(ctx, workdir, "rev-parse", "HEAD")
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, AcceptPartial: true})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(paramString(req.Node, "persona", "engineer"), prompt), Workdir: workdir, Tools: true, AcceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1004,7 +1005,7 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 			return StepResult{}, err
 		}
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "review", Persona: persona, Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "review", Persona: persona, Delegate: paramString(req.Node, "delegate", ""), Input: canonical.TaskRequest(persona, prompt), Workdir: workdir})
 	if err != nil {
 		return StepResult{}, err
 	}

@@ -3,6 +3,7 @@ package panel
 import (
 	"context"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 )
 
@@ -65,7 +66,7 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 		// remote result, so each capacity seat carries a distinct durable slot.
 		// An empty Selector is deliberate: generic delegation resolves eligibility.
 		requests[i] = SeatRequest{Role: delegateRole, Persona: seat.Persona, Selector: seat.Selector,
-			Prompt: prompt, Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
+			Input: canonical.TaskRequest(seat.Persona, prompt), Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
 			DurableSlot:   seatDurableSlot(run, panelRound, seat.Ordinal),
 			ArtifactStage: artifactStage, ArtifactHash: artifactHash}
 	}
@@ -105,7 +106,7 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 				Role:        delegateRole,
 				Persona:     seat.Persona,
 				Participant: seat.Participant,
-				Prompt:      panelResponseRepairPrompt(run.ID, artifactHash, artifactStage, outcomes[outcomeIndex].raw),
+				Input:       canonical.TaskRequest(seat.Persona, panelResponseRepairPrompt(run.ID, artifactHash, artifactStage, outcomes[outcomeIndex].raw)),
 				// Preserve the review delegate's tool-capable transport: a CLI-backed
 				// agent has no HTTP request URL, and tools:false would send its
 				// continuation down the simple path instead.

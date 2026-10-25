@@ -58,7 +58,7 @@ type SeatRequest struct {
 	// Participant continues an existing seat rather than opening a new one, and
 	// is opaque: the panel returns it without interpreting it.
 	Participant string
-	Prompt      string
+	Input       *canonical.Request
 	// DurableSlot distinguishes concurrent seats that would otherwise look
 	// identical, so two capacity seats cannot collapse onto one remote result.
 	DurableSlot   string

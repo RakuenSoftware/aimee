@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func testSeatRun() roundtablecfg.Run {
 func TestPanelDelegatesAlwaysDeclareTheInlineArtifact(t *testing.T) {
 	agents := &recordingPlaneAgents{}
 	plane := panelDelegates{runner: &NativeRunner{agents: agents}}
-	seat := roundtablecfg.SeatRequest{Role: "review", Persona: "qa", Prompt: "review", Tools: true}
+	seat := roundtablecfg.SeatRequest{Role: "review", Persona: "qa", Input: canonical.TaskRequest("qa", "review"), Tools: true}
 	plane.Group(context.Background(), testSeatRun(), []roundtablecfg.SeatRequest{seat})
 	plane.One(context.Background(), testSeatRun(), seat)
 	if len(agents.requests) != 2 {

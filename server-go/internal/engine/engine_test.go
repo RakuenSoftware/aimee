@@ -1644,7 +1644,7 @@ type costRefusalRunner struct {
 
 func (r *costRefusalRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
 	r.calls.Add(1)
-	_, err := r.client.Delegate(ctx, DelegateRequest{Role: "draft", Persona: "engineer", Prompt: req.Proposal, WorkItemID: req.WorkItem.ID, MaxCostUSD: req.CostLimitUSD})
+	_, err := r.client.Delegate(ctx, DelegateRequest{Role: "draft", Persona: "engineer", Input: canonical.TaskRequest("engineer", req.Proposal), WorkItemID: req.WorkItem.ID, MaxCostUSD: req.CostLimitUSD})
 	return StepResult{}, fmt.Errorf("author plan: %w", err)
 }
 func newCostRefusalFixture(t *testing.T) (*workflowstore.Store, *Engine, *costRefusalRunner, *costRefusalCaller) {
@@ -1764,7 +1764,7 @@ type outputLimitRunner struct {
 
 func (r *outputLimitRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
 	r.calls.Add(1)
-	_, err := r.client.Delegate(ctx, DelegateRequest{Role: "draft", Persona: "engineer", Prompt: req.Proposal, WorkItemID: req.WorkItem.ID, MaxCostUSD: req.CostLimitUSD})
+	_, err := r.client.Delegate(ctx, DelegateRequest{Role: "draft", Persona: "engineer", Input: canonical.TaskRequest("engineer", req.Proposal), WorkItemID: req.WorkItem.ID, MaxCostUSD: req.CostLimitUSD})
 	return StepResult{}, fmt.Errorf("author plan: %w", err)
 }
 func newOutputLimitFixture(t *testing.T) (*workflowstore.Store, *Engine, *outputLimitRunner, *outputLimitCaller) {

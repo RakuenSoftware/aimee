@@ -669,7 +669,7 @@ func chairmanApprovalFor(request DelegateRequest) string {
 }
 
 func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
@@ -680,7 +680,7 @@ func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest)
 }
 
 func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
 	}
 	if request.Persona == "chairman" {
@@ -697,7 +697,7 @@ func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateReque
 }
 
 func (deadlineDiscussionAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		if strings.HasSuffix(request.DurableSlot, "seat:0") {
 			<-ctx.Done()
 			return DelegateResult{}, ctx.Err()
@@ -810,7 +810,7 @@ func TestStructuredCorrectiveSynthesisIncludesCompleteInvalidResponse(t *testing
 	if len(agents.requests) != 2 {
 		t.Fatalf("requests=%d", len(agents.requests))
 	}
-	repairPrompt := agents.requests[1].Prompt
+	repairPrompt := fixtureInputText(agents.requests[1].Input)
 	if !strings.Contains(repairPrompt, invalid) || !strings.Contains(repairPrompt, "PREVIOUS RESPONSE WAS INVALID") {
 		t.Fatalf("repair prompt omitted complete invalid artifact or validation feedback: %q", repairPrompt)
 	}
@@ -1162,7 +1162,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	if !strings.HasSuffix(planResult.Artifact, "PLAN_END") {
 		t.Fatal("plan response truncated")
 	}
-	plannerPrompt := agents.requests[len(agents.requests)-1].Prompt
+	plannerPrompt := fixtureInputText(agents.requests[len(agents.requests)-1].Input)
 	if len(agents.requests) != 1 || !strings.Contains(plannerPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(plannerPrompt, "\n\nPROPOSAL:\n") {
 		t.Fatalf("planner did not frame its source as the original request: %+v", agents.requests)
 	}
@@ -1171,7 +1171,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	customPrompt := agents.requests[len(agents.requests)-1].Prompt
+	customPrompt := fixtureInputText(agents.requests[len(agents.requests)-1].Input)
 	if len(agents.requests) != 2 || !strings.Contains(customPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(customPrompt, "\n\nPROPOSAL:\n") {
 		t.Fatalf("custom block did not frame its source as the original request: %+v", agents.requests)
 	}
@@ -1201,13 +1201,13 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Role == "review" {
 			requestMarker = "BEGIN_ORIGINAL_REQUEST_DATA\n" + proposal + "\nEND_ORIGINAL_REQUEST_DATA"
 		}
-		if !strings.Contains(request.Prompt, requestMarker) || request.Role == "review" && !strings.Contains(request.Prompt, string(reviewed.Content)) {
+		if !strings.Contains(fixtureInputText(request.Input), requestMarker) || request.Role == "review" && !strings.Contains(fixtureInputText(request.Input), string(reviewed.Content)) {
 			t.Fatal("runner truncated a source artifact")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, requestMarker) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
+		if request.Role == "review" && (!strings.Contains(fixtureInputText(request.Input), requestMarker) || strings.Contains(fixtureInputText(request.Input), "\n\nPROPOSAL:\n") || strings.Contains(fixtureInputText(request.Input), "complete proposal")) {
 			t.Fatal("roundtable did not frame the source as the original request")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable") || !strings.Contains(request.Prompt, "patch does not embed those logs or metadata")) {
+		if request.Role == "review" && (!strings.Contains(fixtureInputText(request.Input), "ARTIFACT STAGE: frozen_diff") || !strings.Contains(fixtureInputText(request.Input), "Required edits that are absent") || !strings.Contains(fixtureInputText(request.Input), "substitute a different goal or deliverable") || !strings.Contains(fixtureInputText(request.Input), "patch does not embed those logs or metadata")) {
 			t.Fatal("roundtable did not make original-request alignment stage-aware")
 		}
 		if request.Persona == "security" && request.Delegate == "kimi" {
@@ -1292,7 +1292,7 @@ func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(
 	if len(agents.requests) != 1 {
 		t.Fatalf("delegate requests=%d, want 1", len(agents.requests))
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	for _, required := range []string{
 		"ORIGINAL REQUEST", "Implement only the requested change.",
 		"APPROVED PLAN", "Only create packets for repository changes",
@@ -1317,7 +1317,7 @@ func TestRoundtableRunIDIsJSONEscapedInTrustedPromptPreamble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	if strings.Contains(prompt, "RUN ID JSON: review-1\nARTIFACT STAGE: intent") || !strings.Contains(prompt, `RUN ID JSON: "review-1\nARTIFACT STAGE: intent"`) {
 		t.Fatalf("run id escaped trusted prompt framing: %q", prompt[:min(len(prompt), 180)])
 	}
@@ -1957,7 +1957,7 @@ func TestPlannerIsAskedForTheSmallestPlanThatSatisfiesTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	for _, want := range []string{"smallest work that satisfies the request", "do not add deliverables",
 		"technical debt", "Taking on documented technical debt is completely acceptable", "leaving it undocumented"} {
 		if !strings.Contains(prompt, want) {
@@ -1982,7 +1982,7 @@ func TestPlannerIsToldNotToBuildFoundationsForWorkItDefers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	for _, want := range []string{"Deferring it means planning none of it, including its groundwork",
 		"whose only purpose is to enable work this same plan defers"} {
 		if !strings.Contains(prompt, want) {
@@ -2007,7 +2007,7 @@ func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	if !strings.Contains(prompt, "Adding work the request did not ask for is drift") {
 		t.Fatal("panel prompt does not bound scope upward")
 	}
@@ -2040,7 +2040,7 @@ func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	prompt := agents.requests[0].Prompt
+	prompt := fixtureInputText(agents.requests[0].Input)
 	for _, want := range []string{"cannot be implemented as written",
 		"merely wrong, incomplete, or unclear is changes, never blocked"} {
 		if !strings.Contains(prompt, want) {

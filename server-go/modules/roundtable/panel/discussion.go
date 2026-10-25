@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 )
 
@@ -165,7 +166,7 @@ func runDiscussionCycle(ctx context.Context, delegates Delegates, run Run, repor
 	requests := make([]SeatRequest, len(reports))
 	for i, report := range reports {
 		requests[i] = SeatRequest{Role: delegateRole, Persona: report.Seat.Persona,
-			Participant: report.Seat.Participant, Prompt: prompt, Tools: true,
+			Participant: report.Seat.Participant, Input: canonical.TaskRequest(report.Seat.Persona, prompt), Tools: true,
 			MaxTurnsCap:   delegateMaxTurnsCap,
 			DurableSlot:   discussionDurableSlot(run, cycle, report.Seat.Ordinal),
 			ArtifactStage: artifactStage, ArtifactHash: artifactHash}

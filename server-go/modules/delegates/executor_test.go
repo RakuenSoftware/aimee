@@ -59,7 +59,7 @@ func (e *fixedExecutor) Execute(_ context.Context, request delegatecontract.Invo
 
 func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
 	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "done", Response: "complete"}}
-	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "implement", Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "do it")})
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "implement", Persona: "engineer", Input: canonical.TaskRequest("fixture", "do it")})
 	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
@@ -75,7 +75,7 @@ func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
 
 func TestExecutionStageAppliesProducerDeadline(t *testing.T) {
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "review",
-		Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 20})
+		Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 20})
 	started := time.Now()
 	reply, status := NewHandler(blockingExecutor{})(bus.ModuleInvocation{StageID: StageInvoke}, request)
 	if status != bus.ModuleStatusOK || time.Since(started) > time.Second {
@@ -96,7 +96,7 @@ func TestExecutionStageRejectsMalformedTermination(t *testing.T) {
 		},
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "review", Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect")})
+		Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect")})
 	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
 		t.Fatalf("malformed termination crossed the wire: status=%d reply=%s", status, reply)
 	}
@@ -110,7 +110,7 @@ func TestExecutionStageRejectsTerminationWithMismatchedExecutionCap(t *testing.T
 		},
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "review", Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 1000})
+		Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 1000})
 	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
 		t.Fatalf("termination with a mismatched execution cap crossed the wire: status=%d reply=%s", status, reply)
 	}
@@ -473,7 +473,7 @@ func TestRegistryExecutorPreservesHostTurnCap(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			result := executor.Execute(t.Context(), delegatecontract.Invocation{
 				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
-				Input: delegatecontract.TaskRequest("fixture", "exceed the cap"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+				Input: canonical.TaskRequest("fixture", "exceed the cap"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			assertTurnCapResult(t, result)
 			if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
@@ -489,7 +489,7 @@ func TestExecutionStagePreservesHostTurnCapWire(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			request, _ := json.Marshal(delegatecontract.Invocation{
 				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
-				Input: delegatecontract.TaskRequest("fixture", "cross the wire"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+				Input: canonical.TaskRequest("fixture", "cross the wire"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
 			if status != bus.ModuleStatusOK {
