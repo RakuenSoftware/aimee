@@ -21,7 +21,7 @@ extern "C"
 #define DB1_COORD_FILES_LEN    2048
 #define DB1_COORD_ROLE_LEN     32
 #define DB1_COORD_CWD_LEN      512
-/* One complete canonical message plus its terminating NUL; matches Go IR admission. */
+/* Queue contract: one complete canonical message, at most 1 MiB, plus its NUL. */
 #define DB1_COORD_MESSAGE_LEN (1024 * 1024 + 1)
 #define DB1_COORD_RESULT_LEN  4096
 #define DB1_COORD_ERROR_LEN   1024

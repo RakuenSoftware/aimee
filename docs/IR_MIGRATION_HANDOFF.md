@@ -147,6 +147,34 @@ internal tool invocation/message consumers before asserting full-project complet
 Read-only installed Claude SDK constants match the configured token endpoint;
 no endpoint/header/token/grant change or further model attempt was made.
 
+Internal tool execution now borrows the actual IR `tool_input` object and owns
+an execution clone. String-only tool dispatch APIs and the cached-schema fallback
+were unused by production and are removed, including their Windows stubs. The
+architecture guard retires those names globally; test text origins use fixtures.
+Guardrail rendering reads canonical arguments without reparsing or changing them.
+The typed-message request constructor retains all text/image blocks and inert
+sidecars without mutating its source. The alternate browser agent route uses it;
+native primaries pass original canonical input into the source owner rather than
+using a text projection as task authority. The actual ACP check caught the source
+binding requirement; passing canonical input preserves that fence. All 38 public
+ACP cases pass normally and under ASAN/UBSAN, including continuation and controls.
+Normal/sanitizer IR, tool dispatch, context refusal, agent, native runtime and ACP
+resource checks pass. PostgreSQL/KB-dependent checks remain skipped by their
+existing environment gates; no services were configured for them. Windows source
+is updated, not Windows-runtime qualified. Queue size admission now matches the
+published 1 MiB complete-message contract at both writers and readers.
+
+The implementation now carries IR through the reviewed browser, primary/native,
+routing/retry, workflow/coordination, Go delegate/panel, tool execution and durable
+history paths. Domain configuration/artifacts and read-only text views are not
+alternate model-message owners. Native SDK/API codecs and explicit legacy import
+remain boundaries. Do not call the overall recovery complete: live browser Claude
+is still unproved due to the verified refresh HTTP 429; source/credential fences
+remain enabled. Check `/var/tmp/aimee-ir-browser-final-recovery/summary.json` for
+any subsequent exact-source QA upgrade proof; absent that, retained QA remains
+`483dc6edc` with 173 IR rows. No further paid/model send is required merely to
+repeat the same verified authentication failure.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload

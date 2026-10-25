@@ -3,6 +3,7 @@ package families
 import (
 	"encoding/json"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"strings"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestCoordQueueMessageCustodyAndLegacyStorageImport(t *testing.T) {
 	if !ok || !canonical.ValidMessage(json.RawMessage(got)) || json.Unmarshal([]byte(got), &message) != nil || len(message.Blocks) != 1 || message.Blocks[0].Text == nil || *message.Blocks[0].Text != text {
 		t.Fatalf("legacy storage import changed text: %q", got)
 	}
-	for _, bad := range []string{`{"role":"user","blocks":"invalid"}`, `{"role":"assistant","blocks":[{"type":"text","text":"wrong role"}]}`, ""} {
+	for _, bad := range []string{strings.Repeat("x", coordMessageMaxBytes+1), `{"role":"user","blocks":"invalid"}`, `{"role":"assistant","blocks":[{"type":"text","text":"wrong role"}]}`, ""} {
 		for _, legacy := range []bool{false, true} {
 			if _, ok := coordTaskMessage(bad, legacy); ok {
 				t.Fatalf("invalid task accepted: %q", bad)

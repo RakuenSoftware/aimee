@@ -506,12 +506,14 @@ int policy_check_tool_metadata_attempt(const char *name, const aimee_tool_metada
    }
    return execution_mode == 2 ? -1 : 0;
 }
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *function, const char *arguments,
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *function, const cJSON *arguments,
                                        int timeout, int *is_error)
 {
    check_execution_owner(function->name);
    assert(effect_authorized && timeout == 120000);
-   assert(strstr(arguments, "123.123456789012345678901234567890"));
+   char *view = cJSON_PrintUnformatted(arguments);
+   assert(view && strstr(view, "123.123456789012345678901234567890"));
+   free(view);
    dispatch_count++;
    if (atomic_load(&cli_shell_probe) && !strcmp(function->name, "bash"))
       exercise_nested_cli();

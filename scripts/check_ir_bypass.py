@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
+    "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
+    "agent_tools_dispatch_owned",
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
     "TURN_NAR_MAX_CALLS", "TURN_NAR_NAME_LEN", "TURN_NAR_ARG_LEN",
@@ -211,12 +213,7 @@ CANONICAL_MODEL_FILES = {
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
-# These call sites consume the tool/receipt owner's semantic outcome. The other
-# native output/compatibility boundaries are not declared globally migrated.
-CLASSIFIED_DISPATCH_FILES = {
-    "src/posix/agent_runtime.c", "src/server/script_rpc.c",
-    "src/server/server_compute_async.c", "src/server/script_tool_execution.c",
-}
+# String-only tool entries are retired throughout production C.
 CANONICAL_PROFILE_FUNCTIONS = {
     "agent_prepare_request_ir", "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
     "agent_anthropic_profile_ir",
@@ -313,15 +310,13 @@ def findings(root: Path) -> list[dict]:
                 continue
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
-            if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c", "src/server/script_rpc.c", "src/server/script_tool_execution.c"}:
+            if rule in {"canonical-dispatch-cache", "unclassified-tool-dispatch"} and not relative.endswith(".c"):
                 continue
             if rule == "native-schema-lookup" and not canonical:
                 continue
             if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
                 continue
             if rule == "native-history-field" and not canonical and not history_spans:
-                continue
-            if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:
                 continue
             for match in pattern.finditer(source):
                 if rule == "native-control-history" and not any(

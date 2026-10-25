@@ -290,13 +290,12 @@ static void bash_close(void *lease, void *context)
    bash_closes++;
 }
 static int mcp_dispatches;
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *definition, const char *wire,
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *definition, const cJSON *args,
                                        int timeout, int *failed)
 {
    assert(!strcmp(definition->name, "read_file") || !strcmp(definition->name, "write_file") ||
           !strcmp(definition->name, "bash"));
    assert(timeout > 0 && timeout <= 120000);
-   cJSON *args = cJSON_Parse(wire);
    assert(cJSON_IsObject(args));
    if (!strcmp(definition->name, "bash"))
    {
@@ -310,7 +309,6 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *definition, const cha
    assert(!cJSON_GetObjectItemCaseSensitive(args, "file_path"));
    const cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
    assert(!cwd || (cJSON_IsString(cwd) && !strcmp(cwd->valuestring, root_path)));
-   cJSON_Delete(args);
    mcp_dispatches++;
    *failed = 0;
    return strdup("actual MCP tool peer result");
@@ -319,13 +317,13 @@ void agent_tools_set_effect_authorized(int value)
 {
    (void)value;
 }
-char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *definition, const char *wire,
+char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *definition, const cJSON *arguments,
                                              int timeout, agent_tool_file_resource_fn execute,
                                              void *context, int *failed)
 {
    (void)timeout;
    dispatch_calls++;
-   cJSON *args = cJSON_Parse(wire);
+   cJSON *args = cJSON_Duplicate(arguments, 1);
    assert(args);
    const char *path = field(args, "path");
    char absolute[MAX_PATH_LEN];

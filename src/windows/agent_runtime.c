@@ -318,35 +318,3 @@ char *tool_search_notes(const char *query)
    (void)query;
    return safe_strdup("error: search_notes not supported on Windows");
 }
-
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
-{
-   if (!name)
-      return safe_strdup("error: missing tool name");
-   if (strcmp(name, "bash") == 0)
-      return tool_bash(arguments_json, timeout_ms);
-   if (strcmp(name, "read_file") == 0 || strcmp(name, "Read") == 0)
-   {
-      cJSON *args = cJSON_Parse(arguments_json);
-      cJSON *p = args ? cJSON_GetObjectItem(args, "path") : NULL;
-      char *result = tool_read_file(p && cJSON_IsString(p) ? p->valuestring : "", 0, 0, 1);
-      cJSON_Delete(args);
-      return result;
-   }
-   if (strcmp(name, "write_file") == 0 || strcmp(name, "Write") == 0)
-   {
-      cJSON *args = cJSON_Parse(arguments_json);
-      cJSON *p = args ? cJSON_GetObjectItem(args, "path") : NULL;
-      cJSON *c = args ? cJSON_GetObjectItem(args, "content") : NULL;
-      char *result = tool_write_file(p && cJSON_IsString(p) ? p->valuestring : "",
-                                     c && cJSON_IsString(c) ? c->valuestring : "");
-      cJSON_Delete(args);
-      return result;
-   }
-   return safe_strdup("error: tool not supported on Windows");
-}
-
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms)
-{
-   return dispatch_tool_call_ctx(name, arguments_json, timeout_ms);
-}

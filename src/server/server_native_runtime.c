@@ -897,7 +897,7 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
                 agent_tools_bind_bash_environment(server_native_cli_environment(shell));
          }
          agent_tools_set_effect_authorized(1);
-         text = dispatch_tool_call_ir_ctx_status(function, arguments, 120000, &is_error);
+         text = dispatch_tool_call_ir_ctx_status(function, original->tool_input, 120000, &is_error);
          agent_tools_set_effect_authorized(0);
          if (local_shell)
          {

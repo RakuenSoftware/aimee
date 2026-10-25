@@ -8,7 +8,6 @@
 #include "log.h"
 #include "json_fluent.h"
 #include "economizer.h"
-#include "tool_args_coerce.h"
 #include "sandbox_learned.h"
 #include "modules/workspace/workspace_provider.h"
 #include <aimee/tools/module_api.h>
@@ -130,11 +129,11 @@ static int tool_dispatch_cancelled(char *buf, size_t bufsz)
    return agent_delegation_stop_requested(buf, bufsz);
 }
 
-static char *guardrail_input_json(const char *name, const char *arguments_json)
+static char *guardrail_input_json(const char *name, const cJSON *arguments)
 {
-   cJSON *args = cJSON_Parse(arguments_json);
+   cJSON *args = cJSON_Duplicate(arguments, 1);
    if (!args)
-      return safe_strdup(arguments_json);
+      return cJSON_PrintUnformatted(arguments);
 
    cJSON *mapped = cJSON_CreateObject();
    if (strcmp(name, "bash") == 0)
@@ -175,13 +174,13 @@ static char *guardrail_input_json(const char *name, const char *arguments_json)
       /* Pass through original */
       cJSON_Delete(mapped);
       cJSON_Delete(args);
-      return safe_strdup(arguments_json);
+      return cJSON_PrintUnformatted(arguments);
    }
 
    char *json = cJSON_PrintUnformatted(mapped);
    cJSON_Delete(mapped);
    cJSON_Delete(args);
-   return json ? json : safe_strdup(arguments_json);
+   return json ? json : cJSON_PrintUnformatted(arguments);
 }
 
 static int command_word_matches(const char *s, const char *word)
@@ -2042,11 +2041,9 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
-static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
-                                          int timeout_ms, cJSON *admitted_arguments,
-                                          agent_tool_file_resource_fn execute, void *context)
+static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *args,
+                                    agent_tool_file_resource_fn execute, void *context)
 {
-   cJSON *args = admitted_arguments ? admitted_arguments : cJSON_Parse(arguments_json);
    if (!args)
    {
       td_outcome_set("error", "bad_args");
@@ -2059,18 +2056,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       cJSON_Delete(args);
       td_outcome_set("refused", "cancelled");
       return safe_strdup(cancel_msg);
-   }
-
-   /* Legacy ingress still normalizes using the cached catalog. Canonical IR
-    * callers transfer the exact admitted arguments and must not use that cache. */
-   if (!admitted_arguments)
-   {
-      cJSON *canonical = tool_args_canonicalize(agent_tool_get_schema_cached(name), args);
-      if (canonical && canonical != args)
-      {
-         cJSON_Delete(args);
-         args = canonical;
-      }
    }
 
    /* Shared by in-process execution and isolated native MCP callbacks. Toolset
@@ -2154,7 +2139,13 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
        * the orchestrator coordination reminders do not apply to them. */
       state.is_delegate = 1;
 
-      char *gr_input = guardrail_input_json(name, arguments_json);
+      char *gr_input = guardrail_input_json(name, args);
+      if (!gr_input)
+      {
+         cJSON_Delete(args);
+         td_outcome_set("error", "bad_args");
+         return safe_strdup("error: cannot prepare canonical guardrail input");
+      }
 
       char msg[1024] = "";
       int rc = agent_tools_is_mcp_derived(name)
@@ -2425,14 +2416,13 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    return result;
 }
 
-char *agent_tools_dispatch_file_owned(const char *name, const char *arguments_json, int timeout_ms,
-                                      int *is_error, cJSON *admitted_arguments,
+char *agent_tools_dispatch_file_owned(const char *name, int timeout_ms, int *is_error,
+                                      cJSON *admitted_arguments,
                                       agent_tool_file_resource_fn execute, void *context)
 {
    agent_tools_emit_tool_event("started", name);
    td_outcome_reset();
-   char *result = dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms, admitted_arguments,
-                                               execute, context);
+   char *result = dispatch_admitted_tool(name, timeout_ms, admitted_arguments, execute, context);
    agent_tools_emit_tool_event("completed", name);
 
    /* Completion audit (a no-op unless the server installed a bridge). Fires once

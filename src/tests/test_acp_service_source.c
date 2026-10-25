@@ -230,7 +230,7 @@ void agent_tools_set_effect_authorized(int yes)
 {
    (void)yes;
 }
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *t, const char *a, int m, int *e)
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *t, const cJSON *a, int m, int *e)
 {
    (void)t;
    (void)a;
@@ -238,7 +238,7 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *t, const char *a, int
    (void)e;
    abort();
 }
-char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *t, const char *a, int m,
+char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *t, const cJSON *a, int m,
                                              agent_tool_file_resource_fn f, void *c, int *e)
 {
    (void)t;

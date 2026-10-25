@@ -280,8 +280,10 @@ func coordJobCreate(ctx context.Context, q store.Queryer, f []string) (uint32, [
 
 // New queue writes are canonical IR. Legacy prompt rows are imported only at
 // this storage read boundary; valid canonical bytes and opaque fields stay exact.
+const coordMessageMaxBytes = 1 << 20
+
 func coordTaskMessage(raw string, legacy bool) (string, bool) {
-	if raw == "" {
+	if raw == "" || len(raw) > coordMessageMaxBytes {
 		return "", false
 	}
 	if canonical.ValidMessage(json.RawMessage(raw)) {
@@ -303,7 +305,7 @@ func coordTaskMessage(raw string, legacy bool) (string, bool) {
 	}
 	encoded, err := json.Marshal(canonical.Message{Role: "user",
 		Blocks: []canonical.Block{{Type: "text", Text: &raw}}})
-	return string(encoded), err == nil && canonical.ValidMessage(encoded)
+	return string(encoded), err == nil && len(encoded) <= coordMessageMaxBytes && canonical.ValidMessage(encoded)
 }
 
 func coordTaskAdd(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {

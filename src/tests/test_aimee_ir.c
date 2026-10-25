@@ -386,8 +386,37 @@ static void test_general_complete_media(void)
    cJSON_Delete(raw);
 }
 
+static void test_request_from_original_message(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "first 雪"},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/input.png"},
+                             {.type = AIMEE_BLK_TEXT, .text = "last"}};
+   blocks[1].raw = cJSON_Parse("{\"opaque\":true}");
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 3};
+   message.raw = cJSON_Parse("{\"owner\":\"source\"}");
+   assert(blocks[1].raw && message.raw);
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_message(&request, "host policy", &message, 128, 0));
+   assert(request.n_system == 1 && request.n_messages == 1 && request.messages[0].n_blocks == 3);
+   assert(request.system[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(request.messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(!blocks[0].context.origin);
+   assert(request.has_temperature && request.temperature == 0 && request.max_tokens == 128);
+   assert(request.messages[0].blocks != blocks && request.messages[0].raw != message.raw);
+   assert(cJSON_Compare(request.messages[0].raw, message.raw, 1));
+   assert(request.messages[0].blocks[1].raw != blocks[1].raw);
+   assert(cJSON_Compare(request.messages[0].blocks[1].raw, blocks[1].raw, 1));
+   assert(!strcmp(request.messages[0].blocks[2].text, "last"));
+   aimee_request_free(&request);
+   cJSON_Delete(message.raw);
+   cJSON_Delete(blocks[1].raw);
+}
+
 int main(void)
 {
+   test_request_from_original_message();
    test_general_complete_media();
    test_owned_refusal_clone();
    test_refusal_details_validation();

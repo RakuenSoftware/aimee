@@ -431,8 +431,8 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
 static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
                                       size_t selected_len);
-static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
-                                     const char *aimee_sid, const char *provider,
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const aimee_message_t *message,
+                                     const char *cwd, const char *aimee_sid, const char *provider,
                                      const char *model_override);
 static void chat_agent_add_default_roles(agent_t *ag)
 {
@@ -652,9 +652,14 @@ static int chat_native_progress(void *context)
 /* The original task stays with the canonical host request; the native process
  * only schedules model/tool exchanges through its scoped local capability. */
 static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent_network_t *network,
-                             const char *cwd, const char *system, const char *prompt,
+                             const char *cwd, const char *system, const aimee_message_t *message,
                              agent_result_t *out)
 {
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = system && system[0] ? 1 : 0,
+                            .messages = (aimee_message_t *)message,
+                            .n_messages = 1};
    agent_t selected = *agent;
    if (!strcmp(selected.cli_kind, "claude-code"))
       snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
@@ -662,7 +667,9 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
                              .network = network,
                              .cwd = cwd,
                              .system_prompt = system,
-                             .user_prompt = prompt,
+                             /* The native owner reads the captured canonical turn. */
+                             .user_prompt = "Continue the server-owned canonical turn.",
+                             .canonical_request = &input,
                              .primary = 1,
                              .control_channel =
                                  c->ir_delivery && server_control_scope_can_reply(c->ir_controls),
@@ -698,8 +705,8 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
    return rc;
 }
 
-static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
-                                     const char *aimee_sid, const char *provider,
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const aimee_message_t *message,
+                                     const char *cwd, const char *aimee_sid, const char *provider,
                                      const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s", provider && provider[0] ? provider : "agent");
@@ -816,8 +823,8 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    else
    {
       aimee_request_t request = {0};
-      rc = aimee_ir_request_from_text(&request, system_prompt, message, AGENT_DEFAULT_MAX_TOKENS,
-                                      0.3)
+      rc = aimee_ir_request_from_message(&request, system_prompt, message, AGENT_DEFAULT_MAX_TOKENS,
+                                         0.3)
                ? AGENT_RC_CONTEXT_REFUSED
                : agent_run_with_tools(&acfg, "code", &request, &result);
       aimee_request_free(&request);
@@ -1107,10 +1114,8 @@ void chat_stream_worker(void *arg)
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jcompact = cJSON_GetObjectItemCaseSensitive(req, "compact");
 
-   /* The queue accepts canonical input only. This text view is for routing
-    * diagnostics and the explicit external CLI boundary, never model history. */
+   /* The queue and every execution branch retain the original canonical input. */
    int input_rc = jmsg ? aimee_ir_message_parse(jmsg, &cctx->ir_input) : 0;
-   const char *message = "Continue the admitted conversation.";
    int has_content = 0;
    for (int i = 0; !input_rc && i < cctx->ir_input.n_blocks; i++)
    {
@@ -1120,7 +1125,6 @@ void chat_stream_worker(void *arg)
          input_rc = -1;
       if (block->type == AIMEE_BLK_TEXT && block->text && block->text[0])
       {
-         message = block->text;
          has_content = 1;
       }
       if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
@@ -1224,6 +1228,6 @@ void chat_stream_worker(void *arg)
                                          model_override);
    }
    else
-      chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override);
+      chat_stream_worker_agent(cctx, &cctx->ir_input, cwd, aimee_sid, provider, model_override);
    return;
 }

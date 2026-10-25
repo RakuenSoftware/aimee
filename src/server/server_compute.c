@@ -1759,21 +1759,11 @@ static void delegate_worker_run(void *arg)
        * also resets write capability and loses the managed revision root. */
       server_delegate_heartbeat_begin(cctx->background_job_id);
       aimee_request_t request = {0};
-      aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system_prompt};
       aimee_block_t content = cctx->ir_input.blocks[0];
       content.text = (char *)run_prompt;
       aimee_message_t message = cctx->ir_input;
       message.blocks = &content;
-      aimee_request_t view = {.system = &policy,
-                              .n_system = system_prompt && system_prompt[0] ? 1 : 0,
-                              .messages = &message,
-                              .n_messages = 1,
-                              .has_max_tokens = max_tokens > 0,
-                              .max_tokens = max_tokens > 0 ? max_tokens : 0,
-                              .has_temperature = 1,
-                              .temperature = 0.3};
-      aimee_ir_classify_context(&view);
-      rc = aimee_ir_request_clone(&view, &request)
+      rc = aimee_ir_request_from_message(&request, system_prompt, &message, max_tokens, 0.3)
                ? AGENT_RC_CONTEXT_REFUSED
                : delegate_run_with_credential_retry(
                      &acfg, target_agent, role, &request, force_tools, delegate_allows_writes,

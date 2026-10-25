@@ -379,7 +379,7 @@ int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
       /* Independent callback TLS/action state: the producer remains inside the
        * real outer Bash call. No producer queue, borrowed sink or fake model ID. */
       agent_tools_set_effect_authorized(1);
-      text = dispatch_tool_call_ir_ctx_status(&definition, wire, timeout_ms, &is_error);
+      text = dispatch_tool_call_ir_ctx_status(&definition, arguments, timeout_ms, &is_error);
       agent_tools_set_effect_authorized(0);
       text = policy_annotate_indexed(tool, wire, attempt, text);
    }

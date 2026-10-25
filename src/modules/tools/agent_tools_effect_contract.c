@@ -401,16 +401,15 @@ int agent_tools_classification(const char *name)
    return agent_tools_effect_classification(name, g_tool_classifier);
 }
 
-static char *dispatch_ir_owned(const aimee_tool_t *admitted, const char *arguments_json,
-                               int timeout_ms, int *is_error, agent_tool_file_resource_fn execute,
-                               void *context)
+static char *dispatch_ir_owned(const aimee_tool_t *admitted, const cJSON *arguments, int timeout_ms,
+                               int *is_error, agent_tool_file_resource_fn execute, void *context)
 {
    if (is_error)
       *is_error = 1;
    if (!admitted || admitted->kind != AIMEE_TOOL_FUNCTION || !admitted->name ||
-       !admitted->name[0] || !cJSON_IsObject(admitted->schema) || !arguments_json)
+       !admitted->name[0] || !cJSON_IsObject(admitted->schema))
       return safe_strdup("error: invalid admitted tool definition");
-   cJSON *args = aimee_ir_json_parse_frame(arguments_json, strlen(arguments_json));
+   cJSON *args = cJSON_IsObject(arguments) ? cJSON_Duplicate(arguments, 1) : NULL;
    cJSON *canonical = cJSON_IsObject(args) ? tool_args_canonicalize(admitted->schema, args) : NULL;
    char *before = args ? cJSON_PrintUnformatted(args) : NULL;
    char *after = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
@@ -423,19 +422,18 @@ static char *dispatch_ir_owned(const aimee_tool_t *admitted, const char *argumen
       cJSON_Delete(args);
       return safe_strdup("error: admitted tool arguments are not canonical");
    }
-   return agent_tools_dispatch_file_owned(admitted->name, arguments_json, timeout_ms, is_error,
-                                          args, execute, context);
+   return agent_tools_dispatch_file_owned(admitted->name, timeout_ms, is_error, args, execute,
+                                          context);
 }
 
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char *arguments_json,
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const cJSON *arguments,
                                        int timeout_ms, int *is_error)
 {
-   return dispatch_ir_owned(admitted, arguments_json, timeout_ms, is_error, NULL, NULL);
+   return dispatch_ir_owned(admitted, arguments, timeout_ms, is_error, NULL, NULL);
 }
-char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *admitted,
-                                             const char *arguments_json, int timeout_ms,
-                                             agent_tool_file_resource_fn execute, void *context,
-                                             int *is_error)
+char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *admitted, const cJSON *arguments,
+                                             int timeout_ms, agent_tool_file_resource_fn execute,
+                                             void *context, int *is_error)
 {
    if (!execute || !admitted || !admitted->name ||
        (strcmp(admitted->name, "read_file") && strcmp(admitted->name, "write_file")))
@@ -444,31 +442,5 @@ char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *admitted,
          *is_error = 1;
       return safe_strdup("error: invalid file resource owner");
    }
-   return dispatch_ir_owned(admitted, arguments_json, timeout_ms, is_error, execute, context);
-}
-
-/* Public entry: fire the tool-event hook (no-op unless a worker installed one)
- * around the actual dispatch, so streaming/run consumers see started/completed
- * without the dispatcher's many return paths needing to care. */
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
-{
-   return dispatch_tool_call_ctx_status(name, arguments_json, timeout_ms, NULL);
-}
-
-char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
-                                    int *is_error)
-{
-   return agent_tools_dispatch_owned(name, arguments_json, timeout_ms, is_error, NULL);
-}
-
-char *agent_tools_dispatch_owned(const char *name, const char *arguments_json, int timeout_ms,
-                                 int *is_error, cJSON *admitted_arguments)
-{
-   return agent_tools_dispatch_file_owned(name, arguments_json, timeout_ms, is_error,
-                                          admitted_arguments, NULL, NULL);
-}
-
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms)
-{
-   return dispatch_tool_call_ctx(name, arguments_json, timeout_ms);
+   return dispatch_ir_owned(admitted, arguments, timeout_ms, is_error, execute, context);
 }

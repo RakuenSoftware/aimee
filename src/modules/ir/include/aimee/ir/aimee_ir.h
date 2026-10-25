@@ -486,6 +486,9 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
  */
 /* Genuinely text-only request origin; structured callers retain their existing
  * IR instead. out is owned/zeroed, replaced atomically, and freed normally. */
+int aimee_ir_request_from_message(aimee_request_t *out, const char *system,
+                                  const aimee_message_t *message, int max_tokens,
+                                  double temperature);
 int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
                                int max_tokens, double temperature);
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);

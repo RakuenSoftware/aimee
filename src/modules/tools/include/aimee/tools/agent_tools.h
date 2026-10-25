@@ -58,7 +58,6 @@ char *tool_find_symbol(const char *identifier);
 char *tool_create_note(const char *title, const char *content, const char *tags);
 char *tool_list_notes(const char *tag, int limit);
 char *tool_search_notes(const char *query);
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 
 /* Server registration seam for the separately supervised event-bus tool
  * classifier. classification values are the AIMEE_TOOL_CLASS_* constants.
@@ -94,10 +93,10 @@ int agent_tools_effect_scope_pop(agent_tools_effect_scope_t *scope);
 void agent_tools_set_effect_authorized(int authorized);
 
 struct aimee_tool;
-/* Execute already canonical arguments using their exact admitted definition.
- * Refuses arguments which would change under that schema. */
+/* Execute the canonical input object held in IR using its admitted definition.
+ * Borrows the input; execution owns a clone. Refuses schema-changing arguments. */
 char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
-                                       const char *canonical_arguments_json, int timeout_ms,
+                                       const struct cJSON *canonical_arguments, int timeout_ms,
                                        int *is_error);
 /* Private host file-resource executor. It runs only for read_file/write_file,
  * after the same admitted-schema, role, guardrail and final-action owners as
@@ -107,9 +106,9 @@ char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
 typedef char *(*agent_tool_file_resource_fn)(const char *name, const struct cJSON *arguments,
                                              void *context, int *is_error);
 char *dispatch_tool_file_resource_ctx_status(const struct aimee_tool *admitted,
-                                             const char *canonical_arguments_json, int timeout_ms,
-                                             agent_tool_file_resource_fn execute, void *context,
-                                             int *is_error);
+                                             const struct cJSON *canonical_arguments,
+                                             int timeout_ms, agent_tool_file_resource_fn execute,
+                                             void *context, int *is_error);
 /* Shared file policy below dispatch. Path must already be resolved against the
  * execution cwd. This grants no execution or filesystem capability. */
 const char *agent_tools_validate_file_resource(const char *path, int writing);
@@ -156,12 +155,9 @@ struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
  * The names are borrowed from the process-lifetime schema cache. */
 int agent_tool_known_names(const char **out, int max);
 
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
 /* Same dispatch and owned text result, plus the tool owner's authoritative
  * semantic failure flag, including refusals and unconfirmed action receipts.
  * Consumers must not infer success by parsing or matching the result text. */
-char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
-                                    int *is_error);
 
 void agent_tools_set_dispatch_role(const char *role);
 
@@ -266,7 +262,7 @@ agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
 
 /* Tool-call lifecycle hook. A streaming chat worker or a /v1/runs worker
  * installs a thread-local callback (NULL by default — every other caller is
- * unaffected) before running a turn; dispatch_tool_call_ctx fires it as each
+ * unaffected) before running a turn; canonical dispatch fires it as each
  * tool starts and completes so the turn's tool activity can be surfaced to the
  * chat SSE / ACP session/update stream and to /v1/runs events. `phase` is
  * "started" or "completed". Mirrors the agent_tools_set_dispatch_role pattern. */
@@ -277,7 +273,7 @@ void agent_tools_set_tool_event_cb(agent_tool_event_cb_t cb, void *ud);
  * above: this is a PROCESS-GLOBAL, NULL-by-default hook (like the vault/sandbox
  * audit hooks) that the server installs ONCE at startup so a bridge can record
  * every completed tool dispatch's OUTCOME on the audit bus. It fires exactly once
- * per dispatch_tool_call_ctx, after execution, on every return path (success,
+ * per canonical dispatch, after execution, on every return path (success,
  * error, timeout, refused). It carries ONLY classified enums + the principal —
  * never argument or result content, and never the raw error text an MCP server
  * returned. A thin client that links the tools module but not the bus leaves the

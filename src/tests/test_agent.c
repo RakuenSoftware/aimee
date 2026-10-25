@@ -1,3 +1,4 @@
+#include "support/ir_tool_fixture.h"
 #include "support/ir_text_request.h"
 #include "support/typed_catalog_fixture.h"
 #include "modules/tools/tool_catalog_data.h"
@@ -118,7 +119,6 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
                      int replace_all);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_script_rpc_keeps_permission_scope(void);
@@ -997,19 +997,19 @@ static void test_a_delegate_without_shell_cannot_run_commands(void)
    agent_tools_set_dispatch_role("code");
    agent_tools_shell_set(0);
 
-   char *result = dispatch_tool_call("bash", "{\"command\":\"ls\"}", 1000);
+   char *result = fixture_dispatch_tool("bash", "{\"command\":\"ls\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") != NULL);
    free(result);
 
-   result = dispatch_tool_call("execute_script", "{\"body\":\"echo hi\"}", 1000);
+   result = fixture_dispatch_tool("execute_script", "{\"body\":\"echo hi\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") != NULL);
    free(result);
 
    /* Holding it, the refusal is gone: whatever bash does next, it is not this. */
    agent_tools_shell_set(1);
-   result = dispatch_tool_call("bash", "{\"command\":\"true\"}", 1000);
+   result = fixture_dispatch_tool("bash", "{\"command\":\"true\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") == NULL);
    free(result);
@@ -1025,17 +1025,17 @@ static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
     * into the run rather than worked out per call. */
    agent_tools_knowledge_write_set(0);
 
-   char *result = dispatch_tool_call("find_symbol", "{\"identifier\":\"main\"}", 1000);
+   char *result = fixture_dispatch_tool("find_symbol", "{\"identifier\":\"main\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "current-checkout evidence") != NULL);
    free(result);
 
-   result = dispatch_tool_call("aimee:search_memory", "{\"query\":\"prior facts\"}", 1000);
+   result = fixture_dispatch_tool("aimee:search_memory", "{\"query\":\"prior facts\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "current-checkout evidence") != NULL);
    free(result);
 
-   result = dispatch_tool_call("bash", "{\"command\":\"aimee index scan\"}", 1000);
+   result = fixture_dispatch_tool("bash", "{\"command\":\"aimee index scan\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "mutating or broad aimee context commands are disabled") != NULL);
    free(result);
@@ -1180,16 +1180,14 @@ static void test_file_resource_requires_final_owner(void)
    int failed = 0;
    file_resource_calls = 0;
    agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
-   char *result =
-       dispatch_tool_file_resource_ctx_status(&definition, "{\"path\":\"incoming-relative\"}", 1000,
-                                              owned_file_resource, "/fixture/final-owner", &failed);
+   char *result = fixture_dispatch_file_text(&definition, "{\"path\":\"incoming-relative\"}", 1000,
+                                             owned_file_resource, "/fixture/final-owner", &failed);
    assert(result && failed && !file_resource_calls &&
           strstr(result, "fixture_resource_unavailable"));
    free(result);
    agent_tools_register_action_owner(normalize_file_resource, file_resource_receipt);
-   result =
-       dispatch_tool_file_resource_ctx_status(&definition, "{\"path\":\"incoming-relative\"}", 1000,
-                                              owned_file_resource, "/fixture/final-owner", &failed);
+   result = fixture_dispatch_file_text(&definition, "{\"path\":\"incoming-relative\"}", 1000,
+                                       owned_file_resource, "/fixture/final-owner", &failed);
    assert(result && !failed && file_resource_calls == 1);
    free(result);
    agent_tools_register_action_owner(NULL, NULL);
@@ -1200,8 +1198,8 @@ static void test_dispatch_carries_owner_failure_status(void)
 {
    agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
    int is_error = 0;
-   char *result = dispatch_tool_call_ctx_status("read_file", "{\"path\":\"unopened-fixture\"}",
-                                                1000, &is_error);
+   char *result = fixture_dispatch_tool_status("read_file", "{\"path\":\"unopened-fixture\"}", 1000,
+                                               &is_error);
    assert(result && is_error && !strncmp(result, "{", 1));
    assert(strstr(result, "fixture_resource_unavailable"));
    free(result);
@@ -2227,7 +2225,7 @@ static int bash_progress_fixture(void *context)
       assert(!agent_tools_effect_scope_push(&scope));
       int failed = 0;
       char *result =
-          dispatch_tool_call_ctx_status("unknown_nested_fixture_tool", "{}", 1000, &failed);
+          fixture_dispatch_tool_status("unknown_nested_fixture_tool", "{}", 1000, &failed);
       assert(result && failed && strstr(result, "error: unknown tool"));
       free(result);
       assert(!agent_tools_effect_scope_pop(scope));
@@ -2332,7 +2330,7 @@ static void test_bash_lexical_scope(void)
    char *arguments_wire = cJSON_PrintUnformatted(arguments);
    assert(arguments_wire);
    int outer_failed = 1;
-   wire = dispatch_tool_call_ctx_status("bash", arguments_wire, 5000, &outer_failed);
+   wire = fixture_dispatch_tool_status("bash", arguments_wire, 5000, &outer_failed);
    value = cJSON_Parse(wire);
    assert(value && !outer_failed && cJSON_GetObjectItem(value, "exit_code")->valueint == 0);
    cJSON_Delete(value);
@@ -2573,7 +2571,7 @@ static void test_shell_worktree_rewrite_is_applied_not_refused(void)
       assert(system(shellcmd) == 0);
 
       run_cmd_set_cwd(repo);
-      char *out = dispatch_tool_call("bash", "{\"command\":\"pwd\"}", 10000);
+      char *out = fixture_dispatch_tool("bash", "{\"command\":\"pwd\"}", 10000);
       run_cmd_set_cwd(NULL);
       assert(out != NULL);
       if (strstr(out, "guardrail blocked") != NULL)
@@ -3618,9 +3616,9 @@ static void test_git_tools_default_to_session_worktree(void)
    }
 
    run_cmd_set_cwd(root);
-   char *st = dispatch_tool_call("git_status", "{}", 5000);
-   char *lg = dispatch_tool_call("git_log", "{}", 5000);
-   char *df = dispatch_tool_call("git_diff", "{}", 5000);
+   char *st = fixture_dispatch_tool("git_status", "{}", 5000);
+   char *lg = fixture_dispatch_tool("git_log", "{}", 5000);
+   char *df = fixture_dispatch_tool("git_diff", "{}", 5000);
    run_cmd_set_cwd(NULL);
 
    /* None of the three read-only git tools may error for a missing 'path' now
@@ -3721,7 +3719,7 @@ static void test_tool_grep_excludes_heavy_dirs(void)
 static void test_dispatch_tool_call(void)
 {
    /* bash tool */
-   char *result = dispatch_tool_call("bash", "{\"command\":\"echo dispatch_test\"}", 5000);
+   char *result = fixture_dispatch_tool("bash", "{\"command\":\"echo dispatch_test\"}", 5000);
    assert(result != NULL);
    cJSON *json = parse_json_or_die(result);
    assert(strstr(cJSON_GetObjectItem(json, "stdout")->valuestring, "dispatch_test") != NULL);
@@ -3729,24 +3727,24 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Unknown tool */
-   result = dispatch_tool_call("unknown_tool", "{}", 5000);
+   result = fixture_dispatch_tool("unknown_tool", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error: unknown tool") != NULL);
    free(result);
 
    /* Unknown tool with suggestion */
-   result = dispatch_tool_call("read_flie", "{}", 5000);
+   result = fixture_dispatch_tool("read_flie", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "Did you mean 'read_file'?") != NULL);
    free(result);
 
-   result = dispatch_tool_call("writ_file", "{}", 5000);
+   result = fixture_dispatch_tool("writ_file", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "Did you mean 'write_file'?") != NULL);
    free(result);
 
    /* Argument alias: "cmd" → "command" */
-   result = dispatch_tool_call("bash", "{\"cmd\":\"echo alias_test\"}", 5000);
+   result = fixture_dispatch_tool("bash", "{\"cmd\":\"echo alias_test\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "alias_test") != NULL);
    assert(strstr(result, "error") == NULL);
@@ -3762,7 +3760,7 @@ static void test_dispatch_tool_call(void)
                    script_root) < (int)sizeof(script_cwd));
    assert(platform_mkdir_p(script_cwd, 0700) == 0 || access(script_cwd, F_OK) == 0);
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call(
+   result = fixture_dispatch_tool(
        "execute_script",
        "{\"language\":\"python\",\"body\":\"print('script_dispatch')\",\"timeout_secs\":5}", 5000);
    run_cmd_set_cwd(NULL);
@@ -3774,14 +3772,14 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Argument alias: "filepath" → "file_path" then falls through to "path" */
-   result = dispatch_tool_call("read_file", "{\"filepath\":\"/dev/null\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"filepath\":\"/dev/null\"}", 5000);
    assert(result != NULL);
    /* Should not fail with "missing 'path'" */
    assert(strstr(result, "missing") == NULL);
    free(result);
 
    /* Type coercion: string "5" → integer for offset */
-   result = dispatch_tool_call("read_file", "{\"path\":\"/dev/null\",\"offset\":\"5\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"/dev/null\",\"offset\":\"5\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error") == NULL);
    free(result);
@@ -3789,22 +3787,22 @@ static void test_dispatch_tool_call(void)
    /* Reversible writes are contracted and independently read back before the
     * dispatcher reports success. */
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call(
+   result = fixture_dispatch_tool(
        "write_file", "{\"path\":\"contract.txt\",\"content\":\"verified write\\n\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error:") == NULL);
    free(result);
-   result = dispatch_tool_call("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
    assert(result != NULL && strcmp(result, "verified write\n") == 0);
    free(result);
-   result = dispatch_tool_call("write_file", "{\"content\":\"no target\"}", 5000);
+   result = fixture_dispatch_tool("write_file", "{\"content\":\"no target\"}", 5000);
    assert(result != NULL && strstr(result, "effect contract refused") != NULL);
    free(result);
    run_cmd_set_cwd(NULL);
 
    /* Write file error includes recovery hint */
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
+   result = fixture_dispatch_tool("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
    run_cmd_set_cwd(NULL);
    assert(result != NULL);
    if (strstr(result, "error"))
@@ -3813,7 +3811,7 @@ static void test_dispatch_tool_call(void)
    platform_test_rmrf(script_root);
 
    /* Missing parameter */
-   result = dispatch_tool_call("bash", "{}", 5000);
+   result = fixture_dispatch_tool("bash", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error: missing 'command' parameter") != NULL);
    free(result);
@@ -4055,7 +4053,7 @@ static void test_path_traversal_rejected(void)
    free(result);
 
    /* dispatch traversal via read_file */
-   result = dispatch_tool_call("read_file", "{\"path\":\"/tmp/../../etc/shadow\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"/tmp/../../etc/shadow\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error:") != NULL);
    free(result);

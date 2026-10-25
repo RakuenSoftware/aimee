@@ -392,8 +392,8 @@ static int resource_execute_claimed(server_acp_resources_t *owner, const aimee_b
          bash_bound = 1;
       }
       agent_tools_set_effect_authorized(1);
-      receipt = mcp ? dispatch_tool_call_ir_ctx_status(&definition, wire, timeout_ms, &failed)
-                    : dispatch_tool_file_resource_ctx_status(&definition, wire, timeout_ms,
+      receipt = mcp ? dispatch_tool_call_ir_ctx_status(&definition, args, timeout_ms, &failed)
+                    : dispatch_tool_file_resource_ctx_status(&definition, args, timeout_ms,
                                                              resource_io, &io, &failed);
       agent_tools_set_effect_authorized(0);
       if (bash_bound)

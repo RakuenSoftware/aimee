@@ -1,3 +1,4 @@
+#include "support/ir_tool_fixture.h"
 /* test_agent_delegate_root.c: focused delegate root-cause regressions. */
 #include <assert.h>
 #include <stdio.h>
@@ -45,7 +46,7 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void)
 
    char args[1024];
    snprintf(args, sizeof(args), "{\"path\":\"%s\",\"content\":\"should not write\"}", path);
-   char *result = dispatch_tool_call("write_file", args, 1000);
+   char *result = fixture_dispatch_tool("write_file", args, 1000);
    assert(result != NULL);
    assert(strstr(result, "delegate cancelled") != NULL);
    assert(access(path, F_OK) != 0);
@@ -372,8 +373,8 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    snprintf(sibling, sizeof sibling, "%s-other/file.txt", worktree);
    assert(agent_tools_session_isolation_blocks(sibling, worktree));
    run_cmd_set_cwd(worktree);
-   char *native =
-       dispatch_tool_call("write_file", "{\"path\":\"native.txt\",\"content\":\"scope\\n\"}", 1000);
+   char *native = fixture_dispatch_tool("write_file",
+                                        "{\"path\":\"native.txt\",\"content\":\"scope\\n\"}", 1000);
    assert(native && !strstr(native, "write blocked"));
    free(native);
    char native_path[768], actual[32] = "";
@@ -382,8 +383,8 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    assert(written && fread(actual, 1, sizeof actual - 1, written) == 6 &&
           !strcmp(actual, "scope\n") && !fclose(written));
    agent_tools_write_capable_set(0);
-   native = dispatch_tool_call("write_file",
-                               "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}", 1000);
+   native = fixture_dispatch_tool("write_file",
+                                  "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}", 1000);
    assert(native && strstr(native, "read-only delegate"));
    free(native);
    snprintf(native_path, sizeof native_path, "%s/forbidden.txt", worktree);
@@ -713,7 +714,7 @@ void test_container_execute_script_runs_in_sandbox(void)
                    sandbox_root) < (int)sizeof(sandbox_cwd));
    assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
    run_cmd_set_cwd(sandbox_cwd);
-   char *result = dispatch_tool_call(
+   char *result = fixture_dispatch_tool(
        "execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\",\"timeout_secs\":7}", 5000);
    run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();
@@ -787,8 +788,8 @@ void test_container_write_retains_unknown_effect(void)
       assert(!platform_setenv("AIMEE_EFFECT_CONTRACT_MODE", enforce ? "enforce" : "shadow"));
       agent_tools_set_effect_authorized(
           1); /* Explicit test effect-owner grant, not source proof. */
-      char *result = dispatch_tool_call("write_file",
-                                        "{\"path\":\"uncertain.txt\",\"content\":\"new\"}", 1000);
+      char *result = fixture_dispatch_tool(
+          "write_file", "{\"path\":\"uncertain.txt\",\"content\":\"new\"}", 1000);
       agent_tools_set_effect_authorized(0);
       assert(result);
       cJSON *reply = cJSON_Parse(result);
