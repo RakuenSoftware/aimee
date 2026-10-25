@@ -20,6 +20,30 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
+## Current browser recovery outcome
+
+Runtime source `2f7f57205` is installed on retained QA
+`https://192.168.0.67:8447`. The earlier HTTP 429 is retained failed history,
+not the current blocker. After the user pointed out the working Claude login on
+this box, a local real request succeeded. Its credential was imported for the
+existing `ir-native-d851-claude` connection through the authenticated browser
+Vault API; no credential/source fence was weakened and no secret was logged.
+The QA alias `ir-native-d851-recall` now has tools enabled and max_turns=20
+(previously the historical tools-off/max_turns=1 test configuration).
+
+Three actual browser turns completed: READY; a successful Aimee `read_file`
+call reading the project README; and, after reload, recall of the prior ORBIT
+marker. The SDK process was observed using `--resume` with the same native
+handle fingerprint; the cache commitment advanced normally. All 173 prior IR
+records remain exact, with 198 total after the successful turns. Grants, SDK
+binaries, installed products and TLS remain exact; `.vault` and `models.json`
+are the intentional authority changes. All three QA services are healthy, with
+zero active SDK processes/reservations. No implementation change or rebuild was
+needed for this credential recovery. Current receipts supersede older blocked
+status descriptions below: `/var/tmp/aimee-ir-browser-final-recovery/summary.json`,
+`/var/tmp/aimee-local-claude-recovery/`, `/var/tmp/aimee-local-claude-tools/`, and
+`/var/tmp/aimee-local-claude-continuation/`.
+
 ## Recovery scope, 2026-10-25
 
 Exactly two goals govern this work:
