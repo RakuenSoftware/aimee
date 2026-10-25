@@ -437,6 +437,7 @@ set(DB1_SRCS
 # in-process until the staged aimee-kb process-contract cutover; the later Go
 # port replaces this private tree without moving PostgreSQL/pgvector out of KB_STORE.
 set(KB_STORE_SRCS
+    ${AIMEE_SRC_DIR}/modules/kb/c/index_observer.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_init.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_reembed.c
     ${AIMEE_SRC_DIR}/modules/kb/c/agent_hints.c
@@ -1176,6 +1177,18 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/modules/webuser
     ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers)
+
+# Generic source observer consumers use only its installed module ABI.
+set_property(SOURCE
+    "${AIMEE_SRC_DIR}/index.c"
+    "${AIMEE_SRC_DIR}/server/server_code_index.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/index_observer.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/code_index.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/canonical_index.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/code_project_lifecycle.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/db_schema.c"
+    "${AIMEE_SRC_DIR}/modules/kb/c/kb_store_init.c"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/kb/include")
 
 # Match the Makefile's per-consumer graph enum include path.
 set_property(SOURCE

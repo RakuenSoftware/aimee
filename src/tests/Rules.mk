@@ -2103,6 +2103,11 @@ $(TESTPREFIX)/unit-test-kb-client-index: $(OBJDIR)/tests/test_kb_client_index.o 
 
 $(TESTPREFIX)/unit-test-kb-client-index-remote: $(OBJDIR)/tests/test_kb_client_index_remote.o \
 	                                 $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o \
+	                                 $(OBJDIR)/modules/kb_client/kb_client_code_embed.o \
+	                                 $(OBJDIR)/server/server_state.o \
+	                                 $(OBJDIR)/kb/kb_service_graph.o \
+	                                 $(OBJDIR)/kb/http/kb_http_code_graphfb.o \
+	                                 $(OBJDIR)/tests/support/log_stub.o \
 	                                 $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
 	                                 $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

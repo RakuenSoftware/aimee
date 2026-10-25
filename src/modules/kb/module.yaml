@@ -21,6 +21,7 @@
   "public_headers": [
     "src/modules/kb/include/aimee/kb/graph_kinds.h",
     "src/modules/kb/include/aimee/kb/host_contracts.h",
+    "src/modules/kb/include/aimee/kb/index_observer.h",
     "src/modules/kb/include/aimee/kb/module_api.h"
   ],
   "docs": [
@@ -60,6 +61,7 @@
     "src/modules/kb/c/curator_terms.c",
     "src/modules/kb/c/curiosity.c",
     "src/modules/kb/c/kb_store_hardening.c",
+    "src/modules/kb/c/index_observer.c",
     "src/modules/kb/c/kb_store_init.c",
     "src/modules/kb/c/kb_store_reembed.c",
     "src/modules/kb/c/kb_store_tenant.c",
@@ -142,6 +144,7 @@
     "src/modules/kb/c/write_tier_grant.c"
   ],
   "private_headers": [
+    "src/modules/kb/c/index_observer_internal.h",
     "src/modules/kb/c/admin_grant.h",
     "src/modules/kb/c/agent_hints.h",
     "src/modules/kb/c/agent_outcomes.h",

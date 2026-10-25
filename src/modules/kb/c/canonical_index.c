@@ -1,3 +1,4 @@
+#include "index_observer_internal.h"
 /* canonical_index.c: project/org-level code index, owned by aimee-kb.
  *
  * Storage: KB_STORE (Postgres). All paths use aimee_pg_* (libpq) directly.
@@ -445,6 +446,9 @@ static int ci_replace_file_data_txn(void *conn, int64_t file_id, const char *ext
 static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
                                 const char *content)
 {
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, project, "replace_file", 0) != 0)
+      return -1;
    char err[CI_ERRBUF] = "";
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
@@ -483,7 +487,7 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
-   return 0;
+   return kb_index_mutation_finish(&observer);
 }
 
 /* CSS migration assistant (WP-C/D): build the style graph for .css files and the
@@ -512,7 +516,7 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
        strcmp(ext, ".js") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".vue") == 0 ||
        strcmp(ext, ".svelte") == 0)
    {
-      char(*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
+      char (*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
       if (!tokens)
          return;
       int nt = canonical_index_css_extract_class_tokens(content, len, tokens, 512);
@@ -1309,6 +1313,9 @@ int canonical_index_scan_begin(const char *name, const char *root_label, const c
    void *conn = ci_conn();
    if (!conn)
       return -1;
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, name, "scan_begin", 1) != 0)
+      return -1;
    int64_t project_id =
        ci_upsert_project(conn, name, root_label && root_label[0] ? root_label : "remote");
    if (project_id < 0)
@@ -1364,7 +1371,7 @@ int canonical_index_scan_begin(const char *name, const char *root_label, const c
       return -1;
    if (baseline_revision_out)
       *baseline_revision_out = baseline;
-   return 0;
+   return kb_index_mutation_finish(&observer);
 }
 
 int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_input_t *files,
@@ -1506,20 +1513,33 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
    if (!conn)
       return -1;
    char err[CI_ERRBUF] = "";
-   char project[256] = "";
+   char project[1025] = "";
+   int64_t guarded_project_id = -1;
    aimee_pg_stmt_t *project_q = aimee_pg_prepare(
        conn,
-       "SELECT p.name FROM code_scan_sessions s JOIN projects p ON p.id=s.project_id "
+       "SELECT p.id,p.name FROM code_scan_sessions s JOIN projects p ON p.id=s.project_id "
        "WHERE s.scan_id=?1",
        err, sizeof(err));
    if (!project_q)
       return -1;
    aimee_pg_bind_text(project_q, "?1", scan_id);
    if (aimee_pg_step(project_q, err, sizeof(err)) == AIMEE_PG_ROW)
-      snprintf(project, sizeof(project), "%s", aimee_pg_column_text(project_q, 0));
+   {
+      const char *actual = aimee_pg_column_text(project_q, 1);
+      if (!actual || !actual[0] || strnlen(actual, sizeof(project)) >= sizeof(project))
+      {
+         aimee_pg_finalize(project_q);
+         return -1;
+      }
+      memcpy(project, actual, strlen(actual) + 1);
+      guarded_project_id = aimee_pg_column_int64(project_q, 0);
+   }
    aimee_pg_finalize(project_q);
-   if (!project[0])
+   if (!project[0] || guarded_project_id <= 0)
       return -2;
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, project, "scan_seal", 0) != 0)
+      return -1;
    if (aimee_pg_exec(conn, aimee_pg_is_shim() ? "BEGIN" : "BEGIN ISOLATION LEVEL SERIALIZABLE", err,
                      sizeof(err)) != 0)
       return -1;
@@ -1547,6 +1567,14 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
       goto stale;
    }
    int64_t project_id = aimee_pg_column_int64(session, 0);
+   const char *actual_project = aimee_pg_column_text(session, 4);
+   if (project_id != guarded_project_id || !actual_project ||
+       strnlen(actual_project, sizeof(project)) >= sizeof(project) ||
+       strcmp(actual_project, project) != 0)
+   {
+      aimee_pg_finalize(session);
+      goto stale;
+   }
    int64_t generation = aimee_pg_column_int64(session, 1);
    int64_t baseline = aimee_pg_column_int64(session, 2);
    char state[16];
@@ -1699,7 +1727,7 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
          aimee_pg_finalize(css);
       }
    }
-   return 0;
+   return kb_index_mutation_finish(&observer);
 
 stale:
    aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -1984,6 +2012,9 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       return -1;
    }
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, name, "scan_files", 1) != 0)
+      return -1;
    int64_t project_id =
        ci_upsert_project(conn, name, root_label && root_label[0] ? root_label : "remote");
    if (project_id < 0)
@@ -2050,7 +2081,7 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    if (cochange_on && root_label && root_label[0] && strcmp(root_label, "remote") != 0)
       ci_backfill_cochange(name, root_label);
 
-   return scanned;
+   return kb_index_mutation_finish(&observer) == 0 ? scanned : -1;
 }
 
 /* ---- Public API: read ----------------------------------------- */

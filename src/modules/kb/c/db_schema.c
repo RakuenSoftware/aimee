@@ -1,3 +1,4 @@
+#include "index_observer_internal.h"
 /* KB_STORE (Postgres) idempotent schema bootstrap.
  * See docs/STORAGE_TIERS.md. */
 
@@ -917,6 +918,14 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (!pg_conn)
       return -1;
 
+   KB_INDEX_MUTATION(observer_startup);
+   if (kb_index_observer_startup_begin(&observer_startup, pg_conn) != 0)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "selected source observer unavailable or schema requires offline bootstrap");
+      return -1;
+   }
    /* The KB_STORE schema declares its vector embedding columns with the
     * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
     * supported width. Substitute the configured dimension here — the one place
@@ -959,7 +968,8 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
     * them), which is what a hardened runtime kb reads to verify a complete, current
     * migration. This C layer keeps the authoritative dim record-or-check (drift
     * guard) above. */
-   return kb_store_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
+   int record_rc = kb_store_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
+   return record_rc == 0 && kb_index_mutation_finish(&observer_startup) == 0 ? 0 : -1;
 }
 
 int kb_store_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)

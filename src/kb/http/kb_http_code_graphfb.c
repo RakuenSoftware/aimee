@@ -5,6 +5,7 @@
 #include "kb_http_code.h"
 #include "aimee.h"
 #include "cJSON.h"
+#include "json_int64.h"
 #include "modules/kb/c/code_projection.h"
 #include "modules/kb/c/lessons.h"
 #include "modules/kb/c/lifecycle.h"
@@ -34,7 +35,7 @@ void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
 {
    cJSON_AddStringToObject(response, "file", blast->file);
    cJSON_AddStringToObject(response, "project", blast->project);
-   cJSON_AddNumberToObject(response, "generation", (double)blast->generation);
+   cJSON_AddItemToObject(response, "generation", jo_i64_value_exact(blast->generation));
    cJSON_AddStringToObject(response, "freshness", blast->freshness);
    cJSON_AddBoolToObject(response, "resolved", blast->resolved);
    cJSON *dependents = cJSON_AddArrayToObject(response, "dependents");
@@ -47,7 +48,7 @@ void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
       cJSON_AddStringToObject(edge, "provenance", blast->dependent_meta[i].provenance);
       cJSON_AddStringToObject(edge, "confidence", blast->dependent_meta[i].confidence);
       cJSON_AddStringToObject(edge, "project", blast->dependent_meta[i].project);
-      cJSON_AddNumberToObject(edge, "generation", (double)blast->dependent_meta[i].generation);
+      cJSON_AddItemToObject(edge, "generation", jo_i64_value_exact(blast->dependent_meta[i].generation));
       cJSON_AddStringToObject(edge, "freshness", blast->dependent_meta[i].freshness);
       cJSON_AddItemToArray(dependent_edges, edge);
    }
@@ -62,7 +63,7 @@ void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
       cJSON_AddStringToObject(edge, "provenance", blast->dependency_meta[i].provenance);
       cJSON_AddStringToObject(edge, "confidence", blast->dependency_meta[i].confidence);
       cJSON_AddStringToObject(edge, "project", blast->dependency_meta[i].project);
-      cJSON_AddNumberToObject(edge, "generation", (double)blast->dependency_meta[i].generation);
+      cJSON_AddItemToObject(edge, "generation", jo_i64_value_exact(blast->dependency_meta[i].generation));
       cJSON_AddStringToObject(edge, "freshness", blast->dependency_meta[i].freshness);
       cJSON_AddItemToArray(dependency_edges, edge);
    }
@@ -238,7 +239,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "project", project);
-   cJSON_AddNumberToObject(resp, "generation_id", (double)vgen);
+   cJSON_AddItemToObject(resp, "generation_id", jo_i64_value_exact(vgen));
    if (source_hash[0])
       cJSON_AddStringToObject(resp, "source_hash", source_hash); /* staleness echo (R1) */
    cJSON_AddNumberToObject(resp, "edge_count", ne);

@@ -1,3 +1,5 @@
+#include "index_observer_internal.h"
+#include "kb_store_internal.h"
 /* index.c: code indexing, project scanning, symbol lookup, blast radius analysis */
 #include "aimee.h"
 #include "config.h"
@@ -444,7 +446,7 @@ static int path_in_subproject(const char *policy_path, char prefixes[][MAX_PATH_
  * nested sub-project, so a rescan cleans up files a parent used to absorb. */
 static void purge_subprojects(int64_t project_id, const char *root)
 {
-   char(*prefixes)[MAX_PATH_LEN] = malloc(sizeof(*prefixes) * SUBPROJECT_PREFIX_CAP);
+   char (*prefixes)[MAX_PATH_LEN] = malloc(sizeof(*prefixes) * SUBPROJECT_PREFIX_CAP);
    if (!prefixes)
       return;
    int count = 0;
@@ -471,7 +473,7 @@ static void collect_code_files(const char *dir, const char *root, file_list_t *l
 
    /* Heap-allocated (256 * 4 KiB = 1 MiB) to keep this scan worker's stack
     * frame small; collect_code_files runs on pooled threads. */
-   char(*subproject_prefixes)[MAX_PATH_LEN] =
+   char (*subproject_prefixes)[MAX_PATH_LEN] =
        malloc(sizeof(*subproject_prefixes) * SUBPROJECT_PREFIX_CAP);
    int subproject_count = 0;
    if (subproject_prefixes)
@@ -803,6 +805,9 @@ int index_scan_project(const char *name, const char *root, int force)
       return -1;
    }
 
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, kb_store_conn(), name, "legacy_scan", 1) != 0)
+      return -1;
    int64_t project_id = kb_store_code_index_project_upsert(name, abs_root);
    if (project_id < 0)
       return -1;
@@ -940,7 +945,7 @@ int index_scan_project(const char *name, const char *root, int force)
    if (cochange_on)
       index_backfill_cochange(name, abs_root);
 
-   return scanned;
+   return kb_index_mutation_finish(&observer) == 0 ? scanned : -1;
 }
 
 int index_list_projects(project_info_t *out, int max)

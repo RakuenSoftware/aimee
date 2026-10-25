@@ -1,3 +1,4 @@
+#include "index_observer_internal.h"
 /* code_project_lifecycle.c: recoverable identity lifecycle for the code index. */
 #include "code_project_lifecycle.h"
 
@@ -369,6 +370,9 @@ int kb_store_code_project_detach(const char *project, const char *principal,
    void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, project, "kb_store_code_project_detach", 0) != 0)
+      return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
    if (cpl_begin(conn, err, sizeof(err)) != 0)
       return CODE_PROJECT_LIFECYCLE_ERROR;
@@ -430,7 +434,7 @@ int kb_store_code_project_detach(const char *project, const char *principal,
       goto rollback;
    if (generation_out)
       *generation_out = generation;
-   return 0;
+   return kb_index_mutation_finish(&observer) == 0 ? 0 : CODE_PROJECT_LIFECYCLE_ERROR;
 rollback:
    aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    return rc == CODE_PROJECT_LIFECYCLE_NOT_FOUND || rc == CODE_PROJECT_LIFECYCLE_AUDIT_FAILED
@@ -544,6 +548,10 @@ int kb_store_code_project_purge_confirm(const char *project, const char *expecte
    void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, project, "kb_store_code_project_purge_confirm",
+                               0) != 0)
+      return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
    if (cpl_begin(conn, err, sizeof(err)) != 0)
       return CODE_PROJECT_LIFECYCLE_ERROR;
@@ -576,7 +584,7 @@ int kb_store_code_project_purge_confirm(const char *project, const char *expecte
       rc = CODE_PROJECT_LIFECYCLE_ERROR;
       goto rollback;
    }
-   return 0;
+   return kb_index_mutation_finish(&observer) == 0 ? 0 : CODE_PROJECT_LIFECYCLE_ERROR;
 rollback:
    aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    return rc;
@@ -653,6 +661,11 @@ int kb_store_code_project_gc_confirm(const char *project, int retention_days,
        strlen(reason) > 512)
       return CODE_PROJECT_LIFECYCLE_ERROR;
    void *conn = kb_store_conn();
+   if (!conn)
+      return CODE_PROJECT_LIFECYCLE_ERROR;
+   KB_INDEX_MUTATION(observer);
+   if (kb_index_mutation_begin(&observer, conn, project, "gc", 0) != 0)
+      return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
    if (!conn || cpl_begin(conn, err, sizeof(err)) != 0)
       return CODE_PROJECT_LIFECYCLE_ERROR;
@@ -670,7 +683,7 @@ int kb_store_code_project_gc_confirm(const char *project, int retention_days,
    {
       if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
          goto rollback;
-      return 0; /* non-mutating no-op needs no destructive-action audit */
+      return kb_index_mutation_finish(&observer) == 0 ? 0 : CODE_PROJECT_LIFECYCLE_ERROR;
    }
    char detail[CPL_AUDIT_DETAIL_CAP];
    cpl_audit_detail(out, principal, reason, detail, sizeof(detail));
@@ -708,7 +721,7 @@ int kb_store_code_project_gc_confirm(const char *project, int retention_days,
    }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
       goto rollback_error;
-   return 0;
+   return kb_index_mutation_finish(&observer) == 0 ? 0 : CODE_PROJECT_LIFECYCLE_ERROR;
 rollback_error:
    rc = CODE_PROJECT_LIFECYCLE_ERROR;
 rollback:

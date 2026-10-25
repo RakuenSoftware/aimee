@@ -7,6 +7,13 @@
 
 #include "kb_client.h"
 #include "cJSON.h"
+#include "json_int64.h"
+#include "server.h"
+#include "kb_http_code.h"
+#include "kb/kb_service_graph.h"
+#include "modules/kb/c/code_projection.h"
+#include "kb/kb_graph_analytics.h"
+#include <stdint.h>
 
 #include <assert.h>
 #include <dirent.h>
@@ -34,6 +41,11 @@ static int g_post_calls = 0;
 static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
 static size_t g_max_body_bytes = 0;  /* largest single request body seen */
 static int g_next_status = 200;
+static const char *g_next_get_response = "{}";
+static const char *g_next_action_response = "{}";
+static int g_actual_graph_producer;
+static int64_t g_producer_generation;
+static char *g_upstream_wire;
 static const char *g_next_response =
     "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 
@@ -76,12 +88,104 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
    (void)timeout_ms;
    if (status_out)
       *status_out = 200;
-   return strdup("{}");
+   return strdup(g_next_get_response);
+}
+
+char *kb_v1_action_request(const char *action, cJSON *request)
+{
+   assert(!strcmp(action, "graph.sync_code"));
+   if (g_actual_graph_producer)
+   {
+      assert(kb_handle_graph_sync_code(0, request) == 0);
+      cJSON_Delete(request);
+      return strdup(g_upstream_wire);
+   }
+   cJSON_Delete(request);
+   return strdup(g_next_action_response);
 }
 
 char *kb_client_query_escape(const char *s)
 {
    return s ? strdup(s) : strdup("");
+}
+
+/* Graph storage is scripted here solely to qualify the real response producer's
+ * integer wire encoding, not projection authorization or SQL transactionality. */
+int kb_store_is_initialized(void) { return 1; }
+int64_t kb_store_code_projection_generation_create(const char *project)
+{
+   assert(!strcmp(project, "p"));
+   return g_producer_generation;
+}
+int64_t kb_store_code_projection_sync_project(const char *project, int64_t generation)
+{
+   assert(!strcmp(project, "p") && generation == g_producer_generation);
+   return 0;
+}
+int kb_store_code_projection_generation_publish(int64_t generation, const char *project)
+{
+   assert(!strcmp(project, "p") && generation == g_producer_generation);
+   return 0;
+}
+int kb_store_code_projection_generation_abort(int64_t generation, const char *error)
+{
+   (void)generation;
+   (void)error;
+   assert(0);
+   return -1;
+}
+int kb_store_code_projection_list_edges_for_gen(int64_t generation, code_projection_edge_t *out,
+                                                int max)
+{
+   (void)out;
+   (void)max;
+   assert(generation == g_producer_generation);
+   return 0;
+}
+int kb_store_code_projection_communities_replace(int64_t generation, const char *project,
+                                                 const code_projection_community_t *rows, int count)
+{
+   (void)rows;
+   assert(!strcmp(project, "p") && generation == g_producer_generation && count == 0);
+   return 0;
+}
+int kb_graph_communities(const kb_graph_edge_t *edges, int count, kb_graph_community_t *out, int max)
+{
+   (void)edges;
+   (void)count;
+   (void)out;
+   (void)max;
+   assert(0);
+   return -1;
+}
+int kb_send_response(int fd, cJSON *response)
+{
+   (void)fd;
+   free(g_upstream_wire);
+   g_upstream_wire = cJSON_PrintUnformatted(response);
+   return g_upstream_wire ? 0 : -1;
+}
+int kb_send_error(int fd, const char *message)
+{
+   (void)fd;
+   (void)message;
+   return -1;
+}
+
+static char *g_server_wire;
+int server_send_response(server_conn_t *connection, cJSON *response)
+{
+   (void)connection;
+   free(g_server_wire);
+   g_server_wire = cJSON_PrintUnformatted(response);
+   return g_server_wire ? 0 : -1;
+}
+int server_send_error(server_conn_t *connection, const char *message, const char *request_id)
+{
+   (void)connection;
+   (void)message;
+   (void)request_id;
+   return -1;
 }
 
 static void reset_stub(void)
@@ -97,6 +201,8 @@ static void reset_stub(void)
    g_max_body_bytes = 0;
    g_remote_mode = 0;
    g_next_status = 200;
+   g_next_get_response = "{}";
+   g_next_action_response = "{}";
    g_next_response = "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 }
 
@@ -386,6 +492,186 @@ static void test_scan_refusal_preserves_kb_error(void)
    reset_stub();
 }
 
+static void test_exact_retained_integer_tokens(void)
+{
+   const char *valid[] = {"9007199254740993", "9223372036854775807",
+                          "-9223372036854775808", "-9007199254740993", "0"};
+   const int64_t expected[] = {INT64_C(9007199254740993), INT64_MAX, INT64_MIN,
+                              -INT64_C(9007199254740993), 0};
+   for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
+   {
+      cJSON *number = cJSON_Parse(valid[i]);
+      int64_t value = 17;
+      assert(number && jo_read_i64_token_exact(number, &value) && value == expected[i]);
+      if (i < 4)
+         assert(!jo_read_i64_exact(number, &value)); /* Portable reader unchanged. */
+      cJSON *encoded = jo_i64_value_exact(expected[i]);
+      char *wire = cJSON_PrintUnformatted(encoded);
+      cJSON *decoded = cJSON_Parse(wire);
+      assert(decoded && jo_read_i64_token_exact(decoded, &value) && value == expected[i]);
+      cJSON_Delete(decoded);
+      free(wire);
+      cJSON_Delete(encoded);
+      cJSON_Delete(number);
+   }
+   const char *invalid[] = {"9223372036854775808", "-9223372036854775809", "1.0",
+                            "1e0", "-0", "\"+1\"", "\"01\"", "\"-0\"", "null"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      cJSON *number = cJSON_Parse(invalid[i]);
+      int64_t value = 17;
+      assert(number && !jo_read_i64_token_exact(number, &value) && value == 17);
+      cJSON_Delete(number);
+   }
+   cJSON *number = cJSON_CreateNumber(9007199254740993.0);
+   int64_t value = 17;
+   assert(!jo_read_i64_token_exact(number, &value) && value == 17);
+   cJSON_Delete(number);
+   number = cJSON_Parse("9007199254740993");
+   number->valuedouble = 4; /* Stale original token must not restore old authority. */
+   assert(!jo_read_i64_token_exact(number, &value) && value == 17);
+   cJSON_Delete(number);
+   number = cJSON_CreateNumber(-0.0); /* Existing safe constructed-zero contract. */
+   assert(jo_read_i64_token_exact(number, &value) && value == 0);
+   cJSON_Delete(number);
+   /* Native FieldRef belief is u64; opaque forwarding must not use this i64 reader. */
+   const char *temporal = "{\"source\":{\"version\":{\"belief\":18446744073709551615,"
+                          "\"operation\":9007199254740993}},\"region\":{"
+                          "\"00000000-0000-0000-0000-000000000001\":{"
+                          "\"start\":1792929600000000001,\"end\":1792929600000000002}}}";
+   cJSON *original = cJSON_Parse(temporal);
+   cJSON *copy = cJSON_Duplicate(original, 1);
+   char *printed = cJSON_PrintUnformatted(copy);
+   assert(printed && !strcmp(printed, temporal));
+   free(printed);
+   cJSON_Delete(copy);
+   cJSON_Delete(original);
+}
+
+static void test_blast_generations_survive_actual_transport(void)
+{
+   reset_stub();
+   g_remote_mode = 1;
+   g_next_get_response =
+       "{\"project\":\"p\",\"generation\":9007199254740993,\"freshness\":\"current\","
+       "\"resolved\":true,\"dependency_edges\":[{\"identity\":\"dep\",\"project\":\"p\","
+       "\"generation\":9223372036854775807,\"freshness\":\"current\",\"provenance\":\"import\","
+       "\"confidence\":\"high\"}],\"dependent_edges\":[{\"path\":\"a.c\",\"project\":\"p\","
+       "\"generation\":\"9007199254740993\",\"freshness\":\"current\",\"provenance\":\"call\","
+       "\"confidence\":\"high\"}]}";
+   blast_radius_t out;
+   assert(kb_client_index_blast_radius("p", "a.c", &out) == 0);
+   assert(out.generation == INT64_C(9007199254740993));
+   assert(out.dependency_count == 1 && out.dependency_meta[0].generation == INT64_MAX);
+   assert(out.dependent_count == 1 &&
+          out.dependent_meta[0].generation == INT64_C(9007199254740993));
+   /* Actual upstream HTTP response encoder -> HTTP client, for all three fields. */
+   cJSON *produced = cJSON_CreateObject();
+   code_blast_radius_json_fields(produced, &out);
+   char *produced_wire = cJSON_PrintUnformatted(produced);
+   cJSON_Delete(produced);
+   const char *original_wire = g_next_get_response;
+   g_next_get_response = produced_wire;
+   assert(kb_client_index_blast_radius("p", "a.c", &out) == 0 &&
+          out.generation == INT64_C(9007199254740993) &&
+          out.dependency_meta[0].generation == INT64_MAX &&
+          out.dependent_meta[0].generation == INT64_C(9007199254740993));
+   free(produced_wire);
+   g_next_get_response = original_wire;
+   cJSON *response = cJSON_Parse(g_next_get_response);
+   char why[64];
+   cJSON_ReplaceItemInObjectCaseSensitive(response, "generation", cJSON_CreateNumber(9007199254740992.0));
+   assert(!kb_client_index_blast_response_valid(response, why, sizeof(why)));
+   const char *invalid[] = {"0", "-1", "1.5", "1e0", "9223372036854775808"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      cJSON_ReplaceItemInObjectCaseSensitive(response, "generation", cJSON_Parse(invalid[i]));
+      char *wire = cJSON_PrintUnformatted(response);
+      g_next_get_response = wire;
+      assert(kb_client_index_blast_radius("p", "a.c", &out) == -1);
+      free(wire);
+   }
+   cJSON_ReplaceItemInObjectCaseSensitive(response, "generation", cJSON_Parse("9007199254740993"));
+   cJSON *dependency = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependency_edges"), 0);
+   cJSON *dependent = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependent_edges"), 0);
+   cJSON *edges[] = {dependency, dependent};
+   for (size_t i = 0; i < sizeof(edges) / sizeof(edges[0]); ++i)
+   {
+      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation", cJSON_Parse("9223372036854775808"));
+      assert(!kb_client_index_blast_response_valid(response, why, sizeof(why)));
+      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation", cJSON_Parse("9007199254740993"));
+      assert(kb_client_index_blast_response_valid(response, why, sizeof(why)));
+   }
+   cJSON_Delete(response);
+   reset_stub();
+}
+
+static void test_graph_sync_generation_roundtrip(void)
+{
+   const char *valid[] = {"7", "9007199254740993", "9223372036854775807",
+                          "\"9007199254740993\""};
+   const int64_t expected[] = {7, INT64_C(9007199254740993), INT64_MAX,
+                              INT64_C(9007199254740993)};
+   for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
+   {
+      char response[256];
+      snprintf(response, sizeof(response), "{\"status\":\"ok\",\"project\":\"p\","
+               "\"generation_id\":%s,\"edge_count\":0}", valid[i]);
+      g_next_action_response = response;
+      kb_client_graph_sync_result_t out;
+      assert(kb_client_graph_sync_code("p", &out) == 0 && out.ok &&
+             out.generation_id == expected[i] && out.edge_count == 0);
+      cJSON *encoded = jo_i64_value_exact(out.generation_id);
+      assert((expected[i] == 7 && cJSON_IsNumber(encoded)) ||
+             (expected[i] != 7 && cJSON_IsString(encoded)));
+      char *wire = cJSON_PrintUnformatted(encoded);
+      cJSON *decoded = cJSON_Parse(wire);
+      int64_t reread;
+      assert(jo_read_i64_token_exact(decoded, &reread) && reread == expected[i]);
+      free(wire);
+      cJSON_Delete(decoded);
+      cJSON_Delete(encoded);
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "project", "p");
+      assert(handle_graph_sync_code(NULL, NULL, request) == 0);
+      cJSON *sent = cJSON_Parse(g_server_wire);
+      assert(sent && jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
+                                             &reread) && reread == expected[i]);
+      cJSON_Delete(sent);
+      cJSON_Delete(request);
+      /* Full real KB response producer -> actual client -> real server handler. */
+      g_actual_graph_producer = 1;
+      g_producer_generation = expected[i];
+      request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "project", "p");
+      assert(handle_graph_sync_code(NULL, NULL, request) == 0);
+      sent = cJSON_Parse(g_server_wire);
+      assert(sent && jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
+                                             &reread) && reread == expected[i]);
+      cJSON_Delete(sent);
+      cJSON_Delete(request);
+      g_actual_graph_producer = 0;
+   }
+   free(g_upstream_wire);
+   g_upstream_wire = NULL;
+   free(g_server_wire);
+   g_server_wire = NULL;
+   const char *invalid[] = {"0", "-1", "1.5", "1e0", "9223372036854775808"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      char response[256];
+      snprintf(response, sizeof(response), "{\"status\":\"ok\",\"generation_id\":%s,"
+               "\"edge_count\":0}", invalid[i]);
+      g_next_action_response = response;
+      kb_client_graph_sync_result_t out;
+      assert(kb_client_graph_sync_code("p", &out) == -1 && !out.ok);
+   }
+   g_next_action_response = "{\"status\":\"ok\",\"generation_id\":7,\"edge_count\":-1}";
+   kb_client_graph_sync_result_t out;
+   assert(kb_client_graph_sync_code("p", &out) == -1 && !out.ok);
+   g_next_action_response = "{}";
+}
+
 int main(void)
 {
    test_local_mode_no_files_array();
@@ -394,6 +680,9 @@ int main(void)
    test_remote_mode_batches_large_tree();
    test_remote_mode_missing_args();
    test_scan_refusal_preserves_kb_error();
+   test_exact_retained_integer_tokens();
+   test_blast_generations_survive_actual_transport();
+   test_graph_sync_generation_roundtrip();
    printf("kb_client_index_remote: all tests passed\n");
    return 0;
 }
