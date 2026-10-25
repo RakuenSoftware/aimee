@@ -22,16 +22,17 @@ in `OWNERS.md`.
 
 ## Current browser recovery outcome
 
-Runtime source `2f7f57205` is installed on retained QA
-`https://192.168.0.67:8447`. The earlier HTTP 429 is retained failed history,
-not the current blocker. After the user pointed out the working Claude login on
+Runtime source `31e2c4b95` is installed on retained QA
+`https://192.168.0.67:8447`. The follow-up IR contract audit and browser default
+metadata repair are installed and qualified. The earlier HTTP 429 is retained
+failed history, not a current blocker. After the user pointed out the working Claude login on
 this box, a local real request succeeded. Its credential was imported for the
 existing `ir-native-d851-claude` connection through the authenticated browser
 Vault API; no credential/source fence was weakened and no secret was logged.
 The QA alias `ir-native-d851-recall` now has tools enabled and max_turns=20
 (previously the historical tools-off/max_turns=1 test configuration).
 
-Three actual browser turns completed: READY; a successful Aimee `read_file`
+The initial recovery on `2f7f57205` completed three actual browser turns: READY; a successful Aimee `read_file`
 call reading the project README; and, after reload, recall of the prior ORBIT
 marker. The SDK process was observed using `--resume` with the same native
 handle fingerprint; the cache commitment advanced normally. All 173 prior IR
@@ -694,3 +695,22 @@ max_turns=20. The runtime-web roster had discarded `default_agent` despite the
 Chat UI expecting it. The proxy now preserves that validated string alongside
 both roster keys, so an unpinned session displays its actual configured primary.
 Existing model-route tests cover the restored metadata contract.
+
+Final runtime qualification: `31e2c4b95`, image
+`sha256:f7974fbcbce128e1d0019a4acf8769721d6936ed5e7760212bde8a1433da9ed4`.
+All 87 installed products and 19 modules match the canonical build. The upgrade
+preserves all 198 prior IR rows and exact credentials/grants/SDK/native-cache
+state; normal public certificate renewal retains its key. The final browser
+check resumes the same native Claude handle, recalls ORBIT and reloads. A new
+session follows the configured default without manually selecting an agent,
+executes a real `read_file` and returns Hello World!, then reloads successfully.
+There are 216 IR rows after those two sends; every prior row remains exact.
+Credentials, grants, SDK binaries, installed products and TLS remain unchanged
+through the browser checks. All three services are healthy and no SDK process
+or native reservation remains active. The installed internal draft boundary
+refuses a legacy non-IR payload before model transport. Both requested goals
+are complete for this retained QA runtime and the audited implementation.
+The proof is `/var/tmp/aimee-ir-browser-final-recovery/summary.json`; final UI,
+SDK resume and state receipts are in `/var/tmp/aimee-ir-browser-31e2c4b95-native-ui/`
+and `/var/tmp/aimee-ir-browser-31e2c4b95-default-ui/`. This documentation-only
+qualification update does not change runtime code from `31e2c4b95`.
