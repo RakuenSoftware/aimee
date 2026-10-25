@@ -15,6 +15,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int begin_selected_text(const char *role, const char *text, const char *agent,
+                               const char *provider, const char *model, int controls,
+                               server_session_log_t **out)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   return server_session_log_begin_selected(role, text ? &message : NULL, agent, provider, model,
+                                            controls, out);
+}
+static int begin_text(const char *role, const char *text, server_session_log_t **out)
+{
+   return begin_selected_text(role, text, NULL, NULL, NULL, 1, out);
+}
 static _Thread_local agent_request_creds_t credentials;
 static _Thread_local int job;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -449,7 +462,7 @@ static void *worker(void *arg)
    job = (int)(long)arg;
    attest("parent", "alice"); /* Worker restores a copied, attested request context. */
    server_session_log_t *scope;
-   assert(server_session_log_begin("review", "private child prompt", &scope) == 0);
+   assert(begin_text("review", "private child prompt", &scope) == 0);
    cJSON *history = NULL;
    assert(server_session_log_history_load(&history) == 1 && !history);
    history = cJSON_Parse(
@@ -459,7 +472,7 @@ static void *worker(void *arg)
    model_reply();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    assert(!server_session_log_active());
-   assert(server_session_log_begin("review", "continued", &scope) == 0);
+   assert(begin_text("review", "continued", &scope) == 0);
    assert(server_session_log_history_load(&history) == 0 && cJSON_GetArraySize(history) == 1);
    cJSON_Delete(history);
    model_reply();
@@ -472,7 +485,7 @@ static void unresolved_history_requires_reconciliation(void)
    attest("parent", "alice");
    job = 10; /* Reuse the worker's existing private child and valid source. */
    server_session_log_t *scope = NULL;
-   assert(!server_session_log_begin("review", "reconcile", &scope));
+   assert(!begin_text("review", "reconcile", &scope));
    char session[128], actor[VAULT_PRINCIPAL_MAX];
    assert(!server_session_log_identity(session, sizeof session, actor, sizeof actor));
    struct row *row = find(session);
@@ -503,7 +516,7 @@ static void *fail_capture_worker(void *arg)
 static void retained_private_failure_is_terminal(void)
 {
    server_session_log_t *scope = NULL;
-   int started = server_session_log_begin("review", "private worker failure", &scope);
+   int started = begin_text("review", "private worker failure", &scope);
    assert(!started && scope);
    model_reply();
    char session[128], actor[VAULT_PRINCIPAL_MAX];
@@ -534,13 +547,26 @@ static void source_bound_selected_delegate(void)
    job = 901;
    run_cmd_set_cwd("/approved/workspace");
    server_session_log_t *scope = NULL;
-   assert(!server_session_log_begin_selected("review", "actual selected attempt", "selected-agent",
+   aimee_block_t initial_blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "actual selected attempt 雪"},
+                                     {.type = AIMEE_BLK_IMAGE,
+                                      .media_type = "image/png",
+                                      .media_ref = "https://fixture.invalid/input.png"}};
+   aimee_message_t initial = {.role = "user", .blocks = initial_blocks, .n_blocks = 2};
+   assert(!server_session_log_begin_selected("review", &initial, "selected-agent",
                                              "actual-provider", "actual-model", 1, &scope));
+   char child_id[128], child_actor[VAULT_PRINCIPAL_MAX];
+   assert(!server_session_log_identity(child_id, sizeof child_id, child_actor, sizeof child_actor));
+   struct row *child = find(child_id);
+   cJSON *expected_initial = aimee_ir_message_json(&initial);
+   assert(child && expected_initial);
+   const cJSON *initial_event = cJSON_GetArrayItem(child->events, 1);
+   assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(initial_event, "payload"),
+                        expected_initial, 1));
+   cJSON_Delete(expected_initial);
    assert(verified_appends == 1 && delegate_experiences == 0);
    server_session_log_t *nested = NULL;
-   assert(!server_session_log_begin_selected("review", "same-role synchronous nested call",
-                                             "selected-agent", "actual-provider", "actual-model", 1,
-                                             &nested));
+   assert(!begin_selected_text("review", "same-role synchronous nested call", "selected-agent",
+                               "actual-provider", "actual-model", 1, &nested));
    model_reply();
    assert(!server_session_log_finish(nested, 1, NULL));
    assert(verified_appends == 1 && delegate_experiences == 0);
@@ -581,15 +607,15 @@ static void source_bound_selected_delegate(void)
    assert(delegate_experiences == 1); /* Retry uses exact running source, never terminal ref. */
    cJSON_Delete(running);
    job_matches = 0;
-   assert(!server_session_log_begin_selected("nested-role", "nested model call", "selected-agent",
-                                             "actual-provider", "actual-model", 1, &scope));
+   assert(!begin_selected_text("nested-role", "nested model call", "selected-agent",
+                               "actual-provider", "actual-model", 1, &scope));
    model_reply();
    assert(!server_session_log_finish(scope, 1, NULL));
    assert(verified_appends == 2 && delegate_experiences == 1);
    job_matches = 1;
    workspace_held = 0;
-   assert(!server_session_log_begin_selected("review", "unheld workspace", "selected-agent",
-                                             "actual-provider", "actual-model", 1, &scope));
+   assert(!begin_selected_text("review", "unheld workspace", "selected-agent", "actual-provider",
+                               "actual-model", 1, &scope));
    model_reply();
    assert(!server_session_log_finish(scope, 1, NULL));
    assert(verified_appends == 2 && delegate_experiences == 1);
@@ -601,9 +627,8 @@ static void source_bound_selected_delegate(void)
    delegate_experiences = 0;
    attest("crash-learning-parent", "alice");
    job = 902;
-   assert(!server_session_log_begin_selected("review", "terminal publication interrupted",
-                                             "selected-agent", "actual-provider", "actual-model", 1,
-                                             &scope));
+   assert(!begin_selected_text("review", "terminal publication interrupted", "selected-agent",
+                               "actual-provider", "actual-model", 1, &scope));
    parent = find("crash-learning-parent");
    running = cJSON_Duplicate(cJSON_GetArrayItem(parent->events, 0), 1);
    cJSON *envelope = cJSON_GetArrayItem(parent->envelopes, 0);
@@ -640,9 +665,8 @@ static void child_control_reply_capability(void)
          if (!parent_enabled)
             server_control_scope_disable_replies(parent);
          server_session_log_t *scope = NULL;
-         assert(!server_session_log_begin_selected("review", "explicit child capability",
-                                                   "selected-agent", "actual-provider",
-                                                   "actual-model", producer_enabled, &scope));
+         assert(!begin_selected_text("review", "explicit child capability", "selected-agent",
+                                     "actual-provider", "actual-model", producer_enabled, &scope));
          server_control_scope_t *child = server_control_scope_current();
          assert(child && child != parent);
          assert(server_control_scope_can_reply(child) == (parent_enabled && producer_enabled));
@@ -663,8 +687,8 @@ static void child_control_reply_capability(void)
    assert(headed && !server_control_scope_bind(headed));
    aimee_ir_session_set_sink(parent_sink, &parent_events);
    server_session_log_t *scope = NULL;
-   assert(server_session_log_begin_selected(NULL, "existing browser owner", "selected-agent",
-                                            "actual-provider", "actual-model", 0, &scope) == 1 &&
+   assert(begin_selected_text(NULL, "existing browser owner", "selected-agent", "actual-provider",
+                              "actual-model", 0, &scope) == 1 &&
           !scope);
    assert(server_control_scope_current() == headed && server_control_scope_can_reply(headed));
    aimee_ir_session_set_sink(NULL, NULL);
@@ -674,14 +698,14 @@ static void child_control_reply_capability(void)
 int main(void)
 {
    server_session_log_t *scope = NULL;
-   assert(server_session_log_begin(NULL, "internal", &scope) == 1 && !scope);
+   assert(begin_text(NULL, "internal", &scope) == 1 && !scope);
    attest("parent", "");
-   assert(server_session_log_begin(NULL, "unattested", &scope) < 0 && !scope);
+   assert(begin_text(NULL, "unattested", &scope) < 0 && !scope);
    attest("parent", "alice");
    aimee_ir_session_set_sink(parent_sink, &parent_events);
-   assert(server_session_log_begin(NULL, "existing browser owner", &scope) == 1 && !scope);
+   assert(begin_text(NULL, "existing browser owner", &scope) == 1 && !scope);
    job = 4;
-   assert(server_session_log_begin("review", "private", &scope) == 0);
+   assert(begin_text("review", "private", &scope) == 0);
    assert(parent_events == 0 && count == 2 && !strcmp(rows[1].actor, "alice"));
    assert(strcmp(rows[1].id, "parent"));
    char native_scope[128], native_principal[128];
@@ -737,19 +761,19 @@ int main(void)
                                      .execution_status = "completed"};
    assert(aimee_ir_session_emit(&finished) == 0 && parent_events == 1);
    attest("parent", "mallory");
-   assert(server_session_log_begin("review", "wrong parent owner", &scope) < 0 && !scope);
+   assert(begin_text("review", "wrong parent owner", &scope) < 0 && !scope);
    assert(count == 2);
    attest("parent", "alice");
    int observations_before_rejection = test_learning_observations();
    reject_append = 1;
-   assert(server_session_log_begin("review", "stop before execution", &scope) < 0 && scope);
+   assert(begin_text("review", "stop before execution", &scope) < 0 && scope);
    assert(server_session_log_finish(scope, 0, "failed") < 0);
    assert(aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(NULL, NULL);
    assert(test_learning_observations() == observations_before_rejection);
    reject_append = 0;
    reject_checkpoint = 1;
-   assert(server_session_log_begin("review", "private", &scope) == 0);
+   assert(begin_text("review", "private", &scope) == 0);
    cJSON *empty = cJSON_CreateArray();
    assert(server_session_log_history_save(empty) < 0);
    cJSON_Delete(empty);
@@ -757,17 +781,16 @@ int main(void)
    aimee_ir_session_set_sink(NULL, NULL);
    reject_checkpoint = 0;
    job = 6;
-   assert(server_session_log_begin("review", "unconverted producer", &scope) == 0);
+   assert(begin_text("review", "unconverted producer", &scope) == 0);
    assert(server_session_log_finish(scope, 1, NULL) < 0);
    assert(aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(NULL, NULL);
    reject_reference = 1;
-   assert(server_session_log_begin("review", "reference admission must persist", &scope) < 0 &&
-          scope);
+   assert(begin_text("review", "reference admission must persist", &scope) < 0 && scope);
    reject_reference = 0;
    assert(server_session_log_finish(scope, 0, "reference unavailable") < 0);
    aimee_ir_session_set_sink(NULL, NULL);
-   assert(server_session_log_begin("review", "terminal reference", &scope) == 0);
+   assert(begin_text("review", "terminal reference", &scope) == 0);
    model_reply();
    reject_reference = 1;
    assert(server_session_log_finish(scope, 1, NULL) < 0);
@@ -808,7 +831,7 @@ int main(void)
    attest("long-parent", long_owner);
    int created = db1_server_session_create("long-parent", "test", long_owner);
    assert(!created);
-   assert(!server_session_log_begin("review", "long owner", &scope));
+   assert(!begin_text("review", "long owner", &scope));
    char exact_actor[VAULT_PRINCIPAL_MAX];
    assert(!server_session_log_identity(native_scope, sizeof native_scope, exact_actor,
                                        sizeof exact_actor));
@@ -818,7 +841,7 @@ int main(void)
    assert(!server_session_log_finish(scope, 1, NULL));
    long_owner[8 + VAULT_CERT_CN_MAX - 1] = 'b';
    attest("long-parent", long_owner);
-   assert(server_session_log_begin("review", "different suffix", &scope) < 0 && !scope);
+   assert(begin_text("review", "different suffix", &scope) < 0 && !scope);
    aimee_ir_session_set_sink(NULL, NULL);
    source_bound_selected_delegate();
    child_control_reply_capability();

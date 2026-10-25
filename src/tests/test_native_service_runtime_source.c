@@ -39,11 +39,13 @@ __typeof__(server_native_delegate_source_runtime_consume)
     composition_mock_server_native_delegate_source_runtime_consume;
 #define server_native_delegate_source_runtime_consume                                              \
    composition_mock_server_native_delegate_source_runtime_consume
-#define request  composition_runtime_request
-#define identity composition_runtime_identity
-#define main     composition_runtime_unused_main
+#define request                  composition_runtime_request
+#define identity                 composition_runtime_identity
+#define main                     composition_runtime_unused_main
+#define agent_request_auth_error composition_mock_agent_request_auth_error
 #include "test_server_native_runtime.c"
 #undef main
+#undef agent_request_auth_error
 #undef identity
 #undef request
 #undef agent_get_request_session
@@ -120,8 +122,8 @@ static void ctor(const agent_t *model, const aimee_request_t *profile, int admit
    assert(!server_native_runtime_forward_service_admitted());
    constructor_owner_queries = 0;
    probing_constructor = 1;
-   assert(!server_native_runtime_open_bound_request(model, request_context_get(),
-                                                    agent_get_request_session(), profile, NULL, 0));
+   assert(!server_native_runtime_open_bound_request(
+       model, request_context_get(), agent_get_request_session(), profile, NULL, 0, NULL));
    probing_constructor = 0;
    assert(!server_native_runtime_forward_service_admitted());
    assert(constructor_owner_queries == admitted);

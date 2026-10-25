@@ -18,6 +18,26 @@ int agent_load_config(agent_config_t *cfg)
    memset(cfg, 0, sizeof *cfg);
    return config_failure;
 }
+int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
+                   agent_result_t *out)
+{
+   assert(cfg && agent_name && !strcmp(agent_name, "draft-model"));
+   assert(!aimee_ir_request_admit(request));
+   assert(request->n_system == 1 && strstr(request->system[0].text, "PROPOSAL"));
+   assert(request->n_messages == 1 && request->messages[0].n_blocks == 1);
+   assert(!strcmp(request->messages[0].role, "user"));
+   assert(!strcmp(request->messages[0].blocks[0].text, "Draft subject: {\"opaque\":1} 雪"));
+   assert(request->has_max_tokens && request->max_tokens == 4096);
+   assert(request->has_temperature && request->temperature == 0.3);
+   assert(!request->n_tools);
+   memset(out, 0, sizeof *out);
+   out->response = strdup("POISONED DISPLAY IS NOT A DRAFT");
+   assert(!aimee_ir_response_from_text(&out->canonical_response, "CANONICAL DRAFT", "draft-model"));
+   out->canonical_response.stop_reason = terminal;
+   snprintf(out->agent_name, sizeof out->agent_name, "%s", "draft-model");
+   out->success = 1;
+   return 0;
+}
 int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, agent_result_t *out)
 {
    assert(cfg && request);
@@ -290,6 +310,17 @@ int main(void)
       }
       invoke(rpc, 0, 0);
    }
+   cJSON *draft = cJSON_CreateObject();
+   cJSON_AddStringToObject(draft, "prompt", "Draft subject: {\"opaque\":1} 雪");
+   cJSON_AddStringToObject(draft, "model", "draft-model");
+   terminal = AIMEE_STOP_END_TURN;
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
+   terminal = AIMEE_STOP_MAX_TOKENS;
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "status")), "error"));
+   assert(!field(reply, "text"));
+   cJSON_Delete(draft);
    assert(loaded > 0 && generated > 0);
    cJSON_Delete(reply);
    cJSON_Delete(expected_request);

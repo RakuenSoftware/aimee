@@ -106,8 +106,7 @@ void agent_run_require_initial_tool_call(int on);
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
  * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,
  * no exec role. The model can only return text (out->response). 0 on success. */
-int agent_generate(agent_config_t *cfg, const char *agent_name, const char *system_prompt,
-                   const char *user_prompt, int max_tokens, double temperature,
+int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
                    agent_result_t *out);
 int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request,
                            agent_result_t *out);

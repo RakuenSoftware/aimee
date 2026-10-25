@@ -56,6 +56,26 @@ or arbitrary JSON payload does not make a representation canonical. Real browser
 completion and continuation on the resulting source remain required. Older test
 receipts below apply only to their named revisions.
 
+The recovery checkpoint `3141fcf11` is built and installed on the retained QA
+browser at `https://192.168.0.67:8447`. All 167 prior IR rows, native/cache state,
+private authority, grants and SDK files survived. Normal same-key public TLS
+certificate renewal changed only public certificate hashes. The separate unused
+fresh-test app/embedder were temporarily stopped for build memory and restarted.
+No new installation or learning exercise was run.
+
+One real Claude UI send on the new image admitted canonical input and reloaded
+its same session without page errors, but failed before SDK launch. The fresh
+server log again records OAuth refresh HTTP 429 at `claude_source_lineage`.
+Receipt: `/var/tmp/aimee-ir-browser-3141fcf11-native-ui-r2/result.json`.
+An earlier UI-driver attempt stopped on a detached onboarding locator with zero
+sends; its failure is preserved separately. No second model send was attempted.
+Do not call real agent sessions restored while this startup failure remains.
+
+Current follow-up preserves safe verified refresh-status diagnostics through
+credential resolution and native startup into the canonical execution error,
+without adding retries or changing token/grant behavior. It also skips empty
+text blocks when taking a routing-only text view of a canonical message.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload

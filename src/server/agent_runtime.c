@@ -223,13 +223,15 @@ const agent_dispatch_scope_t *agent_dispatch_scope_current(void)
 
 static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
                                        const char *user_prompt, int max_tokens, double temperature,
-                                       agent_result_t *out, const aimee_request_t *request);
+                                       agent_result_t *out, const aimee_request_t *request,
+                                       int host_text_profile);
 
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
                                        const char *role, const char *system_prompt,
                                        const char *user_prompt, int max_tokens, double temperature,
                                        int use_tools, agent_result_t *out,
-                                       const aimee_request_t *request, aimee_response_t *response)
+                                       const aimee_request_t *request, aimee_response_t *response,
+                                       int host_text_profile)
 {
    if (!ag || !out)
       return -1;
@@ -337,8 +339,11 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
       }
       else
       {
-         capture = server_session_log_begin_selected(role, request ? NULL : user_prompt, ag->name,
-                                                     ag->provider, ag->model, 0, &log_scope);
+         aimee_block_t input_block = {.type = AIMEE_BLK_TEXT, .text = (char *)user_prompt};
+         aimee_message_t input = {.role = "user", .blocks = &input_block, .n_blocks = 1};
+         capture =
+             server_session_log_begin_selected(role, request || !user_prompt ? NULL : &input,
+                                               ag->name, ag->provider, ag->model, 0, &log_scope);
          if (capture < 0)
          {
             rc = AGENT_RC_CAPTURE_FAILED;
@@ -351,14 +356,17 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
             aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
                                            .message_id = "user",
                                            .message = &request->messages[0]};
-            if (aimee_ir_session_emit(&event))
+            /* Ordinary drafting inherits an existing primary subscriber just
+             * as before; it must not insert its private prompt into that
+             * conversation. A newly installed log owns this request's input. */
+            if ((!host_text_profile || capture == 0) && aimee_ir_session_emit(&event))
                rc = AGENT_RC_CAPTURE_FAILED;
             else
             {
                const char *previous_cache_role = result_cache_role;
                result_cache_role = NULL;
                rc = agent_execute_plain_request(ag, system_prompt, user_prompt, max_tokens,
-                                                temperature, out, request);
+                                                temperature, out, request, host_text_profile);
                result_cache_role = previous_cache_role;
             }
          }
@@ -431,7 +439,7 @@ int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, con
                        int use_tools, agent_result_t *out)
 {
    return agent_dispatch_one_internal(agent, network, role, system, prompt, max_tokens, temperature,
-                                      use_tools, out, NULL, NULL);
+                                      use_tools, out, NULL, NULL, 0);
 }
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
@@ -562,13 +570,20 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
  * No provider-CLI, no exec role, no worktree, no tools: the model can only return
  * text. Returns 0 on success (out->response holds the text), -1 otherwise.
  * Provider-CLI agents are refused as drafters precisely because they are agentic. */
-int agent_generate(agent_config_t *cfg, const char *agent_name, const char *system_prompt,
-                   const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
+                   agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
-   if (!cfg || !user_prompt || !user_prompt[0])
+   if (!cfg || !request || aimee_ir_request_admit(request) || request->n_messages != 1 ||
+       request->n_system > 1 || (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) ||
+       strcmp(request->messages[0].role, "user") || request->messages[0].n_blocks != 1 ||
+       request->messages[0].blocks[0].type != AIMEE_BLK_TEXT ||
+       !request->messages[0].blocks[0].text || !request->messages[0].blocks[0].text[0] ||
+       !agent_request_with_tools_supported(request) || request->model || request->stream ||
+       request->messages[0].blocks[0].cache_control || request->messages[0].blocks[0].cache_ttl ||
+       request->messages[0].blocks[0].raw)
    {
-      snprintf(out->error, sizeof(out->error), "empty prompt");
+      snprintf(out->error, sizeof(out->error), "unsupported drafting request");
       return -1;
    }
    /* Pick a non-CLI (non-agentic) drafter. */
@@ -606,8 +621,10 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
     * only return text: it cannot run a tool, read/write files, or touch a repo.
     * The non-CLI filter above is secondary. (agent_dispatch_one also enforces the
     * drafter's max_parallel + records its health, like every other turn.) */
-   int rc = agent_dispatch_one(&local, &cfg->network, NULL /* role */, system_prompt, user_prompt,
-                               max_tokens, temperature, 0 /* use_tools: plain completion */, out);
+   int rc = agent_dispatch_one_internal(
+       &local, &cfg->network, NULL, request->n_system ? request->system[0].text : NULL,
+       request->messages[0].blocks[0].text, request->has_max_tokens ? request->max_tokens : 0,
+       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL, 1);
    /* Stamp the drafter name for the caller even on the early-guard paths that
     * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
@@ -653,7 +670,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
    return agent_dispatch_one_internal(
        &local, &cfg->network, NULL, NULL, request->messages[0].blocks[0].text,
        request->has_max_tokens ? request->max_tokens : 0,
-       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL);
+       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL, 0);
 }
 
 /* Run one fan-out task on a specifically named configured agent (resolved like
@@ -852,7 +869,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    int rc = agent_dispatch_one_internal(
        ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
        request && request->has_temperature ? request->temperature : 0.3, 1 /* use_tools */, out,
-       request, response);
+       request, response, 0);
    free(enhanced);
 
    if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
@@ -1024,7 +1041,8 @@ static void parse_response(const char *body, const agent_t *agent,
 
 static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
                                        const char *user_prompt, int max_tokens, double temperature,
-                                       agent_result_t *out, const aimee_request_t *request)
+                                       agent_result_t *out, const aimee_request_t *request,
+                                       int host_text_profile)
 {
    memset(out, 0, sizeof(*out));
    /* A refused route arrives here as NULL, and the three reads below would fault
@@ -1076,13 +1094,14 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
       return -1;
    }
    /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
-   char *augmented_prompt = request ? NULL : plugin_chook_apply_pre_llm(user_prompt);
+   char *augmented_prompt =
+       request && !host_text_profile ? NULL : plugin_chook_apply_pre_llm(user_prompt);
    const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
    /* Build request body — derive the output cap from the model when unpinned. */
    int tok = agent_request_max_tokens(agent, max_tokens);
-   if (!request && is_anthropic_provider(agent))
+   if ((!request || host_text_profile) && is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = request
+   cJSON *req = request && !host_text_profile
                     ? agent_build_plain_request_ir(agent, request)
                     : agent_build_request(agent, system_prompt, effective_user, tok, temperature);
    char *body = cJSON_PrintUnformatted(req);
@@ -2182,5 +2201,5 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
                   int max_tokens, double temperature, agent_result_t *out)
 {
    return agent_execute_plain_request(agent, system_prompt, user_prompt, max_tokens, temperature,
-                                      out, NULL);
+                                      out, NULL, 0);
 }

@@ -578,6 +578,10 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
           64);
    return 0;
 }
+const char *agent_request_auth_error(void)
+{
+   return "Claude sign-in refresh was rate limited (HTTP 429). Try again later.";
+}
 int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
 {
    agent_codex_credentials_t source;
@@ -2279,8 +2283,8 @@ static void test_native_supervised_execution(const agent_t *selected,
           {.space = "aimee", .name = "bash", .registry_name = "bash"},
           {.space = "aimee", .name = "read_file", .registry_name = "read_file"}};
       server_native_runtime_t *runtime =
-          mode >= 10 ? server_native_runtime_open_bound_request(selected, &selected_owner,
-                                                                "session-a", &profile, bindings, 2)
+          mode >= 10 ? server_native_runtime_open_bound_request(
+                           selected, &selected_owner, "session-a", &profile, bindings, 2, NULL)
                      : server_native_runtime_open_request(selected, &selected_owner, "session-a",
                                                           &profile);
       assert(runtime);
@@ -2488,7 +2492,7 @@ static void test_native_large_mcp_catalog(const agent_t *selected, const request
                               .prompt_cache_key = "",
                               .mutated = 1};
    server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-       selected, owner, "session-a", &profile, bindings, COUNT);
+       selected, owner, "session-a", &profile, bindings, COUNT, NULL);
    assert(runtime);
    cJSON_Delete(schema); /* Real listener owns a deep profile copy. */
    assert(server_session_capture_bind(NULL) == capture);
@@ -2541,23 +2545,37 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
                                               .name = "mcp__aimee__read_file",
                                               .registry_name = "read_file",
                                               .mcp_name = "exposed_read"};
+      if (variant == 0)
+      {
+         agent_t unavailable = *selected;
+         strcpy(unavailable.registration, "unavailable-account");
+         char diagnostic[512] = "stale failure";
+         assert(!server_native_runtime_open_bound_request(&unavailable, owner, "session-a",
+                                                          &profile, &binding, 1, diagnostic));
+         assert(strstr(diagnostic, "connection's credentials are unavailable"));
+         strcpy(unavailable.auth_type, "claude-oauth");
+         assert(!server_native_runtime_open_bound_request(&unavailable, owner, "session-a",
+                                                          &profile, &binding, 1, diagnostic));
+         assert(!strcmp(diagnostic,
+                        "Claude sign-in refresh was rate limited (HTTP 429). Try again later."));
+      }
       server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-          selected, owner, "session-a", &profile, &binding, 1);
+          selected, owner, "session-a", &profile, &binding, 1, NULL);
       assert(runtime);
       assert(server_native_runtime_attest_launch(runtime, "invalid-proof"));
       if (!variant)
       {
          server_native_tool_binding_t duplicate[] = {binding, binding};
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          duplicate, 2));
+                                                          duplicate, 2, NULL));
          server_native_tool_binding_t invalid = binding;
          invalid.registry_name = "not-a-registered-tool";
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &invalid, 1));
+                                                          &invalid, 1, NULL));
          invalid = binding;
          invalid.name = "not-an-advertised-tool";
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &invalid, 1));
+                                                          &invalid, 1, NULL));
          const char *digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
          server_native_execution_profile_t execution = {.sdk = "claude",
                                                         .build_digest = digest,
@@ -2568,12 +2586,12 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
          invalid = binding;
          invalid.mcp_name = "different_exposed_name";
          server_native_runtime_t *other = server_native_runtime_open_bound_request(
-             selected, owner, "session-a", &profile, &invalid, 1);
+             selected, owner, "session-a", &profile, &invalid, 1, NULL);
          assert(other && !server_native_runtime_cache_scope(other, &execution, changed));
          assert(strcmp(baseline, changed));
          server_native_runtime_close(other);
          other = server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &binding, 1);
+                                                          &binding, 1, NULL);
          assert(other && !server_native_runtime_cache_scope(other, &execution, changed));
          assert(!strcmp(baseline, changed));
          server_native_runtime_close(other);
@@ -2955,16 +2973,16 @@ static void test_private_service_forward_callback(const agent_t *selected)
        server_session_capture_open("service-session", "native-turn", "server", "service-session");
    assert(capture && !server_session_capture_bind(capture));
    assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &profile,
-                                                    NULL, 0));
+                                                    NULL, 0, NULL));
    aimee_request_t foreign = profile;
    foreign.model = "foreign-profile-model";
    fixture_service_ticket = &foreign;
    assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &foreign,
-                                                    NULL, 0));
+                                                    NULL, 0, NULL));
    assert(!server_native_runtime_forward_service_admitted());
    fixture_service_ticket = &profile;
    server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-       selected, &owner, "service-session", &profile, NULL, 0);
+       selected, &owner, "service-session", &profile, NULL, 0, NULL);
    assert(runtime && server_session_capture_bind(NULL) == capture);
    assert(!fixture_service_ticket && !server_native_runtime_forward_service_admitted());
    atomic_store(&expected_capture, capture);

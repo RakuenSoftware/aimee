@@ -1026,7 +1026,7 @@ done:
    return rc;
 }
 static int native_registry_open(native_execution_t *execution, const request_context_t *owner,
-                                const provider_cli_cfg_t *cfg)
+                                const provider_cli_cfg_t *cfg, char error[512])
 {
    aimee_request_t *profile = &execution->profile;
    int claude = !strcmp(execution->selected.cli_kind, "claude");
@@ -1061,8 +1061,9 @@ static int native_registry_open(native_execution_t *execution, const request_con
                                                      cfg->canonical_request, profile,
                                                      execution->source_session))
       goto done;
-   execution->runtime = server_native_runtime_open_bound_request(
-       &execution->selected, owner, execution->source_session, profile, bindings, profile->n_tools);
+   execution->runtime = server_native_runtime_open_bound_request(&execution->selected, owner,
+                                                                 execution->source_session, profile,
+                                                                 bindings, profile->n_tools, error);
    rc = execution->runtime ? 0 : -1;
 done:
    for (int i = 0; i < profile->n_tools; i++)
@@ -1226,7 +1227,7 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (server_native_sdk_profile_prepare(&execution->profile, sdk, execution->executable_fd))
       goto refused;
    stage = "native runtime preparation";
-   if (native_registry_open(execution, owner, cfg))
+   if (native_registry_open(execution, owner, cfg, error))
       goto refused;
    if (server_native_runtime_set_turn_limit(execution->runtime, cfg->native_turn_limit))
       goto refused;

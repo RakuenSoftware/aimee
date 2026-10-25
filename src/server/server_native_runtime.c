@@ -1655,8 +1655,10 @@ int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t 
 static server_native_runtime_t *
 native_runtime_open(const agent_t *selected, const request_context_t *owner, const char *session_id,
                     const aimee_request_t *profile, const server_native_tool_binding_t *bindings,
-                    int binding_count, int bound_registry)
+                    int binding_count, int bound_registry, char error[512])
 {
+   if (error)
+      error[0] = 0;
    int service_source =
        server_native_delegate_source_runtime_consume(selected, owner, profile, session_id);
    if (!selected || !selected->enabled || !owner || !owner->vault_principal[0] ||
@@ -1829,6 +1831,14 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       int rc = codex    ? agent_codex_connection_credentials(registration, &credentials)
                : claude ? agent_claude_connection_credentials(registration, &claude_credentials)
                         : agent_api_connection_credentials(selected, &api_credentials);
+      if (rc && error)
+      {
+         const char *why = claude ? agent_request_auth_error() : NULL;
+         snprintf(error, 512, "%s",
+                  why ? why
+                      : "The selected model connection's credentials are unavailable. Check the "
+                        "connection on the Models page.");
+      }
       agent_request_creds_restore(&previous_credentials);
       OPENSSL_cleanse(&previous_credentials, sizeof previous_credentials);
       request_context_restore(&previous_request);
@@ -1930,22 +1940,24 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id)
 {
-   return native_runtime_open(selected, owner, session_id, NULL, NULL, 0, 0);
+   return native_runtime_open(selected, owner, session_id, NULL, NULL, 0, 0, NULL);
 }
 server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
                                                             const request_context_t *owner,
                                                             const char *session_id,
                                                             const aimee_request_t *profile)
 {
-   return profile ? native_runtime_open(selected, owner, session_id, profile, NULL, 0, 0) : NULL;
+   return profile ? native_runtime_open(selected, owner, session_id, profile, NULL, 0, 0, NULL)
+                  : NULL;
 }
 
 server_native_runtime_t *
 server_native_runtime_open_bound_request(const agent_t *selected, const request_context_t *owner,
                                          const char *session, const aimee_request_t *profile,
-                                         const server_native_tool_binding_t *bindings, int count)
+                                         const server_native_tool_binding_t *bindings, int count,
+                                         char error[512])
 {
-   return native_runtime_open(selected, owner, session, profile, bindings, count, 1);
+   return native_runtime_open(selected, owner, session, profile, bindings, count, 1, error);
 }
 
 int server_native_runtime_set_turn_limit(server_native_runtime_t *runtime, int limit)

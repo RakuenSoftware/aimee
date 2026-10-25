@@ -591,7 +591,8 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    /* Routing policy may inspect text; the loop appends the original IR message. */
    const char *query = "Continue the admitted conversation.";
    for (int i = 0; i < message->n_blocks; i++)
-      if (message->blocks[i].type == AIMEE_BLK_TEXT && message->blocks[i].text)
+      if (message->blocks[i].type == AIMEE_BLK_TEXT && message->blocks[i].text &&
+          message->blocks[i].text[0])
       {
          query = message->blocks[i].text;
          break;

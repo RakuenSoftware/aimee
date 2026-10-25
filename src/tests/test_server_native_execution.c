@@ -508,8 +508,11 @@ int server_native_delegate_source_runtime_prepare(const char *role, const agent_
 }
 server_native_runtime_t *server_native_runtime_open_bound_request(
     const agent_t *selected, const request_context_t *request_owner, const char *source,
-    const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count)
+    const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count,
+    char error[512])
 {
+   assert(error);
+   error[0] = 0;
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
    if (!strcmp(active_sdk, "claude"))
@@ -524,7 +527,12 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
       assert(!strcmp(selected->auth_type, expected_auth));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
    if (refuse_runtime)
+   {
+      if (refuse_runtime == 2)
+         snprintf(error, 512,
+                  "Claude sign-in refresh was rate limited (HTTP 429). Try again later.");
       return NULL;
+   }
    if (expected_no_tools)
    {
       assert(!profile->n_tools && !count && !bindings);
@@ -1253,17 +1261,23 @@ int main(int argc, char **argv)
 #if defined(__linux__)
    /* Runtime preparation also resolves credential/source lineage. A refusal
     * must not misdiagnose that boundary as a tool-catalog defect or model reply. */
-   reset(0);
-   refuse_runtime = 1;
-   agent_result_t preparation_refused = {0};
-   assert(provider_cli_adapter_host_execute(&cfg, &preparation_refused) < 0);
-   assert(!preparation_refused.success && !preparation_refused.canonical_response.content &&
-          !preparation_refused.canonical_response.n_content);
-   assert(!strcmp(preparation_refused.error,
-                  "native SDK launch refused during native runtime preparation"));
-   assert(!sdk_calls && !opened && !began && !reserved && !private_home[0] && !retained);
-   assert(restored == 1);
-   agent_result_clear_response(&preparation_refused);
+   for (int diagnostic = 1; diagnostic <= 2; diagnostic++)
+   {
+      reset(0);
+      refuse_runtime = diagnostic;
+      agent_result_t preparation_refused = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &preparation_refused) ==
+             AGENT_RC_CAPTURE_FAILED);
+      assert(!preparation_refused.success && !preparation_refused.canonical_response.content &&
+             !preparation_refused.canonical_response.n_content);
+      assert(!strcmp(preparation_refused.error,
+                     diagnostic == 1
+                         ? "native SDK launch refused during native runtime preparation"
+                         : "Claude sign-in refresh was rate limited (HTTP 429). Try again later."));
+      assert(!sdk_calls && !opened && !began && !reserved && !private_home[0] && !retained);
+      assert(restored == 1);
+      agent_result_clear_response(&preparation_refused);
+   }
    refuse_runtime = 0;
    for (int scenario = 0; scenario <= 10; scenario++)
    {

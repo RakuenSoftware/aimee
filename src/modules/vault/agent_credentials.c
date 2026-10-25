@@ -780,6 +780,7 @@ done:
 
 int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
 {
+   g_request_auth_error[0] = 0;
    if (!out)
       return -1;
    OPENSSL_cleanse(out, sizeof *out);
@@ -804,9 +805,16 @@ int agent_claude_connection_credentials(const char *registration, agent_claude_c
                                             .token_endpoint = CLAUDE_OAUTH_TOKEN_ENDPOINT,
                                             .scope = scopes,
                                             .format = OAUTH_REFRESH_JSON};
-   if (oauth_token_get_profile(registration, &profile, 300, out->token, sizeof out->token) ||
+   int refresh_http_status = 0;
+   if (oauth_token_get_profile_status(registration, &profile, 300, out->token, sizeof out->token,
+                                      &refresh_http_status) ||
        !out->token[0] || strpbrk(out->token, "\r\n"))
+   {
+      if (refresh_http_status == 429)
+         snprintf(g_request_auth_error, sizeof g_request_auth_error,
+                  "Claude sign-in refresh was rate limited (HTTP 429). Try again later.");
       goto done;
+   }
    snprintf(out->source_digest, sizeof out->source_digest, "%s", digest);
    rc = 0;
 done:

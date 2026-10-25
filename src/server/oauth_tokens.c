@@ -396,8 +396,11 @@ static char *oauth_refresh_body(const oauth_refresh_profile_t *profile, const ch
    return body;
 }
 
-static int oauth_refresh_profile(const char *client_name, const oauth_refresh_profile_t *profile)
+static int oauth_refresh_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                                 int *refresh_http_status)
 {
+   if (refresh_http_status)
+      *refresh_http_status = 0;
    if (!client_name || !profile || !profile->client_id || !profile->token_endpoint ||
        (profile->format != OAUTH_REFRESH_FORM && profile->format != OAUTH_REFRESH_JSON))
       return OAUTH_REFRESH_TRANSIENT;
@@ -449,6 +452,8 @@ static int oauth_refresh_profile(const char *client_name, const oauth_refresh_pr
    failure = "credential_store";
    rc = oauth_token_store(client_name, &result) ? OAUTH_REFRESH_TRANSIENT : 0;
 done:
+   if (refresh_http_status)
+      *refresh_http_status = diagnostic.http_status;
    if (rc)
    {
       /* Registration identity is already logged by this owner. Only fixed
@@ -474,12 +479,14 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
 {
    const oauth_refresh_profile_t profile = {.client_id = client_id,
                                             .token_endpoint = token_endpoint};
-   return oauth_refresh_profile(client_name, &profile);
+   return oauth_refresh_profile(client_name, &profile, NULL);
 }
 
-int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
-                            int skew_secs, char *buf, size_t len)
+int oauth_token_get_profile_status(const char *client_name, const oauth_refresh_profile_t *profile,
+                                   int skew_secs, char *buf, size_t len, int *refresh_http_status)
 {
+   if (refresh_http_status)
+      *refresh_http_status = 0;
    if (!buf || len == 0)
       return -1;
    buf[0] = '\0';
@@ -500,7 +507,7 @@ int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile
 
    if (need_refresh && profile && profile->client_id && profile->token_endpoint)
    {
-      if (oauth_refresh_profile(client_name, profile) == OAUTH_REFRESH_REAUTH)
+      if (oauth_refresh_profile(client_name, profile, refresh_http_status) == OAUTH_REFRESH_REAUTH)
          return -1;
    }
 
@@ -513,6 +520,12 @@ int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile
       return -1;
    }
    return 0;
+}
+
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t len)
+{
+   return oauth_token_get_profile_status(client_name, profile, skew_secs, buf, len, NULL);
 }
 
 int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,

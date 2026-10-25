@@ -153,13 +153,9 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
    }
    return binding;
 }
-int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out)
-{
-   return server_session_log_begin_selected(role, prompt, NULL, NULL, NULL, 1, out);
-}
-int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
-                                      const char *provider, const char *model, int control_replies,
-                                      server_session_log_t **out)
+int server_session_log_begin_selected(const char *role, const aimee_message_t *message,
+                                      const char *agent, const char *provider, const char *model,
+                                      int control_replies, server_session_log_t **out)
 {
    if (!out)
       return -1;
@@ -230,14 +226,12 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
    aimee_ir_session_set_sink(log_event, scope);
    *out = scope;
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)(prompt ? prompt : "")};
-   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t user = {
-       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &message};
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = message};
    if (aimee_ir_session_emit(&started) || publish_child(scope, "running"))
       return -1;
    scope->announced = scope->parent[0] != 0;
-   if (prompt && aimee_ir_session_emit(&user))
+   if (message && aimee_ir_session_emit(&user))
       return -1; /* Caller must finish *out, including failed admission. */
    return 0;
 fail:

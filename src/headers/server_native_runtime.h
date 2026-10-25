@@ -51,7 +51,8 @@ typedef struct
 server_native_runtime_t *
 server_native_runtime_open_bound_request(const agent_t *selected, const request_context_t *owner,
                                          const char *session, const aimee_request_t *profile,
-                                         const server_native_tool_binding_t *bindings, int count);
+                                         const server_native_tool_binding_t *bindings, int count,
+                                         char error[512]);
 /* Creator-only release after independently verifying this actual native launch.
  * Bound runtimes hold model forwarding until release; SDK bytes cannot release
  * it. Digest is non-secret launch configuration identity, not a credential. */

@@ -266,17 +266,34 @@ int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        "that conflict with these.";
 
    agent_result_t r = {0};
-   int rc = agent_generate(&cfg, model, DRAFT_SYS, prompt, 4096, 0.3, &r);
-   if (rc != 0 || !r.response || !r.response[0])
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = (char *)DRAFT_SYS};
+   aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = (char *)prompt};
+   aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
+   aimee_request_t draft = {.system = &system,
+                            .n_system = 1,
+                            .messages = &message,
+                            .n_messages = 1,
+                            .has_max_tokens = 1,
+                            .max_tokens = 4096,
+                            .has_temperature = 1,
+                            .temperature = 0.3};
+   aimee_ir_classify_context(&draft);
+   int rc = agent_generate(&cfg, model, &draft, &r);
+   char *draft_text = !rc && !aimee_ir_response_complete_text_valid(&r.canonical_response)
+                          ? agent_result_take_text(&r)
+                          : NULL;
+   if (!draft_text || !draft_text[0])
    {
       char err[540];
       snprintf(err, sizeof err, "draft failed%s%s", r.error[0] ? ": " : "",
                r.error[0] ? r.error : "");
+      free(draft_text);
       agent_result_clear_response(&r);
       return server_send_error(conn, err, NULL);
    }
    cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "text", r.response);
+   cJSON_AddStringToObject(resp, "text", draft_text);
+   free(draft_text);
    cJSON_AddStringToObject(resp, "agent", r.agent_name);
    agent_result_clear_response(&r);
    return server_send_ok(conn, resp);
