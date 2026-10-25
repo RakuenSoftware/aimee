@@ -141,40 +141,6 @@ static void test_http_round_trip(void)
    printf("  http_round_trip: ok\n");
 }
 
-/* ---- 4. streaming round trip: cli_http_request_stream parses SSE events ---- */
-static int count_cb(cJSON *event, void *userdata)
-{
-   (void)event;
-   (*(int *)userdata)++;
-   return 0;
-}
-
-static void test_http_stream(void)
-{
-   const char *resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
-                      "data: {\"i\":1}\n\ndata: {\"i\":2}\n\ndata: [DONE]\n\n";
-   stub_arg_t arg;
-   snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_stream_%d.sock", test_tmpdir(),
-            (int)getpid());
-   arg.response = resp;
-   pthread_t th;
-   assert(pthread_create(&th, NULL, stub_server, &arg) == 0);
-   usleep(30000);
-
-   int n = 0, status = 0;
-   cJSON *last = cli_http_request_stream(arg.path, "POST", "/v1/chat/completions", "{}", NULL, 2000,
-                                         &status, count_cb, &n);
-   pthread_join(th, NULL);
-
-   assert(status == 200);
-   assert(n == 2);
-   assert(last != NULL);
-   cJSON *i = cJSON_GetObjectItemCaseSensitive(last, "i");
-   assert(cJSON_IsNumber(i) && i->valueint == 2);
-   cJSON_Delete(last);
-   printf("  http_stream: ok\n");
-}
-
 /* A reachable server that refuses this identity is not an old server. Pin the
  * operator-facing distinction because the wrong diagnosis sends people toward
  * an upgrade when they actually need to inspect or renew enrollment. */
@@ -357,7 +323,6 @@ int main(void)
    test_served_dispatch();
    test_served_marshal();
    test_http_round_trip();
-   test_http_stream();
    printf("All cli_http_transport tests passed.\n");
    return 0;
 }

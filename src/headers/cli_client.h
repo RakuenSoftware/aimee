@@ -121,12 +121,6 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
                         const char *body_json, const char *bearer, int timeout_ms,
                         int *http_status);
 
-/* Streaming variant of cli_http_request(): parses a Server-Sent Events response,
- * invoking cb() per event. Returns the last event (caller frees) or NULL. */
-cJSON *cli_http_request_stream(const char *endpoint, const char *method, const char *path,
-                               const char *body_json, const char *bearer, int timeout_ms,
-                               int *http_status, cli_stream_cb cb, void *userdata);
-
 /* Canonical NDJSON delivery: 0 for EOF/subscriber stop, -1 on transport/framing
  * failure. Only a validated subscriber terminal authorizes successful output.
  * Every frame reaches the required callback; no flat final object bypasses it. */

@@ -16,6 +16,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
+    "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
+    "TURN_NAR_MAX_CALLS", "TURN_NAR_NAME_LEN", "TURN_NAR_ARG_LEN",
     "agent_collect_tool_prompts", "router_advise_turn", "delegation_mailbox_t", "mailbox_acquire", "mailbox_find",
     "mailbox_wait", "mailbox_reply", "mailbox_release", "mailbox_put", "tl_mailbox",
     "agent_vote", "delegate_token_budget_for_agents",

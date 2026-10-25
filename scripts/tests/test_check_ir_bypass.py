@@ -137,6 +137,20 @@ class IRBypassTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "retired-api"):
             checker.check(self.root)
 
+    def test_obsolete_cli_sse_and_tool_narration_stay_retired(self):
+        for symbol in ("cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
+                       "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
+                       "TURN_NAR_MAX_CALLS", "TURN_NAR_NAME_LEN", "TURN_NAR_ARG_LEN"):
+            for relative in ("src/renamed_presentation.c", "src/headers/renamed_presentation.h",
+                             "server-go/modules/rogue/renamed.go"):
+                path = self.source(relative, symbol + "(message);")
+                with self.subTest(symbol=symbol, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+        self.source("src/posix/cli_client.c", "int cli_http_request_stream_ndjson(void); ")
+        self.source("src/headers/cli_client.h", "typedef int (*cli_stream_cb)(void *event); ")
+        checker.check(self.root)
+
     def test_production_tree(self):
         checker.check(checker.ROOT)
 

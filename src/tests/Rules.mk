@@ -690,7 +690,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-memory-setup \
                $(TESTPREFIX)/unit-test-cmd-config \
                $(TESTPREFIX)/unit-test-tool-validation \
-               $(TESTPREFIX)/unit-test-turn-narration \
                $(TESTPREFIX)/unit-test-kb-export \
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
@@ -6016,10 +6015,6 @@ $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/tests/test_tool_validation.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-turn-narration: $(OBJDIR)/tests/test_turn_narration.o \
-                                         $(OBJDIR)/turn_narration.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 
 
