@@ -71,7 +71,7 @@ int ensemble_continuation_request(const aimee_request_t *task, const char *perso
       out->max_tokens = max_tokens;
       out->has_max_tokens = 1;
    }
-   if (!out->has_temperature)
+   if (!out->has_temperature && temperature >= 0)
    {
       out->temperature = temperature;
       out->has_temperature = 1;

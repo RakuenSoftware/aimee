@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include "agent_config.h"
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -34,12 +35,10 @@ extern "C"
     * milestone's slices). */
    int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, const char *level);
 
-   /* Build the review prompt for a milestone.
-    * Includes the milestone title, intent, acceptance criteria, and the
-    * acceptance criteria of all its child tasks (loaded from KB_STORE artifacts
-    * scoped to milestone_id via their slice parents). Returns heap string
-    * (caller frees), or NULL on error. */
-   char *roadmap_milestone_review_prompt(const char *roadmap_id, const char *milestone_id);
+   /* Build an owned canonical request: host policy is separate from retrieved
+    * artifact evidence. Free out with aimee_request_free. Returns 0 or -1. */
+   int roadmap_milestone_build_request(const char *roadmap_id, const char *milestone_id,
+                                       aimee_request_t *out);
 
    /* Run the milestone validation gate. Calls agent_run with role="review",
     * parses the verdict from the response text, and returns the verdict string

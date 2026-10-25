@@ -1,3 +1,4 @@
+#include "cli_ir.h"
 /* First-party canonical chat subscriber; ACP alone projects callbacks to its wire. */
 #include "aimee_home.h"
 #include "cli_client.h"
@@ -339,7 +340,15 @@ char *cli_chat_stream(const char *sock, const char *session, const char *message
    }
    char *bearer = cli_v1_has_remote_endpoint() ? cli_v1_client_bearer() : NULL;
    cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "message", message);
+   cJSON *canonical = cli_ir_user_message(message, NULL, NULL);
+   if (!canonical || !cJSON_AddItemToObject(request, "message", canonical))
+   {
+      cJSON_Delete(canonical);
+      cJSON_Delete(request);
+      free(endpoint);
+      free(bearer);
+      return NULL;
+   }
    cJSON_AddStringToObject(request, "aimee_session_id", session ? session : "");
    char cwd[4096];
    if (getcwd(cwd, sizeof cwd))

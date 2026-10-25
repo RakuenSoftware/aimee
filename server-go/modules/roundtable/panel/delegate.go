@@ -2,6 +2,7 @@ package panel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 )
@@ -10,6 +11,9 @@ import (
 // to key durable delegate slots, bound spend and reach the worktree; it needs
 // nothing else about the workflow item that may own the review.
 type Run struct {
+	Focus          string
+	Brief          json.RawMessage
+	Request        *canonical.Request
 	ExecutionScope string
 	// ID is the review identity. It is echoed by every seat and checked, so a
 	// report about a different run is detectable.
@@ -27,10 +31,6 @@ type Run struct {
 	// CostLimitUSD is the whole review's ceiling, zero meaning unbounded. The
 	// panel subdivides it across concurrent seats itself.
 	CostLimitUSD float64
-	// OriginalRequest is what the artifact is judged against. Alignment to it is
-	// the first question every seat answers, so a review without it is not a
-	// weaker review -- it is a different one.
-	OriginalRequest string
 	// Reviewed is the exact artifact under review.
 	Reviewed Artifact
 }

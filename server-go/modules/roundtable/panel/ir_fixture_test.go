@@ -26,3 +26,5 @@ func fixtureInputText(input *canonical.Request) string {
 	}
 	return text
 }
+
+func fixtureTask(text string) *canonical.Request { return canonical.TaskRequest("", text) }

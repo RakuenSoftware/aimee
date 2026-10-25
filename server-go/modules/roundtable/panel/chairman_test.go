@@ -11,7 +11,7 @@ func chairmanRun() Run {
 	artifact := Artifact{Stage: "plan", Content: "complete plan"}
 	artifact.Hash = Hash([]byte(artifact.Content))
 	return Run{ID: "wi", Stage: "gate", Workdir: "/worktree",
-		OriginalRequest: "fix the scheduler", Reviewed: artifact}
+		Request: fixtureTask("fix the scheduler"), Reviewed: artifact}
 }
 
 func chairmanResponse(body string) string {

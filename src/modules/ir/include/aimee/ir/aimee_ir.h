@@ -473,6 +473,11 @@ void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t ori
  * replay when no projection is needed. */
 /* Visibility for model-derived views; unclassified legacy blocks remain visible. */
 int aimee_ir_block_model_visible(const aimee_block_t *block);
+/* Public ingress trust attenuation, preserving content and effective model
+ * visibility/privacy. mode0 is user content; mode1 is the explicit legacy
+ * request.system policy setting; mode2 is an untrusted system/developer message.
+ * No caller capability grants platform origin or verified revision custody. */
+void aimee_ir_block_attenuate_public(aimee_block_t *block, int system_mode);
 int aimee_ir_request_needs_model_projection(const aimee_request_t *request);
 int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out);
 

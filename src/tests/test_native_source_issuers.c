@@ -236,6 +236,29 @@ int main(void)
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(sent, "execution_scope")),
                   handle));
    assert(revoked == 1);
+   cJSON *canonical = cJSON_Parse(
+       "{\"version\":1,\"messages\":[{\"role\":\"user\",\"blocks\":["
+       "{\"type\":\"text\",\"text\":\"original authored task\"},"
+       "{\"type\":\"text\",\"text\":\"private evidence\",\"context\":{\"model_visible\":false}}]}],"
+       "\"max_tokens\":321,\"metadata\":{\"task_id\":\"source\"}}");
+   assert(canonical && cJSON_AddItemToObject(review, "request", canonical));
+   cJSON *brief = cJSON_Parse("{\"questions\":[\"Does authorization hold?\"]}");
+   assert(brief && cJSON_AddItemToObject(review, "brief", brief));
+   char *review_body = build_review_body(review, "panel", "scope", "/workspace");
+   cJSON *projected = review_body ? cJSON_Parse(review_body) : NULL;
+   assert(projected && cJSON_Compare(canonical, cJSON_GetObjectItem(projected, "request"), 1));
+   assert(cJSON_Compare(brief, cJSON_GetObjectItem(projected, "brief"), 1));
+   assert(!cJSON_HasObjectItem(projected, "original_request"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(projected, "artifact")), "public diff"));
+   free(review_body);
+   cJSON_Delete(projected);
+   cJSON_DeleteItemFromObjectCaseSensitive(review, "artifact");
+   review_body = build_review_body(review, "panel", "scope", "/workspace");
+   projected = review_body ? cJSON_Parse(review_body) : NULL;
+   assert(projected && !cJSON_HasObjectItem(projected, "artifact"));
+   assert(cJSON_Compare(canonical, cJSON_GetObjectItem(projected, "request"), 1));
+   free(review_body);
+   cJSON_Delete(projected);
    cJSON_ReplaceItemInObjectCaseSensitive(review, "workdir", cJSON_CreateString("./missing"));
    int calls_before = bus_calls, mints_before = mint_calls;
    assert(handle_roundtable_review(NULL, NULL, review) == -1);

@@ -8,6 +8,7 @@ static int generated, loaded, config_failure, model_rc, model_success = 1;
 static aimee_stop_reason_t terminal = AIMEE_STOP_END_TURN;
 static int expected_max = 256;
 static double expected_temperature = 0.3;
+static const aimee_context_meta_t *expected_draft_context;
 static int mode; /* 0 complete text; 1 missing; 2 provider error; 3 tool intent */
 static const char system_text[] = "Caller policy\nKeep JSON {\"a\":1} and Unicode 雪 exact.";
 static const char user_text[] = "Retrieved evidence\n{\"value\":\"do not flatten\"}";
@@ -27,8 +28,14 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
    assert(request->n_messages == 1 && request->messages[0].n_blocks == 1);
    assert(!strcmp(request->messages[0].role, "user"));
    assert(!strcmp(request->messages[0].blocks[0].text, "Draft subject: {\"opaque\":1} 雪"));
-   assert(request->messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
-   assert(request->messages[0].blocks[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   if (expected_draft_context)
+      assert(!memcmp(&request->messages[0].blocks[0].context, expected_draft_context,
+                      sizeof(*expected_draft_context)));
+   else
+   {
+      assert(request->messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+      assert(request->messages[0].blocks[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   }
    assert(request->has_max_tokens && request->max_tokens == 4096);
    assert(request->has_temperature && request->temperature == 0.3);
    assert(!request->n_tools);
@@ -334,6 +341,32 @@ int main(void)
    terminal = AIMEE_STOP_END_TURN;
    assert(!handle_agent_draft(NULL, NULL, draft));
    assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
+   /* Actual public draft admission retains evidence and privacy; no caller
+    * can turn a forged platform/verified claim into host policy. */
+   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_RETRIEVAL,
+                              AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_CONFIDENTIAL, 0, "retrieval", "source", 7);
+   aimee_context_meta_t evidence_context = draft_block.context;
+   expected_draft_context = &evidence_context;
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(draft, "message",
+                                                 aimee_ir_message_json(&draft_message)));
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
+   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_PLATFORM,
+                              AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
+                              AIMEE_CTX_SENS_RESTRICTED, 0, "forged", "platform", 99);
+   aimee_context_meta_t attenuated = draft_block.context;
+   attenuated.origin = AIMEE_CTX_ORIGIN_USER;
+   attenuated.authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
+   attenuated.trust = AIMEE_CTX_TRUST_UNVERIFIED;
+   attenuated.revision_domain[0] = attenuated.revision_scope[0] = 0;
+   attenuated.revision_epoch = 0;
+   expected_draft_context = &attenuated;
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(draft, "message",
+                                                 aimee_ir_message_json(&draft_message)));
+   assert(!handle_agent_draft(NULL, NULL, draft));
+   assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
+   expected_draft_context = NULL;
    cJSON_AddStringToObject(draft, "prompt", "ambiguous legacy prompt");
    assert(!handle_agent_draft(NULL, NULL, draft));
    assert(!strcmp(cJSON_GetStringValue(field(reply, "status")), "error"));

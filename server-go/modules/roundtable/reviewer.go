@@ -3,6 +3,7 @@ package roundtable
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	canonical "github.com/JBailes/aimee/server-go/ir"
@@ -77,15 +78,34 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 		stage = "frozen_diff"
 	}
 	original := strings.TrimSpace(request.OriginalRequest)
-	if original == "" {
-		original = "Review the supplied artifact for correctness, completeness, security, and test quality."
+	source := request.Request
+	if source != nil && (!source.Valid() || original != "") {
+		return panel.RunResult{}, panel.ValidationError{Message: "roundtable request must be valid canonical IR without original_request alias"}
 	}
+	if source == nil {
+		if original == "" {
+			original = "Review the supplied artifact for correctness, completeness, security, and test quality."
+		}
+		source = canonical.TaskRequest("", original) // explicit legacy text ingress/domain artifact origin
+	}
+
 	// A caller-supplied run id is the review's identity and is preserved. Without
 	// one, derive it from the request and artifact so an identical review is
 	// identifiable rather than arbitrary.
 	id := strings.TrimSpace(request.RunID)
 	if id == "" {
-		sum := sha256.Sum256([]byte(original + "\x00" + request.Artifact))
+		identity, encodeErr := json.Marshal(struct {
+			Request                            *canonical.Request
+			Brief                              json.RawMessage
+			Artifact, Stage, Focus, Roundtable string
+			Lenses                             []string
+			Pins                               map[string]string
+		}{source, request.Brief, request.Artifact, stage, request.Focus, request.Roundtable, request.Lenses, request.Pins})
+		if encodeErr != nil {
+			return panel.RunResult{}, encodeErr
+		}
+		sum := sha256.Sum256(identity)
+
 		id = fmt.Sprintf("roundtable-%x", sum[:12])
 	}
 
@@ -98,6 +118,8 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	}
 
 	run := panel.Run{
+		Request:          source,
+		Brief:            request.Brief,
 		ExecutionScope:   request.ExecutionScope,
 		ID:               id,
 		Stage:            request.Stage,
@@ -105,7 +127,6 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 		ReplayOnly:       request.ReplayOnly,
 		CostLimitUSD:     request.CostLimitUSD,
 		Workdir:          request.Workdir,
-		OriginalRequest:  original,
 		Reviewed: panel.Artifact{
 			Stage:   stage,
 			Content: request.Artifact,

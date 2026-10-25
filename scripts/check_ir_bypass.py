@@ -22,6 +22,9 @@ RETIRED = (
     "plugin_chook_apply_pre_llm",
     "platform_delegate_run_background", "platform_trace_run_task",
     "cron_build_job_prompt", "cron_run_llm_prompt",
+    "roadmap_milestone_review_prompt", "roadmap_reassess_build_prompt",
+    "roadmap_decompose_build_prompt",
+    "roundtable_chair_build_prompt",
     "agent_tools_dispatch_owned",
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
@@ -165,6 +168,11 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "public-context-reset": re.compile(
+        r'\bmemset\s*\(\s*&[^,;\n]*\.context\s*,\s*0\s*,|'
+        r'\.context\s*=\s*\(\s*aimee_context_meta_t\s*\)\s*\{\s*0\s*\}'),
+    "first-party-text-message": re.compile(
+        r'\bcJSON_AddStringToObject\s*\([^,]+,\s*"(?:message|prompt|system_prompt|original_request)"\s*,'),
     "native-control-reparse": re.compile(r"\b(?:anthropic_backend_parse|anthropic_frontend_parse|anthropic_stream_to_deltas)\s*\("),
     "native-control-history": re.compile(r"\b(?:message|delta|harness_output_decode)\s*\("),
     "acp-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
@@ -297,6 +305,13 @@ def findings(root: Path) -> list[dict]:
             "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
             if relative == "src/modules/translation/harness_ir.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "public-context-reset" and relative not in {
+                    "src/posix/server_compute.c", "src/server/server_agent.c"}:
+                continue
+            if rule == "first-party-text-message" and relative not in {
+                    "src/cli_chat_stream.c", "src/cli_v1_routes.c",
+                    "src/cli_v1_routes_e.c", "src/gateway/gateway_ctx.c"}:
+                continue
             if rule == "untyped-exec-context" and (
                     not relative.endswith(".c") or relative == "src/server/agent_runtime.c"):
                 continue

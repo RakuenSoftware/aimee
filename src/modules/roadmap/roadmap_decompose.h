@@ -26,12 +26,13 @@ extern "C"
    typedef int (*roadmap_model_fn)(const aimee_request_t *request, aimee_response_t *response,
                                    void *ud);
 
-   /* Build the decomposition prompt for a goal. prior_err (may be NULL/empty)
+   /* Build the owned canonical decomposition request for a goal. prior_err (may be NULL/empty)
     * is the validation failure from the previous attempt, fed back so the
-    * model can correct. Returns a heap string in *out (caller frees), 0 on
+    * model can correct. Free out with aimee_request_free. Returns 0 on
     * success / -1 on error. */
-   int roadmap_decompose_build_prompt(const char *goal, const char *planning_depth,
-                                      const char *token_profile, const char *prior_err, char **out);
+   int roadmap_decompose_build_request(const char *goal, const char *planning_depth,
+                                       const char *token_profile, const char *prior_err,
+                                       aimee_request_t *out);
 
    /* Extract the first balanced top-level JSON object ({...}) from arbitrary
     * model text, tolerating prose and ```json fences before/after. Brace

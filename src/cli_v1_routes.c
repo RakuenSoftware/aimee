@@ -7,6 +7,7 @@
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
 #include "cli_client.h"
+#include "cli_ir.h"
 #define V1_PROTOCOL_VERSION 1
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
@@ -1683,40 +1684,6 @@ static char *marshal_read_prompt_stdin(void)
    return marshal_read_stdin_limited(2u * 1024u * 1024u);
 }
 
-static char *client_strdup(const char *s)
-{
-   if (!s)
-      s = "";
-   size_t len = strlen(s);
-   char *copy = malloc(len + 1);
-   if (!copy)
-      return NULL;
-   memcpy(copy, s, len + 1);
-   return copy;
-}
-
-static char *marshal_compose_delegate_prompt(const char *cli_prompt, const char *file_prompt)
-{
-   if (file_prompt && file_prompt[0])
-   {
-      if (cli_prompt && cli_prompt[0])
-      {
-         size_t cap = strlen(cli_prompt) + strlen(file_prompt) + 32;
-         char *combined = malloc(cap);
-         if (!combined)
-            return NULL;
-         snprintf(combined, cap, "%s\n\n# Prompt File\n%s", cli_prompt, file_prompt);
-         return combined;
-      }
-      return client_strdup(file_prompt);
-   }
-
-   if (cli_prompt && cli_prompt[0])
-      return client_strdup(cli_prompt);
-
-   return NULL;
-}
-
 /* Append one file's contents to the preload block, bounded by `cap`.
  * Emits a "--- File: <path> ---" header (or a "(not found)" marker) so the
  * delegate can attribute the snippet. Reads relative to the operator's cwd,
@@ -1970,8 +1937,11 @@ cJSON *marshal_delegate_aggregate(int argc, char **argv)
    cli_args_t opts;
    cli_args_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("delegate.aggregate");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   if (opts.pos_count > 0 && cli_ir_add_request(req, opts.positional[0], NULL, NULL, NULL, 0))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
    return req;
 }
 
@@ -2022,6 +1992,18 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
             return NULL;
          }
       }
+      else
+      {
+         /* The historical positional form supplies the artifact itself. Keep
+          * those bytes as domain data rather than reusing them as task text. */
+         artifact_positional = 1;
+         artifact_text = strdup(opts.positional[0]);
+         if (!artifact_text)
+         {
+            cJSON_Delete(req);
+            return NULL;
+         }
+      }
    }
    if ((artifact_stdin || artifact_path) && !artifact_text)
    {
@@ -2031,42 +2013,24 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
    if (artifact_text)
       cJSON_AddStringToObject(req, "artifact", artifact_text);
 
-   /* Fold --context-file / --files / --context-dir / --context preloads into the
-    * prompt, mirroring marshal_delegate() so both paths ship identical payloads. */
    int prompt_index = artifact_positional ? 1 : 0;
-   char *prompt = (opts.pos_count > prompt_index && opts.positional[prompt_index])
-                      ? strdup(opts.positional[prompt_index])
-                      : NULL;
-   char *preload = marshal_build_preload_context(&opts);
-   if (preload)
-   {
-      const char *base = (prompt && prompt[0]) ? prompt : "";
-      size_t cap = strlen(base) + strlen(preload) + 64;
-      char *combined = malloc(cap);
-      if (combined)
-      {
-         snprintf(combined, cap, "%s%s# Source Packet: Preloaded Context\n%s", base,
-                  base[0] ? "\n\n" : "", preload);
-         free(prompt);
-         prompt = combined;
-      }
-      free(preload);
-   }
-   if (prompt && prompt[0])
-   {
-      if (artifact_text)
-         cJSON_AddStringToObject(req, "original_request", prompt);
-      else
-         cJSON_AddStringToObject(req, "prompt", prompt);
-   }
-   free(prompt);
-   free(artifact_text);
+   const char *prompt = opts.pos_count > prompt_index ? opts.positional[prompt_index] : NULL;
    const char *original_request = cli_args_get(&opts, "original-request");
    if (original_request)
-   {
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "original_request");
-      cJSON_AddStringToObject(req, "original_request", original_request);
-   }
+      prompt = original_request;
+   if (artifact_text && (!prompt || !prompt[0]))
+      prompt = "Review the supplied artifact for correctness, completeness, security, and test quality.";
+   char *preload = marshal_build_preload_context(&opts);
+   if ((prompt && prompt[0]) || (preload && preload[0]))
+      if (cli_ir_add_request(req, prompt, NULL, preload, NULL, 0))
+      {
+         free(preload);
+         free(artifact_text);
+         cJSON_Delete(req);
+         return NULL;
+      }
+   free(preload);
+   free(artifact_text);
    const char *mode = cli_args_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
@@ -2178,34 +2142,21 @@ cJSON *marshal_delegate(int argc, char **argv)
       file_prompt = marshal_read_prompt_stdin();
    else
       file_prompt = marshal_read_prompt_file(cli_args_get(&opts, "prompt-file"));
-   char *delegate_prompt = marshal_compose_delegate_prompt(cli_prompt, file_prompt);
-
-   /* Fold any --context-file / --files / --context-dir / --context preloads
-    * into the prompt. These are advertised flags that the server delegate
-    * handler does not interpret, so they must be resolved client-side (where
-    * the operator's cwd anchors relative paths) and shipped in the prompt. */
    char *preload = marshal_build_preload_context(&opts);
-   if (preload)
+   const char *policy = cli_args_get(&opts, "system");
+   int max_tokens = cli_args_get_int(&opts, "max-tokens", 0);
+   if (((cli_prompt && cli_prompt[0]) || (file_prompt && file_prompt[0]) ||
+        (preload && preload[0])) &&
+       cli_ir_add_request(req, cli_prompt, file_prompt, preload, policy, max_tokens))
    {
-      const char *base = (delegate_prompt && delegate_prompt[0]) ? delegate_prompt : "";
-      size_t cap = strlen(base) + strlen(preload) + 64;
-      char *combined = malloc(cap);
-      if (combined)
-      {
-         snprintf(combined, cap, "%s%s# Source Packet: Preloaded Context\n%s", base,
-                  base[0] ? "\n\n" : "", preload);
-         free(delegate_prompt);
-         delegate_prompt = combined;
-      }
+      free(file_prompt);
       free(preload);
+      cJSON_Delete(req);
+      return NULL;
    }
-
-   if (delegate_prompt && delegate_prompt[0])
-      cJSON_AddStringToObject(req, "prompt", delegate_prompt);
+   free(preload);
 
    const char *v;
-   if ((v = cli_args_get(&opts, "system")))
-      cJSON_AddStringToObject(req, "system_prompt", v);
    if ((v = resolve_delegate_session_env()) && v[0])
       cJSON_AddStringToObject(req, "session_id", v);
    /* Propagate chain context only as a pair. A leaked depth without a parent
@@ -2239,9 +2190,7 @@ cJSON *marshal_delegate(int argc, char **argv)
       cJSON_AddFalseToObject(req, "handoff_json");
    else if (cli_args_get(&opts, "handoff-json"))
       cJSON_AddTrueToObject(req, "handoff_json");
-   int mt = cli_args_get_int(&opts, "max-tokens", 0);
-   if (mt > 0)
-      cJSON_AddNumberToObject(req, "max_tokens", mt);
+
    if ((v = cli_args_get(&opts, "max-turns")))
       cJSON_AddNumberToObject(req, "max_turns", atoi(v));
    int timeout = cli_args_get_int(&opts, "timeout", 0);
@@ -2283,7 +2232,7 @@ cJSON *marshal_delegate(int argc, char **argv)
       if (getcwd(cwd_buf, sizeof(cwd_buf)))
          cJSON_AddStringToObject(req, "cwd", cwd_buf);
    }
-   free(delegate_prompt);
+
    free(file_prompt);
    return req;
 }

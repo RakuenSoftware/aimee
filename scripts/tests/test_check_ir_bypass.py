@@ -28,6 +28,39 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_first_party_transports_cannot_emit_text_messages(self):
+        for relative in ("src/cli_chat_stream.c", "src/cli_v1_routes.c",
+                         "src/cli_v1_routes_e.c", "src/gateway/gateway_ctx.c"):
+            for field in ("message", "prompt", "system_prompt", "original_request"):
+                path = self.source(relative, f'cJSON_AddStringToObject(req, "{field}", text);')
+                with self.subTest(relative=relative, field=field), self.assertRaisesRegex(
+                        ValueError, "first-party-text-message"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_roadmap_model_builders_cannot_return_plain_prompts(self):
+        for name in ("roadmap_milestone_review_prompt", "roadmap_reassess_build_prompt",
+                     "roadmap_decompose_build_prompt"):
+            path = self.source("src/modules/roadmap/reintroduced.c", f'char *{name}(void);')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+
+    def test_public_admission_cannot_erase_context_before_classifying(self):
+        for relative in ("src/posix/server_compute.c", "src/server/server_agent.c"):
+            for code in ('memset(&input.blocks[i].context, 0, sizeof(input.blocks[i].context));',
+                         'message->blocks[0].context = (aimee_context_meta_t){0};'):
+                path = self.source(relative, code)
+                with self.subTest(relative=relative, code=code), self.assertRaisesRegex(
+                        ValueError, "public-context-reset"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_canonical_message_and_external_error_text_are_allowed(self):
+        self.source("src/cli_chat_stream.c", 'cJSON_AddItemToObject(req, "message", canonical);')
+        self.source("src/cli_mcp_serve.c", 'cJSON_AddStringToObject(error, "message", text);')
+        checker.check(self.root)
+
     def test_unmanaged_child_env_exporters_stay_retired(self):
         for name in ("delegate_child_export_context_env", "agent_source_authority_export_env"):
             for relative in ("src/server/legacy_child_env.c", "src/headers/legacy_child_env.h"):

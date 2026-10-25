@@ -17,6 +17,7 @@
 #include "aimee_home.h"
 #include "cli_client.h"
 #include "cli_chat_stream.h"
+#include "cli_ir.h"
 #include <cJSON.h>
 #include <unistd.h>
 
@@ -149,7 +150,13 @@ static char *rpc_chat_send_stream(const char *aimee_sid, const char *message)
       return NULL;
    cJSON *req = cJSON_CreateObject();
    /* No "method" — the POST /v1/chat/stream route maps to chat.send_stream. */
-   cJSON_AddStringToObject(req, "message", message);
+   cJSON *canonical = cli_ir_user_message(message, NULL, NULL);
+   if (!canonical || !cJSON_AddItemToObject(req, "message", canonical))
+   {
+      cJSON_Delete(canonical);
+      cJSON_Delete(req);
+      return NULL;
+   }
    cJSON_AddStringToObject(req, "aimee_session_id", aimee_sid);
    cJSON_AddStringToObject(req, "cwd", "/");
    char *reply = cli_chat_request_stream(endpoint, NULL, req, 120000, NULL, NULL, NULL);

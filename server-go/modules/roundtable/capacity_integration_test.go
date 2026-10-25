@@ -3,6 +3,7 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,8 +107,8 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 		go func(i int) {
 			defer wg.Done()
 			run := panel.Run{ExecutionScope: strings.Repeat("a", 64), ID: "live-capacity-" + string(rune('a'+i)),
-				OriginalRequest: "review the implementation under overlapping delegate load",
-				Reviewed:        panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
+				Request:  canonical.TaskRequest("", "review the implementation under overlapping delegate load"),
+				Reviewed: panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
 			result, err := panel.Convene(t.Context(), delegates, run, reviewPanel, "")
 			results <- result
 			errs <- err

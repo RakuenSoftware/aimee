@@ -523,6 +523,7 @@ set(KB_STORE_HOST_ADAPTER_SRCS
 set(IR_BASE_SRCS
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/session_event.c
+    ${AIMEE_SRC_DIR}/modules/ir/request_codec.c
     ${AIMEE_SRC_DIR}/modules/ir/response_codec.c
 )
 set(HOOK_IR_SRCS
@@ -908,6 +909,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_delegate_input.c
     ${AIMEE_SRC_DIR}/server/server_chat_ir.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c

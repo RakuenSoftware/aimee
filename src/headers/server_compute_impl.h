@@ -49,6 +49,9 @@ typedef struct compute_ctx
    struct workspace_turn_mirror_lease *source_mirror;
    cJSON *req;               /* owned by this context */
    aimee_message_t ir_input; /* Owned canonical user input for this admitted turn. */
+   aimee_request_t
+       delegate_request; /* Owned canonical source, including policy/history/controls. */
+   char *delegate_task;  /* Read-only routing/job display view; never used to rebuild input. */
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
    /* Set only after the canonical compaction owner commits its checkpoint. */
    int ir_history_checkpointed;

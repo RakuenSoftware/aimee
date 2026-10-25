@@ -144,29 +144,46 @@ static void append_file(dstr_t *s, const char *root, const char *rel, size_t bud
    dstr_appendf(s, "## %s\n```\n%s\n```\n", rel, buf);
 }
 
-/* Build the proposer prompt for one area (its file slice). */
-static char *build_area_prompt(const char *root, const char (*paths)[MAX_PATH_LEN], const int *area,
-                               int n, int area_id)
+/* Build the canonical proposer request for one area (its file slice). */
+static int build_area_request(const char *root, const char (*paths)[MAX_PATH_LEN], const int *area,
+                              int n, int area_id, aimee_request_t *out)
 {
    dstr_t s;
    dstr_init(&s);
-   dstr_appendf(&s,
-                "You are scanning one area of a C codebase for DUPLICATION-ACROSS-CALL-SITES: "
-                "a helper/logic repeated at many call sites that should become one deep module. "
-                "Name the ORIGINAL seam (existing file + top-level symbol), not a new module. "
-                "Return ONLY JSON: {\"candidates\":[{\"seam_file\":\"<existing file>\","
-                "\"seam_symbol\":\"<existing top-level decl>\",\"claimed_callers\":<int>,"
-                "\"rationale\":\"<one line>\"}]}. The engine VERIFIES every candidate against the "
-                "code index (you do not run anything); name only seams you can point to. Empty "
-                "candidates is fine. No prose, no fences.\n\nAREA FILES:\n");
+   static const char policy_text[] =
+       "You are scanning one area of a C codebase for DUPLICATION-ACROSS-CALL-SITES: "
+       "a helper/logic repeated at many call sites that should become one deep module. "
+       "Name the ORIGINAL seam (existing file + top-level symbol), not a new module. "
+       "Return ONLY JSON: {\"candidates\":[{\"seam_file\":\"<existing file>\","
+       "\"seam_symbol\":\"<existing top-level decl>\",\"claimed_callers\":<int>,"
+       "\"rationale\":\"<one line>\"}]}. The engine VERIFIES every candidate against the "
+       "code index (you do not run anything); name only seams you can point to. Empty "
+       "candidates is fine. No prose, no fences.\n\n";
+   dstr_append_str(&s, "AREA FILES:\n");
    for (int i = 0; i < n; i++)
    {
       if (area[i] != area_id)
          continue;
-      size_t used = dstr_len(&s);
+      size_t used = strlen(policy_text) + dstr_len(&s);
       append_file(&s, root, paths[i], used < SWEEP_PROMPT_CAP ? SWEEP_PROMPT_CAP - used : 0);
    }
-   return dstr_steal(&s);
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)policy_text};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT, .text = (char *)dstr_cstr(&s)};
+   aimee_ir_block_set_context(&policy, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   aimee_ir_block_set_context(&evidence, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = 1,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.2};
+   int rc = aimee_ir_request_clone(&request, out);
+   dstr_free(&s);
+   return rc;
 }
 
 /* Filing context: when do_file, STRONG candidates are filed as work items on the
@@ -437,17 +454,13 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    for (int a = 0; a < area_count; a++)
    {
-      char *prompt = build_area_prompt(root, (const char(*)[MAX_PATH_LEN])cc.paths, area, cc.n, a);
-      if (!prompt)
+      aimee_request_t request = {0};
+      if (build_area_request(root, (const char(*)[MAX_PATH_LEN])cc.paths, area, cc.n, a, &request))
          continue;
       agent_result_t r = {0};
       memset(&r, 0, sizeof(r));
-      aimee_request_t request = {0};
-      int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.2);
-      int prc = request_rc ? AGENT_RC_CONTEXT_REFUSED
-                           : agent_run_named(&acfg, proposer, "review", &request, &r);
+      int prc = agent_run_named(&acfg, proposer, "review", &request, &r);
       aimee_request_free(&request);
-      free(prompt);
       areas_run++;
       char *authored = prc ? NULL : agent_result_take_text(&r);
       if (!authored)

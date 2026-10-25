@@ -1149,7 +1149,7 @@ void chat_stream_worker(void *arg)
    if (!compact)
    {
       for (int i = 0; i < cctx->ir_input.n_blocks; i++)
-         memset(&cctx->ir_input.blocks[i].context, 0, sizeof(cctx->ir_input.blocks[i].context));
+         aimee_ir_block_attenuate_public(&cctx->ir_input.blocks[i], 0);
       aimee_request_t input = {.messages = &cctx->ir_input, .n_messages = 1};
       aimee_ir_classify_context(&input);
    }

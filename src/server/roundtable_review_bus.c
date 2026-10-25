@@ -52,24 +52,46 @@ static char *build_review_body(const cJSON *request, const char *resolved_panel,
    const cJSON *requested_run_id = cJSON_GetObjectItemCaseSensitive(request, "run_id");
    const cJSON *transport_run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
    const cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
+   const cJSON *canonical = cJSON_GetObjectItemCaseSensitive(request, "request");
    const cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
 
    const char *artifact_text = cJSON_IsString(artifact)
                                    ? artifact->valuestring
                                    : (cJSON_IsString(prompt) ? prompt->valuestring : NULL);
-   if (!artifact_text)
+   if (!artifact_text && !cJSON_IsObject(canonical))
    {
       cJSON_Delete(payload);
       return NULL;
    }
-   cJSON_AddStringToObject(payload, "artifact", artifact_text);
+   if (artifact_text)
+      cJSON_AddStringToObject(payload, "artifact", artifact_text);
+   if (canonical)
+   {
+      cJSON *copy = cJSON_Duplicate(canonical, 1);
+      if (!copy || !cJSON_AddItemToObject(payload, "request", copy))
+      {
+         cJSON_Delete(copy);
+         cJSON_Delete(payload);
+         return NULL;
+      }
+   }
    cJSON_AddStringToObject(payload, "artifact_stage",
                            cJSON_IsString(stage) ? stage->valuestring : "frozen_diff");
    if (cJSON_IsString(original))
       cJSON_AddStringToObject(payload, "original_request", original->valuestring);
-   else if (cJSON_IsString(brief))
+   if (canonical && brief)
+   {
+      cJSON *copy = cJSON_Duplicate(brief, 1);
+      if (!copy || !cJSON_AddItemToObject(payload, "brief", copy))
+      {
+         cJSON_Delete(copy);
+         cJSON_Delete(payload);
+         return NULL;
+      }
+   }
+   else if (!original && cJSON_IsString(brief))
       cJSON_AddStringToObject(payload, "original_request", brief->valuestring);
-   else if (cJSON_IsObject(brief))
+   else if (!original && cJSON_IsObject(brief))
    {
       char *text = cJSON_PrintUnformatted(brief);
       if (text)

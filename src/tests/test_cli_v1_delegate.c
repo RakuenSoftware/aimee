@@ -25,6 +25,82 @@
 #include "../cli_v1_routes_f.c"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
+static const cJSON *test_ir_text(const cJSON *envelope, int authority)
+{
+   assert(!cJSON_GetObjectItemCaseSensitive(envelope, "prompt") &&
+          !cJSON_GetObjectItemCaseSensitive(envelope, "original_request") &&
+          !cJSON_GetObjectItemCaseSensitive(envelope, "system_prompt"));
+   const cJSON *json = cJSON_GetObjectItemCaseSensitive(envelope, "request");
+   aimee_request_t parsed = {0};
+   assert(json && !aimee_ir_request_parse(json, &parsed));
+   aimee_request_free(&parsed);
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(json, "messages");
+   const cJSON *blocks =
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "blocks");
+   const cJSON *block;
+   cJSON_ArrayForEach(block, blocks)
+   {
+      const cJSON *context = cJSON_GetObjectItemCaseSensitive(block, "context");
+      if (cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(context, "authority")) == authority)
+         return cJSON_GetObjectItemCaseSensitive(block, "text");
+   }
+   return NULL;
+}
+static const cJSON *test_ir_task(const cJSON *envelope)
+{
+   return test_ir_text(envelope, AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+}
+static const cJSON *test_ir_evidence(const cJSON *envelope)
+{
+   return test_ir_text(envelope, AIMEE_CTX_AUTH_EVIDENCE);
+}
+
+static void test_first_party_cli_request_custody(void)
+{
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee_cli_task_XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   const char *file_task = "exact file task\n  preserve whitespace 雪\n";
+   assert(write(fd, file_task, strlen(file_task)) == (ssize_t)strlen(file_task));
+   close(fd);
+   char *args[] = {"review",   "authored argv task", "--prompt-file", path,  "--context-file", path,
+                   "--system", "operator policy",    "--max-tokens",  "321", "--no-tools"};
+   cJSON *envelope = marshal_delegate(11, args);
+   assert(envelope && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(envelope, "tools")));
+   assert(!cJSON_GetObjectItemCaseSensitive(envelope, "max_tokens"));
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_parse(cJSON_GetObjectItemCaseSensitive(envelope, "request"), &request));
+   assert(request.n_messages == 1 && request.messages[0].n_blocks == 3 && request.n_system == 1);
+   assert(!strcmp(request.messages[0].blocks[0].text, "authored argv task") &&
+          !strcmp(request.messages[0].blocks[1].text, file_task));
+   assert(request.messages[0].blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
+          request.messages[0].blocks[1].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
+          request.messages[0].blocks[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          request.messages[0].blocks[2].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(strstr(request.messages[0].blocks[2].text, file_task) &&
+          !strstr(request.messages[0].blocks[0].text, file_task));
+   assert(!strcmp(request.system[0].text, "operator policy") &&
+          request.system[0].context.origin == AIMEE_CTX_ORIGIN_OPERATOR &&
+          request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(request.has_max_tokens && request.max_tokens == 321);
+   aimee_request_free(&request);
+   cJSON_Delete(envelope);
+   char *aggregate[] = {"compare the completed jobs"};
+   envelope = marshal_delegate_aggregate(1, aggregate);
+   assert(!strcmp(test_ir_task(envelope)->valuestring, aggregate[0]));
+   cJSON_Delete(envelope);
+   cJSON *message = cli_ir_user_message("chat origin 雪", NULL, NULL);
+   aimee_message_t chat = {0};
+   assert(message && !aimee_ir_message_parse(message, &chat));
+   assert(chat.n_blocks == 1 && !strcmp(chat.role, "user") &&
+          !strcmp(chat.blocks[0].text, "chat origin 雪") &&
+          chat.blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   aimee_message_free(&chat);
+   cJSON_Delete(message);
+   unlink(path);
+}
+
 static void test_delegate_max_turns_marshaled(void)
 {
    char *argv[] = {"review",
@@ -38,8 +114,7 @@ static void test_delegate_max_turns_marshaled(void)
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "role")->valuestring, "review") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "inspect this bounded diff") ==
-          0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect this bounded diff") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "tools")));
    assert(cJSON_GetObjectItem(req, "max_turns")->valueint == 40);
    assert(cJSON_GetObjectItem(req, "output") == NULL);
@@ -322,8 +397,8 @@ static void test_delegate_tools_named_toolset_marshaled(void)
    cJSON *req = marshal_delegate(4, argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "role")->valuestring, "execute") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
-                 "inspect this repository with read-only tools") == 0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect this repository with read-only tools") ==
+          0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "tools")));
    assert(strcmp(cJSON_GetObjectItem(req, "toolset")->valuestring, "readonly") == 0);
    cJSON_Delete(req);
@@ -332,8 +407,8 @@ static void test_delegate_tools_named_toolset_marshaled(void)
                       "inspect this repository with read-only tools"};
    req = marshal_delegate(3, eq_argv);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
-                 "inspect this repository with read-only tools") == 0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect this repository with read-only tools") ==
+          0);
    assert(strcmp(cJSON_GetObjectItem(req, "toolset")->valuestring, "readonly") == 0);
    cJSON_Delete(req);
 
@@ -360,8 +435,7 @@ static void test_delegate_provider_model_marshaled(void)
    assert(strcmp(cJSON_GetObjectItem(req, "role")->valuestring, "code") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "provider")->valuestring, "mistral") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "model")->valuestring, "codestral-latest") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "inspect this bounded diff") ==
-          0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect this bounded diff") == 0);
    cJSON_Delete(req);
    printf("  PASS: test_delegate_provider_model_marshaled\n");
 }
@@ -373,8 +447,7 @@ static void test_delegate_persona_marshaled(void)
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "role")->valuestring, "code") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "persona")->valuestring, "security") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "inspect this bounded diff") ==
-          0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect this bounded diff") == 0);
    cJSON_Delete(req);
 
    /* No --persona: the field is omitted (the server enforces the requirement). */
@@ -405,8 +478,9 @@ static void test_delegate_roundtable_brief_marshaled(void)
    cJSON *req = marshal_roundtable_review(14, argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "roundtable.review") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring,
                  "review this change thoroughly") == 0);
+   assert(strstr(test_ir_task(req)->valuestring, "Review the supplied artifact") != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "mode")->valuestring, "review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "roundtable")->valuestring, "deep-review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "turns")->valuestring, "parallel") == 0);
@@ -440,56 +514,36 @@ static void test_delegate_roundtable_invalid_brief_json_exits(void)
    printf("  PASS: test_delegate_roundtable_invalid_brief_json_exits\n");
 }
 
-/* Regression guard: the roundtable marshaller must fold --context-file preloads
- * into the prompt as well. It previously dropped them, so the panel received no
- * context and stalled looping for it. Mirrors
- * test_delegate_context_file_folded_into_prompt for the roundtable path. */
+/* Preloaded context is evidence, separate from the authored request/artifact. */
 static void test_delegate_roundtable_context_file_folded_into_prompt(void)
 {
    char path[256];
-   snprintf(path, sizeof path, "%s/aimee_rt_ctx_test_XXXXXX", platform_tmpdir());
+   snprintf(path, sizeof path, "%s/aimee_cli_ir_XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
-   const char *marker = "ROUNDTABLE_PRELOAD_MARKER_77 review_block_body";
+   const char *marker = "UNTRUSTED_PRELOAD_MUST_STAY_EVIDENCE";
    assert(write(fd, marker, strlen(marker)) == (ssize_t)strlen(marker));
    close(fd);
-
-   char *argv[] = {"critique the block above", "--context-file", path};
-   cJSON *req = marshal_roundtable_review(3, argv);
-   assert(req != NULL);
-   const cJSON *prompt = cJSON_GetObjectItem(req, "prompt");
-   assert(cJSON_IsString(prompt));
-   /* Original prompt text preserved... */
-   assert(strstr(prompt->valuestring, "critique the block above") != NULL);
-   /* ...and the file contents are injected. */
-   assert(strstr(prompt->valuestring, "ROUNDTABLE_PRELOAD_MARKER_77") != NULL);
-   assert(strstr(prompt->valuestring, "Source Packet: Preloaded Context") != NULL);
-   assert(strstr(prompt->valuestring, path) != NULL);
-   cJSON_Delete(req);
-
-   /* Preload-only invocation (no positional prompt): the preload still becomes
-    * the prompt. Exercises the base == "" branch. */
-   char *argv_only[] = {"--context-file", path};
-   cJSON *req_only = marshal_roundtable_review(2, argv_only);
-   assert(req_only != NULL);
-   const cJSON *p_only = cJSON_GetObjectItem(req_only, "prompt");
-   assert(cJSON_IsString(p_only));
-   /* With no positional prompt, the preload IS the prompt: no leading blank lines. */
-   assert(strncmp(p_only->valuestring, "# Source Packet: Preloaded Context", 34) == 0);
-   assert(strstr(p_only->valuestring, "ROUNDTABLE_PRELOAD_MARKER_77") != NULL);
-   cJSON_Delete(req_only);
-
-   /* No preload flags => prompt is unchanged (no spurious Source Packet). */
-   char *argv2[] = {"a plain roundtable prompt with no preload flags"};
-   cJSON *req2 = marshal_roundtable_review(1, argv2);
-   assert(req2 != NULL);
-   const cJSON *p2 = cJSON_GetObjectItem(req2, "prompt");
-   assert(cJSON_IsString(p2));
-   assert(strcmp(p2->valuestring, "a plain roundtable prompt with no preload flags") == 0);
-   cJSON_Delete(req2);
-
+   char *args[] = {"--original-request", "exact authored task", "--context-file", path};
+   cJSON *request = marshal_roundtable_review(4, args);
+   char *only[] = {"--context-file", path};
+   cJSON *evidence_only = marshal_roundtable_review(2, only);
+   char *plain[] = {"plain authored task"};
+   cJSON *no_evidence = marshal_roundtable_review(1, plain);
+   assert(request && evidence_only && no_evidence);
+   assert(!strcmp(test_ir_task(request)->valuestring, "exact authored task"));
+   assert(strstr(test_ir_evidence(request)->valuestring, marker) &&
+          strstr(test_ir_evidence(request)->valuestring, path));
+   assert(!test_ir_task(evidence_only) &&
+          strstr(test_ir_evidence(evidence_only)->valuestring, marker));
+   assert(!strcmp(cJSON_GetObjectItem(no_evidence, "artifact")->valuestring,
+                  "plain authored task"));
+   assert(strstr(test_ir_task(no_evidence)->valuestring, "Review the supplied artifact") &&
+          !test_ir_evidence(no_evidence));
+   cJSON_Delete(request);
+   cJSON_Delete(evidence_only);
+   cJSON_Delete(no_evidence);
    unlink(path);
-   printf("  PASS: test_delegate_roundtable_context_file_folded_into_prompt\n");
 }
 
 static cJSON *marshal_roundtable_with_stdin(int argc, char **argv, const char *input)
@@ -545,8 +599,7 @@ static void test_roundtable_stdin_is_authoritative_artifact(void)
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring,
                  "diff --git a/PR1828 b/PR1828\n+marker\n") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
-                 "Review PR #1828 only") == 0);
+   assert(strcmp(test_ir_task(req)->valuestring, "Review PR #1828 only") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "run_id")->valuestring, "review-pr-1828") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "artifact_stage")->valuestring, "frozen_diff") == 0);
    assert(cJSON_GetObjectItem(req, "prompt") == NULL);
@@ -567,8 +620,7 @@ static void test_roundtable_path_is_read_not_forwarded(void)
    cJSON *req = marshal_roundtable_review(2, argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring, artifact) == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
-                 "Implement the original request") == 0);
+   assert(strcmp(test_ir_task(req)->valuestring, "Implement the original request") == 0);
    assert(strstr(cJSON_GetObjectItem(req, "artifact")->valuestring, path) == NULL);
    cJSON_Delete(req);
    unlink(path);
@@ -601,15 +653,13 @@ static void test_delegate_prompt_stdin_marshaled(void)
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "role")->valuestring, "review") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "inspect `git diff` literally") ==
-          0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect `git diff` literally") == 0);
    cJSON_Delete(req);
 
    char *tools_argv[] = {"execute", "--tools", "readonly", "--prompt-stdin"};
    req = marshal_delegate_with_stdin(4, tools_argv, "inspect `git diff` literally");
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "inspect `git diff` literally") ==
-          0);
+   assert(strcmp(test_ir_task(req)->valuestring, "inspect `git diff` literally") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "toolset")->valuestring, "readonly") == 0);
    cJSON_Delete(req);
    printf("  PASS: test_delegate_prompt_stdin_marshaled\n");
@@ -1737,8 +1787,10 @@ static void test_aux_test_marshaled(void)
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "aux.test") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "task")->valuestring, "title") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring, "summarize this") == 0);
-   assert(cJSON_GetObjectItem(req, "max_tokens")->valueint == 128);
+   assert(strcmp(test_ir_task(req)->valuestring, "summarize this") == 0);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(req, "request"), "max_tokens")->valueint == 128);
+   cJSON *temperature = cJSON_GetObjectItem(cJSON_GetObjectItem(req, "request"), "temperature");
+   assert(cJSON_IsNumber(temperature) && temperature->valuedouble == 0.0);
    cJSON_Delete(req);
    printf("  PASS: test_aux_test_marshaled\n");
 }
@@ -2006,56 +2058,32 @@ static void test_client_endpoint_selection(void)
 static void test_delegate_context_file_folded_into_prompt(void)
 {
    char path[256];
-   snprintf(path, sizeof path, "%s/aimee_ctx_test_XXXXXX", platform_tmpdir());
+   snprintf(path, sizeof path, "%s/aimee_cli_ir_XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
-   const char *marker = "UNIQUE_PRELOAD_MARKER_42 token_normalize_xyz";
+   const char *marker = "UNTRUSTED_PRELOAD_MUST_STAY_EVIDENCE";
    assert(write(fd, marker, strlen(marker)) == (ssize_t)strlen(marker));
    close(fd);
-
-   char *argv[] = {"code", "--context-file", path, "implement the change described above"};
-   cJSON *req = marshal_delegate(4, argv);
-   assert(req != NULL);
-   const cJSON *prompt = cJSON_GetObjectItem(req, "prompt");
-   assert(cJSON_IsString(prompt));
-   /* Original prompt text preserved... */
-   assert(strstr(prompt->valuestring, "implement the change described above") != NULL);
-   /* ...and the file contents are injected. */
-   assert(strstr(prompt->valuestring, "UNIQUE_PRELOAD_MARKER_42") != NULL);
-   assert(strstr(prompt->valuestring, "Source Packet: Preloaded Context") != NULL);
-   assert(strstr(prompt->valuestring, path) != NULL);
-   cJSON_Delete(req);
-
-   /* --files (comma-separated) is the same mechanism. */
-   char files_flag[256];
-   snprintf(files_flag, sizeof(files_flag), "%s", path);
-   char *argv2[] = {"code", "--files", files_flag, "do the work using the preloaded files"};
-   cJSON *req2 = marshal_delegate(4, argv2);
-   assert(req2 != NULL);
-   const cJSON *p2 = cJSON_GetObjectItem(req2, "prompt");
-   assert(cJSON_IsString(p2));
-   assert(strstr(p2->valuestring, "UNIQUE_PRELOAD_MARKER_42") != NULL);
-   cJSON_Delete(req2);
-
-   /* No preload flags => prompt is unchanged (no spurious Source Packet). */
-   char *argv3[] = {"code", "a plain prompt with no preload flags at all"};
-   cJSON *req3 = marshal_delegate(2, argv3);
-   assert(req3 != NULL);
-   const cJSON *p3 = cJSON_GetObjectItem(req3, "prompt");
-   assert(cJSON_IsString(p3));
-   assert(strstr(p3->valuestring, "Source Packet: Preloaded Context") == NULL);
-   cJSON_Delete(req3);
-
+   char *args[] = {"review", "exact authored task", "--context-file", path};
+   cJSON *request = marshal_delegate(4, args);
+   char *only[] = {"review", "--context-file", path};
+   cJSON *evidence_only = marshal_delegate(3, only);
+   char *plain[] = {"review", "plain authored task"};
+   cJSON *no_evidence = marshal_delegate(2, plain);
+   assert(request && evidence_only && no_evidence);
+   assert(!strcmp(test_ir_task(request)->valuestring, "exact authored task"));
+   assert(strstr(test_ir_evidence(request)->valuestring, marker) &&
+          strstr(test_ir_evidence(request)->valuestring, path));
+   assert(!test_ir_task(evidence_only) &&
+          strstr(test_ir_evidence(evidence_only)->valuestring, marker));
+   assert(!strcmp(test_ir_task(no_evidence)->valuestring, "plain authored task") &&
+          !test_ir_evidence(no_evidence));
+   cJSON_Delete(request);
+   cJSON_Delete(evidence_only);
+   cJSON_Delete(no_evidence);
    unlink(path);
-   printf("  PASS: test_delegate_context_file_folded_into_prompt\n");
 }
 
-/* --verify and --scope govern SPEND (escalation) and what a seat may attempt
- * (scope), and are honoured only by the in-process delegate path. The marshaller
- * forwards a fixed allowlist and drops the rest, so routing a run with either
- * flag used to return a normal, successful-looking result while the verifier
- * never ran. Refusing the run is the only honest answer until they are plumbed
- * end to end - so pin that it EXITS rather than quietly marshaling. */
 static int marshal_delegate_exit_status(char **argv, int argc)
 {
    pid_t pid = fork();
@@ -2356,7 +2384,11 @@ static void test_git_explicit_repo_alias(void)
  * without deadlocking a pipe before the marshaller starts reading it. */
 static cJSON *model_generate_stdin(const void *bytes, size_t length, int argc, char **argv)
 {
-   FILE *file = tmpfile();
+   char path[512];
+   snprintf(path, sizeof path, "%s/aimee_cli_frame_XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0 && unlink(path) == 0);
+   FILE *file = fdopen(fd, "w+b");
    assert(file);
    assert(fwrite(bytes, 1, length, file) == length);
    assert(!fflush(file) && !fseek(file, 0, SEEK_SET));
@@ -2419,6 +2451,7 @@ static void test_model_generate_canonical_frame(void)
 
 int main(void)
 {
+   test_first_party_cli_request_custody();
    test_model_generate_canonical_frame();
    test_git_explicit_repo_alias();
    test_cli_v1_body_cap_matches_server();

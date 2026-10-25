@@ -10,6 +10,8 @@ package panel
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 type ValidationError struct{ Message string }
@@ -46,9 +48,12 @@ func Hash(content []byte) string {
 }
 
 type ReviewRequest struct {
-	ExecutionScope  string `json:"execution_scope,omitempty"`
-	Artifact        string `json:"artifact"`
-	OriginalRequest string `json:"original_request"`
+	Brief          json.RawMessage    `json:"brief,omitempty"`
+	Request        *canonical.Request `json:"request,omitempty"`
+	ExecutionScope string             `json:"execution_scope,omitempty"`
+	Artifact       string             `json:"artifact"`
+	// External legacy ingress only; internal callers carry Request.
+	OriginalRequest string `json:"original_request,omitempty"`
 	ArtifactStage   string `json:"artifact_stage"`
 	Roundtable      string `json:"roundtable"`
 	Workdir         string `json:"workdir"`

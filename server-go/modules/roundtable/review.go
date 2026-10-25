@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -57,8 +58,23 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		var decoded panel.ReviewRequest
+		if !canonical.ValidJSON(request) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 		if err := json.Unmarshal(request, &decoded); err != nil {
 			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(request, &fields); err != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if raw, present := fields["request"]; present {
+			input, err := canonical.DecodeRequest(raw)
+			if err != nil || decoded.OriginalRequest != "" {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			attenuateReviewRequest(input)
+			decoded.Request = input
 		}
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled

@@ -10,7 +10,8 @@ import (
 )
 
 func TestDiscussionPromptUsesJSONIdentityEscaping(t *testing.T) {
-	prompt := buildDiscussionPrompt("run\x01\"\\", "hash\x02", 1, nil, nil)
+	procedure, data := buildDiscussionParts("run\x01\"\\", "hash\x02", 1, nil, nil)
+	prompt := procedure + "\n" + data
 	if strings.Contains(prompt, `\x01`) || strings.Contains(prompt, `\x02`) {
 		t.Fatalf("discussion identity used Go quoting instead of JSON escaping: %q", prompt)
 	}

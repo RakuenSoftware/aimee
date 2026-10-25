@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_compute_internal.h"
+#include "server_delegate_input.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "db1_client/db1.h"
@@ -377,6 +378,8 @@ void compute_ctx_free(compute_ctx_t *cctx)
 {
    server_chat_ir_close(cctx);
    aimee_message_free(&cctx->ir_input);
+   aimee_request_free(&cctx->delegate_request);
+   free(cctx->delegate_task);
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)
@@ -709,59 +712,29 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
 }
 
 /* The internal worker requires IR. Only the external launch ingress may import
- * the legacy CLI/tool text field, before that request enters the queue. */
+ * the legacy public text field, before that request enters the queue. */
 static int delegate_input_admit(compute_ctx_t *cctx, int external_text)
 {
-   cJSON *input = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
-   cJSON *text = cJSON_GetObjectItemCaseSensitive(cctx->req, "prompt");
-   if (!input && external_text && cJSON_IsString(text))
-   {
-      aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = text->valuestring};
-      aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
-      input = aimee_ir_message_json(&message);
-      if (!input || !cJSON_AddItemToObject(cctx->req, "message", input))
-      {
-         cJSON_Delete(input);
-         return -1;
-      }
-      cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "prompt");
-      text = NULL;
-   }
-   if (!input || text || (!cctx->ir_input.role && aimee_ir_message_parse(input, &cctx->ir_input)))
-      return -1;
-   const aimee_message_t *message = &cctx->ir_input;
-   if (!message->role || strcmp(message->role, "user") || message->n_blocks != 1 ||
-       message->blocks[0].type != AIMEE_BLK_TEXT || !message->blocks[0].text ||
-       message->blocks[0].raw || message->blocks[0].cache_control || message->blocks[0].cache_ttl)
+   if (cctx->delegate_task)
+      return 0;
+   if (server_delegate_input_parse(cctx->req, external_text, &cctx->delegate_request,
+                                   &cctx->delegate_task))
       return -1;
    if (external_text)
+      server_delegate_input_attenuate(&cctx->delegate_request);
+   /* Queue the canonical source once; workers never re-import a text alias. */
+   cJSON *source = aimee_ir_request_json(&cctx->delegate_request);
+   if (!source)
+      return -1;
+   cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "request");
+   if (!cJSON_AddItemToObject(cctx->req, "request", source))
    {
-      /* Public ingress may lower authority, never erase privacy or evidence.
-       * Worker admission below this boundary preserves its queued IR exactly. */
-      aimee_context_meta_t *context = &cctx->ir_input.blocks[0].context;
-      int attenuate = context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
-                      context->origin == AIMEE_CTX_ORIGIN_OPERATOR ||
-                      context->authority == AIMEE_CTX_AUTH_POLICY ||
-                      context->trust > AIMEE_CTX_TRUST_UNVERIFIED;
-      if (context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
-          context->origin == AIMEE_CTX_ORIGIN_OPERATOR)
-         context->origin = AIMEE_CTX_ORIGIN_USER;
-      if (context->authority == AIMEE_CTX_AUTH_POLICY)
-         context->authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
-      if (context->trust > AIMEE_CTX_TRUST_UNVERIFIED)
-         context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
-      if (attenuate)
-      {
-         context->revision_domain[0] = context->revision_scope[0] = 0;
-         context->revision_epoch = 0;
-         cJSON *queued = aimee_ir_message_json(&cctx->ir_input);
-         if (!queued || !cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "message", queued))
-         {
-            cJSON_Delete(queued);
-            return -1;
-         }
-      }
+      cJSON_Delete(source);
+      return -1;
    }
+   cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "prompt");
+   cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "message");
+   cJSON_DeleteItemFromObjectCaseSensitive(cctx->req, "system_prompt");
    return 0;
 }
 
@@ -821,7 +794,6 @@ static void delegate_worker_run(void *arg)
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
    cJSON *jmaxcost = cJSON_GetObjectItemCaseSensitive(req, "max_cost_usd");
-   cJSON *jsystem = cJSON_GetObjectItemCaseSensitive(req, "system_prompt");
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "delegation_id");
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
@@ -846,13 +818,20 @@ static void delegate_worker_run(void *arg)
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    if (delegate_input_admit(cctx, 0))
    {
-      delegation_compute_error(cctx, "delegate task requires a canonical user text message");
+      delegation_compute_error(cctx,
+                               "delegate task requires a canonical request with user task text");
       goto delegate_fail;
    }
-   const char *prompt = cctx->ir_input.blocks[0].text;
-   int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
+   const char *prompt = cctx->delegate_task;
+   int max_tokens =
+       cJSON_IsNumber(jmax)
+           ? (int)jmax->valuedouble
+           : (cctx->delegate_request.has_max_tokens ? cctx->delegate_request.max_tokens : 0);
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
-   const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
+   /* A source policy replaces the role template, just as --system_prompt did.
+    * Its blocks stay canonical; only generated persona policy is assembled here. */
+   const char *system_prompt =
+       server_delegate_input_has_policy(&cctx->delegate_request) ? "" : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *branch =
@@ -1141,9 +1120,9 @@ static void delegate_worker_run(void *arg)
       }
       /* Both learning arms operate on the same qualified pool. Premium means
        * demonstrated task competence, never the most expensive configured tier. */
-      acfg.route_input_tokens =
-          (int)((strlen(prompt ? prompt : "") + strlen(system_prompt ? system_prompt : "") + 3) /
-                4);
+      acfg.route_input_tokens = (int)((delegate_request_text_bytes(&cctx->delegate_request) +
+                                       strlen(system_prompt ? system_prompt : "") + 3) /
+                                      4);
       acfg.route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]) &&
@@ -1405,7 +1384,8 @@ static void delegate_worker_run(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   if (aimee_ir_request_from_message(&request, system_prompt, &cctx->ir_input, max_tokens, 0.3) ||
+   if (server_delegate_request_prepare(&cctx->delegate_request, system_prompt, max_tokens,
+                                       &request) ||
        (!delegate_shared_worktree &&
         delegate_request_map_root(&request, cwd, delegate_worktree_path)) ||
        delegate_request_add_context(&request, resolved_prompt, AIMEE_CTX_ORIGIN_RETRIEVAL,
@@ -2227,13 +2207,13 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    {
       compute_ctx_free(cctx);
       if (err)
-         snprintf(err, errn, "delegate task requires a canonical user text message");
+         snprintf(err, errn, "delegate task requires a canonical request with user task text");
       return -1;
    }
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    const char *requested_role = cJSON_IsString(jrole) ? jrole->valuestring : "execute";
    const char *role = delegate_role_canonicalize(requested_role);
-   const char *prompt = cctx->ir_input.blocks[0].text;
+   const char *prompt = cctx->delegate_task;
 
    /* Canonicalization fails CLOSED: with no delegates module registered it
       answers "" for every role, by design. That empty string used to travel on
@@ -2257,14 +2237,14 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 
    /* Cheap, request-only pre-flight validation (the persona check lives in the
     * MCP layer and the worker). */
-   if (!prompt[0])
+   size_t prompt_length = server_delegate_input_task_size(&cctx->delegate_request);
+   if (!prompt_length)
    {
       compute_ctx_free(cctx);
       if (err)
          snprintf(err, errn, "missing prompt");
       return -1;
    }
-   size_t prompt_length = strlen(prompt);
    if (prompt_length < 20)
    {
       if (err)
@@ -2429,17 +2409,19 @@ static int prepare_roundtable_panel(cJSON *req, ensemble_panel_t *panel, agent_c
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   if (!prompt || !prompt[0])
-      return server_send_error(conn, "missing prompt", NULL);
-   /* The ensemble prompt is the task; the same minimum-length guard as an
-    * ordinary delegate applies, but it must name the ensemble. */
-   if (strlen(prompt) < 20)
+   aimee_request_t input = {0};
+   char *prompt = NULL;
+   if (server_delegate_input_parse(req, 1, &input, &prompt))
+      return server_send_error(conn, "missing canonical ensemble task", NULL);
+   server_delegate_input_attenuate(&input);
+   size_t prompt_length = server_delegate_input_task_size(&input);
+   free(prompt);
+   if (prompt_length < 20)
    {
       char errmsg[80];
       snprintf(errmsg, sizeof(errmsg), "ensemble prompt too short (%zu chars, min 20)",
-               strlen(prompt));
+               prompt_length);
+      aimee_request_free(&input);
       return server_send_error(conn, errmsg, NULL);
    }
 
@@ -2448,17 +2430,20 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
+   {
+      aimee_request_free(&input);
       return server_send_error(conn, "could not load agents.json", NULL);
+   }
    char pin_err[256] = "no enabled review agent is currently available";
    if (prepare_roundtable_panel(req, &panel, &acfg, pin_err, sizeof pin_err) != 0)
+   {
+      aimee_request_free(&input);
       return server_send_error(conn, pin_err, NULL);
+   }
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   aimee_request_t input = {0};
-   int rc = aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3)
-                ? AGENT_RC_CONTEXT_REFUSED
-                : delegate_ensemble_run(&acfg, &panel, &input, &result);
+   int rc = delegate_ensemble_run(&acfg, &panel, &input, &result);
    aimee_request_free(&input);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",

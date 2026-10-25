@@ -133,6 +133,14 @@ static void *serve(void *unused)
       assert(cJSON_GetObjectItem(request, "ir_version")->valuedouble == 1);
       assert(cJSON_IsFalse(cJSON_GetObjectItem(request, "control_replies")));
    }
+#if !defined(CLI_IR_PREDECESSOR_PROBE) && !defined(CLI_IR_GATEWAY_PREDECESSOR_PROBE)
+   aimee_message_t input = {0};
+   assert(!aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(request, "message"), &input));
+   assert(!strcmp(input.role, "user") && input.n_blocks == 1 &&
+          !strcmp(input.blocks[0].text, "hello") &&
+          input.blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   aimee_message_free(&input);
+#endif
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "aimee_session_id")), sid));
    cJSON_Delete(request);
    char header[256];
@@ -207,7 +215,7 @@ static char *run(int wrapper)
    {
       snprintf(endpoint, sizeof endpoint, "unix:%s", socket_path);
       cJSON *r = cJSON_CreateObject();
-      cJSON_AddStringToObject(r, "message", "hello");
+      cJSON_AddItemToObject(r, "message", cli_ir_user_message("hello", NULL, NULL));
       cJSON_AddStringToObject(r, "aimee_session_id", sid);
       cJSON_AddNumberToObject(r, "ir_version", 0);
       cJSON_AddBoolToObject(r, "control_replies", 1);

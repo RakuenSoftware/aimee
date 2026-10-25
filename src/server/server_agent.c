@@ -271,7 +271,7 @@ int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "draft requires a non-trivial user text message", NULL);
    }
    /* Browser/public clients cannot assign trusted source authority. */
-   message->blocks[0].context = (aimee_context_meta_t){0};
+   aimee_ir_block_attenuate_public(&message->blocks[0], 0);
    cJSON *jm = cJSON_GetObjectItemCaseSensitive(req, "model");
    const char *model = (jm && cJSON_IsString(jm) && jm->valuestring[0]) ? jm->valuestring : NULL;
 

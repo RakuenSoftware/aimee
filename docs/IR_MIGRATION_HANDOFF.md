@@ -20,116 +20,94 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Current qualification
+## Qualification checkpoint before the first-party origin build
 
-The goal is active. The earlier whole-task blocked classification was premature:
-independent validation and exact request inspection remained possible. A live
-scoped debugger interception now captured the exact cold provider body before
-transport, without headers or credentials; all nine intercepted SDK attempts
-were denied transport, then the scoped SDK was interrupted and the debugger
-detached. Service health, zero active native reservations and unchanged prior
-history were verified. The private body is 48,771 bytes; its safe structural
-receipt is `/var/tmp/aimee-ir-c0-live-wire-probe-v2/body-structure.json`.
+This checkpoint records work before its deployment, rather than a live runtime
+status. Inspect the source revision and completion evidence in
+`/var/tmp/aimee-ir-browser-final-recovery/summary.json` for later qualification.
+At this checkpoint the goal is active and incomplete. The whole-task blocked classification was
+premature: a provider refusal of one cold saved-history continuation did not
+prevent request inspection, implementation or independent browser validation.
+Do not stop the migration or classify it blocked on that refusal alone.
 
-Production codec comparison proves its historical nine- and thirteen-message
-prefixes match stored canonical history after the normal tool-to-Anthropic-user
-conversion. There is no hidden reasoning, mismatched tool pair or reconstructed
-task. The actual body does contain three historical empty assistant envelopes.
-A correction now omits those unsupported native envelopes only at Anthropic
-egress, preserving canonical history and emitting `omitted_empty_messages` in
-the existing canonical projection receipt. Native raw-byte and overlay shortcuts
-cannot resurrect omitted envelopes; a rejected required receipt prevents HTTP
-transport. Current-turn/prefill behavior is unchanged. Focused normal/sanitizer,
-Go race and frontend checks pass. Combined-source image and runtime qualification
-for this correction remain pending; c0 evidence below is historical to it.
+Installed retained browser: `https://192.168.0.67:8447`, source
+`ab1059c6fa075e7bf8b7e19242327d7f2357a556`, image
+`sha256:800537854a3f42bfd35206eeaf5d0f860037b16a119278583f6d3d51df2a962a`.
+All 87 products and 19 modules match that build. Upgrade preserves prior IR,
+credentials, grants, channels, jobs and SDK state. The retained browser session
+`web-7db8c5ba-fa58-4363-af71-0494b086f05f` completed a follow-up recalling the
+README word count (`2`), used no tools and reloaded the same session successfully.
+Receipt: `/var/tmp/aimee-ir-parallel-ab1059c6f-retained-upgrade-ui/result.json`.
 
-A separate exact-final-source clean installation is being prepared on the owned
-VM with fresh isolated identity, credentials, database and volumes, verified free
-ports and monitored capacity. Existing retained projects remain intact. Both
-pinned vendor SDK packages will be staged as hash-verified external artifacts
-before first entrypoint startup so normal prewarming requires no downloads.
-This is planned qualification, not an executed clean-boot claim. No KB or learning
-workflow is introduced.
+That build corrects unsupported historical empty assistant envelopes only at
+Anthropic egress, with the canonical `omitted_empty_messages` projection receipt.
+Exact private pre-transport comparison proves three envelopes removed and every
+other message and request field unchanged; canonical stored history is unchanged.
+Raw-byte and overlay restoration cannot reintroduce them. Thirty C targets pass
+normal and ASAN/UBSAN; Go IR race, frontend and architecture checks pass. The old
+ORBIT cold continuation still receives a typed `content_filter` /
+`reasoning_extraction` refusal. Preserve this failed case; do not silently change
+models or weaken source/cache/credential fences to label it successful. The
+initial refusal preceded empty envelopes, so they are not a demonstrated cause.
 
-The parallel source audit and repairs are complete and committed through runtime
-`c0c2f6eb25977ff2a208e78b1587a7c9a971c6ba`. That exact revision is installed at
-`https://192.168.0.67:8447`, image
-`sha256:0c751ecef5aa4941358ffd8461ca2c6b0c5768ff8df132cfc5262a784c58f21d`.
-All 87 products and 19 modules match the canonical source build. The retained
-upgrade preserves all 216 previous IR rows, jobs, channels, native cache,
-credentials, grants and SDK binaries; certificate renewal retains the same key.
+An isolated clean installation of that exact image is booted at
+`https://192.168.0.67:8451` with fresh identity, credentials, database and volumes.
+Initial IR, jobs, sessions and caches were empty; normal browser setup and a
+public Hello-World clone are complete. Only the public pinned vendor packages
+were staged; no identity or SDK cache was copied. Retained project seals remain
+exact. Fresh model/read and governed nested CLI checks are being run separately.
+No KB or learning workflow belongs to this task.
 
-A fresh browser session uses the configured primary without manual selection,
-executes the actual `read_file` and returns the README first line. Reload and a
-second turn recall that result without tools, retaining the same session.
-Manual ensemble execution against the real DB preserves four canonical
-contributions, literal Unicode/JSON-looking text, pause/resume, independent
-status reads and exact logical refusal outcomes, without model calls.
-All 29 combined C targets pass normal and ASAN/UBSAN builds. The 51-case IR guard,
-ownership, DB1 contract, line and generated-doc checks pass, alongside the earlier
-Go compile/race, frontend TypeScript and browser/channel/IR tests.
+A subsequent production-caller audit found real remaining internal text paths:
+Aimee's thin CLI and gateway were incorrectly treated as external message
+boundaries. Their chat producers now emit canonical Message, and delegate,
+aggregate, auxiliary and review producers emit the existing full Request at
+origin. Authored tasks, file task text, evidence, policy and controls remain typed.
+Actual UDS/HTTP and CLI tests pass normal and ASAN/UBSAN; thin CLI links without
+DB dependencies. Delegate admission and queued workers now retain full Request,
+with unconditional public authority attenuation and no capability-based bypass.
+MCP/Subagent adapters import external tool text at their own boundaries.
 
-The installed passive browser check replays closed permission and question
-histories exactly, including known-error/unknown-effect ordering, at 1280, 390
-and 320 pixels. Resolved controls have no reply actions; idle and reload issue
-no model send, control reply or cancel. There is no page error or overflow.
-An isolated installed channel preserves one authenticated canonical message,
-Unicode and literal JSON-looking text through send, GET, SSE and reload. Its
-uniquely tagged row remains for inspection; other channel metadata is unchanged.
-These checks use no model. Receipts:
-`/var/tmp/aimee-ir-current-passive-c0c2f6eb2-r3/proof.json` and
-`/var/tmp/aimee-ir-current-channel-c0c2f6eb2/proof.json`.
+The auxiliary consumer now retains the full Request, with deterministic legacy
+sampling set at the CLI producer. The public chat and draft handlers share the
+IR block attenuation primitive with delegate admission; blanket metadata resets
+were removed. Actual handler checks preserve hidden/restricted evidence even for
+privileged transports, and the provider wire excludes those private bodies.
+Roadmap, sweep and chair builders now originate typed Requests, preserving source
+history/controls and keeping generated instructions separate from retrieved or
+model-authored evidence. Their obsolete raw prompt builder contracts are removed.
 
-Ordinary restart and native recall now pass on the current revision. After the
-old imported OAuth expired, provider refresh returned HTTP 429 before launching
-the SDK. The fresh local Claude login was imported through the normal
-authenticated browser Vault API; no secret was logged. With that current
-credential, a new default session completes a real `read_file`. Restart then
-preserves all 278 existing IR rows, the complete native cache, credentials,
-grants and SDK binaries. The following browser turn recalls the README without
-tools, reloads the same session and is observed using `--resume` with the same
-registered native handle. Credential, grant, SDK, product and TLS state remains
-exact throughout that successful turn. Evidence is in
-`/var/tmp/aimee-ir-parallel-c0c2f6eb2-stable-resume-ui/resume-proof.json`.
+Review transport retains canonical Request, domain artifact and structured brief
+separately. The historical positional CLI artifact form retains its bytes as an
+artifact, with a separate review task; file/stdin task forms remain supported.
+Go panel participants, discussion and chair clone the source Request rather than
+reconstructing it from original_request. Only the public legacy importer retains
+that text alias; the internal Run requires canonical Request.
 
-Full runtime qualification remains incomplete. Cold continuation after profile
-or credential requalification receives Anthropic policy refusals. This affects
-the historical ORBIT conversation and the first new session after explicit
-credential rotation; a bounded documentation task is refused too. The SDK
-reports `reasoning_extraction` for the inspected historical refusal. That
-conversation has no thinking blocks. Do not describe the historical conversation
-as successfully resumed or claim its prior native handle was reused.
+Before deployment, 40 C targets pass normal and ASAN/UBSAN checks, alongside
+all 38 actual public ACP cases in each lane. Roundtable and engine Go normal/race
+checks pass, including the independent review's system-evidence revision fix.
+The thin CLI builds with CMake; ownership, inventory, API, documentation, line,
+generated-document and all-package Go compile checks pass. The IR architecture
+guard has 55 passing cases. Combined C receipts are recorded in
+`/var/tmp/aimee-ir-firstparty-combined-c-proof.json`.
 
-Read-only investigation verifies exact history/cache preservation across
-restart and normal separation of credential lineages. Rotation intentionally
-selects a cold native scope, with no stale-token fallback or old-handle reuse.
-No actionable source defect was found. Effective provider bodies are deliberately
-excluded from sensitive bus capture; private capture inspection cannot recover
-them. Preserve that protection and all provider/source/cache fences.
-Current-image evidence covers the retained upgrade and restart; clean-install
-qualification below remains historical.
+These subsequent changes are not yet installed. Combined-source verification,
+deployment and exact-final-source qualification remain required. Do not claim
+completion while those steps remain. The clean AB baseline has now completed two
+browser turns: one actual file read and one actual installed CLI read inside Bash.
+The nested read has an acknowledged governed-action receipt tied to the same turn
+and workspace, with trusted timestamps inside the canonical outer source/result.
+First use added five normal OAuth credential slots while retaining every prior
+encrypted Vault record exactly; phase two retained the resulting authority state.
+The isolated AB project is stopped with its volumes and identity preserved to
+make room for the final source build; the three retained projects remain healthy.
+Receipts: `/var/tmp/aimee-ir-clean-ab1059c6f-read-ui/qualified-supplement.json`
+and `/var/tmp/aimee-ir-clean-ab1059c6f-cli-ui/custody-proof.json`.
 
-The final blocked audit rechecks all 285 rows, native state, credentials, SDK
-binaries and products against the last qualification snapshot: unchanged, with
-zero SDK processes or active native reservations. Anthropic's current
-[error reference](https://code.claude.com/docs/en/errors#usage-policy-refusal)
-explains that these refusals evaluate the full conversation and can recur after
-resume. Its
-[Agent SDK subscription guidance](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
-permits subscription usage for the SDK and third-party apps; do not misdiagnose
-this as an unsupported login. No actionable source defect is established.
-Completion remains blocked on acceptance of cold saved-history requests. Do not
-delete preserved history, change source/cache fences, or silently substitute a
-different model to label the failed qualification successful.
-
-The final state has 285 IR rows, all 216 pre-upgrade rows unchanged. All nine
-services across the three retained projects are healthy; no SDK process or
-native reservation remains active. The explicit credential replacement above
-means credential constancy must not be claimed across the entire continuation
-audit. The proof pointer deliberately retains `completion:false`:
-`/var/tmp/aimee-ir-browser-final-recovery/summary.json`.
-Detailed receipts are under `/var/tmp/aimee-ir-parallel-c0c2f6eb2-*`.
-Historical success statements below apply only to their recorded revisions.
+Older receipt paths and success statements below apply only to their recorded
+revisions. `/var/tmp/aimee-ir-browser-final-recovery/summary.json` is a historical
+c0 receipt with `completion:false`, not a final-source completion claim.
 
 ## Parallel audit coverage
 

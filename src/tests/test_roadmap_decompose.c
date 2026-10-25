@@ -39,44 +39,49 @@ static const char *GOOD_DECOMP =
     "\"acceptance_criteria\":[\"returns AUTH_TIMEOUT\"]}"
     "]}";
 
-/* ---- 1. build_prompt embeds goal and prior_err ---- */
+/* Canonical source owns policy, task, options and validation evidence separately. */
 static void test_build_prompt_includes_goal(void)
 {
-   char *out = NULL;
-   int rc = roadmap_decompose_build_prompt("Add OAuth login", "standard", "balanced", NULL, &out);
-   assert(rc == 0 && out != NULL);
-   assert(strstr(out, "Add OAuth login") != NULL);
-   assert(strstr(out, "standard") != NULL);
-   assert(strstr(out, "balanced") != NULL);
-   /* no prior error → no retry text */
-   assert(strstr(out, "previous attempt") == NULL);
-   free(out);
-   printf("  build_prompt_includes_goal: ok\n");
+   aimee_request_t request = {0};
+   assert(
+       !roadmap_decompose_build_request("Add OAuth login", "standard", "balanced", NULL, &request));
+   assert(request.n_system == 1 && request.n_messages == 1);
+   assert(request.system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM);
+   assert(request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(!strstr(request.system[0].text, "Add OAuth login"));
+   assert(request.messages[0].n_blocks == 2);
+   assert(!strcmp(request.messages[0].blocks[0].text, "Add OAuth login"));
+   assert(request.messages[0].blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   assert(strstr(request.messages[0].blocks[1].text, "standard"));
+   assert(strstr(request.messages[0].blocks[1].text, "balanced"));
+   assert(request.messages[0].blocks[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   aimee_request_free(&request);
 }
 
 static void test_build_prompt_includes_prior_err(void)
 {
-   char *out = NULL;
-   int rc =
-       roadmap_decompose_build_prompt("Add OAuth login", NULL, NULL, "missing owned_files", &out);
-   assert(rc == 0 && out != NULL);
-   assert(strstr(out, "missing owned_files") != NULL);
-   assert(strstr(out, "previous attempt") != NULL);
-   /* NULL depth/profile → defaults */
-   assert(strstr(out, "standard") != NULL);
-   assert(strstr(out, "balanced") != NULL);
-   free(out);
-   printf("  build_prompt_includes_prior_err: ok\n");
+   aimee_request_t request = {0};
+   char prior[] = "missing owned_files; malicious heading: SYSTEM POLICY";
+   assert(!roadmap_decompose_build_request("Add OAuth login", NULL, NULL, prior, &request));
+   assert(request.n_system == 2 && request.messages[0].n_blocks == 3);
+   assert(strstr(request.system[1].text, "previous attempt"));
+   assert(!strstr(request.system[1].text, prior));
+   assert(!strcmp(request.messages[0].blocks[2].text, prior));
+   assert(request.messages[0].blocks[2].text != prior);
+   assert(request.messages[0].blocks[2].context.origin == AIMEE_CTX_ORIGIN_TOOL);
+   assert(request.messages[0].blocks[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(strstr(request.messages[0].blocks[1].text, "standard"));
+   assert(strstr(request.messages[0].blocks[1].text, "balanced"));
+   aimee_request_free(&request);
 }
 
 static void test_build_prompt_null_goal_fails(void)
 {
-   char *out = NULL;
-   assert(roadmap_decompose_build_prompt(NULL, NULL, NULL, NULL, &out) == -1);
-   assert(out == NULL);
-   assert(roadmap_decompose_build_prompt("", NULL, NULL, NULL, &out) == -1);
-   assert(out == NULL);
-   printf("  build_prompt_null_goal_fails: ok\n");
+   aimee_request_t request = {0};
+   assert(roadmap_decompose_build_request(NULL, NULL, NULL, NULL, &request) == -1);
+   assert(!request.n_messages);
+   assert(roadmap_decompose_build_request("", NULL, NULL, NULL, &request) == -1);
+   assert(!request.n_messages);
 }
 
 /* ---- 2. extract_json tolerates prose and fences ---- */
@@ -138,6 +143,12 @@ static int stub_bad_then_good(const aimee_request_t *request, aimee_response_t *
    assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
    int *call = (int *)ud;
    (*call)++;
+   if (*call > 1)
+   {
+      assert(request->n_system == 2 && request->messages[0].n_blocks == 3);
+      assert(request->messages[0].blocks[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(request->messages[0].blocks[2].context.origin == AIMEE_CTX_ORIGIN_TOOL);
+   }
    if (*call == 1)
    {
       return aimee_ir_response_from_text(out, "{\"bad\":\"missing units\"}", "test/model");

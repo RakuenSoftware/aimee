@@ -1031,7 +1031,13 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON *dreq = cJSON_CreateObject();
          cJSON_AddStringToObject(dreq, "role", "execute");
          cJSON_AddStringToObject(dreq, "persona", "engineer");
-         cJSON_AddStringToObject(dreq, "prompt", prompt);
+         aimee_request_t input = {0};
+         cJSON *canonical = NULL;
+         if (!aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3))
+            canonical = aimee_ir_request_json(&input);
+         aimee_request_free(&input);
+         if (canonical)
+            cJSON_AddItemToObject(dreq, "request", canonical);
          if (sid && sid[0])
             cJSON_AddStringToObject(dreq, "session_id", sid);
          if (cwd && cwd[0])

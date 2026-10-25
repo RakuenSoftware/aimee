@@ -669,7 +669,7 @@ func chairmanApprovalFor(request DelegateRequest) string {
 }
 
 func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.Contains(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
@@ -680,7 +680,7 @@ func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest)
 }
 
 func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.Contains(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
 	}
 	if request.Persona == "chairman" {
@@ -697,7 +697,7 @@ func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateReque
 }
 
 func (deadlineDiscussionAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
-	if strings.HasPrefix(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
+	if strings.Contains(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
 		if strings.HasSuffix(request.DurableSlot, "seat:0") {
 			<-ctx.Done()
 			return DelegateResult{}, ctx.Err()
@@ -1201,7 +1201,10 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		}
 		requestMarker := "ORIGINAL REQUEST:\n" + proposal
 		if request.Role == "review" {
-			requestMarker = "BEGIN_ORIGINAL_REQUEST_DATA\n" + proposal + "\nEND_ORIGINAL_REQUEST_DATA"
+			requestMarker = proposal
+			if request.Input == nil || len(request.Input.Messages) < 2 || request.Input.Messages[0].Blocks[0].Text == nil || *request.Input.Messages[0].Blocks[0].Text != proposal {
+				t.Fatal("review did not retain original canonical source message")
+			}
 		}
 		if !strings.Contains(fixtureInputText(request.Input), requestMarker) || request.Role == "review" && !strings.Contains(fixtureInputText(request.Input), string(reviewed.Content)) {
 			t.Fatal("runner truncated a source artifact")

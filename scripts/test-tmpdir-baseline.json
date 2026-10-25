@@ -5,7 +5,6 @@
     "src/tests/test_agent.c": 4,
     "src/tests/test_agent_key_import.c": 1,
     "src/tests/test_agent_parallel.c": 2,
-    "src/tests/test_agent_responses.c": 1,
     "src/tests/test_aimee_tls_clientcert.c": 1,
     "src/tests/test_aimee_tls_pin.c": 1,
     "src/tests/test_anchor_snapshot.c": 3,
@@ -51,7 +50,6 @@
     "src/tests/test_kb_management_runtime.c": 5,
     "src/tests/test_kb_pki.c": 3,
     "src/tests/test_kb_rules_transport.c": 3,
-    "src/tests/test_learning_synth.c": 1,
     "src/tests/test_log.c": 1,
     "src/tests/test_lsp.c": 9,
     "src/tests/test_managed_server_identity.c": 1,
@@ -65,12 +63,11 @@
     "src/tests/test_role_templates.c": 1,
     "src/tests/test_script_runner.c": 4,
     "src/tests/test_server_dispatch.c": 8,
-    "src/tests/test_session_brief.c": 1,
     "src/tests/test_skill.c": 4,
     "src/tests/test_synthesis_mtls_client.c": 1,
     "src/tests/test_token_audit_load.c": 1,
     "src/tests/test_tool_validation.c": 6,
-    "src/tests/test_trigger.c": 11,
+    "src/tests/test_trigger.c": 1,
     "src/tests/test_vault_audit.c": 1,
     "src/tests/test_vault_bootstrap.c": 1,
     "src/tests/test_vault_capability.c": 1,
@@ -89,6 +86,6 @@
     "src/tests/test_workspace.c": 1,
     "src/tests/test_workspace_migration.c": 1,
     "src/tests/test_workspace_mirror.c": 3,
-    "src/tests/test_workspace_turn.c": 38
+    "src/tests/test_workspace_turn.c": 37
   }
 }

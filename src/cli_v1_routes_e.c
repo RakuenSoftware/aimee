@@ -9,6 +9,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "cli_ir.h"
 #include "platform_path.h"
 #include <aimee/workspace/identity.h>
 #include "cli_client.h"
@@ -1141,10 +1142,20 @@ cJSON *marshal_aux_test(int argc, char **argv)
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "task", opts.positional[0]);
-   if (opts.pos_count > 1)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[1]);
-   if (opts.pos_count > 2)
-      cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
+   if (opts.pos_count > 1 && cli_ir_add_request(req, opts.positional[1], NULL, NULL, NULL,
+                                                opts.pos_count > 2 ? atoi(opts.positional[2]) : 0))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   /* Preserve aux.test's established deterministic sampling at the producer;
+    * consumers retain canonical controls without supplying legacy defaults. */
+   cJSON *input = cJSON_GetObjectItemCaseSensitive(req, "request");
+   if (input && !cJSON_AddNumberToObject(input, "temperature", 0.0))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
    return req;
 }
 

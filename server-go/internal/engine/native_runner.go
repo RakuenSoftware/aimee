@@ -1482,10 +1482,14 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	// The saved panel is named, not resolved here: the module owns its preset
 	// store, and resolving a second time in the control plane is how the two
 	// sides previously ended up with different notions of the same panel.
+	reviewTask := req.Proposal
+	if strings.TrimSpace(reviewTask) == "" {
+		reviewTask = "Review the supplied artifact for correctness, completeness, security, and test quality."
+	}
 	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
 		ExecutionScope:   req.WorkItem.ExecutionScope,
 		Artifact:         string(reviewed.Content),
-		OriginalRequest:  req.Proposal,
+		Request:          canonical.TaskRequest("", reviewTask),
 		ArtifactStage:    reviewed.Type,
 		Roundtable:       paramString(req.Node, "roundtable", ""),
 		Workdir:          workdir,

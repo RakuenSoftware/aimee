@@ -64,8 +64,12 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 		// Repeated persona/agent specifications must not collide and reuse one
 		// remote result, so each capacity seat carries a distinct durable slot.
 		// An empty Selector is deliberate: generic delegation resolves eligibility.
+		input, err := reviewInput(run, seat.Persona, prompt)
+		if err != nil {
+			return Analysis{Unreachable: "canonical review input: " + err.Error()}
+		}
 		requests[i] = SeatRequest{Role: delegateRole, Persona: seat.Persona, Selector: seat.Selector,
-			Input: canonical.TaskRequest(seat.Persona, prompt), Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
+			Input: input, Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
 			DurableSlot:   seatDurableSlot(run, panelRound, seat.Ordinal),
 			ArtifactStage: artifactStage, ArtifactHash: artifactHash}
 	}

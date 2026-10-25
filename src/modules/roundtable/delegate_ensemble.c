@@ -534,7 +534,8 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
 {
    memset(out, 0, sizeof(*out));
    aimee_request_t request = {0};
-   if (ensemble_synthesis_request(source, synthesis_prompt, &request))
+   if (synthesis_prompt ? ensemble_synthesis_request(source, synthesis_prompt, &request)
+                        : aimee_ir_request_clone(source, &request))
       return AGENT_RC_CONTEXT_REFUSED;
 
    /* deadline_abs_ms (absolute CLOCK_MONOTONIC ms; 0 = UNBOUNDED) caps the FALLBACK
@@ -2268,13 +2269,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
           * back. */
          if (panel->chair_synthesis && panel->reference_count > 1)
          {
-            char *chair_prompt = roundtable_chair_build_prompt(out);
-            if (chair_prompt)
+            aimee_request_t chair_request = {0};
+            if (!roundtable_chair_build_request(out, task, &chair_request))
             {
                agent_result_t chair_res = {0};
                memset(&chair_res, 0, sizeof(chair_res));
                long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res, task) ==
+               if (run_aggregator(acfg, panel, NULL, chair_deadline, &chair_res, &chair_request) ==
                        0 &&
                    chair_res.response && chair_res.response[0])
                {
@@ -2283,7 +2284,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                }
                out->cost_usd += result_token_cost(acfg, &chair_res, panel->aggregator);
                agent_result_clear_response(&chair_res);
-               free(chair_prompt);
+               aimee_request_free(&chair_request);
             }
          }
          best_artifact = assemble_review_artifact(out);

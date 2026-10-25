@@ -2,6 +2,7 @@ package panel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -117,11 +118,19 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if !strings.Contains(fixtureInputText(repair.Input), "Preserve its analysis and findings") || !strings.Contains(fixtureInputText(repair.Input), "exactly one JSON object") {
 		t.Fatalf("repair prompt=%q", fixtureInputText(repair.Input))
 	}
-	if len(repair.Input.Messages) != 3 || repair.Input.Messages[1].Role != "assistant" ||
-		repair.Input.Messages[1].Blocks[0].Text == nil || *repair.Input.Messages[1].Blocks[0].Text != agents.invalid ||
-		repair.Input.Messages[0].Blocks[0].Text == nil || *repair.Input.Messages[0].Blocks[0].Text != "review" {
-		t.Fatalf("repair lost canonical task or complete assistant response: %+v", repair.Input.Messages)
+	original := agents.requests[0][0].Input
+	count := len(original.Messages)
+	if len(repair.Input.Messages) != count+2 || repair.Input.Messages[count].Role != "assistant" ||
+		repair.Input.Messages[count].Blocks[0].Text == nil || *repair.Input.Messages[count].Blocks[0].Text != agents.invalid ||
+		!strings.Contains(fixtureInputText(repair.Input), "review") {
+		t.Fatal("repair lost canonical task or complete assistant response")
 	}
+	before, _ := json.Marshal(original.Messages)
+	prefix, _ := json.Marshal(repair.Input.Messages[:count])
+	if string(before) != string(prefix) {
+		t.Fatal("repair rewrote canonical task history")
+	}
+
 }
 
 func TestPanelCapacityRoundsHaveDistinctDurableJobKeys(t *testing.T) {

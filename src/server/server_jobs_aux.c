@@ -1,6 +1,7 @@
 /* server/server_jobs_aux.c: RPC handlers for durable delegate jobs and aux routing. */
 #include "aimee.h"
 #include "aux_router.h"
+#include "server_delegate_input.h"
 #include <aimee/ir/session_event.h>
 #include "db1_client/db1.h"
 #include <aimee/delegates/delegate_role.h>
@@ -404,8 +405,9 @@ int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    cJSON *jtask = cJSON_GetObjectItemCaseSensitive(req, "task");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-   if (!cJSON_IsString(jtask) || !jtask->valuestring[0] || !cJSON_IsString(jprompt) ||
-       !jprompt->valuestring[0])
+   const cJSON *canonical = cJSON_GetObjectItemCaseSensitive(req, "request");
+   if (!cJSON_IsString(jtask) || !jtask->valuestring[0] ||
+       (!canonical && (!cJSON_IsString(jprompt) || !jprompt->valuestring[0])))
       return server_send_error(conn, "usage: aimee aux test <task> \"<prompt>\" [max_tokens]",
                                NULL);
 
@@ -424,12 +426,29 @@ int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    aimee_request_t input = {0};
    aimee_response_t result = {0};
-   int rc = aimee_ir_request_from_text(&input, NULL, jprompt->valuestring, max_tokens, 0.0);
+   char *summary = NULL;
+   int rc = server_delegate_input_parse(req, 1, &input, &summary);
+   free(summary);
    if (!rc)
+   {
+      /* Only legacy text imports receive the old default sampling controls.
+       * Canonical producers already own their complete inference request. */
+      if (!canonical)
+      {
+         input.has_temperature = 1;
+         input.temperature = 0.0;
+         input.has_max_tokens = max_tokens > 0;
+         input.max_tokens = max_tokens > 0 ? max_tokens : 0;
+      }
+      server_delegate_input_attenuate(&input);
       rc = aux_call(jtask->valuestring, &input, &result);
+   }
    aimee_request_free(&input);
    if (rc)
+   {
+      aimee_response_free(&result);
       return server_send_error(conn, "aux_call failed", NULL);
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "task", jtask->valuestring);

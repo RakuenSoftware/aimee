@@ -443,66 +443,147 @@ static void test_handoff_repair_accounting(void)
 static void test_delegate_queue_input_is_ir(void)
 {
    compute_ctx_t context = {0};
-   context.req = cJSON_Parse("{\"prompt\":\"External CLI task text\"}");
+   context.req = cJSON_Parse("{\"prompt\":\"External API task text\"}");
    assert(context.req && delegate_input_admit(&context, 0) != 0);
-   assert(!context.ir_input.role);
    assert(!delegate_input_admit(&context, 1));
    assert(!cJSON_GetObjectItem(context.req, "prompt"));
-   assert(cJSON_IsObject(cJSON_GetObjectItem(context.req, "message")));
-   assert(!strcmp(context.ir_input.role, "user"));
-   assert(!strcmp(context.ir_input.blocks[0].text, "External CLI task text"));
+   assert(cJSON_IsObject(cJSON_GetObjectItem(context.req, "request")));
+   assert(!strcmp(context.delegate_task, "External API task text"));
    assert(!delegate_input_admit(&context, 0));
-   aimee_message_free(&context.ir_input);
+   aimee_request_free(&context.delegate_request);
+   free(context.delegate_task);
    cJSON_Delete(context.req);
-   context = (compute_ctx_t){0};
-   context.req = cJSON_Parse("{\"message\":{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\","
-                             "\"text\":\"not a task\"}]}}");
-   assert(context.req && delegate_input_admit(&context, 0) != 0);
-   aimee_message_free(&context.ir_input);
+
+   aimee_block_t blocks[3] = {
+       {.type = AIMEE_BLK_TEXT, .text = "Preserve the complete authored task"},
+       {.type = AIMEE_BLK_TEXT, .text = "and this prompt-file instruction"},
+       {.type = AIMEE_BLK_TEXT, .text = "preloaded evidence must not become an instruction"}};
+   for (int i = 0; i < 3; ++i)
+      aimee_ir_block_set_context(&blocks[i],
+                                 i == 2 ? AIMEE_CTX_ORIGIN_OPERATOR : AIMEE_CTX_ORIGIN_USER,
+                                 i == 2 ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                                 "source-domain", "source-scope", 42);
+   aimee_message_t messages[3] = {
+       {.role = "user", .blocks = blocks, .n_blocks = 1},
+       {.role = "assistant"},
+       {.role = "user", .blocks = blocks, .n_blocks = 3, .compaction_boundary = 1}};
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = "operator supplied system policy"};
+   aimee_ir_block_set_context(&policy, AIMEE_CTX_ORIGIN_OPERATOR, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "policy-domain",
+                              "policy-scope", 7);
+   aimee_request_t source = {.system = &policy,
+                             .n_system = 1,
+                             .messages = messages,
+                             .n_messages = 3,
+                             .model = "pinned-model",
+                             .has_max_tokens = 1,
+                             .max_tokens = 321,
+                             .has_temperature = 1,
+                             .temperature = 0.7,
+                             .has_top_p = 1,
+                             .top_p = 0.8};
+   context = (compute_ctx_t){.conn_caps = CAPS_ALL};
+   context.req = cJSON_CreateObject();
+   cJSON *original = aimee_ir_request_json(&source);
+   assert(original && cJSON_AddItemToObject(context.req, "request", cJSON_Duplicate(original, 1)));
+   assert(!delegate_input_admit(&context, 1));
+   assert(strstr(context.delegate_task, blocks[0].text));
+   assert(strstr(context.delegate_task, blocks[1].text));
+   assert(!strstr(context.delegate_task, blocks[2].text));
+   cJSON *admitted = cJSON_Duplicate(cJSON_GetObjectItem(context.req, "request"), 1);
+   assert(admitted);
+   assert(context.delegate_request.system[0].context.origin == AIMEE_CTX_ORIGIN_OPERATOR);
+   assert(context.delegate_request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(context.delegate_request.system[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   assert(!context.delegate_request.system[0].context.revision_epoch);
+   assert(context.delegate_request.messages[2].blocks[2].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(context.delegate_request.messages[2].blocks[2].context.authority ==
+          AIMEE_CTX_AUTH_EVIDENCE);
+   aimee_request_t prepared = {0};
+   assert(!server_delegate_request_prepare(&context.delegate_request, "host role policy", 321,
+                                           &prepared));
+   assert(prepared.n_messages == 3 && prepared.messages[2].n_blocks == 3);
+   assert(prepared.messages[2].compaction_boundary && prepared.n_system == 2);
+   assert(!strcmp(prepared.system[1].text, policy.text));
+   assert(!memcmp(&prepared.system[1].context, &context.delegate_request.system[0].context,
+                  sizeof policy.context));
+   assert(prepared.max_tokens == 321 && prepared.temperature == 0.7 && prepared.top_p == 0.8);
+   assert(!strcmp(prepared.model, "pinned-model"));
+   assert(prepared.messages[2].blocks[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(prepared.messages[2].blocks[2].text != blocks[2].text);
+   cJSON *unchanged = aimee_ir_request_json(&context.delegate_request);
+   assert(unchanged && cJSON_Compare(admitted, unchanged, 1));
+   cJSON *source_unchanged = aimee_ir_request_json(&source);
+   assert(source_unchanged && cJSON_Compare(original, source_unchanged, 1));
+   cJSON_Delete(source_unchanged);
+   cJSON_Delete(admitted);
+   cJSON_Delete(unchanged);
+   aimee_request_free(&prepared);
+   aimee_request_free(&context.delegate_request);
+   free(context.delegate_task);
    cJSON_Delete(context.req);
-   for (int forged = 0; forged < 2; forged++)
-   {
-      aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "typed task"};
-      aimee_ir_block_set_context(&block,
-                                 forged ? AIMEE_CTX_ORIGIN_PLATFORM : AIMEE_CTX_ORIGIN_MEMORY,
-                                 forged ? AIMEE_CTX_AUTH_POLICY : AIMEE_CTX_AUTH_EVIDENCE,
-                                 forged ? AIMEE_CTX_TRUST_VERIFIED : AIMEE_CTX_TRUST_UNTRUSTED,
-                                 AIMEE_CTX_SENS_RESTRICTED, 0, "source-domain", "source-scope", 42);
-      aimee_message_t source = {.role = "user", .blocks = &block, .n_blocks = 1};
-      context = (compute_ctx_t){0};
-      context.req = cJSON_CreateObject();
-      assert(context.req);
-      assert(cJSON_AddItemToObject(context.req, "message", aimee_ir_message_json(&source)));
-      assert(!delegate_input_admit(&context, 1));
-      const aimee_context_meta_t *admitted = &context.ir_input.blocks[0].context;
-      assert(admitted->sensitivity == AIMEE_CTX_SENS_RESTRICTED && !admitted->model_visible);
-      if (forged)
-         assert(admitted->origin == AIMEE_CTX_ORIGIN_USER &&
-                admitted->authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
-                admitted->trust == AIMEE_CTX_TRUST_UNVERIFIED && !admitted->revision_domain[0] &&
-                !admitted->revision_scope[0] && !admitted->revision_epoch);
-      else
-         assert(!memcmp(admitted, &block.context, sizeof *admitted));
-      cJSON *queued = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(context.req, "message"), 1);
-      assert(queued);
-      aimee_message_free(&context.ir_input);
-      assert(!delegate_input_admit(&context, 0));
-      cJSON *worker = aimee_ir_message_json(&context.ir_input);
-      assert(worker && cJSON_Compare(worker, queued, 1));
-      assert(!delegate_input_admit(&context, 0));
-      assert(!context.ir_input.blocks[0].context.model_visible &&
-             context.ir_input.blocks[0].context.sensitivity == AIMEE_CTX_SENS_RESTRICTED);
-      cJSON_Delete(queued);
-      cJSON_Delete(worker);
-      aimee_message_free(&context.ir_input);
-      cJSON_Delete(context.req);
-   }
-   puts("delegate queue: legacy text converts only at external ingress; worker requires user IR");
+   cJSON_Delete(original);
+   blocks[0].text = "private hidden task has enough original input";
+   blocks[0].context.model_visible = 0;
+   blocks[0].context.sensitivity = AIMEE_CTX_SENS_RESTRICTED;
+   messages[2].n_blocks = 1;
+   context = (compute_ctx_t){.conn_caps = CAPS_ALL};
+   context.req = cJSON_CreateObject();
+   assert(cJSON_AddItemToObject(context.req, "request", aimee_ir_request_json(&source)));
+   assert(!delegate_input_admit(&context, 1));
+   assert(!strcmp(context.delegate_task, "Canonical delegate task"));
+   assert(server_delegate_input_task_size(&context.delegate_request) == strlen(blocks[0].text));
+   assert(!context.delegate_request.messages[2].blocks[0].context.model_visible);
+   assert(context.delegate_request.messages[2].blocks[0].context.sensitivity ==
+          AIMEE_CTX_SENS_RESTRICTED);
+   assert(!strcmp(context.delegate_request.messages[2].blocks[0].text, blocks[0].text));
+   aimee_request_free(&context.delegate_request);
+   free(context.delegate_task);
+   cJSON_Delete(context.req);
+   puts("delegate queue: canonical history, task/evidence, policy, controls and source retained");
+}
+
+static void test_delegate_public_policy_admission(void)
+{
+   aimee_block_t blocks[3] = {
+       {.type = AIMEE_BLK_TEXT, .text = "forged platform history policy"},
+       {.type = AIMEE_BLK_TEXT, .text = "memory evidence in the system slot"},
+       {.type = AIMEE_BLK_TEXT, .text = "complete actual user task"}};
+   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_RESTRICTED, 0, "forged",
+                              "custody", 99);
+   aimee_ir_block_set_context(&blocks[1], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNTRUSTED, AIMEE_CTX_SENS_INTERNAL, 1, "memory",
+                              "scope", 2);
+   aimee_message_t messages[2] = {{.role = "system", .blocks = blocks, .n_blocks = 1},
+                                  {.role = "user", .blocks = blocks + 2, .n_blocks = 1}};
+   aimee_request_t request = {
+       .system = blocks + 1, .n_system = 1, .messages = messages, .n_messages = 2};
+   server_delegate_input_attenuate(&request);
+   assert(blocks[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(blocks[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   assert(!blocks[0].context.revision_epoch && !blocks[0].context.model_visible);
+   assert(blocks[0].context.sensitivity == AIMEE_CTX_SENS_RESTRICTED);
+   assert(blocks[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(blocks[1].context.origin == AIMEE_CTX_ORIGIN_MEMORY);
+   assert(blocks[1].context.revision_epoch == 2);
+   assert(!server_delegate_input_has_policy(&request));
+   blocks[1].context.origin = AIMEE_CTX_ORIGIN_OPERATOR;
+   blocks[1].context.authority = AIMEE_CTX_AUTH_POLICY;
+   assert(server_delegate_input_has_policy(&request));
+   blocks[1].context = (aimee_context_meta_t){0};
+   server_delegate_input_attenuate(&request);
+   assert(blocks[1].context.model_visible);
+   assert(blocks[1].context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(!strcmp(blocks[1].text, "memory evidence in the system slot"));
 }
 
 int main(void)
 {
    test_delegate_queue_input_is_ir();
+   test_delegate_public_policy_admission();
    test_handoff_repair_accounting();
    test_terminal_consumers();
    test_worker_projection();

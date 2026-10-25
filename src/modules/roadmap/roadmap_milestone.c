@@ -138,17 +138,20 @@ int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, co
 
 /* ── review prompt builder ─────────────────────────────────────────────────── */
 
-char *roadmap_milestone_review_prompt(const char *roadmap_id, const char *milestone_id)
+int roadmap_milestone_build_request(const char *roadmap_id, const char *milestone_id,
+                                    aimee_request_t *out)
 {
+   if (!out)
+      return -1;
    kb_store_artifact_row_t row;
    memset(&row, 0, sizeof(row));
 
    if (kb_store_artifact_read(milestone_id, &row, NULL, 0, NULL) != 0)
-      return NULL;
+      return -1;
 
    cJSON *payload = cJSON_Parse(row.payload_json);
    if (!payload)
-      return NULL;
+      return -1;
 
    const char *title = "";
    const char *intent = "";
@@ -179,18 +182,32 @@ char *roadmap_milestone_review_prompt(const char *roadmap_id, const char *milest
       }
    }
 
-   dstr_append_str(&s, "\n");
-   dstr_append_str(&s, "Return a verdict of: pass, partial, or fail.\n");
-   dstr_append_str(&s, "- pass: all acceptance criteria are met\n");
-   dstr_append_str(&s, "- partial: most criteria met but gaps remain\n");
-   dstr_append_str(&s, "- fail: critical acceptance criteria not met\n\n");
-   dstr_append_str(&s, "Your response MUST include one of the words: pass, partial, or fail.\n");
 
    cJSON_Delete(payload);
 
-   char *result = strdup(dstr_cstr(&s));
+   aimee_block_t policy = {
+       .type = AIMEE_BLK_TEXT,
+       .text = "Return a verdict of: pass, partial, or fail.\n"
+               "- pass: all acceptance criteria are met\n"
+               "- partial: most criteria met but gaps remain\n"
+               "- fail: critical acceptance criteria not met\n\n"
+               "Your response MUST include one of the words: pass, partial, or fail.\n"};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT, .text = (char *)dstr_cstr(&s)};
+   aimee_ir_block_set_context(&policy, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   aimee_ir_block_set_context(&evidence, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = 1,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.3};
+   int rc = aimee_ir_request_clone(&request, out);
    dstr_free(&s);
-   return result;
+   return rc;
 }
 
 /* ── validation gate ──────────────────────────────────────────────────────── */
@@ -201,21 +218,17 @@ char *roadmap_milestone_validate(const char *roadmap_id, const char *milestone_i
    if (!cfg)
       return NULL;
 
-   char *prompt = roadmap_milestone_review_prompt(roadmap_id, milestone_id);
-   if (!prompt)
+   aimee_request_t request = {0};
+   if (roadmap_milestone_build_request(roadmap_id, milestone_id, &request))
       return NULL;
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
    agent_http_init();
-   aimee_request_t request = {0};
-   int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.3);
-   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED : agent_run(cfg, "review", &request, &result);
+   int rc = agent_run(cfg, "review", &request, &result);
    aimee_request_free(&request);
    agent_http_cleanup();
-
-   free(prompt);
 
    char *authored = rc ? NULL : agent_result_take_text(&result);
    if (!authored)

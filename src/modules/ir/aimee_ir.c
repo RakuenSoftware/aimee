@@ -756,6 +756,51 @@ int aimee_ir_block_model_visible(const aimee_block_t *block)
    return !classified || c->model_visible;
 }
 
+void aimee_ir_block_attenuate_public(aimee_block_t *block, int system)
+{
+   if (!block)
+      return;
+   int visible = aimee_ir_block_model_visible(block);
+   aimee_context_meta_t *context = &block->context;
+   int changed = context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+                 context->origin == AIMEE_CTX_ORIGIN_OPERATOR ||
+                 context->authority == AIMEE_CTX_AUTH_POLICY ||
+                 context->trust > AIMEE_CTX_TRUST_UNVERIFIED;
+   if (system == 1 && context->authority != AIMEE_CTX_AUTH_EVIDENCE &&
+       context->origin != AIMEE_CTX_ORIGIN_MODEL && context->origin != AIMEE_CTX_ORIGIN_MEMORY &&
+       context->origin != AIMEE_CTX_ORIGIN_TOOL && context->origin != AIMEE_CTX_ORIGIN_RETRIEVAL)
+   {
+      /* Explicit caller policy setting matches the legacy system_prompt API;
+       * it is not proof of platform ownership or verified revision custody. */
+      context->origin = AIMEE_CTX_ORIGIN_OPERATOR;
+      context->authority = AIMEE_CTX_AUTH_POLICY;
+      context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
+      changed = 1;
+   }
+   else
+   {
+      if (context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+          context->origin == AIMEE_CTX_ORIGIN_OPERATOR)
+         context->origin = AIMEE_CTX_ORIGIN_USER;
+      if (system)
+      {
+         changed |= context->authority != AIMEE_CTX_AUTH_EVIDENCE;
+         context->authority = AIMEE_CTX_AUTH_EVIDENCE;
+      }
+      else if (context->authority == AIMEE_CTX_AUTH_POLICY)
+         context->authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
+      if (context->trust > AIMEE_CTX_TRUST_UNVERIFIED)
+         context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
+   }
+   context->model_visible = visible;
+   if (changed)
+   {
+      context->revision_domain[0] = context->revision_scope[0] = 0;
+      context->revision_epoch = 0;
+   }
+}
+
+
 static int system_evidence(const aimee_block_t *block)
 {
    return block->context.authority == AIMEE_CTX_AUTH_EVIDENCE;

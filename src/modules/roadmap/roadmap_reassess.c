@@ -20,20 +20,20 @@
 
 /* ── prompt builder ───────────────────────────────────────────────────────── */
 
-char *roadmap_reassess_build_prompt(const char *roadmap_id)
+int roadmap_reassess_build_request(const char *roadmap_id, aimee_request_t *out)
 {
-   if (!roadmap_id)
-      return NULL;
+   if (!out || !roadmap_id)
+      return -1;
 
    kb_store_artifact_row_t row;
    memset(&row, 0, sizeof(row));
 
    if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, NULL) != 0)
-      return NULL;
+      return -1;
 
    cJSON *payload = cJSON_Parse(row.payload_json);
    if (!payload)
-      return NULL;
+      return -1;
 
    cJSON *goal_j = cJSON_GetObjectItemCaseSensitive(payload, "goal");
    const char *goal = cJSON_IsString(goal_j) ? goal_j->valuestring : "";
@@ -41,8 +41,6 @@ char *roadmap_reassess_build_prompt(const char *roadmap_id)
    dstr_t s;
    dstr_init(&s);
 
-   dstr_append_str(
-       &s, "You are reviewing a completed software roadmap to determine if all goals are met.\n\n");
    dstr_appendf(&s, "Goal: %s\n\n", goal);
    dstr_append_str(&s, "All milestone acceptance criteria:\n");
 
@@ -101,13 +99,29 @@ char *roadmap_reassess_build_prompt(const char *roadmap_id)
 
    cJSON_Delete(payload);
 
-   dstr_append_str(&s, "\nAre all goals and acceptance criteria fully met? ");
-   dstr_append_str(&s, "If YES: respond with 'complete' and a brief summary. ");
-   dstr_append_str(&s, "If NO: respond with 'gaps found' and list the specific gaps.\n");
-
-   char *result = strdup(dstr_cstr(&s));
+   aimee_block_t policy = {
+       .type = AIMEE_BLK_TEXT,
+       .text =
+           "You are reviewing a completed software roadmap to determine if all goals are met.\n\n"
+           "Are all goals and acceptance criteria fully met? "
+           "If YES: respond with 'complete' and a brief summary. "
+           "If NO: respond with 'gaps found' and list the specific gaps.\n"};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT, .text = (char *)dstr_cstr(&s)};
+   aimee_ir_block_set_context(&policy, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   aimee_ir_block_set_context(&evidence, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = 1,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.3};
+   int rc = aimee_ir_request_clone(&request, out);
    dstr_free(&s);
-   return result;
+   return rc;
 }
 
 /* ── verdict parser ───────────────────────────────────────────────────────── */
@@ -142,21 +156,17 @@ int roadmap_reassess_run(const char *roadmap_id, agent_config_t *cfg, char **out
 
    *out_verdict = NULL;
 
-   char *prompt = roadmap_reassess_build_prompt(roadmap_id);
-   if (!prompt)
+   aimee_request_t request = {0};
+   if (roadmap_reassess_build_request(roadmap_id, &request))
       return -1;
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
    agent_http_init();
-   aimee_request_t request = {0};
-   int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.3);
-   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED : agent_run(cfg, "reason", &request, &result);
+   int rc = agent_run(cfg, "reason", &request, &result);
    aimee_request_free(&request);
    agent_http_cleanup();
-
-   free(prompt);
 
    char *authored = rc ? NULL : agent_result_take_text(&result);
    if (!authored)
