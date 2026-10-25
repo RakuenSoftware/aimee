@@ -20,13 +20,44 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Active parallel audit
+## Current qualification
 
-The installed browser qualification below remains valid for source `31e2c4b95`.
-Whole-project completion is still pending. The new independent audit found
-remaining roundtable task, auxiliary router, delegate context, interrupt and
-channel message contracts. Parallel repairs and combined-source verification
-are in progress; historical completion statements do not qualify these changes.
+The parallel source audit and repairs are complete and committed through runtime
+`c0c2f6eb25977ff2a208e78b1587a7c9a971c6ba`. That exact revision is installed at
+`https://192.168.0.67:8447`, image
+`sha256:0c751ecef5aa4941358ffd8461ca2c6b0c5768ff8df132cfc5262a784c58f21d`.
+All 87 products and 19 modules match the canonical source build. The retained
+upgrade preserves all 216 previous IR rows, jobs, channels, native cache,
+credentials, grants and SDK binaries; certificate renewal retains the same key.
+
+A fresh browser session uses the configured primary without manual selection,
+executes the actual `read_file` and returns the README first line. Reload and a
+second turn recall that result without tools, retaining the same session.
+Manual ensemble execution against the real DB preserves four canonical
+contributions, literal Unicode/JSON-looking text, pause/resume, independent
+status reads and exact logical refusal outcomes, without model calls.
+All 29 combined C targets pass normal and ASAN/UBSAN builds. The 51-case IR guard,
+ownership, DB1 contract, line and generated-doc checks pass, alongside the earlier
+Go compile/race, frontend TypeScript and browser/channel/IR tests.
+
+Full retained-session runtime qualification remains incomplete: Anthropic
+refuses the historical ORBIT conversation with a provider policy error. Three
+live attempts are retained, including an unchanged retry and a request about
+the word supplied by the user. HTTP reaches the provider; the SDK reports a
+`reasoning_extraction` policy refusal. That history has no thinking blocks.
+Reviewed source preserves authenticated IR and filters hidden/restricted blocks;
+no corresponding source defect was found. Do not claim that this retained
+conversation resumed successfully or that its old native handle was reused.
+Do not bypass provider, credential, source or cache fences to change this result.
+
+The final state has 252 IR rows, all 216 pre-upgrade rows unchanged. Credentials,
+grants, SDK binaries, products and TLS remain exact during the browser checks;
+all nine services across the three retained projects are healthy. No SDK process
+or native reservation remains active. The proof pointer deliberately records
+`completion:false` and the outstanding provider refusal:
+`/var/tmp/aimee-ir-browser-final-recovery/summary.json`.
+Detailed receipts are under `/var/tmp/aimee-ir-parallel-c0c2f6eb2-*`.
+Historical success statements below apply only to their recorded revisions.
 
 ## Parallel audit coverage
 
@@ -112,7 +143,7 @@ native cache requalification; successful logical continuation is required, and
 handle reuse is recorded only when actually observed. No source or cache fence
 may be weakened to preserve an incompatible native handle.
 
-## Current browser recovery outcome
+## Historical browser recovery outcome
 
 Runtime source `31e2c4b95` is installed on retained QA
 `https://192.168.0.67:8447`. The follow-up IR contract audit and browser default
@@ -788,7 +819,7 @@ Chat UI expecting it. The proxy now preserves that validated string alongside
 both roster keys, so an unpinned session displays its actual configured primary.
 Existing model-route tests cover the restored metadata contract.
 
-Final runtime qualification: `31e2c4b95`, image
+Historical runtime qualification: `31e2c4b95`, image
 `sha256:f7974fbcbce128e1d0019a4acf8769721d6936ed5e7760212bde8a1433da9ed4`.
 All 87 installed products and 19 modules match the canonical build. The upgrade
 preserves all 198 prior IR rows and exact credentials/grants/SDK/native-cache
