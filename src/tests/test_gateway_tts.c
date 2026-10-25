@@ -116,7 +116,12 @@ int main(int argc, char **argv)
    const char *name = strrchr(argv[0], '/');
    if (!strcmp(name ? name + 1 : argv[0], "espeak-ng"))
       return espeak_fixture(argc, argv);
-   char directory[] = "/tmp/aimee-tts-fixture-XXXXXX";
+   char directory[4096];
+   const char *temporary = getenv("TMPDIR");
+   if (!temporary || !temporary[0])
+      temporary = "/tmp";
+   int n = snprintf(directory, sizeof directory, "%s/aimee-tts-fixture-XXXXXX", temporary);
+   assert(n > 0 && (size_t)n < sizeof directory);
    assert(mkdtemp(directory));
    assert(!setenv("TMPDIR", directory, 1));
    char *text = malloc(65537);

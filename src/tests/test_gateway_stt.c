@@ -101,7 +101,12 @@ int main(int argc, char **argv)
 {
    if (argc > 1)
       return whisper_fixture(argc, argv);
-   char pattern[] = "/tmp/aimee-stt-test-XXXXXX";
+   char pattern[4096];
+   const char *temporary = getenv("TMPDIR");
+   if (!temporary || !temporary[0])
+      temporary = "/tmp";
+   int n = snprintf(pattern, sizeof pattern, "%s/aimee-stt-test-XXXXXX", temporary);
+   assert(n > 0 && (size_t)n < sizeof pattern);
    assert(mkdtemp(pattern));
    snprintf(root, sizeof root, "%s", pattern);
    snprintf(input, sizeof input, "%s/voice \"quoted\"\r\n.wav", root);

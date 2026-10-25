@@ -14,12 +14,12 @@
         {
           "primitive": "http",
           "path": "src/posix/agent_bridge.c",
-          "count": 11
+          "count": 13
         },
         {
           "primitive": "http",
           "path": "src/windows/agent_bridge.c",
-          "count": 9
+          "count": 11
         }
       ]
     },
@@ -98,7 +98,7 @@
         {
           "primitive": "http",
           "path": "src/gateway/tts.c",
-          "count": 2
+          "count": 1
         }
       ]
     },
@@ -120,7 +120,7 @@
         {
           "primitive": "http",
           "path": "src/kb/kb_tsr_sidecar.c",
-          "count": 2
+          "count": 1
         },
         {
           "primitive": "http",
