@@ -160,6 +160,8 @@ static const char *projection_text_override;
 static int recalls;
 static int refuse_after;
 static int provider_calls;
+static int visibility_query_case;
+static char last_ingress_query[4096];
 static int final_response;
 static int usage_mixed;
 static const char *simple_finish;
@@ -198,6 +200,12 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (visibility_query_case)
+   {
+      assert(!strstr((const char *)body, "HIDDEN_QUERY_SECRET"));
+      if (visibility_query_case == 1)
+         assert(strstr((const char *)body, "visible primary task"));
+   }
    if (rich_generation_case)
    {
       if (rich_generation_case != 3)
@@ -416,7 +424,7 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
 char *ingress_preinject_task_instructions(const char *instructions, const char *query)
 {
    (void)instructions;
-   (void)query;
+   snprintf(last_ingress_query, sizeof last_ingress_query, "%s", query ? query : "");
    return NULL;
 }
 void policy_action_attempt(const char *attempt)
@@ -795,6 +803,53 @@ static void test_actual_generation_preserves_rich_canonical_request(const agent_
    free(cfg);
 }
 
+static void test_visible_primary_and_routing_queries(const agent_t *agent)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "HIDDEN_QUERY_SECRET"},
+                             {.type = AIMEE_BLK_TEXT, .text = "visible primary task"}};
+   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_RESTRICTED, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   cJSON *before = aimee_ir_message_json(&message), *updated = NULL;
+   assert(before);
+   agent_result_t result = {0};
+   provider_calls = 0;
+   visibility_query_case = 1;
+   last_ingress_query[0] = 0;
+   int rc = agent_execute_session_with_tools(agent, NULL, NULL, &message, 128, 0.3, NULL, &updated,
+                                             &result);
+   assert(!rc && result.success && provider_calls == 1);
+   assert(!strcmp(last_ingress_query, "visible primary task"));
+   cJSON *after = aimee_ir_message_json(&message);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   cJSON_Delete(updated);
+   agent_result_clear_response(&result);
+   agent_config_t *cfg = calloc(1, sizeof *cfg);
+   assert(cfg);
+   cfg->agent_count = 1;
+   cfg->agents[0] = *agent;
+   cfg->agents[0].enabled = cfg->agents[0].tools_enabled = 1;
+   cfg->agents[0].max_parallel = 1;
+   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
+   message.n_blocks = 1;
+   aimee_request_t source = {.messages = &message, .n_messages = 1};
+   visibility_query_case = 2;
+   provider_calls = 0;
+   rc = agent_run(cfg, "review", &source, &result);
+   /* No review route is configured: routing still computes its real input view
+    * before refusal. Its token estimate must describe fallback, never secret. */
+   assert(rc < 0 && provider_calls == 0 && strstr(result.error, "no agent available"));
+   assert(cfg->route_input_tokens ==
+          (int)((strlen("Continue the admitted conversation.") + 3) / 4));
+   assert(!strstr(last_ingress_query, "HIDDEN_QUERY_SECRET"));
+   agent_result_clear_response(&result);
+   visibility_query_case = 0;
+   free(cfg);
+}
+
 static void test_typed_exec_context_origin(const agent_t *agent)
 {
    agent_network_t network = {0};
@@ -1118,6 +1173,7 @@ int main(void)
    free(answer);
    test_owned_plain_generation(&agent);
    test_actual_generation_preserves_rich_canonical_request(&agent);
+   test_visible_primary_and_routing_queries(&agent);
    test_typed_exec_context_origin(&agent);
    simple_finish = NULL;
    /* A durable capture loss is local and terminal, including after dispatch.

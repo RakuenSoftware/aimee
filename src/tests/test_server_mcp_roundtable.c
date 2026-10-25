@@ -1,4 +1,7 @@
 #include "server_mcp_roundtable.h"
+#include "server_mcp_ensemble.h"
+#include "db1_client/db1.h"
+#include <stdlib.h>
 #include "../server/roundtable_review_bus.h"
 
 #include <assert.h>
@@ -139,6 +142,119 @@ static void test_deadline_covers_the_chairman_phase(void)
    assert(roundtable_review_deadline_ms(INT_MAX, 1) == INT_MAX);
 }
 
+/* Manual ensemble outcomes are DB1 fixtures; the actual MCP handler and its
+ * dispatcher-facing handled/result contract run without a model or database. */
+static int ensemble_errors, ensemble_reads, error_write_result;
+static const char *ensemble_refusal;
+static char ensemble_error[256];
+
+const char *config_default_dir(void)
+{
+   return "/unused-ensemble-fixture";
+}
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   (void)conn;
+   (void)request_id;
+   ensemble_errors++;
+   snprintf(ensemble_error, sizeof ensemble_error, "%s", message);
+   return error_write_result;
+}
+int db1_ensemble_create(const char *project, const char *config, const char *name,
+                        const char *channel, const char *assignments, int *id, char *error,
+                        size_t capacity)
+{
+   (void)project;
+   (void)config;
+   (void)name;
+   (void)channel;
+   (void)assignments;
+   (void)id;
+   snprintf(error, capacity, "fixture does not create ensembles");
+   return -1;
+}
+int db1_ensemble_pause(int id, const char *reason, char *error, size_t capacity)
+{
+   (void)id;
+   (void)reason;
+   (void)error;
+   (void)capacity;
+   assert(!"pause is outside this outcome fixture");
+   return -1;
+}
+int db1_ensemble_list(ensemble_info_t **rows, int *count, char *error, size_t capacity)
+{
+   (void)rows;
+   (void)count;
+   (void)error;
+   (void)capacity;
+   assert(!"list is outside this outcome fixture");
+   return -1;
+}
+int db1_ensemble_get(int id, ensemble_info_t *info, aimee_request_t *request, char **context,
+                     char *error, size_t capacity)
+{
+   (void)error;
+   (void)capacity;
+   assert(id == 7);
+   ensemble_reads++;
+   memset(info, 0, sizeof *info);
+   info->id = id;
+   snprintf(info->status, sizeof info->status, "active");
+   snprintf(info->expected_agent, sizeof info->expected_agent, "planner");
+   if (request)
+      assert(!aimee_ir_request_from_text(request, NULL, "Provide the next contribution.", 0, -1));
+   if (context)
+      *context = strdup("{\"schema\":\"aimee.ensemble-context.v1\",\"messages\":[]}");
+   return 0;
+}
+int db1_ensemble_advance(int id, const char *sender, const aimee_message_t *message,
+                         ensemble_info_t *info, aimee_request_t *request, char *error,
+                         size_t capacity)
+{
+   (void)info;
+   (void)request;
+   assert(id == 7 && sender && message->n_blocks == 1);
+   assert(message->blocks[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          message->blocks[0].context.trust == AIMEE_CTX_TRUST_UNTRUSTED);
+   assert(ensemble_refusal);
+   snprintf(error, capacity, "%s", ensemble_refusal);
+   return 1;
+}
+
+static void test_manual_ensemble_refusal_is_already_handled(void)
+{
+   const char *refusals[] = {"expected 'planner', got 'critic'", "ensemble is already complete"};
+   cJSON *args = cJSON_Parse("{\"id\":7,\"speaker\":\"critic\",\"message\":\"must not advance\"}");
+   for (size_t i = 0; i < sizeof refusals / sizeof refusals[0]; i++)
+   {
+      ensemble_refusal = refusals[i];
+      ensemble_errors = ensemble_reads = error_write_result = 0;
+      cJSON *content = NULL, *structured = NULL;
+      /* server_mcp.c stops only for nonzero; returning zero after this write
+       * previously let it send a second unknown-tool response for NULL content. */
+      int handled =
+          server_mcp_handle_ensemble_tool(NULL, "ensemble_advance", args, &content, &structured);
+      assert(handled != 0 && ensemble_errors == 1 && ensemble_reads == 0);
+      assert(!content && !structured && !strcmp(ensemble_error, refusals[i]));
+   }
+   error_write_result = -1;
+   cJSON *content = NULL, *structured = NULL;
+   assert(server_mcp_handle_ensemble_tool(NULL, "ensemble_advance", args, &content, &structured) ==
+          -1);
+   assert(!content && !structured);
+   error_write_result = 0;
+   ensemble_errors = ensemble_reads = 0;
+   assert(!server_mcp_handle_ensemble_tool(NULL, "ensemble_status", args, &content, &structured));
+   assert(!ensemble_errors && ensemble_reads == 1 && cJSON_IsArray(content) &&
+          cJSON_IsObject(structured) &&
+          cJSON_IsObject(cJSON_GetObjectItem(structured, "next_request")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(structured, "status")), "active"));
+   cJSON_Delete(content);
+   cJSON_Delete(structured);
+   cJSON_Delete(args);
+}
+
 int main(void)
 {
    printf("server_mcp_roundtable: ");
@@ -148,6 +264,7 @@ int main(void)
    test_review_reports_a_dispatch_failure();
    test_review_preflights_the_capability();
    test_deadline_covers_the_chairman_phase();
+   test_manual_ensemble_refusal_is_already_handled();
    printf("ok\n");
    return 0;
 }

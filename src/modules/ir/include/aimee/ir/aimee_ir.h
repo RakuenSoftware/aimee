@@ -471,6 +471,8 @@ void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t ori
  * unverified system evidence to user role. Source history/profile stay exact.
  * Source and output must be distinct. The preflight preserves untouched native-byte
  * replay when no projection is needed. */
+/* Visibility for model-derived views; unclassified legacy blocks remain visible. */
+int aimee_ir_block_model_visible(const aimee_block_t *block);
 int aimee_ir_request_needs_model_projection(const aimee_request_t *request);
 int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out);
 

@@ -98,6 +98,13 @@ before launch. It cannot silently discard source controls before checking
 whether the external agent can represent them. Shared query views exclude
 model-hidden and restricted text so derived notes cannot expose those blocks.
 
+The independent final review also closes hidden-text query shortcuts and Qwen
+shaping. Routing and hint views use the shared model-visibility predicate.
+Delegate worker admission preserves queued metadata exactly; external launch
+admission attenuates privileged claims without erasing privacy or evidence.
+Manual ensemble refusals send exactly one handled response; transport errors
+cannot pass the live proof as expected state refusals.
+
 The final live proof must use the exact combined runtime revision, retain every
 pre-upgrade IR row, and test both the existing browser session and a new default
 session with real tools and follow-up. Typed context changes may require normal

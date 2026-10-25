@@ -460,6 +460,43 @@ static void test_delegate_queue_input_is_ir(void)
    assert(context.req && delegate_input_admit(&context, 0) != 0);
    aimee_message_free(&context.ir_input);
    cJSON_Delete(context.req);
+   for (int forged = 0; forged < 2; forged++)
+   {
+      aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "typed task"};
+      aimee_ir_block_set_context(&block,
+                                 forged ? AIMEE_CTX_ORIGIN_PLATFORM : AIMEE_CTX_ORIGIN_MEMORY,
+                                 forged ? AIMEE_CTX_AUTH_POLICY : AIMEE_CTX_AUTH_EVIDENCE,
+                                 forged ? AIMEE_CTX_TRUST_VERIFIED : AIMEE_CTX_TRUST_UNTRUSTED,
+                                 AIMEE_CTX_SENS_RESTRICTED, 0, "source-domain", "source-scope", 42);
+      aimee_message_t source = {.role = "user", .blocks = &block, .n_blocks = 1};
+      context = (compute_ctx_t){0};
+      context.req = cJSON_CreateObject();
+      assert(context.req);
+      assert(cJSON_AddItemToObject(context.req, "message", aimee_ir_message_json(&source)));
+      assert(!delegate_input_admit(&context, 1));
+      const aimee_context_meta_t *admitted = &context.ir_input.blocks[0].context;
+      assert(admitted->sensitivity == AIMEE_CTX_SENS_RESTRICTED && !admitted->model_visible);
+      if (forged)
+         assert(admitted->origin == AIMEE_CTX_ORIGIN_USER &&
+                admitted->authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
+                admitted->trust == AIMEE_CTX_TRUST_UNVERIFIED && !admitted->revision_domain[0] &&
+                !admitted->revision_scope[0] && !admitted->revision_epoch);
+      else
+         assert(!memcmp(admitted, &block.context, sizeof *admitted));
+      cJSON *queued = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(context.req, "message"), 1);
+      assert(queued);
+      aimee_message_free(&context.ir_input);
+      assert(!delegate_input_admit(&context, 0));
+      cJSON *worker = aimee_ir_message_json(&context.ir_input);
+      assert(worker && cJSON_Compare(worker, queued, 1));
+      assert(!delegate_input_admit(&context, 0));
+      assert(!context.ir_input.blocks[0].context.model_visible &&
+             context.ir_input.blocks[0].context.sensitivity == AIMEE_CTX_SENS_RESTRICTED);
+      cJSON_Delete(queued);
+      cJSON_Delete(worker);
+      aimee_message_free(&context.ir_input);
+      cJSON_Delete(context.req);
+   }
    puts("delegate queue: legacy text converts only at external ingress; worker requires user IR");
 }
 

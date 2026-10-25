@@ -79,7 +79,8 @@ void router_advise_ir(const aimee_request_t *request)
          continue;
       size_t length = 0;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             length += strlen(message->blocks[j].text) + 1;
       if (!length)
          return; /* Tool-result continuation is not a fresh routing request. */
@@ -87,7 +88,8 @@ void router_advise_ir(const aimee_request_t *request)
       if (!query)
          return;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
          {
             if (query[0])
                strcat(query, "\n");

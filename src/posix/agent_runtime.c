@@ -653,7 +653,7 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    const char *query = "Continue the admitted conversation.";
    for (int i = 0; i < message->n_blocks; i++)
       if (message->blocks[i].type == AIMEE_BLK_TEXT && message->blocks[i].text &&
-          message->blocks[i].text[0])
+          message->blocks[i].text[0] && aimee_ir_block_model_visible(&message->blocks[i]))
       {
          query = message->blocks[i].text;
          break;

@@ -147,6 +147,14 @@ int server_mcp_is_ensemble_tool(const char *tool)
           strcmp(t, "ensemble_list") == 0;
 }
 
+/* The dispatcher stops on nonzero. A successful error write returns zero from
+ * server_send_error, so preserve an explicit handled verdict after sending it. */
+static int ensemble_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   int rc = server_send_error(conn, message, request_id);
+   return rc ? rc : 1;
+}
+
 int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON *args,
                                     cJSON **content_out, cJSON **structured_out)
 {
@@ -254,7 +262,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
          aimee_request_free(&request);
          free(prompt);
          free(context);
-         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble operation failed", NULL);
+         return ensemble_send_error(conn, errbuf[0] ? errbuf : "ensemble operation failed", NULL);
       }
 
       /* This MCP response is the explicit text-preview boundary. */
@@ -276,7 +284,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
       free(prompt);
       free(context);
       if (!structured)
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
    }
    else if (strcmp(t, "ensemble_list") == 0)
    {
@@ -286,7 +294,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
       ensemble_info_t *rows = NULL;
       int n = 0;
       if (db1_ensemble_list(&rows, &n, errbuf, sizeof(errbuf)) != 0)
-         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble list failed", NULL);
+         return ensemble_send_error(conn, errbuf[0] ? errbuf : "ensemble list failed", NULL);
       if (limit < 0)
          limit = 0;
       if (limit > 100)
@@ -297,14 +305,14 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
       if (!structured)
       {
          free(rows);
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
       }
       cJSON *sessions = cJSON_AddArrayToObject(structured, "sessions");
       if (!sessions)
       {
          free(rows);
          cJSON_Delete(structured);
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
       }
       for (int i = 0; i < limit; i++)
       {
@@ -313,7 +321,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
          {
             free(rows);
             cJSON_Delete(structured);
-            return server_send_error(conn, "ensemble serialization failed", NULL);
+            return ensemble_send_error(conn, "ensemble serialization failed", NULL);
          }
          cJSON_AddItemToArray(sessions, item);
       }
@@ -325,7 +333,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
    }
 
    if (!content)
-      return server_send_error(conn, "ensemble operation failed", NULL);
+      return ensemble_send_error(conn, "ensemble operation failed", NULL);
 
    *content_out = content;
    *structured_out = structured;

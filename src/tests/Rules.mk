@@ -1601,7 +1601,10 @@ $(TESTPREFIX)/unit-test-cli-index-bootstrap: $(OBJDIR)/tests/test_cli_index_boot
 
 $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
                     $(OBJDIR)/tests/test_server_mcp_roundtable.o \
-                    $(OBJDIR)/server/server_mcp_roundtable.o $(OBJDIR)/cJSON.o
+                    $(OBJDIR)/server/server_mcp_roundtable.o \
+                    $(OBJDIR)/server/server_mcp_ensemble.o $(OBJDIR)/ensemble_render.o \
+                    $(OBJDIR)/dstr.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # aimee_client.o resolves the remote-target accessors cli_v1_client_endpoint now
@@ -2293,7 +2296,8 @@ $(TESTPREFIX)/unit-test-wfe-deliver: $(OBJDIR)/tests/test_wfe_deliver.o \
 
 # S1 router pure core (no engine/DB/LLM deps).
 $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
-                                    $(OBJDIR)/modules/workflows/wfe_router.o
+                                    $(OBJDIR)/modules/workflows/wfe_router.o \
+                                    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S4 autonomous-parity routing policy (pure; no engine/DB deps).

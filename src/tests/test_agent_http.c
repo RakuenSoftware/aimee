@@ -1213,6 +1213,31 @@ static void test_canonical_request_profiles(void)
       cJSON_Delete(before);
       cJSON_Delete(source);
    }
+   /* Hidden text must neither suppress shaping of visible text nor acquire it. */
+   for (int visibility = 0; visibility < 2; ++visibility)
+   {
+      aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "/no_think\nHIDDEN_SECRET"},
+                                {.type = AIMEE_BLK_TEXT, .text = "inspect"}};
+      aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED,
+                                 visibility ? AIMEE_CTX_SENS_RESTRICTED : AIMEE_CTX_SENS_INTERNAL,
+                                 visibility, NULL, NULL, 0);
+      aimee_message_t typed = {.role = "user", .blocks = blocks, .n_blocks = 2};
+      cJSON *source = cJSON_CreateArray();
+      assert(source && cJSON_AddItemToArray(source, aimee_ir_message_json(&typed)));
+      cJSON *before = cJSON_Duplicate(source, 1);
+      cJSON *actual = fixture_build_request(&qwen, source, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual && cJSON_Compare(source, before, 1));
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      const char *content =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(message, "content"));
+      assert(content && !strcmp(content, "/no_think\ninspect"));
+      cJSON_Delete(actual);
+      cJSON_Delete(before);
+      cJSON_Delete(source);
+   }
    /* Shaping is idempotent and never edits durable canonical source content. */
    const cJSON *block = cJSON_GetArrayItem(
        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 0), "blocks"), 0);

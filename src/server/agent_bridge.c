@@ -116,6 +116,8 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
       for (int j = 0; j < message->n_blocks; j++)
       {
          aimee_block_t *block = &message->blocks[j];
+         if (!aimee_ir_block_model_visible(block))
+            continue;
          if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
             return 0;
          if (block->type != AIMEE_BLK_TOOL_RESULT)
@@ -141,13 +143,15 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
       }
       size_t length = 0;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             length += strlen(message->blocks[j].text);
       char *joined = calloc(length + 1, 1);
       if (!joined)
          return -1;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             strcat(joined, message->blocks[j].text);
       char *shaped = agent_request_shape_user_prompt(agent, joined);
       int changed = shaped && strcmp(joined, shaped);

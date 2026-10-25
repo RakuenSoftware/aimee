@@ -452,7 +452,8 @@ void agent_run_require_initial_tool_call(int on)
 static const char *host_request_query(const aimee_request_t *request, char *query, size_t size)
 {
    if (request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
-       request->messages[0].blocks[0].type == AIMEE_BLK_TEXT)
+       request->messages[0].blocks[0].type == AIMEE_BLK_TEXT &&
+       aimee_ir_block_model_visible(&request->messages[0].blocks[0]))
       return request->messages[0].blocks[0].text;
    aimee_ir_last_user_text(request, query, size);
    return query[0] ? query : "Continue the admitted conversation.";

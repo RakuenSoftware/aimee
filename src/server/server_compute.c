@@ -734,7 +734,34 @@ static int delegate_input_admit(compute_ctx_t *cctx, int external_text)
        message->blocks[0].type != AIMEE_BLK_TEXT || !message->blocks[0].text ||
        message->blocks[0].raw || message->blocks[0].cache_control || message->blocks[0].cache_ttl)
       return -1;
-   memset(&cctx->ir_input.blocks[0].context, 0, sizeof cctx->ir_input.blocks[0].context);
+   if (external_text)
+   {
+      /* Public ingress may lower authority, never erase privacy or evidence.
+       * Worker admission below this boundary preserves its queued IR exactly. */
+      aimee_context_meta_t *context = &cctx->ir_input.blocks[0].context;
+      int attenuate = context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+                      context->origin == AIMEE_CTX_ORIGIN_OPERATOR ||
+                      context->authority == AIMEE_CTX_AUTH_POLICY ||
+                      context->trust > AIMEE_CTX_TRUST_UNVERIFIED;
+      if (context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+          context->origin == AIMEE_CTX_ORIGIN_OPERATOR)
+         context->origin = AIMEE_CTX_ORIGIN_USER;
+      if (context->authority == AIMEE_CTX_AUTH_POLICY)
+         context->authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
+      if (context->trust > AIMEE_CTX_TRUST_UNVERIFIED)
+         context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
+      if (attenuate)
+      {
+         context->revision_domain[0] = context->revision_scope[0] = 0;
+         context->revision_epoch = 0;
+         cJSON *queued = aimee_ir_message_json(&cctx->ir_input);
+         if (!queued || !cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "message", queued))
+         {
+            cJSON_Delete(queued);
+            return -1;
+         }
+      }
+   }
    return 0;
 }
 

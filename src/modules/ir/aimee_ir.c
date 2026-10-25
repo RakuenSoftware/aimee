@@ -746,7 +746,7 @@ static int clone_tool(aimee_tool_t *out, const aimee_tool_t *source)
    }
    return 0;
 }
-static int model_block_visible(const aimee_block_t *block)
+int aimee_ir_block_model_visible(const aimee_block_t *block)
 {
    const aimee_context_meta_t *c = &block->context;
    if (c->sensitivity >= AIMEE_CTX_SENS_RESTRICTED)
@@ -772,11 +772,11 @@ int aimee_ir_request_needs_model_projection(const aimee_request_t *request)
    if (!request)
       return 0;
    for (int i = 0; i < request->n_system; ++i)
-      if (!model_block_visible(&request->system[i]) || system_evidence(&request->system[i]))
+      if (!aimee_ir_block_model_visible(&request->system[i]) || system_evidence(&request->system[i]))
          return 1;
    for (int i = 0; i < request->n_messages; ++i)
       for (int j = 0; j < request->messages[i].n_blocks; ++j)
-         if (!model_block_visible(&request->messages[i].blocks[j]) ||
+         if (!aimee_ir_block_model_visible(&request->messages[i].blocks[j]) ||
              (policy_message(&request->messages[i]) &&
               system_evidence(&request->messages[i].blocks[j])))
             return 1;
@@ -788,7 +788,7 @@ static int model_project_blocks(aimee_block_t *blocks, int *count)
    int kept = 0, removed = 0;
    for (int i = 0; i < *count; ++i)
    {
-      if (!model_block_visible(&blocks[i]))
+      if (!aimee_ir_block_model_visible(&blocks[i]))
       {
          aimee_block_free_contents(&blocks[i]);
          removed++;
@@ -1187,7 +1187,7 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n)
    for (int i = 0; i < last->n_blocks && used + 1 < n; i++)
    {
       const aimee_block_t *b = &last->blocks[i];
-      if (b->type != AIMEE_BLK_TEXT || !b->text || !model_block_visible(b))
+      if (b->type != AIMEE_BLK_TEXT || !b->text || !aimee_ir_block_model_visible(b))
          continue;
       size_t l = strlen(b->text);
       if (l > n - 1 - used)
