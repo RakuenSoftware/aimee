@@ -13,13 +13,11 @@
  * Nonzero prior work cannot be priced at the final peer's model tariff. Its
  * per-attempt canonical capture remains intact, while the aggregate is unknown. */
 int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
-                             const char *system, const char *prompt, int max_tokens,
-                             double temperature, int use_tools, agent_result_t *out)
+                             const aimee_request_t *request, int use_tools, agent_result_t *out)
 {
    int unknown = agent_retry_usage_tainted(out);
    agent_result_clear_response(out);
-   int rc = agent_dispatch_one(agent, network, role, system, prompt, max_tokens, temperature,
-                               use_tools, out);
+   int rc = agent_dispatch_one(agent, network, role, request, use_tools, out);
    agent_retry_usage_apply(out, unknown);
    return rc;
 }
@@ -116,8 +114,8 @@ static int agent_is_named_in_fallback_chain(const agent_config_t *cfg, const cha
 }
 
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
-                                 const char *system_prompt, const char *user_prompt, int max_tokens,
-                                 int enforce_writes, agent_result_t *out, int rc)
+                                 const aimee_request_t *request, int enforce_writes,
+                                 agent_result_t *out, int rc)
 {
    agent_t *ag = current ? *current : NULL;
    /* Proceed for a retryable failure OR a saturation refusal (AGENT_RC_AT_LIMIT):
@@ -178,8 +176,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
          /* Through the single guarded executor: enforces peer->max_parallel and
           * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
           * non-zero so the loop simply moves to the next same-tier peer. */
-         rc = agent_retry_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt,
-                                       max_tokens, 0.3, 1 /* use_tools */, out);
+         rc = agent_retry_dispatch_one(peer, &cfg->network, role, request, 1 /* use_tools */, out);
          if (rc == 0)
          {
             ag = peer;

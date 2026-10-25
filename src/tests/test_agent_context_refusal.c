@@ -1,3 +1,4 @@
+#include "support/ir_text_request.h"
 /* Exercise the production context builder and native initial-dispatch boundary.
  * External module and HTTP transports are fixtures. Memory decisions are supplied
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
@@ -621,8 +622,8 @@ int main(void)
       assert(agent_build_exec_context_for_role(&agent, &network, "review", "original prompt", 0) ==
              NULL);
       agent_result_t result = {0};
-      int rc = agent_execute_with_tools_for_role(&agent, &network, "review", "original prompt",
-                                                 "task", 128, 0, &result);
+      int rc = fixture_agent_role_text(&agent, &network, "review", "original prompt", "task", 128,
+                                       0, &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED);
       assert(!result.success && result.turns == 0 && result.tool_calls == 0);
       assert(strcmp(result.stop_reason, "context_refused") == 0);
@@ -646,8 +647,8 @@ int main(void)
    for (malformed_projection = 1; malformed_projection <= 8; malformed_projection++)
    {
       agent_result_t invalid_result = {0};
-      int invalid_rc = agent_execute_with_tools_for_role(
-          &agent, &network, "review", "original prompt", "task", 128, 0, &invalid_result);
+      int invalid_rc = fixture_agent_role_text(&agent, &network, "review", "original prompt",
+                                               "task", 128, 0, &invalid_result);
       assert(invalid_rc == AGENT_RC_CONTEXT_REFUSED && provider_calls == 0);
       assert(strstr(invalid_result.error, "invalid_projection"));
       agent_result_clear_response(&invalid_result);
@@ -689,8 +690,8 @@ int main(void)
    agent.max_turns = 8;
    agent.timeout_ms = 10000;
    agent_result_t result = {0};
-   int rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task",
-                                              128, 0, &result);
+   int rc =
+       fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    if (rc != AGENT_RC_CONTEXT_REFUSED)
       fprintf(stderr, "unexpected loop result: rc=%d calls=%d recalls=%d error=%s\n", rc,
               provider_calls, recalls, result.error);
@@ -708,8 +709,7 @@ int main(void)
    request_context_t inherited = {0};
    request_context_set(&inherited);
    assert(request_context_refuse_assembly("protected_context_overflow") == 0);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success && provider_calls == 0);
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strcmp(result.error, "protected_context_overflow") == 0);
@@ -717,8 +717,7 @@ int main(void)
    agent_result_clear_response(&result);
    request_context_clear();
    recalls = 0;
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && !result.error[0]);
    assert(recalls == 1 && provider_calls == 1);
    assert(result.response && strstr(result.response, "Fixture completed."));
@@ -731,8 +730,8 @@ int main(void)
       transport_refuse = fallback ? 2 : 1;
       snprintf(agent.fallback_model, sizeof(agent.fallback_model), "%s",
                fallback ? "fallback" : "");
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(provider_calls == (fallback ? 2 : 1));
       assert(strcmp(result.stop_reason, "context_refused") == 0);
@@ -746,7 +745,7 @@ int main(void)
       plugin_chook_reset();
       int hook_registered = plugin_chook_register_pre_llm(fallback_hook_context, NULL);
       assert(hook_registered == 0);
-      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
       assert(hook_calls == 1);
       plugin_chook_reset();
       expect_hook_prompt = 0;
@@ -766,7 +765,7 @@ int main(void)
    {
       simple_finish = incomplete_stops[i];
       provider_calls = 0;
-      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
       assert(rc != 0 && !result.success && provider_calls == 1);
       assert(result.canonical_response.n_content == 1);
       assert(result.canonical_response.usage_in == 7);
@@ -779,7 +778,7 @@ int main(void)
    {
       simple_finish = "stop";
       provider_calls = 0;
-      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
       if (rc || !result.success || result.error[0] || provider_calls != 1)
          fprintf(stderr, "media fixture=%d rc=%d success=%d calls=%d error=%s blocks=%d stop=%d\n",
                  simple_media, rc, result.success, provider_calls, result.error,
@@ -796,7 +795,7 @@ int main(void)
       {
          simple_finish = declined[i];
          provider_calls = 0;
-         rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+         rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
          assert(rc != 0 && !result.success && provider_calls == 1);
          assert(result.canonical_response.n_content == simple_media);
          assert(!agent_result_take_text(&result));
@@ -812,8 +811,8 @@ int main(void)
       simple_finish = denied_tool_stops[i];
       provider_calls = terminal_intents = terminal_denials = 0;
       aimee_ir_session_set_sink(capture_terminal_denial, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       aimee_ir_session_set_sink(NULL, NULL);
       assert(terminal_intents == 1 && terminal_denials == 1);
       assert(rc != 0 && !result.success && provider_calls == 1 && result.tool_calls == 0);
@@ -823,7 +822,7 @@ int main(void)
    }
    simple_tools = 0;
    simple_finish = "stop";
-   rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+   rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
    assert(rc == 0 && result.success);
    char *answer = agent_result_take_text(&result);
    assert(answer && !strcmp(answer, "Partial plausible verdict."));
@@ -839,8 +838,8 @@ int main(void)
       final_response = mode == 1;
       capture_failure_mode = mode;
       aimee_ir_session_set_sink(refusing_capture, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == AGENT_RC_CAPTURE_FAILED && !result.success);
       assert(provider_calls == 1 && capture_events == (mode == 1 ? 1 : 4));
       assert(result.tool_calls == (mode == 1 ? 0 : 1));
@@ -857,8 +856,7 @@ int main(void)
    cJSON *pending = cJSON_CreateObject();
    assert(pending);
    aimee_ir_session_set_sink(wide_capture, pending);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(result.tool_calls == 17 && wide_uses == 17 && wide_results == 17);
    assert(pending->child == NULL && provider_calls <= 2);
    agent_result_clear_response(&result);
@@ -875,8 +873,8 @@ int main(void)
    {
       recalls = provider_calls = identity_results = 0;
       aimee_ir_session_set_sink(capture_identity_result, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
       assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
       agent_result_clear_response(&result);
@@ -887,8 +885,8 @@ int main(void)
    {
       recalls = provider_calls = identity_results = 0;
       aimee_ir_session_set_sink(capture_identity_result, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
       assert(!aimee_ir_response_admit(&result.canonical_response));
       assert(agent_result_usage_is_unobserved(&result) == (usage_mixed != 3));
@@ -904,8 +902,7 @@ int main(void)
    metadata_available = 0;
    recalls = provider_calls = identity_results = 0;
    aimee_ir_session_set_sink(capture_identity_result, NULL);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
    assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
    agent_result_clear_response(&result);
@@ -918,8 +915,7 @@ int main(void)
    provider_calls = recalls = bootstrap_evidence_seen = 0;
    agent_tools_register_classifier(fixture_classifier);
    run_cmd_set_cwd(home);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(result.successful_tool_calls == 0 && !bootstrap_evidence_seen);
    agent_result_clear_response(&result);
    run_cmd_set_cwd(NULL);

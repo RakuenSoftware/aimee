@@ -98,7 +98,11 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
 
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   int rc = agent_dispatch_one(&local, NULL, NULL, NULL, prompt, tok, 0.0, 0 /* use_tools */, &res);
+   aimee_request_t request = {0};
+   if (aimee_ir_request_from_text(&request, NULL, prompt, tok, 0.0))
+      return NULL;
+   int rc = agent_dispatch_one(&local, NULL, NULL, &request, 0 /* use_tools */, &res);
+   aimee_request_free(&request);
    if (rc != 0 || aimee_ir_response_complete_text_valid(&res.canonical_response))
    {
       LOG_WARN("aux", "aux_call task '%s': %s", task_name,

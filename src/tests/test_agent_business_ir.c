@@ -74,14 +74,10 @@ static void produce(agent_result_t *out)
    agent_result_replace_display_text(
        out, strdup(mode == 6 ? "DISPLAY_POISON" : "CANONICAL_OK {\"completion\":100}"));
 }
-int agent_execute(const agent_t *a, const char *sys, const char *prompt, int max, double temp,
-                  agent_result_t *out)
+int agent_execute(const agent_t *a, const aimee_request_t *request, agent_result_t *out)
 {
    (void)a;
-   (void)sys;
-   (void)prompt;
-   (void)max;
-   (void)temp;
+   (void)request;
    produce(out);
    return 0;
 }

@@ -484,6 +484,10 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
  * NULL/empty. stop_reason is END_TURN. Fills caller-provided `out` (stack-ok); free with
  * aimee_response_free. Returns 0 on success, -1 on allocation failure (out is left freed/zeroed).
  */
+/* Genuinely text-only request origin; structured callers retain their existing
+ * IR instead. out is owned/zeroed, replaced atomically, and freed normally. */
+int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
+                               int max_tokens, double temperature);
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
 
 /* ---- accessors used by the core stages / KB ----

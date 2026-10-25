@@ -151,7 +151,8 @@ static int guarded_admission_probe(agent_t *agent)
    admission_probe_active = 1;
    admission_probe_model = agent->model;
    request_context_clear();
-   int rc = agent_dispatch_one(agent, &network, NULL, "system", "task", 128, 0, 1, &result);
+   int rc =
+       fixture_agent_dispatch_text(agent, &network, NULL, "system", "task", 128, 0, 1, &result);
    admission_probe_active = 0;
    assert(!result.success && !result.canonical_response.n_content);
    assert(!agent->model[0] || !strcmp(result.model, agent->model));
@@ -396,7 +397,8 @@ static void test_plain_refusal_clears_phase(void)
       job_refuse_at_model = fallback + 1;
       job_model_phases = 0;
       agent_result_t result = {0};
-      assert(agent_execute(&agent, "system", "task", 128, 0, &result) == AGENT_RC_CONTEXT_REFUSED);
+      assert(fixture_agent_execute_text(&agent, "system", "task", 128, 0, &result) ==
+             AGENT_RC_CONTEXT_REFUSED);
       assert(job_model_phases == fallback + 1 && job_store_count == 3 + fallback &&
              !job_store_tool[0]);
       job_refuse_at_model = 0;
@@ -441,9 +443,9 @@ static void test_actual_executor_observations(int only_mode)
          agent.timeout_ms = 10000;
          agent_network_t network = {0};
          agent_result_t result = {0};
-         int rc = execution ? agent_execute(&agent, "system", "task", 128, 0, &result)
-                            : agent_execute_with_tools_for_role(&agent, &network, NULL, "system",
-                                                                "task", 128, 0, &result);
+         int rc = execution ? fixture_agent_execute_text(&agent, "system", "task", 128, 0, &result)
+                            : fixture_agent_role_text(&agent, &network, NULL, "system", "task", 128,
+                                                      0, &result);
          expected_attempts += count;
          assert(job_store_count == expected_attempts);
          assert(agent_job_progress_transport_attempts() == expected_attempts);
@@ -577,7 +579,7 @@ static void test_dispatch_resource_refusal(void)
    strcpy(agent.endpoint, url);
    agent_result_t result = {0};
    fixture_active_delegation = "owned-test-delegation";
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    fixture_active_delegation = NULL;
    assert(!result.success && !result.response);
@@ -590,7 +592,7 @@ static void test_dispatch_resource_refusal(void)
    atomic_int cancelled = 1;
    atomic_int *previous_cancel = agent_get_request_cancel();
    agent_set_request_cancel(&cancelled);
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    agent_set_request_cancel(previous_cancel);
    assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
@@ -598,14 +600,14 @@ static void test_dispatch_resource_refusal(void)
    request_context_snapshot(&previous_owner);
    request_context_t refused = {.context_refused = 1};
    request_context_set(&refused);
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    request_context_restore(&previous_owner);
    assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
    state.fail_end = 0;
    state.setup_delay_ms = 30;
    agent.tool_loop_timeout_ms_cap = 1;
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    assert(state.begins == 1 && state.ends == 1 && !state.active);
    assert(agent.tool_loop_timeout_ms_cap == 1); /* Runtime copy only; no caller mutation. */
@@ -615,14 +617,14 @@ static void test_dispatch_resource_refusal(void)
    int status = 200;
    const char *body = known_zero;
    pid_t child = serve_peer(listener, &status, &body, 1);
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CAPTURE_FAILED);
    assert(!result.success && state.begins == 1 && state.ends == 1 && !state.active);
    agent_result_clear_response(&result);
    join_peer(child, listener);
    listener = listening_peer(url);
    strcpy(agent.endpoint, url);
-   assert(agent_dispatch_one(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    assert(!result.success && state.begins == 1 && state.ends == 1);
    pending = (struct pollfd){.fd = listener, .events = POLLIN};
@@ -727,7 +729,7 @@ static void test_retry_owner_known_usage_boundaries(void)
          out.canonical_response.usage_cache_read = 3;
       if (prior == 3)
          out.canonical_response.usage_reasoning = 2;
-      assert(!agent_retry_dispatch_one(&agent, NULL, NULL, "system", "task", 128, 0, 0, &out));
+      assert(!fixture_agent_retry_text(&agent, NULL, NULL, "system", "task", 128, 0, 0, &out));
       assert(out.success && agent_result_usage_is_unobserved(&out) == (prior != 0));
       assert(out.canonical_response.usage_unobserved == (prior != 0));
       assert(!aimee_ir_response_admit(&out.canonical_response));

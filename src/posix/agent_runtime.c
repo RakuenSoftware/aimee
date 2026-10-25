@@ -539,24 +539,31 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    return rc;
 }
 
-int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
-                             const char *system_prompt, const char *user_prompt, int max_tokens,
-                             double temperature, agent_result_t *out)
-{
-   return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
-                                            max_tokens, temperature, NULL, NULL, out, NULL, NULL,
-                                            NULL);
-}
-
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
-                                      const char *role, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature,
+                                      const char *role, const aimee_request_t *request,
                                       agent_result_t *out)
 {
+   if (!request || !agent_request_with_tools_supported(request) || request->n_messages != 1 ||
+       strcmp(request->messages[0].role, "user"))
+   {
+      memset(out, 0, sizeof *out);
+      snprintf(out->error, sizeof out->error, "unsupported host tool request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   const char *user_prompt =
+       request->messages[0].n_blocks == 1 && request->messages[0].blocks[0].type == AIMEE_BLK_TEXT
+           ? request->messages[0].blocks[0].text
+       : query[0] ? query
+                  : "Continue the admitted conversation.";
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature : -1;
    if (!server_session_log_active())
       return agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
                                                max_tokens, temperature, NULL, NULL, out, NULL, NULL,
-                                               NULL);
+                                               &request->messages[0]);
    cJSON *history = NULL, *updated = NULL;
    if (server_session_log_history_load(&history) < 0)
    {
@@ -568,7 +575,7 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
    }
    int rc = agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
                                               max_tokens, temperature, history, &updated, out, NULL,
-                                              NULL, NULL);
+                                              NULL, &request->messages[0]);
    cJSON_Delete(history);
    if (rc == 0 && updated && server_session_log_history_save(updated))
    {

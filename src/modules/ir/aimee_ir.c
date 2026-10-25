@@ -1232,6 +1232,26 @@ static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_
    return used;
 }
 
+int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
+                               int max_tokens, double temperature)
+{
+   if (!out || !isfinite(temperature))
+      return -1;
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system};
+   aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = (char *)(user ? user : "")};
+   aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = system && system[0] ? 1 : 0,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_max_tokens = max_tokens > 0,
+                              .max_tokens = max_tokens > 0 ? max_tokens : 0,
+                              .has_temperature = temperature >= 0,
+                              .temperature = temperature >= 0 ? temperature : 0};
+   aimee_ir_classify_context(&request);
+   return aimee_ir_request_clone(&request, out);
+}
+
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model)
 {
    if (!out)

@@ -76,6 +76,16 @@ credential resolution and native startup into the canonical execution error,
 without adding retries or changing token/grant behavior. It also skips empty
 text blocks when taking a routing-only text view of a canonical message.
 
+The next recovery change moves the primitive completion, host tool execution,
+single dispatch, retry and same-tier fallback APIs to `aimee_request_t`.
+Capture receives the original message; tool execution retains its blocks. Text
+fixtures construct IR in test-only adapters. Production text origins use the IR
+constructor. Host sampling, pre-model hooks and fallback behavior remain; the
+refusal fixture caught a dropped fallback hook and the fix restores it.
+Normal agent/context-refusal/provider-attempt/business checks pass. Owner checks
+pass with existing line warnings. Higher-level routing/parallel APIs still need
+migration; this checkpoint does not establish full-project completion.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload

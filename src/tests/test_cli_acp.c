@@ -16,24 +16,6 @@
 #include "provider_cli_adapter.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-/* Minimal stubs needed for provider_cli_adapter_get without the full agent stack */
-int agent_execute_with_tools(const agent_t *a, const agent_network_t *n, const char *sys,
-                             const char *usr, int max, double temp, agent_result_t *out)
-{
-   (void)a;
-   (void)n;
-   (void)sys;
-   (void)usr;
-   (void)max;
-   (void)temp;
-   if (out)
-   {
-      memset(out, 0, sizeof(*out));
-      out->success = 1;
-   }
-   return 0;
-}
-
 /* Minimal harnesses have no bound server turn to cancel. */
 int agent_request_cancelled(void)
 {

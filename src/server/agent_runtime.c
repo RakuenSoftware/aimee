@@ -226,12 +226,25 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
                                        agent_result_t *out, const aimee_request_t *request,
                                        int host_text_profile);
 
+static int host_request_supported(const aimee_request_t *request, int use_tools)
+{
+   if (!request || !agent_request_with_tools_supported(request) || request->model ||
+       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user"))
+      return 0;
+   const aimee_message_t *message = &request->messages[0];
+   for (int i = 0; i < message->n_blocks; i++)
+      if (message->blocks[i].type != AIMEE_BLK_TEXT && message->blocks[i].type != AIMEE_BLK_IMAGE &&
+          message->blocks[i].type != AIMEE_BLK_DOCUMENT)
+         return 0;
+   return use_tools || (message->n_blocks == 1 && message->blocks[0].type == AIMEE_BLK_TEXT &&
+                        !message->blocks[0].cache_control && !message->blocks[0].cache_ttl &&
+                        !message->blocks[0].raw);
+}
+
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
-                                       const char *role, const char *system_prompt,
-                                       const char *user_prompt, int max_tokens, double temperature,
+                                       const char *role, const aimee_request_t *request,
                                        int use_tools, agent_result_t *out,
-                                       const aimee_request_t *request, aimee_response_t *response,
-                                       int host_text_profile)
+                                       aimee_response_t *response, int host_text_profile)
 {
    if (!ag || !out)
       return -1;
@@ -241,6 +254,26 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
     * return can never hit stale/garbage. (No caller passes a live out->response
     * here; the executors also memset, so this is the established contract.) */
    memset(out, 0, sizeof(*out));
+   if (!request || aimee_ir_request_admit(request) ||
+       (host_text_profile && !host_request_supported(request, use_tools)))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical execution request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system && request->system[0].type == AIMEE_BLK_TEXT
+                                   ? request->system[0].text
+                                   : NULL;
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   const char *user_prompt = request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
+                                     request->messages[0].blocks[0].type == AIMEE_BLK_TEXT
+                                 ? request->messages[0].blocks[0].text
+                             : query[0] ? query
+                                        : "Continue the admitted conversation.";
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature
+                        : host_text_profile      ? -1
+                                                 : 0.3;
    /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
     * the precondition (net != NULL when use_tools) so a future caller that flips
     * use_tools without supplying a network fails cleanly instead of crashing. */
@@ -339,49 +372,37 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
       }
       else
       {
-         aimee_block_t input_block = {.type = AIMEE_BLK_TEXT, .text = (char *)user_prompt};
-         aimee_message_t input = {.role = "user", .blocks = &input_block, .n_blocks = 1};
-         capture =
-             server_session_log_begin_selected(role, request || !user_prompt ? NULL : &input,
-                                               ag->name, ag->provider, ag->model, 0, &log_scope);
+         capture = server_session_log_begin_selected(
+             role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider,
+             ag->model, 0, &log_scope);
          if (capture < 0)
          {
             rc = AGENT_RC_CAPTURE_FAILED;
             snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
          }
-         else if (request && use_tools)
-            rc = agent_execute_request_with_tools(ag, net, role, request, response, out);
-         else if (request)
+         else if (use_tools)
+            rc = host_text_profile
+                     ? agent_execute_with_tools_for_role(ag, net, role, request, out)
+                     : agent_execute_request_with_tools(ag, net, role, request, response, out);
+         else
          {
             aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
                                            .message_id = "user",
                                            .message = &request->messages[0]};
-            /* Ordinary drafting inherits an existing primary subscriber just
-             * as before; it must not insert its private prompt into that
-             * conversation. A newly installed log owns this request's input. */
-            if ((!host_text_profile || capture == 0) && aimee_ir_session_emit(&event))
+            if (!host_text_profile && aimee_ir_session_emit(&event))
                rc = AGENT_RC_CAPTURE_FAILED;
             else
             {
                const char *previous_cache_role = result_cache_role;
-               result_cache_role = NULL;
+               result_cache_role = host_text_profile && role && role[0] &&
+                                           !agent_get_request_session()[0] &&
+                                           delegate_role_result_cache_enabled(role)
+                                       ? role
+                                       : NULL;
                rc = agent_execute_plain_request(ag, system_prompt, user_prompt, max_tokens,
                                                 temperature, out, request, host_text_profile);
                result_cache_role = previous_cache_role;
             }
-         }
-         else
-         {
-            const char *previous_cache_role = result_cache_role;
-            result_cache_role = !use_tools && role && role[0] && !agent_get_request_session()[0] &&
-                                        delegate_role_result_cache_enabled(role)
-                                    ? role
-                                    : NULL;
-            rc = use_tools
-                     ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
-                                                         max_tokens, temperature, out)
-                     : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-            result_cache_role = previous_cache_role;
          }
       }
    }
@@ -435,11 +456,9 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
 }
 
 int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
-                       const char *system, const char *prompt, int max_tokens, double temperature,
-                       int use_tools, agent_result_t *out)
+                       const aimee_request_t *request, int use_tools, agent_result_t *out)
 {
-   return agent_dispatch_one_internal(agent, network, role, system, prompt, max_tokens, temperature,
-                                      use_tools, out, NULL, NULL, 0);
+   return agent_dispatch_one_internal(agent, network, role, request, use_tools, out, NULL, 1);
 }
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
@@ -521,8 +540,13 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       /* The turn goes through the single guarded executor: it enforces max_parallel
        * and records provider health. Returns 0 (ok), AGENT_RC_AT_LIMIT (agent
        * saturated — no health recorded), or -1 (run failure — health recorded). */
-      int rc = agent_retry_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt,
-                                        max_tokens, temperature, use_tools, out);
+      aimee_request_t request = {0};
+      int prepared = !aimee_ir_request_from_text(&request, system_prompt, effective_prompt,
+                                                 max_tokens, temperature);
+      int rc = prepared
+                   ? agent_retry_dispatch_one(ag, &cfg->network, role, &request, use_tools, out)
+                   : AGENT_RC_CONTEXT_REFUSED;
+      aimee_request_free(&request);
       free(enhanced);
 
       if (rc == 0)
@@ -621,10 +645,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
     * only return text: it cannot run a tool, read/write files, or touch a repo.
     * The non-CLI filter above is secondary. (agent_dispatch_one also enforces the
     * drafter's max_parallel + records its health, like every other turn.) */
-   int rc = agent_dispatch_one_internal(
-       &local, &cfg->network, NULL, request->n_system ? request->system[0].text : NULL,
-       request->messages[0].blocks[0].text, request->has_max_tokens ? request->max_tokens : 0,
-       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL, 1);
+   int rc = agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 1);
    /* Stamp the drafter name for the caller even on the early-guard paths that
     * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
@@ -667,10 +688,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
       snprintf(out->error, sizeof out->error, "selected model cannot honor generation controls");
       return AGENT_RC_CONTEXT_REFUSED;
    }
-   return agent_dispatch_one_internal(
-       &local, &cfg->network, NULL, NULL, request->messages[0].blocks[0].text,
-       request->has_max_tokens ? request->max_tokens : 0,
-       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL, 0);
+   return agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 0);
 }
 
 /* Run one fan-out task on a specifically named configured agent (resolved like
@@ -712,10 +730,11 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
     * (agent saturated) propagates as a non-zero rc; the parallel panel/ensemble
     * caller treats a non-response as "this lens unfilled" and retries a different
     * agent, so a saturated model is spread rather than piled on. */
-   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                               temperature, 0 /* use_tools */, out);
-   {
-   }
+   aimee_request_t request = {0};
+   if (aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature))
+      return AGENT_RC_CONTEXT_REFUSED;
+   int rc = agent_dispatch_one(&local, &cfg->network, role, &request, 0 /* use_tools */, out);
+   aimee_request_free(&request);
    return rc;
 }
 
@@ -746,10 +765,11 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
     * index-only `review_indexed`) is what actually decides which tools appear. */
    local.write_capable = 0;
 
-   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                               temperature, 1 /* use_tools */, out);
-   {
-   }
+   aimee_request_t request = {0};
+   if (aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature))
+      return AGENT_RC_CONTEXT_REFUSED;
+   int rc = agent_dispatch_one(&local, &cfg->network, role, &request, 1 /* use_tools */, out);
+   aimee_request_free(&request);
    return rc;
 }
 
@@ -866,10 +886,26 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 
    /* The delegate turn through the single guarded executor (tools enabled): it
     * enforces ag->max_parallel and records provider health. */
-   int rc = agent_dispatch_one_internal(
-       ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
-       request && request->has_temperature ? request->temperature : 0.3, 1 /* use_tools */, out,
-       request, response, 0);
+   aimee_request_t base = {0}, attempted = {0};
+   if (!request && aimee_ir_request_from_text(&base, system_prompt, user_prompt, max_tokens, 0.3))
+   {
+      free(enhanced);
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const aimee_request_t *original = request ? request : &base;
+   const aimee_request_t *dispatch = original;
+   if (!request && enhanced)
+   {
+      if (aimee_ir_request_from_text(&attempted, system_prompt, effective_prompt, max_tokens, 0.3))
+      {
+         free(enhanced);
+         aimee_request_free(&base);
+         return AGENT_RC_CONTEXT_REFUSED;
+      }
+      dispatch = &attempted;
+   }
+   int rc = agent_dispatch_one_internal(ag, &cfg->network, role, dispatch, 1, out, response,
+                                        request ? 0 : 1);
    free(enhanced);
 
    if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
@@ -895,20 +931,20 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          aimee_log(LOG_INFO, "agent", "fallback: trying agent '%s'", fb->name);
-         rc = agent_retry_dispatch_one(fb, &cfg->network, role, system_prompt, user_prompt,
-                                       max_tokens, 0.3, 1 /* use_tools */, out);
+         rc = agent_retry_dispatch_one(fb, &cfg->network, role, original, 1 /* use_tools */, out);
          if (rc == 0)
             ag = fb; /* update ag for post-run logging (health recorded by dispatch_one) */
       }
    }
 
    if (!route_pinned)
-      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                        enforce_writes, out, rc);
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, original, enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
    agent_log_call(out, role);
+   aimee_request_free(&attempted);
+   aimee_request_free(&base);
 
    return rc;
 }
@@ -1183,11 +1219,12 @@ static int agent_execute_plain_request(const agent_t *agent, const char *system_
       snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
-      if (!request && is_anthropic_provider(&fb_agent))
+      if ((!request || host_text_profile) && is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
       cJSON *fb_req =
-          request ? agent_build_plain_request_ir(&fb_agent, request)
-                  : agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
+          request && !host_text_profile
+              ? agent_build_plain_request_ir(&fb_agent, request)
+              : agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -2197,9 +2234,18 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
    return rc;
 }
 
-int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                  int max_tokens, double temperature, agent_result_t *out)
+int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_result_t *out)
 {
-   return agent_execute_plain_request(agent, system_prompt, user_prompt, max_tokens, temperature,
-                                      out, NULL, 0);
+   if (!out)
+      return -1;
+   if (!host_request_supported(request, 0))
+   {
+      memset(out, 0, sizeof *out);
+      snprintf(out->error, sizeof out->error, "unsupported canonical completion request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   return agent_execute_plain_request(
+       agent, request->n_system ? request->system[0].text : NULL,
+       request->messages[0].blocks[0].text, request->has_max_tokens ? request->max_tokens : 0,
+       request->has_temperature ? request->temperature : -1, out, request, 1);
 }

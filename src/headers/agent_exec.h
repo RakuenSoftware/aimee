@@ -15,13 +15,8 @@ void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate);
 void policy_unknown_effect_clear(void);
 /* Execution */
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
-int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
-                             const char *system_prompt, const char *user_prompt, int max_tokens,
-                             double temperature, agent_result_t *out);
-
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
-                                      const char *role, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature,
+                                      const char *role, const aimee_request_t *request,
                                       agent_result_t *out);
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
@@ -41,8 +36,7 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
                                  const aimee_request_t *request, aimee_response_t *response,
                                  agent_result_t *out);
 
-int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                  int max_tokens, double temperature, agent_result_t *out);
+int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_result_t *out);
 
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
@@ -139,14 +133,13 @@ int agent_rc_should_try_another(int rc, const char *error);
 /* Private retry owner: out must be initialized and owns its previous response.
  * Clears that response before dispatch, retaining aggregate usage uncertainty. */
 int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
-                             const char *system, const char *prompt, int max_tokens,
-                             double temperature, int use_tools, agent_result_t *out);
+                             const aimee_request_t *request, int use_tools, agent_result_t *out);
 /* Remaining milliseconds in the one request-wide delegate tool-loop budget.
  * Returns 0 when no request cap exists and -1 after an existing cap expires. */
 int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg);
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
-                                 const char *system_prompt, const char *user_prompt, int max_tokens,
-                                 int enforce_writes, agent_result_t *out, int rc);
+                                 const aimee_request_t *request, int enforce_writes,
+                                 agent_result_t *out, int rc);
 
 /* AGENT_RC_AT_LIMIT: agent_dispatch_one refused because the agent is already at
  * its max_parallel ceiling — a saturation signal DISTINCT from a run failure, so
@@ -183,8 +176,7 @@ static inline int agent_rc_is_local_refusal(int rc)
  * call re-acquires the same max_parallel slot (self-throttle). Such composite
  * helpers use the primitive agent_execute() directly. */
 int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
-                       const char *system_prompt, const char *user_prompt, int max_tokens,
-                       double temperature, int use_tools, agent_result_t *out);
+                       const aimee_request_t *request, int use_tools, agent_result_t *out);
 
 /* Logging */
 void agent_log_call(const agent_result_t *result, const char *role);

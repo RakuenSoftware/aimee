@@ -1,3 +1,4 @@
+#include "support/ir_text_request.h"
 #include "support/typed_catalog_fixture.h"
 #include "modules/tools/tool_catalog_data.h"
 #include "support/delegate_role_seam_stub.h"
@@ -1458,7 +1459,7 @@ static void test_legacy_tmux_requires_owned_headless(void)
    int messages = 0;
    aimee_ir_session_set_sink(headless_legacy_capture, &messages);
    agent_result_t out = {0};
-   assert(agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out) < 0);
+   assert(fixture_agent_tools_text(&agent, NULL, "system", "user", 100, 0.1, &out) < 0);
    assert(!out.success && messages == 0 && access(marker, F_OK) < 0);
    agent_result_clear_response(&out);
    aimee_ir_session_set_sink(NULL, NULL);
