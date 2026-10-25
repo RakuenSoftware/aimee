@@ -46,6 +46,8 @@ The continuation repairs additional active message-consumer defects:
   vendor JSON into chat. Local CLI arguments/results and concurrent temporary
   outputs retain their own boundaries. TTS preserves structured request fields
   and complete binary audio rather than truncating JSON or using `strlen`.
+  The matching ntfy outbound consumer now sends complete text/attachment bytes,
+  owns/frees its response, and recognizes HTTP 2xx success.
 - The common buffered HTTP reader refuses incomplete declared/chunked bodies
   before copying or publishing them. Binary requests/responses retain explicit
   lengths. Windows header conversions preserve complete fields and refuse

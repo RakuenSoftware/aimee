@@ -514,6 +514,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-gateway-stt-pairing \
                $(TESTPREFIX)/unit-test-gateway-stt \
                $(TESTPREFIX)/unit-test-gateway-tts \
+               $(TESTPREFIX)/unit-test-gateway-ntfy \
                $(TESTPREFIX)/unit-test-embed-result \
                $(TESTPREFIX)/unit-test-kb-sidecar-admission \
                $(TESTPREFIX)/unit-test-mcp-gateway-tools \
@@ -4051,6 +4052,10 @@ $(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/test_gateway_stt.o \
 $(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/test_gateway_tts.o \
     $(OBJDIR)/gateway/tts.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-gateway-ntfy: $(OBJDIR)/tests/test_gateway_ntfy.o \
+    $(OBJDIR)/gateway/platform_ntfy.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-embed-result: $(OBJDIR)/tests/test_embed_result.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lm
