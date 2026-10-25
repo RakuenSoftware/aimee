@@ -831,6 +831,19 @@ int main(void)
    external_projection.projection_history_messages_as_text = -1;
    assert(!aimee_ir_session_event_json(&external_projection));
 
+   aimee_session_event_t settings = {.kind = AIMEE_SESSION_PROJECTION,
+                                     .projection_model = "subscription-model",
+                                     .projection_boundary = "request",
+                                     .projection_request_controls = 2};
+   cJSON *settings_json = aimee_ir_session_event_json(&settings);
+   assert(settings_json && cJSON_GetObjectItem(cJSON_GetObjectItem(settings_json, "payload"),
+                                               "omitted_request_controls")->valueint == 2);
+   cJSON_Delete(settings_json);
+   settings.projection_request_controls = -1;
+   assert(!aimee_ir_session_event_json(&settings));
+   settings.projection_request_controls = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&settings));
+
    puts("IR session event tests passed");
    return 0;
 }

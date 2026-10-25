@@ -226,20 +226,7 @@ static int agent_execute_plain_request(const agent_t *agent, const aimee_request
 
 static int host_request_supported(const aimee_request_t *request, int use_tools)
 {
-   if (!request || !agent_request_with_tools_supported(request) || request->model ||
-       request->stream || request->n_messages != 1 || strcmp(request->messages[0].role, "user"))
-      return 0;
-   const aimee_message_t *message = &request->messages[0];
-   for (int i = 0; i < message->n_blocks; i++)
-   {
-      const aimee_block_t *block = &message->blocks[i];
-      if ((block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
-           block->type != AIMEE_BLK_DOCUMENT) ||
-          (!use_tools && (block->type != AIMEE_BLK_TEXT || block->cache_control ||
-                          block->cache_ttl || block->raw)))
-         return 0;
-   }
-   return 1;
+   return agent_host_request_supported(request, use_tools);
 }
 
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
@@ -477,39 +464,39 @@ static int host_request_with_hint(const aimee_request_t *source, const char *hin
 {
    if (aimee_ir_request_clone(source, out))
       return -1;
+   if (out->n_messages < 1)
+      goto fail;
    aimee_message_t *message = &out->messages[out->n_messages - 1];
-   if (message->n_blocks == 1 && message->blocks[0].type == AIMEE_BLK_TEXT &&
-       !message->blocks[0].raw && !message->blocks[0].cache_control &&
-       !message->blocks[0].cache_ttl)
+   if (strcmp(message->role, "user"))
    {
-      const char *text = message->blocks[0].text;
-      size_t size = strlen(text ? text : "") + strlen(hint) + 3;
-      char *joined = malloc(size);
-      if (!joined)
+      aimee_message_t *messages =
+          realloc(out->messages, (size_t)(out->n_messages + 1) * sizeof *messages);
+      if (!messages)
          goto fail;
-      snprintf(joined, size, "%s\n\n%s", text ? text : "", hint);
-      free(message->blocks[0].text);
-      message->blocks[0].text = joined;
+      out->messages = messages;
+      message = &messages[out->n_messages++];
+      *message = (aimee_message_t){.role = strdup("user")};
+      if (!message->role)
+         goto fail;
    }
-   else
+   char *text = strdup(hint);
+   aimee_block_t *blocks =
+       realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+   if (!text || !blocks)
    {
-      char *text = strdup(hint);
-      aimee_block_t *blocks =
-          realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
-      if (!text || !blocks)
-      {
-         free(text);
-         if (blocks)
-            message->blocks = blocks;
-         goto fail;
-      }
-      message->blocks = blocks;
-      aimee_block_t *block = &blocks[message->n_blocks++];
-      *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
-      aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
-                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                                 0);
+      free(text);
+      if (blocks)
+         message->blocks = blocks;
+      goto fail;
    }
+   message->blocks = blocks;
+   message->content_scalar = 0;
+   aimee_block_t *block = &blocks[message->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   out->mutated = 1;
    return 0;
 fail:
    aimee_request_free(out);
@@ -622,14 +609,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
                    agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
-   if (!cfg || !request || aimee_ir_request_admit(request) || request->n_messages != 1 ||
-       request->n_system > 1 || (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) ||
-       strcmp(request->messages[0].role, "user") || request->messages[0].n_blocks != 1 ||
-       request->messages[0].blocks[0].type != AIMEE_BLK_TEXT ||
-       !request->messages[0].blocks[0].text || !request->messages[0].blocks[0].text[0] ||
-       !agent_request_with_tools_supported(request) || request->model || request->stream ||
-       request->messages[0].blocks[0].cache_control || request->messages[0].blocks[0].cache_ttl ||
-       request->messages[0].blocks[0].raw)
+   if (!cfg || !host_request_supported(request, 0))
    {
       snprintf(out->error, sizeof(out->error), "unsupported drafting request");
       return -1;
@@ -682,10 +662,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
 {
    memset(out, 0, sizeof *out);
    if (!cfg || !request || aimee_ir_request_admit(request) || request->n_tools || request->stream ||
-       request->model || request->tool_choice != AIMEE_TOOL_CHOICE_NONE ||
-       request->n_messages != 1 || request->messages[0].n_blocks != 1 ||
-       request->messages[0].blocks[0].type != AIMEE_BLK_TEXT ||
-       !request->messages[0].blocks[0].text || !request->messages[0].blocks[0].text[0])
+       request->model || request->tool_choice != AIMEE_TOOL_CHOICE_NONE || request->n_messages < 1)
       return AGENT_RC_CONTEXT_REFUSED;
    agent_t *pick = cfg->default_agent[0] ? agent_find(cfg, cfg->default_agent) : NULL;
    if (pick && (!pick->enabled || agent_uses_provider_cli(pick)))
@@ -1080,17 +1057,10 @@ static int agent_execute_plain_request(const agent_t *agent, const aimee_request
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
-   char query[4096];
-   aimee_ir_last_user_text(request, query, sizeof query);
-   const char *user_prompt = request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
-                                     request->messages[0].blocks[0].type == AIMEE_BLK_TEXT
-                                 ? request->messages[0].blocks[0].text
-                             : query[0] ? query
-                                        : "Continue the admitted conversation.";
-   if (!user_prompt || !user_prompt[0])
+   if (!request || aimee_ir_request_admit(request))
    {
-      snprintf(out->error, sizeof(out->error), "empty prompt");
-      return -1;
+      snprintf(out->error, sizeof out->error, "invalid canonical request");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
    char stop_reason[128];
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
@@ -1557,9 +1527,89 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    return 0;
 }
 
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom_prompt,
-                                       int skip_kb_context, char *error, size_t error_len)
+/* Boundaries are recorded at the source append sites, never inferred from
+ * headings or content. The buffer is only scratch storage for formatting and
+ * the legacy read-only view; model consumers receive the owned typed blocks. */
+typedef enum
+{
+   EXEC_PLATFORM_POLICY,
+   EXEC_OPERATOR_POLICY,
+   EXEC_MEMORY_EVIDENCE,
+   EXEC_OPERATOR_EVIDENCE,
+   EXEC_TOOL_EVIDENCE
+} exec_context_kind_t;
+typedef struct
+{
+   size_t begin, end;
+   exec_context_kind_t kind;
+} exec_context_span_t;
+typedef struct
+{
+   exec_context_span_t spans[16];
+   int count, failed;
+   size_t begin;
+   exec_context_kind_t kind;
+} exec_context_record_t;
+static void exec_context_boundary(exec_context_record_t *record, size_t pos,
+                                  exec_context_kind_t next)
+{
+   if (pos > record->begin)
+   {
+      if (record->count && record->spans[record->count - 1].kind == record->kind &&
+          record->spans[record->count - 1].end == record->begin)
+         record->spans[record->count - 1].end = pos;
+      else if (record->count < 16)
+         record->spans[record->count++] = (exec_context_span_t){record->begin, pos, record->kind};
+      else
+         record->failed = 1;
+   }
+   record->begin = pos;
+   record->kind = next;
+}
+static int exec_context_message(const exec_context_record_t *record, const char *text,
+                                aimee_message_t *out)
+{
+   if (record->failed)
+      return -1;
+   aimee_message_t message = {.role = strdup("system")};
+   message.blocks = record->count ? calloc((size_t)record->count, sizeof *message.blocks) : NULL;
+   if (!message.role || (record->count && !message.blocks))
+      goto fail;
+   for (int i = 0; i < record->count; i++)
+   {
+      const exec_context_span_t *span = &record->spans[i];
+      aimee_block_t *block = &message.blocks[message.n_blocks++];
+      block->type = AIMEE_BLK_TEXT;
+      block->text = strndup(text + span->begin, span->end - span->begin);
+      if (!block->text)
+         goto fail;
+      aimee_context_origin_t origin = span->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_ORIGIN_PLATFORM
+                                      : span->kind == EXEC_MEMORY_EVIDENCE ? AIMEE_CTX_ORIGIN_MEMORY
+                                      : span->kind == EXEC_TOOL_EVIDENCE
+                                          ? AIMEE_CTX_ORIGIN_TOOL
+                                          : AIMEE_CTX_ORIGIN_OPERATOR;
+      int policy = span->kind == EXEC_PLATFORM_POLICY || span->kind == EXEC_OPERATOR_POLICY;
+      aimee_ir_block_set_context(block, origin,
+                                 policy ? AIMEE_CTX_AUTH_POLICY : AIMEE_CTX_AUTH_EVIDENCE,
+                                 span->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_TRUST_VERIFIED
+                                                                    : AIMEE_CTX_TRUST_UNVERIFIED,
+                                 AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   }
+   cJSON *validated = aimee_ir_message_json(&message);
+   if (!validated)
+      goto fail;
+   cJSON_Delete(validated);
+   aimee_message_free(out);
+   *out = message;
+   return 0;
+fail:
+   aimee_message_free(&message);
+   return -1;
+}
+static char *agent_build_exec_context_recorded(const agent_t *agent, const agent_network_t *network,
+                                               const char *role, const char *custom_prompt,
+                                               int skip_kb_context, aimee_message_t *typed,
+                                               char *error, size_t error_len)
 {
    if (error && error_len)
       error[0] = '\0';
@@ -1591,6 +1641,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       return NULL;
    }
    size_t pos = 0;
+   exec_context_record_t source = {.kind = EXEC_PLATFORM_POLICY};
 
    /* Compute per-category budgets from the content budget.
     * Fixed overhead (instructions, network, guardrails, etc.) sits outside these limits. */
@@ -1627,12 +1678,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       char root[MAX_PATH_LEN] = "";
       if (workspace_active_root(cwd, root, sizeof(root)) != 0)
          snprintf(root, sizeof(root), "%s", cwd);
+      exec_context_boundary(&source, pos, EXEC_OPERATOR_EVIDENCE);
+      ctx_appendf(buf, cap, &pos, "Workspace root: %s\n", root);
+      exec_context_boundary(&source, pos, EXEC_PLATFORM_POLICY);
       ctx_appendf(buf, cap, &pos,
-                  "Workspace root: %s\n"
                   "Use paths relative to this workspace, or absolute paths under this exact "
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
-                  "unless the user explicitly asks for them.\n",
-                  root);
+                  "unless the user explicitly asks for them.\n");
       (void)workspace_repo_identity(cwd, memory_project, sizeof(memory_project), memory_workspace,
                                     sizeof(memory_workspace));
    }
@@ -1642,11 +1694,15 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
    ctx_appendf(buf, cap, &pos, "\n");
 
-   /* Custom prompt override */
+   exec_context_boundary(&source, pos, EXEC_OPERATOR_POLICY);
+
+   /* Authored profile/role policy, not an inherited first-system projection. */
    if (custom_prompt && custom_prompt[0])
    {
       ctx_appendf(buf, cap, &pos, "%s\n\n", custom_prompt);
    }
+
+   exec_context_boundary(&source, pos, EXEC_MEMORY_EVIDENCE);
 
    /* Replace the prior native proof set once per complete context build;
     * subsequent native blocks in this build add their retained proofs. */
@@ -1896,6 +1952,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       }
    }
 
+   exec_context_boundary(&source, pos, EXEC_OPERATOR_EVIDENCE);
+
    /* Network access */
    if (network && network->ssh_entry[0])
    {
@@ -1951,6 +2009,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          ctx_appendf(buf, cap, &pos, "\n");
       }
    }
+
+   exec_context_boundary(&source, pos, EXEC_MEMORY_EVIDENCE);
 
    /* Working memory context */
    {
@@ -2062,6 +2122,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
     * Each delegate starts fresh — it has the task prompt and relevant context
     * from memory/index, which is sufficient. */
 
+   exec_context_boundary(&source, pos, EXEC_PLATFORM_POLICY);
+
    /* Guardrail warnings */
    {
       const char *mode = config_guardrail_mode();
@@ -2080,6 +2142,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       }
    }
 
+   exec_context_boundary(&source, pos, EXEC_OPERATOR_POLICY);
+
    /* Project contract */
    char *contract = agent_load_project_contract(NULL);
    if (contract)
@@ -2087,6 +2151,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       ctx_appendf(buf, cap, &pos, "%s\n", contract);
       free(contract);
    }
+
+   exec_context_boundary(&source, pos, EXEC_TOOL_EVIDENCE);
 
    /* Environment capabilities */
    {
@@ -2101,13 +2167,47 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       }
    }
 
+   exec_context_boundary(
+       &source, pos, agent->exec_system_prompt[0] ? EXEC_OPERATOR_POLICY : EXEC_PLATFORM_POLICY);
+
    /* Instructions */
    ctx_appendf(buf, cap, &pos, "%s",
                agent->exec_system_prompt[0] ? agent->exec_system_prompt
                                             : default_exec_instructions);
 
    kb_client_memory_scope_context_clear();
+   exec_context_boundary(&source, pos, source.kind);
+   if (typed && exec_context_message(&source, buf, typed))
+   {
+      if (error && error_len)
+         snprintf(error, error_len, "canonical execution context admission failed");
+      free(buf);
+      return NULL;
+   }
    return buf;
+}
+
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context, aimee_message_t *out, char *error,
+                                        size_t error_len)
+{
+   if (!out)
+      return -1;
+   char *view = agent_build_exec_context_recorded(agent, network, role, custom_prompt,
+                                                  skip_kb_context, out, error, error_len);
+   if (!view)
+      return -1;
+   free(view);
+   return 0;
+}
+/* Read-only inspection compatibility. Never feed this string to model execution. */
+char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
+                                       const char *role, const char *custom_prompt,
+                                       int skip_kb_context, char *error, size_t error_len)
+{
+   return agent_build_exec_context_recorded(agent, network, role, custom_prompt, skip_kb_context,
+                                            NULL, error, error_len);
 }
 
 char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,

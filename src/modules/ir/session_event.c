@@ -1084,6 +1084,8 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
+          event->projection_request_controls < 0 ||
+          event->projection_request_controls > AIMEE_IR_MAX_BLOCKS ||
           event->projection_history_messages_as_text < 0 ||
           event->projection_history_messages_as_text > AIMEE_IR_MAX_BLOCKS ||
           event->projection_host_context_blocks_as_text < 0 ||
@@ -1091,6 +1093,7 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           event->projection_unverified_external_tool_reports < 0 ||
           event->projection_unverified_external_tool_reports > AIMEE_IR_MAX_BLOCKS ||
           (!event->projection_reasoning && !event->projection_cache_controls &&
+           !event->projection_request_controls &&
            !event->projection_history_messages_as_text &&
            !event->projection_host_context_blocks_as_text &&
            !event->projection_unverified_external_tool_reports) ||
@@ -1110,6 +1113,9 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           (event->projection_cache_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
                                     event->projection_cache_controls)) ||
+          (event->projection_request_controls &&
+           !cJSON_AddNumberToObject(payload, "omitted_request_controls",
+                                    event->projection_request_controls)) ||
           (event->projection_host_context_blocks_as_text &&
            !cJSON_AddNumberToObject(payload, "host_context_blocks_as_text",
                                     event->projection_host_context_blocks_as_text)) ||

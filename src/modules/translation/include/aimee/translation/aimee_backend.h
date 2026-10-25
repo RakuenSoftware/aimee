@@ -34,6 +34,9 @@ typedef struct
 /* Only translation-created host layout extensions belong in a prepared
  * execution profile. Whole native conversations/selectors cannot be profiles. */
 int aimee_backend_host_profile_valid(const aimee_request_t *request);
+/* Restore closed, same-wire host extensions after an owned model projection. */
+int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
+                                           aimee_request_t *projected, aimee_wire_t wire);
 /* Reports wire incompatibility without editing canonical history. */
 void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
                                      aimee_wire_projection_report_t *report);

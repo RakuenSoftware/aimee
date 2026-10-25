@@ -1085,6 +1085,7 @@ static void probe_replay_scope(const char *path)
          assert(request.n_system == 1 + identity);
          assert(!strcmp(request.system[identity].text, "host-owned system"));
          assert(!identity || !strcmp(request.system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+         assert(!identity || request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
          assert(request.n_messages == 1 && request.n_tools == 1);
          assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
                                                                 ? "fresh durable one"

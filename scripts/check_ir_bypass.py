@@ -18,7 +18,8 @@ LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
-    "agent_build_request", "plugin_chook_apply_pre_llm",
+    "agent_build_request", "agent_build_request_ir", "agent_prepare_request_ir",
+    "plugin_chook_apply_pre_llm",
     "platform_delegate_run_background", "platform_trace_run_task",
     "cron_build_job_prompt", "cron_run_llm_prompt",
     "agent_tools_dispatch_owned",
@@ -181,6 +182,7 @@ RULES = {
         r"\baux_call\s*\([^)]*const\s+char\s*\*\s*(?:prompt|input)\b|"
         r"\(\s*\*\s*roadmap_model_fn\s*\)\s*\(\s*const\s+char\s*\*|"
         r"\b(?:delegate_(?:ensemble|roundtable)_run|aimee_panel_(?:run|aggregate))\s*\([^)]*const\s+char\s*\*\s*(?:prompt|task)\b"),
+    "untyped-exec-context": re.compile(r"\bagent_build_exec_context(?:_checked)?\s*\("),
     "raw-steer-contract": re.compile(
         r"\b(?:chat_steer_set|server_chat_ir_(?:replace|reject)_steer)\s*\([^)]*const\s+char\s*\*\s*message\b|"
         r"\bchat_steer_take\s*\([^)]*char\s*\*\s*\*\s*out_message\b"),
@@ -231,7 +233,8 @@ CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/",
                    "server-go/internal/engine/", "server-go/delegate/")
 # String-only tool entries are retired throughout production C.
 CANONICAL_PROFILE_FUNCTIONS = {
-    "agent_prepare_request_ir", "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
+    "prepare_host_profile", "agent_prepare_seeded_request_ir", "agent_build_seeded_request_ir",
+    "agent_openai_profile_ir", "agent_responses_profile_ir",
     "agent_anthropic_profile_ir",
 }
 
@@ -294,6 +297,9 @@ def findings(root: Path) -> list[dict]:
             "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
             if relative == "src/modules/translation/harness_ir.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "untyped-exec-context" and (
+                    not relative.endswith(".c") or relative == "src/server/agent_runtime.c"):
+                continue
             if rule in {"native-control-reparse", "native-control-history"} and relative != "src/modules/translation/harness_ir.c":
                 continue
             if rule == "acp-ambient-launch" and relative != "src/server/cli_acp.c":

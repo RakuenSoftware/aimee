@@ -9,25 +9,19 @@ struct cJSON;
 
 /* --- Request builders --- */
 
-/* Prepare the complete owned host request, after profile shaping and delegate
- * policy, without provider rendering or projection events. Inputs are borrowed;
- * out must be zero-initialized or an owned request. Success atomically replaces
- * it; failure leaves it unchanged. Native producers consume this typed context
- * rather than recover host authority from SDK-generated native requests. */
-int agent_prepare_request_ir(const agent_t *agent, const struct cJSON *messages,
-                             const aimee_request_t *catalog, const char *system_prompt,
-                             int max_tokens, double temperature, aimee_wire_t wire, int is_delegate,
-                             aimee_request_t *out);
-
-/* The runtime stores canonical {role,blocks} messages. Native history is accepted
- * only by this migration adapter, and native requests are built only at egress.
- * Optional dispatch_catalog receives the owned, post-policy function catalog on
- * success, replacing its previous owned value. It never contains conversation
- * content. Pass NULL at output-only boundaries. */
-struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *messages,
-                                     const aimee_request_t *catalog, const char *system_prompt,
-                                     int max_tokens, double temperature, aimee_wire_t wire,
-                                     int is_delegate, aimee_request_t *dispatch_catalog);
+/* Preserve the canonical seed while attaching separate host policy/catalog
+ * and current canonical history. Inputs borrowed, output owned. */
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const struct cJSON *messages, const aimee_request_t *catalog,
+                                    const aimee_message_t *host_context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int is_delegate,
+                                    aimee_request_t *out);
+struct cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                            const struct cJSON *messages,
+                                            const aimee_request_t *catalog,
+                                            const aimee_message_t *host_context, int max_tokens,
+                                            double temperature, aimee_wire_t wire, int is_delegate,
+                                            int host_profile, aimee_request_t *dispatch_catalog);
 
 /* Resolve the output-token cap for an outbound request: an explicit caller
  * `requested` (>0) wins, else the agent's pinned max_tokens (>0), else the

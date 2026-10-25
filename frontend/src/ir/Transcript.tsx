@@ -131,6 +131,7 @@ function ProjectionNotice({ report }: { report: SessionState['projections'][numb
     {(report.host_context_blocks_as_text ?? 0) > 0 && <> ACP sends host instructions as context ({report.host_context_blocks_as_text} {report.host_context_blocks_as_text === 1 ? 'block' : 'blocks'}).</>}
     {(report.history_messages_as_text ?? 0) > 0 && <> ACP receives earlier messages as text context ({report.history_messages_as_text}).</>}
     {(report.unverified_external_tool_reports ?? 0) > 0 && <> External tool reports are unverified ({report.unverified_external_tool_reports}).</>}
+    {(report.omitted_request_controls ?? 0) > 0 && <> {report.model} could not apply {report.omitted_request_controls} requested {report.omitted_request_controls === 1 ? 'setting' : 'settings'}.</>}
     {(report.omitted_cache_controls ?? 0) > 0 && <> {report.omitted_cache_controls} requested cache {report.omitted_cache_controls === 1 ? 'setting was' : 'settings were'} not applied for {report.model}.</>}
   </>;
 }
@@ -242,6 +243,7 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
     {(state.projections ?? []).length > 1 && <div className="ir-compatibility-notices">
       <p role="status">
         {state.projections.some(report => report.omitted_reasoning_blocks > 0) && <>Some model inputs or responses omit reasoning that remains in history.</>}
+        {state.projections.some(report => (report.omitted_request_controls ?? 0) > 0) && <> Some requested model settings could not be applied.</>}
         {state.projections.some(report => (report.host_context_blocks_as_text ?? 0) > 0) && <> ACP sends host instructions as context.</>}
         {state.projections.some(report => (report.history_messages_as_text ?? 0) > 0) && <> ACP receives earlier messages as text context.</>}
         {state.projections.some(report => (report.unverified_external_tool_reports ?? 0) > 0) && <> External tool reports are unverified.</>}

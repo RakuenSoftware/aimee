@@ -430,12 +430,211 @@ static void test_plain_hook_context_is_separate_ir_evidence(void)
    puts("plain hooks preserve original IR spans and append separate unverified evidence OK");
 }
 
+static int fixture_history_hook(const char *view, char *out, size_t size, void *user)
+{
+   (void)user;
+   assert(strstr(view, "Repair the owned draft.") && strstr(view, "Retrieved repair evidence."));
+   assert(!strstr(view, "PRIVATE"));
+   snprintf(out, size, "History hook context.");
+   return 0;
+}
+
+static void test_canonical_history_egress_projection(void)
+{
+   aimee_block_t policies[] = {{.type = AIMEE_BLK_TEXT, .text = "Keep host policy A."},
+                               {.type = AIMEE_BLK_TEXT, .text = "Keep appended host policy B."},
+                               {.type = AIMEE_BLK_TEXT,
+                                .text = "PRIVATE SYSTEM SECRET",
+                                .context = {.origin = AIMEE_CTX_ORIGIN_PLATFORM,
+                                            .authority = AIMEE_CTX_AUTH_POLICY,
+                                            .trust = AIMEE_CTX_TRUST_VERIFIED,
+                                            .sensitivity = AIMEE_CTX_SENS_RESTRICTED,
+                                            .model_visible = 0}}};
+   aimee_block_t task = {.type = AIMEE_BLK_TEXT, .text = "Original repair task."};
+   aimee_block_t prior[] = {{.type = AIMEE_BLK_TEXT, .text = "Prior draft remains evidence."},
+                            {.type = AIMEE_BLK_THINKING,
+                             .text = "PRIVATE REASONING PAYLOAD",
+                             .thinking_signature = "PRIVATE THINKING SIGNATURE"}};
+   aimee_ir_block_set_context(&prior[1], AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_DIAGNOSTIC,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 0,
+                              "model-output", "cron-repair", 3);
+   aimee_block_t repair[] = {{.type = AIMEE_BLK_TEXT, .text = "Repair the owned draft."},
+                             {.type = AIMEE_BLK_TEXT, .text = "Retrieved repair evidence."}};
+   aimee_ir_block_set_context(&repair[1], AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                              "repair-evidence", "source", 4);
+   aimee_message_t history[] = {{.role = "user",
+                                 .blocks = &task,
+                                 .n_blocks = 1,
+                                 .content_scalar = 1,
+                                 .compaction_boundary = 1},
+                                {.role = "assistant", .blocks = prior, .n_blocks = 2},
+                                {.role = "user", .blocks = repair, .n_blocks = 2}};
+   aimee_request_t request = {.system = policies,
+                              .n_system = 3,
+                              .messages = history,
+                              .n_messages = 3,
+                              .has_max_tokens = 1,
+                              .max_tokens = 128,
+                              .has_temperature = 1,
+                              .temperature = 0.0};
+   request.raw = cJSON_Parse("{\"messages\":[{\"content\":\"PRIVATE REASONING PAYLOAD\"}]}");
+   cJSON *snapshot = aimee_ir_request_json(&request),
+         *raw_snapshot = cJSON_Duplicate(request.raw, 1);
+   assert(snapshot && raw_snapshot && agent_host_request_supported(&request, 0));
+   aimee_request_t projected = {0};
+   assert(!agent_request_project_model(&request, &projected));
+   assert(projected.n_messages == 3 && projected.n_system == 2 &&
+          projected.messages[1].n_blocks == 1 && projected.messages[0].content_scalar &&
+          projected.messages[0].compaction_boundary && !projected.raw);
+   assert(!strcmp(projected.messages[1].blocks[0].text, prior[0].text));
+   assert(projected.messages[2].blocks[1].context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL &&
+          projected.messages[2].blocks[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          projected.messages[2].blocks[1].context.revision_epoch == 4);
+   aimee_request_free(&projected);
+   const char *providers[] = {"openai", "anthropic", "chatgpt"};
+   for (size_t i = 0; i < sizeof providers / sizeof providers[0]; i++)
+   {
+      agent_t agent = mk_agent(providers[i], "configured-model");
+      cJSON *body = agent_build_host_request_ir(&agent, &request);
+      assert(body);
+      char *encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, policies[0].text) && strstr(encoded, policies[1].text) &&
+             strstr(encoded, task.text) && strstr(encoded, prior[0].text) &&
+             strstr(encoded, repair[0].text) && strstr(encoded, repair[1].text));
+      assert(!strstr(encoded, "PRIVATE REASONING PAYLOAD") &&
+             !strstr(encoded, "PRIVATE THINKING SIGNATURE") &&
+             !strstr(encoded, "PRIVATE SYSTEM SECRET"));
+      cJSON *messages = cJSON_GetObjectItemCaseSensitive(
+          body, !strcmp(providers[i], "chatgpt") ? "input" : "messages");
+      assert(cJSON_IsArray(messages));
+      if (strcmp(providers[i], "chatgpt"))
+      {
+         int offset = !strcmp(providers[i], "openai") ? 2 : 0;
+         assert(cJSON_GetArraySize(messages) == 3 + offset);
+         assert(!strcmp(cJSON_GetStringValue(
+                            cJSON_GetObjectItem(cJSON_GetArrayItem(messages, offset), "role")),
+                        "user"));
+         assert(!strcmp(cJSON_GetStringValue(
+                            cJSON_GetObjectItem(cJSON_GetArrayItem(messages, offset + 1), "role")),
+                        "assistant"));
+      }
+      free(encoded);
+      cJSON_Delete(body);
+      cJSON *after = aimee_ir_request_json(&request);
+      assert(after && cJSON_Compare(snapshot, after, 1) &&
+             cJSON_Compare(request.raw, raw_snapshot, 1));
+      cJSON_Delete(after);
+   }
+   plugin_chook_reset();
+   assert(!plugin_chook_register_pre_llm(fixture_history_hook, NULL));
+   aimee_request_t prepared = {0};
+   assert(agent_prepare_plain_request_hooks(&request, &prepared) == 1);
+   assert(prepared.n_messages == 3 && prepared.n_system == 3 &&
+          prepared.messages[1].n_blocks == 2 && prepared.messages[2].n_blocks == 3);
+   assert(!strcmp(prepared.messages[2].blocks[2].text, "History hook context."));
+   assert(prepared.messages[2].blocks[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   aimee_request_free(&prepared);
+   plugin_chook_reset();
+   cJSON *after_hook = aimee_ir_request_json(&request);
+   assert(after_hook && cJSON_Compare(snapshot, after_hook, 1));
+   cJSON_Delete(after_hook);
+   /* Cron carries completed assistant blocks as user evidence; hidden reasoning
+    * stays owned internally while each actual provider sees the visible task. */
+   history[1].role = "user";
+   aimee_request_t cron = request;
+   cron.messages = &history[1];
+   cron.n_messages = 1;
+   cJSON *cron_snapshot = aimee_ir_request_json(&cron);
+   for (size_t i = 0; i < sizeof providers / sizeof providers[0]; i++)
+   {
+      agent_t agent = mk_agent(providers[i], "configured-model");
+      cJSON *body = agent_build_host_request_ir(&agent, &cron);
+      assert(body);
+      char *encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, prior[0].text) && !strstr(encoded, "PRIVATE"));
+      cJSON *after = aimee_ir_request_json(&cron);
+      assert(after && cJSON_Compare(cron_snapshot, after, 1));
+      cJSON_Delete(after);
+      cJSON_Delete(body);
+      free(encoded);
+   }
+   cJSON_Delete(cron_snapshot);
+   cJSON_Delete(snapshot);
+   cJSON_Delete(raw_snapshot);
+   cJSON_Delete(request.raw);
+   puts("repair histories and all policy/evidence blocks reach real provider builders without "
+        "hidden reasoning or source mutation OK");
+}
+
+typedef struct
+{
+   int events, controls, reject;
+} projection_fixture_t;
+
+static int fixture_projection_sink(const aimee_session_event_t *event, void *context)
+{
+   projection_fixture_t *fixture = context;
+   assert(event->kind == AIMEE_SESSION_PROJECTION &&
+          !strcmp(event->projection_boundary, "request"));
+   assert(!event->projection_reasoning && !event->projection_opaque &&
+          !event->projection_cache_controls && event->projection_request_controls > 0);
+   cJSON *encoded = aimee_ir_session_event_json(event);
+   assert(encoded);
+   cJSON_Delete(encoded);
+   fixture->events++;
+   fixture->controls = event->projection_request_controls;
+   return fixture->reject;
+}
+
+static void test_host_control_projection_capture(void)
+{
+   agent_t agent = mk_agent("chatgpt", "gpt-5.5-codex");
+   snprintf(agent.name, sizeof agent.name, "codex-fixture");
+   aimee_request_t input = {0};
+   assert(!aimee_ir_request_from_text(&input, NULL, "Keep my source controls.", 128, 0.3));
+   input.has_top_p = input.has_top_k = 1;
+   input.top_p = 0.8;
+   input.top_k = 17;
+   input.thinking = cJSON_Parse("{\"type\":\"disabled\"}");
+   cJSON *snapshot = aimee_ir_request_json(&input);
+   projection_fixture_t fixture = {0};
+   aimee_ir_session_set_sink(fixture_projection_sink, &fixture);
+   cJSON *body = agent_build_host_request_ir(&agent, &input);
+   assert(body && fixture.events == 1 && fixture.controls == 5);
+   assert(!cJSON_HasObjectItem(body, "max_output_tokens") &&
+          !cJSON_HasObjectItem(body, "temperature"));
+   cJSON_Delete(body);
+   fixture.reject = 1;
+   assert(!agent_build_host_request_ir(&agent, &input) && aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_begin_task();
+   cJSON *after = aimee_ir_request_json(&input);
+   assert(after && cJSON_Compare(snapshot, after, 1));
+   cJSON_Delete(after);
+   cJSON_Delete(snapshot);
+   aimee_request_free(&input);
+   assert(!aimee_ir_request_from_text(&input, NULL, "No explicit controls to omit.", 0, -1));
+   fixture = (projection_fixture_t){0};
+   aimee_ir_session_set_sink(fixture_projection_sink, &fixture);
+   body = agent_build_host_request_ir(&agent, &input);
+   assert(body && !fixture.events);
+   cJSON_Delete(body);
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_begin_task();
+   aimee_request_free(&input);
+   puts("actual omitted host controls report exact canonical projection counts and require active "
+        "capture OK");
+}
+
 int main(void)
 {
    init_config_home();
    set_thinking(0, 2048);
    test_owned_plain_request_preserves_input();
    test_plain_hook_context_is_separate_ir_evidence();
+   test_canonical_history_egress_projection();
+   test_host_control_projection_capture();
    printf("agent_request_build golden:\n");
 
    /* Anthropic Messages wire: system + user as typed text blocks, max_tokens, then

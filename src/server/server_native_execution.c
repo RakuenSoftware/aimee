@@ -1200,16 +1200,18 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    int catalog_ready = cfg->no_tools || !agent_tools_catalog(wire, &tools);
    if (catalog_ready && agent_tools_catalog_filter(&tools, cfg->role))
       catalog_ready = 0;
-   char *system =
-       agent_build_exec_context_checked(selected, cfg->network, cfg->role, cfg->system_prompt,
-                                        !agent_tools_knowledge_write_allowed(), error, 512);
    const aimee_request_t *seed = cfg->canonical_request;
-   int prepared = empty && catalog_ready && system && (!seed || !aimee_ir_request_admit(seed)) &&
-                  !agent_prepare_request_ir(selected, empty, &tools, system,
-                                            seed && seed->has_max_tokens ? seed->max_tokens : 0,
-                                            seed && seed->has_temperature ? seed->temperature : -1,
-                                            wire, cfg->role != NULL, &execution->profile);
-   free(system);
+   aimee_message_t context = {0};
+   int context_ready = !agent_build_exec_context_ir_checked(
+       selected, cfg->network, cfg->role, seed ? NULL : cfg->system_prompt,
+       !agent_tools_knowledge_write_allowed(), &context, error, 512);
+   int prepared =
+       empty && catalog_ready && context_ready && (!seed || !aimee_ir_request_admit(seed)) &&
+       !agent_prepare_seeded_request_ir(selected, seed, empty, &tools, &context,
+                                        seed && seed->has_max_tokens ? seed->max_tokens : 0,
+                                        seed && seed->has_temperature ? seed->temperature : -1,
+                                        wire, cfg->role != NULL, &execution->profile);
+   aimee_message_free(&context);
    cJSON_Delete(empty);
    aimee_request_free(&tools);
    if (prepared && cfg->reasoning_effort &&

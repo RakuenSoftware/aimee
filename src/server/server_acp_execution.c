@@ -904,8 +904,10 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
       if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &captured.messages[i]))
          goto done;
    latest = &captured.messages[captured.n_messages - 1];
-   if (strcmp(latest->role, "user") || latest->n_blocks != 1 ||
-       latest->blocks[0].type != AIMEE_BLK_TEXT || !latest->blocks[0].text)
+   if (strcmp(latest->role, "user") || latest->n_blocks < 1 ||
+       (!cfg->canonical_request &&
+        (latest->n_blocks != 1 || latest->blocks[0].type != AIMEE_BLK_TEXT ||
+         !latest->blocks[0].text)))
       goto done;
    if (cfg->canonical_request)
    {
@@ -922,11 +924,9 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
          if (!exact)
             goto done;
       }
-      task.system = cfg->canonical_request->system;
-      task.n_system = cfg->canonical_request->n_system;
-      task.model = cfg->canonical_request->model;
-      task.stream = cfg->canonical_request->stream;
-      task.frontend = cfg->canonical_request->frontend;
+      /* Borrow the entire admitted request; the native boundary must refuse
+       * controls it cannot represent, never discard them before qualification. */
+      task = *seed;
       if (cfg->system_prompt && cfg->system_prompt[0])
       {
          aimee_response_t system_text = {.content = task.system, .n_content = task.n_system};

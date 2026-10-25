@@ -57,6 +57,7 @@ typedef struct
    int projection_reasoning, projection_opaque, projection_cache_controls;
    int projection_host_context_blocks_as_text, projection_unverified_external_tool_reports;
    int projection_history_messages_as_text;
+   int projection_request_controls;
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;

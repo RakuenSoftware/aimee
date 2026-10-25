@@ -65,6 +65,46 @@ not replace canonical conversation history. Provider/native SDK codecs,
 external API text imports and marked legacy storage imports remain conversion
 boundaries. Opaque native cache state remains owned by the native-session owner.
 
+## Actual executor integration qualification
+
+The source audit was followed through real executor entrypoints. Producer tests
+had not exposed obsolete singleton gates in generation, tool dispatch and plain
+HTTP rendering. Those gates are removed for supported canonical requests, and
+actual HTTP fixtures now exercise repair history, multiple policy/evidence
+blocks, hidden reasoning, exact opaque metadata and sampling controls. Host KB
+hints remain separate evidence even for a single text task.
+
+Execution context now originates as an owned canonical Message. The builder
+records provenance at actual source append ranges; it never infers policy from
+headings or parses its own rendered output. Fixed host instructions are policy;
+operator profile/project settings retain operator policy; retrieved memory,
+network facts and environment observations remain evidence. Text concatenation
+is a read-only inspection boundary. Both primary and seeded POSIX/native paths
+consume the typed context. Dead public text-tuple request builders are retired.
+
+At provider egress, an owned IR projection removes hidden/restricted material
+and places evidence from system containers into a stable user context prefix.
+This leaves the original task current and keeps wire prefixes stable as history
+grows. Original canonical history remains exact. Native cache/source guards run
+before this projection and still reject using projected history as durable
+source. Known, validated OpenAI host extensions survive projection; whole native
+conversation sidecars cannot be restored. Actual omitted host profile settings
+are recorded in canonical projection events and displayed as read-only notices;
+strict public hard-control capability refusals remain.
+
+ACP renders every supported final text block at its explicit protocol boundary,
+retains history/role-loss reporting, and qualifies the complete original request
+before launch. It cannot silently discard source controls before checking
+whether the external agent can represent them. Shared query views exclude
+model-hidden and restricted text so derived notes cannot expose those blocks.
+
+The final live proof must use the exact combined runtime revision, retain every
+pre-upgrade IR row, and test both the existing browser session and a new default
+session with real tools and follow-up. Typed context changes may require normal
+native cache requalification; successful logical continuation is required, and
+handle reuse is recorded only when actually observed. No source or cache fence
+may be weakened to preserve an incompatible native handle.
+
 ## Current browser recovery outcome
 
 Runtime source `31e2c4b95` is installed on retained QA

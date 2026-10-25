@@ -157,8 +157,8 @@ typedef struct
    char *role; /* opaque: "user" / "assistant" / "system" / "tool" / ... */
    aimee_block_t *blocks;
    int n_blocks;
-   int content_scalar; /* observed scalar-text form; retained as transport provenance */
-   struct cJSON *raw;  /* sidecar */
+   int content_scalar;      /* observed scalar-text form; retained as transport provenance */
+   struct cJSON *raw;       /* sidecar */
    int compaction_boundary; /* canonical history marker; never provider content */
 } aimee_message_t;
 
@@ -467,7 +467,15 @@ void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t ori
                                 const char *revision_domain, const char *revision_scope,
                                 unsigned long long revision_epoch);
 
-/* Apply conservative defaults to blocks whose origin is still UNKNOWN. This is
+/* Egress-only owned projection: exclude hidden/restricted content and move
+ * unverified system evidence to user role. Source history/profile stay exact.
+ * Source and output must be distinct. The preflight preserves untouched native-byte
+ * replay when no projection is needed. */
+int aimee_ir_request_needs_model_projection(const aimee_request_t *request);
+int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out);
+
+/* Apply conservative defaults only to unspecified provenance. Explicit partial
+ * context metadata remains unchanged. This is
  * metadata-only and does not dirty provider payload bytes. Returns the number
  * of blocks classified. */
 int aimee_ir_classify_context(aimee_request_t *request);
@@ -495,8 +503,9 @@ int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const c
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
 
 /* ---- accessors used by the core stages / KB ----
- * Concatenate the text of the LAST user-role message's TEXT blocks into `buf`
- * (truncating to n). This is the ONE shape-agnostic query extractor that replaces
+ * Concatenate model-visible text of the LAST user-role message into `buf`
+ * (truncating to n). Hidden/restricted blocks never enter derived query views.
+ * This is the ONE shape-agnostic query extractor that replaces
  * ingress_preinject_query_from_messages' per-shape arms (which dropped non-text
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);

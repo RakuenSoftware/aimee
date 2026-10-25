@@ -169,7 +169,9 @@ static void test_actual_acp_admission_unknown_model_bucket(void)
    agent_dispatch_set_fail_fast(1);
    admission_probe_calls = 0;
    assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
-   assert(admission_probe_calls == 1 && !agent.model[0]);
+   /* The admitted slot is released when the canonical source gate refuses;
+    * this fixture never fabricates a capture/source owner to reach a host. */
+   assert(admission_probe_calls == 0 && !agent.model[0]);
    assert(agent_admission_global_active() == 0);
 
    agent_admission_configure(16, 1, NULL, 0);
@@ -182,10 +184,10 @@ static void test_actual_acp_admission_unknown_model_bucket(void)
    assert(slot);
    strcpy(agent.name, "acp-admission-b");
    assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
-   assert(admission_probe_calls == 1); /* Distinct aliases share the unknown model cap. */
+   assert(admission_probe_calls == 0); /* Distinct aliases share the unknown model cap. */
    strcpy(agent.model, "declared-model");
    assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
-   assert(admission_probe_calls == 2); /* A real model keeps its own bucket/metadata. */
+   assert(admission_probe_calls == 0); /* A real model reaches the source refusal through its own bucket. */
    agent_admission_release(slot);
 
    held.agent = agent.name;
@@ -194,14 +196,14 @@ static void test_actual_acp_admission_unknown_model_bucket(void)
    assert(slot);
    agent.model[0] = 0;
    assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
-   assert(admission_probe_calls == 2); /* Per-agent cap is still enforced. */
+   assert(admission_probe_calls == 0); /* Per-agent cap is still enforced. */
    agent_admission_release(slot);
    assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
-   assert(admission_probe_calls == 3 && !agent.model[0]);
+   assert(admission_probe_calls == 0 && !agent.model[0]);
 
    strcpy(agent.cli_kind, "claude");
    assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
-   assert(admission_probe_calls == 3); /* No generic model-less bypass. */
+   assert(admission_probe_calls == 0); /* No generic model-less bypass. */
    assert(agent_admission_global_active() == 0);
    agent_dispatch_set_fail_fast(0);
    puts("ACP actual dispatcher: unknown admission bucket bounded; metadata stays unknown; no "

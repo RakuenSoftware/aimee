@@ -6,6 +6,7 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include "agent_request_build.h"
 #include <aimee/gateway/gateway_delegate.h>
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_frontend.h>
@@ -296,58 +297,21 @@ static int agent_anthropic_profile_ir(const agent_t *agent, const char *system_p
  * economizer must not own provider cache configuration. */
 int agent_request_with_tools_supported(const aimee_request_t *request)
 {
-   if (aimee_ir_request_admit(request) || request->n_messages < 1 ||
-       request->n_messages > AIMEE_IR_MAX_BLOCKS || !request->messages)
+   if (aimee_ir_request_admit(request) || request->n_messages < 1 || request->stream)
       return 0;
-   int content = 0;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      if (request->messages[i].n_blocks < 0 ||
-          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
-          (request->messages[i].n_blocks && !request->messages[i].blocks))
-         return 0;
-      for (int j = 0; j < request->messages[i].n_blocks; j++)
-      {
-         const aimee_block_t *block = &request->messages[i].blocks[j];
-         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
-            content = 1;
-      }
-   }
-   if (request->n_system)
-   {
-      const aimee_block_t *system = &request->system[0];
-      /* This execution capability composes one TEXT policy through its host
-       * role/persona owner. Opaque native block data and modeled wire controls
-       * cannot silently disappear when rebuilding that host profile. Context
-       * provenance and authored grouping remain valid host-only metadata. */
-      if (system->cache_control || system->cache_ttl || system->raw || system->media_type ||
-          system->media_ref || system->thinking_signature || system->thinking_binding ||
-          system->thinking_id || system->thinking_encrypted_content || system->thinking_redacted ||
-          system->tool_id || system->tool_name || system->tool_namespace || system->tool_input ||
-          system->tool_result || system->tool_is_error)
-         return 0;
-   }
-   return content &&
-          !(request->cache_policy != AIMEE_CACHE_DEFAULT || request->n_tools ||
-            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
-             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
-            request->n_system > 1 ||
-            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
-            request->metadata || request->service_tier || request->prompt_cache_key ||
-            request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
-            request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
-            request->reasoning_summary || request->reasoning_effort ||
-            request->output_format.kind > AIMEE_OUTPUT_TEXT || request->output_format.name ||
-            request->output_format.description || request->output_format.schema ||
-            request->output_format.strict != AIMEE_STRICT_UNSET);
+   /* Structural admission is independent of later host catalog/grant checks.
+    * Retain valid controls and content rather than imposing text adapter shape. */
+   for (int i = 0; i < request->n_messages; ++i)
+      if (request->messages[i].n_blocks)
+         return 1;
+   return 0;
 }
 
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages,
-                             const aimee_request_t *catalog, const char *system_prompt,
-                             int max_tokens, double temperature, aimee_wire_t wire, int is_delegate,
-                             aimee_request_t *out)
+static int prepare_host_profile(const agent_t *agent, const aimee_request_t *catalog,
+                                const char *system_prompt, int max_tokens, double temperature,
+                                aimee_wire_t wire, int is_delegate, aimee_request_t *out)
 {
-   if (!agent || !out || !cJSON_IsArray(messages))
+   if (!agent || !out)
       return -1;
    aimee_request_t ir = {0};
    aimee_request_t tool_view = {.tools = catalog ? catalog->tools : NULL,
@@ -371,25 +335,9 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages,
    }
    else
       goto fail;
-   int count = cJSON_GetArraySize(messages);
-   ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
-   if (count && !ir.messages)
-      goto fail;
-   for (int i = 0; i < count; i++)
-   {
-      ir.n_messages++;
-      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]) != 0)
-         goto fail;
-   }
-   if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
-      goto fail;
    /* Policy may remove catalog entries; it must not sanitize an unadmitted
     * host request into admissible transport by hiding an invalid input. */
    if (aimee_ir_request_admit(&ir))
-      goto fail;
-   aimee_ir_classify_context(&ir);
-   int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
-   if (policy_changes < 0)
       goto fail;
    ir.mutated = 1;
    if (aimee_ir_request_admit(&ir))
@@ -402,45 +350,233 @@ fail:
    return -1;
 }
 
-cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages,
-                              const aimee_request_t *catalog, const char *system_prompt,
-                              int max_tokens, double temperature, aimee_wire_t wire,
-                              int is_delegate, aimee_request_t *dispatch_catalog)
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const cJSON *messages, const aimee_request_t *catalog,
+                                    const aimee_message_t *host_context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int is_delegate,
+                                    aimee_request_t *out)
 {
-   aimee_request_t ir = {0};
-   cJSON *rendered = NULL;
-   if (agent_prepare_request_ir(agent, messages, catalog, system_prompt, max_tokens, temperature,
-                                wire, is_delegate, &ir))
-      return NULL;
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(&ir, wire, &projection);
-   if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,
-                                                 projection.omitted_opaque_state_blocks,
-                                                 projection.omitted_cache_controls, "request"))
+   if (seed && !agent_request_with_tools_supported(seed))
+      return -1;
+   if (host_context && (!host_context->role || strcmp(host_context->role, "system")))
+      return -1;
+   aimee_request_t profile = {0}, ir = {0}, context_copy = {0};
+   int simple_policy = host_context && host_context->n_blocks == 1 &&
+                       host_context->blocks[0].type == AIMEE_BLK_TEXT &&
+                       host_context->blocks[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
+                       !host_context->blocks[0].raw && !host_context->blocks[0].cache_control &&
+                       !host_context->blocks[0].cache_ttl;
+   int rc =
+       prepare_host_profile(agent, catalog, simple_policy ? host_context->blocks[0].text : NULL,
+                            max_tokens, temperature, wire, is_delegate, &profile) ||
+       (seed && aimee_ir_request_clone(seed, &ir));
+   if (rc)
       goto fail;
-   if (projection.omitted_reasoning_blocks)
-      LOG_INFO("translation.projection",
-               "wire=%d omitted_reasoning=%d omitted_opaque_state=%d canonical_history=retained",
-               (int)wire, projection.omitted_reasoning_blocks,
-               projection.omitted_opaque_state_blocks);
-   rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
-              : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
-                                             : openai_backend_build(&ir);
-   if (!rendered)
-      goto fail;
-   if (dispatch_catalog)
+   if (ir.frontend == AIMEE_WIRE_UNKNOWN)
+      ir.frontend = profile.frontend;
+   if (!ir.raw && ir.frontend == profile.frontend)
    {
-      aimee_request_free(dispatch_catalog);
-      *dispatch_catalog = (aimee_request_t){.tools = ir.tools, .n_tools = ir.n_tools};
+      ir.raw = profile.raw;
+      profile.raw = NULL;
+   }
+   free(ir.model);
+   ir.model = profile.model;
+   profile.model = NULL;
+   for (int i = 0; i < ir.n_messages; ++i)
+      aimee_message_free(&ir.messages[i]);
+   free(ir.messages);
+   ir.messages = NULL;
+   ir.n_messages = 0;
+   int count = cJSON_GetArraySize(messages);
+   ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
+   if ((count && !ir.messages) || !cJSON_IsArray(messages))
+      goto fail;
+   for (int i = 0; i < count; ++i)
+   {
+      ++ir.n_messages;
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]))
+         goto fail;
+   }
+   if (simple_policy || !host_context || !host_context->n_blocks)
+   {
+      for (int i = 0; i < profile.n_system; ++i)
+      {
+         if (simple_policy)
+         {
+            profile.system[i].context = host_context->blocks[0].context;
+            profile.system[i].message_group = host_context->blocks[0].message_group;
+         }
+         else
+            aimee_ir_block_set_context(&profile.system[i], AIMEE_CTX_ORIGIN_PLATFORM,
+                                       AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
+                                       AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+      }
+      context_copy.system = profile.system;
+      context_copy.n_system = profile.n_system;
+      profile.system = NULL;
+      profile.n_system = 0;
+   }
+   else
+   {
+      aimee_request_t view = {.system = host_context->blocks, .n_system = host_context->n_blocks};
+      if (aimee_ir_request_clone(&view, &context_copy))
+         goto fail;
+   }
+   if (ir.n_system > AIMEE_IR_MAX_BLOCKS - context_copy.n_system)
+      goto fail;
+   if (context_copy.n_system)
+   {
+      aimee_block_t *blocks =
+          realloc(ir.system, (size_t)(ir.n_system + context_copy.n_system) * sizeof *blocks);
+      if (!blocks)
+         goto fail;
+      ir.system = blocks;
+      memcpy(blocks + ir.n_system, context_copy.system,
+             (size_t)context_copy.n_system * sizeof *blocks);
+      ir.n_system += context_copy.n_system;
+      free(context_copy.system);
+      context_copy.system = NULL;
+      context_copy.n_system = 0;
+   }
+   if (ir.n_tools)
+   {
+      aimee_request_t requested = {.tools = ir.tools, .n_tools = ir.n_tools};
+      aimee_request_t hosted = {.tools = profile.tools, .n_tools = profile.n_tools};
+      if (!aimee_ir_request_wire_equal(&requested, &hosted))
+         goto fail; /* A caller catalog cannot add or change host execution grants. */
+   }
+   else
+   {
+      ir.tools = profile.tools;
+      ir.n_tools = profile.n_tools;
+      profile.tools = NULL;
+      profile.n_tools = 0;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_UNSET)
+   {
+      ir.tool_choice = profile.tool_choice;
+      free(ir.tool_choice_name);
+      ir.tool_choice_name = profile.tool_choice_name;
+      profile.tool_choice_name = NULL;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_TOOL &&
+       !aimee_ir_find_function(&ir, NULL, ir.tool_choice_name))
+      goto fail;
+   if (!seed)
+      ir.stream = profile.stream;
+   if (!ir.has_parallel_tool_calls)
+   {
+      ir.has_parallel_tool_calls = profile.has_parallel_tool_calls;
+      ir.parallel_tool_calls = profile.parallel_tool_calls;
+   }
+   if (!ir.has_max_tokens)
+   {
+      ir.max_tokens = profile.max_tokens;
+      ir.has_max_tokens = profile.has_max_tokens;
+   }
+   if (!ir.has_temperature)
+   {
+      ir.temperature = profile.temperature;
+      ir.has_temperature = profile.has_temperature;
+   }
+   if (!ir.has_top_p)
+   {
+      ir.top_p = profile.top_p;
+      ir.has_top_p = profile.has_top_p;
+   }
+   if (!ir.has_top_k)
+   {
+      ir.top_k = profile.top_k;
+      ir.has_top_k = profile.has_top_k;
+   }
+   if (!ir.thinking)
+   {
+      ir.thinking = profile.thinking;
+      profile.thinking = NULL;
+   }
+   if (!ir.reasoning_effort)
+      ir.reasoning_effort = profile.reasoning_effort;
+   if (!ir.reasoning_summary)
+   {
+      ir.reasoning_summary = profile.reasoning_summary;
+      profile.reasoning_summary = NULL;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_NONE)
+   {
+      if (agent->require_initial_tool_call)
+         goto fail;
+      for (int i = 0; i < ir.n_tools; ++i)
+         aimee_tool_free(&ir.tools[i]);
+      free(ir.tools);
       ir.tools = NULL;
       ir.n_tools = 0;
    }
-   aimee_request_free(&ir);
-   return rendered;
+   if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
+      goto fail;
+   aimee_ir_classify_context(&ir);
+   ir.mutated = 1;
+   if (aimee_ir_request_admit(&ir) || gateway_delegate_run_request_pipeline(&ir, is_delegate) < 0)
+      goto fail;
+   aimee_request_free(out);
+   *out = ir;
+   aimee_request_free(&profile);
+   aimee_request_free(&context_copy);
+   return 0;
 fail:
-   cJSON_Delete(rendered);
+   aimee_request_free(&profile);
+   aimee_request_free(&context_copy);
    aimee_request_free(&ir);
-   return NULL;
+   return -1;
+}
+
+cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                     const cJSON *messages, const aimee_request_t *catalog,
+                                     const aimee_message_t *host_context, int max_tokens,
+                                     double temperature, aimee_wire_t wire, int is_delegate,
+                                     int host_profile, aimee_request_t *dispatch_catalog)
+{
+   aimee_request_t ir = {0}, projected = {0};
+   cJSON *rendered = NULL;
+   if (agent_prepare_seeded_request_ir(agent, seed, messages, catalog, host_context, max_tokens,
+                                       temperature, wire, is_delegate, &ir) ||
+       agent_request_project_model(&ir, &projected) ||
+       aimee_backend_preserve_host_extensions(&ir, &projected, wire))
+      goto done;
+   int omitted_controls = 0;
+   if (host_profile && wire == AIMEE_WIRE_RESPONSES)
+   {
+      omitted_controls = projected.has_max_tokens + projected.has_temperature;
+      projected.has_max_tokens = projected.has_temperature = 0;
+   }
+   if (omitted_controls)
+   {
+      aimee_session_event_t report = {.kind = AIMEE_SESSION_PROJECTION,
+                                      .projection_model = agent->name,
+                                      .projection_boundary = "request",
+                                      .projection_request_controls = omitted_controls};
+      if (aimee_ir_session_emit(&report))
+         goto done;
+   }
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(&projected, wire, &projection);
+   if (aimee_ir_session_emit_projection_controls(
+           projected.model, projection.omitted_reasoning_blocks,
+           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
+      goto done;
+   rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&projected)
+              : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&projected)
+                                             : openai_backend_build(&projected);
+   if (rendered && dispatch_catalog)
+   {
+      aimee_request_free(dispatch_catalog);
+      *dispatch_catalog = (aimee_request_t){.tools = projected.tools, .n_tools = projected.n_tools};
+      projected.tools = NULL;
+      projected.n_tools = 0;
+   }
+done:
+   aimee_request_free(&ir);
+   aimee_request_free(&projected);
+   return rendered;
 }
 
 /* --- Message utilities --- */

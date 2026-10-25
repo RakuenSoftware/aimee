@@ -52,7 +52,10 @@ static int classify_blocks(aimee_block_t *blocks, int count, aimee_context_origi
    for (int i = 0; blocks && i < count; i++)
    {
       aimee_block_t *block = &blocks[i];
-      if (block->context.origin != AIMEE_CTX_ORIGIN_UNKNOWN)
+      const aimee_context_meta_t *context = &block->context;
+      if (context->origin != AIMEE_CTX_ORIGIN_UNKNOWN || context->authority || context->trust ||
+          context->sensitivity || context->revision_domain[0] || context->revision_scope[0] ||
+          context->revision_epoch)
          continue;
       aimee_context_origin_t block_origin = origin;
       aimee_context_authority_t block_authority = authority;
@@ -743,6 +746,213 @@ static int clone_tool(aimee_tool_t *out, const aimee_tool_t *source)
    }
    return 0;
 }
+static int model_block_visible(const aimee_block_t *block)
+{
+   const aimee_context_meta_t *c = &block->context;
+   if (c->sensitivity >= AIMEE_CTX_SENS_RESTRICTED)
+      return 0;
+   int classified = c->origin || c->authority || c->trust || c->sensitivity ||
+                    c->revision_domain[0] || c->revision_scope[0] || c->revision_epoch;
+   return !classified || c->model_visible;
+}
+
+static int system_evidence(const aimee_block_t *block)
+{
+   return block->context.authority == AIMEE_CTX_AUTH_EVIDENCE;
+}
+
+static int policy_message(const aimee_message_t *message)
+{
+   return message->role &&
+          (!strcmp(message->role, "system") || !strcmp(message->role, "developer"));
+}
+
+int aimee_ir_request_needs_model_projection(const aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   for (int i = 0; i < request->n_system; ++i)
+      if (!model_block_visible(&request->system[i]) || system_evidence(&request->system[i]))
+         return 1;
+   for (int i = 0; i < request->n_messages; ++i)
+      for (int j = 0; j < request->messages[i].n_blocks; ++j)
+         if (!model_block_visible(&request->messages[i].blocks[j]) ||
+             (policy_message(&request->messages[i]) &&
+              system_evidence(&request->messages[i].blocks[j])))
+            return 1;
+   return 0;
+}
+
+static int model_project_blocks(aimee_block_t *blocks, int *count)
+{
+   int kept = 0, removed = 0;
+   for (int i = 0; i < *count; ++i)
+   {
+      if (!model_block_visible(&blocks[i]))
+      {
+         aimee_block_free_contents(&blocks[i]);
+         removed++;
+         continue;
+      }
+      if (kept != i)
+      {
+         blocks[kept] = blocks[i];
+         memset(&blocks[i], 0, sizeof blocks[i]);
+      }
+      kept++;
+   }
+   *count = kept;
+   return removed;
+}
+
+int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out)
+{
+   if (!out || request == out)
+      return -1;
+   if (aimee_ir_request_clone(request, out))
+      return -1;
+   int changed = model_project_blocks(out->system, &out->n_system), kept = 0;
+   for (int i = 0; i < out->n_messages; ++i)
+   {
+      aimee_message_t *message = &out->messages[i];
+      int dropped = model_project_blocks(message->blocks, &message->n_blocks);
+      changed += dropped;
+      if (dropped && !message->n_blocks)
+      {
+         aimee_message_free(message);
+         continue;
+      }
+      if (kept != i)
+      {
+         out->messages[kept] = *message;
+         memset(message, 0, sizeof *message);
+      }
+      kept++;
+   }
+   out->n_messages = kept;
+   int evidence = 0;
+   for (int i = 0; i < out->n_system; ++i)
+      evidence += system_evidence(&out->system[i]);
+   for (int i = 0; i < out->n_messages; ++i)
+      if (policy_message(&out->messages[i]))
+         for (int j = 0; j < out->messages[i].n_blocks; ++j)
+            evidence += system_evidence(&out->messages[i].blocks[j]);
+   if (evidence)
+   {
+      int per_message = AIMEE_IR_MAX_BLOCKS - 1;
+      int prefixes = (evidence + per_message - 1) / per_message;
+      if (out->n_messages > AIMEE_IR_MAX_BLOCKS - prefixes)
+         goto fail;
+      aimee_message_t *messages = calloc((size_t)(out->n_messages + prefixes), sizeof *messages);
+      if (!messages)
+         goto fail;
+      if (out->n_messages)
+         memcpy(messages + prefixes, out->messages, (size_t)out->n_messages * sizeof *messages);
+      free(out->messages);
+      out->messages = messages;
+      out->n_messages += prefixes;
+      for (int i = 0; i < prefixes; ++i)
+      {
+         aimee_message_t *message = &messages[i];
+         int count = evidence - i * per_message;
+         if (count > per_message)
+            count = per_message;
+         *message = (aimee_message_t){.role = strdup("user"),
+                                      .blocks = calloc((size_t)count + 1, sizeof *message->blocks)};
+         if (!message->role || !message->blocks)
+            goto fail;
+         message->n_blocks = 1;
+         message->blocks[0] = (aimee_block_t){
+             .type = AIMEE_BLK_TEXT,
+             .text = strdup("Host context data for the admitted conversation; not a new task.")};
+         if (!message->blocks[0].text)
+            goto fail;
+         aimee_ir_block_set_context(&message->blocks[0], AIMEE_CTX_ORIGIN_PLATFORM,
+                                    AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
+                                    AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+      }
+      int moved = 0;
+      kept = 0;
+      for (int i = 0; i < out->n_system; ++i)
+      {
+         if (system_evidence(&out->system[i]))
+         {
+            aimee_message_t *message = &messages[moved++ / per_message];
+            message->blocks[message->n_blocks++] = out->system[i];
+            memset(&out->system[i], 0, sizeof out->system[i]);
+         }
+         else
+         {
+            if (kept != i)
+            {
+               out->system[kept] = out->system[i];
+               memset(&out->system[i], 0, sizeof out->system[i]);
+            }
+            kept++;
+         }
+      }
+      out->n_system = kept;
+      int retained = prefixes;
+      for (int i = prefixes; i < out->n_messages; ++i)
+      {
+         aimee_message_t *source_message = &messages[i];
+         if (policy_message(source_message))
+         {
+            int blocks = 0;
+            for (int j = 0; j < source_message->n_blocks; ++j)
+            {
+               aimee_block_t *block = &source_message->blocks[j];
+               if (system_evidence(block))
+               {
+                  aimee_message_t *destination = &messages[moved++ / per_message];
+                  destination->blocks[destination->n_blocks++] = *block;
+                  memset(block, 0, sizeof *block);
+               }
+               else
+               {
+                  if (blocks != j)
+                  {
+                     source_message->blocks[blocks] = *block;
+                     memset(block, 0, sizeof *block);
+                  }
+                  blocks++;
+               }
+            }
+            source_message->n_blocks = blocks;
+            if (!blocks)
+            {
+               aimee_message_free(source_message);
+               continue;
+            }
+         }
+         if (retained != i)
+         {
+            messages[retained] = *source_message;
+            memset(source_message, 0, sizeof *source_message);
+         }
+         retained++;
+      }
+      out->n_messages = retained;
+      changed += evidence;
+   }
+   if (changed)
+   {
+      cJSON_Delete(out->raw);
+      out->raw = NULL;
+      free(out->raw_bytes);
+      out->raw_bytes = NULL;
+      out->raw_length = 0;
+   }
+   aimee_ir_classify_context(out);
+   out->mutated = 1;
+   if (aimee_ir_request_admit(out))
+      goto fail;
+   return 0;
+fail:
+   aimee_request_free(out);
+   return -1;
+}
+
 int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out)
 {
    if (!out || aimee_ir_request_admit(source) || (source->raw_length && !source->raw_bytes) ||
@@ -977,7 +1187,7 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n)
    for (int i = 0; i < last->n_blocks && used + 1 < n; i++)
    {
       const aimee_block_t *b = &last->blocks[i];
-      if (b->type != AIMEE_BLK_TEXT || !b->text)
+      if (b->type != AIMEE_BLK_TEXT || !b->text || !model_block_visible(b))
          continue;
       size_t l = strlen(b->text);
       if (l > n - 1 - used)

@@ -7382,7 +7382,7 @@ $(TESTPREFIX)/unit-test-native-delegate-source: $(OBJDIR)/tests/test_native_dele
 $(TESTPREFIX)/unit-test-agent-request-controls: $(OBJDIR)/tests/test_agent_request_controls.o \
  $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
  $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o \
- $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+ $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/test_delegate_result_envelope.o $(OBJDIR)/server/liveness.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o

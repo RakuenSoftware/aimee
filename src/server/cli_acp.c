@@ -396,7 +396,7 @@ static int acp_finish_failure(acp_proc_t *process, agent_result_t *out, long lon
    return rc;
 }
 
-int cli_acp_request_supported(const provider_cli_cfg_t *cfg)
+static int acp_projected_request_supported(const provider_cli_cfg_t *cfg)
 {
    if (!cfg || !cfg->agent || cfg->history || (cfg->resume_id && cfg->resume_id[0]) ||
        cfg->no_tools || cfg->native_turn_limit > 0 || cfg->agent->max_turns > 0 ||
@@ -409,17 +409,22 @@ int cli_acp_request_supported(const provider_cli_cfg_t *cfg)
    if (aimee_ir_request_admit(request) || request->n_messages < 1 ||
        request->n_messages > AIMEE_IR_MAX_BLOCKS ||
        strcmp(request->messages[request->n_messages - 1].role, "user") ||
-       request->messages[request->n_messages - 1].n_blocks != 1 ||
-       request->messages[request->n_messages - 1].blocks[0].type != AIMEE_BLK_TEXT ||
-       !request->messages[request->n_messages - 1].blocks[0].text ||
-       !request->messages[request->n_messages - 1].blocks[0].text[0] || request->raw)
+       request->messages[request->n_messages - 1].n_blocks < 1 || request->raw)
       return 0;
    for (int i = 0; i < request->n_system; i++)
       if (request->system[i].type != AIMEE_BLK_TEXT || !request->system[i].text ||
           request->system[i].cache_control || request->system[i].cache_ttl)
          return 0;
-   if (request->messages[request->n_messages - 1].blocks[0].cache_control ||
-       request->messages[request->n_messages - 1].blocks[0].cache_ttl)
+   const aimee_message_t *latest = &request->messages[request->n_messages - 1];
+   int authored = 0;
+   for (int i = 0; i < latest->n_blocks; ++i)
+   {
+      const aimee_block_t *block = &latest->blocks[i];
+      if (block->type != AIMEE_BLK_TEXT || !block->text || block->cache_control || block->cache_ttl)
+         return 0;
+      authored |= block->text[0] != '\0';
+   }
+   if (!authored)
       return 0;
    for (int i = 0; i < request->n_messages - 1; i++)
    {
@@ -448,6 +453,21 @@ int cli_acp_request_supported(const provider_cli_cfg_t *cfg)
    cJSON_Delete(original);
    cJSON_Delete(supported);
    return exact;
+}
+int cli_acp_request_supported(const provider_cli_cfg_t *cfg)
+{
+   if (!cfg || !cfg->canonical_request)
+      return acp_projected_request_supported(cfg);
+   if (cfg->canonical_request->raw)
+      return 0;
+   aimee_request_t projection = {0};
+   if (aimee_ir_request_project_model(cfg->canonical_request, &projection))
+      return 0;
+   provider_cli_cfg_t view = *cfg;
+   view.canonical_request = &projection;
+   int supported = acp_projected_request_supported(&view);
+   aimee_request_free(&projection);
+   return supported;
 }
 static int acp_prompt_text(cJSON *prompt, const char *text)
 {
@@ -528,7 +548,7 @@ int cli_acp_timeout_ms(const agent_t *agent)
                                                 : ACP_DEFAULT_TIMEOUT_MS;
    return agent_timeout_cap_ms(timeout, agent->tool_loop_timeout_ms_cap);
 }
-static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+static int acp_adapter_execute_projected(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
    if (!out)
       return -1;
@@ -630,7 +650,6 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
    request = acp_request("session/prompt", 3, &params);
    cJSON *prompt = params ? cJSON_AddArrayToObject(params, "prompt") : NULL;
    const aimee_request_t *seed = cfg->canonical_request;
-   const char *user = seed ? seed->messages[seed->n_messages - 1].blocks[0].text : cfg->user_prompt;
    int context_count =
        seed ? seed->n_system : (cfg->system_prompt && cfg->system_prompt[0] ? 1 : 0);
    if (!prompt || !cJSON_AddStringToObject(params, "sessionId", session))
@@ -650,9 +669,17 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
                                    .projection_model = cfg->agent->name,
                                    .projection_boundary = "request",
                                    .projection_host_context_blocks_as_text = context_count};
-   if (acp_prompt_history(seed, prompt, &report) || acp_prompt_text(prompt, user) ||
-       ((context_count || report.projection_history_messages_as_text) &&
-        aimee_ir_session_emit(&report)))
+   int prompt_failed = acp_prompt_history(seed, prompt, &report);
+   if (seed)
+   {
+      const aimee_message_t *latest = &seed->messages[seed->n_messages - 1];
+      for (int i = 0; i < latest->n_blocks && !prompt_failed; ++i)
+         prompt_failed = acp_prompt_text(prompt, latest->blocks[i].text);
+   }
+   else if (!prompt_failed)
+      prompt_failed = acp_prompt_text(prompt, cfg->user_prompt);
+   if (prompt_failed || ((context_count || report.projection_history_messages_as_text) &&
+                         aimee_ir_session_emit(&report)))
    {
       cJSON_Delete(request);
       goto failed;
@@ -757,6 +784,32 @@ done:
    acp_proc_close(&process);
    aimee_harness_ir_free(&ir);
    free(session);
+   return rc;
+}
+
+static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (!cfg || !cfg->canonical_request)
+      return acp_adapter_execute_projected(cfg, out);
+   if (!cli_acp_request_supported(cfg))
+   {
+      if (out)
+      {
+         memset(out, 0, sizeof *out);
+         snprintf(out->error, sizeof out->error, "unsupported canonical ACP request");
+      }
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   aimee_request_t projection = {0};
+   if (aimee_ir_request_project_model(cfg->canonical_request, &projection))
+      return AGENT_RC_CONTEXT_REFUSED;
+   provider_cli_cfg_t view = *cfg;
+   view.canonical_request = &projection;
+   int rc = acp_adapter_execute_projected(&view, out);
+   aimee_request_free(&projection);
    return rc;
 }
 

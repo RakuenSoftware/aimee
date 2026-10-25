@@ -26,6 +26,45 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "support/typed_catalog_fixture.h"
+static aimee_message_t fixture_context(const char *system)
+{
+   aimee_message_t context = {.role = strdup("system")};
+   assert(context.role);
+   if (system && system[0])
+   {
+      context.blocks = calloc(1, sizeof *context.blocks);
+      assert(context.blocks);
+      context.n_blocks = 1;
+      context.blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(system)};
+      assert(context.blocks[0].text);
+      aimee_ir_block_set_context(context.blocks, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   }
+   return context;
+}
+static cJSON *fixture_build_catalog(const agent_t *agent, const cJSON *messages,
+                                    const aimee_request_t *catalog, const char *system, int maximum,
+                                    double temperature, aimee_wire_t wire, int delegate,
+                                    aimee_request_t *dispatch)
+{
+   aimee_message_t context = fixture_context(system);
+   cJSON *result = agent_build_seeded_request_ir(agent, NULL, messages, catalog, &context, maximum,
+                                                 temperature, wire, delegate, 1, dispatch);
+   aimee_message_free(&context);
+   return result;
+}
+static int fixture_prepare_catalog(const agent_t *agent, const cJSON *messages,
+                                   const aimee_request_t *catalog, const char *system, int maximum,
+                                   double temperature, aimee_wire_t wire, int delegate,
+                                   aimee_request_t *out)
+{
+   aimee_message_t context = fixture_context(system);
+   int result = agent_prepare_seeded_request_ir(agent, NULL, messages, catalog, &context, maximum,
+                                                temperature, wire, delegate, out);
+   aimee_message_free(&context);
+   return result;
+}
 static cJSON *fixture_build_request(const agent_t *agent, const cJSON *messages, cJSON *tools,
                                     const char *system, int maximum, double temperature,
                                     aimee_wire_t wire, int delegate, aimee_request_t *dispatch)
@@ -33,8 +72,8 @@ static cJSON *fixture_build_request(const agent_t *agent, const cJSON *messages,
    aimee_request_t catalog = {0};
    if (fixture_catalog_import(tools, wire, &catalog))
       return NULL;
-   cJSON *result = agent_build_request_ir(agent, messages, &catalog, system, maximum, temperature,
-                                          wire, delegate, dispatch);
+   cJSON *result = fixture_build_catalog(agent, messages, &catalog, system, maximum, temperature,
+                                         wire, delegate, dispatch);
    aimee_request_free(&catalog);
    return result;
 }
@@ -45,8 +84,8 @@ static int fixture_prepare_request(const agent_t *agent, const cJSON *messages, 
    aimee_request_t catalog = {0};
    if (fixture_catalog_import(tools, wire, &catalog))
       return -1;
-   int result = agent_prepare_request_ir(agent, messages, &catalog, system, maximum, temperature,
-                                         wire, delegate, out);
+   int result = fixture_prepare_catalog(agent, messages, &catalog, system, maximum, temperature,
+                                        wire, delegate, out);
    aimee_request_free(&catalog);
    return result;
 }
@@ -1312,8 +1351,8 @@ static void test_canonical_catalog_only_projection(void)
       snprintf(agent.model, sizeof agent.model, "selected");
       assert(!agent_tools_catalog(wires[w], &catalog));
       assert(agent_tools_catalog_respond(&catalog) == 1);
-      assert(!agent_prepare_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
-                                       &expected));
+      assert(!fixture_prepare_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                      &expected));
       catalog.stream = 1;
       catalog.tool_choice = AIMEE_TOOL_CHOICE_NONE;
       catalog.has_temperature = 1;
@@ -1324,8 +1363,8 @@ static void test_canonical_catalog_only_projection(void)
       catalog.has_parallel_tool_calls = 1;
       catalog.parallel_tool_calls = 0;
       assert(!aimee_ir_request_admit(&catalog));
-      assert(!agent_prepare_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
-                                       &actual));
+      assert(!fixture_prepare_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                      &actual));
       assert(actual.stream == expected.stream && actual.tool_choice == expected.tool_choice &&
              actual.output_format.kind == expected.output_format.kind);
       assert(actual.max_tokens == expected.max_tokens &&
@@ -1336,7 +1375,7 @@ static void test_canonical_catalog_only_projection(void)
       const aimee_tool_t *respond = aimee_ir_find_function(&actual, NULL, "respond");
       assert(respond);
       cJSON *wire =
-          agent_build_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0, NULL);
+          fixture_build_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0, NULL);
       assert(wire && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(wire, "tools")) ==
                          catalog.n_tools);
       /* Typed respond is valid on Anthropic too; the retired wrapped-Chat append

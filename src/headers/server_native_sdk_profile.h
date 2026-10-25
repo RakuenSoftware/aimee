@@ -25,7 +25,7 @@ static inline int server_native_sdk_profile_prepare(aimee_request_t *profile, co
    if (!blocks)
       return -1;
    blocks[0].type = AIMEE_BLK_TEXT;
-   aimee_ir_block_set_context(blocks, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_EVIDENCE,
+   aimee_ir_block_set_context(blocks, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
                               AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_PUBLIC, 1,
                               "native-sdk-profile", "claude", 0);
    blocks[0].text = strdup(AIMEE_NATIVE_CLAUDE_IDENTITY);

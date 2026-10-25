@@ -314,8 +314,37 @@ static void epoch_and_qualified_claim(void)
    cJSON_Delete(published_claim);
    published_claim = NULL;
 }
+static void host_context_keeps_exact_history_fence(void)
+{
+   reset();
+   aimee_request_t req = request();
+   req.n_messages = 1;
+   aimee_block_t context[] = {
+       system_block, {.type = AIMEE_BLK_TEXT, .text = "independently scoped host evidence"}};
+   aimee_ir_block_set_context(&context[1], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "host",
+                              "scope", 1);
+   req.system = context;
+   req.n_system = 2;
+   source(&req);
+   lifecycle("host-context", "running");
+   server_native_cache_t *cache = begin(&req, "host-context");
+   assert(cache && !server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+   aimee_request_t projection = {0};
+   assert(!aimee_ir_request_project_model(&req, &projection));
+   assert(projection.n_system == 1 && projection.n_messages == 2 &&
+          projection.messages[0].n_blocks == 2 && projection.messages[1].n_blocks == 1);
+   int before = cas_calls;
+   assert(!begin(&projection, "host-context"));
+   assert(cas_calls == before); /* Egress evidence never acquires source-history custody. */
+   assert(req.n_messages == 1 && req.messages[0].n_blocks == 1);
+   aimee_request_free(&projection);
+}
+
 int main(void)
 {
+   host_context_keeps_exact_history_fence();
    epoch_and_qualified_claim();
    unresolved_source_refuses();
    aimee_request_t req;

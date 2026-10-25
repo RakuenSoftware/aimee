@@ -424,11 +424,35 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    assert(!strcmp(agent->model, "selected-model") && skip);
    return strdup("host environment");
 }
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom, int skip,
+                                        aimee_message_t *out, char *error, size_t size)
+{
+   char *text = agent_build_exec_context_checked(agent, network, role, custom, skip, error, size);
+   if (!text)
+      return -1;
+   out->role = strdup("system");
+   out->blocks = calloc(1, sizeof *out->blocks);
+   assert(out->role && out->blocks);
+   out->n_blocks = 1;
+   out->blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_ir_block_set_context(&out->blocks[0], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   if (mode == 11)
+   {
+      free(out->blocks[0].text);
+      out->blocks[0].text = strdup("generated native evidence");
+      aimee_ir_block_set_context(&out->blocks[0], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   }
+   return 0;
+}
 static int expected_no_tools;
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages,
-                             const aimee_request_t *tools, const char *system, int max_tokens,
-                             double temperature, aimee_wire_t wire, int delegate,
-                             aimee_request_t *out)
+static int fixture_prepare_profile(const agent_t *agent, const cJSON *messages,
+                                   const aimee_request_t *tools, const char *system, int max_tokens,
+                                   double temperature, aimee_wire_t wire, int delegate,
+                                   aimee_request_t *out)
 {
    assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
@@ -451,6 +475,27 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages,
    out->tools[0].schema = cJSON_Parse("{\"type\":\"object\"}");
    return 0;
 }
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const cJSON *messages, const aimee_request_t *tools,
+                                    const aimee_message_t *context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int delegate,
+                                    aimee_request_t *out)
+{
+   (void)seed;
+   int rc = fixture_prepare_profile(agent, messages, tools, "host environment", max_tokens,
+                                    temperature, wire, delegate, out);
+   if (rc)
+      return rc;
+   aimee_request_t view = {.system = context->blocks, .n_system = context->n_blocks}, copy = {0};
+   assert(!aimee_ir_request_clone(&view, &copy));
+   out->system = copy.system;
+   out->n_system = copy.n_system;
+   copy.system = NULL;
+   copy.n_system = 0;
+   aimee_request_free(&copy);
+   return 0;
+}
+
 int db1_session_ir_history_load(const char *session, const char *kind, const char *actor,
                                 const char *active, char **out)
 {
@@ -515,9 +560,19 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
    error[0] = 0;
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
+   if (mode == 11)
+   {
+      assert(profile->n_system == 1);
+      assert(!strcmp(profile->system[0].text, "generated native evidence"));
+      assert(profile->system[0].context.origin == AIMEE_CTX_ORIGIN_MEMORY &&
+             profile->system[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   }
    if (!strcmp(active_sdk, "claude"))
       assert(profile->n_system > 0 &&
-             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY) &&
+             profile->system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+             profile->system[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
+             profile->system[0].context.trust == AIMEE_CTX_TRUST_VERIFIED);
    else
       assert(!profile->n_system || strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
    assert(!strcmp(selected->provider, expected_provider ? expected_provider : "chatgpt"));
@@ -724,6 +779,9 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(turn, "turn"));
    assert(!strcmp(harness, active_sdk) && !strcmp(scope, digest));
    assert(profile->n_messages == (mode == 10 ? 2 : 0));
+   if (mode == 11)
+      assert(profile->n_system == 1 &&
+             !strcmp(profile->system[0].text, "generated native evidence"));
    began++;
    return &cache;
 }

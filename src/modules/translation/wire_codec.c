@@ -92,6 +92,20 @@ int aimee_backend_host_profile_valid(const aimee_request_t *profile)
    return 1;
 }
 
+int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
+                                           aimee_request_t *projected, aimee_wire_t wire)
+{
+   if (!source || !projected || source == projected)
+      return -1;
+   if (projected->raw || !source->raw || wire != AIMEE_WIRE_OPENAI_CHAT ||
+       source->frontend != wire || projected->frontend != wire ||
+       !aimee_backend_host_profile_valid(source) || !source->model || !projected->model ||
+       strcmp(source->model, projected->model))
+      return 0;
+   projected->raw = cJSON_Duplicate(source->raw, 1);
+   return projected->raw ? 0 : -1;
+}
+
 static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_request_t *out,
                                char *error, size_t capacity)
 {
@@ -146,6 +160,20 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
 {
    if (aimee_ir_request_admit(request))
       return NULL;
+   if (aimee_ir_request_needs_model_projection(request))
+   {
+      aimee_request_t projected = {0};
+      if (aimee_ir_request_project_model(request, &projected))
+         return NULL;
+      if (aimee_backend_preserve_host_extensions(request, &projected, wire))
+      {
+         aimee_request_free(&projected);
+         return NULL;
+      }
+      char *body = aimee_backend_render_wire(&projected, wire);
+      aimee_request_free(&projected);
+      return body;
+   }
    int native_transport =
        wire != AIMEE_WIRE_RESPONSES ||
        (request->stream && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request->raw, "store")));

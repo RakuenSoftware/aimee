@@ -243,9 +243,17 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context);
 
-/* Returns NULL on refusal and copies the owner diagnostic into error.
- * Callers must stop dispatch; neither the original prompt nor stale context
- * is an admissible replacement. The caller owns the returned text. */
+/* Owned canonical context origin, ordered source blocks. Policy and evidence
+ * authority are recorded at generation; consumers must preserve that split.
+ * Failure leaves out unchanged and retains the owner diagnostic. */
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context, aimee_message_t *out, char *error,
+                                        size_t error_len);
+
+/* Read-only CLI/inspection compatibility. Returns NULL on refusal and copies
+ * the owner diagnostic into error; caller owns the returned text. Never use
+ * this view as an execution message or a fallback for a refused typed origin. */
 char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
                                        const char *role, const char *custom_prompt,
                                        int skip_kb_context, char *error, size_t error_len);

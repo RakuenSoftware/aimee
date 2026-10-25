@@ -446,8 +446,8 @@ int main(void)
    /* last user: two text blocks + a tool_result block that must NOT be concatenated
     * (but must not cause the message to be skipped) */
    r.messages[2].role = dup("user");
-   r.messages[2].n_blocks = 3;
-   r.messages[2].blocks = mk_blocks(3);
+   r.messages[2].n_blocks = 5;
+   r.messages[2].blocks = mk_blocks(5);
    r.messages[2].blocks[0].type = AIMEE_BLK_TEXT;
    r.messages[2].blocks[0].text = dup("fix ");
    r.messages[2].blocks[1].type = AIMEE_BLK_TOOL_RESULT;
@@ -456,11 +456,24 @@ int main(void)
        cJSON_CreateString("output that must not leak into the query");
    r.messages[2].blocks[2].type = AIMEE_BLK_TEXT;
    r.messages[2].blocks[2].text = dup("the login bug");
+   r.messages[2].blocks[3].type = AIMEE_BLK_TEXT;
+   r.messages[2].blocks[3].text = dup("hidden operator note");
+   aimee_ir_block_set_context(&r.messages[2].blocks[3], AIMEE_CTX_ORIGIN_OPERATOR,
+                              AIMEE_CTX_AUTH_DIAGNOSTIC, AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 0, "private-query", "test", 1);
+   r.messages[2].blocks[4].type = AIMEE_BLK_TEXT;
+   r.messages[2].blocks[4].text = dup("restricted source text");
+   aimee_ir_block_set_context(&r.messages[2].blocks[4], AIMEE_CTX_ORIGIN_USER,
+                              AIMEE_CTX_AUTH_TASK_INSTRUCTION, AIMEE_CTX_TRUST_UNTRUSTED,
+                              AIMEE_CTX_SENS_RESTRICTED, 1, "restricted-query", "test", 1);
 
    char q[128];
    size_t got = aimee_ir_last_user_text(&r, q, sizeof q);
    assert(got == strlen("fix the login bug"));
    assert(strcmp(q, "fix the login bug") == 0); /* tool_result dropped, texts joined */
+   assert(r.messages[2].n_blocks == 5 &&
+          !strcmp(r.messages[2].blocks[3].text, "hidden operator note") &&
+          !strcmp(r.messages[2].blocks[4].text, "restricted source text"));
 
    /* truncation: tiny buffer never overflows and is NUL-terminated */
    char tiny[6];

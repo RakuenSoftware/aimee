@@ -914,6 +914,7 @@ static void test_native_thinking_replay_binding(void)
       {
          request.mutated = 1;
          request.messages[0].blocks[0].context.origin = AIMEE_CTX_ORIGIN_MEMORY;
+         request.messages[0].blocks[0].context.model_visible = 1;
          char *exact = aimee_backend_render_wire(&request, AIMEE_WIRE_ANTHROPIC);
          assert(exact && !strcmp(exact, body));
          free(exact);
@@ -1324,8 +1325,214 @@ static void test_external_claude_observation_import(void)
    puts("external SDK import: owned typed observations only, no repair/effect/proof authority");
 }
 
+static void classified_host_context_keeps_source_history(void)
+{
+   aimee_block_t system[] = {{.type = AIMEE_BLK_TEXT, .text = "TRUSTED_POLICY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "SDK_COMPONENT_IDENTITY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_MEMORY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_RETRIEVAL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_MODEL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_TOOL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_OPERATOR"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_PLATFORM"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_USER"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_UNKNOWN"},
+                             {.type = AIMEE_BLK_TEXT, .text = "HIDDEN_SECRET"}};
+   aimee_context_origin_t origins[] = {
+       AIMEE_CTX_ORIGIN_PLATFORM,  AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_ORIGIN_MEMORY,
+       AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_ORIGIN_MODEL,    AIMEE_CTX_ORIGIN_TOOL,
+       AIMEE_CTX_ORIGIN_OPERATOR,  AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_ORIGIN_USER,
+       AIMEE_CTX_ORIGIN_UNKNOWN,   AIMEE_CTX_ORIGIN_MEMORY};
+   for (int i = 0; i < 11; ++i)
+      aimee_ir_block_set_context(
+          &system[i], origins[i], i ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_POLICY,
+          AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, i != 10, "source", "scope", 17);
+   aimee_ir_block_set_context(&system[1], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_PUBLIC, 1,
+                              "native-sdk-profile", "claude", 0);
+   aimee_block_t task = {.type = AIMEE_BLK_TEXT, .text = "ORIGINAL_TASK"};
+   aimee_message_t message = {.role = "user", .blocks = &task, .n_blocks = 1, .content_scalar = 1};
+   aimee_request_t source = {.model = "fixture",
+                             .system = system,
+                             .n_system = 11,
+                             .messages = &message,
+                             .n_messages = 1,
+                             .has_max_tokens = 1,
+                             .max_tokens = 64};
+   assert(aimee_ir_request_needs_model_projection(&source));
+   assert(aimee_ir_request_project_model(&source, &source) == -1);
+   aimee_request_t view = {0};
+   assert(!aimee_ir_request_project_model(&source, &view));
+   assert(view.n_system == 2 && view.n_messages == 2 && view.messages[0].n_blocks == 9);
+   assert(view.messages[1].content_scalar &&
+          !strcmp(view.messages[1].blocks[0].text, "ORIGINAL_TASK"));
+   assert(strstr(view.messages[0].blocks[0].text, "not a new task"));
+   assert(view.messages[0].blocks[8].context.origin == AIMEE_CTX_ORIGIN_UNKNOWN &&
+          view.messages[0].blocks[8].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   cJSON *first_prefix = aimee_ir_message_json(&view.messages[0]);
+   assert(first_prefix);
+   assert(view.messages[0].blocks[1].context.revision_epoch == 17);
+   assert(!aimee_ir_request_needs_model_projection(&view));
+   aimee_request_free(&view);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   for (int i = 0; i < 3; ++i)
+   {
+      char *body = aimee_backend_render_wire(&source, wires[i]);
+      assert(body && strstr(body, "ORIGINAL_TASK") && strstr(body, "UNTRUSTED_MEMORY") &&
+             strstr(body, "UNTRUSTED_RETRIEVAL") && strstr(body, "UNTRUSTED_MODEL") &&
+             strstr(body, "UNTRUSTED_TOOL") && !strstr(body, "HIDDEN_SECRET"));
+      assert(strstr(body, "UNTRUSTED_MEMORY") < strstr(body, "ORIGINAL_TASK"));
+      cJSON *native = cJSON_Parse(body);
+      assert(native);
+      if (wires[i] == AIMEE_WIRE_OPENAI_CHAT)
+      {
+         const cJSON *row;
+         cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(native, "messages"))
+         {
+            const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "role"));
+            if (role && (!strcmp(role, "system") || !strcmp(role, "developer")))
+            {
+               char *policy = cJSON_PrintUnformatted(row);
+               assert(policy && !strstr(policy, "UNTRUSTED_"));
+               free(policy);
+            }
+         }
+      }
+      else
+      {
+         const cJSON *policy = cJSON_GetObjectItemCaseSensitive(
+             native, wires[i] == AIMEE_WIRE_ANTHROPIC ? "system" : "instructions");
+         char *text = cJSON_PrintUnformatted(policy);
+         assert(text && strstr(text, "SDK_COMPONENT_IDENTITY") && !strstr(text, "UNTRUSTED_"));
+         free(text);
+      }
+      cJSON_Delete(native);
+      free(body);
+      assert(source.n_system == 11 && source.n_messages == 1 && message.n_blocks == 1 &&
+             message.content_scalar && !strcmp(system[10].text, "HIDDEN_SECRET"));
+   }
+   /* Closed host extensions survive filtering; native conversation sidecars do not. */
+   source.frontend = AIMEE_WIRE_OPENAI_CHAT;
+   source.raw = cJSON_Parse("{\"model\":\"fixture\",\"min_p\":0.07}");
+   assert(source.raw);
+   char *host_body = aimee_backend_render_wire(&source, AIMEE_WIRE_OPENAI_CHAT);
+   cJSON *host_native = host_body ? cJSON_Parse(host_body) : NULL;
+   assert(host_native &&
+          cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(host_native, "min_p")) == 0.07);
+   assert(strstr(host_body, "UNTRUSTED_MEMORY") && !strstr(host_body, "HIDDEN_SECRET"));
+   assert(cJSON_GetObjectItemCaseSensitive(source.raw, "min_p") && source.n_messages == 1 &&
+          source.n_system == 11 && !strcmp(system[10].text, "HIDDEN_SECRET"));
+   cJSON_Delete(host_native);
+   free(host_body);
+   assert(cJSON_AddArrayToObject(source.raw, "messages"));
+   host_body = aimee_backend_render_wire(&source, AIMEE_WIRE_OPENAI_CHAT);
+   host_native = host_body ? cJSON_Parse(host_body) : NULL;
+   assert(host_native && !cJSON_GetObjectItemCaseSensitive(host_native, "min_p"));
+   cJSON_Delete(host_native);
+   free(host_body);
+   cJSON_Delete(source.raw);
+   source.raw = NULL;
+   aimee_block_t prior = {.type = AIMEE_BLK_TEXT, .text = "PRIOR_ASSISTANT"};
+   aimee_block_t next = {.type = AIMEE_BLK_TEXT, .text = "CURRENT_FOLLOWUP_TASK"};
+   aimee_message_t continuation[] = {message,
+                                     {.role = "assistant", .blocks = &prior, .n_blocks = 1},
+                                     {.role = "user", .blocks = &next, .n_blocks = 1}};
+   source.messages = continuation;
+   source.n_messages = 3;
+   assert(!aimee_ir_request_project_model(&source, &view));
+   assert(view.n_messages == 4 && !strcmp(view.messages[0].role, "user") &&
+          view.messages[0].n_blocks == 9 &&
+          !strcmp(view.messages[3].blocks[0].text, "CURRENT_FOLLOWUP_TASK"));
+   cJSON *followup_prefix = aimee_ir_message_json(&view.messages[0]);
+   assert(followup_prefix && cJSON_Compare(first_prefix, followup_prefix, 1));
+   assert(!strcmp(view.messages[1].blocks[0].text, "ORIGINAL_TASK"));
+   assert(source.n_messages == 3 && continuation[0].n_blocks == 1);
+   cJSON_Delete(first_prefix);
+   cJSON_Delete(followup_prefix);
+   aimee_request_free(&view);
+   puts("  owned native host evidence projects as user without changing source history OK");
+}
+
+static void policy_role_message_evidence_projects_as_user(void)
+{
+   const char *roles[] = {"system", "developer"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   for (int r = 0; r < 2; ++r)
+   {
+      aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "POLICY_BEFORE"},
+                                {.type = AIMEE_BLK_TEXT, .text = "ROLE_EVIDENCE"},
+                                {.type = AIMEE_BLK_TEXT, .text = "POLICY_AFTER"}};
+      for (int b = 0; b < 3; ++b)
+         aimee_ir_block_set_context(&blocks[b], AIMEE_CTX_ORIGIN_OPERATOR,
+                                    b == 1 ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_POLICY,
+                                    AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                                    "source", "role-test", 12);
+      aimee_block_t task = {.type = AIMEE_BLK_TEXT, .text = "ROLE_TASK"};
+      aimee_message_t messages[] = {{.role = (char *)roles[r], .blocks = blocks, .n_blocks = 3},
+                                    {.role = "user", .blocks = &task, .n_blocks = 1}};
+      aimee_request_t source = {.model = "fixture",
+                                .messages = messages,
+                                .n_messages = 2,
+                                .has_max_tokens = 1,
+                                .max_tokens = 64};
+      cJSON *before = aimee_ir_request_json(&source);
+      assert(before && aimee_ir_request_needs_model_projection(&source));
+      aimee_request_t view = {0};
+      assert(!aimee_ir_request_project_model(&source, &view));
+      assert(view.n_messages == 3 && !strcmp(view.messages[0].role, "user") &&
+             !strcmp(view.messages[0].blocks[1].text, "ROLE_EVIDENCE"));
+      assert(!strcmp(view.messages[1].role, roles[r]) && view.messages[1].n_blocks == 2 &&
+             !strcmp(view.messages[1].blocks[0].text, "POLICY_BEFORE") &&
+             !strcmp(view.messages[1].blocks[1].text, "POLICY_AFTER"));
+      assert(!strcmp(view.messages[2].blocks[0].text, "ROLE_TASK"));
+      aimee_request_free(&view);
+      for (int w = 0; w < 3; ++w)
+      {
+         char *body = aimee_backend_render_wire(&source, wires[w]);
+         cJSON *native = body ? cJSON_Parse(body) : NULL;
+         assert(native && strstr(body, "ROLE_EVIDENCE") && strstr(body, "ROLE_TASK"));
+         const cJSON *rows = cJSON_GetObjectItemCaseSensitive(
+             native, wires[w] == AIMEE_WIRE_RESPONSES ? "input" : "messages");
+         const cJSON *row;
+         int evidence_user = 0;
+         cJSON_ArrayForEach(row, rows)
+         {
+            const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "role"));
+            char *serialized = cJSON_PrintUnformatted(row);
+            assert(serialized);
+            if (strstr(serialized, "ROLE_EVIDENCE"))
+            {
+               assert(role && !strcmp(role, "user"));
+               evidence_user++;
+            }
+            free(serialized);
+         }
+         assert(evidence_user == 1);
+         const cJSON *policy = cJSON_GetObjectItemCaseSensitive(
+             native, wires[w] == AIMEE_WIRE_ANTHROPIC ? "system" : "instructions");
+         if (policy)
+         {
+            char *serialized = cJSON_PrintUnformatted(policy);
+            assert(serialized && !strstr(serialized, "ROLE_EVIDENCE"));
+            free(serialized);
+         }
+         cJSON_Delete(native);
+         free(body);
+         cJSON *after = aimee_ir_request_json(&source);
+         assert(after && cJSON_Compare(before, after, 1));
+         cJSON_Delete(after);
+      }
+      cJSON_Delete(before);
+   }
+   puts("  system/developer message evidence projects as user, policy order/source retained OK");
+}
+
 int main(void)
 {
+   policy_role_message_evidence_projects_as_user();
+   classified_host_context_keeps_source_history();
    test_external_claude_observation_import();
    test_host_request_owner_precedes_proof_guard();
    test_host_profile_sidecars_exclude_native_selectors();

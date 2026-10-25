@@ -421,6 +421,8 @@ static int mirror_add(cJSON *object, const char *key, cJSON *value)
 }
 static char *mirror_text_request(const aimee_request_t *request)
 {
+   if (aimee_ir_request_needs_model_projection(request))
+      return NULL; /* A legacy text endpoint cannot faithfully expose hidden context. */
    if (request->n_system || request->n_messages != 1 || request->n_tools ||
        strcmp(request->messages[0].role, "user") || request->messages[0].n_blocks != 1 ||
        request->messages[0].blocks[0].type != AIMEE_BLK_TEXT)

@@ -17,6 +17,10 @@ extern "C"
    int is_chatgpt_provider(const agent_t *agent);
    int is_anthropic_provider(const agent_t *agent);
 
+   /* Admission is independent of a particular provider's wire projection. */
+   int agent_host_request_supported(const aimee_request_t *request, int use_tools);
+   /* Owned model-egress view; original custody and hidden blocks remain untouched. */
+   int agent_request_project_model(const aimee_request_t *request, aimee_request_t *out);
    /* 1 = owned augmented IR, 0 = no hook context, -1 = refusal. Input is borrowed. */
    int agent_prepare_plain_request_hooks(const aimee_request_t *request, aimee_request_t *out);
    /* Host cache/sampling preparation preserves the input IR on an owned clone. */

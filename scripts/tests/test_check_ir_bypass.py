@@ -55,7 +55,7 @@ class IRBypassTests(unittest.TestCase):
                 path.unlink()
 
     def test_dormant_parallel_c_execution_cannot_return(self):
-        for name in ('cron_build_job_prompt', 'cron_run_llm_prompt', 'platform_delegate_run_background', 'platform_trace_run_task', 'agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
+        for name in ('agent_build_request_ir', 'agent_prepare_request_ir', 'cron_build_job_prompt', 'cron_run_llm_prompt', 'platform_delegate_run_background', 'platform_trace_run_task', 'agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
             for relative in ("src/server/reintroduced_runner.c", "src/headers/reintroduced_runner.h"):
                 path = self.source(relative, f"int {name}(void);\n")
                 with self.subTest(name=name, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
@@ -190,7 +190,7 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,"retired-api"): checker.check(self.root)
                 path.unlink()
         for symbol in ("openai_ir_parse_tool", "anthropic_ir_parse_tool"):
-            path=self.source("src/server/agent_bridge.c","int agent_prepare_request_ir(void) { return "+symbol+"(tool); }")
+            path=self.source("src/server/agent_bridge.c","int agent_prepare_seeded_request_ir(void) { return "+symbol+"(tool); }")
             with self.assertRaisesRegex(ValueError,"native-tool-reparse"): checker.check(self.root)
             path.unlink()
         path=self.source("src/modules/delegates/driver.c","driver.build_tools = renamed_builder;")
@@ -454,6 +454,15 @@ class IRBypassTests(unittest.TestCase):
         path.write_text('void delegate_worker_run(void) { lookup(message, "tool_calls"); }')
         with self.assertRaisesRegex(ValueError, "native-history-field"):
             checker.check(self.root)
+
+    def test_model_consumers_cannot_reuse_read_only_context_text_views(self):
+        for relative in ("src/posix/agent_runtime.c", "src/server/server_native_execution.c", "src/another_model.c"):
+            path = self.source(relative, 'agent_build_exec_context_checked(agent, network, role, prompt, 0, error, size);')
+            with self.assertRaisesRegex(ValueError, "untyped-exec-context"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/posix/agent_runtime.c", 'agent_build_exec_context_ir_checked(agent, network, role, prompt, 0, &context, error, size);')
+        checker.check(self.root)
 
     def test_internal_steer_contract_cannot_revert_to_text(self):
         for declaration in (

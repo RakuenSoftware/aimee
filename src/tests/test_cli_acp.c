@@ -468,10 +468,10 @@ static void test_live_acp_ownership_and_budgets(void)
        "if mode=='long': assert len(f['params']['prompt'][0]['text'])==200000\n"
        "if mode=='canonical':\n"
        " assert f['params']['prompt']==[{'type':'text','text':'host context exact'},"
-       "{'type':'text','text':'canonical task exact'}]\n"
+       "{'type':'text','text':'canonical task exact'}, {'type':'text','text':'separate evidence exact'}]\n"
        "if mode=='history':\n"
-       " p=f['params']['prompt']; assert len(p)==3 and p[0]['text']=='host context exact'\n"
-       " assert p[2]['text']=='canonical task exact'\n"
+       " p=f['params']['prompt']; assert len(p)==4 and p[0]['text']=='host context exact'\n"
+       " assert p[2]['text']=='canonical task exact' and p[3]['text']=='separate evidence exact'\n"
        " h=json.loads(p[1]['text'].split('\\n',1)[1]); assert [m['role'] for m in "
        "h]==['user','assistant','tool']\n"
        " assert h[0]['blocks'][0]['text']=='old request'\n"
@@ -610,8 +610,15 @@ static void test_live_acp_ownership_and_budgets(void)
 
    new_execution();
    aimee_block_t context = {.type = AIMEE_BLK_TEXT, .text = "host context exact"};
-   aimee_block_t task_text = {.type = AIMEE_BLK_TEXT, .text = "canonical task exact"};
-   aimee_message_t task_message = {.role = "user", .blocks = &task_text, .n_blocks = 1};
+   aimee_block_t task_text[] = {{.type = AIMEE_BLK_TEXT, .text = "canonical task exact"},
+                                {.type = AIMEE_BLK_TEXT, .text = "separate evidence exact"},
+                                {.type = AIMEE_BLK_THINKING,
+                                 .text = "hidden source reasoning",
+                                 .thinking_signature = "source-signature"}};
+   aimee_ir_block_set_context(&task_text[2], AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_RESTRICTED, 0,
+                              "private-origin", "source", 7);
+   aimee_message_t task_message = {.role = "user", .blocks = task_text, .n_blocks = 3};
    aimee_request_t task = {
        .system = &context, .n_system = 1, .messages = &task_message, .n_messages = 1};
    cfg.canonical_request = &task;
@@ -621,6 +628,9 @@ static void test_live_acp_ownership_and_budgets(void)
    assert(result.success && projected_context == 1 && !projected_opaque);
    assert(result.turns == 0); /* No claim about the external provider's generations. */
    assert(result.canonical_response.usage_unobserved);
+   assert(task_message.n_blocks == 3 && task_text[2].type == AIMEE_BLK_THINKING &&
+          !strcmp(task_text[2].thinking_signature, "source-signature") &&
+          !task_text[2].context.model_visible);
    agent_result_clear_response(&result);
    new_execution();
    aimee_block_t prior_user = {

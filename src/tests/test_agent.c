@@ -4517,6 +4517,82 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 void test_competence_contract_roundtrip_and_routing(void);
 void test_cost_selection_filters_before_learning(void);
 
+static void test_seeded_tool_profile_retains_request_custody(void)
+{
+   aimee_block_t first[] = {{.type = AIMEE_BLK_TEXT, .text = "original task"},
+                            {.type = AIMEE_BLK_TEXT, .text = "retrieved evidence"}};
+   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = "prior assistant"};
+   aimee_block_t repair = {.type = AIMEE_BLK_TEXT, .text = "repair policy"};
+   aimee_message_t history[] = {{.role = "user", .blocks = first, .n_blocks = 2},
+                                {.role = "assistant", .blocks = &answer, .n_blocks = 1},
+                                {.role = "user", .blocks = &repair, .n_blocks = 1}};
+   aimee_block_t system[] = {{.type = AIMEE_BLK_TEXT, .text = "first original policy"},
+                             {.type = AIMEE_BLK_TEXT, .text = "second original policy"}};
+   char *stops[] = {"EXACT_STOP"};
+   aimee_request_t seed = {.system = system,
+                           .n_system = 2,
+                           .messages = history,
+                           .n_messages = 3,
+                           .has_max_tokens = 1,
+                           .max_tokens = 64,
+                           .has_temperature = 1,
+                           .temperature = 0.25,
+                           .has_top_p = 1,
+                           .top_p = 0.9,
+                           .stop_sequences = stops,
+                           .n_stop = 1,
+                           .metadata = cJSON_Parse("{\"exact\":9007199254740993123456789}")};
+   aimee_ir_block_set_context(&first[1], AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "source",
+                              "revision", 17);
+   cJSON *messages = cJSON_CreateArray();
+   for (int i = 0; i < 3; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(&history[i])));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "seed fixture");
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   snprintf(agent.model, sizeof agent.model, "fixture-model");
+   aimee_block_t generated = {.type = AIMEE_BLK_TEXT, .text = "mixed host context and memory"};
+   aimee_ir_block_set_context(&generated, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t context = {.role = "system", .blocks = &generated, .n_blocks = 1};
+   aimee_request_t prepared = {0}, catalog = {0};
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, &catalog, &context, 128, 0.7,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &prepared));
+   assert(prepared.frontend == AIMEE_WIRE_OPENAI_CHAT && seed.frontend == AIMEE_WIRE_UNKNOWN);
+   assert(prepared.n_messages == 3 && prepared.messages[0].n_blocks == 2);
+   assert(!strcmp(prepared.messages[0].blocks[0].text, "original task"));
+   assert(!strcmp(prepared.messages[1].blocks[0].text, "prior assistant"));
+   assert(!strcmp(prepared.messages[2].blocks[0].text, "repair policy"));
+   assert(prepared.messages[0].blocks[1].context.revision_epoch == 17);
+   assert(prepared.n_system >= 3 && !strcmp(prepared.system[0].text, system[0].text) &&
+          !strcmp(prepared.system[1].text, system[1].text));
+   assert(prepared.system[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          prepared.system[2].context.origin == AIMEE_CTX_ORIGIN_MEMORY);
+   assert(prepared.has_max_tokens && prepared.max_tokens == 64 && prepared.has_temperature &&
+          prepared.temperature == 0.25 && prepared.has_top_p && prepared.top_p == 0.9);
+   assert(prepared.n_stop == 1 && !strcmp(prepared.stop_sequences[0], "EXACT_STOP"));
+   char *metadata = cJSON_PrintUnformatted(prepared.metadata);
+   assert(metadata && strstr(metadata, "9007199254740993123456789"));
+   free(metadata);
+   assert(seed.n_system == 2 && seed.n_messages == 3 && seed.messages[0].n_blocks == 2);
+   free(prepared.messages[0].blocks[0].text);
+   prepared.messages[0].blocks[0].text = strdup("mutated clone");
+   assert(!strcmp(seed.messages[0].blocks[0].text, "original task"));
+   aimee_request_free(&prepared);
+   aimee_tool_t unregistered = {.name = "unregistered", .schema = cJSON_CreateObject()};
+   seed.tools = &unregistered;
+   seed.n_tools = 1;
+   assert(agent_prepare_seeded_request_ir(&agent, &seed, messages, &catalog, &context, 128, 0.7,
+                                          AIMEE_WIRE_OPENAI_CHAT, 0, &prepared) == -1);
+   assert(!prepared.messages && seed.n_messages == 3);
+   cJSON_Delete(unregistered.schema);
+   cJSON_Delete(seed.metadata);
+   cJSON_Delete(messages);
+   puts("seeded tool profile retains full canonical task, controls and evidence custody");
+}
+
 static void test_canonical_external_run_preserves_budget_refusal(void)
 {
    request_context_snapshot_t previous;
@@ -4550,10 +4626,10 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
          request.prompt_cache_key = control == 0 ? "" : NULL;
          request.prompt_cache_retention = control == 1 ? "24h" : NULL;
          request.prompt_cache_options = control == 2 ? cJSON_CreateObject() : NULL;
-         assert(!agent_request_with_tools_supported(&request));
+         assert(agent_request_with_tools_supported(&request));
          assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
-                                                 &result) == AGENT_RC_CONTEXT_REFUSED);
-         assert(!strcmp(result.error, "run request contains unsupported execution controls"));
+                                                 &result) != 0);
+         assert(!strcmp(result.error, "request_budget_unavailable"));
          assert(!response.n_content && !result.response);
          cJSON_Delete(request.prompt_cache_options);
          request.prompt_cache_key = request.prompt_cache_retention = NULL;
@@ -4686,6 +4762,7 @@ int main(int argc, char **argv)
     * here rather than silently deleting it. */
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
+   test_seeded_tool_profile_retains_request_custody();
    test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
    test_agent_endpoint_valid();
