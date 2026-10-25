@@ -300,3 +300,8 @@ reviewed memory findings (including symbols, dispositions and content hashes).
 The ownership ledger classifies their retirement separately and rejects both
 restored files and missing or changed historical findings. Original memory
 inventories, symbols and native-boundary rules remain enforced.
+
+Canonical execution histories use `aimee_ir_history_clone`; it refuses provider-shaped
+messages. Legacy storage imports are owned by the explicit translation boundary.
+Browser submissions, pending sends and primary-session input carry canonical
+messages; the host assigns context authority before capture and execution.

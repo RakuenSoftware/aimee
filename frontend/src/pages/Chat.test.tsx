@@ -175,7 +175,7 @@ describe('canonical browser chat', () => {
     fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
     await act(async () => {});
     const sent = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send');
-    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface' });
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface', message: { role: 'user', blocks: [{ type: 'text', text: 'Fresh session first turn' }] } });
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
     await close();
   });
@@ -888,7 +888,7 @@ describe('flat history is an archive, never authority', () => {
   it('sends only the new user input after canonical empty replay, without cached transcript data', async () => {
     await start();
     const request = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')!;
-    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: 'Please investigate', aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '' });
+    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Please investigate' }] }, aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '' });
     expect(context.patchSession.mock.calls.some(([, patch]) => Object.hasOwn(patch, 'messages'))).toBe(false);
     await close();
   });

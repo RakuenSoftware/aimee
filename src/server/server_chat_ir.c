@@ -254,7 +254,9 @@ int server_chat_ir_replace_steer(cJSON *request, const char *message)
 {
    if (!cJSON_IsObject(request) || !message || !message[0])
       return -1;
-   cJSON *replacement = cJSON_CreateString(message);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)message};
+   aimee_message_t input = {.role = "user", .blocks = &block, .n_blocks = 1};
+   cJSON *replacement = aimee_ir_message_json(&input);
    if (!replacement)
       return -1;
    if (!cJSON_ReplaceItemInObjectCaseSensitive(request, "message", replacement))
@@ -338,7 +340,7 @@ int server_chat_ir_prepare_turn(compute_ctx_t *c)
    return 0;
 }
 
-int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
+int server_chat_ir_begin(compute_ctx_t *c, const char *session, const aimee_message_t *message)
 {
    if (!c->presence_locked || !session || !session[0] || strlen(session) >= sizeof(c->ir_session) ||
        !c->vault_principal[0])
@@ -386,12 +388,10 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
                                       .execution_status = "running"};
    if (aimee_ir_session_emit(&lifecycle) != 0)
       return -1;
-   if (!text)
+   if (!message)
       return 0; /* A host history operation has no model/user message to invent. */
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t event = {
-       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &message};
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = message};
    return aimee_ir_session_emit(&event);
 }
 

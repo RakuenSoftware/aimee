@@ -1165,7 +1165,9 @@ static compute_ctx_t *route_context(const char *prompt)
    assert(!pthread_mutex_init(c->write_mutex, NULL));
    c->compute_executor_threads = 1;
    c->conn_caps = CAPS_ALL; /* Normal owned browser/operator connection. */
-   cJSON_AddStringToObject(c->req, "message", prompt);
+   aimee_block_t input_block = {.type = AIMEE_BLK_TEXT, .text = (char *)prompt};
+   aimee_message_t input_message = {.role = "user", .blocks = &input_block, .n_blocks = 1};
+   cJSON_AddItemToObject(c->req, "message", aimee_ir_message_json(&input_message));
    cJSON_AddStringToObject(c->req, "cwd", workspace);
    cJSON_AddStringToObject(c->req, "aimee_session_id", "session-one");
    cJSON_AddNumberToObject(c->req, "ir_version", 1);

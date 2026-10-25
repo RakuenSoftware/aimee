@@ -989,6 +989,22 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cctx)
       return server_send_error(conn, "out of memory", NULL);
 
+   /* Legacy external CLI callers enter here as text; the queued request owns
+    * canonical IR from this boundary onward. Browser callers already send IR. */
+   cJSON *input = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
+   if (cJSON_IsString(input))
+   {
+      aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = input->valuestring};
+      aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+      cJSON *canonical = aimee_ir_message_json(&message);
+      if (!canonical || !cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "message", canonical))
+      {
+         cJSON_Delete(canonical);
+         compute_ctx_free(cctx);
+         return server_send_error(conn, "cannot admit canonical user input", NULL);
+      }
+   }
+
    /* (see retry_after_reclaiming_abandoned_turn above)
     *
     * An identified attachment uses its existing arbitration/queueing contract.

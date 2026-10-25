@@ -864,10 +864,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    compute_ctx_free(cctx);
 }
 
-static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *message,
-                                               const char *provider_sid, const char *cwd,
-                                               const char *aimee_sid, const char *provider,
-                                               const char *model_override)
+static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *provider_sid,
+                                               const char *cwd, const char *aimee_sid,
+                                               const char *provider, const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s session=%s",
                         provider && provider[0] ? provider : "agent",
@@ -961,7 +960,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
    preq.cwd = use_cwd;
    preq.system_prompt = system_prompt ? system_prompt : "";
-   preq.user_prompt = message;
+   preq.message = &cctx->ir_input;
    preq.task_request = cctx->req;
    preq.max_tokens = AGENT_DEFAULT_MAX_TOKENS;
    preq.temperature = 0.3;
@@ -1102,7 +1101,25 @@ void chat_stream_worker(void *arg)
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jcompact = cJSON_GetObjectItemCaseSensitive(req, "compact");
 
-   const char *message = cJSON_IsString(jmsg) ? jmsg->valuestring : "";
+   /* The queue accepts canonical input only. This text view is for routing
+    * diagnostics and the explicit external CLI boundary, never model history. */
+   int input_rc = jmsg ? aimee_ir_message_parse(jmsg, &cctx->ir_input) : 0;
+   const char *message = "Continue the admitted conversation.";
+   int has_content = 0;
+   for (int i = 0; !input_rc && i < cctx->ir_input.n_blocks; i++)
+   {
+      const aimee_block_t *block = &cctx->ir_input.blocks[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
+          block->type != AIMEE_BLK_DOCUMENT)
+         input_rc = -1;
+      if (block->type == AIMEE_BLK_TEXT && block->text && block->text[0])
+      {
+         message = block->text;
+         has_content = 1;
+      }
+      if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
+         has_content = 1;
+   }
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *provider_sid = cJSON_IsString(jpsid) ? jpsid->valuestring : "";
    if (!provider_sid[0] && cJSON_IsString(jcsid))
@@ -1111,18 +1128,26 @@ void chat_stream_worker(void *arg)
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
    int compact = cJSON_IsTrue(jcompact);
 
-   if (!message[0] && !compact)
+   if (input_rc || (!compact && (!cctx->ir_input.role || strcmp(cctx->ir_input.role, "user") ||
+                                 cctx->ir_input.n_blocks < 1 || !has_content)))
    {
       compute_error(cctx, "missing message");
       compute_ctx_free(cctx);
       return;
    }
 
+   if (!compact)
+   {
+      for (int i = 0; i < cctx->ir_input.n_blocks; i++)
+         memset(&cctx->ir_input.blocks[i].context, 0, sizeof(cctx->ir_input.blocks[i].context));
+      aimee_request_t input = {.messages = &cctx->ir_input, .n_messages = 1};
+      aimee_ir_classify_context(&input);
+   }
    cJSON *ir_version = cJSON_GetObjectItemCaseSensitive(req, "ir_version");
    cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
    /* Capture ownership follows the admitted host turn, independently of the
     * subscriber's transport version. Legacy consumers retain their projection. */
-   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
+   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : &cctx->ir_input) != 0)
    {
       compute_error(cctx, "cannot initialize canonical session");
       compute_ctx_free(cctx);
@@ -1189,7 +1214,7 @@ void chat_stream_worker(void *arg)
    compute_ctx_release_budget(cctx);
    if (chat_provider_uses_primary_session(provider))
    {
-      chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
+      chat_stream_worker_primary_session(cctx, provider_sid, cwd, aimee_sid, provider,
                                          model_override);
    }
    else

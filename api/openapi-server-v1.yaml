@@ -5219,7 +5219,22 @@ paths:
                 attach_id: { type: string, description: Server-minted presence attachment }
                 queue: { type: boolean, description: Wait for the session turn lock }
                 queue_wait_ms: { type: integer, minimum: 0, maximum: 120000 }
-                message: { type: string }
+                message:
+                  description: >
+                    Canonical user message retained through queue, capture and execution.
+                    Legacy external strings convert once at ingress. The host assigns
+                    context authority. User blocks are text, image or document.
+                  oneOf:
+                    - type: string
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object }
                 aimee_session_id: { type: string, description: Required stable session identity for ir_version=1 }
                 claude_session_id: { type: string }
                 cwd: { type: string }

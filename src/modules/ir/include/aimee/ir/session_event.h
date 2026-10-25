@@ -84,6 +84,9 @@ struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out
  * is empty; on success it owns its fields (aimee_message_free). */
 int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
+/* Clone canonical stored messages without accepting or guessing a provider wire.
+ * NULL denotes an empty conversation. The caller owns the returned array. */
+struct cJSON *aimee_ir_history_clone(const struct cJSON *messages);
 /* Repair a compatibility view's tool cycles in order; -1 leaves input untouched.
  * Missing results become explicit platform diagnostics with unknown outcomes,
  * never cancellation/effect receipts. Authoritative loaders reject any repair. */

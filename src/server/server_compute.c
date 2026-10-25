@@ -376,6 +376,7 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
 void compute_ctx_free(compute_ctx_t *cctx)
 {
    server_chat_ir_close(cctx);
+   aimee_message_free(&cctx->ir_input);
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)

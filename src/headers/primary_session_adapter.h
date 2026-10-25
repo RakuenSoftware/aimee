@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "agent_types.h"
 #include "session_compact.h"
+#include <aimee/ir/aimee_ir.h>
 
 struct cJSON;
 
@@ -21,7 +22,7 @@ extern "C"
       const char *active_turn_id; /* Server-owned capture turn; never client input. */
       const char *cwd;
       const char *system_prompt;
-      const char *user_prompt;
+      const aimee_message_t *message;
       /* Borrowed native user request, for bounded Go-owned task obligations. */
       const struct cJSON *task_request;
       int max_tokens;

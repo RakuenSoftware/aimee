@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "primary_session_adapter.h"
+#include <aimee/ir/session_event.h>
 #include "request_context.h"
 #include "db1_client/session_state.h"
 #include <assert.h>
@@ -44,7 +45,13 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
    const char *op = text(j, "operation");
    if (!strcmp(op, "retry_begin"))
    {
-      assert(!strcmp(text(body, "input"), "current user constraints"));
+      cJSON *input = cJSON_Parse(text(body, "input"));
+      aimee_message_t message = {0};
+      assert(input && !aimee_ir_message_parse(input, &message));
+      assert(!strcmp(message.role, "user") && message.n_blocks == 1 &&
+             !strcmp(message.blocks[0].text, "current user constraints"));
+      aimee_message_free(&message);
+      cJSON_Delete(input);
       assert(!cJSON_GetObjectItemCaseSensitive(body, "policy"));
    }
    else if (!strcmp(op, "retry_send"))
@@ -67,8 +74,12 @@ int main(void)
 {
    strcpy(ctx.principal, "alice");
    strcpy(ctx.request_id, "request");
-   primary_session_request_t req = {.aimee_session_id = "session",
-                                    .user_prompt = "current user constraints"};
+   primary_session_request_t req = {
+       .aimee_session_id = "session",
+       .message = &(aimee_message_t){
+           .role = "user",
+           .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "current user constraints"},
+           .n_blocks = 1}};
    cJSON *input = cJSON_Parse(
        "{\"clean_retry\":{\"previous_attempt\":\"prior\",\"replace_constraints\":true}}");
    req.task_request = input;

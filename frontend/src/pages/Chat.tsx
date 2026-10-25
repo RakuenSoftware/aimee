@@ -12,7 +12,7 @@ import { useSessions } from '../SessionContext';
 import IRTranscript from '../ir/Transcript';
 import { emptySession, reduceSession } from '../ir/session';
 import { operatorCancelError } from '../ir/interruption';
-import type { Envelope, SessionState } from '../ir/session';
+import type { Envelope, Message, SessionState } from '../ir/session';
 import type { ControlReply } from '../ir/ControlCard';
 import { reconcileSessionMessages } from '../sessionPersistence';
 
@@ -272,7 +272,7 @@ interface QueuedChatSend {
   sessionId: string;
   historyVersion: number;
   projectRoot: string;
-  text: string;
+  message: Message;
   version: number;
   /* aimeeSid of the tab this send was enqueued from. Captured at enqueue time so
    * the turn — and its busy indicator — stays bound to the originating tab even
@@ -2017,7 +2017,7 @@ export default function Chat() {
     const owner = activeSession;
     const sid = owner?.aimeeSid ?? '';
     if (!owner || !activeSessionMatched || !sid || activeContextSid.current !== sid || !irReadyRef.current[sid] || failedHistory.current.has(sid)) return;
-    const origin: QueuedChatSend = { text, sessionId: owner.id, originSid: sid, projectRoot: owner.projectRoot,
+    const origin: QueuedChatSend = { message: { role: 'user', blocks: [{ type: 'text', text }] }, sessionId: owner.id, originSid: sid, projectRoot: owner.projectRoot,
       version: sendQueueVersionRef.current, historyVersion: historyGeneration.current.get(sid) ?? 0 };
     if (retainedSendDrafts[sid] === text) setRetainedSendDrafts(prev => { const next = { ...prev }; delete next[sid]; return next; });
     let clientInflight = false;
@@ -2036,7 +2036,8 @@ export default function Chat() {
   // Explicitly stop the exact canonical turn, then send this new text once.
   // Cancellation acknowledgement alone is not a claim that effects have stopped.
   async function steerInterrupt(origin: QueuedChatSend) {
-    const { originSid: sid, text, version, historyVersion } = origin;
+    const { originSid: sid, version, historyVersion } = origin;
+    const text = origin.message.blocks.map(block => block.text ?? '').join('');
     if (stoppingSessions.current.has(sid)) return;
     const turnIds = irSessions.current[sid]?.activeTurns ?? [];
     if (!ownsQueuedOrigin(origin) || !irReadyRef.current[sid] || turnIds.length !== 1) {
@@ -2084,7 +2085,8 @@ export default function Chat() {
   }
 
   function enqueueChatMessage(origin: QueuedChatSend) {
-    const { text, originSid, sessionId } = origin;
+    const { originSid, sessionId } = origin;
+    const text = origin.message.blocks.map(block => block.text ?? '').join('');
     const hasExistingMessages = (irSessions.current[originSid]?.messages.length ?? 0) > 0 ||
       activeSendAbortRefs.current.size > 0 || (sendQueuesRef.current.get(originSid)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
@@ -2135,7 +2137,7 @@ export default function Chat() {
   }
 
   async function sendQueuedMessage(item: QueuedChatSend) {
-    const text = item.text;
+    const text = item.message.blocks.map(block => block.text ?? '').join('');
     if (item.version !== sendQueueVersionRef.current) return;
 
     // Bind this turn to the tab it was ENQUEUED from (captured at enqueue), not
@@ -2166,7 +2168,7 @@ export default function Chat() {
           'X-CSRF-Token': window._csrf || '',
         },
         body: JSON.stringify({
-          message: text,
+          message: item.message,
           aimee_session_id: aimeeSid,
           attach_id: attachId,
           cwd: item.projectRoot,

@@ -126,8 +126,40 @@ static void native_and_malformed_refuse(void)
       cJSON_Delete(history);
    }
 }
+static void canonical_clone(void)
+{
+   cJSON *empty = aimee_ir_history_clone(NULL);
+   assert(cJSON_IsArray(empty) && cJSON_GetArraySize(empty) == 0);
+   cJSON_Delete(empty);
+   cJSON *history = cJSON_Parse(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}],"
+       "\"_compaction_boundary\":true},{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\","
+       "\"tool_id\":\"opaque\",\"name\":\"read\",\"input\":{\"n\":9007199254740993}}]}]");
+   cJSON *copy = aimee_ir_history_clone(history);
+   assert(copy && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(copy, 0),
+                                                                "_compaction_boundary")));
+   cJSON *again = aimee_ir_history_clone(copy);
+   assert(again && cJSON_Compare(copy, again, 1));
+   cJSON_Delete(again);
+   char *encoded = cJSON_PrintUnformatted(copy);
+   assert(encoded && strstr(encoded, "9007199254740993"));
+   free(encoded);
+   cJSON_Delete(copy);
+   cJSON_Delete(history);
+   const char *native[] = {
+       "[{\"role\":\"user\",\"content\":\"native\"}]",
+       "[{\"type\":\"message\",\"role\":\"user\",\"content\":[]}]",
+       "[{\"role\":\"user\",\"blocks\":[]},{\"role\":\"assistant\",\"content\":\"mixed\"}]", "{}"};
+   for (size_t i = 0; i < sizeof native / sizeof native[0]; i++)
+   {
+      history = cJSON_Parse(native[i]);
+      assert(history && !aimee_ir_history_clone(history));
+      cJSON_Delete(history);
+   }
+}
 int main(void)
 {
+   canonical_clone();
    text_only();
    cycles();
    native_and_malformed_refuse();

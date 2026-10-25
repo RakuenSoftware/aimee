@@ -293,6 +293,35 @@ fail:
    return -1;
 }
 
+cJSON *aimee_ir_history_clone(const cJSON *messages)
+{
+   if (messages && !cJSON_IsArray(messages))
+      return NULL;
+   cJSON *out = cJSON_CreateArray();
+   if (!out)
+      return NULL;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, messages)
+   {
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(item, &message))
+         goto fail;
+      cJSON *copy = aimee_ir_message_json(&message);
+      aimee_message_free(&message);
+      if (copy && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "_compaction_boundary")))
+         cJSON_AddBoolToObject(copy, "_compaction_boundary", 1);
+      if (!copy || !cJSON_AddItemToArray(out, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+
 static _Atomic(aimee_ir_host_history_admission_fn) host_history_admission;
 void aimee_ir_history_set_host_admission(aimee_ir_host_history_admission_fn admit)
 {

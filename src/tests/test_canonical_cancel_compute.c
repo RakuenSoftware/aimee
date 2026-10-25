@@ -95,7 +95,9 @@ void chat_stream_worker(void *arg)
    assert(strlen(canonical) == 32 && strcmp(canonical, c->presence_turn_id));
    assert(turn_registry_match_exact("session-one", canonical) == 1);
    assert(turn_registry_match_exact("session-one", c->presence_turn_id) == -1);
-   assert(!server_chat_ir_begin(c, "session-one", "current canonical turn"));
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "current canonical turn"};
+   aimee_message_t input = {.role = "user", .blocks = &block, .n_blocks = 1};
+   assert(!server_chat_ir_begin(c, "session-one", &input));
    assert(!strcmp(canonical, c->ir_turn));
    char sequence[32];
    assert(!server_session_capture_cancel_owned("alice", "session-one", canonical, sequence,

@@ -9,7 +9,7 @@ obsolete parallel implementations without removing supported behavior.
 
 Continue on `fix/native-mcp-startup-and-editor` in this worktree. Keep one eventual
 PR; PR administration and authentication questions are not implementation
-prerequisites. Use parallel agents for independent implementation and validation.
+prerequisites. Keep implementation and validation within the two goals below.
 Do not call the migration complete while implementation or required live checks
 remain. Historical handoff versions are evidence, not current instructions.
 
@@ -20,12 +20,43 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Current implementation and qualified checkpoint
+## Recovery scope, 2026-10-25
 
-The user clarified the architectural scope on 2026-10-25: **“A message is an
-IR.”** Different task payloads stay in their existing messages. Do not invent a
-parallel inference schema, or exempt speech, recognition and embedding messages
-merely because their payloads differ from conversation content.
+Exactly two goals govern this work:
+
+1. Restore usable agent sessions in the existing Aimee browser GUI, including
+   server tools/models, controls, continuation and durable history.
+2. Canonical IR throughout Aimee; conversion only at explicit external boundaries
+   such as Anthropic, OpenCode and imported legacy storage.
+
+The earlier interpretation that arbitrary task payloads count as IR was wrong.
+Payload completeness repairs do not establish migration. Learning exercises,
+broader installation matrices and PR/authentication work are outside these goals.
+
+Salvageable work at recovered `1b3875369`: canonical stream/replay, primary history
+and model switching, native tool/control plumbing, SDK cache custody, and removal
+of unused parallel CLI/delegate owners. Preserve these and durable history.
+HTTP, ntfy, speech and embedding payload fixes are separate correctness repairs.
+
+The latest real Claude browser attempt on that revision failed before SDK startup:
+OAuth refresh returned HTTP 429; constructor refused at `claude_source_lineage`.
+Vault reads were allowed. A working real session on this revision is unproved.
+See `/var/tmp/aimee-native-1b-preparation-diagnosis/diagnosis.json`.
+
+The resumed audit found plain-text browser submission DTOs through the web backend,
+queue and primary adapter, plus implicit provider-history migration inside the
+execution loop. The recovery change carries canonical messages through that
+browser path and makes execution history canonical-only. Legacy external CLI
+text converts at endpoint ingress. The primary adapter retains the original
+message; policy/metadata text views do not reconstruct model history.
+
+Still audit text-based agent/parallel entry points, workflows, gateway producers,
+and active consumers of compatibility projections. Trace actual dataflow; a name
+or arbitrary JSON payload does not make a representation canonical. Real browser
+completion and continuation on the resulting source remain required. Older test
+receipts below apply only to their named revisions.
+
+## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload
 repairs below, matching ntfy delivery repair, strict HTTP field/length framing,
@@ -410,24 +441,12 @@ quiesced diagnostics preserve known subtotals without manufacturing a model
 response. Auxiliary count_tokens calls do not invalidate a prior completion.
 A failed latest admitted generation cannot transfer an earlier final/cache.
 
-## Remaining completion checks
+## Current completion checks
 
-- Qualify the completed delegate-reply ingress cutover on the final combined source.
-  Preserve the already qualified native failure/usage projection and
-  shared job progress owner; keep original per-generation facts and failure
-  history. Preserve metadata precedence, cache/no-send, retry/fallback and full
-  callback-scope restoration; add no authority or guard exceptions.
-- Preserve the source-bound 7db learning/restart/scoped-reuse positive and all
-  failed history; qualify the relevant final-source installation changes.
-- Freeze the repaired source, qualify the affected normal/sanitizer and full
-  required gates, build its real 87-product/19-module image, then perform the
-  retained original-volume upgrade and a separate latest-source empty install.
-  Validate installed CLI scope, native recall, controls/replay/mobile and
-  learning on the proper source. Keep optional/platform/provider limits visible.
-- Preserve the established net production reduction and repeat the unchanged
-  census after further source edits. Keep code, tests, documentation and build
-  metadata separate; do not change counting rules, minify code or delete
-  supported behavior to manufacture a reduction.
-- Update this handoff with actual final evidence, keep work on the same branch,
-  and obtain source-bound fresh CI when implementation is complete. No PR/auth
-  detours, no `.100` actions, no KB instance, no claim of 100% while work remains.
+- Complete the active internal representation audit and remove internal protocol
+  conversions/reconstruction. Keep external codecs at named boundaries.
+- Verify browser agent completion/continuation, model switching, tools, controls,
+  cancellation and reload using canonical history on the resulting source.
+- Resolve or accurately expose the actual selected-provider startup failure.
+- Run checks appropriate to changed owners; preserve existing branch/history and
+  supported behavior. No learning, PR/authentication detours, `.100` or KB setup.

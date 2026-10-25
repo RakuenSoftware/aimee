@@ -47,7 +47,8 @@ typedef struct compute_ctx
    /* Owned directory capability captured from the producer's actual workspace,
     * never from request-body path claims. Released after worker callbacks join. */
    struct workspace_turn_mirror_lease *source_mirror;
-   cJSON *req; /* owned by this context */
+   cJSON *req;               /* owned by this context */
+   aimee_message_t ir_input; /* Owned canonical user input for this admitted turn. */
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
    /* Set only after the canonical compaction owner commits its checkpoint. */
    int ir_history_checkpointed;
@@ -119,7 +120,7 @@ void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 int server_chat_ir_replace_steer(cJSON *request, const char *message);
 int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
 int server_chat_ir_prepare_turn(compute_ctx_t *cctx);
-int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const aimee_message_t *message);
 int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void server_chat_ir_close(compute_ctx_t *cctx);

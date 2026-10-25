@@ -97,18 +97,39 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		AimeeSessionID  string `json:"aimee_session_id"`
-		Message         string `json:"message"`
-		ClaudeSessionID string `json:"claude_session_id"`
-		Cwd             string `json:"cwd"`
-		AttachID        string `json:"attach_id"`
+		AimeeSessionID  string          `json:"aimee_session_id"`
+		Message         json.RawMessage `json:"message"`
+		ClaudeSessionID string          `json:"claude_session_id"`
+		Cwd             string          `json:"cwd"`
+		AttachID        string          `json:"attach_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
 		return
 	}
-	if req.Message == "" {
-		http.Error(w, `{"error":"message required"}`, http.StatusBadRequest)
+	if !canonical.ValidMessage(req.Message) {
+		http.Error(w, `{"error":"canonical user message required"}`, http.StatusBadRequest)
+		return
+	}
+	var message canonical.Message
+	if !canonical.Decode(req.Message, &message) || message.Role != "user" || len(message.Blocks) == 0 {
+		http.Error(w, `{"error":"a canonical user message is required"}`, http.StatusBadRequest)
+		return
+	}
+	title := ""
+	hasContent := false
+	for _, block := range message.Blocks {
+		if block.Type != "text" && block.Type != "image" && block.Type != "document" {
+			http.Error(w, `{"error":"unsupported user content"}`, http.StatusBadRequest)
+			return
+		}
+		hasContent = hasContent || block.Type != "text" || (block.Text != nil && *block.Text != "")
+		if title == "" && block.Text != nil {
+			title = *block.Text
+		}
+	}
+	if !hasContent {
+		http.Error(w, `{"error":"message content required"}`, http.StatusBadRequest)
 		return
 	}
 	cwd, err := resolveProjectRoot(req.Cwd)
@@ -149,7 +170,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
 			return
 		}
-		if err = s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
+		if err = s.touchChatSession(username, stableSID, cwd, title); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to persist session metadata")
 			return
 		}

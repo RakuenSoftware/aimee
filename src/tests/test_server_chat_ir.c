@@ -23,6 +23,12 @@ int db1_delegate_execution_experience_record(const char *principal, const char *
    return -1;
 }
 
+static int begin_text(compute_ctx_t *c, const char *session, const char *text)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   return server_chat_ir_begin(c, session, text ? &message : NULL);
+}
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled, delivered_sequence;
 static server_session_capture_t *page_writer;
@@ -228,7 +234,7 @@ static void legacy_uses_committed_originals(void)
 {
    compute_ctx_t c = context();
    c.ir_delivery = 0;
-   assert(!server_chat_ir_begin(&c, "session-one", "canonical compatibility"));
+   assert(!begin_text(&c, "session-one", "canonical compatibility"));
    c.ir_native_owned = 1;
    c.ir_legacy_emit = legacy_project;
    legacy_text[0] = legacy_thinking[0] = 0;
@@ -273,7 +279,7 @@ static void legacy_uses_committed_originals(void)
 static void exact_tool_identity(void)
 {
    compute_ctx_t c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "native identity"));
+   assert(!begin_text(&c, "session-one", "native identity"));
    char id[1025];
    memset(id, 'x', sizeof id - 1);
    id[sizeof id - 1] = 0;
@@ -317,7 +323,7 @@ static int failed_control_record(const char *session, const char *turn, const ch
 static void worker_capture_failure_is_sticky(void)
 {
    compute_ctx_t c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "question capture"));
+   assert(!begin_text(&c, "session-one", "question capture"));
    cJSON *request = cJSON_Parse("{\"title\":\"Question\"}");
    assert(server_control_register_recorded(c.ir_controls, "question", "permission", request,
                                            failed_control_record) < 0);
@@ -342,7 +348,7 @@ static void native_failure_terminal_survives_lost_subscriber(void)
          for (int cancel = 0; cancel < 2; cancel++)
          {
             compute_ctx_t c = context();
-            assert(!server_chat_ir_begin(&c, "session-one", "native upstream failure"));
+            assert(!begin_text(&c, "session-one", "native upstream failure"));
             aimee_delta_t start = {.type = AIMEE_DELTA_TURN_START};
             aimee_session_event_t begun = {.kind = AIMEE_SESSION_DELTA,
                                            .role = "assistant",
@@ -428,7 +434,7 @@ static void *write_retained_tail(void *arg)
 static void retained_worker_progress_uses_durable_pages(void)
 {
    compute_ctx_t c = context();
-   int started = server_chat_ir_begin(&c, "session-one", "retained native progress");
+   int started = begin_text(&c, "session-one", "retained native progress");
    assert(!started && writes == 2);
    server_session_capture_t *capture = NULL;
    int retained = server_session_capture_retain_current("session-one", "alice", &capture);
@@ -455,7 +461,7 @@ static void retained_worker_failure_refuses_completion(void)
    for (int model = 0; model < 2; model++)
    {
       compute_ctx_t c = context();
-      int started = server_chat_ir_begin(&c, "session-one", "retained worker");
+      int started = begin_text(&c, "session-one", "retained worker");
       assert(!started);
       if (model)
          response();
@@ -501,7 +507,10 @@ static void failed_steering_admission_is_observation_only(void)
    assert(server_chat_ir_replace_steer(missing, "new action") < 0);
    cJSON_Delete(missing);
    assert(!server_chat_ir_replace_steer(request, "new action"));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "message")), "new action"));
+   aimee_message_t steered = {0};
+   assert(!aimee_ir_message_parse(cJSON_GetObjectItem(request, "message"), &steered));
+   assert(steered.n_blocks == 1 && !strcmp(steered.blocks[0].text, "new action"));
+   aimee_message_free(&steered);
    cJSON_Delete(request);
 
    assert(server_chat_ir_reject_steer("session-one", "mallory", "old action") < 0);
@@ -561,7 +570,7 @@ static void canonical_turn_and_external_cancel(void)
       char canonical[33];
       strcpy(canonical, c.ir_turn);
       assert(!server_chat_ir_prepare_turn(&c) && !strcmp(canonical, c.ir_turn));
-      assert(!server_chat_ir_begin(&c, "session-one", "cancelled owner"));
+      assert(!begin_text(&c, "session-one", "cancelled owner"));
       assert(!strcmp(canonical, c.ir_turn));
       int before = cJSON_GetArraySize(log_entries);
       char sequence[32];
@@ -586,7 +595,7 @@ static void explicit_control_reply_capability(void)
    {
       compute_ctx_t c = context();
       c.req = cJSON_Parse(valid[i]);
-      assert(!server_chat_ir_begin(&c, "session-one", "source owned headless capability"));
+      assert(!begin_text(&c, "session-one", "source owned headless capability"));
       assert(server_control_scope_can_reply(c.ir_controls) == (i != 2));
       assert(c.ir_capture && !server_session_capture_failed(c.ir_capture));
       server_control_scope_t *lease = NULL;
@@ -607,14 +616,14 @@ static void explicit_control_reply_capability(void)
       compute_ctx_t c = context();
       c.req = cJSON_CreateObject();
       assert(cJSON_AddItemToObject(c.req, "control_replies", cJSON_Parse(invalid[i])));
-      assert(server_chat_ir_begin(&c, "session-one", "invalid capability") < 0);
+      assert(begin_text(&c, "session-one", "invalid capability") < 0);
       assert(!c.ir_capture && !c.ir_controls && !cJSON_GetArraySize(log_entries));
       cJSON_Delete(c.req);
       cleanup(&c);
    }
    compute_ctx_t c = context();
    c.req = cJSON_Parse("{\"control_replies\":true,\"control_replies\":false}");
-   assert(server_chat_ir_begin(&c, "session-one", "ambiguous capability") < 0);
+   assert(begin_text(&c, "session-one", "ambiguous capability") < 0);
    assert(!c.ir_capture && !c.ir_controls && !cJSON_GetArraySize(log_entries));
    cJSON_Delete(c.req);
    cleanup(&c);
@@ -634,7 +643,7 @@ int main(void)
    exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;
-   assert(!server_chat_ir_begin(&legacy, "session-one", "legacy subscriber"));
+   assert(!begin_text(&legacy, "session-one", "legacy subscriber"));
    response();
    assert(!server_chat_ir_finish(&legacy, NULL));
    assert(cJSON_GetArraySize(log_entries) == 5 && writes == 0);
@@ -643,7 +652,7 @@ int main(void)
    for (int committed = 0; committed < 2; committed++)
    {
       compute_ctx_t history = context();
-      int opened = server_chat_ir_begin(&history, "session-one", NULL);
+      int opened = begin_text(&history, "session-one", NULL);
       assert(!opened && cJSON_GetArraySize(log_entries) == 1);
       history.ir_history_checkpointed = committed;
       int finished = server_chat_ir_finish(&history, NULL);
@@ -655,7 +664,7 @@ int main(void)
    }
 
    compute_ctx_t checkpoint_context = context();
-   assert(!server_chat_ir_begin(&checkpoint_context, "session-one", "hello"));
+   assert(!begin_text(&checkpoint_context, "session-one", "hello"));
    cJSON_AddItemToArray(log_entries, cJSON_Parse("{\"kind\":\"history\",\"payload\":{\"scope\":"
                                                  "\"primary\",\"phase\":\"commit\",\"count\":0}}"));
    assert(!server_chat_ir_finish(&checkpoint_context, NULL));
@@ -663,7 +672,7 @@ int main(void)
    cleanup(&checkpoint_context);
 
    compute_ctx_t c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "hello"));
+   assert(!begin_text(&c, "session-one", "hello"));
    assert(writes == 2);
    disconnected = 1;
    response();
@@ -676,7 +685,7 @@ int main(void)
    cleanup(&c);
 
    c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "hello"));
+   assert(!begin_text(&c, "session-one", "hello"));
    fail_store = 1;
    aimee_response_t ir = {.role = "assistant"};
    assert(aimee_ir_session_emit_response(&ir, "failed") < 0);
@@ -686,7 +695,7 @@ int main(void)
    cleanup(&c);
 
    c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "hello"));
+   assert(!begin_text(&c, "session-one", "hello"));
    cancelled = 1;
    assert(!server_chat_ir_finish(&c, NULL));
    last = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 2), "payload");
@@ -694,7 +703,7 @@ int main(void)
    cleanup(&c);
 
    c = context();
-   assert(!server_chat_ir_begin(&c, "session-one", "hello"));
+   assert(!begin_text(&c, "session-one", "hello"));
    assert(!server_chat_ir_finish(&c, NULL));
    last = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 2), "payload");
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(last, "status")), "failed"));
@@ -702,10 +711,10 @@ int main(void)
 
    c = context();
    snprintf(owner, sizeof(owner), "bob");
-   assert(server_chat_ir_begin(&c, "session-one", "hello") < 0 && !cJSON_GetArraySize(log_entries));
+   assert(begin_text(&c, "session-one", "hello") < 0 && !cJSON_GetArraySize(log_entries));
    snprintf(owner, sizeof(owner), "alice");
    c.presence_locked = 0;
-   assert(server_chat_ir_begin(&c, "session-one", "hello") < 0);
+   assert(begin_text(&c, "session-one", "hello") < 0);
    cJSON_Delete(log_entries);
    puts("server canonical capture tests passed");
    return 0;

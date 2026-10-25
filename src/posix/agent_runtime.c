@@ -494,7 +494,8 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
                                          double temperature, cJSON *initial_messages,
                                          cJSON **updated_messages, agent_result_t *out,
                                          const aimee_request_t *seed,
-                                         aimee_response_t *canonical_out);
+                                         aimee_response_t *canonical_out,
+                                         const aimee_message_t *input_message);
 
 static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
                                              const char *role, const char *system_prompt,
@@ -502,7 +503,8 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
                                              double temperature, cJSON *initial_messages,
                                              cJSON **updated_messages, agent_result_t *out,
                                              const aimee_request_t *seed,
-                                             aimee_response_t *canonical_out)
+                                             aimee_response_t *canonical_out,
+                                             const aimee_message_t *input_message)
 {
    const request_context_t *previous_context = request_context_get();
    int previous_script_origin = previous_context ? previous_context->operator_script_origin : 0;
@@ -510,7 +512,7 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    aimee_response_t final = {0};
    int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
                                           max_tokens, temperature, initial_messages,
-                                          updated_messages, out, seed, &final);
+                                          updated_messages, out, seed, &final, input_message);
    if (!rc && out->success)
    {
       /* Native/nested owners may already retain their original response. */
@@ -542,7 +544,8 @@ int agent_execute_with_tools(const agent_t *agent, const agent_network_t *networ
                              double temperature, agent_result_t *out)
 {
    return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
-                                            max_tokens, temperature, NULL, NULL, out, NULL, NULL);
+                                            max_tokens, temperature, NULL, NULL, out, NULL, NULL,
+                                            NULL);
 }
 
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
@@ -552,7 +555,7 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
 {
    if (!server_session_log_active())
       return agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
-                                               max_tokens, temperature, NULL, NULL, out, NULL,
+                                               max_tokens, temperature, NULL, NULL, out, NULL, NULL,
                                                NULL);
    cJSON *history = NULL, *updated = NULL;
    if (server_session_log_history_load(&history) < 0)
@@ -565,7 +568,7 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
    }
    int rc = agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
                                               max_tokens, temperature, history, &updated, out, NULL,
-                                              NULL);
+                                              NULL, NULL);
    cJSON_Delete(history);
    if (rc == 0 && updated && server_session_log_history_save(updated))
    {
@@ -579,13 +582,23 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
 }
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const char *user_prompt,
+                                     const char *system_prompt, const aimee_message_t *message,
                                      int max_tokens, double temperature, cJSON *initial_messages,
                                      cJSON **updated_messages, agent_result_t *out)
 {
-   return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
-                                            max_tokens, temperature, initial_messages,
-                                            updated_messages, out, NULL, NULL);
+   if (!message || !message->role || strcmp(message->role, "user") || message->n_blocks < 1)
+      return -1;
+   /* Routing policy may inspect text; the loop appends the original IR message. */
+   const char *query = "Continue the admitted conversation.";
+   for (int i = 0; i < message->n_blocks; i++)
+      if (message->blocks[i].type == AIMEE_BLK_TEXT && message->blocks[i].text)
+      {
+         query = message->blocks[i].text;
+         break;
+      }
+   return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, query, max_tokens,
+                                            temperature, initial_messages, updated_messages, out,
+                                            NULL, NULL, message);
 }
 
 int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
@@ -624,7 +637,7 @@ int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t
        query[0] ? query : "Continue the admitted conversation.",
        request->has_max_tokens ? request->max_tokens : 0,
        request->has_temperature ? request->temperature : 0.3, messages, &updated, out, request,
-       response);
+       response, NULL);
    if (!rc && (!updated || server_session_log_history_save(updated)))
    {
       out->success = 0;
@@ -644,7 +657,8 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
                                          double temperature, cJSON *initial_messages,
                                          cJSON **updated_messages, agent_result_t *out,
                                          const aimee_request_t *seed,
-                                         aimee_response_t *canonical_out)
+                                         aimee_response_t *canonical_out,
+                                         const aimee_message_t *input_message)
 {
    if (updated_messages)
       *updated_messages = NULL;
@@ -904,8 +918,9 @@ native_provider_http:
       return -1;
    }
 
-   /* Stored conversation JSON is canonical; legacy storage imports at this entry. */
-   cJSON *messages = aimee_frontend_history_import(initial_messages, wire);
+   /* Execution consumes canonical history. Legacy imports end at the explicit
+    * storage/translation boundary, before entering this loop. */
+   cJSON *messages = aimee_ir_history_clone(initial_messages);
    if (!messages)
    {
       aimee_request_free(&tools);
@@ -920,7 +935,9 @@ native_provider_http:
       return -1;
    }
    /* System context is assembled per request, never persisted in the session. */
-   cJSON *user_msg = seed ? NULL : agent_session_text_message("user", user_prompt);
+   cJSON *user_msg = seed            ? NULL
+                     : input_message ? aimee_ir_message_json(input_message)
+                                     : agent_session_text_message("user", user_prompt);
    if ((!seed && (!user_msg || !cJSON_AddItemToArray(messages, user_msg))) ||
        (seed && server_session_log_history_save(messages)))
    {

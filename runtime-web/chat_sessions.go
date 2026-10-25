@@ -173,52 +173,6 @@ func (s *server) chatSessionOwned(username, id string) (owned, exists bool, err 
 	}
 }
 
-// setChatSessionRuntime persists the provider-native thread/session id needed to
-// resume a restored chat on another computer. The stable web session id remains
-// the chat_sessions key; provider ids must never replace it.
-func (s *server) setChatSessionRuntime(username, id, providerSessionID string) error {
-	if s == nil || s.db == nil || username == "" || id == "" {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		INSERT INTO chat_session_runtime (session_id, username, provider_session_id)
-		SELECT ?, ?, ?
-		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)
-		ON CONFLICT(session_id) DO UPDATE SET
-			provider_session_id = CASE
-				WHEN excluded.provider_session_id != '' THEN excluded.provider_session_id
-				ELSE chat_session_runtime.provider_session_id END`,
-		id, username, providerSessionID, id)
-	return err
-}
-
-// chatSessionProviderID returns resume metadata only when it is already bound
-// to the authenticated user's stable session. Provider-native ids are opaque
-// bearer-like handles, so callers must never substitute a value supplied by the
-// browser here.
-func (s *server) chatSessionProviderID(username, id string) (string, error) {
-	if s == nil || s.db == nil || username == "" || id == "" {
-		return "", nil
-	}
-	var providerSessionID string
-	err := s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
-		WHERE session_id = ?`, id).Scan(&providerSessionID)
-	switch err {
-	case nil:
-		return providerSessionID, nil
-	case sql.ErrNoRows:
-		return "", nil
-	default:
-		return "", err
-	}
-}
-
-// upsertChatSessionWithLegacyRuntime atomically creates/updates a stable target
-// row and moves a provider binding from an old provider-keyed row. The browser
-// supplies only the alias selector; the provider id itself comes from the
-// server's one-shot legacy migration and must equal that owned alias row.
-// Invalid aliases roll the whole operation back, so a rejected migration cannot
-// strand a ghost target session.
 func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID, title, cwd, now string) (bool, error) {
 	if s == nil || s.db == nil || username == "" || targetID == "" || aliasID == "" || targetID == aliasID {
 		return false, nil
@@ -286,21 +240,6 @@ func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID,
 		return false, err
 	}
 	return true, nil
-}
-
-func (s *server) appendChatMessage(username, id, role, text string) error {
-	if s == nil || s.db == nil || username == "" || id == "" || text == "" {
-		return nil
-	}
-	if role != "user" && role != "assistant" && role != "narration" {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		INSERT INTO chat_session_messages (session_id, username, role, text)
-		SELECT ?, ?, ?, ?
-		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)`,
-		id, username, role, text, id)
-	return err
 }
 
 // Legacy flat records are read-only archives, never active model history.

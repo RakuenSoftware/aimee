@@ -377,7 +377,8 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       memset(out, 0, sizeof(*out));
    if (session_id_out && session_id_len > 0)
       session_id_out[0] = '\0';
-   if (!req || !req->agent || !out || !req->user_prompt || !req->user_prompt[0])
+   if (!req || !req->agent || !out || !req->message || !req->message->role ||
+       strcmp(req->message->role, "user") || req->message->n_blocks < 1)
    {
       if (out)
          snprintf(out->error, sizeof(out->error), "invalid primary session request");
@@ -516,7 +517,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       ingress_preinject_set_task_requirements(retry_task);
    }
    if (rc == 0)
-      rc = agent_execute_session_with_tools(req->agent, req->network, system, req->user_prompt,
+      rc = agent_execute_session_with_tools(req->agent, req->network, system, req->message,
                                             max_tokens, temperature, initial_messages,
                                             &updated_messages, out);
    if (retry_attempt[0])

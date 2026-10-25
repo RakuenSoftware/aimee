@@ -228,9 +228,9 @@ int session_compact_pressure(int a, int b, int c, const session_compact_config_t
    return SESSION_PRESSURE_OK;
 }
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system, const char *prompt, int max_tokens,
-                                     double temperature, cJSON *initial, cJSON **updated,
-                                     agent_result_t *out)
+                                     const char *system, const aimee_message_t *prompt,
+                                     int max_tokens, double temperature, cJSON *initial,
+                                     cJSON **updated, agent_result_t *out)
 {
    (void)agent;
    (void)network;
@@ -244,7 +244,12 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    strcpy(other.name, "mistral");
    strcpy(other.provider, "mistral");
    primary_session_request_t busy = {
-       .agent = &other, .aimee_session_id = "stable", .user_prompt = "overlap"};
+       .agent = &other,
+       .aimee_session_id = "stable",
+       .message =
+           &(aimee_message_t){.role = "user",
+                              .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "overlap"},
+                              .n_blocks = 1}};
    agent_result_t overlap = {0};
    assert(primary_session_adapter_turn(&busy, &overlap, NULL, 0) != 0);
 
@@ -265,7 +270,12 @@ static void turn(agent_t *agent, int count, int ok)
 {
    expected_count = count;
    primary_session_request_t req = {
-       .agent = agent, .aimee_session_id = "stable", .user_prompt = "continue"};
+       .agent = agent,
+       .aimee_session_id = "stable",
+       .message = &(aimee_message_t){
+           .role = "user",
+           .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "continue"},
+           .n_blocks = 1}};
    agent_result_t out = {0};
    int before = executions;
    assert((primary_session_adapter_turn(&req, &out, NULL, 0) == 0) == ok);
@@ -533,7 +543,12 @@ int main(void)
    owner = "alice";
    fail_checkpoint = 1;
    primary_session_request_t req = {
-       .agent = &a, .aimee_session_id = "stable", .user_prompt = "continue"};
+       .agent = &a,
+       .aimee_session_id = "stable",
+       .message = &(aimee_message_t){
+           .role = "user",
+           .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "continue"},
+           .n_blocks = 1}};
    agent_result_t out = {0};
    expected_count = 2;
    int before = executions;

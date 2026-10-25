@@ -424,3 +424,53 @@ func TestChatSessionUpsertRefusesFlatHistoryWithoutChangingStoredArchive(t *test
 		t.Fatalf("archive changed: %+v, %v", got, err)
 	}
 }
+
+// Legacy rows are seeded only by fixtures; production has no parallel transcript
+// or provider-resume writer after the canonical session cutover.
+func (s *server) setChatSessionRuntime(username, id, providerSessionID string) error {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_runtime (session_id, username, provider_session_id)
+		SELECT ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			provider_session_id = CASE
+				WHEN excluded.provider_session_id != '' THEN excluded.provider_session_id
+				ELSE chat_session_runtime.provider_session_id END`,
+		id, username, providerSessionID, id)
+	return err
+}
+
+func (s *server) chatSessionProviderID(username, id string) (string, error) {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return "", nil
+	}
+	var providerSessionID string
+	err := s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
+		WHERE session_id = ?`, id).Scan(&providerSessionID)
+	switch err {
+	case nil:
+		return providerSessionID, nil
+	case sql.ErrNoRows:
+		return "", nil
+	default:
+		return "", err
+	}
+}
+
+func (s *server) appendChatMessage(username, id, role, text string) error {
+	if s == nil || s.db == nil || username == "" || id == "" || text == "" {
+		return nil
+	}
+	if role != "user" && role != "assistant" && role != "narration" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_messages (session_id, username, role, text)
+		SELECT ?, ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)`,
+		id, username, role, text, id)
+	return err
+}
