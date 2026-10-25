@@ -1724,10 +1724,13 @@ static void delegate_worker_run(void *arg)
        * scopes. Container mounts complement these checks; clearing this guard
        * also resets write capability and loses the managed revision root. */
       server_delegate_heartbeat_begin(cctx->background_job_id);
-      rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
-                                              max_tokens, force_tools, delegate_allows_writes,
-                                              leased_cred_name, sizeof(leased_cred_name),
-                                              credential_state_path, &result);
+      aimee_request_t request = {0};
+      rc = aimee_ir_request_from_text(&request, system_prompt, run_prompt, max_tokens, 0.3)
+               ? AGENT_RC_CONTEXT_REFUSED
+               : delegate_run_with_credential_retry(
+                     &acfg, target_agent, role, &request, force_tools, delegate_allows_writes,
+                     leased_cred_name, sizeof leased_cred_name, credential_state_path, &result);
+      aimee_request_free(&request);
       server_delegate_heartbeat_end();
    }
 
@@ -1789,9 +1792,13 @@ static void delegate_worker_run(void *arg)
          {
             agent_result_t repaired = {0};
             memset(&repaired, 0, sizeof(repaired));
-            int repair_rc =
-                delegate_run_attempt(&acfg, role, system_prompt, repair_prompt, max_tokens,
-                                     force_tools, delegate_allows_writes, &repaired);
+            aimee_request_t repair_request = {0};
+            int repair_rc = aimee_ir_request_from_text(&repair_request, system_prompt,
+                                                       repair_prompt, max_tokens, 0.3)
+                                ? AGENT_RC_CONTEXT_REFUSED
+                                : delegate_run_attempt(&acfg, role, &repair_request, force_tools,
+                                                       delegate_allows_writes, &repaired);
+            aimee_request_free(&repair_request);
             free(repair_prompt);
             if (delegate_merge_handoff_repair(&result, &repaired, repair_rc))
             {

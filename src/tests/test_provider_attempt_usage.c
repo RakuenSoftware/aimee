@@ -681,8 +681,11 @@ static void test_actual_routing_retry_usage(void)
              .begin = fixture_dispatch_begin, .end = fixture_dispatch_end, .context = &resources};
          const agent_dispatch_scope_t *previous = agent_dispatch_scope_bind(&scope);
          agent_result_t result = {0};
-         int rc = route == 0 ? agent_run_ex(cfg, "review", "system", "task", 128, 0, &result)
-                             : agent_run_with_tools(cfg, "review", "system", "task", 128, &result);
+         aimee_request_t request = {0};
+         assert(!aimee_ir_request_from_text(&request, "system", "task", 128, route == 0 ? 0 : 0.3));
+         int rc = route == 0 ? agent_run(cfg, "review", &request, &result)
+                             : agent_run_with_tools(cfg, "review", &request, &result);
+         aimee_request_free(&request);
          agent_dispatch_scope_bind(previous);
          assert(resources.begins == 2 && resources.ends == 2 && !resources.active);
          assert(!strcmp(resources.selected[0], cfg->agents[0].name));

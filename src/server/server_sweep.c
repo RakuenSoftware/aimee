@@ -442,7 +442,11 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          continue;
       agent_result_t r = {0};
       memset(&r, 0, sizeof(r));
-      int prc = agent_run_named(&acfg, proposer, "review", NULL, prompt, 0, 0.2, &r);
+      aimee_request_t request = {0};
+      int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.2);
+      int prc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                           : agent_run_named(&acfg, proposer, "review", &request, &r);
+      aimee_request_free(&request);
       free(prompt);
       areas_run++;
       char *authored = prc ? NULL : agent_result_take_text(&r);

@@ -496,10 +496,8 @@ typedef struct
 typedef struct
 {
    const char *role;
-   const char *system_prompt;
-   const char *user_prompt;
-   int max_tokens;
-   double temperature;
+   /* Owned by the producer until the synchronous fan-out has joined all workers. */
+   aimee_request_t request;
    /* Optional per-task participant selector. When set, this task runs on the
     * named configured agent (resolved like aux_router does), bypassing
     * role-based routing — so a fan-out (e.g. the MoA ensemble) reaches N

@@ -284,11 +284,13 @@ static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, con
          leased = 1;
       }
    }
+   aimee_request_t request = {0};
    int rc =
-       (agent_name && agent_name[0])
-           ? agent_run_named(acfg, agent_name, role, system_prompt, user_prompt, max_tokens,
-                             temperature, out)
-           : agent_run_ex(acfg, role, system_prompt, user_prompt, max_tokens, temperature, out);
+       aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature)
+           ? AGENT_RC_CONTEXT_REFUSED
+       : (agent_name && agent_name[0]) ? agent_run_named(acfg, agent_name, role, &request, out)
+                                       : agent_run(acfg, role, &request, out);
+   aimee_request_free(&request);
    if (rc == 0 && ensemble_project_result(out) != 0)
       rc = -1;
    ensemble_fold_cost(acfg, out, agent_name);
@@ -558,7 +560,7 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
     *
     * The aggregator may be configured as a bare agent NAME (what the default
     * panel picks — its first panellist) or as "<...>@<role>". A bare name must
-    * be dispatched by NAME (agent_run_named): agent_run_ex selects by role and
+    * be dispatched by NAME (agent_run_named): agent_run selects by role and
     * an agent's name is not one of its roles, so a name routed as a role finds
     * nothing and returns empty. A role form (or no aggregator) routes by role. */
    /* Primary: the configured (or default) aggregator. max_tokens 0 = derive from
@@ -834,8 +836,13 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    agent_result_t score_result = {0};
    memset(&score_result, 0, sizeof(score_result));
    int score = artifact ? (int)strlen(artifact) : 0;
-   if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &score_result) == 0 &&
-       ensemble_project_result(&score_result) == 0)
+   aimee_request_t request = {0};
+   int run_rc =
+       aimee_ir_request_from_text(&request, NULL, full, 512, 0.3)
+           ? AGENT_RC_CONTEXT_REFUSED
+           : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &score_result);
+   aimee_request_free(&request);
+   if (run_rc == 0 && ensemble_project_result(&score_result) == 0)
    {
       char *end = NULL;
       long parsed = strtol(score_result.response, &end, 10);
@@ -865,8 +872,12 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int completion = 0;
-   if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &res) == 0 &&
-       ensemble_project_result(&res) == 0)
+   aimee_request_t request = {0};
+   int run_rc = aimee_ir_request_from_text(&request, NULL, full, 512, 0.3)
+                    ? AGENT_RC_CONTEXT_REFUSED
+                    : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &res);
+   aimee_request_free(&request);
+   if (run_rc == 0 && ensemble_project_result(&res) == 0)
    {
       cJSON *j = parse_model_json_lenient(res.response);
       cJSON *c = j ? cJSON_GetObjectItemCaseSensitive(j, "completion") : NULL;
@@ -1042,8 +1053,12 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
    free(qjson);
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, prompt, 1024, 0, &res) == 0 &&
-       ensemble_project_result(&res) == 0)
+   aimee_request_t request = {0};
+   int run_rc = aimee_ir_request_from_text(&request, NULL, prompt, 1024, 0.3)
+                    ? AGENT_RC_CONTEXT_REFUSED
+                    : agent_run_with_tools_write_enforce(acfg, "reason", &request, 0, &res);
+   aimee_request_free(&request);
+   if (run_rc == 0 && ensemble_project_result(&res) == 0)
    {
       parse_question_answers(res.response, opts, out);
    }
@@ -1072,8 +1087,12 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
       return -1;
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
-   int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL, prompt, 512,
-                            0.2, &res);
+   aimee_request_t request = {0};
+   int rc =
+       aimee_ir_request_from_text(&request, NULL, prompt, 512, 0.2)
+           ? AGENT_RC_CONTEXT_REFUSED
+           : agent_run_named(acfg, panel->reference_models[participant], "review", &request, &res);
+   aimee_request_free(&request);
    free(prompt);
    if (cost_usd)
       *cost_usd += result_token_cost(acfg, &res, panel->reference_models[participant]);
@@ -1195,14 +1214,15 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
       tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
       tasks[i].require_initial_tool_call = (mode == ROUNDTABLE_REVIEW && panel->require_evidence);
       tasks[i].agent = panel->reference_models[i];
-      tasks[i].system_prompt = personas[i];
-      tasks[i].user_prompt = prompts[i];
-      tasks[i].temperature = 0.3 + (0.05 * i);
-      tasks[i].max_tokens = 0;
+      if (aimee_ir_request_from_text(&tasks[i].request, personas[i], prompts[i], 0,
+                                     0.3 + (0.05 * i)))
+         goto fail;
    }
    /* deadline_ms bounds the panel barrier so one hung panelist can't wedge the
     * whole round past the roundtable deadline. */
    agent_run_parallel(acfg, tasks, ref_count, results, deadline_ms);
+   for (int i = 0; i < ref_count; i++)
+      aimee_request_free(&tasks[i].request);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
    {
@@ -1246,6 +1266,7 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
 fail:
    for (int i = 0; i < ref_count; i++)
    {
+      aimee_request_free(&tasks[i].request);
       free(prompts[i]);
       free(personas[i]);
    }
@@ -1273,16 +1294,20 @@ static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *pa
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
       char *persona = panel_persona_prompt(mode, i);
       memset(&results[i], 0, sizeof(results[i]));
-      if (mode == ROUNDTABLE_REVIEW)
+      aimee_request_t request = {0};
+      if (!aimee_ir_request_from_text(&request, persona, prompt, 0, 0.3 + (0.05 * i)))
       {
-         agent_run_require_initial_tool_call(panel->require_evidence);
-         agent_run_named_with_tools(acfg, panel->reference_models[i], "review", persona, prompt, 0,
-                                    0.3 + (0.05 * i), &results[i]);
-         agent_run_require_initial_tool_call(0);
+         if (mode == ROUNDTABLE_REVIEW)
+         {
+            agent_run_require_initial_tool_call(panel->require_evidence);
+            agent_run_named_with_tools(acfg, panel->reference_models[i], "review", &request,
+                                       &results[i]);
+            agent_run_require_initial_tool_call(0);
+         }
+         else
+            agent_run_named(acfg, panel->reference_models[i], "draft", &request, &results[i]);
       }
-      else
-         agent_run_named(acfg, panel->reference_models[i], "draft", persona, prompt, 0,
-                         0.3 + (0.05 * i), &results[i]);
+      aimee_request_free(&request);
       free(persona);
       (void)ensemble_project_result(&results[i]);
       if (results[i].response && results[i].response[0])
@@ -1741,15 +1766,15 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
        * This is what makes the ensemble an ensemble of *diverse* models. */
       tasks[i].role = NULL;
       tasks[i].agent = panel->reference_models[i];
-      tasks[i].system_prompt = NULL;
-      tasks[i].user_prompt = prompt;
-      tasks[i].max_tokens = 0;
+      (void)aimee_ir_request_from_text(&tasks[i].request, NULL, prompt, 0, 0.3);
    }
 
    agent_result_t results[ENSEMBLE_MAX_REFS];
    memset(results, 0, sizeof(results));
 
    agent_run_parallel(acfg, tasks, ref_count, results, 0 /* MoA aggregate: no deadline */);
+   for (int i = 0; i < ref_count; i++)
+      aimee_request_free(&tasks[i].request);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
    {
@@ -2414,9 +2439,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       {
          agent_result_t apply_result = {0};
          memset(&apply_result, 0, sizeof(apply_result));
-         if (agent_run_with_tools_write_enforce(acfg, "draft", NULL, full, 4096, 0,
-                                                &apply_result) == 0 &&
-             ensemble_project_result(&apply_result) == 0)
+         aimee_request_t request = {0};
+         int run_rc =
+             aimee_ir_request_from_text(&request, NULL, full, 4096, 0.3)
+                 ? AGENT_RC_CONTEXT_REFUSED
+                 : agent_run_with_tools_write_enforce(acfg, "draft", &request, 0, &apply_result);
+         aimee_request_free(&request);
+         if (run_rc == 0 && ensemble_project_result(&apply_result) == 0)
          {
             free(best_artifact);
             best_artifact = xstrdup0(apply_result.response);

@@ -86,6 +86,21 @@ Normal agent/context-refusal/provider-attempt/business checks pass. Owner checks
 pass with existing line warnings. Higher-level routing/parallel APIs still need
 migration; this checkpoint does not establish full-project completion.
 
+The routing/fan-out follow-up replaces the remaining public prompt-tuple runners
+with canonical requests and removes redundant `agent_run_ex`. Named/role runners,
+credential rotation and parallel workers retain IR; `agent_task_t` owns a request
+until every worker is joined. Prompt producers (CLI, drafting/business helpers,
+cron, roadmap, benchmark, roundtable and delegate assembly) create IR at origin.
+Consumed host hints extend a cloned request without reconstructing its blocks.
+The parallel fixture verifies text + image + opaque block fields + explicit zero
+temperature through ordinary and deadline worker joins. Normal and sanitizer
+parallel/ensemble/credential/retry checks pass. All changed Linux production files
+compile; Windows call sites are updated, not Windows-runtime tested. The actual
+38-case browser ACP route passes. Trajectory runtime verification skipped without
+PostgreSQL and is not a passing database result. Owner checks pass with existing
+line warnings. Workflow/coord and compatibility-projection dataflow audit and a
+successful real browser completion are still outstanding.
+
 ## Earlier implementation and evidence
 
 Implementation checkpoint `0dee1a999` includes the complete message-payload

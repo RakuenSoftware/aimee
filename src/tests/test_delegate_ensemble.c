@@ -141,14 +141,15 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    (void)deadline_ms;
    g_parallel_calls++;
    snprintf(g_last_parallel_prompt, sizeof(g_last_parallel_prompt), "%s",
-            count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
+            count > 0 && tasks[0].request.n_messages ? tasks[0].request.messages[0].blocks[0].text
+                                                     : "");
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
    {
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
                tasks[i].agent ? tasks[i].agent : "(null)");
       snprintf(g_captured_personas[i], sizeof(g_captured_personas[i]), "%s",
-               tasks[i].system_prompt ? tasks[i].system_prompt : "(null)");
+               tasks[i].request.n_system ? tasks[i].request.system[0].text : "(null)");
       g_captured_require_tool[i] = tasks[i].require_initial_tool_call;
    }
    for (int i = 0; i < count; i++)
@@ -231,9 +232,13 @@ static void fill_aggregator_response(agent_result_t *out, const char *who);
 static int is_synthesis_prompt(const char *p);
 
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out)
+                    const aimee_request_t *request, agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature : 0.3;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -275,11 +280,10 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
 }
 
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out)
+                               const aimee_request_t *request, agent_result_t *out)
 {
-   int rc =
-       agent_run_named(cfg, name, role, system_prompt, user_prompt, max_tokens, temperature, out);
+
+   int rc = agent_run_named(cfg, name, role, request, out);
    if (rc == 0 && g_named_require_initial_tool)
    {
       out->tool_calls = 1;
@@ -290,7 +294,7 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
 /* The aggregator/synthesis step runs without tools: by NAME (agent_run_named)
  * when the aggregator is a bare agent name (a name is not a role, so role-
- * routing can't reach it), else by role (agent_run_ex). Both land here. */
+ * routing can't reach it), else by role (agent_run). Both land here. */
 static void fill_aggregator_response(agent_result_t *out, const char *who)
 {
    char buf[128];
@@ -331,9 +335,14 @@ static int is_synthesis_prompt(const char *p)
    return p && (strstr(p, "synthesis aggregator") || strstr(p, "consolidating"));
 }
 
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature : 0.3;
+
    (void)cfg;
    (void)system_prompt;
    (void)user_prompt;
@@ -476,9 +485,13 @@ void delegate_credentials_release(const char *principal, const char *agent_name,
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out)
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;

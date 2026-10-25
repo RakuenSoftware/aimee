@@ -30,14 +30,13 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
 
 /* One invocation uses the same explicit tool policy for initial and repair work.
  * Credential retries remain owned by the separate pool loop below. */
-int delegate_run_attempt(agent_config_t *cfg, const char *role, const char *system_prompt,
-                         const char *run_prompt, int max_tokens, int force_tools,
-                         int enforce_writes, agent_result_t *result);
+int delegate_run_attempt(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         int force_tools, int enforce_writes, agent_result_t *result);
 
 int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, const char *role,
-                                       const char *system_prompt, const char *run_prompt,
-                                       int max_tokens, int force_tools, int enforce_writes,
-                                       char *leased_cred_name, size_t leased_cred_name_cap,
+                                       const aimee_request_t *request, int force_tools,
+                                       int enforce_writes, char *leased_cred_name,
+                                       size_t leased_cred_name_cap,
                                        const char *credential_state_path, agent_result_t *result);
 
 #endif /* DEC_DELEGATE_CREDENTIAL_RETRY_H */

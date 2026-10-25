@@ -325,7 +325,11 @@ int describe_one(const char *project_name, const char *project_path)
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
-   int rc = agent_run_with_tools(&cfg, "execute", describe_system_prompt, prompt, 4096, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, describe_system_prompt, prompt, 4096, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                       : agent_run_with_tools(&cfg, "execute", &request, &result);
+   aimee_request_free(&request);
 
    free(prompt);
 
@@ -483,7 +487,11 @@ int style_one(const char *project_name, const char *project_path)
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
-   int rc = agent_run_with_tools(&cfg, "execute", style_system_prompt, prompt, 4096, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, style_system_prompt, prompt, 4096, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                       : agent_run_with_tools(&cfg, "execute", &request, &result);
+   aimee_request_free(&request);
 
    free(prompt);
 

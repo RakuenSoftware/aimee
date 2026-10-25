@@ -38,8 +38,8 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
 
 int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_result_t *out);
 
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out);
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out);
 
 /* Source-bound native delegate entry. Keeps selected role and explicit host
  * no-tools policy; the admitted request is never flattened into a CLI prompt. */
@@ -49,7 +49,7 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
 int agent_native_request_tools_disabled(void);
 int agent_native_request_turn_limit(void);
 
-/* Per-thread override of agent_run/agent_run_ex tool-mode inference. agent_run_ex
+/* Per-thread override of agent_run tool-mode inference. agent_run
  * normally derives use_tools from the routed agent's config (tools_enabled +
  * exec-role); a delegate that decided tools-OFF (CLI --no-tools -> force_tools=0)
  * calls agent_run, so that inference would re-enable tools and ignore the
@@ -63,20 +63,12 @@ void agent_run_force_no_tools(int on);
  * a busy one. Default off = block+queue (correct for a pinned single-agent turn). */
 void agent_dispatch_set_fail_fast(int on);
 
-/* Like agent_run, but with an explicit sampling temperature. agent_run is the
- * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
- * byte-unchanged; the parallel fan-out path uses this to honour a per-task
- * temperature (agent_task_t.temperature), which agent_run dropped. */
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out);
-
 /* Run one task on a specifically named configured agent (clones the agent_t
  * before mutation; a missing/disabled agent is a failed participant, no silent
  * fallback). Defined in agent_runtime.c beside the static helpers it uses,
  * called from agent_parallel.c's fan-out. */
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out);
+                    const aimee_request_t *request, agent_result_t *out);
 
 /* agent_run_named, but WITH tools. Exists for review panelists: they must route by
  * NAME (each lens is bound to a seat model) yet still reach aimee, and the two
@@ -89,8 +81,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
  * i.e. the diff plus aimee's own code + memory tooling, and no filesystem or write
  * tools. write_capable is pinned 0 regardless of the agent's config. */
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out);
+                               const aimee_request_t *request, agent_result_t *out);
 
 /* Thread-local invocation policy used by parallel task workers. It affects only
  * the next in-thread named tool run and must be cleared by the caller. */
@@ -106,21 +97,20 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request,
                            agent_result_t *out);
 
 /* Like agent_run but forces tool execution regardless of agent config */
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
-                         const char *user_prompt, int max_tokens, agent_result_t *out);
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out);
 
 /* Variant for delegates whose prompt explicitly says no edits should be made.
  * When enforce_writes is 0, write-role delegates still get tools but the
  * no-write watchdog is disabled for this run. */
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out);
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out);
 
 /* Fan out `task_count` tasks across worker threads and join.
- * deadline_ms > 0 bounds the wait: a worker still running at the deadline is
- * abandoned (detached) and its slot in `out` left as a failed (zeroed) result,
- * so one hung model can never wedge the whole fan-out. deadline_ms <= 0 keeps the
- * historical unbounded join. Returns the number of successful results. */
+ * deadline_ms > 0 cancels unfinished workers at the deadline and joins them.
+ * Task requests remain owned by the producer until every worker has joined.
+ * deadline_ms <= 0 keeps the unbounded join. Returns the number of successful results. */
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
                        agent_result_t *out, int deadline_ms);
 

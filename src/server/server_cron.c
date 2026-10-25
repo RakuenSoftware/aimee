@@ -215,7 +215,10 @@ static int cron_run_llm_prompt(const char *prompt, char **out, char *err, size_t
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   int rc = agent_run(&acfg, "execute", NULL, prompt, CRON_LLM_MAX_TOKENS, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, CRON_LLM_MAX_TOKENS, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED : agent_run(&acfg, "execute", &request, &result);
+   aimee_request_free(&request);
    if (rc != 0)
    {
       snprintf(err, err_len, "%s", result.error[0] ? result.error : "cron LLM turn failed");

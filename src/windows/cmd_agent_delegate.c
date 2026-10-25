@@ -59,10 +59,15 @@ void platform_delegate_run_background(
    agent_http_init();
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   if (force_tools)
-      agent_run_with_tools(cfg, role, sys_prompt, final_prompt, max_tokens, &result);
-   else
-      agent_run(cfg, role, sys_prompt, final_prompt, max_tokens, &result);
+   aimee_request_t request = {0};
+   if (!aimee_ir_request_from_text(&request, sys_prompt, final_prompt, max_tokens, 0.3))
+   {
+      if (force_tools)
+         agent_run_with_tools(cfg, role, &request, &result);
+      else
+         agent_run(cfg, role, &request, &result);
+   }
+   aimee_request_free(&request);
    agent_http_cleanup();
    write_result_json_with_checkout_ex(result_path, &result, launch_worktree_path, launch_head,
                                       parent_worktree_path, parent_worktree_head,
@@ -88,10 +93,15 @@ int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *s
    }
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   if (use_tools)
-      agent_run_with_tools(cfg, role, sys, prompt, 0, &result);
-   else
-      agent_run(cfg, role, sys, prompt, 0, &result);
+   aimee_request_t request = {0};
+   if (!aimee_ir_request_from_text(&request, sys, prompt, 0, 0.3))
+   {
+      if (use_tools)
+         agent_run_with_tools(cfg, role, &request, &result);
+      else
+         agent_run(cfg, role, &request, &result);
+   }
+   aimee_request_free(&request);
    agent_http_cleanup();
    write_result_json(result_path, &result);
    agent_result_clear_response(&result);

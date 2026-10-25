@@ -209,7 +209,10 @@ char *roadmap_milestone_validate(const char *roadmap_id, const char *milestone_i
    memset(&result, 0, sizeof(result));
 
    agent_http_init();
-   int rc = agent_run(cfg, "review", NULL, prompt, 0, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, NULL, prompt, 0, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED : agent_run(cfg, "review", &request, &result);
+   aimee_request_free(&request);
    agent_http_cleanup();
 
    free(prompt);

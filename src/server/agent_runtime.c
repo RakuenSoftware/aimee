@@ -461,7 +461,7 @@ int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, con
    return agent_dispatch_one_internal(agent, network, role, request, use_tools, out, NULL, 1);
 }
 
-/* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
+/* Per-thread tool-mode override for agent_run; see agent_run_force_no_tools. */
 static __thread int tl_force_no_tools = 0;
 static __thread int tl_native_turn_limit = 0;
 static __thread int tl_require_initial_tool_call = 0;
@@ -475,10 +475,74 @@ void agent_run_require_initial_tool_call(int on)
    tl_require_initial_tool_call = on ? 1 : 0;
 }
 
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+/* Text projections are routing/hint metadata. Dispatch retains the request. */
+static const char *host_request_query(const aimee_request_t *request, char *query, size_t size)
+{
+   if (request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
+       request->messages[0].blocks[0].type == AIMEE_BLK_TEXT)
+      return request->messages[0].blocks[0].text;
+   aimee_ir_last_user_text(request, query, size);
+   return query[0] ? query : "Continue the admitted conversation.";
+}
+
+/* Add consumed host context without rebuilding the input message. */
+static int host_request_with_hint(const aimee_request_t *source, const char *hint,
+                                  aimee_request_t *out)
+{
+   if (aimee_ir_request_clone(source, out))
+      return -1;
+   aimee_message_t *message = &out->messages[out->n_messages - 1];
+   if (message->n_blocks == 1 && message->blocks[0].type == AIMEE_BLK_TEXT &&
+       !message->blocks[0].raw && !message->blocks[0].cache_control &&
+       !message->blocks[0].cache_ttl)
+   {
+      const char *text = message->blocks[0].text;
+      size_t size = strlen(text ? text : "") + strlen(hint) + 3;
+      char *joined = malloc(size);
+      if (!joined)
+         goto fail;
+      snprintf(joined, size, "%s\n\n%s", text ? text : "", hint);
+      free(message->blocks[0].text);
+      message->blocks[0].text = joined;
+   }
+   else
+   {
+      char *text = strdup(hint);
+      aimee_block_t *blocks =
+          realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+      if (!text || !blocks)
+      {
+         free(text);
+         if (blocks)
+            message->blocks = blocks;
+         goto fail;
+      }
+      message->blocks = blocks;
+      aimee_block_t *block = &blocks[message->n_blocks++];
+      *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+      aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   }
+   return 0;
+fail:
+   aimee_request_free(out);
+   return -1;
+}
+
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   if (!host_request_supported(request, 1))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical routing request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   const char *user_prompt = host_request_query(request, query, sizeof query);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
 
    cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
                                     strlen(user_prompt ? user_prompt : "") + 3) /
@@ -523,31 +587,14 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       char *hint = agent_uses_mistral_delegate_path(ag)
                        ? NULL
                        : kb_client_agent_hint_consume(role, user_prompt);
-      const char *effective_prompt = user_prompt;
-      char *enhanced = NULL;
-      if (hint && use_tools)
-      {
-         size_t elen = strlen(user_prompt) + strlen(hint) + 4;
-         enhanced = malloc(elen);
-         if (enhanced)
-         {
-            snprintf(enhanced, elen, "%s\n\n%s", user_prompt, hint);
-            effective_prompt = enhanced;
-         }
-      }
+      aimee_request_t enhanced = {0};
+      int prepared = !hint || !use_tools || !host_request_with_hint(request, hint, &enhanced);
       free(hint);
-
-      /* The turn goes through the single guarded executor: it enforces max_parallel
-       * and records provider health. Returns 0 (ok), AGENT_RC_AT_LIMIT (agent
-       * saturated — no health recorded), or -1 (run failure — health recorded). */
-      aimee_request_t request = {0};
-      int prepared = !aimee_ir_request_from_text(&request, system_prompt, effective_prompt,
-                                                 max_tokens, temperature);
-      int rc = prepared
-                   ? agent_retry_dispatch_one(ag, &cfg->network, role, &request, use_tools, out)
-                   : AGENT_RC_CONTEXT_REFUSED;
-      aimee_request_free(&request);
-      free(enhanced);
+      int rc = prepared ? agent_retry_dispatch_one(ag, &cfg->network, role,
+                                                   enhanced.n_messages ? &enhanced : request,
+                                                   use_tools, out)
+                        : AGENT_RC_CONTEXT_REFUSED;
+      aimee_request_free(&enhanced);
 
       if (rc == 0)
       {
@@ -575,15 +622,6 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    if (!out->error[0])
       agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
-}
-
-/* Thin wrapper preserving the historical 0.3 sampling temperature, so existing
- * agent_run call sites are byte-unchanged while agent_run_ex carries a real
- * temperature parameter for the parallel fan-out path. */
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
-{
-   return agent_run_ex(cfg, role, system_prompt, user_prompt, max_tokens, 0.3, out);
 }
 
 /* One-shot, TOOL-FREE text generation for UI drafting (e.g. "draft this proposal
@@ -700,8 +738,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
  * into duplicate participants. Defined here (next to the static execution
  * helpers it needs) but called from agent_parallel.c, so it is not static. */
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out)
+                    const aimee_request_t *request, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -730,17 +767,11 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
     * (agent saturated) propagates as a non-zero rc; the parallel panel/ensemble
     * caller treats a non-response as "this lens unfilled" and retries a different
     * agent, so a saturated model is spread rather than piled on. */
-   aimee_request_t request = {0};
-   if (aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature))
-      return AGENT_RC_CONTEXT_REFUSED;
-   int rc = agent_dispatch_one(&local, &cfg->network, role, &request, 0 /* use_tools */, out);
-   aimee_request_free(&request);
-   return rc;
+   return agent_dispatch_one(&local, &cfg->network, role, request, 0, out);
 }
 
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out)
+                               const aimee_request_t *request, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -765,21 +796,25 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
     * index-only `review_indexed`) is what actually decides which tools appear. */
    local.write_capable = 0;
 
-   aimee_request_t request = {0};
-   if (aimee_ir_request_from_text(&request, system_prompt, user_prompt, max_tokens, temperature))
-      return AGENT_RC_CONTEXT_REFUSED;
-   int rc = agent_dispatch_one(&local, &cfg->network, role, &request, 1 /* use_tools */, out);
-   aimee_request_free(&request);
-   return rc;
+   return agent_dispatch_one(&local, &cfg->network, role, request, 1, out);
 }
 
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
-                                         const char *system_prompt, const char *user_prompt,
-                                         int max_tokens, int enforce_writes, agent_result_t *out,
-                                         const agent_t *selected, const aimee_request_t *request,
-                                         aimee_response_t *response)
+                                         const aimee_request_t *request, int enforce_writes,
+                                         agent_result_t *out, const agent_t *selected,
+                                         aimee_response_t *response, int host_text_profile)
 {
    memset(out, 0, sizeof(*out));
+   if (!request || aimee_ir_request_admit(request) ||
+       (host_text_profile && !host_request_supported(request, 1)))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical tool routing request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   const char *user_prompt = host_request_query(request, query, sizeof query);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
 
    /* Cooperative cancellation (server-owned turn lifecycle): abort before a
     * (potentially long) provider call if the turn was already cancelled
@@ -866,47 +901,20 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       ag->write_capable = enforce_writes ? 1 : 0;
    }
 
-   char *hint =
-       (request || !agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
-           ? NULL
-           : kb_client_agent_hint_consume(role, user_prompt);
-   const char *effective_prompt = user_prompt;
-   char *enhanced = NULL;
-   if (hint)
-   {
-      size_t elen = strlen(user_prompt) + strlen(hint) + 4;
-      enhanced = malloc(elen);
-      if (enhanced)
-      {
-         snprintf(enhanced, elen, "%s\n\n%s", user_prompt, hint);
-         effective_prompt = enhanced;
-      }
-   }
+   char *hint = (!host_text_profile || !agent_tools_knowledge_write_allowed() ||
+                 agent_uses_mistral_delegate_path(ag))
+                    ? NULL
+                    : kb_client_agent_hint_consume(role, user_prompt);
+   aimee_request_t enhanced = {0};
+   int prepared = !hint || !host_request_with_hint(request, hint, &enhanced);
    free(hint);
-
-   /* The delegate turn through the single guarded executor (tools enabled): it
-    * enforces ag->max_parallel and records provider health. */
-   aimee_request_t base = {0}, attempted = {0};
-   if (!request && aimee_ir_request_from_text(&base, system_prompt, user_prompt, max_tokens, 0.3))
-   {
-      free(enhanced);
+   if (!prepared)
       return AGENT_RC_CONTEXT_REFUSED;
-   }
-   const aimee_request_t *original = request ? request : &base;
-   const aimee_request_t *dispatch = original;
-   if (!request && enhanced)
-   {
-      if (aimee_ir_request_from_text(&attempted, system_prompt, effective_prompt, max_tokens, 0.3))
-      {
-         free(enhanced);
-         aimee_request_free(&base);
-         return AGENT_RC_CONTEXT_REFUSED;
-      }
-      dispatch = &attempted;
-   }
-   int rc = agent_dispatch_one_internal(ag, &cfg->network, role, dispatch, 1, out, response,
-                                        request ? 0 : 1);
-   free(enhanced);
+   const aimee_request_t *original = request;
+   int rc = agent_dispatch_one_internal(ag, &cfg->network, role,
+                                        enhanced.n_messages ? &enhanced : request, 1, out, response,
+                                        host_text_profile);
+   aimee_request_free(&enhanced);
 
    if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
@@ -943,32 +951,28 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
    agent_log_call(out, role);
-   aimee_request_free(&attempted);
-   aimee_request_free(&base);
 
    return rc;
 }
 
 /* Like agent_run but always uses tool execution, even if the agent config
  * does not have tools_enabled set. Used by the delegate command. */
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
-                         const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out)
 {
-   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens, 1, out,
-                                        NULL, NULL, NULL);
+   return agent_run_with_tools_internal(cfg, role, request, 1, out, NULL, NULL, 1);
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out)
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out)
 {
-   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens,
-                                        enforce_writes, out, NULL, NULL, NULL);
+   return agent_run_with_tools_internal(cfg, role, request, enforce_writes, out, NULL, NULL, 1);
 }
 
 /* The parallel fan-out machinery (parallel_worker, agent_run_parallel) lives in
  * agent_parallel.c — extracted to keep this file under the 2000-line cap. It
- * calls the now-non-static agent_run_named / agent_run_ex above. */
+ * calls the now-non-static agent_run_named / agent_run above. */
 
 /* ================================================================
  * From: agent_context.c
@@ -2192,11 +2196,7 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
 {
    if (!config || !selected || !selected->enabled || !request || !response || !out)
       return -1;
-   char query[4096];
-   aimee_ir_last_user_text(request, query, sizeof query);
-   return agent_run_with_tools_internal(
-       config, "execute", NULL, query[0] ? query : "Continue the admitted conversation.",
-       request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
+   return agent_run_with_tools_internal(config, "execute", request, 1, out, selected, response, 0);
 }
 
 /* Only the attested native bridge chooses this scope. Native execution still
@@ -2220,15 +2220,10 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
         strcmp(selected->cli_kind, "acp")) ||
        aimee_ir_request_admit(request))
       return -1;
-   char query[4096];
-   aimee_ir_last_user_text(request, query, sizeof query);
    int previous = tl_force_no_tools, previous_limit = tl_native_turn_limit;
    tl_force_no_tools = !tools;
    tl_native_turn_limit = selected->max_turns > 0 ? selected->max_turns : 0;
-   int rc = agent_run_with_tools_internal(
-       config, role, request->n_system ? request->system[0].text : NULL,
-       query[0] ? query : "Continue the admitted conversation.",
-       request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
+   int rc = agent_run_with_tools_internal(config, role, request, 1, out, selected, response, 0);
    tl_force_no_tools = previous;
    tl_native_turn_limit = previous_limit;
    return rc;

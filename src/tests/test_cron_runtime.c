@@ -142,9 +142,13 @@ int agent_load_config(agent_config_t *cfg)
    return 0;
 }
 
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;

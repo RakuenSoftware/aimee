@@ -202,8 +202,12 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
       char safe[128];
       safe_name(tasks[i].name, safe, sizeof(safe));
       agent_result_t ar = {0};
-      int rc = agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", NULL, tasks[i].prompt,
-                         0, &ar);
+      aimee_request_t request = {0};
+      int request_rc = aimee_ir_request_from_text(&request, NULL, tasks[i].prompt, 0, 0.3);
+      int rc = request_rc
+                   ? AGENT_RC_CONTEXT_REFUSED
+                   : agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", &request, &ar);
+      aimee_request_free(&request);
       int passed = task_passed(&tasks[i], &ar, rc);
       char *traj = NULL;
       if (!ar.canonical_session_id[0] ||

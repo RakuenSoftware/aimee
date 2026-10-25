@@ -533,9 +533,13 @@ static int context_attempt(agent_result_t *result)
    return local_refusal_rc;
 }
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out)
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -545,9 +549,13 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    assert(!fixture_no_tools);
    return context_attempt(out);
 }
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -562,6 +570,9 @@ void agent_run_force_no_tools(int force)
 }
 static void test_context_refusal_does_not_rotate_credentials(void)
 {
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, NULL, "task", 128, 0.3));
+
    for (int refusal = 0; refusal < 2; refusal++)
       for (int first = 0; first < 2; first++)
          for (int tools = 0; tools < 2; tools++)
@@ -582,9 +593,8 @@ static void test_context_refusal_does_not_rotate_credentials(void)
             context_attempts = 0;
             provider_failure_first = first;
             agent_result_t result = {0};
-            int rc =
-                delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128, tools,
-                                                   0, name, sizeof(name), NULL, &result);
+            int rc = delegate_run_with_credential_retry(&cfg, &agent, "review", &request, tools, 0,
+                                                        name, sizeof(name), NULL, &result);
             assert(rc == local_refusal_rc);
             assert(context_attempts == 1 + first);
             assert(strcmp(name, first ? "backup" : "main") == 0);
@@ -601,9 +611,13 @@ static void test_context_refusal_does_not_rotate_credentials(void)
             delegate_credentials_release("", agent.name, name);
          }
    puts("  PASS: local refusal keeps credentials and stops retries");
+   aimee_request_free(&request);
 }
 static void test_rotation_preserves_canonical_usage_knowledge(void)
 {
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, NULL, "task", 128, 0.3));
+
    for (int tools = 0; tools < 2; tools++)
       for (int mode = 1; mode <= 6; mode++)
       {
@@ -621,9 +635,8 @@ static void test_rotation_preserves_canonical_usage_knowledge(void)
          context_attempts = 0;
          usage_retry_mode = mode;
          agent_result_t result = {0};
-         int rc =
-             delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128, tools, 0,
-                                                leased, sizeof leased, NULL, &result);
+         int rc = delegate_run_with_credential_retry(&cfg, &agent, "review", &request, tools, 0,
+                                                     leased, sizeof leased, NULL, &result);
          assert(!rc && result.success && context_attempts == 2 && !strcmp(leased, "backup"));
          assert(!fixture_no_tools);
          assert(result.turns == 5 && result.tool_calls == 8);
@@ -649,6 +662,7 @@ static void test_rotation_preserves_canonical_usage_knowledge(void)
       }
    usage_retry_mode = 0;
    puts("  PASS: actual credential rotation preserves unknown/mixed usage and diagnostic counts");
+   aimee_request_free(&request);
 }
 int main(void)
 {

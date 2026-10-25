@@ -81,9 +81,13 @@ int agent_execute(const agent_t *a, const aimee_request_t *request, agent_result
    produce(out);
    return 0;
 }
-int agent_run(agent_config_t *cfg, const char *role, const char *sys, const char *prompt, int max,
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
               agent_result_t *out)
 {
+   const char *sys = request->n_system ? request->system[0].text : NULL;
+   const char *prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)sys;
@@ -92,10 +96,11 @@ int agent_run(agent_config_t *cfg, const char *role, const char *sys, const char
    produce(out);
    return 0;
 }
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *sys, const char *prompt,
-                         int max, agent_result_t *out)
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out)
 {
-   return agent_run(cfg, role, sys, prompt, max, out);
+
+   return agent_run(cfg, role, request, out);
 }
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {

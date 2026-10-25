@@ -304,9 +304,13 @@ void persona_free(persona_t *p)
    free(p->persona_text);
    free(p->principles_text);
 }
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system,
-                         const char *prompt, int tokens, agent_result_t *out)
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out)
 {
+   const char *system = request->n_system ? request->system[0].text : NULL;
+   const char *prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system;

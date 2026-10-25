@@ -361,7 +361,11 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
          for (int i = 0; i < task_count; i++)
          {
             agent_result_t ar = {0};
-            int rc = agent_run(cfg, tasks[i].role, NULL, tasks[i].prompt, 0, &ar);
+            aimee_request_t request = {0};
+            int request_rc = aimee_ir_request_from_text(&request, NULL, tasks[i].prompt, 0, 0.3);
+            int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                                : agent_run(cfg, tasks[i].role, &request, &ar);
+            aimee_request_free(&request);
 
             int passed = (rc == 0) && eval_check_success(&tasks[i], &ar);
             if (passed && tasks[i].max_latency_ms > 0 && ar.latency_ms > tasks[i].max_latency_ms)

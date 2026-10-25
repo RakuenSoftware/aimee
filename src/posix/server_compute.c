@@ -814,8 +814,14 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       rc = chat_native_print(cctx, selected_agent, &acfg.network, use_cwd,
                              system_prompt ? system_prompt : "", message, &result);
    else
-      rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
-                                AGENT_DEFAULT_MAX_TOKENS, &result);
+   {
+      aimee_request_t request = {0};
+      rc = aimee_ir_request_from_text(&request, system_prompt, message, AGENT_DEFAULT_MAX_TOKENS,
+                                      0.3)
+               ? AGENT_RC_CONTEXT_REFUSED
+               : agent_run_with_tools(&acfg, "code", &request, &result);
+      aimee_request_free(&request);
+   }
    agent_routing_set_primary_turn(0);
 
    agent_tools_set_tool_event_cb(NULL, NULL);
