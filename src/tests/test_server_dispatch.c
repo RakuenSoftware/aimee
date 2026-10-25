@@ -692,7 +692,7 @@ int db1_session_ir_cancel(const char *actor, const char *session, const char *tu
    assert(0 && "unexpected browser cancellation in dispatch-only fixture");
    return -1;
 }
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    (void)id;
    (void)out;

@@ -271,9 +271,9 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
 {
    static const char reason[] = "Steering continuation was not dispatched; no model or tool "
                                 "executed. Send it again explicitly.";
-   db1_server_session_t registered;
+   db1_server_session_owner_t registered;
    if (!session || !session[0] || !actor || !actor[0] || !message || !message[0] ||
-       db1_server_session_get(session, &registered) || strcmp(registered.principal, actor))
+       db1_server_session_owner_get(session, &registered) || strcmp(registered.principal, actor))
       return -1;
    size_t length = strlen(message), preview_length = length < 1536 ? length : 1536;
    while (preview_length && ((unsigned char)message[preview_length] & 0xc0) == 0x80)
@@ -352,8 +352,8 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
          return -1;
       replies = field;
    }
-   db1_server_session_t row;
-   int found = db1_server_session_get(session, &row);
+   db1_server_session_owner_t row;
+   int found = db1_server_session_owner_get(session, &row);
    if (found == 0 && strcmp(row.principal, c->vault_principal))
       return -1;
    if (found != 0 && db1_server_session_create(session, "webchat", c->vault_principal) != 0)

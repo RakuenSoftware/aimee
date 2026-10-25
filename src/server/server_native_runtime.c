@@ -1188,8 +1188,8 @@ static int native_perform(const char *method, const char *path, const char *head
        (runtime->capture && !server_session_capture_accepting(runtime->capture)))
       return native_mcp_refused(work, path, "initial owner binding");
    native_mcp_stage(&diagnostic, "ownership", NATIVE_MCP_STAGE_BEGIN);
-   db1_server_session_t source;
-   if (db1_server_session_get(runtime->session, &source) ||
+   db1_server_session_owner_t source;
+   if (db1_server_session_owner_get(runtime->session, &source) ||
        strcmp(source.principal, runtime->owner.vault_principal))
    {
       server_session_capture_fail(runtime->capture);
@@ -1198,7 +1198,7 @@ static int native_perform(const char *method, const char *path, const char *head
    }
    const char *destination = server_session_capture_session(runtime->capture);
    if (destination && strcmp(destination, runtime->session) &&
-       (db1_server_session_get(destination, &source) ||
+       (db1_server_session_owner_get(destination, &source) ||
         strcmp(source.principal, runtime->owner.vault_principal)))
    {
       /* A parent's transport grant does not survive deletion or reassignment
@@ -1668,8 +1668,8 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       LOG_WARN("native.runtime", "constructor refused at request_owner");
       return NULL;
    }
-   db1_server_session_t session;
-   if (db1_server_session_get(session_id, &session) ||
+   db1_server_session_owner_t session;
+   if (db1_server_session_owner_get(session_id, &session) ||
        strcmp(session.principal, owner->vault_principal))
    {
       LOG_WARN("native.runtime", "constructor refused at session_owner");

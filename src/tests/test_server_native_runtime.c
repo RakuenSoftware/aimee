@@ -627,7 +627,7 @@ int agent_set_request_api_credentials_for(const agent_t *agent,
             credentials->target_digest);
    return 0;
 }
-int db1_server_session_get(const char *session, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *session, db1_server_session_owner_t *out)
 {
    memset(out, 0, sizeof *out);
    snprintf(out->created_at, sizeof out->created_at, "%s",

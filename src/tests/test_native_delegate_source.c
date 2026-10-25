@@ -103,12 +103,15 @@ int db1_server_session_create(const char *id, const char *client, const char *pr
    snprintf(p->principal, sizeof p->principal, "%s", principal);
    return 0;
 }
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    for (int i = 0; i < n_parents; i++)
       if (!strcmp(parents[i].id, id))
       {
-         *out = parents[i];
+         memset(out, 0, sizeof *out);
+         memcpy(out->id, parents[i].id, sizeof out->id);
+         memcpy(out->principal, parents[i].principal, sizeof out->principal);
+         memcpy(out->created_at, parents[i].created_at, sizeof out->created_at);
          return 0;
       }
    return -1;

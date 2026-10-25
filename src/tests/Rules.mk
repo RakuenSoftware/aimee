@@ -4989,6 +4989,7 @@ $(OBJDIR)/aimee-module-aimee:
 
 $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \
+                                       $(OBJDIR)/db1_client/sessions.o \
                                        $(OBJDIR)/db1_client/conversation.o $(OBJDIR)/db1_client/transport.o \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -7478,7 +7479,7 @@ $(OBJDIR)/tests/acp_full_learning_peer.o: tests/support/learning_outcome_stub.c
 
 $(OBJDIR)/tests/acp_route_db1/%.o: db1_client/%.c tests/Rules.mk
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_session_ir_history_load=unused_route_db1_session_ir_history_load -Ddb1_session_native_history_load=unused_route_db1_session_native_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) -Ddb1_server_session_get=unused_route_db1_server_session_get -Ddb1_server_session_owner_get=unused_route_db1_server_session_owner_get -Ddb1_server_session_create=unused_route_db1_server_session_create -Ddb1_session_ir_append=unused_route_db1_session_ir_append -Ddb1_session_ir_page=unused_route_db1_session_ir_page -Ddb1_session_ir_running_history_load=unused_route_db1_session_ir_running_history_load -Ddb1_session_ir_history_load=unused_route_db1_session_ir_history_load -Ddb1_session_native_history_load=unused_route_db1_session_native_history_load -Ddb1_governed_action_apply=unused_route_db1_governed_action_apply -Ddb1_delegate_execution_terminal_lookup=unused_route_db1_delegate_execution_terminal_lookup -Ddb1_delegate_execution_experience_record=unused_route_db1_delegate_execution_experience_record -Ddb1_session_ir_append_verified=unused_route_db1_session_ir_append_verified -Ddb1_session_native_source_append=unused_route_db1_session_native_source_append -Ddb1_interaction_event_record=unused_route_db1_interaction_event_record -Ddb1_execution_test_grade_record=unused_route_db1_execution_test_grade_record -c -o $@ $<
 
 $(OBJDIR)/tests/support/acp_route_policy_fixture.o: tests/support/acp_route_policy_fixture.c
 	@mkdir -p $(dir $@)

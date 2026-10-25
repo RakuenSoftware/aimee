@@ -452,8 +452,9 @@ static int source_mint(const char *purpose, const char *workspace, char handle[6
          goto fail;
       created = 1;
    }
-   db1_server_session_t owner;
-   if (db1_server_session_get(parent, &owner) || strcmp(owner.principal, context->vault_principal))
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(parent, &owner) ||
+       strcmp(owner.principal, context->vault_principal))
       goto fail;
    cJSON *payload = cJSON_CreateObject(), *snapshot = context_json(context);
    if (!payload || !snapshot)
@@ -534,8 +535,8 @@ int server_native_delegate_source_bind(const char *handle, unsigned principal_re
       snprintf(purpose, sizeof purpose, "%s", saved_purpose);
    }
    free_secret_json(payload);
-   db1_server_session_t owner;
-   if (!verified || db1_server_session_get(parent, &owner) ||
+   db1_server_session_owner_t owner;
+   if (!verified || db1_server_session_owner_get(parent, &owner) ||
        strcmp(owner.principal, restored.vault_principal))
    {
       OPENSSL_cleanse(&restored, sizeof restored);
@@ -714,7 +715,7 @@ int server_native_delegate_source_runtime_prepare(const char *role, const agent_
       OPENSSL_cleanse(&scope->runtime_owner, sizeof scope->runtime_owner);
    }
    char seed_hash[65], original_hash[65];
-   db1_server_session_t child;
+   db1_server_session_owner_t child;
    if (!can_issue || !scope || !scope->service || !scope->admitted || !owner || !role ||
        strcmp(role, scope->role) || owner->capabilities != scope->bound_capabilities ||
        owner->vault_transport != ATTEST_NONE || owner->trusted || owner->context_refused ||
@@ -722,9 +723,9 @@ int server_native_delegate_source_runtime_prepare(const char *role, const agent_
        strcmp(owner->principal, scope->account) || strcmp(owner->vault_principal, scope->actor) ||
        strcmp(agent_get_request_vault_principal(), scope->actor) || !session || !session[0] ||
        strlen(session) >= sizeof scope->runtime_session ||
-       strcmp(agent_get_request_session(), session) || db1_server_session_get(session, &child) ||
-       strcmp(child.principal, scope->actor) || !original || !selected ||
-       strcmp(original->name, selected->name) ||
+       strcmp(agent_get_request_session(), session) ||
+       db1_server_session_owner_get(session, &child) || strcmp(child.principal, scope->actor) ||
+       !original || !selected || strcmp(original->name, selected->name) ||
        strcmp(original->registration, selected->registration) ||
        strcmp(original->model, selected->model) ||
        strcmp(original->auth_type, selected->auth_type) ||
@@ -929,11 +930,11 @@ int server_native_delegate_source_trigger(const cJSON *registration,
       const char *root = source_text(source, "workspace");
       const char *expected_identity = source_text(source, "workspace_identity");
       char *current_root = realpath(source_text(registration, "workspace"), NULL);
-      db1_server_session_t owner;
+      db1_server_session_owner_t owner;
       workspace_turn_scope_t *custody = NULL;
       int directory = -1;
       char actual_identity[65];
-      reusable = parent && parent[0] && !db1_server_session_get(parent, &owner) &&
+      reusable = parent && parent[0] && !db1_server_session_owner_get(parent, &owner) &&
                  !strcmp(owner.principal, VAULT_SERVER_PRINCIPAL) && root && current_root &&
                  !strcmp(root, current_root) && expected_identity &&
                  cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(source, "trigger_registration")) &&

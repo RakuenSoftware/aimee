@@ -51,7 +51,7 @@ const char *agent_get_request_vault_principal(void)
 {
    return "alice";
 }
-int db1_server_session_get(const char *id, db1_server_session_t *row)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *row)
 {
    assert(!strcmp(id, "stable"));
    memset(row, 0, sizeof *row);

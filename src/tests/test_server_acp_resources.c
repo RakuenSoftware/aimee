@@ -115,7 +115,7 @@ int server_session_capture_claim_call(server_session_capture_t *c, const char *s
    c->claims[n] = 1;
    return 0;
 }
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    if (strcmp(id, "source") && strcmp(id, "destination"))
       return -1;

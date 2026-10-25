@@ -197,9 +197,9 @@ static int primary_history_import_source(const char *target, const char *id, con
 int primary_session_history_open(const char *session, const char *actor)
 {
    const char *attested = agent_get_request_vault_principal();
-   db1_server_session_t owner;
+   db1_server_session_owner_t owner;
    if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
-       db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+       db1_server_session_owner_get(session, &owner) || strcmp(owner.principal, actor))
       return -1;
    pthread_mutex_lock(&g_primary_sessions_lock);
    primary_session_native_browse_reconcile_fn reconcile = g_primary_native_browse_reconcile;
@@ -258,11 +258,11 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    }
    snprintf(state->scope_id, sizeof state->scope_id, "%s",
             alternate_id && alternate_id[0] ? alternate_id : state->id);
-   db1_server_session_t owner;
-   if (db1_server_session_get(state->scope_id, &owner) != 0)
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(state->scope_id, &owner) != 0)
    {
       if (db1_server_session_create(state->scope_id, "primary", principal) != 0 ||
-          db1_server_session_get(state->scope_id, &owner) != 0)
+          db1_server_session_owner_get(state->scope_id, &owner) != 0)
          return -1;
    }
    if (strcmp(owner.principal, principal))

@@ -99,12 +99,12 @@ static int publish_child(server_session_log_t *scope, const char *status)
 
 static int ensure_owner(const char *session, const char *type, const char *principal)
 {
-   db1_server_session_t row;
-   if (db1_server_session_get(session, &row) != 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(session, &row) != 0)
    {
       // Another admitted worker may create the same parent concurrently.
       (void)db1_server_session_create(session, type, principal);
-      if (db1_server_session_get(session, &row) != 0)
+      if (db1_server_session_owner_get(session, &row) != 0)
          return -1;
    }
    return strcmp(row.principal, principal) ? -1 : 0;

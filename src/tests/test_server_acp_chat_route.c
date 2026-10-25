@@ -7,13 +7,13 @@
 #define write_all                           original_chat_write_all
 #define db1_session_ir_append               original_chat_append
 #define db1_session_ir_page                 original_chat_page
-#define db1_server_session_get              original_chat_get
+#define db1_server_session_owner_get        original_chat_get
 #define db1_server_session_create           original_chat_create
 #include "test_server_chat_ir.c"
 #undef write_all
 #undef db1_session_ir_append
 #undef db1_session_ir_page
-#undef db1_server_session_get
+#undef db1_server_session_owner_get
 #undef db1_session_ir_running_history_load
 #undef db1_delegate_execution_terminal_lookup
 #undef db1_delegate_execution_experience_record
@@ -28,7 +28,7 @@
  * links real workspace/runtime owners and supplies a multi-session store peer. */
 #ifdef AIMEE_ACP_FULL_WORKER_FIXTURE
 #define db1_server_session_create           full_unused_route_session_create
-#define db1_server_session_get              full_unused_route_session_get
+#define db1_server_session_owner_get        full_unused_route_session_get
 #define db1_session_ir_append               full_unused_route_ir_append
 #define db1_session_ir_page                 full_unused_route_ir_page
 #define db1_session_ir_running_history_load full_unused_route_history_load
@@ -396,7 +396,7 @@ int db1_server_session_create(const char *sid, const char *client, const char *a
    assert(!strcmp(sid, "session-one") && !strcmp(actor, "alice"));
    return 0;
 }
-int db1_server_session_get(const char *sid, db1_server_session_t *row)
+int db1_server_session_owner_get(const char *sid, db1_server_session_owner_t *row)
 {
    int rc = original_chat_get(sid, row);
    if (!rc)

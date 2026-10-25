@@ -33,8 +33,8 @@ __typeof__(agent_set_request_codex_creds_for) composition_mock_agent_set_request
 #define agent_set_request_codex_creds_for composition_mock_agent_set_request_codex_creds_for
 __typeof__(agent_set_request_session) composition_mock_agent_set_request_session;
 #define agent_set_request_session composition_mock_agent_set_request_session
-__typeof__(db1_server_session_get) composition_mock_db1_server_session_get;
-#define db1_server_session_get composition_mock_db1_server_session_get
+__typeof__(db1_server_session_owner_get) composition_mock_db1_server_session_owner_get;
+#define db1_server_session_owner_get composition_mock_db1_server_session_owner_get
 __typeof__(server_native_delegate_source_runtime_consume)
     composition_mock_server_native_delegate_source_runtime_consume;
 #define server_native_delegate_source_runtime_consume                                              \
@@ -59,7 +59,7 @@ __typeof__(server_native_delegate_source_runtime_consume)
 #undef agent_set_request_claude_creds_for
 #undef agent_set_request_codex_creds_for
 #undef agent_set_request_session
-#undef db1_server_session_get
+#undef db1_server_session_owner_get
 #undef server_native_delegate_source_runtime_consume
 
 static int probing_constructor, constructor_owner_queries, service_probes;
@@ -69,19 +69,19 @@ static void service_runtime_probe(server_native_delegate_source_scope_t *scope);
 static int composition_source_admit(server_native_delegate_source_scope_t *scope,
                                     const char *persona, const aimee_request_t *effective,
                                     char *error, size_t capacity);
-__typeof__(db1_server_session_get) composition_source_session_get;
+__typeof__(db1_server_session_owner_get) composition_source_session_get;
 __typeof__(server_native_delegate_source_bind) composition_source_bind;
 #define server_native_delegate_source_bind  composition_source_bind
-#define db1_server_session_get              composition_source_session_get
+#define db1_server_session_owner_get        composition_source_session_get
 #define server_native_delegate_source_admit composition_source_admit
 #define main                                composition_source_suite_main
 #include "test_native_delegate_source.c"
 #undef main
 #undef server_native_delegate_source_admit
-#undef db1_server_session_get
+#undef db1_server_session_owner_get
 #undef server_native_delegate_source_bind
 
-int db1_server_session_get(const char *session, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *session, db1_server_session_owner_t *out)
 {
    if (probing_constructor)
    {

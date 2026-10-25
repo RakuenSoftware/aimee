@@ -25,8 +25,8 @@ void session_subcmd_show(app_ctx_t *ctx, int argc, char **argv)
 
    /* Look up server_session record (DB1). */
    {
-      db1_server_session_t row;
-      if (db1_server_session_get(sid, &row) == 0)
+      db1_server_session_record_t row;
+      if (db1_server_session_record_get(sid, &row) == 0)
       {
          printf("session: %s\n", row.id[0] ? row.id : sid);
          if (row.client_type[0])
@@ -39,6 +39,7 @@ void session_subcmd_show(app_ctx_t *ctx, int argc, char **argv)
             printf("  last active: %s\n", row.last_activity_at);
          if (row.outcome[0])
             printf("  outcome:     %s\n", row.outcome);
+         db1_server_session_record_free(&row);
       }
       else
       {
@@ -171,14 +172,18 @@ void session_subcmd_search(app_ctx_t *ctx, int argc, char **argv)
 
    /* Search server_sessions titles (DB1). */
    {
-      db1_server_session_t rows[20];
-      int n = db1_server_session_search_by_title(pattern, rows, 20);
+      db1_server_session_record_t rows[20];
+      int n = db1_server_session_record_search_by_title(pattern, rows, 20);
       for (int i = 0; i < n; i++)
       {
          if (!rows[i].id[0])
+         {
+            db1_server_session_record_free(&rows[i]);
             continue;
+         }
          printf("%.8s  %s  \"%s\"\n", rows[i].id, rows[i].created_at[0] ? rows[i].created_at : "?",
                 rows[i].title);
+         db1_server_session_record_free(&rows[i]);
          found++;
       }
    }

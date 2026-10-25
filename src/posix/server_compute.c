@@ -420,8 +420,8 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
 {
    if (!aimee_sid || !aimee_sid[0])
       return;
-   db1_server_session_t row;
-   if (db1_server_session_get(aimee_sid, &row) == 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(aimee_sid, &row) == 0)
       return; /* already registered */
    const char *principal = agent_get_request_vault_principal();
    (void)db1_server_session_create(aimee_sid,

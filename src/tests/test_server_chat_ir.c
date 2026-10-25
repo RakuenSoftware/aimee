@@ -60,7 +60,7 @@ int agent_request_cancelled(void)
    }
    return cancelled;
 }
-int db1_server_session_get(const char *id, db1_server_session_t *row)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *row)
 {
    assert(!strcmp(id, "session-one"));
    memset(row, 0, sizeof(*row));

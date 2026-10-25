@@ -1354,8 +1354,8 @@ static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "exact session_id and turn_id required");
    }
-   db1_server_session_t owner;
-   if (db1_server_session_get(session, &owner))
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(session, &owner))
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 503, "session ownership unavailable");

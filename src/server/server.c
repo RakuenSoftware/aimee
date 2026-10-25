@@ -1246,8 +1246,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
     * findable record. Idempotent (SessionStart also fires on resume); best-effort. */
    if (sid && sid[0])
    {
-      db1_server_session_t existing;
-      if (db1_server_session_get(sid, &existing) != 0)
+      db1_server_session_owner_t existing;
+      if (db1_server_session_owner_get(sid, &existing) != 0)
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);

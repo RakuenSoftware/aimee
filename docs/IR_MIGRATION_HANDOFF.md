@@ -22,46 +22,91 @@ in `OWNERS.md`.
 
 ## Current source and qualification
 
-The composed source after merge 017e89520 contains the repairs below. Its
-final whole-source and installed-image checks remain outstanding. These are
-earlier source-specific qualification checkpoints, not a completed migration.
+Runtime source is `4e577b87355723e3ec24c003d8040ca7c2305c3b`, tree
+`2caf7d88ac2676fb3cf9681df628f50227bd1a9b`, version
+`v1.0.2-451-g4e577b873`. It includes current testing `35418e47e` through clean
+merge `017e89520`; all eight affected Rust module-runtime tests pass. Later
+ownership-ledger/documentation commits do not change application inputs; retain
+an explicit byte join rather than relabelling old binaries as a later commit.
+This is not yet a completed migration: the metadata repair below needs fresh
+whole-source qualification and the remaining installed-image journeys are required.
 
-Checkpoint `7db3f9c67e1e5add544ae9b07ab5bf4de2fc8f2e`, tree
-`bf73f238948be72daef6458fa290307b171e23d7`, is pushed to the same branch. This
-checkpoint is not migration completion. Commit 95c3ffecf adds qualified served-
-metadata workspace paths and canonical native tool counts, retiring duplicate SDK
-usage/tool display parsers. The branch also includes current testing 35418e47e
-through clean merge 017e89520; its eight Rust module-runtime tests pass.
-Later fixes must receive source-specific
-qualification; do not relabel older binaries or live cases as a new source.
+Exact clean 4e source passes 702 normal and 702 ASan/UBSan/leak invocations,
+699 unique binaries per lane, with 35 explicit optional-prerequisite notices per
+lane. The lanes ran serially. All 76 lint checks ran: 75 passed and the sole
+failure was the old memory-ownership fingerprint for server/agent_runtime.c.
+The reviewed change adds only four job wait-phase heartbeat calls; removing
+those lines reproduces the previous reviewed file byte for byte. Memory calls,
+arguments, scope, budgets and Go ownership are unchanged. The ledger now records
+that reviewed hash; the unchanged canonical gate must be rerun. No exemption,
+rule relaxation or promotion-baseline refresh is authorized. Review:
+`/var/tmp/aimee-final-source-review-coherent/memory-runtime-heartbeat-review.json`.
+Native receipt:
+`/var/tmp/aimee-final-4e577-native-qualification/qualification.json`.
 
-The checkpoint passes 702 normal and 702 ASan/UBSan/leak native invocations
-(699 unique binaries per lane), all 76 lint checks, shipping Make linkage and
-CMake default-all thin-client build. Each native lane retains 35 explicit
-optional-prerequisite notices. Whole Go normal/race passes 4,281 server pass
-events, 291 runtime-web and 43 control-web cases per lane; the server retains
-337 explicit skips. Exporters pass 24 cases. The private PostgreSQL history,
-learning, native, selection and metrics pattern passes 109 normal and 109 race
-cases with no skips; its database/role were dropped and server stopped.
+Fresh whole Go normal and race each pass 4,615 pass events across the three
+modules, with 337 explicit server prerequisite skips; all 24 exporter checks
+pass. PostgreSQL history/learning/native/selection/metrics tests pass 109 normal
+and 109 race cases with no skips. Its restricted database and role were dropped
+and PostgreSQL stopped. CMake default-all thin-client build and actual 4e version
+pass, as do shipping Make links. Source bytes and modes stayed unchanged during
+each frozen qualification. Receipts:
+`/var/tmp/aimee-final-go-coherent/final-index.json`,
+`/var/tmp/aimee-pg-4e577/proof.json`,
+`/var/tmp/aimee-cmake-4e577/proof.json`.
 
-Full `make -C src -j2 CC=gcc integration-tests` passes 172/172 and its subsequent
-checks, with 27 explicit unavailable-service checks. Actual installed local
-Codex 0.163.0 and Claude 2.1.227 binaries use controlled HTTP fixtures in this
-suite; it does not establish genuine paid-provider or live Docker coverage.
-Independent workflow-equivalent checks pass 47/48 commands; the remaining
-promotion-only surface baseline must not be re-frozen on this integration
-branch. These are local checks, not fresh GitHub CI or promotion approval.
+The 48 workflow-equivalent commands initially report 46 passes, the stale
+memory fingerprint above, and the intentionally separate promotion-only surface
+baseline. The integration branch must not re-freeze that promotion baseline.
+The 411 workflow tests, attribution API/workflow cases, 41 IR mutations and actual
+11-commit rename/copy history delta join pass. These are local checks, not fresh
+GitHub CI or production-promotion approval. Receipt:
+`/var/tmp/aimee-final-source-review-coherent/final-index.json`.
 
-A clean, locked frontend installation uses SmoothGUI 0.12.3, passes 510 tests,
-`npm run check` and both production builds. Its 149 tracked frontend inputs
-match this checkpoint. The ignored main-worktree node_modules had 0.11.0;
-only the clean-install receipt establishes the tested dependency version.
-Upstream package metadata also reports 0.12.3 at the recorded observation.
+A clean locked frontend installation uses SmoothGUI 0.12.3, passes 510 tests,
+`npm run check` and both production builds. All 149 tracked frontend inputs
+match 4e, and the resulting SPA is byte-identical to the installed f21962de...
+bundle. Upstream package metadata reports 0.12.3 at the recorded observation.
+Ignored main-worktree node_modules held 0.11.0; only the clean locked receipt and
+shipping byte join establish the tested dependency:
+`/var/tmp/aimee-frontend-3999/proof.json`,
+`/var/tmp/aimee-checkpoint-7db3-root/frontend-shipping-byte-join.json`.
 
-Hashed source-specific receipts are joined in
-`/var/tmp/aimee-checkpoint-7db3-root/index.json`. Native, Go, source-review,
-PostgreSQL, integration, CMake and frontend receipts remain separate so their
-scope and skips are visible. Failed cases remain retained.
+Earlier exact 7db full client/server integration passes 172/172 and subsequent
+checks, retaining 27 unavailable-service checks. Actual local Codex 0.163.0 and
+Claude 2.1.227 use controlled HTTP fixtures there, not genuine paid inference.
+The corresponding exact 4e full integration also passes 172/172 plus postchecks,
+with 27 explicit unavailable-service skips. Receipt:
+`/var/tmp/aimee-integration-4e577/proof.json`. These controlled provider fixtures
+do not establish genuine inference on the installed final image.
+
+## Live session metadata repair, pending final image validation
+
+The first installed 4e one-call check failed before any provider request: job 7
+could not admit canonical capture. Its existing parent
+`3dad6876-648c-3db9-9256-e920608c798b` contains the accepted 33-byte client label
+`cold-default-7db-41d0e11e80bb5766`. The old C full-record DTO rejects that stored
+value and also breaks session listing. The parent, label and failed job remain
+unchanged; this is not a provider, usage-counter or Rust principal regression.
+Evidence: `/var/tmp/aimee-http-count-4e-41d0e11e80bb5766/`.
+
+The repair reuses the measured-length owned session decoder and existing bus
+operations, schema, message bound and deadline. Display readers own complete
+metadata; authority readers use only exact ID, principal and incarnation fields.
+Legacy fixed DTO consumers stay strict. Malformed/partial/extra rows fail
+atomically. Focused producer wire and 11 caller fixtures pass normally and with
+sanitizers/leak checks; independent source review is clear. The four intersecting
+memory-ledger fingerprints record only reviewed owner-projection replacements;
+classifications, memory symbols and guard rules are unchanged. Receipts:
+`/var/tmp/aimee-session-metadata-proof/qualified.json`,
+`/var/tmp/aimee-session-callers-proof/final-join.json`,
+`/var/tmp/aimee-session-callers-proof/memory-pin-review.json`.
+
+Next freeze and qualify this repaired source, build its exact installed image,
+then load the existing long-label parent losslessly through normal list/get and
+run a distinct bounded one-call job using that same unchanged parent. Preserve
+job 7 as failed with zero provider sends. Genuine native replay, a new empty
+installation and original retained-history upgrade remain required afterward.
 
 ## Implemented behavior and current work
 
@@ -171,7 +216,7 @@ private-owner recovery receipts remain at
 
 Host `192.168.1.252`, retained VM8168, guest `192.168.0.67`. The supported
 manual-review hold protects only this VM until explicit user cleanup. Its owned
-disk was expanded online from 64 to 84 GiB with root/EFI identities unchanged;
+disk was expanded online from 64 to 84, then 104 GiB with root/EFI identities unchanged;
 resource gates remain 9 GiB free disk and 3 GiB MemAvailable. No foreign VM,
 volume, cache or reaper policy was removed or weakened.
 
@@ -184,10 +229,10 @@ genuinely empty installation at 601aff47e; subsequent deployments are upgrades.
 Keep the failed first native OAuth-refresh refusal as failed history.
 
 Separate project `aimee-internal-ir-fresh-d8511ad41`, API8747/web8447, started
-with zero sessions/IR/native caches at d851. It is now upgraded to 7db, image
-`sha256:855b36754d0d1e91f923f2a97e1b80cf90f5be400fa5a2a4236eba6e0097c3b1`.
-Its prior 118 IR rows and caches/authority/grants survived that upgrade exactly;
-later live jobs add genuine new history. This is not a clean 7db installation.
+with zero sessions/IR/native caches at d851. It is now upgraded to 4e, image
+`sha256:935ceaa4aacd5596a743579868b8d53a134e050aa94ca095477af47821ad38ac`.
+All 156 prior IR rows and native caches/authority/grants survived the 4e upgrade
+exactly. Later live jobs add genuine new history. This is not a clean 4e install.
 Both app inventories match 87 products and 19 modules.
 
 Actual d851 browser testing passes normal login/project clone, pending question
@@ -203,7 +248,7 @@ private canonical/cache seals remain under
 `/var/tmp/aimee-internal-ir-live-8168/upgrade-fb0-to-d851/`.
 
 Actual 7db live validation exposed two defects whose source repairs are now
-implemented; matching-image live positives remain required:
+implemented; the CLI live positive passes and accounting is being validated:
 
 - Relative `workspace add .` still registers the server cwd. Served argument
   metadata bypasses the corrected compiled marshaller. The failed registration

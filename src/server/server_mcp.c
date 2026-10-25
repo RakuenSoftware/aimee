@@ -2043,8 +2043,8 @@ void mcp_session_register(server_conn_t *conn, const char *sid)
 {
    if (!conn || !sid || !sid[0] || !is_safe_id(sid))
       return;
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) == 0)
+   db1_server_session_owner_t existing;
+   if (db1_server_session_owner_get(sid, &existing) == 0)
       return; /* already registered */
    char principal[32];
    snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);

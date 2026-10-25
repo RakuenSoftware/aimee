@@ -472,13 +472,13 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
          cJSON_Delete(req);
          return err_json(resp, cap, 403, "browser session owner mismatch");
       }
-      db1_server_session_t row;
-      if (db1_server_session_get(session_id, &row) != 0)
+      db1_server_session_owner_t row;
+      if (db1_server_session_owner_get(session_id, &row) != 0)
       {
          /* Creation never updates an existing owner. A concurrent creator or
           * lost acknowledgement is resolved only by reading the durable row. */
          (void)db1_server_session_create(session_id, "webchat", actor);
-         if (db1_server_session_get(session_id, &row) != 0)
+         if (db1_server_session_owner_get(session_id, &row) != 0)
          {
             cJSON_Delete(req);
             return err_json(resp, cap, 503, "browser session admission unavailable");

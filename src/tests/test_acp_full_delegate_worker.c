@@ -57,7 +57,7 @@ void compute_pool_set_job(pool_job_kind_t kind, const char *format, ...)
 #undef workspace_turn_container_bound
 #undef agent_run_with_tools
 #undef db1_server_session_create
-#undef db1_server_session_get
+#undef db1_server_session_owner_get
 #undef db1_session_ir_append
 #undef db1_session_ir_page
 #undef db1_session_ir_running_history_load
@@ -135,7 +135,7 @@ static void full_worker_exact_file(const char *path, const char *expected)
  * source/capture/control policy and all workspace/container I/O stay real. */
 static db1_server_session_t full_sessions[32];
 static int full_session_count;
-int db1_server_session_get(const char *sid, db1_server_session_t *out);
+int db1_server_session_owner_get(const char *sid, db1_server_session_owner_t *out);
 int db1_server_session_create(const char *sid, const char *client, const char *actor)
 {
    assert(sid && sid[0] && actor && actor[0]);
@@ -152,20 +152,24 @@ int db1_server_session_create(const char *sid, const char *client, const char *a
    const char *source_session = agent_get_request_session();
    if (!source_session || !source_session[0])
       source_session = sid;
-   db1_server_session_t declared;
-   assert(!db1_server_session_get(source_session, &declared) && !strcmp(declared.principal, actor));
+   db1_server_session_owner_t declared;
+   assert(!db1_server_session_owner_get(source_session, &declared) &&
+          !strcmp(declared.principal, actor));
    /* Logical tool/action ownership remains the admitted parent; canonical
     * content is captured in the separately owned child turn/session. */
    acp_route_policy_reset(bound && bound[0] ? bound : workspace, actor, source_session);
    acp_route_policy_fault(5);
    return 0;
 }
-int db1_server_session_get(const char *sid, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *sid, db1_server_session_owner_t *out)
 {
    for (int i = 0; i < full_session_count; i++)
       if (!strcmp(full_sessions[i].id, sid))
       {
-         *out = full_sessions[i];
+         memset(out, 0, sizeof *out);
+         memcpy(out->id, full_sessions[i].id, sizeof out->id);
+         memcpy(out->principal, full_sessions[i].principal, sizeof out->principal);
+         memcpy(out->created_at, full_sessions[i].created_at, sizeof out->created_at);
          return 0;
       }
    return -1;
@@ -182,14 +186,14 @@ static struct
 int db1_delegation_spawn_record(const char *id, const char *parent, const char *sid, int depth,
                                 const char *role)
 {
-   db1_server_session_t session;
+   db1_server_session_owner_t session;
    const char *parent_id = parent ? parent : "";
    const request_context_t *context = request_context_get();
    if (!id || !id[0] || strlen(id) >= sizeof full_spawn.id ||
        strlen(parent_id) >= sizeof full_spawn.parent || !sid ||
        strlen(sid) >= sizeof full_spawn.session || !role || strcmp(role, full_worker_role()) ||
        depth < 0 || !context || strcmp(request_context_session_actor(context), owner) ||
-       db1_server_session_get(sid, &session) || strcmp(session.principal, owner))
+       db1_server_session_owner_get(sid, &session) || strcmp(session.principal, owner))
       return -1;
    if (full_spawn.recorded)
       return strcmp(full_spawn.id, id) || strcmp(full_spawn.parent, parent_id) ||
@@ -223,8 +227,8 @@ int db1_delegation_spawn_complete(const char *id)
 int db1_session_ir_append(const char *sid, const char *id, const char *turn, const char *actor,
                           const char *payload, char sequence[32])
 {
-   db1_server_session_t owner;
-   if (db1_server_session_get(sid, &owner) || strcmp(owner.principal, actor))
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(sid, &owner) || strcmp(owner.principal, actor))
       return -1;
    int last = 0;
    const cJSON *existing;
@@ -250,8 +254,8 @@ int db1_session_ir_append(const char *sid, const char *id, const char *turn, con
 }
 char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *actor)
 {
-   db1_server_session_t owner;
-   if (db1_server_session_get(sid, &owner) || strcmp(owner.principal, actor))
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(sid, &owner) || strcmp(owner.principal, actor))
       return NULL;
    cJSON *page = cJSON_CreateArray();
    assert(page);
@@ -296,8 +300,8 @@ int db1_session_ir_running_history_load(const char *sid, const char *actor, cons
  * handoff. Refuse any preexisting model or interruption content in this case. */
 static cJSON *full_fresh_completed_history(const char *sid, const char *actor, const char *turn)
 {
-   db1_server_session_t session;
-   if (db1_server_session_get(sid, &session) || strcmp(session.principal, actor))
+   db1_server_session_owner_t session;
+   if (db1_server_session_owner_get(sid, &session) || strcmp(session.principal, actor))
       return NULL;
    const cJSON *row;
    cJSON_ArrayForEach(row, stored_rows)

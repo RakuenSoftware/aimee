@@ -108,7 +108,7 @@ void test_learning_assert_source(const cJSON *record)
                         cJSON_GetObjectItemCaseSensitive(record, "event"), 1));
    pthread_mutex_unlock(&lock);
 }
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    pthread_mutex_lock(&lock);
    struct row *r = find(id);
