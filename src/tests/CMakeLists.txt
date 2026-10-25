@@ -34,7 +34,6 @@ endfunction()
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
-aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
 aimee_add_test(test_server_mcp_project test_server_mcp_project.c
                ../server/server_mcp_project.c ../server/server_active_project.c)
 aimee_add_test(test_server_active_project test_server_active_project.c
@@ -428,24 +427,6 @@ else()
 endif()
 add_test(NAME test_kb_mdl COMMAND test_kb_mdl)
 set_tests_properties(test_kb_mdl PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-add_executable(test_compact_prune test_compact_prune.c)
-target_include_directories(test_compact_prune PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_compact_prune)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_compact_prune PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_compact_prune PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-endif()
-add_test(NAME test_compact_prune COMMAND test_compact_prune)
-set_tests_properties(test_compact_prune PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_session_compact_focused test_session_compact_focused.c)

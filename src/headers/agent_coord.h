@@ -47,12 +47,6 @@ int delegate_token_budget_load(const char *project_root, const char *role);
  * ceiling), honouring an agent's explicit context_window override. 0 = unknown. */
 int delegate_token_budget_for_agent(const char *model, int agent_context_window);
 
-/* Smallest such budget across every agent still eligible after routing: the
- * agent is picked downstream, so the prompt has to fit the smallest of them. */
-int delegate_token_budget_for_agents(const agent_config_t *cfg);
-
-int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
-               agent_result_t *out);
 /* Check whether a tool call would violate any active hard directive in KB_STORE.
  * Returns -1 with reason_out filled on a likely violation, 0 otherwise. Reads
  * go through kb_store_rules_list. */

@@ -1,4 +1,4 @@
-/* Delegate prompt resources, quorum voting and hard directives. */
+/* Delegate prompt resources and hard directives. */
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "kb_client.h"
@@ -351,26 +351,6 @@ int delegate_token_budget_for_agent(const char *model, int agent_context_window)
    return window;
 }
 
-/* The budget that fits EVERY agent still eligible after routing. The agent is
- * chosen downstream, so the prompt must fit whichever one wins; the smallest
- * eligible window is the only safe answer. */
-int delegate_token_budget_for_agents(const agent_config_t *cfg)
-{
-   if (!cfg || cfg->agent_count <= 0)
-      return 0;
-   int smallest = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      int budget = delegate_token_budget_for_agent(cfg->agents[i].model,
-                                                   cfg->agents[i].middleware.context_window);
-      if (budget <= 0)
-         continue;
-      if (smallest == 0 || budget < smallest)
-         smallest = budget;
-   }
-   return smallest;
-}
-
 int delegate_token_budget_load(const char *project_root, const char *role)
 {
    /* Reads from the global per-project config:
@@ -418,85 +398,6 @@ int delegate_token_budget_load(const char *project_root, const char *role)
    }
    fclose(f);
    return budget;
-}
-
-/* --- Multi-Agent Coordination (Feature 8) --- */
-
-int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
-               agent_result_t *out)
-{
-   if (!cfg || !prompt || !out || n_voters <= 0)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   if (n_voters > AGENT_MAX_COORD_AGENTS)
-      n_voters = AGENT_MAX_COORD_AGENTS;
-
-   agent_task_t tasks[AGENT_MAX_COORD_AGENTS] = {0};
-   agent_result_t results[AGENT_MAX_COORD_AGENTS] = {0};
-
-   for (int i = 0; i < n_voters; i++)
-   {
-      tasks[i].role = role;
-      tasks[i].system_prompt = NULL;
-      tasks[i].user_prompt = prompt;
-      tasks[i].max_tokens = 0;
-      tasks[i].temperature = 0.3 + (0.1 * i); /* slight variation */
-   }
-
-   (void)agent_run_parallel(cfg, tasks, n_voters, results, 0 /* no deadline */);
-   int successes = 0;
-   for (int i = 0; i < n_voters; i++)
-   {
-      if (results[i].success && !agent_result_project_complete_text(&results[i]))
-         successes++;
-      else
-         results[i].success = 0;
-   }
-   if (successes == 0)
-   {
-      snprintf(out->error, sizeof(out->error), "all voters failed");
-      for (int i = 0; i < n_voters; i++)
-         agent_result_clear_response(&results[i]);
-      return -1;
-   }
-
-   /* Simple majority: pick the most common response (by first 200 chars) */
-   int best_idx = -1;
-   int best_count = 0;
-   for (int i = 0; i < n_voters; i++)
-   {
-      if (!results[i].success || !results[i].response)
-         continue;
-      int count = 0;
-      for (int j = 0; j < n_voters; j++)
-      {
-         if (!results[j].success || !results[j].response)
-            continue;
-         if (strncmp(results[i].response, results[j].response, 200) == 0)
-            count++;
-      }
-      if (count > best_count)
-      {
-         best_count = count;
-         best_idx = i;
-      }
-   }
-
-   if (best_idx >= 0)
-   {
-      agent_result_move_response(out, &results[best_idx]); /* don't free, transferred to out */
-      out->success = 1;
-      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", results[best_idx].agent_name);
-      out->confidence = (best_count * 100) / n_voters;
-   }
-
-   /* Free remaining results */
-   for (int i = 0; i < n_voters; i++)
-      agent_result_clear_response(&results[i]);
-
-   return out->success ? 0 : -1;
 }
 
 /* --- Hard Directive Enforcement (Feature 15) --- */

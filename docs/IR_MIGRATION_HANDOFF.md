@@ -20,93 +20,106 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Current source and qualification
+## Current implementation and qualified checkpoint
 
-Runtime source is `4e577b87355723e3ec24c003d8040ca7c2305c3b`, tree
-`2caf7d88ac2676fb3cf9681df628f50227bd1a9b`, version
-`v1.0.2-451-g4e577b873`. It includes current testing `35418e47e` through clean
-merge `017e89520`; all eight affected Rust module-runtime tests pass. Later
-ownership-ledger/documentation commits do not change application inputs; retain
-an explicit byte join rather than relabelling old binaries as a later commit.
-This is not yet a completed migration: the metadata repair below needs fresh
-whole-source qualification and the remaining installed-image journeys are required.
+The last fully qualified source checkpoint is
+`19911237b0cff2f66edf9de4b943be99768bf38c`, tree
+`c770deae4f752af62d3057f14f45833b7449a447`, version
+`v1.0.2-452-g19911237b`. Current testing remains `35418e47e`; its affected Rust
+runtime tests pass. This continuation retires dormant execution/projection code
+from that checkpoint. It requires combined-source qualification before its
+image is called final. The migration is unfinished.
 
-Exact clean 4e source passes 702 normal and 702 ASan/UBSan/leak invocations,
-699 unique binaries per lane, with 35 explicit optional-prerequisite notices per
-lane. The lanes ran serially. All 76 lint checks ran: 75 passed and the sole
-failure was the old memory-ownership fingerprint for server/agent_runtime.c.
-The reviewed change adds only four job wait-phase heartbeat calls; removing
-those lines reproduces the previous reviewed file byte for byte. Memory calls,
-arguments, scope, budgets and Go ownership are unchanged. The ledger now records
-that reviewed hash; the unchanged canonical gate must be rerun. No exemption,
-rule relaxation or promotion-baseline refresh is authorized. Review:
-`/var/tmp/aimee-final-source-review-coherent/memory-runtime-heartbeat-review.json`.
-Native receipt:
-`/var/tmp/aimee-final-4e577-native-qualification/qualification.json`.
+Exact clean 199 passes 702 normal and 702 ASan/UBSan/leak invocations, 699 unique
+binaries per lane, 35 explicit optional-prerequisite notices per lane. Lanes ran
+serially; all 76 lint checks pass. Reviewed ownership fingerprints changed only
+for host heartbeat and exact session-owner projections; classifications, memory
+calls, scope, budgets, Go ownership and guard rules remain intact. Receipt:
+`/var/tmp/aimee-final-session-native-qualification/qualification.json`.
 
-Fresh whole Go normal and race each pass 4,615 pass events across the three
-modules, with 337 explicit server prerequisite skips; all 24 exporter checks
-pass. PostgreSQL history/learning/native/selection/metrics tests pass 109 normal
-and 109 race cases with no skips. Its restricted database and role were dropped
-and PostgreSQL stopped. CMake default-all thin-client build and actual 4e version
-pass, as do shipping Make links. Source bytes and modes stayed unchanged during
-each frozen qualification. Receipts:
-`/var/tmp/aimee-final-go-coherent/final-index.json`,
-`/var/tmp/aimee-pg-4e577/proof.json`,
-`/var/tmp/aimee-cmake-4e577/proof.json`.
+Fresh actual PostgreSQL passes 109 normal and 109 race cases with no skips;
+the restricted database/role were dropped and PostgreSQL stopped. CMake default
+thin-client ALL/version passes. Full composed integration passes 172/172 plus
+postchecks with 27 explicit unavailable-service skips. Its actual Claude 2.1.227
+and Codex 0.163.0 binaries use controlled HTTP fixtures, not genuine inference.
+Receipts: `/var/tmp/aimee-pg-199112/proof.json`,
+`/var/tmp/aimee-cmake-199112/proof.json`,
+`/var/tmp/aimee-integration-199112/proof.json`.
 
-The 48 workflow-equivalent commands initially report 46 passes, the stale
-memory fingerprint above, and the intentionally separate promotion-only surface
-baseline. The integration branch must not re-freeze that promotion baseline.
-The 411 workflow tests, attribution API/workflow cases, 41 IR mutations and actual
-11-commit rename/copy history delta join pass. These are local checks, not fresh
-GitHub CI or production-promotion approval. Receipt:
-`/var/tmp/aimee-final-source-review-coherent/final-index.json`.
+The 48 workflow-equivalent commands pass 47; only the deliberately separate
+production-promotion surface baseline remains red. Do not re-freeze it on this
+branch. All 411 workflow tests, attribution checks, 41 IR mutation cases and
+actual history/metadata joins pass. These are local checks, not fresh GitHub CI
+or production-promotion approval:
+`/var/tmp/aimee-final-source-review-19911237/final-index.json`.
 
-A clean locked frontend installation uses SmoothGUI 0.12.3, passes 510 tests,
-`npm run check` and both production builds. All 149 tracked frontend inputs
-match 4e, and the resulting SPA is byte-identical to the installed f21962de...
-bundle. Upstream package metadata reports 0.12.3 at the recorded observation.
-Ignored main-worktree node_modules held 0.11.0; only the clean locked receipt and
-shipping byte join establish the tested dependency:
-`/var/tmp/aimee-frontend-3999/proof.json`,
-`/var/tmp/aimee-checkpoint-7db3-root/frontend-shipping-byte-join.json`.
+Go/exporter inputs (2,269 files), frontend/module inputs (152), and Rust/shared
+ABI inputs (40) match the fully qualified 4e source byte for byte, including
+modes: `/var/tmp/aimee-final-input-join-19911237/input-joins.json`. That prior Go
+normal/race qualification passes 4,615 events each with 337 explicit prerequisites
+skipped, plus 24 exporter checks. The clean frontend uses SmoothGUI 0.12.3,
+passes 510 tests, type checking and both production builds; its SPA f21962de...
+bytes match the installed 199 image. These input joins preserve the actual
+source/version of each receipt rather than relabelling binaries.
 
-Earlier exact 7db full client/server integration passes 172/172 and subsequent
-checks, retaining 27 unavailable-service checks. Actual local Codex 0.163.0 and
-Claude 2.1.227 use controlled HTTP fixtures there, not genuine paid inference.
-The corresponding exact 4e full integration also passes 172/172 plus postchecks,
-with 27 explicit unavailable-service skips. Receipt:
-`/var/tmp/aimee-integration-4e577/proof.json`. These controlled provider fixtures
-do not establish genuine inference on the installed final image.
+## Installed session metadata and accounting regression
 
-## Live session metadata repair, pending final image validation
+Installed 4e job 7 failed before any provider request because its existing parent
+`3dad6876-648c-3db9-9256-e920608c798b` has the accepted 33-byte client label
+`cold-default-7db-41d0e11e80bb5766`. The old C DTO also broke session listing.
+The repair reuses the measured-length owned decoder and existing bus operations,
+schema, message bound and deadline. Display readers own complete metadata;
+authority readers retain exact ID/principal/incarnation bounds. Malformed,
+partial and extra rows fail atomically. Focused normal/sanitizer tests and
+independent boundary review pass; no input restriction or truncation was added.
 
-The first installed 4e one-call check failed before any provider request: job 7
-could not admit canonical capture. Its existing parent
-`3dad6876-648c-3db9-9256-e920608c798b` contains the accepted 33-byte client label
-`cold-default-7db-41d0e11e80bb5766`. The old C full-record DTO rejects that stored
-value and also breaks session listing. The parent, label and failed job remain
-unchanged; this is not a provider, usage-counter or Rust principal regression.
-Evidence: `/var/tmp/aimee-http-count-4e-41d0e11e80bb5766/`.
+The actual 199 QA upgrade preserves all 156 prior IR rows, caches, SDKs,
+authority, grants and the entire failed job 7. Normal UID1000 list/get both return
+HTTP200 with the unchanged full label and parent identity. A distinct job 8 uses
+that same parent and completes canonically with one observed HTTP POST and
+api_call_count=1; omitted usage leaves cost unknown. Job 7 stays byte-exact,
+failed with zero calls. The ordinary container was observed through creation,
+start, destruction and independent absence; provider/observers are closed.
+The store now has 164 IR rows. Receipts:
+`/var/tmp/aimee-internal-ir-live-8168/upgrade-qa-4e-to-199-final/upgrade-preservation-proof.json`,
+`/var/tmp/aimee-internal-ir-live-8168/upgrade-qa-4e-to-199-final/normal-parent-metadata-lossless-proof.json`,
+`/var/tmp/aimee-http-parent33-199-cdb483c85d7c34ec/final-index.json`.
 
-The repair reuses the measured-length owned session decoder and existing bus
-operations, schema, message bound and deadline. Display readers own complete
-metadata; authority readers use only exact ID, principal and incarnation fields.
-Legacy fixed DTO consumers stay strict. Malformed/partial/extra rows fail
-atomically. Focused producer wire and 11 caller fixtures pass normally and with
-sanitizers/leak checks; independent source review is clear. The four intersecting
-memory-ledger fingerprints record only reviewed owner-projection replacements;
-classifications, memory symbols and guard rules are unchanged. Receipts:
-`/var/tmp/aimee-session-metadata-proof/qualified.json`,
-`/var/tmp/aimee-session-callers-proof/final-join.json`,
-`/var/tmp/aimee-session-callers-proof/memory-pin-review.json`.
+Installed 199 same-root A-to-B-to-A index queries pass as UID1000 with implicit
+CWD, strict single JSON, distinct canonical project identities and each root's
+own C definition. No project override, registration/config/default/KB mutation,
+provider prompt or retry was used:
+`/var/tmp/aimee-installed-index-199-ready-join/joined-proof.json`.
 
-Next freeze and qualify this repaired source, build its exact installed image,
-then load the existing long-label parent losslessly through normal list/get and
-run a distinct bounded one-call job using that same unchanged parent. Preserve
-job 7 as failed with zero provider sends. Genuine native replay, a new empty
-installation and original retained-history upgrade remain required afterward.
+## Retiring obsolete owners and remaining ingress review
+
+This continuation removes dormant CLI screen-response execution, its unused
+isolated credential-copy helpers, an unreferenced mixed-wire pruning helper,
+unused native roundtable brief/result projection, and an unreachable quorum-vote
+and aggregate-budget facade. Supported PTY forwarding/startup settling, native
+HOME/cache custody, OAuth setup/login, active canonical compaction, model/project
+budgets and hard directives remain. Retained function bodies and source sections
+have exact byte joins; only four obsolete cleanup-field lines change in the
+retained CLI destructor. Independent reviews are clear and focused tests pass.
+The first focused budget runner omitted its provider fixture; the unchanged old
+199 binary reproduces the same assertion. The corrected runner with actual
+qualified peers passes both retained targets normally and under sanitizers.
+No source/test assertion was weakened to fix that harness error. Receipts:
+`/var/tmp/aimee-screen-retirement-exports/qualified.json`,
+`/var/tmp/aimee-screen-retirement-exports/independent-review.json`,
+`/var/tmp/aimee-roundtable-retirement-proof/independent-final-review.json`,
+`/var/tmp/aimee-vote-retirement-proof/independent-review.json`,
+`/var/tmp/aimee-vote-retirement-proof/with-provider-fixtures/qualification.json`.
+Only obsolete helpers' own test cases are retired; active PTY/native/OAuth,
+business description/liveness and prompt-budget targets remain.
+
+A remaining registered ingress is under review: `delegate_reply` still queues
+into a legacy mailbox, while production questions now wait through the canonical
+control owner. Do not claim this cutover complete or acknowledge an undelivered
+reply. Trace and repair the supported tool/HTTP contract with exact control
+identity and delegation/source authority; add no ambient permission or question
+authority. Final genuine native replay, separate latest-source empty install,
+original retained-history upgrade and fresh source-bound CI remain required.
 
 ## Implemented behavior and current work
 
@@ -229,10 +242,10 @@ genuinely empty installation at 601aff47e; subsequent deployments are upgrades.
 Keep the failed first native OAuth-refresh refusal as failed history.
 
 Separate project `aimee-internal-ir-fresh-d8511ad41`, API8747/web8447, started
-with zero sessions/IR/native caches at d851. It is now upgraded to 4e, image
-`sha256:935ceaa4aacd5596a743579868b8d53a134e050aa94ca095477af47821ad38ac`.
-All 156 prior IR rows and native caches/authority/grants survived the 4e upgrade
-exactly. Later live jobs add genuine new history. This is not a clean 4e install.
+with zero sessions/IR/native caches at d851. It is now upgraded to 199, image
+`sha256:6bae300ff30745c9c0001505e6447343846fa7b33f8ae7e126f5a6617ed6756c`.
+All 156 prior IR rows and native caches/authority/grants survived that upgrade
+exactly; job 8 adds new history for 164 current rows. This is not a clean 199 install.
 Both app inventories match 87 products and 19 modules.
 
 Actual d851 browser testing passes normal login/project clone, pending question
@@ -248,7 +261,7 @@ private canonical/cache seals remain under
 `/var/tmp/aimee-internal-ir-live-8168/upgrade-fb0-to-d851/`.
 
 Actual 7db live validation exposed two defects whose source repairs are now
-implemented; the CLI live positive passes and accounting is being validated:
+implemented and now have installed 199 live positives above:
 
 - Relative `workspace add .` still registers the server cwd. Served argument
   metadata bypasses the corrected compiled marshaller. The failed registration
@@ -263,7 +276,7 @@ implemented; the CLI live positive passes and accounting is being validated:
   across plain/tool-loop, retry/fallback and joined native/script callbacks,
   initializes from the real stored baseline and serializes count plus DB writes.
   Actual HTTP focused normal/SAN tests, cache/no-send and scope/lifetime cases
-  pass. A new installed one-call case must report one observed call.
+  pass. Installed 199 job 8 now records one observed call; the earlier failure remains intact.
 
 Actual normal readonly `validate` training has business DONE, canonical COMPLETED
 and a protected configured-test grade on 7db. Normal restart preserves 145 prior rows and native caches/authority/grants;
@@ -290,7 +303,8 @@ A failed latest admitted generation cannot transfer an earlier final/cache.
 
 ## Remaining completion checks
 
-- Finish composition qualification of the native failure/usage projection and
+- Complete the registered delegate-reply ingress cutover and final combined-source qualification.
+  Preserve the already qualified native failure/usage projection and
   shared job progress owner; keep original per-generation facts and failure
   history. Preserve metadata precedence, cache/no-send, retry/fallback and full
   callback-scope restoration; add no authority or guard exceptions.
@@ -304,7 +318,8 @@ A failed latest admitted generation cannot transfer an earlier final/cache.
 - Requested overall production-code reduction is not established. At 7db the
   unchanged census is +1,929 physical production lines against cleanup baseline
   03d881e0e and +6,918 against testing 251536ddb. At 95c3ffecf they are +1,917
-  and +6,906 respectively under the identical counting rules. Subsequent source
+  and +6,906 respectively under the identical counting rules. At 199 they are
+  +2,277 and +7,266. This continuation removes dormant production code, but subsequent source
   must receive a fresh census. Substantial obsolete paths were
   retired, but ownership and container support added more. Do not change counting
   rules, minify code or delete supported behavior to manufacture a reduction.

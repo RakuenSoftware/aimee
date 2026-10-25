@@ -14,7 +14,6 @@
 #include "platform_path.h"
 #include <aimee/translation/harness_ir.h>
 #include <poll.h>
-#include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1_client/db1.h"
 #include "webchat_live.h" /* db1_webchat_live_set — mirror the live turn for browser polling */

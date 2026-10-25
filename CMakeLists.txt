@@ -726,7 +726,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c
     ${AIMEE_SRC_DIR}/server/session_compact.c
-    ${AIMEE_SRC_DIR}/server/compact_prune.c
     ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
@@ -911,7 +910,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
     ${AIMEE_SRC_DIR}/server/server_chat_ir.c
-    ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c
     ${AIMEE_SRC_DIR}/server/server_delegate_ondemand.c

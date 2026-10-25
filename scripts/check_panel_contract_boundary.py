@@ -28,7 +28,6 @@ TEMPORARY_ENSEMBLE_CONSUMERS = {
     # than migrated. The list only ever shrinks.
     "src/modules/workflows/wfe_panel_roundtable.h",
     "src/server/server_compute.c",
-    "src/server/server_compute_roundtable.c",
     "src/server/server_sweep.c",
 }
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)

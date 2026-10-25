@@ -17,7 +17,6 @@
 #include "server_session_capture.h"
 #include <openssl/crypto.h>
 #include "server_session_control.h"
-#include "cli_session.h"
 #include "db1_client/primary_sessions.h"
 #include "agent_response_projection.h"
 #include "agent_runtime_messages.h"

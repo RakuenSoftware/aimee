@@ -36,21 +36,4 @@ extern __thread char tl_parent_delegation_id[64];
 extern __thread int tl_delegation_depth;
 extern delegation_mailbox_t g_mailboxes[MAX_ACTIVE_DELEGATIONS];
 extern pthread_mutex_t g_mailbox_lock;
-typedef struct
-{
-   char *rendered;
-   int truncated;
-   char questions[ROUNDTABLE_MAX_QUESTIONS][512];
-   const char *question_ptrs[ROUNDTABLE_MAX_QUESTIONS];
-   int question_count;
-} normalized_roundtable_brief_t;
-
-/* promoted cross-TU (former .inc statics) */
-void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result);
-int normalize_roundtable_brief(cJSON *req, normalized_roundtable_brief_t *out, char *err,
-                               size_t err_n);
-
-#define ROUNDTABLE_MAX_ROUNDS_REQUEST 16
-
-#define ROUNDTABLE_BRIEF_MAX_BYTES (256 * 1024)
 #endif /* SERVER_COMPUTE_INTERNAL_H */

@@ -277,16 +277,6 @@ static int oauth_store_token_in_vault(cli_oauth_vendor_t v)
    return 0;
 }
 
-/* Strong override of cli_session.c's weak materialize seam: read the vaulted
- * (agent, "oauth") token so a delegate launch can write it into its ephemeral HOME
- * (the single-source-of-truth read side). This TU already links the vault; keeping
- * the seam out of cli_session.c means test binaries linking cli_session.o need no
- * vault objects. Returns 0 (token written to out) or non-zero (no entry / error). */
-int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len)
-{
-   return vault_service_get_server_principal(agent, "oauth", out, out_len) == VAULT_OK ? 0 : 1;
-}
-
 /* Build the explicit child environment for a vendor command: HOME + per-vendor
  * config dirs on the runtime tier, with only the non-secret npm installation on
  * the persistent volume. Fills `buf`

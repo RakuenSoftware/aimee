@@ -1,4 +1,4 @@
-/* Active voting, description and liveness boundaries consume canonical authored
+/* Active description and liveness boundaries consume canonical authored
  * TEXT, never display aliases, THINKING, partial or refused observations. */
 #include "aimee.h"
 #include "platform_test_util.h"
@@ -101,24 +101,6 @@ int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *sys,
 {
    return agent_run(cfg, role, sys, prompt, max, out);
 }
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int n, agent_result_t *out,
-                       int deadline)
-{
-   (void)cfg;
-   (void)deadline;
-   for (int i = 0; i < n; i++)
-   {
-      assert(!tasks[i].agent && !tasks[i].use_tools && !tasks[i].require_initial_tool_call);
-      int saved = mode;
-      mode = saved == 9 ? 1 : i < 2 ? 6 : 5;
-      produce(&out[i]);
-      mode = saved;
-      if (saved == 10)
-         agent_result_replace_display_text(&out[i],
-                                           strdup(i < 2 ? "WRONG_MAJORITY" : "CANONICAL_OK"));
-   }
-   return n;
-}
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
    (void)cfg;
@@ -133,20 +115,6 @@ void agent_route_failure_message(const char *role, char *out, size_t n)
 static void reset(int m)
 {
    mode = m;
-}
-static void test_vote_canonical_quorum(void)
-{
-   agent_config_t cfg = {0};
-   agent_result_t out = {0};
-   reset(9);
-   assert(agent_vote(&cfg, "review", "task", 3, &out) == -1);
-   assert(!out.success);
-   agent_result_clear_response(&out);
-   reset(10);
-   assert(agent_vote(&cfg, "review", "task", 3, &out) == 0);
-   assert(!strcmp(out.response, "CANONICAL_OK"));
-   assert(out.canonical_response.n_content == 2);
-   agent_result_clear_response(&out);
 }
 static void read_file(const char *path, char *out, size_t n)
 {
@@ -224,7 +192,6 @@ int main(void)
    char projects[512];
    snprintf(projects, sizeof projects, "%s/projects", test_home);
    assert(!mkdir(projects, 0700));
-   test_vote_canonical_quorum();
    test_description_writes();
    test_liveness_uses_canonical_observation();
    rmdir(projects);

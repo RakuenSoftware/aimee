@@ -1,9 +1,8 @@
 /* delegate_ensemble.c: Mixture-of-Agents ensemble implementation.
  *
  * Fans the same prompt to N diverse reference models in parallel, then runs
- * a synthesis pass that produces one reconciled answer. Different from
- * agent_vote() (same model N times, majority) -- MoA uses diverse models
- * and synthesizes via an aggregator.
+ * a synthesis pass that produces one reconciled answer. Diverse models
+ * contribute independently before the aggregator reconciles their results.
  */
 #include "delegate_ensemble_internal.h"
 #include "aimee.h"
