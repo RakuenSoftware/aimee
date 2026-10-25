@@ -27,6 +27,29 @@ IR.”** Different task payloads stay in their existing messages. Do not invent 
 parallel inference schema, or exempt speech, recognition and embedding messages
 merely because their payloads differ from conversation content.
 
+Implementation checkpoint `0dee1a999` includes the complete message-payload
+repairs below, matching ntfy delivery repair, strict HTTP field/length framing,
+and retirement of the unused narration/SSE and local CLI owners. Shipping thin
+CLI commands, server/KB dashboards, and native-memory ownership remain intact.
+Original external ownership findings are retained as frozen retirement records;
+restoring the old files fails validation.
+
+The unchanged production census now establishes a net reduction: **3,336 fewer
+lines than original testing `251536ddb`**, 3,370 fewer than the recorded current
+testing `35418e47e`, and 8,325 fewer than cleanup checkpoint `03d881e0e`.
+The full included/excluded inventory and unchanged rules are recorded at
+`/var/tmp/aimee-specialized-0dee-census.json`. No counting-rule change,
+minification, or supported behavior removal is used.
+
+Checkpoint `6600e422f` has all 76 lint gates and composed normal/sanitizer
+coverage: 703 invocations per lane, 700 inside the private temporary namespace,
+then the same three ownership-sensitive binaries passing on the host. Its exact
+image has all 87 products/19 modules and is not deployed. Its integration run
+aborted after 26 checks on host `/tmp` usrquota; the remaining hardcoded TCP
+fixture now honors `TMPDIR` in `5f3e1bf48`. These are checkpoint receipts, not
+qualification of the later retirement. Final combined-source tests/image and
+installed upgrade/empty-install journeys remain required.
+
 Recovery checkpoint `6afbaf919` adds only the reviewed ownership-ledger update
 to `b517daa71`; all other 10,218 tracked entries are identical. Its 76 lint
 checks pass and its `.252` producer has all 87 products and 19 modules. It has
@@ -389,7 +412,7 @@ A failed latest admitted generation cannot transfer an earlier final/cache.
 
 ## Remaining completion checks
 
-- Complete the registered delegate-reply ingress cutover and final combined-source qualification.
+- Qualify the completed delegate-reply ingress cutover on the final combined source.
   Preserve the already qualified native failure/usage projection and
   shared job progress owner; keep original per-generation facts and failure
   history. Preserve metadata precedence, cache/no-send, retry/fallback and full
@@ -401,14 +424,10 @@ A failed latest admitted generation cannot transfer an earlier final/cache.
   retained original-volume upgrade and a separate latest-source empty install.
   Validate installed CLI scope, native recall, controls/replay/mobile and
   learning on the proper source. Keep optional/platform/provider limits visible.
-- Requested overall production-code reduction is not established. At 7db the
-  unchanged census is +1,929 physical production lines against cleanup baseline
-  03d881e0e and +6,918 against testing 251536ddb. At 95c3ffecf they are +1,917
-  and +6,906 respectively under the identical counting rules. At 199 they are
-  +2,277 and +7,266. This continuation removes dormant production code, but subsequent source
-  must receive a fresh census. Substantial obsolete paths were
-  retired, but ownership and container support added more. Do not change counting
-  rules, minify code or delete supported behavior to manufacture a reduction.
+- Preserve the established net production reduction and repeat the unchanged
+  census after further source edits. Keep code, tests, documentation and build
+  metadata separate; do not change counting rules, minify code or delete
+  supported behavior to manufacture a reduction.
 - Update this handoff with actual final evidence, keep work on the same branch,
   and obtain source-bound fresh CI when implementation is complete. No PR/auth
   detours, no `.100` actions, no KB instance, no claim of 100% while work remains.

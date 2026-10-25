@@ -226,7 +226,7 @@ compatibility contracts. Moving server/root orchestration into `src/modules/dele
 build/link targets, durable jobs, and supported in-flight recovery behavior.
 
 The legacy `/v1/delegate/reply` route always returns an unavailable error. It cannot
-identify or authorize a canonical pending question. MCP does not advertise or dispatch
+identify or authorize a canonical unanswered question. MCP does not advertise or dispatch
 `delegate_reply`; answers use the operator-only `/v1/chat/control-reply` route with
 the exact session and turn-qualified request ID. Headless delegates retain their
 existing refusal when no reply-enabled canonical control scope exists.
