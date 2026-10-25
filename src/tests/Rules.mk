@@ -255,7 +255,7 @@ TEST_MEMORY_TRANSPORT_OBJS = $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_regi
                              $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
                              $(OBJDIR)/module_commands.o $(OBJDIR)/server/server_error_kind.o
 
-$(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-cmd-onboard \
+$(TESTPREFIX)/unit-test-guardrails \
 $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-mcp-native-dispatch \
 $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
 $(TESTPREFIX)/unit-test-notes \
@@ -491,7 +491,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-memory-benchmark \
                $(TESTPREFIX)/unit-test-agent-admission \
                $(TESTPREFIX)/unit-test-provider-catalog \
-               $(TESTPREFIX)/unit-test-cmd-branch \
                $(TESTPREFIX)/unit-test-cmd-core \
                $(TESTPREFIX)/unit-test-client-integrations \
                $(TESTPREFIX)/unit-test-git-verify-select \
@@ -681,14 +680,12 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-verify-hook \
                $(TESTPREFIX)/unit-test-process-mgr \
                $(TESTPREFIX)/unit-test-proxy-bootstrap \
-               $(TESTPREFIX)/unit-test-cmd-run \
                $(TESTPREFIX)/unit-test-conversation \
                $(TESTPREFIX)/unit-test-agent-business-ir \
                $(TESTPREFIX)/unit-test-agent-max-turns \
                $(TESTPREFIX)/unit-test-provider-settable \
                $(TESTPREFIX)/unit-test-json-fluent \
                $(TESTPREFIX)/unit-test-server-memory-setup \
-               $(TESTPREFIX)/unit-test-cmd-config \
                $(TESTPREFIX)/unit-test-tool-validation \
                $(TESTPREFIX)/unit-test-kb-export \
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
@@ -732,7 +729,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-plugin-c-hook \
                $(TESTPREFIX)/unit-test-context-engine \
                $(TESTPREFIX)/unit-test-dogfood \
-               $(TESTPREFIX)/unit-test-cmd-onboard \
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-learning-memory-transport \
                $(TESTPREFIX)/unit-test-memory-reference-transport \
@@ -745,7 +741,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-erasure-protocol \
                $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-memory-demotion-transport \
-               $(TESTPREFIX)/unit-test-cmd-memory-data \
                $(TESTPREFIX)/unit-test-memory-checkpoint-transport \
                $(TESTPREFIX)/unit-test-workflow-transport \
                $(TESTPREFIX)/unit-test-trace-transport \
@@ -755,7 +750,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-facts-transport \
                $(TESTPREFIX)/unit-test-server-memory-domain \
                $(TESTPREFIX)/unit-test-server-prospective \
-               $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
                $(TESTPREFIX)/unit-test-approach-memory \
                $(TESTPREFIX)/unit-test-learning-attribution \
@@ -2041,7 +2035,7 @@ $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJD
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
-                          $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o \
+                          $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o \
                           $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_f.o \
                           $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/decision_log.o $(OBJDIR)/kb_store/kb_audit_worm.o \
                           $(CONFIG_CLIENT_TEST_OBJS) \
@@ -2891,16 +2885,11 @@ $(TESTPREFIX)/unit-test-provider-catalog: $(OBJDIR)/tests/test_provider_catalog.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-$(TESTPREFIX)/unit-test-cmd-branch: $(OBJDIR)/tests/test_cmd_branch.o $(OBJDIR)/cmd_branch.o \
-                           $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
-                           $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
-                           $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 
 $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OBJS) \
                          $(TEST_WORKSPACE_OBJS_EXTRA) \
                          $(OBJDIR)/cmd_util.o \
-                         $(OBJDIR)/cmd_infra.o \
                          $(OBJDIR)/cmd_init.o \
                          $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                          $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o \
@@ -4138,17 +4127,7 @@ $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/
                             $(OBJDIR)/posix/agent_bridge.o $(TEST_CORE_OBJS) $(OBJDIR)/interaction_event_names.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
-                      $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                            $(OBJDIR)/cmd_onboard.o $(OBJDIR)/cmd_core.o $(OBJDIR)/cmd_init.o \
-                            $(OBJDIR)/cmd_doctor.o $(OBJDIR)/agent_tier_lint.o $(OBJDIR)/hardware_probe.o $(OBJDIR)/cmd_util.o \
-                            $(KB_STORE_OBJS) \
-                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
-                            $(OBJDIR)/client_integrations.o \
-                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
-                            $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o \
-                           $(OBJDIR)/secrets.o $(DB1_CLIENT_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 
 $(TESTPREFIX)/unit-test-diff: $(OBJDIR)/tests/test_diff.o $(OBJDIR)/diff.o $(OBJDIR)/dstr.o \
                       $(OBJDIR)/cJSON.o
@@ -5951,9 +5930,7 @@ $(TESTPREFIX)/unit-test-proxy-bootstrap: $(OBJDIR)/tests/test_proxy_bootstrap.o 
                                           $(OBJDIR)/util.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cmd-run: $(OBJDIR)/tests/test_cmd_run.o \
-                                  $(OBJDIR)/cmd_run.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 
 $(TESTPREFIX)/unit-test-conversation: $(OBJDIR)/tests/test_conversation.o \
                                        $(OBJDIR)/conversation.o $(OBJDIR)/cJSON.o
@@ -6006,9 +5983,7 @@ $(TESTPREFIX)/unit-test-json-fluent: $(OBJDIR)/tests/test_json_fluent.o $(OBJDIR
                                            $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/cmd_data.o \
-                                     $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 
 
 
@@ -6361,9 +6336,7 @@ $(TESTPREFIX)/unit-test-session-start-util: $(OBJDIR)/tests/test_session_start_u
                      $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-session-brief: $(OBJDIR)/tests/test_session_brief.o \
-                     $(OBJDIR)/cmd_session_history.o $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 
 $(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolve.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
@@ -7096,8 +7069,7 @@ $(TESTPREFIX)/unit-test-memory-reference-transport: $(OBJDIR)/tests/test_memory_
 $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory_domain.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-cmd-memory-data: $(OBJDIR)/tests/test_cmd_memory_data.o $(OBJDIR)/cmd_data.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
 
 $(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o $(PROVIDER_IR_OBJS)
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

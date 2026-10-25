@@ -119,7 +119,7 @@
       "evidence": [
         "src/Makefile",
         "CMakeLists.txt",
-        "src/tests/test_cmd_memory_data.c"
+        "docs/modules/ir.md"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
@@ -1735,23 +1735,6 @@
     }
   },
   "external_files": {
-    "src/cmd_data.c": {
-      "disposition": "legacy-command",
-      "symbols": [
-        "kb_client_memory_insert",
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de"
-    },
-    "src/cmd_onboard.c": {
-      "disposition": "legacy-command",
-      "symbols": [
-        "kb_client_memory_get",
-        "kb_client_memory_insert",
-        "kb_client_memory_insert_as"
-      ],
-      "sha256": "86bdc71da0af618b9093eb73ff719f7db8541d69c573c14d05a43c269986dc95"
-    },
     "src/cmd_session_lifecycle.c": {
       "disposition": "host-context",
       "symbols": [
@@ -2340,14 +2323,6 @@
       ],
       "sha256": "74184437dd278bc1b68f1210be82f327b6e80e7332cfcf016997c6277ff72544"
     },
-    "src/tests/test_cmd_memory_data.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_client_memory_insert",
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "3c9afa759a7fbf3ec050d9aff922c2698e984481cbd688a67d59293ea4a8446a"
-    },
     "src/tests/test_context_assembly.c": {
       "disposition": "legacy-fixture",
       "symbols": [
@@ -2707,13 +2682,6 @@
       ],
       "sha256": "b9275a655e5a6cae4ae333c82c138cf036c6cab30d0a008825d1f2ca3e66a370"
     },
-    "src/tests/test_cmd_config.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "AIMEE_MEMORY_BACKEND_TOKEN"
-      ],
-      "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4"
-    },
     "src/tests/test_server_memory_setup.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -2768,5 +2736,75 @@
       }
     }
   },
-  "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."
+  "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change.",
+  "retired_external_files": {
+    "src/cmd_data.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de",
+      "retirement": {
+        "reason": "Unlinked local CLI owner or its exclusive fixture retired; supported CLI uses served /v1 routes.",
+        "evidence": [
+          "docs/modules/ir.md",
+          "src/Makefile",
+          "CMakeLists.txt",
+          "scripts/check_ir_bypass.py"
+        ]
+      }
+    },
+    "src/cmd_onboard.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_get",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as"
+      ],
+      "sha256": "86bdc71da0af618b9093eb73ff719f7db8541d69c573c14d05a43c269986dc95",
+      "retirement": {
+        "reason": "Unlinked local CLI owner or its exclusive fixture retired; supported CLI uses served /v1 routes.",
+        "evidence": [
+          "docs/modules/ir.md",
+          "src/Makefile",
+          "CMakeLists.txt",
+          "scripts/check_ir_bypass.py"
+        ]
+      }
+    },
+    "src/tests/test_cmd_memory_data.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "3c9afa759a7fbf3ec050d9aff922c2698e984481cbd688a67d59293ea4a8446a",
+      "retirement": {
+        "reason": "Unlinked local CLI owner or its exclusive fixture retired; supported CLI uses served /v1 routes.",
+        "evidence": [
+          "docs/modules/ir.md",
+          "src/Makefile",
+          "CMakeLists.txt",
+          "scripts/check_ir_bypass.py"
+        ]
+      }
+    },
+    "src/tests/test_cmd_config.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4",
+      "retirement": {
+        "reason": "Unlinked local CLI owner or its exclusive fixture retired; supported CLI uses served /v1 routes.",
+        "evidence": [
+          "docs/modules/ir.md",
+          "src/Makefile",
+          "CMakeLists.txt",
+          "scripts/check_ir_bypass.py"
+        ]
+      }
+    }
+  }
 }

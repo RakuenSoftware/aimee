@@ -25,7 +25,7 @@ void subcmd_usage(const char *parent, const subcmd_t *table);
  * that only need DB1 (not other config fields). */
 void cmd_require_db1(const char *errmsg);
 
-/* cmd_core.c */
+/* Advisory session lifecycle hook; server-owned implementation. */
 void ensure_mcp_json(const char *dir);
 void ensure_client_integrations(void);
 void ensure_codex_project_trusted(const char *codex_home, const char *project_root);
@@ -33,7 +33,6 @@ void ensure_codex_current_project_trusted(const char *codex_home);
 
 /* client_integrations.c */
 void ensure_claude_code_trust(const char *dir);
-void cmd_init(app_ctx_t *ctx, int argc, char **argv);
 
 /* Stack detection for aimee init */
 typedef struct
@@ -60,48 +59,17 @@ int write_novel_rules_file(const char *dir);
 /* Write a songbook .aimee-rules scaffold for songwriter mode (concept, voice,
  * structure, hook). Returns 0 on success, 1 if already exists, -1 on error. */
 int write_songbook_rules_file(const char *dir);
-void cmd_setup(app_ctx_t *ctx, int argc, char **argv);
-void cmd_version(app_ctx_t *ctx, int argc, char **argv);
-void cmd_mode(app_ctx_t *ctx, int argc, char **argv);
-void cmd_primary(app_ctx_t *ctx, int argc, char **argv);
-void cmd_tdd(app_ctx_t *ctx, int argc, char **argv);
-void cmd_plan(app_ctx_t *ctx, int argc, char **argv);
-void cmd_implement(app_ctx_t *ctx, int argc, char **argv);
-void cmd_dashboard(app_ctx_t *ctx, int argc, char **argv);
-void cmd_env(app_ctx_t *ctx, int argc, char **argv);
-void cmd_contract(app_ctx_t *ctx, int argc, char **argv);
-void cmd_status(app_ctx_t *ctx, int argc, char **argv);
-void cmd_hud(app_ctx_t *ctx, int argc, char **argv);
-void cmd_export(app_ctx_t *ctx, int argc, char **argv);
-void cmd_import(app_ctx_t *ctx, int argc, char **argv);
-void cmd_workspace(app_ctx_t *ctx, int argc, char **argv);
 /* cli_workspace_serve.c: client-side detached-workspace runner serve loop. */
 int cmd_workspace_serve(const char *workspace_id);
-void cmd_session(app_ctx_t *ctx, int argc, char **argv);
-const subcmd_t *get_session_subcmds(void);
 /* cmd_ensemble.c — multi-agent ensemble sessions (canonical `ensemble` verb;
  * the same session_subcmd_* handlers stay reachable under `session` as aliases) */
 void cmd_ensemble(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_ensemble_subcmds(void);
-/* cmd_session_history.c */
-void session_subcmd_show(app_ctx_t *ctx, int argc, char **argv);
-void session_subcmd_search(app_ctx_t *ctx, int argc, char **argv);
-void session_subcmd_stats(app_ctx_t *ctx, int argc, char **argv);
-void session_subcmd_tokens(app_ctx_t *ctx, int argc, char **argv);
-void session_subcmd_brief(app_ctx_t *ctx, int argc, char **argv);
 void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv);
 void session_subcmd_status(app_ctx_t *ctx, int argc, char **argv);
 void session_subcmd_pause(app_ctx_t *ctx, int argc, char **argv);
 void session_subcmd_advance(app_ctx_t *ctx, int argc, char **argv);
-void cmd_config(app_ctx_t *ctx, int argc, char **argv);
-void cmd_git(app_ctx_t *ctx, int argc, char **argv);
-void cmd_doctor(app_ctx_t *ctx, int argc, char **argv);
-/* Returns malloc'd JSON with all doctor check results. Caller frees. */
-char *doctor_checks_json(void);
 void cmd_slop(app_ctx_t *ctx, int argc, char **argv);
-void cmd_notify(app_ctx_t *ctx, int argc, char **argv);
-void cmd_usage(app_ctx_t *ctx, int argc, char **argv);
-void cmd_clarify(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_index.c */
 void cmd_index(app_ctx_t *ctx, int argc, char **argv);
@@ -123,11 +91,6 @@ void cmd_dogfood(app_ctx_t *ctx, int argc, char **argv);
 /* cmd_identity.c */
 void cmd_identity(app_ctx_t *ctx, int argc, char **argv);
 
-/* cmd_onboard.c */
-void cmd_onboard(app_ctx_t *ctx, int argc, char **argv);
-/* Pure report builder; exposed for tests. Caller owns the returned
- * cJSON object and must cJSON_Delete() it. */
-struct cJSON *onboard_build_report(app_ctx_t *ctx, int skip_setup);
 /* JSON accessors reused by MCP and dashboard surfaces. Caller owns
  * the returned cJSON object and must cJSON_Delete() it. */
 struct cJSON;
@@ -201,10 +164,6 @@ const subcmd_t *get_cancel_subcmds(void);
 /* cmd_rewind.c */
 void cmd_rewind(app_ctx_t *ctx, int argc, char **argv);
 
-/* cmd_branch.c */
-void cmd_branch(app_ctx_t *ctx, int argc, char **argv);
-const subcmd_t *get_branch_subcmds(void);
-
 /* cmd_roles.c */
 void cmd_roles(app_ctx_t *ctx, int argc, char **argv);
 
@@ -223,9 +182,6 @@ const subcmd_t *get_mcp_subcmds(void);
 void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_autopilot_subcmds(void);
 
-/* cmd_run.c */
-void cmd_run(app_ctx_t *ctx, int argc, char **argv);
-
 /* cmd_kb.c */
 void cmd_kb(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_kb_subcmds(void);
@@ -243,8 +199,7 @@ void cmd_aux(app_ctx_t *ctx, int argc, char **argv);
 void cmd_audit(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_aux_subcmds(void);
 
-/* cmd_infra.c (webchat, gateway) */
-void cmd_webchat(app_ctx_t *ctx, int argc, char **argv);
+/* Platform gateway command. */
 void cmd_gateway(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_describe.c */

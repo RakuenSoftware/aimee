@@ -1,0 +1,37 @@
+{
+  "source_commit": "6600e422f93f95e20393afc6df27578267f198f3",
+  "files": {
+    "src/cmd_data.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de"
+    },
+    "src/cmd_onboard.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_get",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as"
+      ],
+      "sha256": "86bdc71da0af618b9093eb73ff719f7db8541d69c573c14d05a43c269986dc95"
+    },
+    "src/tests/test_cmd_memory_data.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "3c9afa759a7fbf3ec050d9aff922c2698e984481cbd688a67d59293ea4a8446a"
+    },
+    "src/tests/test_cmd_config.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4"
+    }
+  }
+}

@@ -282,3 +282,21 @@ refuse only the best-effort mirror, with a counted drop. Opaque companions that
 the selected codec can faithfully represent remain intact. Disarmed publishing
 and absent subscribers cause no clone or rendering. Subscriber responses are
 discarded: HTTP 2xx means delivery, never canonical model or business success.
+
+The old local command implementations (`cmd_core`, `cmd_data`, `cmd_doctor`,
+`cmd_infra`, `cmd_onboard`, `cmd_run`, `cmd_branch`, `cmd_session_history`) and
+root `dashboard.c` are retired. None belonged to the shipping Make/CMake source
+sets or published module APIs. The thin client's manifest discovery, `/v1`
+marshalling and forwarding remain the command boundary; the platform gateway,
+server dashboard, KB dashboard, session lifecycle and shared command utilities
+retain their existing owners. The legacy dashboard test retains its active
+vector-status assertion without linking the obsolete local dashboard owner.
+Mixed command tests retain Git validation, subcommand dispatch, stack detection
+and rules generation; only the orphan `.mcp.json` writer case is removed.
+
+The IR bypass guard rejects restoration of these retired source/header owners.
+`tests/baselines/modules/cli-native-retirement.json` preserves the original
+reviewed memory findings (including symbols, dispositions and content hashes).
+The ownership ledger classifies their retirement separately and rejects both
+restored files and missing or changed historical findings. Original memory
+inventories, symbols and native-boundary rules remain enforced.

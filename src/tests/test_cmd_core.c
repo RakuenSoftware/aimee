@@ -574,71 +574,6 @@ static void test_write_aimee_rules_no_stack(void)
    rmdir_r(dir);
 }
 
-static void test_ensure_mcp_json_rewrites_server_command(void)
-{
-   char tmpdir[PATH_MAX];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-mcp-json-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char home_dir[PATH_MAX];
-   char bin_dir[PATH_MAX];
-   char workspace_dir[PATH_MAX];
-   char fake_aimee_client[PATH_MAX];
-   char mcp_path[PATH_MAX];
-   snprintf(home_dir, sizeof(home_dir), "%s/home", tmpdir);
-   snprintf(bin_dir, sizeof(bin_dir), "%s/.local/bin", home_dir);
-   snprintf(workspace_dir, sizeof(workspace_dir), "%s/workspace", tmpdir);
-   snprintf(fake_aimee_client, sizeof(fake_aimee_client), "%s/aimee", bin_dir);
-   snprintf(mcp_path, sizeof(mcp_path), "%s/.mcp.json", workspace_dir);
-
-   char cmd[PATH_MAX * 2];
-   snprintf(cmd, sizeof(cmd), "mkdir -p '%s' '%s'", bin_dir, workspace_dir);
-   assert(system(cmd) == 0);
-
-   FILE *fp = fopen(fake_aimee_client, "w");
-   assert(fp != NULL);
-   fputs("#!/bin/sh\n", fp);
-   fclose(fp);
-
-   fp = fopen(mcp_path, "w");
-   assert(fp != NULL);
-   fputs("{\n"
-         "  \"mcpServers\": {\n"
-         "    \"aimee\": {\n"
-         "      \"command\": \"aimee-server\",\n"
-         "      \"args\": [\"mcp-serve\"]\n"
-         "    }\n"
-         "  }\n"
-         "}\n",
-         fp);
-   fclose(fp);
-
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   platform_setenv("HOME", home_dir);
-
-   ensure_mcp_json(workspace_dir);
-
-   fp = fopen(mcp_path, "r");
-   assert(fp != NULL);
-   char buf[2048];
-   size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-   fclose(fp);
-   buf[n] = '\0';
-
-   assert(strstr(buf, fake_aimee_client) != NULL);
-   assert(strstr(buf, "\"args\": [\"mcp-serve\"]") != NULL);
-   assert(strstr(buf, "\"command\": \"aimee-server\"") == NULL);
-   assert(strstr(buf, "\"command\": \"aimee\"") == NULL);
-
-   if (old_home)
-   {
-      platform_setenv("HOME", old_home);
-      free(old_home);
-   }
-
-   rmdir_r(tmpdir);
-}
-
 /* --- Bootstrap banner helpers --- */
 
 /* Simulates the webchat bootstrap flow: detect stacks, check for missing rules,
@@ -730,7 +665,6 @@ int main(void)
    test_write_novel_rules_basic();
    test_write_songbook_rules_basic();
    test_write_aimee_rules_no_stack();
-   test_ensure_mcp_json_rewrites_server_command();
    test_webchat_bootstrap_no_rules();
    test_webchat_bootstrap_rules_exist();
 

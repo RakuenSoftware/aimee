@@ -151,6 +151,17 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/headers/cli_client.h", "typedef int (*cli_stream_cb)(void *event); ")
         checker.check(self.root)
 
+    def test_obsolete_local_cli_owners_stay_retired(self):
+        for relative in checker.RETIRED_OWNERS:
+            path = self.source(relative, "/* even an empty restored owner is forbidden */")
+            with self.subTest(relative=relative), self.assertRaisesRegex(ValueError, "retired-owner"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/posix/cmd_infra.c", "void cmd_gateway(void); ")
+        self.source("src/cmd_workflow.c", "static int cmd_run(void); static int cmd_status(void); ")
+        self.source("src/server/dashboard_server.c", "char *api_doctor(void); ")
+        checker.check(self.root)
+
     def test_production_tree(self):
         checker.check(checker.ROOT)
 

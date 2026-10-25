@@ -15,6 +15,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
+RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
     "cli_http_request_stream", "turn_narration_t", "turn_narration_reset",
     "turn_narration_add", "turn_narration_inc_iter", "turn_narration_build",
@@ -261,7 +262,8 @@ def sources(root: Path):
 
 
 def findings(root: Path) -> list[dict]:
-    result = []
+    result = [{"file": path, "rule": "retired-owner", "line": 1, "match": path}
+              for path in RETIRED_OWNERS if (root / path).exists()]
     for relative, path in sources(root):
         original = path.read_text(encoding="utf-8")
         source = without_comments(original)
