@@ -288,14 +288,11 @@ char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const cha
  * prompt assembly. */
 char *delegate_prompt_append_block(const char *base, const char *block);
 
-/* Assemble a delegate's system prompt: the request-supplied `in` (may be NULL),
- * else a per-role template, else a static fallback; with the persona's
- * identity/principles composed on and the role's token budget applied. Returns
- * the active prompt and sets *owned_out to the malloc'd buffer the caller must
- * free (NULL when the static fallback literal is in use). */
-const char *delegate_assemble_system_prompt(const char *in, const char *role, const char *prompt,
-                                            const char *cwd, const char *persona,
-                                            const char *worktree_path, char **owned_out);
+/* Produce role/persona configuration as an owned canonical policy block.
+ * Source task/history never enter template substitution. Existing system blocks
+ * remain owned by the caller's canonical Request. Output unchanged on error. */
+int delegate_assemble_policy_ir(int has_source_policy, const char *role, const char *cwd,
+                                const char *persona, const char *worktree_path, aimee_block_t *out);
 
 /* For read-only inspection roles (review/validate/diagnose/test), prepend the
  * PARENT worktree's uncommitted-diff bundle (with a labelled preamble) to the

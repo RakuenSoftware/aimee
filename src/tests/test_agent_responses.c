@@ -222,8 +222,59 @@ void test_ir_parse_responses_text_only(void)
    aimee_response_free(&p);
 }
 
+static void assert_reasoning_content_does_not_hide_answer_events(void)
+{
+   const char *answer_events[] = {
+       "event: response.output_text.delta\ndata: "
+       "{\"type\":\"response.output_text.delta\",\"delta\":\"HelloWorld\"}\n\n",
+       "event: response.output_text.done\ndata: "
+       "{\"type\":\"response.output_text.done\",\"text\":\"HelloWorld\"}\n\n",
+       "event: response.content_part.done\ndata: "
+       "{\"type\":\"response.content_part.done\",\"part\":{\"type\":\"output_text\",\"text\":"
+       "\"HelloWorld\"}}\n\n",
+       ""};
+   const char *reasoning_types[] = {"reasoning_text", "text"};
+   for (int reasoning = 0; reasoning < 2; reasoning++)
+      for (int event = 0; event < 4; event++)
+         for (int snapshot = 0; snapshot < 2; snapshot++)
+         {
+            char native_reasoning[512], body[4096];
+            snprintf(native_reasoning, sizeof native_reasoning,
+                     "{\"type\":\"reasoning\",\"id\":\"rs_fixture\",\"summary\":[],"
+                     "\"encrypted_content\":\"opaque-encrypted-fixture\",\"content\":[{"
+                     "\"type\":\"%s\",\"text\":\"private synthetic thought must stay opaque\"}]}",
+                     reasoning_types[reasoning]);
+            snprintf(body, sizeof body,
+                     "%sevent: response.completed\n"
+                     "data: {\"type\":\"response.completed\",\"response\":{"
+                     "\"id\":\"fixture-response\",\"status\":\"completed\",\"output\":[%s,{"
+                     "\"type\":\"message\",\"id\":\"msg_fixture\",\"role\":\"assistant\","
+                     "\"content\":[{\"type\":\"output_text\",\"text\":\"%s\"}]}],"
+                     "\"usage\":{\"input_tokens\":5,\"output_tokens\":109,"
+                     "\"output_tokens_details\":{\"reasoning_tokens\":103}}}}\n\n",
+                     answer_events[event], native_reasoning, snapshot ? "snapshot answer" : "");
+            aimee_response_t parsed = {0};
+            assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+            assert_ir_text(&parsed, snapshot ? "snapshot answer" : event < 3 ? "HelloWorld" : "");
+            assert(parsed.n_content == (snapshot || event == 3 ? 2 : 3));
+            assert(
+                parsed.content[0].type == AIMEE_BLK_THINKING && !parsed.content[0].text &&
+                !strcmp(parsed.content[0].thinking_id, "rs_fixture") &&
+                !strcmp(parsed.content[0].thinking_encrypted_content, "opaque-encrypted-fixture"));
+            cJSON *expected = cJSON_Parse(native_reasoning);
+            assert(expected && cJSON_Compare(parsed.content[0].raw, expected, 1));
+            cJSON_Delete(expected);
+            assert(parsed.usage_in == 5 && parsed.usage_out == 109 &&
+                   parsed.usage_reasoning == 103);
+            assert(parsed.stop_reason == AIMEE_STOP_END_TURN &&
+                   !strcmp(parsed.raw_stop_reason, "completed"));
+            aimee_response_free(&parsed);
+         }
+}
+
 void test_responses_parser_uses_output_text_done(void)
 {
+   assert_reasoning_content_does_not_hide_answer_events();
    const char *body =
        "event: response.content_part.done\n"
        "data: {\"part\":{\"type\":\"output_text\",\"text\":\"One caveat: the endpoint I could "

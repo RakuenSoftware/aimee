@@ -1444,52 +1444,47 @@ char *delegate_prompt_append_block(const char *base, const char *block)
    return combined;
 }
 
-const char *delegate_assemble_system_prompt(const char *in, const char *role, const char *prompt,
-                                            const char *cwd, const char *persona,
-                                            const char *worktree_path, char **owned_out)
+int delegate_assemble_policy_ir(int has_source_policy, const char *role, const char *cwd,
+                                const char *persona, const char *worktree_path, aimee_block_t *out)
 {
+   if (!out)
+      return -1;
+   cwd = cwd ? cwd : "";
+   worktree_path = worktree_path ? worktree_path : "";
    char *owned = NULL;
-   if (!in)
+   const char *base = has_source_policy ? "" : NULL;
+   if (!base)
    {
       const char *template_root =
           worktree_path[0] ? worktree_path : ((cwd[0] && cwd[0] == '/') ? cwd : NULL);
-      owned = role_template_build(template_root, role, prompt, NULL);
-      if (owned)
-         in = owned;
+      /* The admitted task already exists as canonical user content. Only the
+       * template's task reference belongs in this policy, never a text copy. */
+      owned = role_template_build(template_root, role, NULL, NULL);
+      base = owned;
    }
-   if (!in)
-   {
-      static const char *fallback =
-          "You are a sub-agent executing a delegated task. "
-          "Complete the task and report results. "
-          "If you need input from the parent agent, use the request_input tool.";
-      in = fallback;
-   }
-
-   /* Compose the assigned persona's identity + principles onto the role/task
-    * prompt. persona is guaranteed non-empty (required by the caller). */
-   char *with_principles = persona_compose_delegate_prompt(persona, cwd, in);
-   if (with_principles)
-   {
-      free(owned);
-      owned = with_principles;
-      in = with_principles;
-   }
-
-   /* Apply token budget to system prompt (progressive context shedding).
-    * Mirrors the CLI delegate path so structured shedding is logged via aimee_log. */
-   const char *budget_root = cwd[0] ? cwd : NULL;
-   int budget = delegate_token_budget_load(budget_root, role);
-   char *limited = delegate_prompt_limit(in, budget);
-   if (limited)
-   {
-      free(owned);
-      owned = limited;
-      in = limited;
-   }
-
-   *owned_out = owned;
-   return in;
+   if (!base)
+      base = "You are a sub-agent executing a delegated task. "
+             "Complete the task and report results. "
+             "If you need input from the parent agent, use the request_input tool.";
+   char *composed =
+       persona_compose_delegate_prompt(persona && persona[0] ? persona : "engineer", cwd, base);
+   free(owned);
+   if (!composed)
+      return -1;
+   int budget = delegate_token_budget_load(cwd[0] ? cwd : NULL, role);
+   char *limited = delegate_prompt_limit(composed, budget);
+   free(composed);
+   if (!limited)
+      return -1;
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = limited};
+   /* Role/persona files are operator-editable configuration. Do not attest
+    * their contents as verified platform instructions. */
+   aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_OPERATOR, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_block_free_contents(out);
+   *out = block;
+   return 0;
 }
 
 char *delegate_prepend_parent_diff_evidence(const char *prompt, const char *role, int allows_writes,

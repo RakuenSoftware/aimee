@@ -69,3 +69,30 @@ func TestInvalidConnectionTransportIsAtomicBeforeCredentialWrite(t *testing.T) {
 		}
 	}
 }
+
+func TestExplicitNativeConnectionPreservesCustomAliasCommands(t *testing.T) {
+	for _, kind := range []string{"claude", "codex"} {
+		t.Run(kind, func(t *testing.T) {
+			m, home, _ := manager(t)
+			raw := `{"providers":[{"name":"account","provider":"chatgpt","endpoint":"https://chatgpt.com/backend-api/codex","auth_type":"codex-oauth","backend":"provider-cli","cli_kind":"` + kind + `","cli_cmd":"` + kind + `"}],"models":[{"name":"custom","registration":"account","provider":"chatgpt","backend":"provider-cli","cli_kind":"` + kind + `","cli_cmd":"/opt/owned/custom-` + kind + `","model":"account-model"}]}`
+			if err := os.WriteFile(filepath.Join(home, "models.json"), []byte(raw), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+			if actual := str(find(rows(got, "models"), "custom"), "cli_cmd"); actual != "/opt/owned/custom-"+kind {
+				t.Fatalf("unrelated read rewrote legacy custom command: got %q", actual)
+			}
+			edit := object{"name": "account", "provider": "chatgpt",
+				"endpoint": "https://chatgpt.com/backend-api/codex", "auth_type": "codex-oauth"}
+			call(t, m, "provider.save_connection", edit)
+			for _, command := range []string{kind, "/approved/new/" + kind} {
+				edit["backend"], edit["cli_kind"], edit["cli_cmd"] = "provider-cli", kind, command
+				call(t, m, "provider.save_connection", edit)
+				config := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+				if actual := str(find(rows(config, "models"), "custom"), "cli_cmd"); actual != "/opt/owned/custom-"+kind {
+					t.Fatalf("connection edit rewrote custom command: got %q", actual)
+				}
+			}
+		})
+	}
+}

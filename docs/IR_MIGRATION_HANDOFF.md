@@ -22,19 +22,54 @@ in `OWNERS.md`.
 
 ## Current work remains active
 
-The earlier completion claim was premature. Runtime `361fefa7f` has verified
-Claude and direct ChatGPT browser paths, but native Codex browser execution and
-the main retained Claude historical continuation failures remain unresolved.
-Historical positive receipts below qualify their stated cases only.
+The earlier completion claim was premature. Source `130d4cb6d` is pushed and its
+canonical image is `sha256:191b2791662cd52ceb00e6b65047b1be43feb47fde72f0045e44d67c8bcc26e1`.
+All 43 C targets pass normally and under ASan/UBSan, with Go normal/race,
+provider UI, TypeScript and architecture checks. The retained upgrade preserves
+all 315 prior IR rows. The second upgrade preserves its 103 prior rows and
+protected state; normal Compose dependency recreation changes the embedder's
+container ID while preserving its image, configuration and mounts. The original
+overstrict container-ID verifier failure is retained separately from the readback
+qualification.
 
-The follow-up implementation repairs request-control projection, workflow and
-primary-session IR construction at origin, typed retry observations, canonical
-QA callback requests, and normal provider connection enrollment for native Codex.
-Focused checks pass; independent review and qualification of the combined runtime
-are still required. No claim of all-model browser coverage
-or project-wide IR completion is established by the older runtime receipts.
+A live native Codex 0.163.0 browser session on `gpt-6.1-sol` completed a real
+`read_file`, returned `Hello World!`, then recalled its word count (`2`) in the
+same session without tools. Replay/reload, the actual SDK executable, persisted
+native thread binding and prior history/custody checks pass. Its history grows
+from 103 to 122 to 137 canonical events. An app-only restart and third same-session/same-thread turn also pass. The finite
+seven-model HTTP/native matrix remains in progress; this establishes no universal
+all-model claim. Receipts are in
+`/var/tmp/aimee-live-codex-130d4cb6d-held/native-1-read/qualification-proof.json`
+and `native-1-followup/qualification-proof.json` under that same directory.
 
-## Current qualification: runtime 361fefa7f
+The main retained Claude continuation remains unresolved. Its one subsequent
+arithmetic send stops before SDK launch at credential refresh HTTP 429. All 315
+prior events and protected state remain exact; three terminal/input events leave
+318 rows. This is distinct from the preserved earlier `reasoning_extraction`
+refusals and does not qualify model continuation.
+
+The follow-up repairs default delegate role/persona policy assembly so no task
+text is reconstructed into policy and both delegate paths retain all original
+system blocks. Three scoped suites and production compute objects pass normally
+and under ASan/UBSan. It also preserves distinct legacy per-model native commands
+while propagating explicit connection command edits to inherited aliases; Go
+normal/race and independent review pass. These follow-up changes still require
+their exact image qualification. Finite active caller reconciliation and proof:
+`/var/tmp/aimee-ir-final-active-caller-reconciliation.md` and
+`/var/tmp/aimee-ir-delegate-policy-proof.json`. Both goals remain active.
+
+The follow-up also corrects Claude refresh scope selection to match the installed
+SDK while preserving the original source digest and rotating-token custody;
+this does not establish a cause or fix for the 429. A separate confirmed Responses
+collector defect let opaque reasoning content suppress real answer deltas when
+the terminal answer snapshot was empty. Its fix preserves private reasoning and
+intentional empty replies; actual decoder tests pass normally and under
+ASan/UBSan. The two direct-HTTP `gpt-5.6-sol` and `gpt-5.6-terra` empty-final
+failures remain preserved and need qualification on the corrected image. Their
+native counterparts pass; no upstream raw response was retained to prove why the
+older HTTP turns failed.
+
+## Historical qualification: runtime 361fefa7f
 
 The implemented runtime is source `361fefa7f5aa02c9fb03ed6d1a8d00ba58a7e382`,
 image `sha256:7c4cd84edb41abf95390f16fcb398734b29b643652797c9c8d7fbd3aecfdd763`.

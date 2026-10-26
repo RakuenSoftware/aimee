@@ -7,6 +7,7 @@
 #include "request_context.h"
 #include "persona.h"
 #include "cmd_agent_delegate_impl.h"
+#include "server_delegate_input.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/ir/session_event.h>
 #include "cJSON.h"
@@ -146,6 +147,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
       return result;
    }
    aimee_request_t request = {0}, effective = {0};
+   aimee_block_t policy = {0};
    aimee_response_t response = {0};
    agent_result_t result = {0};
    agent_config_t *config = NULL;
@@ -192,30 +194,11 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
       goto done;
    const char *persona = text(json, "persona");
    if ((persona && persona[0] && !persona_exists(text(json, "workdir"), persona)) ||
-       aimee_ir_request_clone(&request, &effective))
+       delegate_assemble_policy_ir(server_delegate_input_has_policy(&request), text(json, "role"),
+                                   text(json, "workdir"), persona, text(json, "workdir"),
+                                   &policy) ||
+       server_delegate_request_prepare(&request, &policy, 0, &effective))
       goto done;
-   char query[4096], *owned_system = NULL;
-   aimee_ir_last_user_text(&request, query, sizeof query);
-   const char *system = delegate_assemble_system_prompt(
-       request.n_system ? request.system[0].text : NULL, text(json, "role"), query,
-       text(json, "workdir"), persona, text(json, "workdir"), &owned_system);
-   char *effective_system = system ? strdup(system) : NULL;
-   free(owned_system);
-   if (!effective_system)
-      goto done;
-   if (!effective.n_system)
-   {
-      effective.system = calloc(1, sizeof *effective.system);
-      if (!effective.system)
-      {
-         free(effective_system);
-         goto done;
-      }
-      effective.n_system = 1;
-      effective.system[0].type = AIMEE_BLK_TEXT;
-   }
-   free(effective.system[0].text);
-   effective.system[0].text = effective_system;
    if (aimee_ir_request_admit(&effective) ||
        server_native_delegate_source_admit(scope, persona, &effective, error, sizeof error))
       goto done;
@@ -304,6 +287,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
       status = AIMEE_MODULE_STATUS_INTERNAL;
    cJSON_free(wire);
 done:
+   aimee_block_free_contents(&policy);
    server_native_delegate_source_unbind(scope);
    free(config);
    cJSON_Delete(json);

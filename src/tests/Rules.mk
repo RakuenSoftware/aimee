@@ -4444,6 +4444,9 @@ $(TESTPREFIX)/unit-test-file-ref: $(OBJDIR)/tests/test_file_ref.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-role-templates: $(OBJDIR)/tests/test_role_templates.o \
+                               $(OBJDIR)/modules/delegates/delegate_prompt.o $(PROVIDER_IR_OBJS) \
+                               $(OBJDIR)/persona.o $(OBJDIR)/prompts.o $(OBJDIR)/working_profile.o \
+                               $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/server_delegate_input.o \
                                $(OBJDIR)/role_templates.o $(TEST_CORE_OBJS) \
                                $(OBJDIR)/dstr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7372,6 +7375,7 @@ $(TESTPREFIX)/unit-test-module-embedded-runtime: $(OBJDIR)/tests/test_bus_module
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
 $(TESTPREFIX)/unit-test-server-native-delegate: $(OBJDIR)/tests/test_server_native_delegate.o \
+ $(OBJDIR)/server/server_delegate_input.o \
  $(OBJDIR)/server/server_native_delegate.o $(OBJDIR)/modules/ir/request_codec.o \
  $(OBJDIR)/modules/ir/response_codec.o $(OBJDIR)/modules/ir/session_event.o \
  $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/core/event_bus/module_runtime.o \

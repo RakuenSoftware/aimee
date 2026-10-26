@@ -857,11 +857,15 @@ cJSON *responses_backend_sse_object(const char *body)
       const cJSON *item;
       cJSON_ArrayForEach(item, output)
       {
+         const char *type = ostr(item, "type");
+         if (!type || strcmp(type, "message"))
+            continue;
          const cJSON *part;
          cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, "content"))
          {
-            const char *text = ostr(part, "text");
-            text_found |= text && text[0];
+            const char *part_type = ostr(part, "type"), *text = ostr(part, "text");
+            /* reasoning.content is opaque state, never visible answer text. */
+            text_found |= part_type && !strcmp(part_type, "output_text") && text && text[0];
          }
       }
       const char *text = state.part_text;

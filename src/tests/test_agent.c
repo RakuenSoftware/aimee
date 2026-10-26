@@ -2063,7 +2063,9 @@ static void test_claude_selected_vault_lineage(void)
    assert(vault_service_set_server(registration, "oauth", legacy) == VAULT_OK);
    assert(!agent_claude_connection_credentials(registration, &current));
    assert(!strcmp(test_oauth_profile_client, "9d1c250a-e61b-44d9-88ed-5944d1962f5e"));
-   assert(!strcmp(test_oauth_profile_scope, "user:inference"));
+   assert(!strcmp(test_oauth_profile_scope,
+                  "user:profile user:inference user:sessions:claude_code user:mcp_servers "
+                  "user:file_upload"));
    assert(strcmp(current.source_digest, original.source_digest));
    agent_t agent = {0};
    snprintf(agent.name, sizeof agent.name, "claude");
@@ -2138,6 +2140,78 @@ static void test_claude_selected_vault_lineage(void)
    runtime_secret_wipe(&current, sizeof current);
    runtime_secret_wipe(&codex_credentials, sizeof codex_credentials);
    puts("  PASS: selected Vault Claude lineage, exact refresh profile and vendor switching");
+}
+
+static void test_claude_sdk_refresh_scope_selection(void)
+{
+   const char *registration = "claude-scope-fixture";
+   const char *defaults = "user:profile user:inference user:sessions:claude_code user:mcp_servers "
+                          "user:file_upload";
+   const char *metadata[] = {"",
+                             ",\"subscriptionType\":null",
+                             ",\"subscriptionType\":false",
+                             ",\"subscriptionType\":\"\"",
+                             ",\"subscriptionType\":0",
+                             ",\"subscriptionType\":\"max\"",
+                             ",\"subscriptionType\":true",
+                             ",\"subscriptionType\":{}",
+                             ",\"subscriptionType\":[]"};
+   agent_claude_credentials_t original, current;
+   test_oauth_tokens_reset();
+   int stores = 0;
+   for (size_t i = 0; i < sizeof metadata / sizeof *metadata; i++)
+   {
+      char source[1024], stored[1024];
+      snprintf(source, sizeof source,
+               "{\"claudeAiOauth\":{\"accessToken\":\"scope-access\","
+               "\"refreshToken\":\"scope-refresh\",\"expiresAt\":4102444800000,"
+               "\"scopes\":[\"user:profile\"]%s}}",
+               metadata[i]);
+      assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+      assert(!agent_claude_connection_credentials(registration, &current));
+      assert(!strcmp(test_oauth_profile_scope, i < 5 ? "user:profile" : defaults));
+      /* Pin the pre-repair digest over ORIGINAL effective source fields. */
+      assert(!strcmp(current.source_digest,
+                     "dbb59a4302e816c9f0c212f9c80de10473487feb8f8f89f9c1343aaee8cdbe5e"));
+      vault_store_read_t read = {"oauth", stored, sizeof stored, 0};
+      assert(vault_service_read_server_snapshot(registration, &read, 1) == VAULT_OK);
+      assert(read.present && !strcmp(stored, source));
+      if (!i)
+      {
+         original = current;
+         oauth_token_response_t rotated = {0};
+         snprintf(rotated.access_token, sizeof rotated.access_token, "scope-rotated-access");
+         assert(!oauth_token_store(registration, &rotated));
+         stores = test_oauth_stores;
+      }
+      else
+      {
+         assert(!strcmp(current.token, "scope-rotated-access"));
+         assert(!strcmp(current.source_digest, original.source_digest));
+         assert(test_oauth_stores == stores);
+      }
+   }
+   /* Explicit clientId wins even when it is the standard public client and
+    * scopes/subscription metadata would otherwise select the default set. */
+   const char *clients[] = {"custom-client", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"};
+   for (size_t i = 0; i < sizeof clients / sizeof *clients; i++)
+   {
+      char source[1024];
+      snprintf(source, sizeof source,
+               "{\"claudeAiOauth\":{\"accessToken\":\"explicit-access\","
+               "\"refreshToken\":\"explicit-refresh\",\"expiresAt\":4102444800000,"
+               "\"clientId\":\"%s\",\"subscriptionType\":\"max\","
+               "\"scopes\":[\"user:inference\",\"custom:scope\"]}}",
+               clients[i]);
+      assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+      assert(!agent_claude_connection_credentials(registration, &current));
+      assert(!strcmp(test_oauth_profile_client, clients[i]));
+      assert(!strcmp(test_oauth_profile_scope, "user:inference custom:scope"));
+   }
+   test_oauth_tokens_reset();
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&current, sizeof current);
+   puts("  PASS: SDK Claude refresh scope selection preserves source and rotating-token lineage");
 }
 
 static void test_codex_oauth_auth_resolution(void)
@@ -4841,6 +4915,7 @@ int main(int argc, char **argv)
    test_vault_api_key_lineage_and_request_binding();
    test_codex_source_lineage_and_paired_headers();
    test_claude_selected_vault_lineage();
+   test_claude_sdk_refresh_scope_selection();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();

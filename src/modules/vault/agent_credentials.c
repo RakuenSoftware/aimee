@@ -698,6 +698,8 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
  * the SDK's legacy public client. No endpoint is taken from a login document. */
 #define CLAUDE_OAUTH_CLIENT_ID      "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 #define CLAUDE_OAUTH_TOKEN_ENDPOINT "https://platform.claude.com/v1/oauth/token"
+#define CLAUDE_OAUTH_SUBSCRIPTION_SCOPES                                                           \
+   "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 
 static const cJSON *credential_unique(const cJSON *object, const char *name)
 {
@@ -710,6 +712,15 @@ static const cJSON *credential_unique(const cJSON *object, const char *name)
          found = item;
       }
    return found;
+}
+
+/* Match the SDK's subscriptionType truthiness without introducing a new
+ * credential schema restriction for this optional display metadata. */
+static int credential_json_truthy(const cJSON *value)
+{
+   return value && !cJSON_IsNull(value) && !cJSON_IsFalse(value) &&
+          (!cJSON_IsNumber(value) || value->valuedouble != 0) &&
+          (!cJSON_IsString(value) || value->valuestring[0]);
 }
 
 static int claude_parse_source(const char *document, oauth_token_response_t *tokens,
@@ -734,13 +745,18 @@ static int claude_parse_source(const char *document, oauth_token_response_t *tok
        credential_text(source, "clientId", client, 256, 0) ||
        strpbrk(tokens->access_token, "\r\n") || strpbrk(client, "\r\n"))
       goto done;
-   if (!client[0])
+   int subscription_scopes =
+       !client[0] && credential_json_truthy(credential_unique(source, "subscriptionType"));
+   int default_client = !client[0];
+   if (default_client)
       snprintf(client, 256, "%s", CLAUDE_OAUTH_CLIENT_ID);
    size_t used = 0;
    for (const cJSON *grant = grants->child; grant; grant = grant->next)
    {
       if (!cJSON_IsString(grant) || !grant->valuestring[0])
          goto done;
+      if (default_client && !strcmp(grant->valuestring, "user:inference"))
+         subscription_scopes = 1;
       for (const unsigned char *p = (const unsigned char *)grant->valuestring; *p; p++)
          if (*p < 0x21 || *p > 0x7e || *p == '"' || *p == '\\')
             goto done;
@@ -772,6 +788,11 @@ static int claude_parse_source(const char *document, oauth_token_response_t *tok
    }
    credential_json_cleanse(identity);
    cJSON_Delete(identity);
+   /* SDK 2.1.177 defaults subscription refresh scopes unless clientId was
+    * explicit. Keep this refresh projection OUT of source identity: changing
+    * optional subscription metadata must never reseed rotating Vault tokens. */
+   if (!rc && subscription_scopes)
+      snprintf(scopes, 4096, "%s", CLAUDE_OAUTH_SUBSCRIPTION_SCOPES);
 done:
    credential_json_cleanse(root);
    cJSON_Delete(root);

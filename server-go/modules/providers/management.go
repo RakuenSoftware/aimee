@@ -324,12 +324,19 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 			return nil, errors.New("remove attached models before changing provider type")
 		}
 	}
+	previousCommand := str(p, "cli_cmd")
+	previousTransport := copyObject(p)
+	if normalizeModel(previousTransport) == nil {
+		previousCommand = str(previousTransport, "cli_cmd")
+	}
 	key := str(a, "api_key")
 	transport := copyObject(p)
 	transport["provider"], transport["endpoint"], transport["auth_type"] = protocol, endpoint, auth
 	if err := applyConnectionTransport(transport, a); err != nil {
 		return nil, err
 	}
+	_, commandRequested := a["cli_cmd"]
+	updateInheritedCommand := commandRequested && previousCommand != str(transport, "cli_cmd")
 	if err := m.credential(ctx, req, name, key); err != nil {
 		return nil, err
 	}
@@ -348,6 +355,11 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 	}
 	for _, model := range rows(root, "models") {
 		if owns(p, model) {
+			// Explicit connection edits update inherited commands. Distinct legacy
+			// per-model executables remain intact during reads and unrelated edits.
+			if updateInheritedCommand && str(model, "cli_cmd") == previousCommand {
+				delete(model, "cli_cmd")
+			}
 			applyConnection(model, p)
 		}
 	}

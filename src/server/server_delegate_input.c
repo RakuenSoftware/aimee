@@ -144,16 +144,18 @@ void server_delegate_input_attenuate(aimee_request_t *request)
    request->mutated = 1;
 }
 
-int server_delegate_request_prepare(const aimee_request_t *source, const char *host_policy,
+int server_delegate_request_prepare(const aimee_request_t *source, const aimee_block_t *host_policy,
                                     int max_tokens, aimee_request_t *out)
 {
    aimee_request_t request = {0}, policy = {0};
    if (aimee_ir_request_clone(source, &request))
       return -1;
-   if (host_policy && host_policy[0])
+   if (host_policy)
    {
-      if (aimee_ir_request_from_text(&policy, host_policy, "", 0, 0.3) ||
-          request.n_system >= AIMEE_IR_MAX_BLOCKS)
+      aimee_request_t view = {.system = (aimee_block_t *)host_policy, .n_system = 1};
+      if (host_policy->type != AIMEE_BLK_TEXT ||
+          host_policy->context.authority != AIMEE_CTX_AUTH_POLICY ||
+          aimee_ir_request_clone(&view, &policy) || request.n_system >= AIMEE_IR_MAX_BLOCKS)
          goto fail;
       aimee_block_t *blocks = realloc(request.system, (request.n_system + 1) * sizeof *blocks);
       if (!blocks)

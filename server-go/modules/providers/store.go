@@ -351,7 +351,7 @@ func owns(p, m object) bool {
 }
 func applyConnection(m, p object) {
 	for _, field := range connectionFields {
-		if field == "cli_cmd" && str(m, field) != "" && str(p, "backend") == "" {
+		if field == "cli_cmd" && str(m, field) != "" && str(p, "backend") != "http" {
 			continue
 		}
 		if v, ok := p[field]; ok {

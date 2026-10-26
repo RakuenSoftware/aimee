@@ -2,6 +2,7 @@
 #include "server_native_delegate_source.h"
 #include "server_native_history.h"
 #include "agent_exec.h"
+#include "server_delegate_input.h"
 #include "request_context.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/ir/session_event.h>
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+static aimee_request_t bound_request;
 static int bound, ran, unbound, allow = 1, terminal = 1, loaded, seen_tools, seen_turns;
 static request_context_t actor = {.vault_principal = "webuser:source-owner"};
 static const agent_request_cancel_scope_t *cancel_scope;
@@ -56,6 +58,8 @@ int server_native_delegate_source_bind(const char *handle, unsigned principal,
    seen_turns = max_turns;
    if (!allow)
       return -1;
+   aimee_request_free(&bound_request);
+   assert(!aimee_ir_request_clone(request, &bound_request));
    strcpy(selected->name, "native-model");
    selected->enabled = 1;
    selected->max_turns = 3;
@@ -73,15 +77,31 @@ int persona_exists(const char *workdir, const char *persona)
    assert(!strcmp(workdir, "/owned/task") && !strcmp(persona, "architect"));
    return persona_known;
 }
-const char *delegate_assemble_system_prompt(const char *in, const char *role, const char *prompt,
-                                            const char *cwd, const char *persona,
-                                            const char *worktree, char **owned)
+int delegate_assemble_policy_ir(int has_source_policy, const char *role, const char *cwd,
+                                const char *persona, const char *worktree, aimee_block_t *out)
 {
-   assert(!in && !strcmp(role, "review") && !strcmp(prompt, "actual request") &&
-          !strcmp(cwd, "/owned/task") && !strcmp(worktree, cwd));
+   assert(has_source_policy == server_delegate_input_has_policy(&bound_request));
+   assert(!strcmp(role, "review") && !strcmp(cwd, "/owned/task") && !strcmp(worktree, cwd));
    assert(persona && !strcmp(persona, "architect"));
-   *owned = strdup("host-composed role/persona policy");
-   return *owned;
+   *out =
+       (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("host-composed role/persona policy")};
+   aimee_ir_block_set_context(out, AIMEE_CTX_ORIGIN_OPERATOR, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   return out->text ? 0 : -1;
+}
+static void assert_effective_source(const aimee_request_t *request)
+{
+   assert(request->n_system == bound_request.n_system + 1 &&
+          !strcmp(request->system[0].text, "host-composed role/persona policy"));
+   assert(request->system[0].context.origin == AIMEE_CTX_ORIGIN_OPERATOR &&
+          request->system[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
+          request->system[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   aimee_request_t original = *request;
+   original.system++;
+   original.n_system--;
+   original.mutated = bound_request.mutated;
+   assert(aimee_ir_request_equal(&original, &bound_request));
 }
 int server_native_delegate_source_admit(server_native_delegate_source_scope_t *scope,
                                         const char *persona, const aimee_request_t *request,
@@ -90,8 +110,7 @@ int server_native_delegate_source_admit(server_native_delegate_source_scope_t *s
    (void)error;
    (void)capacity;
    assert(scope && !strcmp(persona, "architect"));
-   assert(request->n_system == 1 &&
-          !strcmp(request->system[0].text, "host-composed role/persona policy"));
+   assert_effective_source(request);
    effective_admitted++;
    return final_allowed ? 0 : -1;
 }
@@ -119,8 +138,7 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
                                       aimee_response_t *response, agent_result_t *result)
 {
    assert(selected->max_turns == 3);
-   assert(request->n_system == 1 &&
-          !strcmp(request->system[0].text, "host-composed role/persona policy"));
+   assert_effective_source(request);
    ran++;
    assert(!strcmp(role, "review") && tools == seen_tools && cancel_scope);
    assert(config->tool_loop_timeout_ms_cap > 0 && config->tool_loop_timeout_ms_cap <= 60000);
@@ -304,6 +322,42 @@ static void test_fences(void)
    allow = 1;
    assert(ran == calls && !cancel_scope);
 }
+static void test_original_system_blocks_preserved(void)
+{
+   cJSON *j = request();
+   const char *policy_text = "operator original policy 漢字";
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = (char *)policy_text},
+                             {.type = AIMEE_BLK_TEXT, .text = "hidden memory evidence"}};
+   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_OPERATOR, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                              "original-policy", "unit", 17);
+   aimee_ir_block_set_context(&blocks[1], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNTRUSTED, AIMEE_CTX_SENS_CONFIDENTIAL, 0,
+                              "original-memory", "unit", 18);
+   aimee_request_t source = {0};
+   assert(!aimee_ir_request_parse(cJSON_GetObjectItemCaseSensitive(j, "ir"), &source));
+   source.system = calloc(2, sizeof *source.system);
+   assert(source.system);
+   source.n_system = 2;
+   for (int i = 0; i < 2; i++)
+   {
+      source.system[i] = blocks[i];
+      source.system[i].text = strdup(blocks[i].text);
+      assert(source.system[i].text);
+   }
+   source.has_temperature = source.has_top_p = 1;
+   source.temperature = 0.17;
+   source.top_p = 0.8;
+   cJSON *ir = aimee_ir_request_json(&source);
+   assert(ir);
+   cJSON_ReplaceItemInObjectCaseSensitive(j, "ir", ir);
+   aimee_module_invocation_t inv = invocation();
+   cJSON *reply = call(j, &inv, AIMEE_MODULE_STATUS_OK);
+   assert(reply);
+   cJSON_Delete(reply);
+   aimee_request_free(&source);
+}
+
 static void test_trigger(void)
 {
    const char *body = "{\"version\":3,\"action\":\"trigger_scope\",\"registration\":{\"id\":"
@@ -338,6 +392,8 @@ int main(void)
    test_success_and_decline();
    test_fences();
    test_trigger();
+   test_original_system_blocks_preserved();
+   aimee_request_free(&bound_request);
    puts("native delegate bridge: PASS");
    return 0;
 }

@@ -777,7 +777,7 @@ static void delegate_worker_run(void *arg)
    char credential_state_path[MAX_PATH_LEN] = "";
    aimee_request_t request = {0};
    char *resolved_prompt = NULL;
-   char *template_sys_prompt = NULL;
+   aimee_block_t delegate_policy = {0};
    char delegate_worktree_path[MAX_PATH_LEN] = "";
    char delegate_git_root[MAX_PATH_LEN] = "";
    char delegate_work_name[32] = "";
@@ -828,10 +828,6 @@ static void delegate_worker_run(void *arg)
            ? (int)jmax->valuedouble
            : (cctx->delegate_request.has_max_tokens ? cctx->delegate_request.max_tokens : 0);
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
-   /* A source policy replaces the role template, just as --system_prompt did.
-    * Its blocks stay canonical; only generated persona policy is assembled here. */
-   const char *system_prompt =
-       server_delegate_input_has_policy(&cctx->delegate_request) ? "" : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *branch =
@@ -1120,9 +1116,8 @@ static void delegate_worker_run(void *arg)
       }
       /* Both learning arms operate on the same qualified pool. Premium means
        * demonstrated task competence, never the most expensive configured tier. */
-      acfg.route_input_tokens = (int)((delegate_request_text_bytes(&cctx->delegate_request) +
-                                       strlen(system_prompt ? system_prompt : "") + 3) /
-                                      4);
+      acfg.route_input_tokens =
+          (int)((delegate_request_text_bytes(&cctx->delegate_request) + 3) / 4);
       acfg.route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]) &&
@@ -1377,14 +1372,11 @@ static void delegate_worker_run(void *arg)
    char parent_worktree_fingerprint[64] = "";
    (void)delegate_git_worktree_fingerprint(parent_worktree_path, parent_worktree_fingerprint,
                                            sizeof(parent_worktree_fingerprint));
-   /* Assemble the system prompt: per-role template (or fallback), persona
-    * identity/principles, and token-budget shedding. template_sys_prompt owns
-    * the buffer (NULL when the static fallback literal is in use). */
-   system_prompt =
-       delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
-                                       delegate_worktree_path, &template_sys_prompt);
-
-   if (server_delegate_request_prepare(&cctx->delegate_request, system_prompt, max_tokens,
+   /* Role/persona policy is generated independently of the admitted task. */
+   if (delegate_assemble_policy_ir(server_delegate_input_has_policy(&cctx->delegate_request), role,
+                                   cwd, persona_override, delegate_worktree_path,
+                                   &delegate_policy) ||
+       server_delegate_request_prepare(&cctx->delegate_request, &delegate_policy, max_tokens,
                                        &request) ||
        (!delegate_shared_worktree &&
         delegate_request_map_root(&request, cwd, delegate_worktree_path)) ||
@@ -1956,7 +1948,7 @@ static void delegate_worker_run(void *arg)
    free(handoff_prompt);
    aimee_request_free(&request);
    free(resolved_prompt);
-   free(template_sys_prompt);
+   aimee_block_free_contents(&delegate_policy);
    compute_respond(cctx, resp);
 
    /* Unified-presence "speak first": tell the launching session's surfaces this
@@ -2053,7 +2045,7 @@ delegate_fail:
    run_cmd_set_cwd(NULL);
    aimee_request_free(&request);
    free(resolved_prompt);
-   free(template_sys_prompt);
+   aimee_block_free_contents(&delegate_policy);
    if (target_agent && leased_cred_name[0])
       delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
    if (container_quiescent && delegate_worktree_path[0] && delegate_git_root[0])

@@ -310,3 +310,11 @@ The browser leaves unauthored sampling controls unset so the selected agent
 resolves its configured defaults. Clean-retry observations enter an owned request
 clone as `MEMORY` / `EVIDENCE` / `UNVERIFIED` blocks, preserving the original
 user message and policy blocks.
+
+Generated delegate role/persona instructions use a separate canonical policy
+block. `delegate_assemble_policy_ir` accepts configuration selectors and policy
+presence; it receives no task text. Templates refer to the canonical task, and
+both queued and native delegate preparation retain every original system block.
+Responses ingestion treats only message `output_text` as a visible answer when
+reconciling streamed text with a terminal snapshot; opaque reasoning content
+cannot suppress real answer events or become public answer text.

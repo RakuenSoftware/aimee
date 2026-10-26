@@ -501,8 +501,13 @@ static void test_delegate_queue_input_is_ir(void)
    assert(context.delegate_request.messages[2].blocks[2].context.authority ==
           AIMEE_CTX_AUTH_EVIDENCE);
    aimee_request_t prepared = {0};
-   assert(!server_delegate_request_prepare(&context.delegate_request, "host role policy", 321,
-                                           &prepared));
+   aimee_block_t host_policy = {.type = AIMEE_BLK_TEXT, .text = "host role policy"};
+   aimee_ir_block_set_context(&host_policy, AIMEE_CTX_ORIGIN_OPERATOR, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   assert(
+       !server_delegate_request_prepare(&context.delegate_request, &host_policy, 321, &prepared));
+   assert(!memcmp(&prepared.system[0].context, &host_policy.context, sizeof host_policy.context));
    assert(prepared.n_messages == 3 && prepared.messages[2].n_blocks == 3);
    assert(prepared.messages[2].compaction_boundary && prepared.n_system == 2);
    assert(!strcmp(prepared.system[1].text, policy.text));
