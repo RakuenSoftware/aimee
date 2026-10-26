@@ -20,94 +20,110 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Qualification checkpoint before the first-party origin build
+## Current qualification: runtime 361fefa7f
 
-This checkpoint records work before its deployment, rather than a live runtime
-status. Inspect the source revision and completion evidence in
-`/var/tmp/aimee-ir-browser-final-recovery/summary.json` for later qualification.
-At this checkpoint the goal is active and incomplete. The whole-task blocked classification was
-premature: a provider refusal of one cold saved-history continuation did not
-prevent request inspection, implementation or independent browser validation.
-Do not stop the migration or classify it blocked on that refusal alone.
+The implemented runtime is source `361fefa7f5aa02c9fb03ed6d1a8d00ba58a7e382`,
+image `sha256:7c4cd84edb41abf95390f16fcb398734b29b643652797c9c8d7fbd3aecfdd763`.
+The two goals remain browser agent sessions and canonical IR throughout Aimee.
+The final handoff-only commit does not change the tested runtime code. Every
+other Git blob and mode remains identical to that source; the explicit proof is
+`/var/tmp/aimee-ir-final-361-code-equivalence.json`. The installed image retains
+its actual source identity above.
 
-Installed retained browser: `https://192.168.0.67:8447`, source
-`ab1059c6fa075e7bf8b7e19242327d7f2357a556`, image
-`sha256:800537854a3f42bfd35206eeaf5d0f860037b16a119278583f6d3d51df2a962a`.
-All 87 products and 19 modules match that build. Upgrade preserves prior IR,
-credentials, grants, channels, jobs and SDK state. The retained browser session
-`web-7db8c5ba-fa58-4363-af71-0494b086f05f` completed a follow-up recalling the
-README word count (`2`), used no tools and reloaded the same session successfully.
-Receipt: `/var/tmp/aimee-ir-parallel-ab1059c6f-retained-upgrade-ui/result.json`.
-
-That build corrects unsupported historical empty assistant envelopes only at
-Anthropic egress, with the canonical `omitted_empty_messages` projection receipt.
-Exact private pre-transport comparison proves three envelopes removed and every
-other message and request field unchanged; canonical stored history is unchanged.
-Raw-byte and overlay restoration cannot reintroduce them. Thirty C targets pass
-normal and ASAN/UBSAN; Go IR race, frontend and architecture checks pass. The old
-ORBIT cold continuation still receives a typed `content_filter` /
-`reasoning_extraction` refusal. Preserve this failed case; do not silently change
-models or weaken source/cache/credential fences to label it successful. The
-initial refusal preceded empty envelopes, so they are not a demonstrated cause.
-
-An isolated clean installation of that exact image is booted at
-`https://192.168.0.67:8451` with fresh identity, credentials, database and volumes.
-Initial IR, jobs, sessions and caches were empty; normal browser setup and a
-public Hello-World clone are complete. Only the public pinned vendor packages
-were staged; no identity or SDK cache was copied. Retained project seals remain
-exact. Fresh model/read and governed nested CLI checks are being run separately.
-No KB or learning workflow belongs to this task.
-
-A subsequent production-caller audit found real remaining internal text paths:
-Aimee's thin CLI and gateway were incorrectly treated as external message
-boundaries. Their chat producers now emit canonical Message, and delegate,
-aggregate, auxiliary and review producers emit the existing full Request at
-origin. Authored tasks, file task text, evidence, policy and controls remain typed.
-Actual UDS/HTTP and CLI tests pass normal and ASAN/UBSAN; thin CLI links without
-DB dependencies. Delegate admission and queued workers now retain full Request,
-with unconditional public authority attenuation and no capability-based bypass.
-MCP/Subagent adapters import external tool text at their own boundaries.
-
-The auxiliary consumer now retains the full Request, with deterministic legacy
-sampling set at the CLI producer. The public chat and draft handlers share the
-IR block attenuation primitive with delegate admission; blanket metadata resets
-were removed. Actual handler checks preserve hidden/restricted evidence even for
-privileged transports, and the provider wire excludes those private bodies.
-Roadmap, sweep and chair builders now originate typed Requests, preserving source
-history/controls and keeping generated instructions separate from retrieved or
-model-authored evidence. Their obsolete raw prompt builder contracts are removed.
-
-Review transport retains canonical Request, domain artifact and structured brief
-separately. The historical positional CLI artifact form retains its bytes as an
-artifact, with a separate review task; file/stdin task forms remain supported.
-Go panel participants, discussion and chair clone the source Request rather than
-reconstructing it from original_request. Only the public legacy importer retains
-that text alias; the internal Run requires canonical Request.
-
-Before deployment, 40 C targets pass normal and ASAN/UBSAN checks, alongside
-all 38 actual public ACP cases in each lane. Roundtable and engine Go normal/race
-checks pass, including the independent review's system-evidence revision fix.
-The thin CLI builds with CMake; ownership, inventory, API, documentation, line,
-generated-document and all-package Go compile checks pass. The IR architecture
-guard has 55 passing cases. Combined C receipts are recorded in
+Final-source verification passes 40 C targets normally and under ASan/UBSan,
+all 38 actual ACP cases in each lane, Go normal/race checks, thin-client CMake,
+all-package Go compilation, and ownership/API/inventory/documentation/architecture
+gates. The architecture guard has 55 passing cases. The combined C receipt names
+this exact source and all exit codes:
 `/var/tmp/aimee-ir-firstparty-combined-c-proof.json`.
 
-These subsequent changes are not yet installed. Combined-source verification,
-deployment and exact-final-source qualification remain required. Do not claim
-completion while those steps remain. The clean AB baseline has now completed two
-browser turns: one actual file read and one actual installed CLI read inside Bash.
-The nested read has an acknowledged governed-action receipt tied to the same turn
-and workspace, with trusted timestamps inside the canonical outer source/result.
-First use added five normal OAuth credential slots while retaining every prior
-encrypted Vault record exactly; phase two retained the resulting authority state.
-The isolated AB project is stopped with its volumes and identity preserved to
-make room for the final source build; the three retained projects remain healthy.
-Receipts: `/var/tmp/aimee-ir-clean-ab1059c6f-read-ui/qualified-supplement.json`
-and `/var/tmp/aimee-ir-clean-ab1059c6f-cli-ui/custody-proof.json`.
+The retained appliance upgrade preserves all 302 pre-upgrade IR rows and its
+native cache, credentials, grants, SDK state and jobs. All 87 products and 19
+modules match the built image; all three services are healthy. Certificate
+renewal preserves its key. Receipt:
+`/var/tmp/aimee-ir-parallel-361fefa7f-upgrade/summary.json`.
 
-Older receipt paths and success statements below apply only to their recorded
-revisions. `/var/tmp/aimee-ir-browser-final-recovery/summary.json` is a historical
-c0 receipt with `completion:false`, not a final-source completion claim.
+A fresh installation of the same image completed an actual README read and an
+actual installed Aimee CLI read inside governed Bash. The CLI read has its own
+acknowledged action receipt joined to the same canonical turn and trusted
+source/result timestamps; it is not presented as a fabricated nested assistant
+or tool claim. After an app-only restart, the same conversation recalled the
+README word count (`2`) without tools and reloaded exactly. The SDK process
+actually used the prior registered warm `--resume` handle. The 64 prior IR rows
+were preserved and the completed conversation has 75 rows. Receipts:
+`/var/tmp/aimee-ir-clean-361fefa7f-read-ui/result.json`,
+`/var/tmp/aimee-ir-clean-361fefa7f-cli-ui/custody-proof.json`,
+`/var/tmp/aimee-ir-clean-361fefa7f-cli-ui/nested-receipt-proof.private.json`,
+`/var/tmp/aimee-ir-clean-361fefa7f-stable-restart/proof.json`, and
+`/var/tmp/aimee-ir-clean-361fefa7f-stable-resume-ui/qualification-proof.json`.
+
+Existing control/usage/permission histories render and reload exactly at desktop
+and mobile widths with no idle model, control-reply or cancel actions. Final-image canonical channel
+send, GET/SSE and reload preserve Unicode and JSON-looking literal text. Installed
+CLI negative cases refuse absent native capabilities before transport. These
+are correctly scoped no-model proofs, not live model continuation claims:
+`/var/tmp/aimee-ir-current-passive-361fefa7f/proof.json`,
+`/var/tmp/aimee-ir-current-channel-361fefa7f-r2/proof.json`, and
+`/var/tmp/aimee-ir-final-cli-negative-361fefa7f/proof.json`.
+
+Preserve the main retained history's two actual typed
+`content_filter` / `reasoning_extraction` provider refusals as negative outcomes.
+They are not successful continuations, and the earlier empty-envelope defect
+was not demonstrated to cause the initial refusal. No prompt/model/identity or
+source/cache/credential guard was changed to relabel those cases as positive.
+
+The controlled AB upgrade restores the original 82-row baseline and its complete
+pre-stop custody, changing only the image to this runtime. Its upgrade receipt
+proves all prior history/cache/credentials/grants/SDK/project journals preserved,
+with other retained projects exact:
+`/var/tmp/aimee-ir-controlled-ab-upgrade-361/proof.json`.
+The separate real continuation recalled the prior README word count (`2`)
+without tools, using the configured default and the actual preserved registered
+SDK `--resume` handle. All prior 82 rows remain exact; the successful turn leaves
+93 rows. Its authority/grants/products/SDK/vendor/project/certificate/journals
+remain exact. This is positive old-history upgrade evidence; it does not replace
+the main history's negative cases. Receipt:
+`/var/tmp/aimee-ir-controlled-ab-upgrade-361/model-ui/qualification-proof.json`.
+
+After that controlled comparison, the fresh final-source appliance is restored
+at `https://192.168.0.67:8451` with its same three healthy containers and all 75 IR
+rows and custody exact. The AB project is stopped with its 93-row receipts
+preserved, and the other three retained projects, including the main 315-row
+negative cases, remain exact. No model call was made during restoration. Receipt:
+`/var/tmp/aimee-ir-controlled-ab-upgrade-361/restoration-proof.json`.
+
+Manual ensemble DB1 integration was exercised by an actual no-model lifecycle:
+four canonical contributions, human pause, planner/critic transitions,
+wrong-speaker/completed-session refusals, independent status reads and exact
+Unicode/literal-JSON preservation. Receipt:
+`/var/tmp/aimee-ir-parallel-c0c2f6eb2-manual/summary.json`.
+All 12 relevant manual producer, DB1, API, Go and schema/operation owner blobs are
+unchanged through this runtime. One final-source read-only status request confirms
+the entire retained completed row, raw context bytes and all four canonical
+Message hashes are exact. No login, model or new lifecycle was executed for the
+readback. Final receipt:
+`/var/tmp/aimee-ir-final-manual-readback/proof.json`.
+
+Canonical Request/Message/Response/delta history now spans first-party browser,
+CLI and gateway origins; public admission; delegates and queued workers;
+review/panel/repair; workflows; peer/channel/manual-ensemble storage; cron replay;
+and actual generation/tool/native execution. Typed source metadata and controls
+survive internal dispatch. Host instructions, user tasks, evidence and policy
+are separate blocks. Retired raw prompt builders cannot be reused. Provider,
+ACP/OpenCode, external SDK and explicit legacy imports are conversion boundaries;
+opaque native caches and domain artifacts/configuration remain owned by their
+respective contracts. These exceptions never replace canonical conversation.
+
+Both requested goals are implemented and qualified for this exact runtime by the
+source inventory, final-source checks and live receipts above. Keep historical
+receipts tied to their recorded revisions, preserve the provider-negative cases,
+and retain the controlled comparison volumes. Production promotion remains
+subject to the repository's normal merge and independent-review requirements.
+
+The current closure index is
+`/var/tmp/aimee-ir-browser-final-recovery/summary.json`. Historical sections below
+apply only to their recorded revisions. No KB, WOL or learning workflow was
+introduced; `.100` was not investigated or modified.
 
 ## Parallel audit coverage
 
