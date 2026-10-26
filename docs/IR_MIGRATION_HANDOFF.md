@@ -57,6 +57,29 @@ provider or model request was made during that cleanup. Proof:
 The wrapper failure after acknowledgement is preserved separately; independent
 acknowledgement/custody checks pass and the POST was never retried.
 
+## Source-binding correction before deployment
+
+The e26 candidate image built successfully but was held before deployment after
+root found a real serialization loss: source/ASR hashes existed only in block.raw,
+which canonical serialization intentionally omits. The first review and JSON
+before/after equality did not establish preservation of those values and are
+explicitly superseded for that claim. The candidate image and original receipts
+remain retained; it was never installed on the active QA.
+
+The bounded correction uses existing typed Context revision fields on assets and
+ASR transcripts, with fixed source-binding namespaces, the full source SHA256 and
+epoch0. It preserves USER/unverified authority and typed file identity. Parsed
+messages retain these bindings after raw/original memory is freed; ASR validates
+the parsed source and rejects changed content. Unknown hashes remain unbound.
+Normal/sanitizer tests, actual C-to-Go acceptance and production gateway relink
+pass. Proof: `/var/tmp/aimee-ir-gateway-source-binding-proof.json`.
+
+Only unused Docker builder cache was pruned once to provide space for the
+corrected image. All images, volumes,15 container identities/configuration,
+renewed35-entry Vault,1680 IR history and native SDK/cache data remain exact.
+Proof: `/var/tmp/aimee-single-QA-builder-cache-prune/proof.json`. The current
+runtime remains f3; no source-binding candidate upgrade/model check has occurred.
+
 ## Gateway source follow-up: tested, awaiting image qualification
 
 The gateway migration now retains owned canonical USER Message blocks at external

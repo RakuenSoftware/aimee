@@ -114,6 +114,14 @@ static inline int gateway_message_import_external(const char *text, const attach
          goto failed;
       int hash_available = !gateway_file_hash(a->path, digest);
       snprintf(b->media_ref, length, "file://%s", a->path);
+      /* Content-addressed source revision; media_ref retains the asset identity.
+       * No revision is asserted when the external source cannot be read. */
+      if (hash_available)
+      {
+         snprintf(b->context.revision_domain, sizeof b->context.revision_domain,
+                  "gateway.asset.sha256");
+         snprintf(b->context.revision_scope, sizeof b->context.revision_scope, "%s", digest);
+      }
       cJSON *source = cJSON_AddObjectToObject(b->raw, "gateway_source");
       if (!source || !cJSON_AddBoolToObject(source, "hash_available", hash_available) ||
           (hash_available && !cJSON_AddStringToObject(source, "sha256", digest)) ||
@@ -186,15 +194,22 @@ static inline int gateway_message_append_transcript(aimee_message_t *message, in
       return -1;
    const aimee_block_t *asset = message->blocks + source_index;
    const char *path = gateway_asset_path(asset);
-   const cJSON *source = cJSON_GetObjectItemCaseSensitive(asset->raw, "gateway_source");
-   const char *expected = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "sha256"));
+   const char *expected = asset->context.revision_scope;
+   /* Only typed canonical metadata binds ASR to its retained source. raw is an
+    * inert diagnostic sidecar and is intentionally absent after RPC parsing. */
+   if (strcmp(asset->context.revision_domain, "gateway.asset.sha256") || strlen(expected) != 64 ||
+       strspn(expected, "0123456789abcdef") != 64 || asset->context.revision_epoch != 0)
+      return -1;
    char digest[65];
-   if (!gateway_audio_block(asset) || !path || !expected || gateway_file_hash(path, digest) ||
+   if (!gateway_audio_block(asset) || !path || gateway_file_hash(path, digest) ||
        strcmp(expected, digest))
       return -1;
    aimee_block_t derived = {
        .type = AIMEE_BLK_TEXT,
        .context = gateway_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION, 1)};
+   snprintf(derived.context.revision_domain, sizeof derived.context.revision_domain,
+            "gateway.asr.source.sha256");
+   snprintf(derived.context.revision_scope, sizeof derived.context.revision_scope, "%s", digest);
    derived.text = strdup(transcript);
    derived.raw = cJSON_CreateObject();
    cJSON *provenance =

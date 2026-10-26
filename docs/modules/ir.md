@@ -101,8 +101,14 @@ platform/TTS adapters own their text projections.
 Original attachments remain separate non-model-visible IMAGE or DOCUMENT file
 assets; generic DOCUMENT can retain an audio MIME type. ASR adds a derived,
 unverified USER task block with source provenance while retaining the original
-asset. Attachment hashes are recorded when available; an unreadable non-audio
-attachment does not discard valid authored text. ASR source validation remains
+asset. Content bindings use typed Context revisions: `gateway.asset.sha256` on
+an asset and `gateway.asr.source.sha256` on its derived transcript, the same full
+SHA256 in `revision_scope`, and epoch0. The typed asset retains its MIME/reference.
+These are unverified content-addressed source bindings, not policy or verified
+revision authority. They survive strict C/Go admission and public attenuation.
+Provider `raw` sidecars are intentionally absent from canonical serialization and
+cannot be the authoritative home for this information. An unreadable non-audio
+attachment remains explicitly unbound and does not discard valid authored text. ASR source validation remains
 separate from generic message admission. Inert sidecars never promote roles or
 policy authority. These are compiled gateway contracts and fixture coverage, not
 an assertion that a messaging platform has been configured or contacted.

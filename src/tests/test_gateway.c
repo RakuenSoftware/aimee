@@ -232,6 +232,11 @@ static void test_media_and_derived_transcript_preserve_source(void)
    assert(input.n_blocks == 3 && !strcmp(input.blocks[0].text, literal));
    assert(input.blocks[1].type == AIMEE_BLK_DOCUMENT && gateway_audio_block(input.blocks + 1));
    assert(!input.blocks[1].context.model_visible && !input.blocks[2].context.model_visible);
+   char source_digest[65];
+   assert(!gateway_file_hash(audio_path, source_digest));
+   assert(!strcmp(input.blocks[1].context.revision_domain, "gateway.asset.sha256") &&
+          !strcmp(input.blocks[1].context.revision_scope, source_digest) &&
+          input.blocks[1].context.revision_epoch == 0);
    cJSON *source_before = aimee_ir_message_json(&input);
    assert(!gateway_message_clone(&input, &derived));
    derived.content_scalar = 0;
@@ -253,12 +258,54 @@ static void test_media_and_derived_transcript_preserve_source(void)
    assert(projected.n_messages == 1 && projected.messages[0].n_blocks == 2);
    assert(!strcmp(projected.messages[0].blocks[0].text, literal) &&
           !strcmp(projected.messages[0].blocks[1].text, spoken));
+   const aimee_context_meta_t *asset_context = &parsed.messages[0].blocks[1].context;
+   const aimee_context_meta_t *transcript_context = &parsed.messages[0].blocks[3].context;
+   assert(!strcmp(asset_context->revision_domain, "gateway.asset.sha256") &&
+          !strcmp(asset_context->revision_scope, source_digest) && !asset_context->revision_epoch);
+   assert(!strcmp(transcript_context->revision_domain, "gateway.asr.source.sha256") &&
+          !strcmp(transcript_context->revision_scope, source_digest) &&
+          !transcript_context->revision_epoch);
+   for (int i = 0; i < parsed.messages[0].n_blocks; i++)
+   {
+      /* Exercise public RPC attenuation before a second strict codec pass. */
+      aimee_ir_block_attenuate_public(parsed.messages[0].blocks + i, 0);
+      cJSON_Delete(parsed.messages[0].blocks[i].raw);
+      parsed.messages[0].blocks[i].raw = NULL;
+   }
+   cJSON *admitted_json = aimee_ir_request_json(&parsed);
+   aimee_request_t admitted = {0};
+   assert(admitted_json && !aimee_ir_request_parse(admitted_json, &admitted));
+   assert(!admitted.messages[0].blocks[1].raw && !admitted.messages[0].blocks[3].raw);
+   assert(!strcmp(admitted.messages[0].blocks[1].context.revision_domain, "gateway.asset.sha256") &&
+          !strcmp(admitted.messages[0].blocks[1].media_ref, input.blocks[1].media_ref) &&
+          !strcmp(admitted.messages[0].blocks[1].context.revision_scope, source_digest) &&
+          !strcmp(admitted.messages[0].blocks[3].context.revision_scope, source_digest) &&
+          !strcmp(admitted.messages[0].blocks[3].context.revision_domain,
+                  "gateway.asr.source.sha256"));
+   /* Optional offline C-to-Go fixture uses this exact production serialization. */
+   const char *fixture_path = getenv("AIMEE_GATEWAY_IR_FIXTURE");
+   if (fixture_path)
+   {
+      char *encoded = cJSON_PrintUnformatted(admitted_json);
+      FILE *fixture = fopen(fixture_path, "wb");
+      assert(encoded && fixture &&
+             fwrite(encoded, 1, strlen(encoded), fixture) == strlen(encoded) && !fclose(fixture));
+      free(encoded);
+   }
    cJSON *source_after = aimee_ir_message_json(&input);
    assert(source_before && source_after && cJSON_Compare(source_before, source_after, 1));
+   aimee_message_free(&input);
+   aimee_message_free(&derived);
+   aimee_request_free(&parsed);
+   assert(!gateway_message_append_transcript(admitted.messages, 1, "parsed source speech") &&
+          admitted.messages[0].n_blocks == 5);
+   assert(!strcmp(admitted.messages[0].blocks[4].context.revision_scope, source_digest));
    file = fopen(audio_path, "wb");
    assert(file && fwrite("changed", 1, 7, file) == 7 && !fclose(file));
-   assert(gateway_message_append_transcript(&derived, 1, "unbound speech") < 0 &&
-          derived.n_blocks == 4);
+   assert(gateway_message_append_transcript(admitted.messages, 1, "unbound speech") < 0 &&
+          admitted.messages[0].n_blocks == 5);
+   cJSON_Delete(admitted_json);
+   aimee_request_free(&admitted);
    cJSON_Delete(source_before);
    cJSON_Delete(source_after);
    cJSON_Delete(json);
@@ -283,6 +330,9 @@ static void test_media_and_derived_transcript_preserve_source(void)
    json = aimee_ir_message_json(&input);
    assert(json && !aimee_ir_message_parse(json, &derived) && !gateway_message_admit(&derived));
    assert(derived.n_blocks == 2 && !strcmp(derived.blocks[0].text, input.blocks[0].text));
+   assert(!derived.blocks[1].context.revision_domain[0] &&
+          !derived.blocks[1].context.revision_scope[0] &&
+          !derived.blocks[1].context.revision_epoch);
    cJSON_Delete(json);
    aimee_message_free(&derived);
    aimee_message_free(&input);
