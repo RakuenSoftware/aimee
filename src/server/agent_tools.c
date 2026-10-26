@@ -800,7 +800,9 @@ static cJSON *tp_read_file(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "path", "string",
            "File path. Prefer paths relative to the current workspace directory.");
-   tp_prop(props, "offset", "integer", "Line offset to start reading from");
+   tp_prop(
+       props, "offset", "integer",
+       "Zero-based line offset (default 0): 0 reads from the first line; 1 skips the first line.");
    tp_prop(props, "limit", "integer", "Maximum number of lines to read");
    tp_prop(props, "raw", "boolean",
            "Return raw bytes with no line anchors (for grep pipelines / binary sniffing). "

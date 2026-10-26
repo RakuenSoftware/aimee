@@ -54,7 +54,7 @@ static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
 static int fixture_usage_unknown, fixture_usage_prefix;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
-static int refuse_runtime;
+static int refuse_runtime, reject_final_source;
 static int expected_turn_limit;
 static char parent_role[64], private_home[4096], host_workspace[4096], observed_sdk_identity[65];
 static int child_executable, child_directory;
@@ -527,7 +527,7 @@ int server_native_history_admit_source(const char *session, const char *actor, c
 {
    assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(active, "turn") &&
           running);
-   return aimee_ir_history_admit(messages);
+   return reject_final_source ? -1 : aimee_ir_history_admit(messages);
 }
 int server_native_runtime_set_native_owner(server_native_runtime_t *value, const cJSON *reservation)
 {
@@ -707,7 +707,7 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
    if (mode == 3)
       return -1;
    out->role = strdup("assistant");
-   out->n_content = mode == 19 ? 4 : mode == 11 ? 2 : 1;
+   out->n_content = mode == 19 ? 4 : mode == 11 || mode == 22 ? 2 : 1;
    out->content = calloc((size_t)out->n_content, sizeof *out->content);
    out->content[0].type = AIMEE_BLK_TEXT;
    out->content[0].text = strdup("ORIGINAL canonical output");
@@ -716,6 +716,16 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
                                         .text = strdup("original reasoning"),
                                         .thinking_id = strdup("original-reasoning-id"),
                                         .thinking_encrypted_content = strdup("opaque-original")};
+   if (mode == 21 || mode == 22)
+   {
+      free(out->content[0].text);
+      out->content[0].text = strdup("");
+      if (mode == 22)
+         out->content[1] =
+             (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                             .thinking_id = strdup("empty-final-reasoning-id"),
+                             .thinking_encrypted_content = strdup("opaque-empty-final")};
+   }
    if (mode == 19)
    {
       out->content[1] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
@@ -1204,7 +1214,7 @@ static void reset(int next)
    assert(!terminal && !retained);
    mode = next;
    fixture_usage_unknown = fixture_usage_prefix = 0;
-   fixture_host_calls = fixture_host_successes = 0;
+   fixture_host_calls = fixture_host_successes = reject_final_source = 0;
    owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
    expected_wire = AIMEE_WIRE_RESPONSES;
    expected_provider = expected_endpoint = expected_auth = NULL;
@@ -1374,6 +1384,8 @@ int main(int argc, char **argv)
       {
          assert(!terminal && !completed);
          assert(!began || (aborted == 1 && closed == 1));
+         if (scenario == 9) /* Exact terminal custody rejected the otherwise complete answer. */
+            assert(!strcmp(out.error, "canonical native execution was refused"));
       }
       agent_result_clear_response(&out);
    }
@@ -1487,11 +1499,48 @@ int main(int argc, char **argv)
          assert(original.stop_reason == AIMEE_STOP_ERROR && original.error_message &&
                 !strcmp(original.error_message, "retained upstream diagnostic"));
       if (diagnostic == 17)
+      {
          assert(original.content[0].type == AIMEE_BLK_THINKING);
+         assert(
+             !strcmp(failed.error, "native provider completed without an authored final answer"));
+      }
+      else
+         assert(strcmp(failed.error, "native provider completed without an authored final answer"));
       if (diagnostic == 18)
          assert(original.stop_reason == AIMEE_STOP_END_TURN && !failed.success);
       aimee_response_free(&original);
       agent_result_clear_response(&failed);
+      cfg.canonical_response = NULL;
+   }
+   /* Empty canonical finals retain original typed diagnostics and fail exactly
+    * as before. A failed source check must not be mislabeled as model emptiness. */
+   for (int scenario = 0; scenario < 3; scenario++)
+   {
+      reset(scenario ? 22 : 21);
+      reject_final_source = scenario == 2;
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t empty = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &empty) == AGENT_RC_CAPTURE_FAILED);
+      assert(!empty.success && !terminal && !completed && aborted == 1 && closed == 1);
+      assert(!strcmp(empty.stop_reason, "capture_failed"));
+      assert(
+          !strcmp(empty.error, reject_final_source
+                                   ? "canonical native execution was refused"
+                                   : "native provider completed without an authored final answer"));
+      assert(original.stop_reason == AIMEE_STOP_END_TURN && original.usage_in == 73 &&
+             original.usage_out == 29 && original.n_content == (scenario ? 2 : 1));
+      assert(original.content[0].type == AIMEE_BLK_TEXT && original.content[0].text &&
+             !original.content[0].text[0] && empty.response && !empty.response[0]);
+      assert(empty.canonical_response.n_content == original.n_content);
+      if (scenario)
+         assert(original.content[1].type == AIMEE_BLK_THINKING &&
+                !strcmp(original.content[1].thinking_id, "empty-final-reasoning-id") &&
+                !strcmp(original.content[1].thinking_encrypted_content, "opaque-empty-final") &&
+                !strcmp(empty.canonical_response.content[1].thinking_encrypted_content,
+                        "opaque-empty-final"));
+      aimee_response_free(&original);
+      agent_result_clear_response(&empty);
       cfg.canonical_response = NULL;
    }
    /* General native/primary completion preserves all admitted visible media,

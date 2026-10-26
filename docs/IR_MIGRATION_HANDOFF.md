@@ -22,52 +22,71 @@ in `OWNERS.md`.
 
 ## Current work remains active
 
-The earlier completion claim was premature. Source `130d4cb6d` is pushed and its
-canonical image is `sha256:191b2791662cd52ceb00e6b65047b1be43feb47fde72f0045e44d67c8bcc26e1`.
-All 43 C targets pass normally and under ASan/UBSan, with Go normal/race,
-provider UI, TypeScript and architecture checks. The retained upgrade preserves
-all 315 prior IR rows. The second upgrade preserves its 103 prior rows and
-protected state; normal Compose dependency recreation changes the embedder's
-container ID while preserving its image, configuration and mounts. The original
-overstrict container-ID verifier failure is retained separately from the readback
-qualification.
+The latest deployed and pushed runtime is `5530a8c59`, image
+`sha256:41158b0d903d0b436545514495daa3033eca8472838328ef8efcf59bf0036e4b`.
+Its 45 C targets pass normally and under ASan/UBSan. Scoped Go normal/race,
+provider UI, TypeScript, thin CLI and enforced architecture/ownership gates pass.
+The separate old Go module-boundary script still reports pre-existing peer
+imports; it is not recorded as passing. Exact combined C evidence:
+`/var/tmp/aimee-ir-5530a8c59-combined-c-proof.json`.
 
-A live native Codex 0.163.0 browser session on `gpt-6.1-sol` completed a real
-`read_file`, returned `Hello World!`, then recalled its word count (`2`) in the
-same session without tools. Replay/reload, the actual SDK executable, persisted
-native thread binding and prior history/custody checks pass. Its history grows
-from 103 to 122 to 137 canonical events. An app-only restart and third same-session/same-thread turn also pass. The finite
-seven-model HTTP/native matrix remains in progress; this establishes no universal
-all-model claim. Receipts are in
-`/var/tmp/aimee-live-codex-130d4cb6d-held/native-1-read/qualification-proof.json`
-and `native-1-followup/qualification-proof.json` under that same directory.
+This runtime includes strict provider control-loss admission, canonical primary
+and workflow requests, immutable user tasks, typed delegate policy separated from
+tasks, legacy native-command compatibility, Claude refresh-scope parity, and the
+Responses collector correction that prevents private reasoning from suppressing
+actual answer deltas. Finite active caller reconciliation is recorded in
+`/var/tmp/aimee-ir-final-active-caller-reconciliation.md`. It is a review of the
+listed active chains, not a mathematical claim about every possible execution.
 
-The main retained Claude continuation remains unresolved. Its one subsequent
-arithmetic send stops before SDK launch at credential refresh HTTP 429. All 315
-prior events and protected state remain exact; three terminal/input events leave
-318 rows. This is distinct from the preserved earlier `reasoning_extraction`
-refusals and does not qualify model continuation.
+Both retained QA upgrades preserve all prior canonical history, credentials,
+grants, caches and source authority. The fresh upgrade preserves 593 prior rows.
+The main upgrade preserves 318 prior rows; its public certificate renews with the
+same key. An original overstrict PEM-size verifier failure is retained separately
+from the successful readback proof. Compose dependency recreation changes the
+embedder container ID while its own image/configuration/mounts remain exact; it
+does not use the app image.
 
-The follow-up repairs default delegate role/persona policy assembly so no task
-text is reconstructed into policy and both delegate paths retain all original
-system blocks. Three scoped suites and production compute objects pass normally
-and under ASan/UBSan. It also preserves distinct legacy per-model native commands
-while propagating explicit connection command edits to inherited aliases; Go
-normal/race and independent review pass. These follow-up changes still require
-their exact image qualification. Finite active caller reconciliation and proof:
-`/var/tmp/aimee-ir-final-active-caller-reconciliation.md` and
-`/var/tmp/aimee-ir-delegate-policy-proof.json`. Both goals remain active.
+The finite browser matrix covers seven account-catalog models through direct
+HTTP and native Codex 0.163.0. Real tools, same-session followups, replay and
+native restart/resume are exercised. It remains under qualification, including
+actual grounding of tool results. Old native history crosses the 553 upgrade
+with its original thread binding; a new native session also survives an app-only
+restart with its own thread binding. Evidence is under
+`/var/tmp/aimee-live-codex-5530a8c59-held`.
 
-The follow-up also corrects Claude refresh scope selection to match the installed
-SDK while preserving the original source digest and rotating-token custody;
-this does not establish a cause or fix for the 429. A separate confirmed Responses
-collector defect let opaque reasoning content suppress real answer deltas when
-the terminal answer snapshot was empty. Its fix preserves private reasoning and
-intentional empty replies; actual decoder tests pass normally and under
-ASan/UBSan. The two direct-HTTP `gpt-5.6-sol` and `gpt-5.6-terra` empty-final
-failures remain preserved and need qualification on the corrected image. Their
-native counterparts pass; no upstream raw response was retained to prove why the
-older HTTP turns failed.
+Do not relabel failed cells. The native gpt-6-luna case initially read a missing
+README.md and the provider completed with an empty final answer. Its SDK tool
+result bytes match the canonical result; no source/custody corruption was found.
+The two old HTTP empty-final cases remain failures. Their subsequent no-tool
+answers of zero are consistent with their actual empty reads, rather than proof
+of history loss: offset 1 skipped the sole line. A newer HTTP cell also guessed
+the fixture answer after empty reads and cannot count as a grounded pass.
+Explicit filename/offset clarification is qualified separately.
+
+The source follow-up, not yet deployed, clarifies the read_file schema: offset is zero-based,
+default 0; offset 1 skips the first line. Reader behavior and constraints do not
+change. It also reports native provider empty-final failures accurately while
+preserving the failure result, original IR, custody checks and refusal handling. Existing full agent tests pass normally and under ASan/UBSan. This changes
+the tool catalog description and therefore may legitimately invalidate a native
+context digest; do not force an old warm handle across a changed context.
+
+The user explicitly approved renewing only the retained QA Claude connection
+from the local Claude login. That normal API import completed once; only the
+approved source credential changed and all 321 prior history rows remained exact.
+Do not repeat it. The one post-renewal retained word-count continuation reached
+Claude but still returned the typed reasoning_extraction refusal (17928 input,
+zero output tokens). All prior rows remain exact; the history now has 328 rows.
+Normal credential-owner cache updates and the new binding are individually
+accounted for. The refusal is unresolved, not an authentication failure or a
+successful continuation. Evidence:
+`/var/tmp/aimee-ir-5530a8c59-retained-wordcount-post-renewal/failed-turn-custody-proof.json`.
+
+A posture observer applied contained-launch requirements to ordinary native
+launch and failed before recording SDK metadata. The configured ordinary mode
+does not promise a zero capability bounding set or no_new_privs. No actual SDK
+posture is claimed from that observer. Do not weaken active containment guards or
+claim contained execution. No history pruning, model changes or fabricated
+answers are permitted to make these cases pass. Both user goals remain active.
 
 ## Historical qualification: runtime 361fefa7f
 

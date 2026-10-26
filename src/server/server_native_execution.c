@@ -1351,9 +1351,25 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
                !server_native_history_admit_source(
                    server_session_capture_session(execution->capture), execution->actor,
                    server_session_capture_turn(execution->capture), 1, history) &&
-               !server_native_runtime_result(execution->runtime, &original) &&
-               !aimee_ir_response_complete_valid(&original);
+               !server_native_runtime_result(execution->runtime, &original);
    cJSON_Delete(history);
+   if (valid && aimee_ir_response_complete_valid(&original))
+   {
+      /* Diagnose an observed terminal with no authored answer, without
+       * treating opaque reasoning as an answer or changing admission. */
+      int empty_final = !aimee_ir_response_valid(&original) && !original.error_message &&
+                        !original.refusal &&
+                        (original.stop_reason == AIMEE_STOP_END_TURN ||
+                         original.stop_reason == AIMEE_STOP_STOP_SEQUENCE);
+      for (int i = 0; empty_final && i < original.n_content; i++)
+         empty_final = original.content[i].type == AIMEE_BLK_THINKING ||
+                       (original.content[i].type == AIMEE_BLK_TEXT &&
+                        (!original.content[i].text || !original.content[i].text[0]));
+      if (empty_final && !out->error[0])
+         snprintf(out->error, sizeof out->error,
+                  "native provider completed without an authored final answer");
+      valid = 0;
+   }
    char *text = valid ? aimee_ir_response_text_alloc(&original) : NULL;
    if (!text || native_terminal_transfer(execution))
    {
