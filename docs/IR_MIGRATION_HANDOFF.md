@@ -20,6 +20,73 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
+## Final source and browser qualification
+
+The installed and pushed application source is
+`b61ebe1dd64d5ec5c652633999cedcd862001861`, version `1.0.2-491-gb61ebe1dd`,
+image `sha256:58e482c132a1f034409eb1433094bb79300a7cb08a8b65e3621cf8176a0fd9d5`.
+The canonical build verified 87 runtime products and 19 modules. The single-QA
+upgrade preserved all 1680 existing IR rows, 35 Vault entries, native SDK/cache
+state, workspace and configuration. Five installed CLI negative cases pass on
+this exact image. Source and upgrade proofs:
+`/var/tmp/aimee-ir-b61ebe1dd-source-qualification.json`,
+`/var/tmp/aimee-single-QA-next-upgrade-held/proof.json`, and
+`/var/tmp/aimee-ir-final-cli-negative-b61ebe1dd-held/proof.json`.
+
+All six final browser sends pass: retained historical Claude continuation,
+HTTP grounded file read and same-session follow-up, and retained native Codex
+file read, follow-up and same-session continuation after app restart. These are
+six browser sends, not a claim of six upstream model iterations. Actual provider
+telemetry confirms Opus5 and gpt-6.1-sol for the respective native calls.
+The final model-idle seal contains 1798 canonical IR rows with the original 1680
+unchanged. Four additional `resp_` histories are owned canonical Responses
+continuation checkpoints, verified against their actor, parent-session hash,
+ordered history and final count commit. They are not additional browser sends.
+
+The historical Claude call reused its existing connection and session. Five
+existing derived credential slots materialized through the normal OAuth owner;
+the imported source credential and other 30 slots remained exact. The retained
+Codex thread, scope and context were reused, with prior SDK file prefixes
+byte-exact and tool IDs preserved. The Claude SDK cache carries a fixed wrapper seed; authoritative
+history is supplied by the host. Its final upstream HTTP body was not captured,
+so cache comparison does not establish that final wire payload. No failed
+historical case was relabeled or silently retried.
+An earlier zero-send harness preflight and an overstrict seal assertion remain
+as separate artifacts. Receipts:
+`/var/tmp/aimee-live-single-QA-b61ebe1dd/qualification-index.json` and
+`/var/tmp/aimee-live-single-QA-b61ebe1dd/final-idle-proof.json`.
+
+The earlier f3 source exercised all 14 configured ChatGPT model/transport pairs
+(seven HTTP and seven native), with actual grounded reads and same-session
+follow-ups. The final b61 checks above exercise representative HTTP/native
+profiles and retained Claude/Codex history; they do not claim another complete
+14-profile run on b61. Source-owner equivalence records the precise intervening
+changes: `/var/tmp/aimee-ir-f3-b61-source-owner-equivalence.json`.
+
+Responsive replay passes nine views across 1280/390/320px: retained native and
+HTTP tools/usage plus the historical Claude error. GET/reload reproduces the
+same canonical history, with zero JavaScript errors, horizontal overflow or idle
+mutations. The passive HTTP case uses a retained f3 history on the b61 runtime,
+not the new six-send HTTP session. Proof:
+`/var/tmp/aimee-single-QA-next-passive-held/proof.json`.
+
+The isolated channel check passes exactly one new channel and one canonical
+Unicode/JSON-looking literal USER Message, with exact GET/SSE/reload agreement,
+correct sender, zero idle mutations and no model calls. The original attempt
+stopped at a disappearing onboarding tooltip before any channel write; its
+failure and zero-write custody are retained. The bounded helper correction
+reused the same absent channel/tag and performed the one authorized write pair.
+Proof: `/var/tmp/aimee-single-QA-next-channel-r2/proof.json`.
+Root visually inspected actual desktop and320px replay screenshots and the
+reloaded channel screenshot. Final custody preserves all1798 IR rows and all
+protected state, with only the exact authorized channel/message added. Native
+SDK/jobs remain idle. Proof:
+`/var/tmp/aimee-single-QA-final-passive-channel-custody/channel-after-proof.json`.
+Current live permission/question replies, cancel and steer flows were not
+exercised in this QA. Gateway platform delivery remains unwired, as documented below; no live platform delivery
+is claimed. Production promotion remains subject to `OWNERS.md`. All sections
+headed previous checkpoint below are historical evidence.
+
 ## Current QA topology: one active instance and one Claude connection
 
 The user paused the larger IR/browser goal, requested consolidation of the
@@ -39,13 +106,13 @@ Do not restart these fixtures, clone Claude credentials into another QA instance
 or reuse old multi-instance build/test wrappers. Future authorized work uses the
 single active QA instance and its connection. Restoring an offline fixture needs
 an explicit topology decision that preserves one active connection. No `.100`
-or real user deployment was investigated or modified. The gateway/IR repair has resumed after preserving its18 work-in-progress files.
+or real user deployment was investigated or modified.
 
 Authoritative consolidation proof:
 `/var/tmp/aimee-five-qa-Claude-consolidate/proof.json`.
 The live guest manifest is
 `/opt/aimee-single-claude-consolidation-38f813090682565e-proof/active-archived-manifest.json`.
-Active history retains all1680 rows; archived last-verified counts are76,128,360
+The consolidation preserved all1680 then-existing active rows; archived last-verified counts are76,128,360
 and93 respectively. All protected configuration/cache/Vault/SDK/workspace hashes
 were checked, and archived live SQL histories/native/jobs were compared after
 app shutdown before stopping their databases. No images, volumes or data were
@@ -77,10 +144,10 @@ pass. Proof: `/var/tmp/aimee-ir-gateway-source-binding-proof.json`.
 Only unused Docker builder cache was pruned once to provide space for the
 corrected image. All images, volumes,15 container identities/configuration,
 renewed35-entry Vault,1680 IR history and native SDK/cache data remain exact.
-Proof: `/var/tmp/aimee-single-QA-builder-cache-prune/proof.json`. The current
-runtime remains f3; no source-binding candidate upgrade/model check has occurred.
+Proof: `/var/tmp/aimee-single-QA-builder-cache-prune/proof.json`. The corrected
+b61 image subsequently built, upgraded and passed the final model checks above.
 
-## Gateway source follow-up: tested, awaiting image qualification
+## Gateway source follow-up: implemented and qualified
 
 The gateway migration now retains owned canonical USER Message blocks at external
 Telegram/webhook ingress, through local RPC, ordered CLI subscriber results,
@@ -113,11 +180,9 @@ conversation reconstruction in those specific producers; its exact domain-origin
 traces are in `/var/tmp/aimee-ir-embedding-seam-audit.md`. This is finite evidence,
 not an inference from a type name or a claim that numeric vectors are messages.
 
-The currently installed image is still f3. Next: build the clean follow-up,
-upgrade only the single active QA with full1680-row renewed-credential custody,
-then run the reviewed six-send historical Claude/HTTP/retained Codex and restart
-checks, responsive replay and isolated canonical channel validation. Never restart
-archived fixtures or clone their credentials. All earlier failures remain sealed.
+The b61 installed image includes these repairs and the typed source-binding
+correction. Never restart archived fixtures or clone their credentials. All
+earlier failures remain sealed. Current validation is summarized above.
 
 ## Previous checkpoint before QA consolidation: gateway repair remains open
 
