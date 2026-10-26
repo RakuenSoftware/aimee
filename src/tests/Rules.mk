@@ -19,6 +19,7 @@ $(OBJDIR)/tests/agent_job_progress_owner.o: server/agent_tasks.c
 # standing a module up beside every case.
 
 PROVIDER_IR_OBJS = $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o
+PROVIDER_CLIENT_IR_OBJS = $(PROVIDER_IR_OBJS) $(MODEL_WIRE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o
 TEST_C_FLAGS = $(C_FLAGS) -I.. -Igateway
 TEST_L_FLAGS = $(L_FULL) $(KB_STORE_TEST_BACKEND_LIB)
 
@@ -224,7 +225,7 @@ $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentia
                                                  \
                              $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                              $(OBJDIR)/tests/support/git_cred_inject_stub.o \
-                             $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o \
+                             $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_policy.o \
                              $(OBJDIR)/modules/ir/aimee_ir.o \
                              $(PLATFORM_AGENT_OBJS)
 
@@ -557,8 +558,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-anthropic-http-p2c \
                $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c \
                $(TESTPREFIX)/unit-test-gateway-policy \
-               $(TESTPREFIX)/unit-test-gateway-pipeline \
-               $(TESTPREFIX)/unit-test-gw-stage-registry \
                $(TESTPREFIX)/unit-test-gw-response-registry $(TESTPREFIX)/unit-test-response-completion-stage \
                $(TESTPREFIX)/unit-test-response-governance-stage \
                $(TESTPREFIX)/unit-test-gw-orchestration-seam \
@@ -1544,7 +1543,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/kb_store/entity_edges.o \
@@ -1807,7 +1806,7 @@ $(TESTPREFIX)/unit-test-code-match: $(OBJDIR)/tests/test_code_match.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-ir-module-plan: $(OBJDIR)/tests/test_ir_module_plan.o \
-                     $(OBJDIR)/modules/ir/aimee_ir_module_plan.o $(OBJDIR)/server/ir_host_bindings.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/ingress_preinject.o \
+                     $(OBJDIR)/modules/ir/aimee_ir_module_plan.o $(OBJDIR)/server/ir_host_bindings.o $(OBJDIR)/server/ingress_preinject.o \
                      $(OBJDIR)/server/request_context.o $(OBJDIR)/log.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/modules/ir/session_event.o \
@@ -4303,7 +4302,7 @@ $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingres
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
-$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
@@ -4316,7 +4315,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/modules/translation/aimee_resp
 # response. The shape tests stub the request-side policy helpers so they
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
-$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
@@ -4328,7 +4327,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/modules/translation/aimee_
 # Same minimal-link pattern as the buffered P2c test above; the SSE replay
 # helper + police function exercise the buffered-fetch + replay flow when
 # `gateway_prevent_subagents` is ON.
-$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
@@ -4337,15 +4336,6 @@ $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/modules/translat
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-$(TESTPREFIX)/unit-test-gateway-pipeline: $(OBJDIR)/tests/test_gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_pipeline.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
-
-# Slice 7: config-driven stage registry, proven through the shared pipeline.
-$(TESTPREFIX)/unit-test-gw-stage-registry: $(OBJDIR)/tests/test_gw_stage_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/modules/gateway/gateway_pipeline.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 
 # Response-stage registry + runner (Slice 1 of the response seam), self-contained.
 $(TESTPREFIX)/unit-test-gw-response-registry: $(OBJDIR)/tests/test_gw_response_registry.o $(OBJDIR)/pipeline/gw_response_registry.o
@@ -4677,7 +4667,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(TEST_CORE_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS)
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-curator-resolve-entities: \
@@ -4791,7 +4781,7 @@ $(TESTPREFIX)/unit-test-curator-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/support/
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(PLATFORM_BASIC_OBJS)
@@ -4805,7 +4795,7 @@ $(TESTPREFIX)/unit-test-kb-surprising-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/su
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(PLATFORM_BASIC_OBJS)
@@ -4818,7 +4808,7 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                        $(OBJDIR)/kb_store/feature_rows.o \
@@ -4838,7 +4828,7 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                        $(OBJDIR)/kb_store/feature_rows.o \
@@ -5951,7 +5941,7 @@ $(TESTPREFIX)/unit-test-agent-business-ir: $(OBJDIR)/tests/test_agent_business_i
 # DB1 server-owned per-model price table (ingress-cost-accounting §2).
 
 $(TESTPREFIX)/unit-test-provider-client: $(OBJDIR)/tests/test_provider_client.o \
-                                  $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) $(OBJDIR)/cJSON.o \
+                                  $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) $(OBJDIR)/cJSON.o \
                                   $(OBJDIR)/text.o \
                                   $(OBJDIR)/tests/support/mock_agent_http.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5965,7 +5955,7 @@ $(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/support/curator_con
 $(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/support/curator_config_stub.o \
                                        $(OBJDIR)/tests/test_kb_curator_llm.o \
                                   $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
-                                  $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
+                                  $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o $(PROVIDER_CLIENT_IR_OBJS) \
                                   $(OBJDIR)/text.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/mock_agent_http.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -6041,7 +6031,7 @@ $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/http_retry.o \
-                     $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o \
+                     $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_policy.o \
                      $(TEST_CORE_OBJS) \
                      $(PLATFORM_AGENT_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7384,7 +7374,7 @@ $(TESTPREFIX)/unit-test-delegate-status-ir: $(OBJDIR)/tests/test_delegate_status
 $(TESTPREFIX)/unit-test-db1-agent-job-observation: $(OBJDIR)/tests/test_db1_agent_job_observation.o $(OBJDIR)/db1_client/delegation.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
+$(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_delegate_input.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Preserve the actual credential TLS; provider getters remain explicit runtime-fixture seams.

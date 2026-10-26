@@ -13,6 +13,9 @@ typedef int (*policy_unknown_effect_gate_fn)(const char *, const char *, const c
                                              int, char *, size_t);
 void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate);
 void policy_unknown_effect_clear(void);
+/* Selected backend classification, shared with public generation admission. */
+int agent_uses_provider_cli(const agent_t *agent);
+
 /* Execution */
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,

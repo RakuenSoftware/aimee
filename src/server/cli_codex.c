@@ -33,7 +33,7 @@
 #define CLI_CODEX_QUIET_POLL_MS           300000 /* 5 min */
 #define CLI_CODEX_LINE_MAX                (8 * 1024 * 1024)
 
-/* Reasons cli_codex_read_line can return NULL — propagated into the
+/* Reasons cli_codex_read_frame can return NULL — propagated into the
  * stall message so operators can tell EOF (codex exited) from an idle
  * deadline expiry. */
 typedef enum
@@ -57,7 +57,7 @@ typedef struct
    int err_fd; /* aimee reads here ← codex stderr (diagnostics) */
    /* incremental line buffer for stdout */
    char *buf;
-   char *line; /* Borrowed by readers until the next read or close. */
+   cJSON *frame; /* Strictly decoded edge frame; borrowed until the next read or close. */
    size_t buf_len;
    size_t buf_cap;
    /* tail-buffer of stderr — last STDERR_TAIL_CAP bytes only, drained
@@ -477,8 +477,8 @@ static void cli_codex_close(cli_codex_t *c)
    }
    free(c->buf);
    c->buf = NULL;
-   free(c->line);
-   c->line = NULL;
+   cJSON_Delete(c->frame);
+   c->frame = NULL;
    aimee_harness_ir_free(&c->ir);
    cJSON_Delete(c->dynamic_tools);
    cJSON_Delete(c->dynamic_seen);
@@ -613,12 +613,12 @@ static int cli_codex_send(cli_codex_t *c, cJSON *msg)
    return cli_codex_write_all(c, "\n", 1);
 }
 
-/* Read until a newline, return the line without terminator (caller must NOT
- * free; pointer is into the internal buffer and stable until the next call).
+/* Read one newline-framed JSON object (caller must NOT free; the decoded
+ * edge frame remains borrowed until the next successful read or close).
  * On NULL, *status (if non-NULL) is set to the specific failure mode so the
  * caller can distinguish EOF (codex exited) from an idle deadline expiry. */
-static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadline_ms,
-                                 cli_codex_read_status_t *status)
+static cJSON *cli_codex_read_frame(cli_codex_t *c, int timeout_ms, long long deadline_ms,
+                                   cli_codex_read_status_t *status)
 {
    if (status)
       *status = CLI_CODEX_READ_OK;
@@ -654,30 +654,19 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
                *status = CLI_CODEX_READ_FRAME_ERR;
             return NULL;
          }
-         char *line_dup = malloc(length + 1);
-         if (!line_dup)
-         {
-            cJSON_Delete(frame);
-            if (status)
-               *status = CLI_CODEX_READ_OOM;
-            return NULL;
-         }
-         memcpy(line_dup, c->buf, length);
-         line_dup[length] = 0;
-         free(c->line);
-         c->line = line_dup;
+         cJSON_Delete(c->frame);
+         c->frame = frame;
          size_t consumed = length + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
          int rc = aimee_codex_frame_ir(frame, &c->ir);
-         cJSON_Delete(frame);
          if (rc)
          {
             if (status)
                *status = CLI_CODEX_READ_READ_ERR;
             return NULL;
          }
-         return line_dup;
+         return frame;
       }
 
       /* Need more bytes. */
@@ -761,18 +750,18 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
 /* The per-line timeout is a quiet-period poll, not the turn ceiling. Codex can
  * be healthy while staying silent for several minutes during delegated work, so
  * keep waiting until the idle deadline or a concrete pipe/process failure. */
-static char *cli_codex_read_line_until_deadline(cli_codex_t *c, long long deadline_ms,
-                                                cli_codex_read_status_t *status)
+static cJSON *cli_codex_read_frame_until_deadline(cli_codex_t *c, long long deadline_ms,
+                                                  cli_codex_read_status_t *status)
 {
    for (;;)
    {
       cli_codex_read_status_t rstatus = CLI_CODEX_READ_OK;
-      char *line = cli_codex_read_line(c, CLI_CODEX_QUIET_POLL_MS, deadline_ms, &rstatus);
-      if (line || rstatus != CLI_CODEX_READ_LINE_TIMEOUT)
+      cJSON *frame = cli_codex_read_frame(c, CLI_CODEX_QUIET_POLL_MS, deadline_ms, &rstatus);
+      if (frame || rstatus != CLI_CODEX_READ_LINE_TIMEOUT)
       {
          if (status)
             *status = rstatus;
-         return line;
+         return frame;
       }
       cli_codex_drain_stderr(c);
       if (deadline_ms > 0 && util_now_ms() >= deadline_ms)
@@ -861,12 +850,9 @@ static char *cli_codex_copy_error_text(const char *raw)
    return strdup(raw);
 }
 
-int cli_codex_parse_error_message(const char *line, char **out_text)
+int cli_codex_parse_error_message(const cJSON *obj, char **out_text)
 {
-   if (!line || !out_text)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
+   if (!obj || !out_text)
       return 0;
 
    int rc = 0;
@@ -897,25 +883,6 @@ int cli_codex_parse_error_message(const char *line, char **out_text)
       rc = (*out_text != NULL);
    }
 
-   cJSON_Delete(obj);
-   return rc;
-}
-
-int cli_codex_parse_method(const char *line, char *out, size_t outsz)
-{
-   if (!line || !out || outsz == 0)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
-      return 0;
-   int rc = 0;
-   cJSON *method = cJSON_GetObjectItemCaseSensitive(obj, "method");
-   if (cJSON_IsString(method) && method->valuestring)
-   {
-      snprintf(out, outsz, "%s", method->valuestring);
-      rc = 1;
-   }
-   cJSON_Delete(obj);
    return rc;
 }
 
@@ -1019,28 +986,18 @@ static int codex_handle_dynamic_call(cli_codex_t *c, const cJSON *frame, cJSON *
 }
 
 /* Native control replies come only from the current canonical operator scope. */
-static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
+static int cli_codex_handle_server_request(cli_codex_t *c, const cJSON *obj)
 {
-   if (!line)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
    if (!obj)
       return 0;
    cJSON *id = cJSON_GetObjectItemCaseSensitive(obj, "id");
    cJSON *method = cJSON_GetObjectItemCaseSensitive(obj, "method");
    if (!id || cJSON_IsNull(id) || !cJSON_IsString(method) || !method->valuestring)
-   {
-      cJSON_Delete(obj);
       return 0;
-   }
 
    const char *m = method->valuestring;
    if (!strcmp(m, "item/tool/call"))
-   {
-      int handled = codex_handle_dynamic_call(c, obj, id);
-      cJSON_Delete(obj);
-      return handled;
-   }
+      return codex_handle_dynamic_call(c, obj, id);
    server_control_scope_t *scope = server_control_scope_current();
    int supported = strstr(m, "requestApproval") || !strcmp(m, "item/tool/requestUserInput") ||
                    !strcmp(m, "mcpServer/elicitation/request") ||
@@ -1083,7 +1040,6 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
       free(kind);
       cJSON_Delete(request);
       cJSON_Delete(reply);
-      cJSON_Delete(obj);
       return 1;
    }
 
@@ -1097,7 +1053,6 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
    else
       (void)cli_codex_send_jsonrpc_error(c, id, -32601, "Unsupported Codex request");
 
-   cJSON_Delete(obj);
    return 1;
 }
 
@@ -1170,18 +1125,15 @@ static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *param
    for (;;)
    {
       cli_codex_read_status_t rstatus = CLI_CODEX_READ_OK;
-      char *line = cli_codex_read_line_until_deadline(c, *deadline_ms, &rstatus);
-      if (!line)
+      cJSON *obj = cli_codex_read_frame_until_deadline(c, *deadline_ms, &rstatus);
+      if (!obj)
       {
          c->last_read_status = rstatus;
          return NULL;
       }
       c->last_read_status = CLI_CODEX_READ_OK;
       *deadline_ms = cli_codex_idle_deadline_ms(idle_timeout_ms);
-      if (cli_codex_handle_server_request(c, line))
-         continue;
-      cJSON *obj = cJSON_Parse(line);
-      if (!obj)
+      if (cli_codex_handle_server_request(c, obj))
          continue;
       cJSON *jid = cJSON_GetObjectItemCaseSensitive(obj, "id");
       if (cJSON_IsNumber(jid) && jid->valueint == id)
@@ -1206,7 +1158,6 @@ static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *param
                char *owned = identity && identity[0] ? strdup(identity) : NULL;
                if (!owned)
                {
-                  cJSON_Delete(obj);
                   c->dynamic_failed = 1;
                   return NULL;
                }
@@ -1215,10 +1166,10 @@ static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *param
             }
          }
          /* Either a "result" or "error" envelope; return for caller to inspect. */
+         c->frame = NULL; /* Transfer the matching reply; the caller owns it. */
          return obj;
       }
       /* Notification or response for a different id; discard. */
-      cJSON_Delete(obj);
    }
 }
 
@@ -1491,8 +1442,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
        * app-server frame below refreshes deadline_ms, so this is an idle
        * ceiling rather than a fixed wall-clock turn limit. */
       cli_codex_read_status_t rstatus = CLI_CODEX_READ_OK;
-      char *line = cli_codex_read_line_until_deadline(&c, deadline_ms, &rstatus);
-      if (!line)
+      const cJSON *frame = cli_codex_read_frame_until_deadline(&c, deadline_ms, &rstatus);
+      if (!frame)
       {
          cli_codex_set_stall_error(&c, rstatus, out->error, sizeof(out->error));
          cli_codex_close(&c);
@@ -1502,19 +1453,18 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       /* Periodic stderr drain so the tail buffer stays current
        * regardless of whether we end up bailing on a stall. */
       cli_codex_drain_stderr(&c);
-      if (cli_codex_handle_server_request(&c, line))
+      if (cli_codex_handle_server_request(&c, frame))
          continue;
       char *err_text = NULL;
-      if (cli_codex_parse_error_message(line, &err_text))
+      if (cli_codex_parse_error_message(frame, &err_text))
       {
          if (!out->error[0])
             snprintf(out->error, sizeof(out->error), "%s", err_text);
          free(err_text);
       }
 
-      char method_buf[64] = {0};
-      if (cli_codex_parse_method(line, method_buf, sizeof(method_buf)) &&
-          strcmp(method_buf, "turn/completed") == 0)
+      const cJSON *method = cJSON_GetObjectItemCaseSensitive(frame, "method");
+      if (cJSON_IsString(method) && !strcmp(method->valuestring, "turn/completed"))
          break;
    }
 

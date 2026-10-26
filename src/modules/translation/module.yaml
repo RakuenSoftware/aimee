@@ -22,14 +22,16 @@
     "src/modules/translation/harness_ir.c",
     "src/modules/translation/history_ir.c",
     "src/modules/translation/hook_ir.c",
-    "src/modules/translation/wire_codec.c"
+    "src/modules/translation/wire_codec.c",
+    "src/modules/translation/codec_stdio.c"
   ],
   "public_headers": [
     "src/modules/translation/include/aimee/translation/aimee_backend.h",
     "src/modules/translation/include/aimee/translation/aimee_frontend.h",
     "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
     "src/modules/translation/include/aimee/translation/harness_ir.h",
-    "src/modules/translation/include/aimee/translation/hook_ir.h"
+    "src/modules/translation/include/aimee/translation/hook_ir.h",
+    "src/modules/translation/include/aimee/translation/codec_stdio.h"
   ],
   "tests": [
     "src/tests/test_aimee_backend.c",
@@ -50,5 +52,8 @@
   "private_headers": [
     "src/modules/translation/anthropic_refusal.h",
     "src/modules/translation/usage_observation.h"
+  ],
+  "go_sources": [
+    "server-go/modules/translation/client.go"
   ]
 }

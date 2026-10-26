@@ -1,4 +1,5 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
+#include <aimee/translation/codec_stdio.h>
 #include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
 #include "server_code_index.h"
@@ -527,6 +528,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
 int main(int argc, char **argv)
 {
+   if (argc == 2 && !strcmp(argv[1], "--module-model-codec"))
+      return aimee_model_codec_stdio(stdin, stdout);
+
    /* The container entrypoint must scrub its own inherited environment after
     * the short-lived Vault bootstrap returns. Emit names only, never values, so
     * it does not need to pipe credential plaintext through env/sed. Reject a

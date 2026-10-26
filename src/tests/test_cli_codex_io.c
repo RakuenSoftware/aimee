@@ -91,12 +91,16 @@ static void high_fd_backpressure(void)
        .in_fd = input[1], .out_fd = output[0], .err_fd = diagnostic[0], .err_log_fd = -1};
    assert(!cli_codex_write_all(&worker, payload, length));
    cli_codex_read_status_t status;
-   char *line = cli_codex_read_line(&worker, 1000, util_now_ms() + 5000, &status);
-   assert(line && status == CLI_CODEX_READ_OK && strstr(line, "fixture/status"));
-   line = cli_codex_read_line(&worker, 1000, util_now_ms() + 5000, &status);
-   assert(line && status == CLI_CODEX_READ_OK && strstr(line, "fixture/complete"));
-   line = cli_codex_read_line(&worker, 1000, util_now_ms() + 5000, &status);
-   assert(!line && status == CLI_CODEX_READ_EOF);
+   cJSON *frame = cli_codex_read_frame(&worker, 1000, util_now_ms() + 5000, &status);
+   assert(frame == worker.frame && status == CLI_CODEX_READ_OK &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "method")),
+                  "fixture/status"));
+   frame = cli_codex_read_frame(&worker, 1000, util_now_ms() + 5000, &status);
+   assert(frame == worker.frame && status == CLI_CODEX_READ_OK &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "method")),
+                  "fixture/complete"));
+   frame = cli_codex_read_frame(&worker, 1000, util_now_ms() + 5000, &status);
+   assert(!frame && status == CLI_CODEX_READ_EOF);
    int code;
    assert(waitpid(child, &code, 0) == child && WIFEXITED(code) && !WEXITSTATUS(code));
    close(worker.in_fd);
@@ -104,7 +108,7 @@ static void high_fd_backpressure(void)
    if (worker.err_fd >= 0)
       close(worker.err_fd);
    free(worker.buf);
-   free(worker.line);
+   cJSON_Delete(worker.frame);
    aimee_harness_ir_free(&worker.ir);
    free(payload);
 }

@@ -165,7 +165,7 @@ static char last_ingress_query[4096];
 static int final_response;
 static int usage_mixed;
 static const char *simple_finish;
-static int simple_tools, simple_media;
+static int simple_tools, simple_media, simple_trailing;
 static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
@@ -356,6 +356,14 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
       }
       *response_buf = cJSON_PrintUnformatted(root);
       cJSON_Delete(root);
+      if (simple_trailing)
+      {
+         size_t length = strlen(*response_buf);
+         char *extended = realloc(*response_buf, length + sizeof " trailing");
+         assert(extended);
+         *response_buf = extended;
+         memcpy(extended + length, " trailing", sizeof " trailing");
+      }
       return 200;
    }
    if (bootstrap_case)
@@ -1388,6 +1396,19 @@ int main(void)
       assert(result.canonical_response.usage_out == 3);
       assert(!agent_result_take_text(&result));
    }
+   /* Both real HTTP execution paths must reject bytes after a complete JSON value. */
+   simple_finish = "stop";
+   simple_trailing = 1;
+   for (int tools = 0; tools <= 1; tools++)
+   {
+      provider_calls = 0;
+      rc = tools ? fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128,
+                                           0, &result)
+                 : fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(rc != 0 && !result.success && provider_calls == 1);
+      agent_result_clear_response(&result);
+   }
+   simple_trailing = 0;
    /* General HTTP completion retains multimedia; business projection refuses it. */
    simple_finish = "stop";
    for (simple_media = 1; simple_media <= 2; simple_media++)

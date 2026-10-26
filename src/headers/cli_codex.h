@@ -39,24 +39,11 @@ extern "C"
                               aimee_block_t *out);
    struct cJSON *cli_codex_dynamic_result(const aimee_block_t *result);
 
-   /* --- Pure JSON-RPC parse helpers (testable without a subprocess) ---
-    * These read one JSON-RPC frame line emitted by `codex app-server`
-    * and pull the bits aimee cares about. Each returns 1 when the line
-    * matched the expected shape and the out-params were populated, 0
-    * otherwise. They never block, never touch the filesystem, and are
-    * safe to call on partial / unrelated frames (returns 0). */
-
-   /* If `line` carries a Codex app-server error notification or a failed
-    * turn/completed error, copy a human-readable error into *out_text
-    * (caller frees) and return 1. Nested Responses API JSON errors are
-    * unwrapped to their inner error.message when present. */
-   int cli_codex_parse_error_message(const char *line, char **out_text);
-
-   /* If `line` carries a JSON-RPC `method` string (request or
-    * notification), copy it (NUL-terminated, truncated to outsz) into
-    * out and return 1. Used to detect the `turn/completed` sentinel
-    * that ends the drain loop. */
-   int cli_codex_parse_method(const char *line, char *out, size_t outsz);
+   /* Read an already decoded app-server edge frame. Copy a human-readable
+    * notification/terminal error into *out_text (caller frees); return 1 when
+    * present, 0 for unrelated frames. Nested Responses error strings are
+    * decoded only here at the external boundary. No frame ownership transfer. */
+   int cli_codex_parse_error_message(const struct cJSON *frame, char **out_text);
 
 #ifdef __cplusplus
 }

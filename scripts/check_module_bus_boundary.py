@@ -63,6 +63,8 @@ IR_SHARED_TYPE = {
     ("src/modules/gateway/include/aimee/gateway/gateway_policy.h", "aimee/ir/aimee_ir.h"),
     # Legacy-history entry migration uses the canonical message codec, not a peer service.
     ("src/modules/translation/history_ir.c", "aimee/ir/session_event.h"),
+    # The pure translation pipe decodes/encodes the shared Request/Response data contract.
+    ("src/modules/translation/codec_stdio.c", "aimee/ir/session_event.h"),
     ("src/modules/delegates/aimee_ir_rescue.c", "aimee/ir/aimee_ir_metrics.h"),
     ("src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h", "aimee/ir/aimee_ir.h"),
     # Rescue transport returns the public owned message type, replacing a flat host response.

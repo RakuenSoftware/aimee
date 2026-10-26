@@ -1589,7 +1589,7 @@ native_provider_http:
          decode_rc = agent_ir_decode_responses(response_body, rescue_mode, &n_rescued, &response);
       else
       {
-         cJSON *root = cJSON_Parse(response_body);
+         cJSON *root = aimee_ir_json_parse_frame(response_body, strlen(response_body));
          decode_rc =
              root ? agent_ir_decode_json_response_bound(root, anthropic, rescue_mode, &n_rescued,
                                                         anthropic ? &sent_replay : NULL, &response)

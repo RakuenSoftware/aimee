@@ -53,6 +53,78 @@ regression coverage and supported history; deleting it is not architecture
 simplification. No new source is qualified merely because the previous image
 passed. The active QA still runs the b61 image described below.
 
+## Independent model-path trace after edc58e19c
+
+Three parallel audits followed production callers across HTTP providers/KB,
+internal orchestration, and browser/native/ACP/CLI execution. The shared C
+Request/Response/Message types and the Go/browser bindings represent the same
+canonical contract. Native request bodies, response frames and SDK control
+protocols belong to the translation or external adapter boundaries.
+
+| Model path | Canonical ownership and external conversion |
+| --- | --- |
+| Anthropic, Chat Completions and Responses ingress | Translation frontends admit Request; HTTP frontends share `server_model_execute_prepared`. |
+| HTTP model execution | Agent profiles, policy, tools and history retain IR; translation renders the upstream body and admits the upstream Response/deltas. |
+| Browser primary sessions | Browser Message, runtime-web admission, canonical session history and one live/replay reducer; legacy display archives do not feed execution. |
+| Claude/Codex SDK execution | Source-bound canonical profile/history and captured upstream IR own model observations; SDK frame decoders handle external controls/lifecycle. |
+| ACP, CLI and IDEs | Canonical request/result through the host; the ACP/CLI boundary owns its declared text/content projections. |
+| Roundtable, delegates, workflow model steps and repairs | Canonical Request/Response through delegate invocation; structured repair retains prior typed output. Business artifacts remain domain records. |
+| Memory/router/economizer stages | Typed IR or strictly admitted canonical history; policy views and retrieval records remain domain metadata. |
+| KB curator and Bedrock egress | Canonical requests/results; existing translation adapters own native provider bodies. |
+| Availability probes | Fixed canonical request and existing provider transport; the translation owner's bounded pipe client reuses the same C codecs in the existing server executable. |
+
+The trace found and retired the unused `gw_request_t` request pipeline and its
+registry/tests, the probe's separate Go provider codecs, repeated Codex frame
+parsing, duplicate Go context serialization and the provider client's local
+completed-response admission. JSON and Responses ingress now share one typed
+rescue/admission/capture owner. A decoded Responses stream is admitted as canonical
+IR, without consulting its inert native sidecar as a second completion authority.
+The local-provider thinking extension now has one translation owner. No alternate provider transcript schema was confirmed in the
+examined live execution chains. This is a source audit, not a claim that every
+configured model or live browser interaction has been exercised on this source.
+
+Detailed caller receipts and frozen-source checks are retained under:
+
+- `/var/tmp/aimee-edc-browser-native-deep-trace.md`
+- `/var/tmp/aimee-codex-single-frame-final-proof.json`
+- `/var/tmp/aimee-ir-trace-root-proof.json`
+- `/var/tmp/aimee-ir-internal-model-trace-edc58e19/trace.json`
+- `/var/tmp/aimee-ir-request-stage-retirement/proof.json`
+- `/var/tmp/aimee-edc-provider-edge-deep-trace.md`
+- `/var/tmp/aimee-ir-native-materializer-retirement/proof.json`
+- `/var/tmp/aimee-ir-model-dispatch-census/census.json`
+- `/var/tmp/aimee-discord-canonical-migration/proof.json`
+- `/var/tmp/aimee-discord-thinclient-wrapper-packaging-proof.json`
+- `/var/tmp/aimee-model-generate-rich-proof.json`
+- `/var/tmp/aimee-model-generate-rich-independent-review.json`
+- `/var/tmp/aimee-discord-validation-owner-followup/proof-r2.json`
+
+The dispatch census reconciles 43 concrete C execution calls, seven Go delegate
+calls and 124 C transport/process sites with these traces. Two actual HTTP
+execution paths also now reject trailing bytes after the native response JSON,
+using the existing strict frame parser and a real plain/tool transport regression.
+Discord is included in the migration and uses the installed thin client:
+`aimee --json model generate` reads a canonical Request plus an optional registered
+agent alias from stdin and returns the canonical Response. Its history and repair
+turns retain canonical blocks; complete Response custody remains separate from the
+sidecar-free Message view. Provider HTTP, credentials, TLS and tokenizer code are
+removed from the bot. Memory/persona/workflow domain records remain unchanged.
+The existing generation handler now admits full tool-free IR history through the
+shared public attenuation and HTTP execution owners. Alias selection changes only
+the request-local configuration; model URLs, credentials and tools remain server-owned.
+
+The bot no longer makes a separate exact-token-packing claim. It sends bounded,
+intact history/evidence to the configured server and preserves the prior delivered
+history on errors or context refusal. The old tokenizer-only tests and qualification
+branch are retired; existing memory, persona, workflow and delivery assertions are
+retained against the canonical thin-client path.
+
+Qualification includes the Discord 124-test local suite, real subprocess wrapper
+checks, actual Python-to-C canonical admission, and normal/sanitizer handler,
+CLI-marshal and HTTP-generation fixtures. These are local source checks. The
+existing edc image and older b61 browser results do not qualify this newer source;
+a final canonical image and browser qualification are still required.
+
 ## Qualified source cleanup, not yet deployed
 
 The cleanup removes the four unused economizer wire/planner/proof owners and
@@ -85,9 +157,14 @@ QA still runs b61. Proofs:
 - `/var/tmp/aimee-ir-final-local-build/proof.json`
 - `/var/tmp/aimee-ir-final-go-model-compile/proof.json`
 
-The new QA image is held at the existing9GiB free-space build requirement; its
-read-only preflight found2.98GiB. No images, volumes, SDK/cache data, credentials,
-history, services or offline fixtures were changed during this cleanup.
+The exact `edc58e19c` image subsequently built successfully after verified retention
+of unused source copies and a builder-cache-only cleanup. Image
+`sha256:5b18af89bee6da7b107bff2ef41edeb3e34207d577cbe353c72ef4918e0336a6`
+contains the verified 87 products and 19 modules. The build preserved all 1798 IR
+rows, 35 Vault entries and protected active/archived QA state, with no deployment
+or model calls. Custody proof:
+`/var/tmp/aimee-ir-single-edc58e19c-build/single-QA-build-custody-proof.json`.
+The further source audit below is newer than that image and requires its own build.
 
 ## Last deployed source and browser qualification
 

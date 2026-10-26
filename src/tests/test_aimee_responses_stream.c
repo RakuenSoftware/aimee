@@ -187,8 +187,59 @@ static void buffered_live_parity(void)
    aimee_ir_response_builder_free(&observed);
 }
 
+static void buffered_alias_admission(void)
+{
+   const char *item =
+       "data: "
+       "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"a\",\"type\":\"message\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n";
+   const char *terminal = "data: "
+                          "{\"type\":\"response.completed\",\"response\":{\"id\":\"owned\","
+                          "\"status\":\"completed\",\"output\":[]}}\n\n";
+   const char *bad[] = {
+       "data: "
+       "{\"type\":\"response.content_part.done\",\"item_id\":\"a\",\"part\":{\"type\":\"output_"
+       "text\",\"text\":\"changed\"}}\n\n",
+       "data: {\"type\":\"response.output_text.done\",\"item_id\":\"foreign\",\"text\":\"ok\"}\n\n",
+       item};
+   char body[2048], error[128];
+   const char *bad_role = "data: "
+                          "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
+                          "\"output\":[{\"type\":\"message\",\"role\":17,\"content\":[{\"type\":"
+                          "\"output_text\",\"text\":\"ok\"}]}]}}\n\n";
+   const char *sparse =
+       "data: {\"type\":\"response.output_text.done\",\"item_id\":\"a\",\"text\":\"ok\"}\n\ndata: "
+       "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{"
+       "\"type\":\"message\",\"id\":\"a\"}]}}\n\n";
+   aimee_response_t sparse_response = {0};
+   assert(!responses_backend_decode_body(sparse, &sparse_response, error, sizeof error));
+   assert(sparse_response.n_content == 1 && !strcmp(sparse_response.content[0].text, "ok"));
+   aimee_response_free(&sparse_response);
+   aimee_response_t malformed = {0};
+   assert(responses_backend_decode_body(bad_role, &malformed, error, sizeof error));
+   aimee_response_free(&malformed);
+   for (size_t i = 0; i < sizeof bad / sizeof *bad; i++)
+   {
+      snprintf(body, sizeof body, "%s%s%s", item, bad[i], terminal);
+      aimee_response_t response = {0};
+      assert(responses_backend_decode_body(body, &response, error, sizeof error));
+      aimee_response_free(&response);
+   }
+   snprintf(body, sizeof body, "%s%s%s", item, terminal,
+            "data: "
+            "{\"type\":\"response.refusal.done\",\"response_id\":\"foreign\",\"refusal\":"
+            "\"declined\"}\n\n");
+   aimee_response_t response = {0};
+   assert(!responses_backend_decode_body(body, &response, error, sizeof error));
+   assert(!aimee_ir_response_valid(&response) && response.n_content == 0 &&
+          response.stop_reason == AIMEE_STOP_CONTENT_FILTER &&
+          !strcmp(response.raw_stop_reason, "refusal") && response.raw);
+   aimee_response_free(&response);
+}
+
 int main(void)
 {
+   buffered_alias_admission();
    buffered_live_parity();
    initial_usage_observation();
    refusal_projection();

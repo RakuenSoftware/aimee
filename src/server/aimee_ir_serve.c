@@ -26,8 +26,7 @@
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
  * default parsed by the Go owner. Cached legacy_config_read applies operator
- * toggles without restarting. Resolved at the seam
- * call site, mirroring the legacy gw_stage_slot_t catalogs. */
+ * toggles without restarting. Resolved at the canonical stage call site. */
 static int ir_memory_enabled(void)
 {
    int tri = config_present() ? config_module_memory() : -1;
@@ -116,11 +115,8 @@ static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
 
 void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
 {
-   /* The one place modules register on the IR (universal-gateway P4): fired once per
-    * ingress, after frontend_parse and before backend_build, protocol-neutral. Memory
-    * is the first ported module -- it replaces gw_stage_memory's two structured-ingress
-    * arms (anthropic /v1/messages + /v1/responses). The four legacy plain-chat handlers
-    * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
+   /* Register protocol-neutral transforms once after frontend admission and
+    * before provider egress. All supported model ingresses use this typed owner. */
    /* Capture the user's OWN query before anything is prepended to it.
     *
     * ir_stage_memory takes its query from aimee_ir_last_user_text(), and the

@@ -25,7 +25,7 @@ The canonical implementations are `src/modules/ir/aimee_ir.c` and
 `src/modules/ir/include/aimee/ir/panel_result.h`. Consumers use the canonical include namespace
 `aimee/ir`; the former flat `src/headers` and `src/server` paths are retired.
 
-The deferred flat `src/headers/aimee_ir_{rescue,serve,shadow,stream}.h` contracts include the canonical
+The deferred flat `src/headers/aimee_ir_{rescue,serve,stream}.h` contracts include the canonical
 IR headers for compatibility. New code should include `aimee/ir/aimee_ir.h` or
 `aimee/ir/aimee_ir_metrics.h` directly when it uses those contracts rather than relying on that transitive
 re-export.
@@ -36,7 +36,7 @@ own panel seats, turns, convergence, deadlines, cancellation callbacks, provider
 or result destruction; those are provider behavior rather than messages.
 The optional `roundtable` provider produces this panel result today, while core serializers, evidence
 replay, and workflows consume it without depending on roundtable's private execution headers.
-The legacy-named rescue, serve, shadow, and stream files remain outside this ownership set because
+The legacy-named rescue, serve, and stream files remain outside this ownership set because
 they mix canonical operations with translation or comparison behavior. A later behavior-separation slice
 must split those responsibilities before assigning them to IR or translation. IR does not own provider
 ingress parsing, provider-specific body construction, response composition outside the typed result, or
@@ -147,10 +147,11 @@ and subagent prevention/completion repair do not require buffered admission; oth
 modes retain their existing buffered path. Incremental Responses-to-Anthropic projection remains
 unfinished. The decoder's native framing stays inside translation and never becomes core history.
 
-The migration remains incomplete: production SDK activation, full native tool effects and human
-controls, account-bound cache/history admission, credential custody, cross-wire incremental
-Responses ingress and remaining IR consumers still require cutover. The current
-[handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
+Production SDK execution and durable history use canonical IR, with provider conversion at
+the external adapters. Incremental Responses-to-Anthropic projection remains unfinished.
+The current [handoff](../IR_MIGRATION_HANDOFF.md) records source qualification, deployed
+versions and the remaining live browser/control evidence; source tracing alone does not
+establish those live journeys.
 
 Canonical requests may carry `system_scalar` as an optional layout preference.
 The Anthropic egress codec emits a scalar only for one uncached TEXT block;
@@ -184,8 +185,9 @@ to protocols or translation while canonical structural limits remain enforced by
 
 ## Surfaces
 
-The current IR surface exposes installed C headers and symbols, canonical blocks/deltas, and the
-`aimee_ir_build_provider_body` compatibility seam; provider-body conversion moves to target translation.
+The current IR surface exposes installed C headers and symbols and canonical blocks/deltas.
+Provider-body conversion belongs to the translation adapters; the former
+`aimee_ir_build_provider_body` compatibility seam is retired.
 IR also exposes stream events, metrics, and shadow/rescue records. It owns no standalone CLI, HTTP route, listener,
 dashboard, or database. External JSON and stdio/network framing are protocol surfaces translated at the
 boundary into or out of `aimee_request_t` and `aimee_response_t`.

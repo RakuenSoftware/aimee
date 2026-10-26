@@ -224,7 +224,7 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	if target, err := url.Parse(str(provider, "endpoint")); err == nil && target.Scheme == "https" && target.Host == "aimee-llm:8761" {
 		localThinking = true
 	}
-	body, renderErr := probeWire(request, localThinking)
+	body, renderErr := probeWireContext(ctx, request, localThinking)
 	if renderErr != nil {
 		result["execution_error"] = "invalid canonical probe request"
 		return result, nil
@@ -233,7 +233,7 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	execution, runErr := m.request(ctx, provider, "POST", suffix, body)
 	result["latency_ms"] = time.Since(started).Milliseconds()
 	// The diagnostic body has an IR owner even when transport status denies health.
-	response, decodeErr := probeHTTPResponse(execution.Body, wire)
+	response, decodeErr := probeHTTPResponseContext(ctx, execution.Body, wire)
 	if runErr != nil {
 		result["execution_error"] = runErr.Error()
 	} else if execution.Status < 200 || execution.Status >= 300 {

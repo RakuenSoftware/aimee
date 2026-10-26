@@ -307,30 +307,6 @@ func TextResponse(text string) *Response {
 		Usage: ZeroUsage(), StopReason: StopEndTurn}
 }
 
-// Context is complete on the C wire even when an enum/default value is zero.
-func (b ResponseBlock) MarshalJSON() ([]byte, error) {
-	type plain ResponseBlock
-	raw, err := json.Marshal(plain(b))
-	if err != nil {
-		return nil, err
-	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
-	if b.Context != nil {
-		c := b.Context
-		epoch := c.RevisionEpoch
-		if epoch == "" {
-			epoch = "0"
-		}
-		fields["context"], err = json.Marshal(map[string]any{"origin": c.Origin, "authority": c.Authority, "trust": c.Trust, "sensitivity": c.Sensitivity, "model_visible": c.ModelVisible, "revision_domain": c.RevisionDomain, "revision_scope": c.RevisionScope, "revision_epoch": epoch})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return json.Marshal(fields)
-}
 func validResponseStrings(b Block) bool {
 	values := []string{b.Type, b.ToolID, b.Name, b.Namespace, b.MediaType, b.MediaRef}
 	for _, v := range []*string{b.Text, b.Signature, b.ThinkingBinding, b.RedactedContent, b.ThinkingID, b.EncryptedContent, b.CacheControl, b.CacheTTL} {

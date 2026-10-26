@@ -128,6 +128,30 @@ static void test_build_options_and_schema(void)
    printf("provider_client: build options + schema ok\n");
 }
 
+static void test_build_model_visibility(void)
+{
+   provider_def_t def = {.base_url = "http://h/v1", .model = "m", .temperature = -1};
+   aimee_request_t request = complete_request();
+   request.system = calloc(1, sizeof *request.system);
+   assert(request.system);
+   request.n_system = 1;
+   request.system[0].type = AIMEE_BLK_TEXT;
+   request.system[0].text = strdup("internal-only source");
+   request.system[0].context.origin = AIMEE_CTX_ORIGIN_MEMORY;
+   provider_completion_t result = {0};
+   mock_agent_http_set_post_handler(capture_build_request);
+   assert(!provider_client_complete_ir(&def, &request, &result, NULL, 0));
+   char *body = cJSON_PrintUnformatted(captured_request);
+   assert(body && !strstr(body, "internal-only source") && strstr(body, "extract entities"));
+   assert(!strcmp(request.system[0].text, "internal-only source"));
+   free(body);
+   cJSON_Delete(captured_request);
+   captured_request = NULL;
+   aimee_request_free(&request);
+   provider_completion_free(&result);
+   mock_agent_http_reset();
+}
+
 static void test_parse_success(void)
 {
    const char *body =
@@ -542,6 +566,7 @@ int main(void)
 {
    test_build_basic();
    test_build_options_and_schema();
+   test_build_model_visibility();
    test_parse_success();
    test_owned_response_blocks();
    test_parse_failures();

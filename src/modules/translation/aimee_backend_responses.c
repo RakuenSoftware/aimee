@@ -373,7 +373,8 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
    const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details");
    const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details");
-   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+   if (!wire_response_metadata_valid(resp) || wire_usage_validate(usage) ||
+       aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
        aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
        aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
        aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
@@ -403,6 +404,11 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
    out->model = dupstr(ostr(resp, "model"));
    out->role = dupstr("assistant");
    const char *status = ostr(resp, "status");
+   if (cJSON_GetObjectItemCaseSensitive(resp, "status") && !status)
+   {
+      aimee_response_free(out);
+      return -1;
+   }
    out->raw_stop_reason = dupstr(status);
    if (status && (!strcmp(status, "failed") || !strcmp(status, "cancelled")))
    {
@@ -457,6 +463,15 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          }
          else if (type && strcmp(type, "message") == 0)
          {
+            const cJSON *role = cJSON_GetObjectItemCaseSensitive(item, "role"),
+                        *parts = cJSON_GetObjectItemCaseSensitive(item, "content");
+            if (!wire_response_metadata_valid(item) ||
+                (role && (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant"))) ||
+                (parts && !cJSON_IsArray(parts)))
+            {
+               aimee_response_free(out);
+               return -1;
+            }
             /* Keep authored-message grouping as metadata, never invented text. */
             saw_message++;
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "content");
@@ -509,6 +524,8 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
     * "incomplete" -> max_tokens (Responses' truncation status). */
    if (status && strcmp(status, "incomplete") == 0)
       out->stop_reason = AIMEE_STOP_MAX_TOKENS;
+   else if (status && strcmp(status, "completed"))
+      out->stop_reason = AIMEE_STOP_UNKNOWN;
    else
       out->stop_reason = saw_refusal ? AIMEE_STOP_CONTENT_FILTER
                          : saw_tool  ? AIMEE_STOP_TOOL_USE
@@ -531,6 +548,15 @@ typedef struct
    char *arguments;
 } response_slot_t;
 
+/* Aliased native text observations share one semantic value per actual item/part.
+ * This is bounded edge assembly state, never a second model request/history. */
+struct response_text
+{
+   char *item_id, *text;
+   int output, part;
+   unsigned closed;
+};
+
 struct aimee_responses_stream
 {
    aimee_ir_response_builder_t builder;
@@ -538,7 +564,9 @@ struct aimee_responses_stream
    response_slot_t *slots;
    cJSON **items;
    cJSON *items_done, *terminal_object;
-   char *delta_text, *done_text, *part_text;
+   struct response_text *texts;
+   int n_texts, refused;
+   char *response_id;
    size_t bytes;
    int failed, terminal, taken, groups;
    int message_groups[AIMEE_IR_MAX_BLOCKS];
@@ -696,6 +724,9 @@ fail:
    return NULL;
 }
 
+static int same(const char *left, const char *right);
+static int response_text_materialize(aimee_responses_stream_t *stream, cJSON *output);
+
 static cJSON *native_object(aimee_responses_stream_t *stream)
 {
    if (!stream->terminal_object)
@@ -709,44 +740,10 @@ static cJSON *native_object(aimee_responses_stream_t *stream)
       cJSON *output = response_merge_output(stream->items_done, native_output);
       if (!output)
          return NULL;
-      /* The completed item snapshots carry all native content. Text-only
-       * providers may supply only text deltas and an empty terminal snapshot. */
-      int text_found = 0;
-      const cJSON *item;
-      cJSON_ArrayForEach(item, output)
+      if (response_text_materialize(stream, output))
       {
-         const char *type = string(item, "type");
-         if (!type || strcmp(type, "message"))
-            continue;
-         const cJSON *part;
-         cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, "content"))
-         {
-            const char *part_type = string(part, "type"), *text = string(part, "text");
-            /* reasoning.content is opaque state, never visible answer text. */
-            text_found |= part_type && !strcmp(part_type, "output_text") && text && text[0];
-         }
-      }
-      const char *text = stream->part_text;
-      if (stream->done_text && (!text || strlen(stream->done_text) > strlen(text)))
-         text = stream->done_text;
-      if (stream->delta_text && (!text || strlen(stream->delta_text) > strlen(text)))
-         text = stream->delta_text;
-      if (!text_found && text && text[0])
-      {
-         cJSON *message = cJSON_CreateObject(), *part = cJSON_CreateObject();
-         cJSON *content = message ? cJSON_AddArrayToObject(message, "content") : NULL;
-         if (!message || !part || !content ||
-             !cJSON_AddStringToObject(message, "type", "message") ||
-             !cJSON_AddStringToObject(part, "type", "output_text") ||
-             !cJSON_AddStringToObject(part, "text", text))
-         {
-            cJSON_Delete(message);
-            cJSON_Delete(part);
-            cJSON_Delete(output);
-            return NULL;
-         }
-         cJSON_AddItemToArray(content, part);
-         cJSON_AddItemToArray(output, message);
+         cJSON_Delete(output);
+         return NULL;
       }
       cJSON_DeleteItemFromObjectCaseSensitive(stream->terminal_object, "output");
       if (!cJSON_AddItemToObject(stream->terminal_object, "output", output))
@@ -767,6 +764,189 @@ static int index_value(const cJSON *object, const char *key)
               : -1;
 }
 
+static int response_identity(aimee_responses_stream_t *stream, const cJSON *frame)
+{
+   const cJSON *nested = cJSON_GetObjectItemCaseSensitive(frame, "response");
+   if (nested && !cJSON_IsObject(nested))
+      return -1;
+   const cJSON *ids[] = {cJSON_GetObjectItemCaseSensitive(frame, "response_id"),
+                         cJSON_GetObjectItemCaseSensitive(nested, "id")};
+   for (size_t i = 0; i < sizeof ids / sizeof *ids; i++)
+   {
+      if (!ids[i] || cJSON_IsNull(ids[i]))
+         continue;
+      const char *id = cJSON_GetStringValue(ids[i]);
+      if (!id || !*id || (stream->response_id && strcmp(stream->response_id, id)))
+         return -1;
+      if (!stream->response_id && !(stream->response_id = strdup(id)))
+         return -1;
+   }
+   return 0;
+}
+
+static int response_text_observe(aimee_responses_stream_t *stream, const char *event,
+                                 const cJSON *frame)
+{
+   int delta = !strcmp(event, "response.output_text.delta");
+   int part = !strcmp(event, "response.content_part.done");
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(frame, part    ? "part"
+                                                                : delta ? "delta"
+                                                                        : "text");
+   if (part && (!string(value, "type") || strcmp(string(value, "type"), "output_text")))
+      return 0;
+   const char *text = part ? string(value, "text") : response_text_value(value);
+   const cJSON *oid = cJSON_GetObjectItemCaseSensitive(frame, "output_index"),
+               *pid = cJSON_GetObjectItemCaseSensitive(frame, "content_index"),
+               *iid = cJSON_GetObjectItemCaseSensitive(frame, "item_id");
+   const char *id = iid ? cJSON_GetStringValue(iid) : NULL;
+   int output = oid ? index_value(frame, "output_index") : -1,
+       content = pid ? index_value(frame, "content_index") : 0;
+   if (!text || (oid && output < 0) || content < 0 || (iid && (!id || !*id)))
+      return -1;
+   struct response_text *entry = NULL;
+   for (int i = 0; i < stream->n_texts; i++)
+   {
+      struct response_text *prior = &stream->texts[i];
+      if ((id && prior->item_id && !strcmp(id, prior->item_id)) ||
+          (output >= 0 && output == prior->output) ||
+          (!id && output < 0 && !prior->item_id && prior->output < 0))
+      {
+         if ((id && prior->item_id && strcmp(id, prior->item_id)) ||
+             (output >= 0 && prior->output >= 0 && output != prior->output))
+            return -1;
+         if (prior->part == content)
+            entry = prior;
+      }
+   }
+   if (!entry)
+   {
+      if (stream->n_texts == AIMEE_IR_MAX_BLOCKS)
+         return -1;
+      entry = &stream->texts[stream->n_texts++];
+      entry->output = output;
+      entry->part = content;
+   }
+   if (id && !entry->item_id && !(entry->item_id = strdup(id)))
+      return -1;
+   if (output >= 0)
+      entry->output = output;
+   if (delta)
+      return entry->closed ? -1 : response_append(&entry->text, text, strlen(text), 0);
+   unsigned alias = part ? 2u : 1u;
+   if ((entry->closed & alias) ||
+       (entry->text && (entry->closed ? strcmp(entry->text, text)
+                                      : strncmp(text, entry->text, strlen(entry->text)))))
+      return -1;
+   char *copy = strdup(text);
+   if (!copy)
+      return -1;
+   free(entry->text);
+   entry->text = copy;
+   entry->closed |= alias;
+   return 0;
+}
+
+static int response_text_materialize(aimee_responses_stream_t *stream, cJSON *output)
+{
+   int authored = 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, output)
+   {
+      if (!same(string(item, "type"), "message"))
+         continue;
+      const cJSON *part;
+      cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, "content")) authored |=
+          same(string(part, "type"), "output_text") && string(part, "text") &&
+          *string(part, "text");
+   }
+   for (int n = 0; n < stream->n_texts; n++)
+   {
+      const struct response_text *text = &stream->texts[n];
+      int bound = text->item_id || text->output >= 0;
+      if (!bound && authored)
+         continue; /* Anonymous legacy hints cannot override a completed authored snapshot. */
+      cJSON *target = NULL;
+      for (int i = 0; i < cJSON_GetArraySize(output); i++)
+      {
+         cJSON *candidate = cJSON_GetArrayItem(output, i);
+         if ((text->item_id && same(text->item_id, string(candidate, "id"))) ||
+             (!text->item_id && text->output == i))
+            target = candidate;
+      }
+      if (target && text->output >= 0 && text->item_id)
+      {
+         const cJSON *at = cJSON_GetArrayItem(stream->items_done, text->output);
+         if (!same(text->item_id, string(at, "id")) &&
+             target != cJSON_GetArrayItem(output, text->output))
+            return -1;
+      }
+      if (!target)
+      {
+         if (bound && authored)
+            return -1; /* A foreign closed alias is not another admitted message. */
+         target = cJSON_CreateObject();
+         if (!target || !cJSON_AddStringToObject(target, "type", "message") ||
+             (text->item_id && !cJSON_AddStringToObject(target, "id", text->item_id)) ||
+             !cJSON_AddArrayToObject(target, "content") || !cJSON_AddItemToArray(output, target))
+         {
+            cJSON_Delete(target);
+            return -1;
+         }
+      }
+      if (!same(string(target, "type"), "message"))
+         return -1;
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(target, "content");
+      if (!content || cJSON_IsNull(content))
+      {
+         cJSON *array = cJSON_CreateArray();
+         int ok =
+             array && (content ? cJSON_ReplaceItemInObjectCaseSensitive(target, "content", array)
+                               : cJSON_AddItemToObject(target, "content", array));
+         if (!ok)
+         {
+            cJSON_Delete(array);
+            return -1;
+         }
+         content = array;
+      }
+      if (!cJSON_IsArray(content) || text->part > cJSON_GetArraySize(content))
+         return -1;
+      cJSON *part = cJSON_GetArrayItem(content, text->part);
+      if (!part)
+      {
+         part = cJSON_CreateObject();
+         if (!part || !cJSON_AddStringToObject(part, "type", "output_text") ||
+             !cJSON_AddItemToArray(content, part))
+         {
+            cJSON_Delete(part);
+            return -1;
+         }
+      }
+      const cJSON *previous_value = cJSON_GetObjectItemCaseSensitive(part, "text");
+      const char *previous = cJSON_GetStringValue(previous_value);
+      if ((previous_value && !cJSON_IsNull(previous_value) && !previous) ||
+          !same(string(part, "type"), "output_text") ||
+          (previous && *previous &&
+           (text->closed ? strcmp(previous, text->text ? text->text : "")
+                         : strncmp(previous, text->text ? text->text : "",
+                                   text->text ? strlen(text->text) : 0))))
+         return -1;
+      if (!previous || !*previous)
+      {
+         cJSON *value = cJSON_CreateString(text->text ? text->text : "");
+         int ok =
+             value && (previous_value ? cJSON_ReplaceItemInObjectCaseSensitive(part, "text", value)
+                                      : cJSON_AddItemToObject(part, "text", value));
+         if (!ok)
+         {
+            cJSON_Delete(value);
+            return -1;
+         }
+      }
+   }
+   return 0;
+}
+
 aimee_responses_stream_t *aimee_responses_stream_new(void)
 {
    aimee_responses_stream_t *stream = calloc(1, sizeof *stream);
@@ -775,7 +955,8 @@ aimee_responses_stream_t *aimee_responses_stream_new(void)
    stream->slots = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *stream->slots);
    stream->items = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *stream->items);
    stream->items_done = cJSON_CreateArray();
-   if (!stream->slots || !stream->items || !stream->items_done)
+   stream->texts = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *stream->texts);
+   if (!stream->slots || !stream->items || !stream->items_done || !stream->texts)
    {
       aimee_responses_stream_free(stream);
       return NULL;
@@ -798,9 +979,13 @@ void aimee_responses_stream_free(aimee_responses_stream_t *stream)
    free(stream->items);
    cJSON_Delete(stream->items_done);
    cJSON_Delete(stream->terminal_object);
-   free(stream->delta_text);
-   free(stream->done_text);
-   free(stream->part_text);
+   for (int i = 0; i < stream->n_texts; i++)
+   {
+      free(stream->texts[i].item_id);
+      free(stream->texts[i].text);
+   }
+   free(stream->texts);
+   free(stream->response_id);
    aimee_ir_response_builder_free(&stream->builder);
    aimee_response_free(&stream->final);
    free(stream);
@@ -1004,9 +1189,9 @@ static int live_delta(aimee_responses_stream_t *stream, const char *event, const
  * fills omissions only after this streaming consistency check. */
 static int item_agrees(const cJSON *left, const cJSON *right)
 {
-   const char *keys[] = {"id",        "type",      "call_id",           "name",
-                         "namespace", "arguments", "encrypted_content", "summary",
-                         "content"};
+   const char *keys[] = {"id",      "type",      "role",      "call_id",
+                         "name",    "namespace", "arguments", "encrypted_content",
+                         "summary", "content"};
    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
    {
       const cJSON *a = cJSON_GetObjectItemCaseSensitive(left, keys[i]);
@@ -1048,8 +1233,12 @@ static int native_done(aimee_responses_stream_t *stream, const cJSON *payload)
          return -1;
       }
    }
+   const char *identity = string(item, "id");
+   for (int i = 0; i < cJSON_GetArraySize(stream->items_done); i++)
+      if (identity && same(identity, string(cJSON_GetArrayItem(stream->items_done, i), "id")))
+         return -1;
    const cJSON *previous = cJSON_GetArrayItem(stream->items_done, position);
-   if (!cJSON_IsNull(previous) && !cJSON_Compare(previous, item, 1))
+   if (!cJSON_IsNull(previous))
       return -1;
    cJSON *copy = cJSON_Duplicate(item, 1);
    if (copy && cJSON_ReplaceItemInArray(stream->items_done, position, copy))
@@ -1068,7 +1257,19 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
       event = type;
    if (!event)
       return sink ? -1 : 0;
-   if (sink && ((type && strcmp(type, event)) || !aimee_ir_json_unique(payload)))
+   if ((type && strcmp(type, event)) || !aimee_ir_json_unique(payload))
+      return -1;
+   const cJSON *part = cJSON_GetObjectItemCaseSensitive(payload, "part");
+   int refusal = !strcmp(event, "response.refusal.delta") ||
+                 !strcmp(event, "response.refusal.done") ||
+                 (part && same(string(part, "type"), "refusal"));
+   if (refusal)
+   {
+      stream->refused = 1;
+      if (!sink)
+         return 0; /* Retain refusal diagnostics; never grant completion from contradictory text. */
+   }
+   if (stream->terminal || response_identity(stream, payload))
       return -1;
    if (sink)
    {
@@ -1088,7 +1289,8 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
       const cJSON *response = cJSON_GetObjectItemCaseSensitive(payload, "response");
       const cJSON *usage = cJSON_GetObjectItemCaseSensitive(response, "usage");
       aimee_delta_t opening = {.type = AIMEE_DELTA_TURN_START};
-      if (aimee_ir_read_usage(usage, "input_tokens", &opening.usage_in) ||
+      if (!wire_response_metadata_valid(response) || wire_usage_validate(usage) ||
+          aimee_ir_read_usage(usage, "input_tokens", &opening.usage_in) ||
           aimee_ir_read_usage(usage, "output_tokens", &opening.usage_out) ||
           aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details"),
                               "cached_tokens", &opening.usage_cache_read) ||
@@ -1102,8 +1304,6 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
    }
    if (!strcmp(event, "response.output_item.added"))
    {
-      if (!sink)
-         return 0;
       int index = index_value(payload, "output_index");
       const cJSON *item = cJSON_GetObjectItemCaseSensitive(payload, "item");
       const char *kind = string(item, "type");
@@ -1121,23 +1321,11 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
          stream->message_groups[index] = ++stream->groups;
       return 0;
    }
-   if (!strcmp(event, "response.output_text.delta") || !strcmp(event, "response.output_text.done"))
-   {
-      int delta = !strcmp(event, "response.output_text.delta");
-      const char *text =
-          response_text_value(cJSON_GetObjectItemCaseSensitive(payload, delta ? "delta" : "text"));
-      if (text &&
-          response_append(delta ? &stream->delta_text : &stream->done_text, text, strlen(text), 0))
-         return -1;
-   }
-   if (!strcmp(event, "response.content_part.done"))
-   {
-      const cJSON *part = cJSON_GetObjectItemCaseSensitive(payload, "part");
-      const char *kind = string(part, "type"), *text = string(part, "text");
-      if (kind && !strcmp(kind, "output_text") && text &&
-          response_append(&stream->part_text, text, strlen(text), 0))
-         return -1;
-   }
+   if ((!strcmp(event, "response.output_text.delta") ||
+        !strcmp(event, "response.output_text.done") ||
+        !strcmp(event, "response.content_part.done")) &&
+       response_text_observe(stream, event, payload))
+      return -1;
    if (!strcmp(event, "response.output_text.delta") || !strcmp(event, "response.refusal.delta") ||
        !strcmp(event, "response.reasoning_summary_text.delta") ||
        !strcmp(event, "response.function_call_arguments.delta"))
@@ -1158,9 +1346,11 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
       const cJSON *response = cJSON_GetObjectItemCaseSensitive(payload, "response");
       const char *status = string(response, "status");
       const cJSON *output = cJSON_GetObjectItemCaseSensitive(response, "output");
-      if (sink)
       {
-         if ((status && strcmp(status, completed ? "completed" : "incomplete")) ||
+         const char *expected = completed ? "completed" : incomplete ? "incomplete" : "failed";
+         if (!wire_response_metadata_valid(response) ||
+             wire_usage_validate(cJSON_GetObjectItemCaseSensitive(response, "usage")) ||
+             (status && strcmp(status, expected)) ||
              cJSON_GetArraySize(output) > AIMEE_IR_MAX_BLOCKS)
             return -1;
          for (int i = 0; i < cJSON_GetArraySize(output); i++)
@@ -1196,6 +1386,7 @@ static int feed(aimee_responses_stream_t *stream, const char *event, const cJSON
       }
       cJSON_Delete(stream->terminal_object);
       stream->terminal_object = copy;
+      stream->terminal = 1;
       if (sink)
       {
          cJSON *object = native_object(stream);
@@ -1250,8 +1441,9 @@ int aimee_responses_stream_take(aimee_responses_stream_t *stream, aimee_response
 int responses_backend_decode_body(const char *body, aimee_response_t *out, char *error,
                                   size_t capacity)
 {
-   if (!body || !out)
+   if (!body || !out || strlen(body) > RESPONSES_STREAM_BYTES)
       return -1;
+   memset(out, 0, sizeof *out);
    const char *first = body;
    while (*first == ' ' || *first == '\t' || *first == '\r' || *first == '\n')
       first++;
@@ -1310,6 +1502,27 @@ int responses_backend_decode_body(const char *body, aimee_response_t *out, char 
    if (object)
       rc = responses_backend_parse(object, out, error, capacity);
 done:
+   if (stream->refused)
+   {
+      if (rc || aimee_ir_response_valid(out))
+      {
+         aimee_response_free(out);
+         out->usage_unobserved = 1;
+      }
+      /* A refusal observation cannot carry an executable tool or authored
+       * successful-answer authority, even if a contradictory terminal did. */
+      for (int i = 0; i < out->n_content; i++)
+         aimee_block_free_contents(&out->content[i]);
+      free(out->content);
+      out->content = NULL;
+      out->n_content = 0;
+      free(out->error_message);
+      out->error_message = NULL;
+      out->stop_reason = AIMEE_STOP_CONTENT_FILTER;
+      free(out->raw_stop_reason);
+      out->raw_stop_reason = strdup("refusal");
+      rc = out->raw_stop_reason && !aimee_ir_response_admit(out) ? 0 : -1;
+   }
    free(data);
    aimee_responses_stream_free(stream);
    return rc;

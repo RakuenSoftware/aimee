@@ -76,8 +76,13 @@ func TestProbeCanonicalResponseRetainsFullRawAndUsage(t *testing.T) {
 }
 func TestProbeRejectsAmbiguousAndMalformedModelObservations(t *testing.T) {
 	cases := []struct{ wire, body string }{
+		{"openai_chat", `{"id":17,"choices":[{"finish_reason":"stop","message":{"content":"ok"}}]}`},
+		{"anthropic", `{"model":{},"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`},
 		{"openai_chat", `{"choices":[{"finish_reason":"stop","message":{"role":"user","content":"ok"}}]}`},
 		{"openai_chat", `{"choices":[{"finish_reason":"stop","message":{"role":42,"content":"ok"}}]}`},
+		{"openai_chat", `{"choices":[{"finish_reason":"stop","message":{"role":null,"content":"ok"}}]}`},
+		{"anthropic", `{"role":42,"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`},
+		{"anthropic", `{"role":null,"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`},
 		{"openai_chat", `{"choices":[{"finish_reason":"stop","message":{"reasoning_content":[],"content":"ok"}}]}`},
 		{"openai_chat", `{"error":{},"choices":[{"finish_reason":"stop","message":{"content":"ok"}}]}`},
 		{"openai_chat", `{"choices":[{"finish_reason":"stop","message":{"content":"ok","tool_calls":[{}]}}]}`},
@@ -255,5 +260,22 @@ func TestProbeUnobservedUsageIsNotObservedZero(t *testing.T) {
 				t.Fatal("explicitly observed zero was lost")
 			}
 		}
+	}
+}
+
+// A malformed terminal cannot erase an observed refusal, nor supply tool or
+// completion authority. This exercises actual stdio -> shared SSE -> IR admission.
+func TestProbeRefusalSurvivesUnadmittedTerminalSidecar(t *testing.T) {
+	body := []byte(`data: {"type":"response.refusal.delta","response_id":"owned","delta":"declined"}` + "\n\n" + `data: {"type":"response.completed","response":{"id":"owned","status":"completed","output":[{"type":"function_call","id":"bad","call_id":"bad","name":"write_file","arguments":"not JSON"}]}}` + "\n\n")
+	response, err := probeHTTPResponse(body, "responses")
+	if err == nil || response.StopReason != canonical.StopContentFilter || response.RawStopReason == nil || *response.RawStopReason != "refusal" || response.CompleteText() || len(response.Blocks) != 0 || !response.Usage.Unobserved {
+		t.Fatalf("refusal lost or granted authority: %+v %v", response, err)
+	}
+	var raw struct {
+		Body   string          `json:"native_body_base64"`
+		Native json.RawMessage `json:"decoded_native"`
+	}
+	if json.Unmarshal(response.Raw, &raw) != nil || raw.Body != base64.StdEncoding.EncodeToString(body) || string(raw.Native) != "null" {
+		t.Fatal("native diagnostic custody lost", string(response.Raw))
 	}
 }

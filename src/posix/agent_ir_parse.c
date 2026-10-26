@@ -16,23 +16,10 @@
 
 static void ir_observe_reasoning(const aimee_response_t *ir);
 
-int agent_ir_decode_json_response_bound(const cJSON *root, int anthropic, int rescue_mode,
-                                        int *n_rescued, const aimee_anthropic_replay_t *request,
-                                        aimee_response_t *out)
+static int ir_admit_decoded_response(int decode_status, aimee_response_t *out, int rescue_mode,
+                                     int *n_rescued)
 {
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   if (n_rescued)
-      *n_rescued = 0;
-   char err[128] = "";
-   if (!aimee_ir_json_unique(root))
-      goto fail;
-   int rc = anthropic ? anthropic_backend_parse(root, out, err, sizeof(err))
-                      : openai_backend_parse(root, out, err, sizeof(err));
-   if (rc != 0)
-      goto fail;
-   if (anthropic && request && aimee_anthropic_bind_response(request, out))
+   if (decode_status)
       goto fail;
    int rescued = rescue_mode >= 0 ? aimee_ir_rescue_tool_calls(out, rescue_mode) : 0;
    if (rescued < 0 || aimee_ir_response_admit(out) != 0)
@@ -50,6 +37,24 @@ fail:
    aimee_response_free(out);
    aimee_ir_session_fail_capture();
    return -1;
+}
+
+int agent_ir_decode_json_response_bound(const cJSON *root, int anthropic, int rescue_mode,
+                                        int *n_rescued, const aimee_anthropic_replay_t *request,
+                                        aimee_response_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (n_rescued)
+      *n_rescued = 0;
+   char err[128] = "";
+   int rc = !aimee_ir_json_unique(root) ? -1
+            : anthropic                 ? anthropic_backend_parse(root, out, err, sizeof(err))
+                                        : openai_backend_parse(root, out, err, sizeof(err));
+   if (!rc && anthropic && request && aimee_anthropic_bind_response(request, out))
+      rc = -1;
+   return ir_admit_decoded_response(rc, out, rescue_mode, n_rescued);
 }
 
 int agent_ir_decode_json_response(const cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
@@ -105,22 +110,5 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
       *n_rescued = 0;
    char error[128];
    int rc = responses_backend_decode_body(body, out, error, sizeof error);
-   if (rc != 0)
-      goto fail;
-   int rescued = rescue_mode >= 0 ? aimee_ir_rescue_tool_calls(out, rescue_mode) : 0;
-   if (rescued < 0 || aimee_ir_response_admit(out) != 0)
-      goto fail;
-   if (n_rescued)
-      *n_rescued = rescued;
-   ir_observe_reasoning(out);
-   if (aimee_ir_session_emit_buffered_response(out, NULL) != 0)
-   {
-      aimee_response_free(out);
-      return AGENT_IR_CAPTURE_FAILED;
-   }
-   return 0;
-fail:
-   aimee_response_free(out);
-   aimee_ir_session_fail_capture();
-   return -1;
+   return ir_admit_decoded_response(rc, out, rescue_mode, n_rescued);
 }

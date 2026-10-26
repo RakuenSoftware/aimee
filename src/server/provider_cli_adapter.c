@@ -3,7 +3,6 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "agent_config.h" /* agent_api_key_secret: resolve at use, not at load */
 #include "runtime_secret.h"
 #include "util.h"
 
@@ -42,20 +41,6 @@ static int provider_cli_resolve_native_env_key(const char *name, char *dst, size
    return runtime_secret_get(name, dst, dst_len);
 }
 
-static void provider_cli_append_header(char *headers, size_t headers_len, const char *header)
-{
-   if (!headers || headers_len == 0 || !header || !header[0])
-      return;
-   if (strstr(headers, header))
-      return;
-   size_t used = strlen(headers);
-   if (used > 0 && used + 1 < headers_len)
-      snprintf(headers + used, headers_len - used, "\n");
-   used = strlen(headers);
-   if (used < headers_len)
-      snprintf(headers + used, headers_len - used, "%s", header);
-}
-
 int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adapter,
                                               const agent_t *agent, agent_t *native_agent,
                                               char *errbuf, size_t errbuf_len)
@@ -89,48 +74,7 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
    if (native_agent->auth_cmd[0] && strcmp(native_agent->auth_type, "bearer") == 0)
       snprintf(native_agent->auth_type, sizeof(native_agent->auth_type), "%s", "oauth");
 
-   if (strcmp(adapter->native_provider, "gemini") == 0 && !native_agent->auth_cmd[0])
-   {
-      char key[MAX_API_KEY_LEN] = {0};
-      /* api_key holds what agents.json holds -- possibly a "$VAR" reference --
-       * so resolve it rather than copying the field. */
-      if (agent_api_key_secret(native_agent, key, sizeof(key)))
-         native_agent->api_key[0] = '\0';
-      else if (adapter->native_api_key_env)
-         (void)provider_cli_resolve_native_env_key(adapter->native_api_key_env, key, sizeof(key));
-      if (!key[0])
-         (void)provider_cli_resolve_native_env_key("GOOGLE_API_KEY", key, sizeof(key));
-      if (key[0])
-      {
-         const char *mechanism = getenv("GEMINI_API_KEY_AUTH_MECHANISM");
-         if (mechanism && strcmp(mechanism, "bearer") == 0)
-         {
-            snprintf(native_agent->api_key, sizeof(native_agent->api_key), "%s", key);
-            snprintf(native_agent->auth_type, sizeof(native_agent->auth_type), "%s", "bearer");
-         }
-         else
-         {
-            char header[MAX_API_KEY_LEN + 32];
-            snprintf(header, sizeof(header), "x-goog-api-key: %s", key);
-            provider_cli_append_header(native_agent->extra_headers,
-                                       sizeof(native_agent->extra_headers), header);
-            snprintf(native_agent->auth_type, sizeof(native_agent->auth_type), "%s", "none");
-            runtime_secret_wipe(header, sizeof(header));
-         }
-         runtime_secret_wipe(key, sizeof(key));
-      }
-      else if (!strstr(native_agent->extra_headers, "x-goog-api-key"))
-      {
-         if (errbuf && errbuf_len > 0)
-            snprintf(errbuf, errbuf_len,
-                     "%s is not present in Vault; native %s adapter also checked "
-                     "GOOGLE_API_KEY in Vault",
-                     adapter->native_api_key_env ? adapter->native_api_key_env : "GEMINI_API_KEY",
-                     adapter->cli_kind);
-         return -1;
-      }
-   }
-   else if (!native_agent->api_key[0] && !native_agent->auth_cmd[0] && adapter->native_api_key_env)
+   if (!native_agent->api_key[0] && !native_agent->auth_cmd[0] && adapter->native_api_key_env)
    {
       /* Nothing on disk: fall back to the provider's vault slot. Writing the
        * resolved secret into api_key here is deliberate and local -- native_agent

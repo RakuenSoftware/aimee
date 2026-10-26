@@ -658,7 +658,7 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
    const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
    const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
-   if (aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
+   if (wire_usage_validate(usage) || aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
        aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
        aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
        aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
@@ -684,6 +684,13 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
       }
       return 0;
    }
+   if (!wire_response_metadata_valid(resp))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider response metadata");
+      aimee_response_free(out);
+      return -1;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
 
@@ -697,6 +704,14 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
 
    if (msg)
    {
+      const cJSON *role = cJSON_GetObjectItemCaseSensitive(msg, "role");
+      if (role && (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant")))
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid provider assistant role");
+         aimee_response_free(out);
+         return -1;
+      }
       out->role = dupstr(ostr(msg, "role"));
 
       const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content");
@@ -733,6 +748,8 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
          aimee_response_free(out);
          return -1;
       }
+      if (cJSON_IsString(refusal) && refusal->valuestring[0])
+         out->stop_reason = AIMEE_STOP_CONTENT_FILTER;
       const cJSON *calls = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "tool_calls");
       const cJSON *c = NULL;
       if (calls && cJSON_IsArray(calls))

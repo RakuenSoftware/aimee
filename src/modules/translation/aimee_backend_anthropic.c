@@ -1124,7 +1124,7 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
    }
    out->raw = cJSON_Duplicate(resp, 1);
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+   if (wire_usage_validate(usage) || aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
        aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
        aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
        aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
@@ -1149,8 +1149,23 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       }
       return 0;
    }
+   if (!wire_response_metadata_valid(resp))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider response metadata");
+      aimee_response_free(out);
+      return -1;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
+   const cJSON *role = cJSON_GetObjectItemCaseSensitive(resp, "role");
+   if (role && (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant")))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider assistant role");
+      aimee_response_free(out);
+      return -1;
+   }
    out->role = dupstr(ostr(resp, "role"));
    const char *sr = ostr(resp, "stop_reason");
    out->raw_stop_reason = dupstr(sr);

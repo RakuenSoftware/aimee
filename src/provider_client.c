@@ -19,7 +19,7 @@
 
 /* --- request building --- */
 
-static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
+static char *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
 {
    if (!def || !request || aimee_ir_request_admit(request))
       return NULL;
@@ -36,18 +36,7 @@ static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t
       profile.max_tokens = def->max_tokens;
       profile.has_max_tokens = 1;
    }
-   cJSON *native = openai_backend_build(&profile);
-   if (native && def->disable_thinking)
-   {
-      /* A provider-profile extension, added only at the native output boundary. */
-      cJSON *kwargs = cJSON_AddObjectToObject(native, "chat_template_kwargs");
-      if (!kwargs || !cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
-      {
-         cJSON_Delete(native);
-         return NULL;
-      }
-   }
-   return native;
+   return openai_backend_render_local(&profile, def->disable_thinking);
 }
 /* --- response parsing --- */
 
@@ -58,22 +47,9 @@ int provider_client_parse_openai(const char *body, provider_completion_t *out)
    memset(out, 0, sizeof *out);
    if (!body)
       return -1;
-   const char *end = NULL;
-   size_t length = strlen(body);
-   cJSON *root = cJSON_ParseWithLengthOpts(body, length, &end, 0);
-   if (end)
-      while (end < body + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
-         end++;
-   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0);
-   const char *finish =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(choice, "finish_reason"));
    char error[128];
-   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
-   int rc = root && end == body + length &&
-                    ((finish && finish[0]) || (failure && !cJSON_IsNull(failure)))
-                ? openai_backend_parse(root, &out->ir, error, sizeof error)
-                : -1;
-   cJSON_Delete(root);
+   int rc = aimee_backend_parse_wire(body, strlen(body), AIMEE_WIRE_OPENAI_CHAT, &out->ir, error,
+                                     sizeof error);
    if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message ||
        out->ir.stop_reason == AIMEE_STOP_CONTENT_FILTER || out->ir.stop_reason == AIMEE_STOP_ERROR)
       return -1;
@@ -147,22 +123,13 @@ int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t
       return -1;
    }
 
-   cJSON *req = provider_build_ir(def, request);
-   if (!req)
+   char *body = provider_build_ir(def, request);
+   if (!body)
    {
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "failed to build request");
       return -1;
    }
-   char *body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!body)
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "failed to serialize request");
-      return -1;
-   }
-
    /* URL = base_url + "/chat/completions" (tolerate a trailing slash). snprintf
     * is bounded (no overflow), but a truncated URL/Bearer would silently hit the
     * wrong endpoint or 401 with valid creds, so treat truncation as an error. */

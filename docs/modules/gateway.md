@@ -9,17 +9,17 @@ translation, protocol standards, workflow definitions, or channel implementation
 
 ## Public contracts
 
-The canonical orchestration sources are `src/modules/gateway/gateway_pipeline.c`,
-`src/modules/gateway/gateway_policy.c`, and `src/modules/gateway/gateway_delegate.c`. Their public
-contracts live under `src/modules/gateway/include/aimee/gateway`; consumers use the canonical include
-namespace `aimee/gateway`. This canonical include namespace is the only supported public-header route.
-The public header inventory is
-`src/modules/gateway/include/aimee/gateway/gateway_pipeline.h`,
-`src/modules/gateway/include/aimee/gateway/gateway_policy.h`, and
-`src/modules/gateway/include/aimee/gateway/gateway_delegate.h`. The `gw_` prefix predates the canonical
-namespace and remains as a compatibility name; renaming it requires the compatibility process.
-`gw_pipeline_run_request`, `gateway_policy_apply_ir`, and
-`gateway_delegate_run_request_pipeline` retain their existing contracts.
+The implementation owners are `src/modules/gateway/gateway_policy.c` and
+`src/modules/gateway/gateway_delegate.c`; their canonical include namespace is
+`aimee/gateway`. The active gateway contracts are `gateway_policy_apply_ir` and
+`gateway_delegate_run_request_pipeline`, declared under
+`src/modules/gateway/include/aimee/gateway/gateway_policy.h` and
+`src/modules/gateway/include/aimee/gateway/gateway_delegate.h`. They consume the shared canonical
+model Request and keep provider-specific rendering at the translation boundary.
+The old native-JSON request-stage runner and its provider-specific memory
+injection modes had no production callers and are retired. Active ingress stages
+are owned by `src/server/aimee_ir_serve.c`; they operate directly on
+`aimee_request_t`, not a second request schema.
 
 The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C and
 private-header files (the module has no private headers) and requires this canonical document.
@@ -57,7 +57,9 @@ and optional channel adapters. Routing is invoked by the gateway journey but rem
 
 ## Providers and readiness
 
-Core `gateway_pipeline` readiness requires identity capture, policy, IR stages, routing handoff, execution, and a
+The typed ingress stages are applied by `aimee_ir_apply_gateway_request_stages` in
+`src/server/aimee_ir_serve.c`. Core gateway readiness requires identity capture, policy,
+IR stages, routing handoff, execution, and a
 working response path for at least the selected listener. Telegram, ntfy, webhook, speech, and similar
 delivery implementations are providers beneath that boundary and may be unavailable independently.
 Readiness must report the exact missing stage rather than marking all of gateway optional.
@@ -68,8 +70,8 @@ Readiness must report the exact missing stage rather than marking all of gateway
 
 Listener, pairing, policy, memory-stage, delivery, STT/TTS, and platform settings tune concrete providers.
 A future module profile must omit a platform's code and hide its GUI/config when excluded, while the core
-gateway remains. Build membership is currently asymmetric by policy, not by drift: Make compiles all
-three sources into `DATA_SRCS`, while no CMake target compiles any of them. `CMakeLists.txt` states
+gateway remains. Build membership is currently asymmetric by policy, not by drift: Make compiles both
+remaining sources into `DATA_SRCS`, while no CMake target compiles any of them. `CMakeLists.txt` states
 that CMake builds only the `aimee` thin client plus the unit-test suite, and that the `aimee-server`,
 `aimee-kb`, `aimee-gateway`, and `aimee-webchat` targets were removed because CMake's source lists had
 drifted far behind `src/Makefile` and no CI gate built them. Multiple config keys must not select parallel ingress pipelines with divergent policy or
@@ -130,8 +132,10 @@ The external contracts are documented in the
 Focused speech fixtures use controlled HTTP/process peers, including binary
 audio and local CLI result files; they do not claim paid-provider inference.
 
-The gateway descriptor owns the direct `src/tests/test_gateway_pipeline.c`,
-`src/tests/test_gateway_policy.c`, and `src/tests/test_gateway_p4_delegate.c` contracts.
+The gateway descriptor owns the direct `src/tests/test_gateway_policy.c` and
+`src/tests/test_gateway_p4_delegate.c` contracts. Active typed stage coverage is in
+`src/tests/test_aimee_ir_serve.c`; dedicated tests of the retired native request runner
+and its unused registry were removed with those implementations.
 `test_gateway.c`, platform tests, `test_gateway_mutate_wire.c`,
 mixed ingress/governance tests, and cross-protocol IR tests cover adjacent boundaries without becoming
 gateway-owned; the `test_gateway*` names that exercise delivery platforms belong to the `src/gateway`

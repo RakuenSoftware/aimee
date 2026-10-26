@@ -131,12 +131,6 @@
       "ctest": false,
       "make": true,
       "module": "gateway",
-      "test": "src/tests/test_gateway_pipeline.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "gateway",
       "test": "src/tests/test_gateway_policy.c"
     },
     {

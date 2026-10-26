@@ -17,9 +17,7 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "ir_host_bindings.h"
-#include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
 #include "gw_stage_completion.h"                /* bounded incomplete-repair continuation */
 #include "dogfood.h"                            /* dogfood_autolabel_next_turn_live */

@@ -96,7 +96,7 @@ static int active_delegation_stopped(char *buf, size_t bufsz)
    return 1;
 }
 
-static int agent_uses_provider_cli(const agent_t *agent)
+int agent_uses_provider_cli(const agent_t *agent)
 {
    return agent && (strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
                     strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) == 0 ||
@@ -978,7 +978,7 @@ static void parse_response(const char *body, const agent_t *agent,
       rc = agent_ir_decode_responses(body, -1, NULL, &response);
    else
    {
-      cJSON *root = cJSON_Parse(body);
+      cJSON *root = aimee_ir_json_parse_frame(body, body ? strlen(body) : 0);
       if (!root)
       {
          out->usage_unobserved = 1;

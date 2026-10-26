@@ -28,6 +28,30 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_separate_provider_probe_codecs_stay_retired(self):
+        for symbol in ("probeParts", "probeUsage", "probeStop", "probeResponsesStream",
+                       "probeResponseOutput", "probeMetadata"):
+            path = self.source("server-go/modules/providers/restored_codec.go",
+                               f"func {symbol}() {{}}")
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+
+    def test_provider_shaped_request_pipeline_stays_retired(self):
+        for relative in ("src/modules/gateway/gateway_pipeline.c",
+                         "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+                         "src/pipeline/gw_stage_registry.c", "src/pipeline/gw_stage_registry.h"):
+            path = self.source(relative, "/* retired owner */\n")
+            with self.subTest(path=relative), self.assertRaisesRegex(ValueError, "retired-owner"):
+                checker.check(self.root)
+            path.unlink()
+        for symbol in ("gw_request_t", "gw_mem_target_t", "gw_api_t", "gw_stage_t",
+                       "gw_stage_slot_t", "gw_pipeline_run_request", "gw_stage_registry_build"):
+            path = self.source("src/server/old_request_pipeline.c", f"void f() {{ {symbol}(value); }}")
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+
     def test_gateway_cannot_resume_raw_message_contracts_or_display_subscriber(self):
         for name in ("gateway_handle_message", "gateway_send_text", "rpc_chat_send_stream",
                      "mirror_record", "delivery_router_send", "tts_synthesize"):

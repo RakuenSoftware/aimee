@@ -120,13 +120,16 @@ int main(void)
          ir.max_tokens = 200;
          ir.has_max_tokens = 1;
          ir.stream = stream;
-         char *wire = aimee_backend_render_wire(&ir, provider ? AIMEE_WIRE_RESPONSES
-                                                              : AIMEE_WIRE_OPENAI_CHAT);
+         int control_losses = 0;
+         char *wire =
+             provider ? aimee_backend_render_wire_profile(&ir, AIMEE_WIRE_RESPONSES,
+                                                          AIMEE_RESPONSES_CODEX, &control_losses)
+                      : aimee_backend_render_wire(&ir, AIMEE_WIRE_OPENAI_CHAT);
          cJSON *body = wire ? cJSON_Parse(wire) : NULL;
          assert(body &&
                 !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "model")), "served-model"));
          if (provider)
-            assert(cJSON_IsTrue(cJSON_GetObjectItem(body, "stream"))); /* Responses requires SSE. */
+            assert(cJSON_IsTrue(cJSON_GetObjectItem(body, "stream"))); /* Codex requires SSE. */
          else
             assert(stream ? cJSON_IsTrue(cJSON_GetObjectItem(body, "stream"))
                           : !cJSON_GetObjectItem(body, "stream"));
@@ -136,6 +139,7 @@ int main(void)
          {
             assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "store")));
             assert(!cJSON_GetObjectItem(body, "max_output_tokens"));
+            assert(control_losses == 1 && ir.has_max_tokens && ir.max_tokens == 200);
             assert(cJSON_GetObjectItem(body, "instructions"));
          }
          else

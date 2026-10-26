@@ -43,6 +43,7 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 | `economizer-post-status` | 11014 | session, provider status and mutation/stream facts | restore/resend decision and breaker result |
 | `economizer-stats` | 11015 | snapshot operation | reduction telemetry |
 | `economizer-request-budget` | 11016 | final body length/digest, route and explicit limits | admission decision bound to the complete metadata |
+| `economizer-task-cost` | 11017 | declared task bounds and observed usage/cost evidence | observe-only cost report and verdict |
 
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
@@ -82,7 +83,7 @@ unattached module are therefore not presented as genuine zero activity.
 
 ## Providers and readiness
 
-The module serves eight bus stages and calls no provider itself, so it has no upstream to be
+The module serves nine bus stages and calls no provider itself, so it has no upstream to be
 ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
 reports whether an `aimee-module-economizer` process is attached to the bus.
 

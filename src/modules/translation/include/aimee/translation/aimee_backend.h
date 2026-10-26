@@ -16,6 +16,8 @@ struct cJSON;
 /* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
  * Independent semantic comparison detects edits even when their flag was missed. */
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
+/* Closed local OpenAI profile extension; shared by host diagnostic and KB edges. */
+char *openai_backend_render_local(const aimee_request_t *request, int disable_thinking);
 /* The Responses API and the authenticated Codex transport have distinct
  * control contracts. This choice belongs to the provider boundary, not IR. */
 typedef enum

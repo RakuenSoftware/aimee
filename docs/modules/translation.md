@@ -9,6 +9,12 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
+Go callers use `server-go/modules/translation/client.go` and the existing server's
+`--module-model-codec` pipe mode to call the same adapters. The mode returns before
+configuration, Vault, database, bus, transport or daemon startup. It adds no second codec
+or installed executable. Provider diagnostics keep their fixed request and health policy
+in the providers owner.
+
 `src/modules/translation/module.yaml` is the complete module-local ownership inventory for shipping
 translation units, canonical public headers, direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the

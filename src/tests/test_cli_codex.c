@@ -41,6 +41,14 @@ static void test_execute_rejects_missing_inputs(void)
    assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
 }
 
+static int parse_error_fixture(const char *line, char **out)
+{
+   cJSON *frame = aimee_ir_json_parse_frame(line, strlen(line));
+   int result = cli_codex_parse_error_message(frame, out);
+   cJSON_Delete(frame);
+   return result;
+}
+
 static void test_parse_error_notification_unwraps_nested_message(void)
 {
    const char *line =
@@ -48,7 +56,7 @@ static void test_parse_error_notification_unwraps_nested_message(void)
        "\\\"status\\\":400,\\\"error\\\":{\\\"type\\\":\\\"invalid_request_error\\\","
        "\\\"message\\\":\\\"The model is not supported.\\\"}}\"}}}";
    char *out = NULL;
-   assert(cli_codex_parse_error_message(line, &out) == 1);
+   assert(parse_error_fixture(line, &out) == 1);
    assert(out != NULL);
    assert(strcmp(out, "The model is not supported.") == 0);
    free(out);
@@ -59,7 +67,7 @@ static void test_parse_turn_completed_error(void)
    const char *line = "{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"status\":\"failed\","
                       "\"error\":{\"message\":\"codex failed\"}}}}";
    char *out = NULL;
-   assert(cli_codex_parse_error_message(line, &out) == 1);
+   assert(parse_error_fixture(line, &out) == 1);
    assert(out != NULL);
    assert(strcmp(out, "codex failed") == 0);
    free(out);
@@ -68,46 +76,10 @@ static void test_parse_turn_completed_error(void)
 static void test_parse_error_message_skips_success(void)
 {
    char *out = NULL;
-   assert(cli_codex_parse_error_message("{\"method\":\"turn/completed\",\"params\":{}}", &out) ==
-          0);
+   assert(parse_error_fixture("{\"method\":\"turn/completed\",\"params\":{}}", &out) == 0);
    assert(out == NULL);
-   assert(cli_codex_parse_error_message("not json", &out) == 0);
+   assert(parse_error_fixture("not json", &out) == 0);
    assert(out == NULL);
-}
-
-static void test_parse_method_extracts_string(void)
-{
-   char buf[64];
-   assert(cli_codex_parse_method("{\"method\":\"turn/completed\",\"params\":{}}", buf,
-                                 sizeof(buf)) == 1);
-   assert(strcmp(buf, "turn/completed") == 0);
-}
-
-static void test_parse_method_response_envelope_has_no_method(void)
-{
-   /* JSON-RPC responses carry "id" + "result" but no "method". */
-   char buf[64] = "untouched";
-   assert(cli_codex_parse_method("{\"id\":1,\"result\":{}}", buf, sizeof(buf)) == 0);
-   /* On miss, the helper does not write to out (sentinel preserved). */
-   assert(strcmp(buf, "untouched") == 0);
-}
-
-static void test_parse_method_truncates_long_names(void)
-{
-   char buf[8];
-   assert(cli_codex_parse_method("{\"method\":\"abcdefghij\"}", buf, sizeof(buf)) == 1);
-   /* snprintf truncates with NUL terminator within outsz. */
-   assert(strlen(buf) == 7);
-   assert(strcmp(buf, "abcdefg") == 0);
-}
-
-static void test_parse_method_invalid_inputs(void)
-{
-   char buf[64];
-   assert(cli_codex_parse_method(NULL, buf, sizeof(buf)) == 0);
-   assert(cli_codex_parse_method("{\"method\":\"x\"}", NULL, sizeof(buf)) == 0);
-   assert(cli_codex_parse_method("{\"method\":\"x\"}", buf, 0) == 0);
-   assert(cli_codex_parse_method("not json", buf, sizeof(buf)) == 0);
 }
 
 /* Run the real adapter through owned interpreter and directory descriptors.
@@ -1212,22 +1184,6 @@ int main(int argc, char **argv)
 
    printf("test_parse_error_message_skips_success... ");
    test_parse_error_message_skips_success();
-   printf("OK\n");
-
-   printf("test_parse_method_extracts_string... ");
-   test_parse_method_extracts_string();
-   printf("OK\n");
-
-   printf("test_parse_method_response_envelope_has_no_method... ");
-   test_parse_method_response_envelope_has_no_method();
-   printf("OK\n");
-
-   printf("test_parse_method_truncates_long_names... ");
-   test_parse_method_truncates_long_names();
-   printf("OK\n");
-
-   printf("test_parse_method_invalid_inputs... ");
-   test_parse_method_invalid_inputs();
    printf("OK\n");
 
    printf("test_spawn_failure_captures_stderr_and_exit_status... ");

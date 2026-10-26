@@ -28,6 +28,7 @@ provider/model pages, and CLI operations consume the same `providers` owner.
 - `config`: configuration and concurrency projections for provider/model state.
 - `egress`: authenticated outbound discovery and provider HTTP probes.
 - `ir`: canonical request/response admission for provider diagnostics.
+- `translation`: shared provider codecs through the existing server's pure one-shot pipe mode; probes retain endpoint, credential and health policy here.
 - `module-runtime`: process identity, event grants, and bus attachment.
 - `vault`: credential storage accessed through the attested resource helper.
 

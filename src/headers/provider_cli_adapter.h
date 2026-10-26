@@ -76,7 +76,7 @@ extern "C"
 
    typedef struct provider_cli_adapter
    {
-      const char *cli_kind;     /* "codex", "claude", "gemini", "mistral" */
+      const char *cli_kind;     /* "codex", "claude", "mistral", "acp" */
       const char *display_name; /* human-readable CLI name for diagnostics */
       cli_adapter_caps_t caps;
 

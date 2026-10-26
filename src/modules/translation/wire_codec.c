@@ -173,6 +173,32 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
    return aimee_backend_render_wire_profile(request, wire, AIMEE_RESPONSES_API, NULL);
 }
 
+char *openai_backend_render_local(const aimee_request_t *request, int disable_thinking)
+{
+   char *body = aimee_backend_render_wire(request, AIMEE_WIRE_OPENAI_CHAT);
+   if (!body || !disable_thinking)
+      return body;
+   cJSON *native = aimee_ir_json_parse_frame(body, strlen(body));
+   free(body);
+   cJSON *kwargs = native ? cJSON_GetObjectItemCaseSensitive(native, "chat_template_kwargs") : NULL;
+   if (!kwargs)
+      kwargs = native ? cJSON_AddObjectToObject(native, "chat_template_kwargs") : NULL;
+   if (!cJSON_IsObject(kwargs))
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(kwargs, "enable_thinking");
+   if (!cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   body = cJSON_PrintUnformatted(native);
+   cJSON_Delete(native);
+   return body;
+}
+
 char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wire_t wire,
                                         aimee_responses_profile_t profile, int *control_losses)
 {
@@ -321,17 +347,16 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
          snprintf(error, capacity, "invalid native provider response frame");
       return -1;
    }
-   int decoded = 0;
+   int rc = -1;
    cJSON *root = aimee_ir_json_parse_frame(frame, length);
    if (!root && wire == AIMEE_WIRE_RESPONSES)
    {
       char *bounded = strndup(frame, length);
-      int rc = bounded ? responses_backend_decode_body(bounded, out, error, capacity) : -1;
+      rc = bounded ? responses_backend_decode_body(bounded, out, error, capacity) : -1;
       free(bounded);
-      if (rc)
-         return -1;
-      root = out->raw;
-      decoded = 1;
+      /* The shared decoder owns native frame/terminal validation. Its inert
+       * sidecar is not a second source of canonical completion authority. */
+      goto admit;
    }
    int shape = cJSON_IsObject(root);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -363,15 +388,13 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
                   !strcmp(status, "failed") || !strcmp(status, "cancelled"));
       }
    }
-   int rc = -1;
    if (shape && aimee_ir_json_unique(root))
-      rc = decoded                          ? 0
-           : wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_parse(root, out, error, capacity)
+      rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)
                                             : -1;
-   if (!decoded)
-      cJSON_Delete(root);
+   cJSON_Delete(root);
+admit:
    if (rc || aimee_ir_response_admit(out))
    {
       if (error && capacity && !error[0])
