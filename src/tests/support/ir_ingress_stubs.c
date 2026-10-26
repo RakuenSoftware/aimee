@@ -156,12 +156,6 @@ __attribute__((weak)) const char *server_http_identity_principal(void)
    return "";
 }
 
-__attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int frontend)
-{
-   (void)req;
-   (void)frontend;
-}
-
 __attribute__((weak)) void openai_stream_state_init(void *st)
 {
    (void)st;

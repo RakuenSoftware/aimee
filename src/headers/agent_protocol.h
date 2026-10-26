@@ -49,13 +49,4 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
 /* Legacy output-only compatibility values are released here while their
  * remaining native emitters are retired. Execution never constructs them. */
 
-/* --- Message utilities --- */
-
-/* Repair a canonical working-history view. Missing results become explicit
- * unknown-outcome diagnostics; orphaned results are removed in causal order.
- * Native/mixed/malformed history refuses atomically; import belongs at translation.
- * This never admits a repaired view as authoritative persisted history.
- * Returns repairs, or -1 on refusal. NULL/empty input performs no repairs. */
-int message_history_repair(struct cJSON *messages);
-
 #endif /* DEC_AGENT_PROTOCOL_H */

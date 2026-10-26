@@ -22,17 +22,30 @@ MODULE_ROOTS = ("aimee", "modules")
 # Scoped to the exact header: audit_action.h and audit_worm.h are the audit
 # module's own domain API and stay debt below.
 BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
-# Exact direct module-to-module coupling on testing, each entry a peer header a
-# module reaches for in-process instead of over the bus. Closed list: nothing may
-# join it, and an entry whose include is gone must be deleted, so it only shrinks.
+# Shared canonical model-I/O data contracts are registered by exact consumer and
+# header below. They carry Request/Message/Response data and their codecs, not
+# calls into a peer's business service. New model-I/O consumers require review;
+# this is not a blanket exemption for aimee/ir headers or a module pair.
 #
-# The aimee/ir/ entries are a different debt from the rest. aimee_request_t is
-# the pipeline's shared data contract rather than a peer service call; retiring
-# them depends on docs/proposals/pending/ir-sole-path-and-pluggable-stages.md,
-# not on moving a call onto the bus.
-# Harness translation also consumes the canonical session envelope: this is the
-# same shared IR data contract, not a call into another module's domain service.
+# The separate peer-service/private/core-linked reach sets below record existing
+# coupling debt on testing. Those sets remain closed: no new service or private
+# header edge may join them, and removed edges must leave their set.
 IR_SHARED_TYPE = {
+    # Delegate queue admission decodes the shared canonical model task Message.
+    ("src/modules/delegates/delegate_launch.c", "aimee/ir/session_event.h"),
+    # Panel model execution accepts a canonical Request without a provider DTO.
+    ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "aimee/ir/aimee_ir.h"),
+    # Roadmap model builders/hooks exchange canonical requests and responses;
+    # the resulting roadmap/verdict remains its own domain artifact.
+    ("src/modules/roadmap/roadmap_decompose.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/roadmap/roadmap_milestone.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/roadmap/roadmap_reassess.h", "aimee/ir/aimee_ir.h"),
+    # Ensemble/chair model continuations retain the original canonical request.
+    ("src/modules/roundtable/ensemble_request.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/roundtable/roundtable_chair.h", "aimee/ir/aimee_ir.h"),
+    # Trial and delegate callbacks exchange model I/O, not peer service policy.
+    ("src/modules/skills/include/aimee/skills/skill.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/workflows/wfe_blocks.h", "aimee/ir/aimee_ir.h"),
     # The tools header exchanges owned canonical catalogs only. These are data
     # declarations; tool policy and peer service calls keep their bus owners.
     ("src/modules/tools/include/aimee/tools/agent_tools.h", "aimee/ir/aimee_ir.h"),

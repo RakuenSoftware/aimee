@@ -591,7 +591,6 @@ The binaries read 303 `AIMEE_*` environment variables (scanned from native acces
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_ANTIPATTERNS_BYPASS` | Bypass the guardrail antipattern checks. |
-| `AIMEE_IR_SHADOW` | Run the canonical IR path in comparison/shadow mode. |
 | `AIMEE_LOG_LEVEL` | Log level: `error` | `warn` | `info` | `debug`. |
 | `AIMEE_TEST_PG_URL` | PostgreSQL URL used only by live test harnesses. |
 | `AIMEE_WITNESS_CADENCE_TEST_S` | Test-only override that shortens witness checkpoint and verification cadence. |

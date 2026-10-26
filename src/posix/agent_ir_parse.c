@@ -103,12 +103,8 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
    memset(out, 0, sizeof(*out));
    if (n_rescued)
       *n_rescued = 0;
-   cJSON *object = responses_backend_sse_object(body);
-   if (!object)
-      goto fail;
    char error[128];
-   int rc = responses_backend_parse(object, out, error, sizeof(error));
-   cJSON_Delete(object);
+   int rc = responses_backend_decode_body(body, out, error, sizeof error);
    if (rc != 0)
       goto fail;
    int rescued = rescue_mode >= 0 ? aimee_ir_rescue_tool_calls(out, rescue_mode) : 0;

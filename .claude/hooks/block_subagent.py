@@ -2,7 +2,7 @@
 """PreToolUse hook: hard-ban Claude Code SUB-AGENTS in the aimee repo.
 
 Root cause this closes: aimee's own sub-agent ban lives in the runtime gateway
-(src/gateway_policy.c: gateway_policy_strip_tools -> is_subagent_tool_name, which
+(src/modules/gateway/gateway_policy.c: gateway_policy_apply_ir -> is_subagent_tool_name, which
 canonicalizes Task/Agent/spawn_agent -> "Subagent" and strips them). That ban only
 sees tools flowing THROUGH aimee's /v1 gateway to model providers, so it governs
 aimee's OWN agents. Claude Code's harness-level Agent/Task tool never traverses that

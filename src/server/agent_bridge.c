@@ -11,9 +11,7 @@
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
-#include "config.h"
 #include "log.h"
-#include "model_sampling.h"
 #include "model_registry.h"
 #include "agent_config.h" /* agent_catalog_provider */
 #include "cJSON.h"
@@ -38,24 +36,6 @@
  * ================================================================ */
 
 /* --- Request builders --- */
-static int agent_is_local_llama_compat(const agent_t *agent)
-{
-   if (!agent)
-      return 0;
-   if (strcmp(agent->provider, "llama_native") == 0 || strcmp(agent->provider, "ollama") == 0 ||
-       strcmp(agent->provider, "llama-eval") == 0)
-      return 1;
-   return str_contains_ci(agent->name, "llama") || str_contains_ci(agent->model, "qwen") ||
-          str_contains_ci(agent->model, ".gguf");
-}
-static int agent_is_mistral_vibe_model(const agent_t *agent)
-{
-   return agent && strcmp(agent->provider, "mistral") == 0 &&
-          str_contains_ci(agent->model, "mistral-vibe-cli");
-}
-static const char *const openrouter_fallbacks[] = {
-    "anthropic/claude-opus-4.7", "google/gemini-2.5-flash", "mistralai/mistral-large-2512"};
-
 /* Reject the gross misconfiguration where the OUTPUT limit alone would consume
  * the entire context window, leaving no room for any prompt at all.
  *
@@ -173,128 +153,6 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
    return 0;
 }
 
-static int agent_openai_profile_ir(const agent_t *agent, const char *system_prompt, int max_tokens,
-                                   double temperature, aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_OPENAI_CHAT;
-   ir->model = strdup(agent->model);
-   if (!ir->model)
-      return -1;
-   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
-   ir->has_max_tokens = 1;
-   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
-   ir->temperature = sampling.temperature;
-   ir->has_temperature = sampling.temperature >= 0;
-   ir->top_p = sampling.top_p;
-   ir->has_top_p = sampling.top_p >= 0;
-   ir->top_k = sampling.top_k;
-   ir->has_top_k = sampling.top_k >= 0;
-   if (agent_is_mistral_vibe_model(agent))
-      ir->reasoning_effort = AIMEE_EFFORT_HIGH;
-   if (system_prompt && system_prompt[0])
-   {
-      ir->system = calloc(1, sizeof *ir->system);
-      if (!ir->system)
-         return -1;
-      ir->n_system = 1;
-      ir->system[0].type = AIMEE_BLK_TEXT;
-      ir->system[0].text = strdup(system_prompt);
-      if (!ir->system[0].text)
-         return -1;
-   }
-   int count = ir->n_tools;
-   if (count)
-   {
-      int minimax = !strcmp(agent->provider, "minimax") ||
-                    strstr(agent->endpoint, "api.minimax.") || strstr(agent->model, "MiniMax-M2.7");
-      ir->has_parallel_tool_calls = agent_is_local_llama_compat(agent) || minimax;
-      ir->parallel_tool_calls = 0;
-      if (agent->require_initial_tool_call)
-         ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
-      else if (!strcmp(agent->provider, "mistral") || minimax)
-         ir->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
-   }
-   aimee_openai_host_profile_t profile = {
-       .min_p = sampling.min_p,
-       .repeat_penalty = sampling.repeat_penalty,
-       .disable_thinking =
-           agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent),
-       .split_reasoning = strstr(agent->model, "MiniMax-M2.7") != NULL};
-   if (!strcmp(agent->provider, "openrouter"))
-   {
-      profile.fallback_models = openrouter_fallbacks;
-      profile.n_fallback_models = sizeof openrouter_fallbacks / sizeof *openrouter_fallbacks;
-   }
-   return openai_ir_set_host_profile(ir, &profile);
-}
-
-/* Host profile controls and the registry-owned catalogue remain canonical
- * until the explicit provider egress render. */
-static int agent_responses_profile_ir(const agent_t *agent, const char *system_prompt,
-                                      aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_RESPONSES;
-   ir->stream = 1;
-   ir->model = strdup(agent->model);
-   ir->system = calloc(1, sizeof *ir->system);
-   if (!ir->model || !ir->system)
-      return -1;
-   ir->n_system = 1;
-   ir->system[0].type = AIMEE_BLK_TEXT;
-   ir->system[0].text =
-       strdup(system_prompt && system_prompt[0] ? system_prompt : "You are an execution agent.");
-   if (!ir->system[0].text)
-      return -1;
-   int count = ir->n_tools;
-   if (!agent->require_initial_tool_call || !count)
-      return 0;
-   static const char *const preferred[] = {"code_search", "find_symbol", "grep",
-                                           "list_files",  "read_file",   NULL};
-   const char *selected = NULL;
-   for (int p = 0; preferred[p] && !selected; p++)
-   {
-      const aimee_tool_t *tool = aimee_ir_find_function(ir, NULL, preferred[p]);
-      if (tool)
-         selected = tool->name;
-   }
-   for (int i = 0; i < ir->n_tools && !selected; i++)
-      if (ir->tools[i].name && ir->tools[i].name[0])
-         selected = ir->tools[i].name;
-   if (selected)
-   {
-      ir->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
-      ir->tool_choice_name = strdup(selected);
-      if (!ir->tool_choice_name)
-         return -1;
-   }
-   return 0;
-}
-
-static int agent_anthropic_profile_ir(const agent_t *agent, const char *system_prompt,
-                                      int max_tokens, double temperature, aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_ANTHROPIC;
-   ir->model = strdup(agent->model);
-   if (!ir->model)
-      return -1;
-   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
-   ir->has_max_tokens = 1;
-   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
-   ir->temperature = sampling.temperature;
-   ir->has_temperature = sampling.temperature >= 0;
-   ir->top_p = sampling.top_p;
-   ir->has_top_p = sampling.top_p >= 0;
-   ir->top_k = sampling.top_k;
-   ir->has_top_k = sampling.top_k >= 0;
-   int cache = config_cache_shaping_enabled();
-   if (anthropic_ir_set_host_system(ir, system_prompt, cache, cache ? config_cache_min_chars() : 0))
-      return -1;
-   int count = ir->n_tools;
-   if (count && agent->require_initial_tool_call)
-      ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
-   return 0;
-}
-
 /* Host profiles start in IR; compatibility catalogs enter their typed parser.
  * Policy and translation own the complete output and dispatch catalog. */
 /* Execution entry controls belong with canonical request profiles. The loop's
@@ -322,28 +180,10 @@ static int prepare_host_profile(const agent_t *agent, const aimee_request_t *cat
                                 .n_tools = catalog ? catalog->n_tools : 0};
    if (aimee_ir_request_admit(&tool_view) || aimee_ir_request_clone(&tool_view, &ir))
       return -1;
-   if (wire == AIMEE_WIRE_RESPONSES)
-   {
-      if (agent_responses_profile_ir(agent, system_prompt, &ir))
-         goto fail;
-   }
-   else if (wire == AIMEE_WIRE_OPENAI_CHAT)
-   {
-      if (agent_openai_profile_ir(agent, system_prompt, max_tokens, temperature, &ir))
-         goto fail;
-   }
-   else if (wire == AIMEE_WIRE_ANTHROPIC)
-   {
-      if (agent_anthropic_profile_ir(agent, system_prompt, max_tokens, temperature, &ir))
-         goto fail;
-   }
-   else
+   if (agent_prepare_host_profile(agent, wire, system_prompt, max_tokens, temperature, 0, &ir))
       goto fail;
    /* Policy may remove catalog entries; it must not sanitize an unadmitted
     * host request into admissible transport by hiding an invalid input. */
-   if (aimee_ir_request_admit(&ir))
-      goto fail;
-   ir.mutated = 1;
    if (aimee_ir_request_admit(&ir))
       goto fail;
    aimee_request_free(out);
@@ -415,6 +255,8 @@ int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t 
                                        AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
                                        AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
       }
+      if (!ir.n_system)
+         ir.system_scalar = profile.system_scalar;
       context_copy.system = profile.system;
       context_copy.n_system = profile.n_system;
       profile.system = NULL;
@@ -543,32 +385,10 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
    cJSON *rendered = NULL;
    if (agent_prepare_seeded_request_ir(agent, seed, messages, catalog, host_context, max_tokens,
                                        temperature, wire, is_delegate, &ir) ||
-       agent_request_project_model(&ir, &projected) ||
+       aimee_ir_request_project_model(&ir, &projected) ||
        aimee_backend_preserve_host_extensions(&ir, &projected, wire))
       goto done;
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(&projected, wire, &projection);
-   if (aimee_ir_session_emit_projection_full(projected.model, projection.omitted_reasoning_blocks,
-                                             projection.omitted_opaque_state_blocks,
-                                             projection.omitted_cache_controls,
-                                             projection.omitted_empty_messages, "request"))
-      goto done;
-   rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&projected)
-              : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&projected)
-                                             : openai_backend_build(&projected);
-   if (rendered)
-   {
-      int losses = aimee_backend_request_control_losses(seed ? seed : &ir, wire, rendered);
-      aimee_session_event_t report = {.kind = AIMEE_SESSION_PROJECTION,
-                                      .projection_model = agent->name,
-                                      .projection_boundary = "request",
-                                      .projection_request_controls = losses};
-      if (losses && (!host_profile || aimee_ir_session_emit(&report)))
-      {
-         cJSON_Delete(rendered);
-         rendered = NULL;
-      }
-   }
+   rendered = agent_render_request_ir(agent, seed ? seed : &ir, &projected, wire, host_profile, 0);
    if (rendered && dispatch_catalog)
    {
       aimee_request_free(dispatch_catalog);
@@ -580,27 +400,6 @@ done:
    aimee_request_free(&ir);
    aimee_request_free(&projected);
    return rendered;
-}
-
-/* --- Message utilities --- */
-
-/* Core history is canonical. Legacy provider formats are admitted only by
- * their explicit translation/import boundary, never detected inside execution. */
-int message_history_repair(cJSON *messages)
-{
-   if (!messages)
-      return 0;
-   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   const cJSON *item;
-   cJSON_ArrayForEach(item, messages)
-   {
-      aimee_message_t message = {0};
-      if (aimee_ir_message_parse(item, &message))
-         return -1;
-      aimee_message_free(&message);
-   }
-   return aimee_ir_history_repair(messages);
 }
 
 /* ================================================================

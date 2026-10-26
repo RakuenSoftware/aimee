@@ -908,8 +908,12 @@ describe('flat history is an archive, never authority', () => {
       if (url === '/api/chat/switch-thread') return new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign legacy branch answer' }] }));
       return original(url, init);
     });
+    const originalMessages = context.sessions[0].messages;
+    // SessionContext owns legacy import; Chat only renders its selected archive.
+    context.sessions[0].messages = messages as typeof originalMessages;
     render(<Chat />);
     await tick();
+    context.sessions[0].messages = originalMessages;
     expect(screen.queryByRole('button', { name: /Alternative|Branch/ })).toBeNull();
     expect(screen.getByLabelText('Legacy transcript archive').textContent).toContain('Archived original answer');
     expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Archived original answer');

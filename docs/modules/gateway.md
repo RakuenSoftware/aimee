@@ -18,7 +18,7 @@ The public header inventory is
 `src/modules/gateway/include/aimee/gateway/gateway_policy.h`, and
 `src/modules/gateway/include/aimee/gateway/gateway_delegate.h`. The `gw_` prefix predates the canonical
 namespace and remains as a compatibility name; renaming it requires the compatibility process.
-`gw_pipeline_run_request`, `gateway_policy_apply_request`, and
+`gw_pipeline_run_request`, `gateway_policy_apply_ir`, and
 `gateway_delegate_run_request_pipeline` retain their existing contracts.
 
 The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C and
@@ -29,10 +29,11 @@ ownership only; it does not assert that every owned export has a caller, or that
 runs in every build system. The source liveness, build and test membership, adjacent-surface, and
 public-surface audit is recorded in `docs/validation/core-modularization-slice-38.md`.
 
-`gateway_policy_is_denied_tool` has no tracked-tree caller outside
-`src/tests/test_gateway_policy.c`; every other export has a tracked production consumer. `src/tests/test_anthropic_http.c` defines its own
-`gateway_policy_pin_model` as a link-time stub, so that one test binary shadows the module symbol
-rather than linking `gateway_policy.c`.
+`gateway_policy_apply_ir` polices canonical tool catalogs, including namespace
+children, before provider rendering. The former vendor-JSON request mutation and
+model-pinning helpers are retired. `gateway_policy_is_denied_tool` remains a pure
+predicate covered by the module tests; live response governance uses the shared
+canonical tool-name policy.
 
 Gateway main, context, pairing, session-key, and channel/session code remains under `src/gateway` and
 awaits a caller and lifecycle audit. That directory contains the `aimee-gateway` delivery binary,

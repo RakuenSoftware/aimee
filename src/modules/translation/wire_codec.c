@@ -57,7 +57,6 @@ int aimee_backend_host_profile_valid(const aimee_request_t *profile)
       return 0;
    static const char *const chat[] = {"model", "min_p",  "repeat_penalty", "chat_template_kwargs",
                                       "route", "models", "reasoning_split"};
-   static const char *const anthropic[] = {"system"};
    const char *const *keys = NULL;
    size_t count = 0;
    if (profile->frontend == AIMEE_WIRE_OPENAI_CHAT)
@@ -65,12 +64,7 @@ int aimee_backend_host_profile_valid(const aimee_request_t *profile)
       keys = chat;
       count = sizeof chat / sizeof *chat;
    }
-   else if (profile->frontend == AIMEE_WIRE_ANTHROPIC)
-   {
-      keys = anthropic;
-      count = sizeof anthropic / sizeof *anthropic;
-   }
-   else if (profile->frontend != AIMEE_WIRE_RESPONSES)
+   else if (profile->frontend != AIMEE_WIRE_ANTHROPIC && profile->frontend != AIMEE_WIRE_RESPONSES)
       return 0;
    if (!profile->raw)
       return 1;
@@ -327,16 +321,17 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
          snprintf(error, capacity, "invalid native provider response frame");
       return -1;
    }
+   int decoded = 0;
    cJSON *root = aimee_ir_json_parse_frame(frame, length);
    if (!root && wire == AIMEE_WIRE_RESPONSES)
    {
-      char *bounded = malloc(length + 1);
-      if (!bounded)
-         return -1;
-      memcpy(bounded, frame, length);
-      bounded[length] = 0;
-      root = responses_backend_sse_object(bounded);
+      char *bounded = strndup(frame, length);
+      int rc = bounded ? responses_backend_decode_body(bounded, out, error, capacity) : -1;
       free(bounded);
+      if (rc)
+         return -1;
+      root = out->raw;
+      decoded = 1;
    }
    int shape = cJSON_IsObject(root);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -370,11 +365,13 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
    }
    int rc = -1;
    if (shape && aimee_ir_json_unique(root))
-      rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
+      rc = decoded                          ? 0
+           : wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)
                                             : -1;
-   cJSON_Delete(root);
+   if (!decoded)
+      cJSON_Delete(root);
    if (rc || aimee_ir_response_admit(out))
    {
       if (error && capacity && !error[0])

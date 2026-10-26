@@ -362,6 +362,16 @@ static void test_compaction_boundary_roundtrip(void)
    cJSON_ReplaceItemInObjectCaseSensitive(json, "_compaction_boundary", cJSON_CreateString("true"));
    assert(aimee_ir_message_parse(json, &message) == -1);
    cJSON_Delete(json);
+   const char *native[] = {
+       "[{\"role\":\"user\",\"content\":\"native\"}]",
+       "[{\"type\":\"message\",\"role\":\"user\",\"content\":[]}]",
+       "[{\"role\":\"user\",\"blocks\":[]},{\"role\":\"assistant\",\"content\":\"mixed\"}]", "{}"};
+   for (size_t i = 0; i < sizeof native / sizeof *native; i++)
+   {
+      history = cJSON_Parse(native[i]);
+      assert(history && !aimee_ir_history_clone(history));
+      cJSON_Delete(history);
+   }
 }
 
 int main(void)
@@ -659,7 +669,8 @@ int main(void)
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"same\",\"content\":"
        "\"ok\",\"is_error\":false}]},"
        "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":"
-       "\"read_file\",\"input\":{}}]},"
+       "\"read_file\",\"input\":{\"marker\":0.123456789012345678901234567890}},"
+       "{\"type\":\"tool_use\",\"tool_id\":\"second\",\"name\":\"read_file\",\"input\":{}}]},"
        "{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"next\"}]},"
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"orphan\","
        "\"content\":\"bad\",\"is_error\":false}]}]");
@@ -670,8 +681,8 @@ int main(void)
    assert(unresolved_after && !strcmp(unresolved_before, unresolved_after));
    free(unresolved_before);
    free(unresolved_after);
-   assert(aimee_ir_history_repair(history) == 2);
-   assert(cJSON_GetArraySize(history) == 5);
+   assert(aimee_ir_history_repair(history) == 3);
+   assert(cJSON_GetArraySize(history) == 6);
    cJSON *repaired =
        cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 3), "blocks"), 0);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "tool_id")), "same"));
@@ -690,6 +701,12 @@ int main(void)
            cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 1), "blocks"), 0),
            "content")),
        "ok"));
+   char *precise = cJSON_PrintUnformatted(history);
+   assert(precise && strstr(precise, "0.123456789012345678901234567890"));
+   free(precise);
+   const cJSON *second =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 4), "blocks"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(second, "tool_id")), "second"));
    assert(aimee_ir_history_repair(history) == 0);
    assert(aimee_ir_history_admit(history) == -1); /* Diagnostics do not become receipts. */
    cJSON *resolved = cJSON_Parse(
@@ -837,7 +854,8 @@ int main(void)
                                      .projection_request_controls = 2};
    cJSON *settings_json = aimee_ir_session_event_json(&settings);
    assert(settings_json && cJSON_GetObjectItem(cJSON_GetObjectItem(settings_json, "payload"),
-                                               "omitted_request_controls")->valueint == 2);
+                                               "omitted_request_controls")
+                                   ->valueint == 2);
    cJSON_Delete(settings_json);
    settings.projection_request_controls = -1;
    assert(!aimee_ir_session_event_json(&settings));

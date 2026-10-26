@@ -38,6 +38,7 @@
 #include "modules/workspace/workspace_turn.h"
 #include <aimee/workspace/workspace.h>
 #include "agent_request_build.h"
+#include "server_model_execution.h"
 #include "agent_protocol.h" /* message_history_repair */
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
@@ -52,7 +53,7 @@
 #include "cJSON.h"
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
+#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_ir — tool-policing stage */
 #include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
 #include "request_context.h"
@@ -114,8 +115,6 @@ static void record_avoided_turn(const char *model, double avoided_cost)
    (void)db1_token_audit_insert(&row);
 }
 
-static int openai_governance_enabled(void);
-
 /* Dedup eligibility for the buffered completion path (§4): only when the flag is
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. The key
@@ -136,7 +135,7 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    snprintf(flags, sizeof(flags), "ir1-sha256 cs%d rc%d pi%d dw%d gv%d sp%d",
             config_cache_shaping_enabled(), config_reasoning_cap_enabled(),
             config_ingress_preinject_enabled(), config_dedup_window_seconds(),
-            openai_governance_enabled(), gateway_prevent_subagents_enabled());
+            server_model_governance_enabled(), gateway_prevent_subagents_enabled());
    /* Key composition needs commitments, not a second copy of a potentially
     * megabyte-scale prompt in the bounded bus frame. Domain separation keeps
     * this canonical-input key format distinct from legacy raw-body callers. */
@@ -185,8 +184,6 @@ static int openai_admit_completion(const char *body, int chat, aimee_request_t *
 static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
                                     double temperature, aimee_response_t *out, char *error,
                                     size_t capacity, int preserve_messages);
-static cJSON *openai_ir_history_json(const aimee_request_t *request);
-static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
@@ -615,7 +612,7 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
    }
    cJSON *history = cJSON_Parse(json);
    free(json);
-   cJSON *current = openai_ir_history_json(request);
+   cJSON *current = aimee_ir_request_history_json(request);
    if (!cJSON_IsArray(history) || !current)
    {
       cJSON_Delete(history);
@@ -634,7 +631,7 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
       }
    }
    cJSON_Delete(current);
-   int rc = openai_ir_history_replace(request, history);
+   int rc = aimee_ir_request_history_replace(request, history);
    cJSON_Delete(history);
    return rc;
 }
@@ -645,7 +642,7 @@ static int responses_store_history(const char *id, const aimee_request_t *reques
    char scope[80];
    if (!actor || !actor[0] || responses_history_scope(scope))
       return -1;
-   cJSON *history = openai_ir_history_json(request);
+   cJSON *history = aimee_ir_request_history_json(request);
    aimee_message_t assistant = {
        .role = "assistant", .blocks = response->content, .n_blocks = response->n_content};
    cJSON *message = aimee_ir_message_json(&assistant);
@@ -875,124 +872,6 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
 
 /* Shared canonical request preparation and provider execution. */
 
-static cJSON *openai_ir_history_json(const aimee_request_t *request)
-{
-   cJSON *history = cJSON_CreateArray();
-   if (!history)
-      return NULL;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      cJSON *message = aimee_ir_message_json(&request->messages[i]);
-      if (!message || !cJSON_AddItemToArray(history, message))
-      {
-         cJSON_Delete(message);
-         cJSON_Delete(history);
-         return NULL;
-      }
-   }
-   return history;
-}
-static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history)
-{
-   int count = cJSON_GetArraySize(history);
-   if (!cJSON_IsArray(history) || count > AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   aimee_request_t replacement = {0};
-   replacement.messages = count ? calloc((size_t)count, sizeof *replacement.messages) : NULL;
-   if (count && !replacement.messages)
-      return -1;
-   replacement.n_messages = count;
-   for (int i = 0; i < count; i++)
-      if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &replacement.messages[i]))
-      {
-         aimee_request_free(&replacement);
-         return -1;
-      }
-   for (int i = 0; i < request->n_messages; i++)
-      aimee_message_free(&request->messages[i]);
-   free(request->messages);
-   request->messages = replacement.messages;
-   request->n_messages = replacement.n_messages;
-   request->mutated = 1;
-   return 0;
-}
-static int openai_ir_append_policy(aimee_request_t *request, char *policy)
-{
-   if (!policy)
-      return 0;
-   if (request->n_system >= AIMEE_IR_MAX_BLOCKS)
-   {
-      free(policy);
-      return -1;
-   }
-   aimee_block_t *blocks =
-       realloc(request->system, (size_t)(request->n_system + 1) * sizeof *blocks);
-   if (!blocks)
-   {
-      free(policy);
-      return -1;
-   }
-   request->system = blocks;
-   aimee_block_t *block = &blocks[request->n_system++];
-   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = policy};
-   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
-                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
-   request->mutated = 1;
-   return 0;
-}
-static char *openai_build_ir_body(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire)
-{
-   if (aimee_frontend_guard_state(request, NULL, 0))
-      return NULL;
-   if (aimee_ir_request_admit(request))
-      return NULL;
-   int controls = 0;
-   char *body = aimee_backend_render_wire_profile(
-       request, wire,
-       agent && !strcmp(agent->provider, "chatgpt") ? AIMEE_RESPONSES_CODEX : AIMEE_RESPONSES_API,
-       &controls);
-   aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
-                                  .projection_model = request->model,
-                                  .projection_boundary = "request",
-                                  .projection_request_controls = controls};
-   if (body && controls && aimee_ir_session_emit(&event))
-   {
-      free(body);
-      return NULL;
-   }
-   if (!body)
-      return NULL;
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(request, wire, &projection);
-   if (aimee_ir_session_emit_projection_full(request->model, projection.omitted_reasoning_blocks,
-                                             projection.omitted_opaque_state_blocks,
-                                             projection.omitted_cache_controls,
-                                             projection.omitted_empty_messages, "request"))
-   {
-      free(body);
-      return NULL;
-   }
-   /* A Chat provider's explicitly counted template extension stays at its
-    * native boundary. It is never turned into model content or another wire. */
-   const cJSON *kwargs =
-       request->frontend == AIMEE_WIRE_OPENAI_CHAT && wire == AIMEE_WIRE_OPENAI_CHAT
-           ? cJSON_GetObjectItemCaseSensitive(request->raw, "chat_template_kwargs")
-           : NULL;
-   if (cJSON_IsObject(kwargs))
-   {
-      cJSON *native = cJSON_Parse(body);
-      free(body);
-      cJSON_DeleteItemFromObjectCaseSensitive(native, "chat_template_kwargs");
-      if (!cJSON_AddItemToObject(native, "chat_template_kwargs", cJSON_Duplicate(kwargs, 1)))
-      {
-         cJSON_Delete(native);
-         return NULL;
-      }
-      body = cJSON_PrintUnformatted(native);
-      cJSON_Delete(native);
-   }
-   return body;
-}
 static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *agent, int max_tokens,
                                      double temperature, int preserve_messages)
 {
@@ -1023,68 +902,16 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
    router_advise_ir(request);
    if (!preserve_messages)
    {
-      if (openai_ir_append_policy(request, gw_ir_request_tool_system_prompt(request, NULL)) ||
-          openai_ir_append_policy(request, gw_ir_request_completion_system_prompt(request, NULL)))
+      if (agent_request_append_host_policy(request,
+                                           gw_ir_request_tool_system_prompt(request, NULL)) ||
+          agent_request_append_host_policy(request,
+                                           gw_ir_request_completion_system_prompt(request, NULL)))
          return -1;
       aimee_ir_apply_gateway_request_stages(request);
    }
    int status = aimee_ir_request_admit(request);
    if (!status)
       shadow_mirror_dispatch_admitted(request);
-   return status;
-}
-static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire,
-                          const char *url, const char *auth, const char *headers, char **reply,
-                          aimee_anthropic_replay_t *replay, char *error, size_t capacity,
-                          server_responses_stream_t *stream, aimee_response_t *streamed_response)
-{
-   /* Completion repair may append a governed tool call after the answer. Its
-    * existing owner requires buffering before any response is projected. */
-   int incremental = stream && wire == AIMEE_WIRE_RESPONSES && !openai_governance_enabled() &&
-                     !gateway_prevent_subagents_enabled() &&
-                     !gw_ir_response_completion_armed(request);
-   if (incremental)
-      request->stream = 1;
-   char *body = openai_build_ir_body(agent, request, wire);
-   if (!body)
-   {
-      snprintf(error, capacity, "the selected provider cannot represent the canonical request");
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   wire_fence_route_t route = wire == AIMEE_WIRE_ANTHROPIC   ? WIRE_FENCE_ANTHROPIC_MESSAGES
-                              : wire == AIMEE_WIRE_RESPONSES ? WIRE_FENCE_OPENAI_RESPONSES
-                                                             : WIRE_FENCE_OPENAI_CHAT;
-   wire_fence_t *snapshot = NULL;
-   wire_fence_bytes_t bytes;
-   if (wire_fence_select(econ_mode_current() != ECON_MODE_OFF, route, body, strlen(body), &snapshot,
-                         &bytes))
-   {
-      snprintf(error, capacity, "%s", wire_fence_last_error());
-      free(body);
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   if (wire == AIMEE_WIRE_ANTHROPIC &&
-       aimee_anthropic_replay_prepare(bytes.data, bytes.len, replay))
-   {
-      wire_fence_destroy(snapshot);
-      free(body);
-      snprintf(error, capacity, "cannot bind native replay prefix");
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   int attempts =
-       config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
-   int base = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
-   int maximum = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int status = incremental ? server_responses_stream_post(stream, url, auth, bytes.data, bytes.len,
-                                                           headers, agent->provider, agent->model,
-                                                           agent->timeout_ms, streamed_response)
-                            : wire_fence_post(url, auth, bytes.data, bytes.len, reply,
-                                              agent->timeout_ms, headers, attempts, base, maximum,
-                                              agent->provider, agent->model, NULL, route);
-   wire_fence_destroy(snapshot);
-   free(body);
-   if (status == HTTP_RETRY_ADMISSION_REFUSED)
-      snprintf(error, capacity, "%s", wire_fence_last_error());
    return status;
 }
 /* Cache payloads are canonical message blocks plus typed response metadata.
@@ -1187,51 +1014,10 @@ invalid:
    return -1;
 }
 
-static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
-                                             aimee_response_t *out, char *error, size_t capacity,
-                                             int preserve_messages, openai_ir_cache_t *cache,
-                                             server_responses_stream_t *stream)
+static int openai_cache_read(const agent_t *agent, const aimee_request_t *request,
+                             aimee_response_t *out, char *error, size_t capacity, void *context)
 {
-   memset(out, 0, sizeof *out);
-   snprintf(error, capacity, "canonical provider request failed");
-   if (!agent || aimee_ir_request_admit(request))
-      return -1;
-   delegate_drivers_init();
-   const delegate_driver_t *driver = delegate_driver_get(agent->provider);
-   char url[MAX_ENDPOINT_LEN + 64], auth[MAX_API_KEY_LEN + 32], headers[512];
-   if (!driver || delegate_build_url(driver, agent, url, sizeof url))
-   {
-      snprintf(error, capacity, "upstream model provider or endpoint is unavailable");
-      return -1;
-   }
-   if (agent_resolve_auth_headers(agent, auth, sizeof auth, headers, sizeof headers))
-   {
-      snprintf(error, capacity, "upstream model credentials are unavailable");
-      return -1;
-   }
-   aimee_wire_t wire = !strcmp(driver->name, "anthropic") ? AIMEE_WIRE_ANTHROPIC
-                       : strstr(url, "/responses")        ? AIMEE_WIRE_RESPONSES
-                                                          : AIMEE_WIRE_OPENAI_CHAT;
-   gw_mutate_ctx_t mutation;
-   gw_mutate_ctx_init(&mutation);
-   cJSON *container = NULL;
-   if (!preserve_messages && gw_mutate_upstream_ok(wire == AIMEE_WIRE_ANTHROPIC))
-   {
-      container = cJSON_CreateObject();
-      cJSON *history = openai_ir_history_json(request);
-      if (!container || !history || !cJSON_AddItemToObject(container, "input", history))
-      {
-         cJSON_Delete(history);
-         cJSON_Delete(container);
-         return -1;
-      }
-      gw_buffered_mutate(container, "input", agent->model, "", server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(),
-                         &mutation);
-      if (mutation.mutated &&
-          openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
-         goto refused;
-   }
+   openai_ir_cache_t *cache = context;
    if (cache && !request->n_tools && config_present() && config_dedup_enabled() &&
        request_context_idempotency_key()[0])
    {
@@ -1246,8 +1032,6 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       if (cache->enabled < 0)
       {
          snprintf(error, capacity, "response composition unavailable");
-         cJSON_Delete(container);
-         gw_mutate_ctx_free(&mutation);
          return -1;
       }
       char *encoded = NULL;
@@ -1258,8 +1042,6 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
          free(encoded);
          if (!decoded)
          {
-            cJSON_Delete(container);
-            gw_mutate_ctx_free(&mutation);
             if (aimee_ir_session_emit_buffered_response(out, NULL))
             {
                snprintf(error, capacity, "canonical cached response persistence failed");
@@ -1268,70 +1050,19 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
             cache->avoided = 1;
             if (!out->usage_unobserved && agent_ingress_accounting_enabled())
                record_avoided_turn(agent->model, avoided);
-            return 0;
+            return 1;
          }
       }
    }
-   char *reply = NULL;
-   aimee_anthropic_replay_t replay = {0};
-   int status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
-                               capacity, stream, out);
-   if (!(stream && stream->used) && status != HTTP_RETRY_ADMISSION_REFUSED && container &&
-       gw_buffered_after_status(container, "input", status, &mutation) == GW_POST_RESEND)
-   {
-      if (cache)
-         cache->enabled = 0; /* The restored request has a different cache identity. */
-      free(reply);
-      reply = NULL;
-      if (openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
-         goto refused;
-      status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
-                              capacity, stream, out);
-   }
-   cJSON_Delete(container);
-   gw_mutate_ctx_free(&mutation);
-   if (status != 200 || (!reply && !(stream && stream->used)))
-   {
-      if (status != HTTP_RETRY_ADMISSION_REFUSED)
-         openai_upstream_error_message(status, reply, error, capacity);
-      free(reply);
-      return -1;
-   }
-   int rc = stream && stream->used
-                ? 0
-                : aimee_backend_parse_wire(reply, strlen(reply), wire, out, error, capacity);
-   free(reply);
-   if (!rc && wire == AIMEE_WIRE_ANTHROPIC && aimee_anthropic_bind_response(&replay, out))
-   {
-      aimee_ir_session_fail_capture();
-      rc = -1;
-      snprintf(error, capacity, "cannot retain native replay binding");
-   }
-   if (rc || out->error_message ||
-       (!(stream && stream->used) && aimee_ir_session_emit_buffered_response(out, NULL)))
-   {
-      if (!rc)
-         snprintf(error, capacity, "%s",
-                  out->error_message ? out->error_message
-                                     : "canonical response persistence failed");
-      return -1;
-   }
-   rc = agent_response_govern(out, openai_governance_enabled(), gateway_prevent_subagents_enabled(),
-                              NULL, 0);
-   if (rc >= 0 && !preserve_messages)
-      rc = gw_ir_response_run_completion(out, request);
-   if (rc < 0)
-   {
-      snprintf(error, capacity, "canonical response policy or persistence failed");
-      return -1;
-   }
-   if (stream && stream->used &&
-       (aimee_responses_frontend_matches(stream->frontend, out) ||
-        aimee_ir_session_emit_response(out, stream->message_id)))
-   {
-      snprintf(error, capacity, "canonical streamed response policy or persistence failed");
-      return -1;
-   }
+   return 0;
+}
+static void openai_cache_invalidate(void *context)
+{
+   ((openai_ir_cache_t *)context)->enabled = 0;
+}
+static void openai_cache_write(const agent_t *agent, const aimee_response_t *out, void *context)
+{
+   openai_ir_cache_t *cache = context;
    if (cache && cache->enabled && !aimee_ir_response_tool_count(out))
    {
       char *encoded = openai_ir_cache_encode(out, cache);
@@ -1350,12 +1081,26 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
          free(encoded);
       }
    }
-   return 0;
-refused:
-   cJSON_Delete(container);
-   gw_mutate_ctx_free(&mutation);
-   snprintf(error, capacity, "canonical economizer history is invalid");
-   return -1;
+}
+static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
+                                             aimee_response_t *out, char *error, size_t capacity,
+                                             int preserve_messages, openai_ir_cache_t *cache,
+                                             server_responses_stream_t *stream)
+{
+   server_model_execution_options_t options = {
+       .preserve_messages = preserve_messages,
+       .stream = stream,
+       .stream_post = server_responses_stream_post,
+       .retry_attempts =
+           config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS,
+       .retry_base_ms = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS,
+       .retry_max_ms = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS,
+       .upstream_error = openai_upstream_error_message,
+       .cache_read = cache ? openai_cache_read : NULL,
+       .cache_write = cache ? openai_cache_write : NULL,
+       .cache_invalidate = cache ? openai_cache_invalidate : NULL,
+       .cache_context = cache};
+   return server_model_execute_prepared(agent, request, out, error, capacity, &options);
 }
 static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
                                     double temperature, aimee_response_t *out, char *error,
@@ -1377,12 +1122,6 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
  * canonical history, with no retry after incremental transport begins. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
  * deprecated env default. Cached legacy_config_read; keeps gw_stage_governance config-free. */
-static int openai_governance_enabled(void)
-{
-   int tri = config_present() ? config_module_governance() : -1;
-   return config_module_enabled(tri, gw_response_governance_enabled());
-}
-
 static int responses_stream_handler(const char *body, server_http_sse_event_emit emit,
                                     void *context)
 {

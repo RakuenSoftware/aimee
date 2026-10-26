@@ -258,6 +258,7 @@ typedef struct
    aimee_cache_policy_t cache_policy;
    aimee_block_t *system; /* system as ORDERED BLOCKS, not a flat string */
    int n_system;
+   int system_scalar; /* prefer scalar transport for one uncached TEXT block; otherwise blocks */
    aimee_message_t *messages;
    int n_messages;
    aimee_tool_t *tools;
@@ -437,6 +438,10 @@ void aimee_message_free(aimee_message_t *message);
  * out must be zero-initialized or owned; success atomically replaces it and
  * failure leaves it intact. source == out is supported. No wire translation. */
 int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out);
+/* Canonical working-history projection and atomic owned replacement. Provider
+ * import is not accepted here; original system/control fields remain intact. */
+struct cJSON *aimee_ir_request_history_json(const aimee_request_t *request);
+int aimee_ir_request_history_replace(aimee_request_t *request, const struct cJSON *history);
 /* Exact owned response snapshot. Source and existing output are unchanged on
  * failure; context metadata and opaque numeric/reasoning values stay exact. */
 int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out);

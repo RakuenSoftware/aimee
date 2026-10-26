@@ -226,8 +226,6 @@ const char *task_type_name(task_type_t type);
 
 /* Context assembly */
 size_t agent_exec_context_budget_chars(const agent_t *agent);
-char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
-                               const char *custom_prompt);
 /* Opening instruction for a task type. A review must be told to answer; an
  * execution agent must be told to act. Pure so the choice is testable. */
 /* The task a delegate is actually running. A declared role wins over guessing
@@ -237,10 +235,6 @@ task_type_t agent_task_type_for_role(const char *role);
 
 const char *agent_exec_instructions(task_type_t task_type);
 
-char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
-                                        const char *role, const char *custom_prompt,
-                                        int skip_kb_context);
-
 /* Owned canonical context origin, ordered source blocks. Policy and evidence
  * authority are recorded at generation; consumers must preserve that split.
  * Failure leaves out unchanged and retains the owner diagnostic. */
@@ -248,17 +242,6 @@ int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context, aimee_message_t *out, char *error,
                                         size_t error_len);
-
-/* Read-only CLI/inspection compatibility. Returns NULL on refusal and copies
- * the owner diagnostic into error; caller owns the returned text. Never use
- * this view as an execution message or a fallback for a refused typed origin. */
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom_prompt,
-                                       int skip_kb_context, char *error, size_t error_len);
-
-char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
-                                  const char *custom_prompt, int skip_kb_context);
-void agent_print_context(const agent_config_t *cfg);
 
 /* Ephemeral SSH */
 int agent_ssh_setup(const agent_network_t *network, char *key_path_out, size_t key_path_len,

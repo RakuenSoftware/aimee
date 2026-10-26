@@ -457,6 +457,30 @@ static void test_task_type_name_strings(void)
    assert(strcmp(task_type_name(TASK_TYPE_GENERAL), "general") == 0);
 }
 
+static char *context_text_view(const agent_t *agent, const agent_network_t *network,
+                               const char *role, const char *custom, int skip, char *error,
+                               size_t error_size)
+{
+   aimee_message_t context = {0};
+   if (agent_build_exec_context_ir_checked(agent, network, role, custom, skip, &context, error,
+                                           error_size))
+      return NULL;
+   size_t length = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+      length += strlen(context.blocks[i].text);
+   char *text = calloc(length + 1, 1);
+   assert(text);
+   size_t offset = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+   {
+      size_t n = strlen(context.blocks[i].text);
+      memcpy(text + offset, context.blocks[i].text, n);
+      offset += n;
+   }
+   aimee_message_free(&context);
+   return text;
+}
+
 static void test_agent_exec_context_truncates_large_prompt(void)
 {
    setup();
@@ -468,6 +492,8 @@ static void test_agent_exec_context_truncates_large_prompt(void)
    char *prompt = malloc(prompt_len + 1);
    assert(prompt != NULL);
    memset(prompt, 'x', prompt_len);
+   for (size_t i = 26; i + 3 <= prompt_len; i += 3)
+      memcpy(prompt + i, "—", 3);
    memcpy(prompt, "fix delegate review crash ", 26);
    prompt[prompt_len] = '\0';
 
@@ -476,7 +502,7 @@ static void test_agent_exec_context_truncates_large_prompt(void)
    snprintf(ag.name, sizeof(ag.name), "test-agent");
    snprintf(ag.model, sizeof(ag.model), "test-model");
 
-   char *ctx = agent_build_exec_context(&ag, NULL, prompt);
+   char *ctx = context_text_view(&ag, NULL, NULL, prompt, 0, NULL, 0);
    assert(ctx != NULL);
    assert(strlen(ctx) < (size_t)(AGENT_CONTEXT_BUDGET + 4096));
    assert(strstr(ctx, "You are an execution agent") != NULL);
@@ -493,7 +519,7 @@ static void test_agent_exec_context_truncates_large_prompt(void)
    teardown();
 }
 
-static void test_agent_exec_context_ex_can_skip_kb(void)
+static void test_agent_exec_context_can_skip_kb(void)
 {
    setup();
    memory_t m;
@@ -505,7 +531,7 @@ static void test_agent_exec_context_ex_can_skip_kb(void)
    snprintf(ag.name, sizeof(ag.name), "test-agent");
    snprintf(ag.model, sizeof(ag.model), "test-model");
 
-   char *ctx = agent_build_exec_context_ex(&ag, NULL, "ctx-sentinel", 1);
+   char *ctx = context_text_view(&ag, NULL, NULL, "ctx-sentinel", 1, NULL, 0);
    assert(ctx != NULL);
    assert(strstr(ctx, "CTX_SENTINEL_SHOULD_NOT_APPEAR") == NULL);
    assert(strstr(ctx, "# Relevant Context") == NULL);
@@ -662,7 +688,7 @@ int main(void)
    test_review_instructions_do_not_forbid_a_final_answer();
    test_task_type_name_strings();
    test_agent_exec_context_truncates_large_prompt();
-   test_agent_exec_context_ex_can_skip_kb();
+   test_agent_exec_context_can_skip_kb();
    test_agent_context_budget_uses_context_window();
    test_agent_context_budget_caps_unpinned_output_reserve();
    test_agent_context_budget_clamps_oversized_pinned_output();

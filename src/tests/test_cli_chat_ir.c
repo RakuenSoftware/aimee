@@ -16,9 +16,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#ifndef CLI_IR_PREDECESSOR_PROBE
 #include "../cli_chat_stream.c"
-#endif
 #include "../gateway/gateway_ctx.c"
 static cli_chat_result_t canonical_result;
 static const aimee_message_t *expected_request_message;
@@ -136,7 +134,6 @@ static void *serve(void *unused)
       assert(cJSON_GetObjectItem(request, "ir_version")->valuedouble == 1);
       assert(cJSON_IsFalse(cJSON_GetObjectItem(request, "control_replies")));
    }
-#if !defined(CLI_IR_PREDECESSOR_PROBE) && !defined(CLI_IR_GATEWAY_PREDECESSOR_PROBE)
    aimee_message_t input = {0};
    assert(!aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(request, "message"), &input));
    assert(!gateway_message_admit(&input));
@@ -153,7 +150,6 @@ static void *serve(void *unused)
              !strcmp(input.blocks[0].text, "hello") &&
              input.blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
    aimee_message_free(&input);
-#endif
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "aimee_session_id")), sid));
    cJSON_Delete(request);
    char header[256];
@@ -182,7 +178,6 @@ static void text_callback(const char *text, void *unused)
    text_calls++;
 }
 static char tool_ids[8][256], phases[8][16];
-#ifndef CLI_IR_PREDECESSOR_PROBE
 static void tool_callback(const char *phase, const char *id, const char *name, void *unused)
 {
    (void)unused;
@@ -198,7 +193,6 @@ static void tool_callback(const char *phase, const char *id, const char *name, v
                   !strcmp(phase, "started") ? "in_progress" : phase));
    cJSON_Delete(j);
 }
-#endif
 static char *run(int wrapper)
 {
    char socket_path[128], endpoint[136];
@@ -213,13 +207,6 @@ static char *run(int wrapper)
    pthread_t thread;
    assert(!pthread_create(&thread, NULL, serve, NULL));
    char *reply;
-#ifdef CLI_IR_GATEWAY_PREDECESSOR_PROBE
-   (void)wrapper;
-   reply = rpc_chat_send_stream(sid, "hello");
-#elif defined(CLI_IR_PREDECESSOR_PROBE)
-   (void)wrapper;
-   reply = cli_chat_stream(NULL, sid, "hello", text_callback, NULL, NULL);
-#else
    if (wrapper == 2 || wrapper == 3)
    {
       aimee_message_t input = {0};
@@ -279,7 +266,6 @@ static char *run(int wrapper)
       free(after);
       cJSON_Delete(r);
    }
-#endif
    assert(!pthread_join(thread, NULL));
    close(listener);
    unlink(socket_path);
@@ -310,7 +296,6 @@ int main(int argc, char **argv)
           sizeof(((struct sockaddr_un *)0)->sun_path));
    assert(mkdtemp(home));
    signal(SIGPIPE, SIG_IGN);
-#ifndef CLI_IR_PREDECESSOR_PROBE
    if (argc == 3 && !strcmp(argv[1], "--replay"))
    {
       FILE *file = fopen(argv[2], "rb");
@@ -355,7 +340,6 @@ int main(int argc, char **argv)
       assert(!rmdir(home));
       return 0;
    }
-#endif
    reset();
    lifecycle("running", NULL);
    delta("TURN_START", NULL);
@@ -365,26 +349,10 @@ int main(int argc, char **argv)
    text_snapshot("Hi there!", 0);
    delta("TURN_STOP", NULL);
    lifecycle("completed", NULL);
-#ifdef CLI_IR_PREDECESSOR_PROBE
-   check_negotiation = 0;
-#endif
-#ifdef CLI_IR_GATEWAY_PREDECESSOR_PROBE
-   reset();
-   check_negotiation = 0;
-   strcpy(wire, "{\"text\":\"partial legacy poison\"}\n{\"status\":\"error\"}\n");
-   status_code = 500;
-   char *reply = run(2);
-   assert(!reply);
-   cli_chat_result_free(&canonical_result);
-   assert(!rmdir(home));
-   return 0;
-#else
    char *reply = run(1);
    assert(reply && !strcmp(reply, "Hi there!") && !strcmp(observed, "Hi there!") &&
           text_calls == 3);
    free(reply);
-#endif
-#ifndef CLI_IR_PREDECESSOR_PROBE
    reset();
    lifecycle("running", NULL);
    aimee_block_t calls[2] = {
@@ -654,7 +622,6 @@ int main(int argc, char **argv)
    free(s.message_ids);
    free(s.message_final);
    aimee_request_free(&s.conversation);
-#endif
    cli_chat_result_free(&canonical_result);
    assert(!rmdir(home));
    puts("canonical ACP/gateway UDS subscriber: terminal, identity, bounded prefix and tool "

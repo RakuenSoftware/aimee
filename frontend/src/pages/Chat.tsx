@@ -14,40 +14,8 @@ import { emptySession, reduceSession } from '../ir/session';
 import { operatorCancelError } from '../ir/interruption';
 import type { Envelope, Message, SessionState } from '../ir/session';
 import type { ControlReply } from '../ir/ControlCard';
-import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
-
-interface TabMessage {
-  role: 'user' | 'assistant' | 'narration';
-  text: string;
-}
-
-interface ThreadInfo {
-  id: number;
-  parent_id: number;
-  branch_msg_index: number;
-  label: string;
-  msg_count: number;
-  active: boolean;
-}
-
-interface TabData {
-  /* The app-level session this conversation belongs to (top tab). Tabs mirror
-   * the SessionContext 1:1 by this id, so each session keeps its own history. */
-  sessionId?: string;
-  title: string;
-  messages: TabMessage[];
-  sid: string;
-  aimeeSid: string;
-  /* Unified-presence attachment id for this tab's session (minted by
-   * POST /api/chat/attach on first send; forwarded on each turn so aimee-server
-   * serializes turns across surfaces). */
-  attachId?: string;
-  workflowChannel?: string;
-  threads?: ThreadInfo[];
-  activeThreadId?: number;
-}
 
 interface BootstrapStack {
   name: string;
@@ -122,10 +90,7 @@ interface MentionQuery {
 
 /* ---- Persistence ---- */
 
-const TABS_KEY = 'aimee_chat_tabs';
-const ACTIVE_TAB_KEY = 'aimee_active_chat_tab';
 const CHANNEL_KEY = 'aimee_active_channel';
-const PROJECT_ROOT_KEY = 'aimee_chat_project_root';
 const RULES_BANNER_DISMISSED_KEY = 'aimee_rules_banner_dismissed';
 // How many of a tab's most-recent messages the transcript renders by default.
 // Full canonical history remains in its durable projection; only this window is mounted
@@ -145,26 +110,6 @@ function saveActiveChannel(name: string | null): void {
   } catch { /* ignore */ }
 }
 
-function saveProjectRoot(root: string): void {
-  try {
-    if (root) localStorage.setItem(PROJECT_ROOT_KEY, root);
-    else localStorage.removeItem(PROJECT_ROOT_KEY);
-  } catch { /* ignore */ }
-}
-
-function loadActiveTabIndex(): number {
-  try {
-    const raw = localStorage.getItem(ACTIVE_TAB_KEY);
-    if (!raw) return 0;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  } catch { return 0; }
-}
-
-function saveActiveTabIndex(index: number): void {
-  try { localStorage.setItem(ACTIVE_TAB_KEY, String(Math.max(0, index))); } catch { /* ignore */ }
-}
-
 function newAimeeSessionId(): string {
   try {
     const cryptoApi = globalThis.crypto;
@@ -172,74 +117,6 @@ function newAimeeSessionId(): string {
   } catch { /* ignore */ }
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
-
-function normalizeTab(tab: Partial<TabData> | null | undefined, index: number): TabData {
-  const messages = Array.isArray(tab?.messages) ? tab.messages : [];
-  return {
-    sessionId: typeof tab?.sessionId === 'string' ? tab.sessionId : undefined,
-    title: typeof tab?.title === 'string' && tab.title ? tab.title : (index === 0 ? 'Chat' : `Chat ${index + 1}`),
-    messages,
-    sid: typeof tab?.sid === 'string' ? tab.sid : '',
-    aimeeSid: typeof tab?.aimeeSid === 'string' && tab.aimeeSid ? tab.aimeeSid : newAimeeSessionId(),
-    // Presence attachments belong to this live browser page, never its cache.
-    attachId: undefined,
-    workflowChannel: tab?.workflowChannel,
-    threads: tab?.threads,
-    activeThreadId: tab?.activeThreadId,
-  };
-}
-
-function loadTabs(): TabData[] {
-  try {
-    const raw = localStorage.getItem(TABS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<TabData>[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(normalizeTab);
-    }
-  } catch { /* ignore */ }
-  return [normalizeTab({ title: 'Chat', messages: [], sid: '' }, 0)];
-}
-
-function loadInitialChatState(): { tabs: TabData[]; activeIdx: number } {
-  const tabs = loadTabs();
-  const activeIdx = Math.min(loadActiveTabIndex(), Math.max(0, tabs.length - 1));
-  return { tabs, activeIdx };
-}
-
-/* Persist the tab list to localStorage, but (1) bound each tab's stored history
- * full history (it's the browser-side restore source and must stay recoverable),
- * coalesce writes onto an idle callback so the synchronous JSON.stringify +
- * setItem never runs on the React commit path during a streaming burst. Rapid
- * tabs changes collapse into one write; a trailing timeout guarantees it still
- * runs if the main thread stays busy. */
-let pendingTabsToPersist: TabData[] | null = null;
-let tabsWriteScheduled = false;
-
-function writePendingTabs(): void {
-  tabsWriteScheduled = false;
-  const tabs = pendingTabsToPersist;
-  pendingTabsToPersist = null;
-  if (!tabs) return;
-  try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
-}
-
-function saveTabs(tabs: TabData[]): void {
-  pendingTabsToPersist = tabs;
-  if (tabsWriteScheduled) return;
-  tabsWriteScheduled = true;
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback;
-  if (ric) ric(writePendingTabs, { timeout: 1000 });
-  else window.setTimeout(writePendingTabs, 200);
-}
-
-/* Flush any coalesced tabs write synchronously — call before the page unloads so
- * a pending in-flight write isn't dropped. */
-function flushPendingTabs(): void {
-  if (pendingTabsToPersist) writePendingTabs();
-}
-
-/* localStorage is a fast cache. SessionContext reconciles it with the
- * authenticated user's server-owned session list and transcript. */
 
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
@@ -1116,18 +993,13 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
 /* ---- Main Chat component ---- */
 
 export default function Chat() {
-  const [initialChatState] = useState(loadInitialChatState);
-  const [tabs, setTabs] = useState<TabData[]>(initialChatState.tabs);
   const { sessions, active: activeSession, patchSession } = useSessions();
-  const activeSessionId = activeSession?.id ?? '';
   const activeContextSid = useRef(activeSession?.aimeeSid ?? '');
   activeContextSid.current = activeSession?.aimeeSid ?? '';
   const sessionOwners = useRef(sessions);
   sessionOwners.current = sessions;
   const ownsQueuedOrigin = (item: QueuedChatSend) => sessionOwners.current.some(session =>
     session.id === item.sessionId && session.aimeeSid === item.originSid && session.projectRoot === item.projectRoot);
-  const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
-  const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
   const [rulesStatus, setRulesStatus] = useState('');
   const irSessions = useRef<Record<string, SessionState>>({});
   const irPending = useRef<Record<string, Map<string, Envelope>>>({});
@@ -1175,7 +1047,7 @@ export default function Chat() {
   // aimeeSid, so the busy indicator reflects the ACTIVE tab alone — sending on one
   // tab no longer shows "working" on every other tab. Derived values below.
   const [workBySid, setWorkBySid] = useState<Record<string, SidWork>>({});
-  const activeWork = workBySid[tabs[activeIdx]?.aimeeSid ?? ''];
+  const activeWork = workBySid[activeSession?.aimeeSid ?? ''];
   const working = !!activeWork && (activeWork.pending > 0 || activeWork.queued > 0);
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
@@ -1190,68 +1062,7 @@ export default function Chat() {
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
   // Driven solely by the active session's project (the single ProjectPicker);
   // never seeded from a stale global value, so we can't send an out-of-workspace cwd.
-  const [projectRoot, setProjectRoot] = useState('');
-  // The top session tabs are the source of truth. Each conversation tab mirrors
-  // a session 1:1 (by sessionId), so every session keeps its own history; the
-  // active session also drives the project (cwd).
-  const sessionProject = activeSession?.projectRoot ?? '';
-
-  // Keep one conversation tab per account-scoped session. Match both the UI id
-  // and stable aimee id so legacy browser-only tabs migrate without duplication.
-  useEffect(() => {
-    if (!sessions.length) return;
-    setTabs(prev => {
-      const byId = new Map(prev.filter(t => t.sessionId).map(t => [t.sessionId as string, t]));
-      const byAimeeId = new Map(prev.filter(t => t.aimeeSid).map(t => [t.aimeeSid, t]));
-      const untagged = prev.filter(t => !t.sessionId);
-      let u = 0;
-      const next = sessions.map((s, i) => {
-        const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
-        if (existing) {
-          const messages = existing.aimeeSid === s.aimeeSid
-            ? reconcileSessionMessages(existing.messages, s.messages) : s.messages;
-          if (existing.sessionId === s.id && existing.title === s.name &&
-              existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
-              (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
-          return {
-            ...existing,
-            sessionId: s.id,
-            title: s.name,
-            messages,
-            sid: s.claudeSid || existing.sid,
-            aimeeSid: s.aimeeSid,
-          };
-        }
-        const adopt = untagged[u++];
-        if (adopt) return {
-          ...adopt,
-          sessionId: s.id,
-          title: s.name,
-          messages: reconcileSessionMessages(adopt.messages, s.messages),
-          sid: s.claudeSid || adopt.sid,
-          aimeeSid: s.aimeeSid,
-        };
-        return normalizeTab({
-          sessionId: s.id,
-          title: s.name,
-          messages: s.messages,
-          sid: s.claudeSid,
-          aimeeSid: s.aimeeSid,
-        }, i);
-      });
-      // No-op if unchanged (avoid a render loop).
-      if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
-      tabsRef.current = next;
-      return next;
-    });
-  }, [sessions]);
-
-  // Mirror the active session's project into the chat cwd (no conversation reset
-  // — switching sessions preserves each one's history).
-  useEffect(() => {
-    setProjectRoot(sessionProject);
-    saveProjectRoot(sessionProject);
-  }, [sessionProject]);
+  const projectRoot = activeSession?.projectRoot ?? '';
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
@@ -1304,11 +1115,9 @@ export default function Chat() {
     }
     q.push(item);
   }
-  const tabsRef = useRef<TabData[]>(tabs);
-  const activeIdxRef = useRef(activeIdx);
   const queueActive = working;
-  const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
-  const activeSessionMatched = !!activeSession && tabs[activeIdx]?.sessionId === activeSession.id && activePersonaSid === activeSession.aimeeSid;
+  const activePersonaSid = activeSession?.aimeeSid ?? '';
+  const activeSessionMatched = !!activeSession;
   const attached = useRef(new Map<string, string>());
   const attaching = useRef(new Map<string, Promise<string>>());
   const attachmentMounted = useRef(false);
@@ -1350,16 +1159,11 @@ export default function Chat() {
           body.attach_id.length > 128 || /[\u0000-\u0020\u007f]/.test(body.attach_id))
         throw new Error('Invalid conversation attachment');
       const id = body.attach_id;
-      if (!attachmentMounted.current || !tabsRef.current.some(tab => tab.aimeeSid === sid)) {
+      if (!attachmentMounted.current || !sessionOwners.current.some(session => session.aimeeSid === sid)) {
         detachAttachment(sid, id);
         throw new Error('Conversation was closed before attachment completed');
       }
       attached.current.set(sid, id);
-      setTabs(prev => {
-        const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: id } : tab);
-        tabsRef.current = next;
-        return next;
-      });
       setAttachmentReady(prev => ({ ...prev, [sid]: true }));
       return id;
     }).finally(() => { attaching.current.delete(sid); });
@@ -1371,11 +1175,6 @@ export default function Chat() {
     attached.current.delete(sid);
     if (old) detachAttachment(sid, old);
     setAttachmentReady(prev => ({ ...prev, [sid]: false }));
-    setTabs(prev => {
-      const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: undefined } : tab);
-      tabsRef.current = next;
-      return next;
-    });
   }, [detachAttachment]);
   useEffect(() => {
     let disposed = false;
@@ -1386,12 +1185,12 @@ export default function Chat() {
   }, [activePersonaSid, activeSessionMatched, ensureAttachment, irReconnect]);
   useEffect(() => {
     for (const [sid, id] of attached.current) {
-      if (tabs.some(tab => tab.aimeeSid === sid)) continue;
+      if (sessions.some(session => session.aimeeSid === sid)) continue;
       detachAttachment(sid, id);
       attached.current.delete(sid);
       setAttachmentReady(prev => ({ ...prev, [sid]: false }));
     }
-  }, [tabs, detachAttachment]);
+  }, [sessions, detachAttachment]);
   const activeAttached = !!attachmentReady[activePersonaSid];
   const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name', activeAttached);
   const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent', activeAttached);
@@ -1424,46 +1223,18 @@ export default function Chat() {
    * browser doesn't leak attachments until the session is closed. keepalive
    * lets the POSTs survive the unload; best-effort. */
   useEffect(() => {
-    const detachAll = () => {
-      for (const tab of tabsRef.current) {
-        if (!tab.attachId || !tab.aimeeSid) continue;
-        try {
-          fetch('/api/chat/detach', {
-            method: 'POST',
-            keepalive: true,
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-            body: JSON.stringify({ sid: tab.aimeeSid, attach_id: tab.attachId }),
-          }).catch(() => {});
-        } catch { /* ignore */ }
-      }
+    const onPageHide = (event: PageTransitionEvent) => {
+      // A bfcache page remains attached; only release a discarded document.
+      if (!event.persisted) for (const [sid, id] of attached.current) detachAttachment(sid, id);
     };
-    // Always flush the coalesced tabs write when the page goes away or is hidden
-    // — NOT just on beforeunload. bfcache navigation (back/forward) and OS
-    // background-kill on mobile don't fire beforeunload. Keeping this fast cache
-    // current also avoids waiting for a server refresh after bfcache navigation.
-    // visibilitychange→hidden catches a backgrounded tab before a kill.
-    // Detach presence only on a GENUINE unload: a tab going to the background — or
-    // entering bfcache (pagehide persisted=true, restored without re-mounting) —
-    // is still an active session and must stay attached.
-    // beforeunload also fires for BFcache entry or a cancelled navigation.
-    // Only pagehide can tell whether this document is actually being discarded.
-    const onBeforeUnload = () => { flushPendingTabs(); };
-    const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
-    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
-    window.addEventListener('beforeunload', onBeforeUnload);
     window.addEventListener('pagehide', onPageHide);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload);
-      window.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [detachAttachment]);
 
   /* Subscribe to the active session's unified-presence event stream so the UI
    * can show when aimee is responding on another surface (CLI/TUI, another
    * tab). Only meaningful once the tab has attached (presence exists). */
-  const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
+  const activeAimeeSid = activeSession?.aimeeSid ?? '';
   useEffect(() => {
     if (!activeAimeeSid || !activeAttached) return;
     let disposed = false;
@@ -1565,7 +1336,6 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [canonicalState, irReady, activeAimeeSid, scrollToBottom]);
-  useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
    * progress is cleared for any sid that has no more in-flight or queued work, and
@@ -1615,25 +1385,7 @@ export default function Chat() {
     setWorkBySid({});
   }
 
-  useEffect(() => {
-    return () => {
-      saveTabs(tabsRef.current);
-      flushPendingTabs();
-      abortActiveSends();
-    };
-  }, []);
-
-  /* Tab persistence */
-  useEffect(() => {
-    saveTabs(tabs);
-  }, [tabs]);
-
-  /* SessionContext restores and refreshes the authenticated user's server-side
-   * session list; the reconciliation effect above maps it onto chat tabs. */
-
-  useEffect(() => {
-    saveActiveTabIndex(activeIdx);
-  }, [activeIdx]);
+  useEffect(() => () => { abortActiveSends(); }, []);
 
   /* Bootstrap banner */
   useEffect(() => {
@@ -1745,7 +1497,7 @@ export default function Chat() {
 
   useEffect(() => {
     setSessionUsage({ in: 0, out: 0, cost: 0, kind: 'realized' });
-  }, [activeIdx]);
+  }, [activeAimeeSid]);
 
   /* Persist active channel to localStorage */
   useEffect(() => { saveActiveChannel(activeChannel); }, [activeChannel]);
@@ -1856,8 +1608,8 @@ export default function Chat() {
     }
   }
 
-  const workflowChannel = ((tabs[activeIdx]?.workflowChannel ?? '').trim()
-    || (tabs[activeIdx]?.title ?? '').trim()
+  const workflowChannel = ((activeSession?.workflowChannel ?? '').trim()
+    || (activeSession?.name ?? '').trim()
     || 'general');
 
   const refreshWorkflow = useCallback(async () => {
@@ -1942,11 +1694,7 @@ export default function Chat() {
   }, [refreshWorkflow]);
 
   function setCurrentWorkflowChannel(value: string) {
-    setTabs(prev => {
-      const next = [...prev];
-      if (next[activeIdx]) next[activeIdx] = { ...next[activeIdx], workflowChannel: value };
-      return next;
-    });
+    if (activeSession) patchSession(activeSession.id, { workflowChannel: value });
   }
 
 
@@ -1954,13 +1702,6 @@ export default function Chat() {
    * Provider cache adoption remains owned by the server, never the browser. */
   function clearChat() {
     const nextAimeeSid = newAimeeSessionId();
-    setTabs(prev => {
-      const next = [...prev];
-      if (next[activeIdx]) {
-        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: nextAimeeSid, attachId: undefined, messages: [] };
-      }
-      return next;
-    });
     if (activeSession) patchSession(activeSession.id, {
       claudeSid: '', aimeeSid: nextAimeeSid, attachId: '',
     });
@@ -2069,7 +1810,7 @@ export default function Chat() {
       if (reply.disposition === 'cancelled' && (terminal.sequence !== reply.terminal_sequence ||
           terminal.event_id !== `operator-cancel:${turnId}` || terminal.status !== 'cancelled' || terminal.error !== operatorCancelError))
         throw new Error('The exact operator cancellation is not present in history. Your message is retained.');
-      if (version !== sendQueueVersionRef.current || tabsRef.current[activeIdxRef.current]?.aimeeSid !== sid ||
+      if (version !== sendQueueVersionRef.current || activeContextSid.current !== sid ||
           (irSessions.current[sid]?.activeTurns.length ?? 0) !== 0)
         throw new Error('Conversation changed while stopping. Your message is retained; select the conversation before continuing.');
       if (activeContextSid.current !== sid || !ownsQueuedOrigin(origin) || !irReadyRef.current[sid] || failedHistory.current.has(sid) || historyVersion !== (historyGeneration.current.get(sid) ?? 0))
@@ -2091,11 +1832,6 @@ export default function Chat() {
       activeSendAbortRefs.current.size > 0 || (sendQueuesRef.current.get(originSid)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
-      setTabs(prev => {
-        const next = prev.map(tab => tab.sessionId === sessionId && tab.aimeeSid === originSid ? { ...tab, title } : tab);
-        tabsRef.current = next;
-        return next;
-      });
       patchSession(sessionId, { name: title });
     }
     atBottomRef.current = true;
@@ -2280,12 +2016,11 @@ export default function Chat() {
       <div className="chat-session-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
-            key={activeSessionId}
+            key={activeSession?.id}
             value={activeSession?.projectRoot ?? ''}
             onChange={sel => {
               const r = sel ? `${sel.root}/${sel.project}` : '';
               if (activeSession) patchSession(activeSession.id, { projectRoot: r, projectName: sel?.project ?? '' });
-              else { setProjectRoot(r); saveProjectRoot(r); }
             }}
           />
         </div>
@@ -2350,10 +2085,10 @@ export default function Chat() {
       )}
 
       {rulesStatus && <p role="status">{rulesStatus}</p>}
-      {activeSessionMatched && !!tabs[activeIdx]?.messages.length && <details aria-label="Legacy transcript archive">
+      {activeSessionMatched && !!activeSession?.messages.length && <details aria-label="Legacy transcript archive">
         <summary>Legacy transcript archive (not model history)</summary>
         <p>This read-only archive is separate from the canonical conversation and is not sent to models.</p>
-        {tabs[activeIdx].messages.map((message, index) => <div key={index}>
+        {activeSession!.messages.map((message, index) => <div key={index}>
           <strong>{message.role}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.text}</pre>
         </div>)}
       </details>}
@@ -2639,7 +2374,7 @@ export default function Chat() {
           open={contextOpen}
           onToggle={() => { setContextOpen(o => !o); setPluginsOpen(false); setRulesOpen(false); }}
           sessionUsage={sessionUsage}
-          sessionId={tabs[activeIdx]?.aimeeSid ?? ''}
+          sessionId={activeAimeeSid}
           msgCount={canonicalState?.messages.filter(m => m.role === 'user').length ?? 0}
           metrics={allTimeMetrics}
         />

@@ -1348,43 +1348,6 @@ static size_t ctx_category_budget(task_type_t type, int category, size_t total_b
    return (total_budget * (size_t)weight) / (size_t)total_weight;
 }
 
-static void ctx_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
-{
-   if (!buf || cap == 0 || !pos || *pos >= cap - 1)
-      return;
-
-   va_list ap;
-   va_start(ap, fmt);
-   int n = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
-   va_end(ap);
-
-   if (n < 0)
-      return;
-   if ((size_t)n >= cap - *pos)
-   {
-      *pos = cap - 1;
-      buf[*pos] = '\0';
-      return;
-   }
-   *pos += (size_t)n;
-}
-
-static void ctx_append_bytes(char *buf, size_t cap, size_t *pos, const char *src, size_t len)
-{
-   if (!buf || cap == 0 || !pos || !src || *pos >= cap - 1)
-      return;
-
-   size_t avail = cap - 1 - *pos;
-   if (len > avail)
-      len = avail;
-   if (len == 0)
-      return;
-
-   memcpy(buf + *pos, src, len);
-   *pos += len;
-   buf[*pos] = '\0';
-}
-
 static const char *agent_context_cwd(char *buf, size_t buf_len)
 {
    const char *thread_cwd = run_cmd_get_cwd();
@@ -1438,23 +1401,100 @@ const char *agent_exec_instructions(task_type_t task_type)
           "file-content authority when it differs from indexed snippets.\n";
 }
 
-char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
-                                  const char *custom_prompt, int skip_kb_context)
+/* Assembly owns canonical blocks from the first append. The byte counter is
+ * shared across blocks so source/category budgets retain their original scope. */
+typedef enum
 {
-   return agent_build_exec_context_for_role(agent, network, NULL, custom_prompt, skip_kb_context);
+   EXEC_PLATFORM_POLICY,
+   EXEC_OPERATOR_POLICY,
+   EXEC_MEMORY_EVIDENCE,
+   EXEC_OPERATOR_EVIDENCE,
+   EXEC_TOOL_EVIDENCE
+} exec_context_kind_t;
+typedef struct
+{
+   aimee_message_t message;
+   exec_context_kind_t kind;
+   int failed;
+} exec_context_t;
+
+static aimee_block_t *exec_context_block(exec_context_t *context)
+{
+   aimee_context_origin_t origin = context->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_ORIGIN_PLATFORM
+                                   : context->kind == EXEC_MEMORY_EVIDENCE ? AIMEE_CTX_ORIGIN_MEMORY
+                                   : context->kind == EXEC_TOOL_EVIDENCE
+                                       ? AIMEE_CTX_ORIGIN_TOOL
+                                       : AIMEE_CTX_ORIGIN_OPERATOR;
+   aimee_context_authority_t authority =
+       context->kind == EXEC_PLATFORM_POLICY || context->kind == EXEC_OPERATOR_POLICY
+           ? AIMEE_CTX_AUTH_POLICY
+           : AIMEE_CTX_AUTH_EVIDENCE;
+   aimee_message_t *message = &context->message;
+   aimee_block_t *block = message->n_blocks ? &message->blocks[message->n_blocks - 1] : NULL;
+   if (block && block->context.origin == origin && block->context.authority == authority)
+      return block;
+   aimee_block_t *blocks =
+       realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      return NULL;
+   message->blocks = blocks;
+   block = &blocks[message->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT};
+   aimee_ir_block_set_context(block, origin, authority,
+                              context->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_TRUST_VERIFIED
+                                                                    : AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   return block;
 }
 
-char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
-                                        const char *role, const char *custom_prompt,
-                                        int skip_kb_context)
+static void ctx_append_bytes(exec_context_t *context, size_t cap, size_t *pos, const char *text,
+                             size_t len)
 {
-   return agent_build_exec_context_checked(agent, network, role, custom_prompt, skip_kb_context,
-                                           NULL, 0);
+   if (context->failed || !len || *pos >= cap - 1)
+      return;
+   aimee_block_t *block = exec_context_block(context);
+   size_t prior = block && block->text ? strlen(block->text) : 0;
+   size_t available = cap - 1 - *pos;
+   size_t added = len < available ? len : available;
+   char *owned = block ? realloc(block->text, prior + added + 1) : NULL;
+   if (!owned)
+   {
+      context->failed = 1;
+      return;
+   }
+   block->text = owned;
+   memcpy(owned + prior, text, added);
+   owned[prior + added] = '\0';
+   if (added < len)
+      text_trim_partial_utf8(owned);
+   *pos += strlen(owned) - prior;
 }
 
-static int append_native_memory_projection(const cJSON *envelope, size_t available, char *buf,
-                                           size_t cap, size_t *pos, int mark_reminders,
-                                           int *native_started, char *error, size_t error_len)
+static void ctx_appendf(exec_context_t *context, size_t cap, size_t *pos, const char *fmt, ...)
+{
+   if (context->failed || *pos >= cap - 1)
+      return;
+   va_list args;
+   va_start(args, fmt);
+   size_t available = cap - *pos;
+   char *text = malloc(available);
+   int length = text ? vsnprintf(text, available, fmt, args) : -1;
+   va_end(args);
+   if (length < 0)
+      context->failed = 1;
+   else
+   {
+      if ((size_t)length >= available)
+         text_trim_partial_utf8(text);
+      ctx_append_bytes(context, cap, pos, text, strlen(text));
+   }
+   free(text);
+}
+
+static int append_native_memory_projection(const cJSON *envelope, size_t available,
+                                           exec_context_t *context, size_t cap, size_t *pos,
+                                           int mark_reminders, int *native_started, char *error,
+                                           size_t error_len)
 {
    /* The Go owner decides whether recall is usable. Preserve explicit
     * refusals instead of treating an absent recall member as empty memory.
@@ -1511,7 +1551,7 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
       return -1;
    }
    *native_started = 1;
-   ctx_append_bytes(buf, cap, pos, text, strlen(text));
+   ctx_append_bytes(context, cap, pos, text, strlen(text));
    if (text[0] && request_context_get())
       (void)request_context_require_memory_receipt();
    if (mark_reminders)
@@ -1528,89 +1568,10 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    return 0;
 }
 
-/* Boundaries are recorded at the source append sites, never inferred from
- * headings or content. The buffer is only scratch storage for formatting and
- * the legacy read-only view; model consumers receive the owned typed blocks. */
-typedef enum
-{
-   EXEC_PLATFORM_POLICY,
-   EXEC_OPERATOR_POLICY,
-   EXEC_MEMORY_EVIDENCE,
-   EXEC_OPERATOR_EVIDENCE,
-   EXEC_TOOL_EVIDENCE
-} exec_context_kind_t;
-typedef struct
-{
-   size_t begin, end;
-   exec_context_kind_t kind;
-} exec_context_span_t;
-typedef struct
-{
-   exec_context_span_t spans[16];
-   int count, failed;
-   size_t begin;
-   exec_context_kind_t kind;
-} exec_context_record_t;
-static void exec_context_boundary(exec_context_record_t *record, size_t pos,
-                                  exec_context_kind_t next)
-{
-   if (pos > record->begin)
-   {
-      if (record->count && record->spans[record->count - 1].kind == record->kind &&
-          record->spans[record->count - 1].end == record->begin)
-         record->spans[record->count - 1].end = pos;
-      else if (record->count < 16)
-         record->spans[record->count++] = (exec_context_span_t){record->begin, pos, record->kind};
-      else
-         record->failed = 1;
-   }
-   record->begin = pos;
-   record->kind = next;
-}
-static int exec_context_message(const exec_context_record_t *record, const char *text,
-                                aimee_message_t *out)
-{
-   if (record->failed)
-      return -1;
-   aimee_message_t message = {.role = strdup("system")};
-   message.blocks = record->count ? calloc((size_t)record->count, sizeof *message.blocks) : NULL;
-   if (!message.role || (record->count && !message.blocks))
-      goto fail;
-   for (int i = 0; i < record->count; i++)
-   {
-      const exec_context_span_t *span = &record->spans[i];
-      aimee_block_t *block = &message.blocks[message.n_blocks++];
-      block->type = AIMEE_BLK_TEXT;
-      block->text = strndup(text + span->begin, span->end - span->begin);
-      if (!block->text)
-         goto fail;
-      aimee_context_origin_t origin = span->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_ORIGIN_PLATFORM
-                                      : span->kind == EXEC_MEMORY_EVIDENCE ? AIMEE_CTX_ORIGIN_MEMORY
-                                      : span->kind == EXEC_TOOL_EVIDENCE
-                                          ? AIMEE_CTX_ORIGIN_TOOL
-                                          : AIMEE_CTX_ORIGIN_OPERATOR;
-      int policy = span->kind == EXEC_PLATFORM_POLICY || span->kind == EXEC_OPERATOR_POLICY;
-      aimee_ir_block_set_context(block, origin,
-                                 policy ? AIMEE_CTX_AUTH_POLICY : AIMEE_CTX_AUTH_EVIDENCE,
-                                 span->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_TRUST_VERIFIED
-                                                                    : AIMEE_CTX_TRUST_UNVERIFIED,
-                                 AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
-   }
-   cJSON *validated = aimee_ir_message_json(&message);
-   if (!validated)
-      goto fail;
-   cJSON_Delete(validated);
-   aimee_message_free(out);
-   *out = message;
-   return 0;
-fail:
-   aimee_message_free(&message);
-   return -1;
-}
-static char *agent_build_exec_context_recorded(const agent_t *agent, const agent_network_t *network,
-                                               const char *role, const char *custom_prompt,
-                                               int skip_kb_context, aimee_message_t *typed,
-                                               char *error, size_t error_len)
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context, aimee_message_t *out, char *error,
+                                        size_t error_len)
 {
    if (error && error_len)
       error[0] = '\0';
@@ -1634,15 +1595,15 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
        "- Do not ask for confirmation. Execute the task directly.\n";
    size_t content_budget = agent_exec_context_budget_chars(agent);
    size_t cap = content_budget + 4096; /* extra room for headers */
-   char *buf = malloc(cap);
-   if (!buf)
+   exec_context_t context = {.message = {.role = strdup("system")}};
+   if (!out || !context.message.role)
    {
       if (error && error_len)
          snprintf(error, error_len, "context assembly allocation failed");
-      return NULL;
+      aimee_message_free(&context.message);
+      return -1;
    }
    size_t pos = 0;
-   exec_context_record_t source = {.kind = EXEC_PLATFORM_POLICY};
 
    /* Compute per-category budgets from the content budget.
     * Fixed overhead (instructions, network, guardrails, etc.) sits outside these limits. */
@@ -1657,8 +1618,8 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
                         (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0) ||
                         ((!kb_mode || !kb_mode[0]) && !kb_client_connection_configured());
 
-   ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
-   ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
+   ctx_appendf(&context, cap, &pos, "%s", agent_exec_instructions(task_type));
+   ctx_appendf(&context, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
 
    /* Turn registers (fold §6): ask for the tags the record path already knows how to
     * read. Gated on the same flag that turns on the fold's skeleton annotation, because
@@ -1667,7 +1628,7 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
    {
       const char *registers = prompt_turn_registers_text(config_fold_register_enabled());
       if (registers)
-         ctx_appendf(buf, cap, &pos, "%s", registers);
+         ctx_appendf(&context, cap, &pos, "%s", registers);
    }
 
    char cwd_buf[MAX_PATH_LEN];
@@ -1679,10 +1640,10 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       char root[MAX_PATH_LEN] = "";
       if (workspace_active_root(cwd, root, sizeof(root)) != 0)
          snprintf(root, sizeof(root), "%s", cwd);
-      exec_context_boundary(&source, pos, EXEC_OPERATOR_EVIDENCE);
-      ctx_appendf(buf, cap, &pos, "Workspace root: %s\n", root);
-      exec_context_boundary(&source, pos, EXEC_PLATFORM_POLICY);
-      ctx_appendf(buf, cap, &pos,
+      context.kind = EXEC_OPERATOR_EVIDENCE;
+      ctx_appendf(&context, cap, &pos, "Workspace root: %s\n", root);
+      context.kind = EXEC_PLATFORM_POLICY;
+      ctx_appendf(&context, cap, &pos,
                   "Use paths relative to this workspace, or absolute paths under this exact "
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
                   "unless the user explicitly asks for them.\n");
@@ -1693,17 +1654,17 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
     * repository identity.  An unresolved cwd deliberately yields global/shared
     * memory only rather than another project's rows. */
    kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
-   ctx_appendf(buf, cap, &pos, "\n");
+   ctx_appendf(&context, cap, &pos, "\n");
 
-   exec_context_boundary(&source, pos, EXEC_OPERATOR_POLICY);
+   context.kind = EXEC_OPERATOR_POLICY;
 
    /* Authored profile/role policy, not an inherited first-system projection. */
    if (custom_prompt && custom_prompt[0])
    {
-      ctx_appendf(buf, cap, &pos, "%s\n\n", custom_prompt);
+      ctx_appendf(&context, cap, &pos, "%s\n\n", custom_prompt);
    }
 
-   exec_context_boundary(&source, pos, EXEC_MEMORY_EVIDENCE);
+   context.kind = EXEC_MEMORY_EVIDENCE;
 
    /* Replace the prior native proof set once per complete context build;
     * subsequent native blocks in this build add their retained proofs. */
@@ -1726,7 +1687,7 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
    if (rules && rules[0] && strcmp(rules, "No rules configured.") != 0)
    {
       size_t rules_start = pos;
-      ctx_appendf(buf, cap, &pos, "# Rules\n");
+      ctx_appendf(&context, cap, &pos, "# Rules\n");
       /* Truncate rules content to budget */
       size_t rules_len = strlen(rules);
       size_t rules_avail =
@@ -1734,8 +1695,8 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       if (rules_len > rules_avail)
          rules_len = rules_avail;
       if (rules_len > 0)
-         ctx_append_bytes(buf, cap, &pos, rules, rules_len);
-      ctx_appendf(buf, cap, &pos, "\n\n");
+         ctx_append_bytes(&context, cap, &pos, rules, rules_len);
+      ctx_appendf(&context, cap, &pos, "\n\n");
    }
    free(rules);
 
@@ -1761,9 +1722,9 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
       if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsString(text) &&
           strlen(text->valuestring) <= available)
-         ctx_appendf(buf, cap, &pos, "%s", text->valuestring);
+         ctx_appendf(&context, cap, &pos, "%s", text->valuestring);
       else
-         ctx_appendf(buf, cap, &pos, "[Memory context unavailable]\n");
+         ctx_appendf(&context, cap, &pos, "[Memory context unavailable]\n");
       cJSON_Delete(reply);
    }
    else if (!skip_kb_client)
@@ -1778,13 +1739,13 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       char *raw = kb_v1_action_request("memory.assemble_context", request);
       cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
       free(raw);
-      if (append_native_memory_projection(reply, available, buf, cap, &pos, 0, &native_started,
+      if (append_native_memory_projection(reply, available, &context, cap, &pos, 0, &native_started,
                                           error, error_len) != 0)
       {
          cJSON_Delete(reply);
          kb_client_memory_scope_context_clear();
-         free(buf);
-         return NULL;
+         aimee_message_free(&context.message);
+         return -1;
       }
       cJSON_Delete(reply);
    }
@@ -1816,13 +1777,14 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
                                                                   session_start, available);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
-         if (append_native_memory_projection(envelope, available, buf, cap, &pos, !skip_kb_client,
-                                             &native_started, error, error_len) != 0)
+         if (append_native_memory_projection(envelope, available, &context, cap, &pos,
+                                             !skip_kb_client, &native_started, error,
+                                             error_len) != 0)
          {
             cJSON_Delete(envelope);
             kb_client_memory_scope_context_clear();
-            free(buf);
-            return NULL;
+            aimee_message_free(&context.message);
+            return -1;
          }
          /* Empty is still the owner's final selection; do not bypass its budget. */
          recall_injected = 1;
@@ -1849,13 +1811,13 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
          char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
          cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
          free(matches_json);
-         if (append_native_memory_projection(response, available, buf, cap, &pos, 1,
+         if (append_native_memory_projection(response, available, &context, cap, &pos, 1,
                                              &native_started, error, error_len) != 0)
          {
             cJSON_Delete(response);
             kb_client_memory_scope_context_clear();
-            free(buf);
-            return NULL;
+            aimee_message_free(&context.message);
+            return -1;
          }
          cJSON_Delete(response);
       }
@@ -1866,12 +1828,12 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
    int pcount = skip_kb_client ? 0 : kb_client_index_list(projects, 32);
    if (pcount > 0)
    {
-      ctx_appendf(buf, cap, &pos, "# Repos: ");
+      ctx_appendf(&context, cap, &pos, "# Repos: ");
       for (int i = 0; i < pcount && pos < cap - 64; i++)
       {
-         ctx_appendf(buf, cap, &pos, "%s%s", i > 0 ? ", " : "", projects[i].name);
+         ctx_appendf(&context, cap, &pos, "%s%s", i > 0 ? ", " : "", projects[i].name);
       }
-      ctx_appendf(buf, cap, &pos, "\n\n");
+      ctx_appendf(&context, cap, &pos, "\n\n");
    }
 
    /* Relevant code symbols: query the index for terms matching the task prompt */
@@ -1899,13 +1861,13 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       if (total_hits > 0)
       {
          size_t code_start = pos;
-         ctx_appendf(buf, cap, &pos, "# Relevant Code\n");
+         ctx_appendf(&context, cap, &pos, "# Relevant Code\n");
          for (int i = 0; i < total_hits && pos < cap - 256 && (pos - code_start) < budget_code; i++)
          {
-            ctx_appendf(buf, cap, &pos, "- %s:%d (%s) [%s]\n", hits[i].file_path, hits[i].line,
+            ctx_appendf(&context, cap, &pos, "- %s:%d (%s) [%s]\n", hits[i].file_path, hits[i].line,
                         hits[i].kind, hits[i].project);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -1939,11 +1901,10 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
                   size_t sg_len = strlen(content);
                   if (sg_len > 0 && pos + sg_len + 4 < cap)
                   {
-                     memcpy(buf + pos, content, sg_len);
-                     pos += sg_len;
-                     if (pos > 0 && buf[pos - 1] != '\n')
-                        buf[pos++] = '\n';
-                     buf[pos++] = '\n';
+                     ctx_append_bytes(&context, cap, &pos, content, sg_len);
+                     if (content[sg_len - 1] != '\n')
+                        ctx_appendf(&context, cap, &pos, "\n");
+                     ctx_appendf(&context, cap, &pos, "\n");
                   }
                   free(sg);
                }
@@ -1953,20 +1914,20 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       }
    }
 
-   exec_context_boundary(&source, pos, EXEC_OPERATOR_EVIDENCE);
+   context.kind = EXEC_OPERATOR_EVIDENCE;
 
    /* Network access */
    if (network && network->ssh_entry[0])
    {
-      ctx_appendf(buf, cap, &pos, "# Network Access\n");
-      ctx_appendf(buf, cap, &pos, "Default entry: %s\n", network->ssh_entry);
+      ctx_appendf(&context, cap, &pos, "# Network Access\n");
+      ctx_appendf(&context, cap, &pos, "Default entry: %s\n", network->ssh_entry);
       if (network->ssh_key[0])
-         ctx_appendf(buf, cap, &pos, "SSH key: %s\n", network->ssh_key);
-      ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "SSH key: %s\n", network->ssh_key);
+      ctx_appendf(&context, cap, &pos, "\n");
 
       if (network->host_count > 0)
       {
-         ctx_appendf(buf, cap, &pos, "Hosts:\n");
+         ctx_appendf(&context, cap, &pos, "Hosts:\n");
          for (int i = 0; i < network->host_count && pos < cap - 256; i++)
          {
             const agent_net_host_t *h = &network->hosts[i];
@@ -1986,39 +1947,39 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
                   snprintf(ssh_cmd, sizeof(ssh_cmd), "%s -i %s", host_entry, network->ssh_key);
                else
                   snprintf(ssh_cmd, sizeof(ssh_cmd), "%s", host_entry);
-               ctx_appendf(buf, cap, &pos, "  %-16s %s %s@  %s\n", h->name, ssh_cmd,
+               ctx_appendf(&context, cap, &pos, "  %-16s %s %s@  %s\n", h->name, ssh_cmd,
                            h->user[0] ? h->user : "root", h->desc);
             }
             else if (h->port > 0)
-               ctx_appendf(buf, cap, &pos, "  %-16s %s:%d  %-8s %s\n", h->name, h->ip, h->port,
+               ctx_appendf(&context, cap, &pos, "  %-16s %s:%d  %-8s %s\n", h->name, h->ip, h->port,
                            h->user, h->desc);
             else
-               ctx_appendf(buf, cap, &pos, "  %-16s %-20s %-8s %s\n", h->name, h->ip, h->user,
+               ctx_appendf(&context, cap, &pos, "  %-16s %-20s %-8s %s\n", h->name, h->ip, h->user,
                            h->desc);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
 
       if (network->network_count > 0)
       {
-         ctx_appendf(buf, cap, &pos, "Networks:\n");
+         ctx_appendf(&context, cap, &pos, "Networks:\n");
          for (int i = 0; i < network->network_count && pos < cap - 128; i++)
          {
             const agent_net_def_t *nd = &network->networks[i];
-            ctx_appendf(buf, cap, &pos, "  %-16s %-20s %s\n", nd->name, nd->cidr, nd->desc);
+            ctx_appendf(&context, cap, &pos, "  %-16s %-20s %s\n", nd->name, nd->cidr, nd->desc);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
-   exec_context_boundary(&source, pos, EXEC_MEMORY_EVIDENCE);
+   context.kind = EXEC_MEMORY_EVIDENCE;
 
    /* Working memory context */
    {
       char *wm_ctx = db1_wm_assemble_context(session_id());
       if (wm_ctx && wm_ctx[0])
       {
-         ctx_appendf(buf, cap, &pos, "# Working Memory\n%s\n\n", wm_ctx);
+         ctx_appendf(&context, cap, &pos, "# Working Memory\n%s\n\n", wm_ctx);
       }
       free(wm_ctx);
    }
@@ -2031,8 +1992,8 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
          size_t vc_len = strlen(vc);
          size_t avail = cap - 1 - pos;
          if (avail > 1)
-            ctx_append_bytes(buf, cap, &pos, vc, vc_len < avail - 1 ? vc_len : avail - 1);
-         ctx_appendf(buf, cap, &pos, "\n");
+            ctx_append_bytes(&context, cap, &pos, vc, vc_len < avail - 1 ? vc_len : avail - 1);
+         ctx_appendf(&context, cap, &pos, "\n");
       }
       free(vc);
    }
@@ -2043,7 +2004,7 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       int acount = db1_wm_list(session_id(), "attempt", attempts, WM_MAX_RESULTS);
       if (acount > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Previous Attempts\n");
+         ctx_appendf(&context, cap, &pos, "# Previous Attempts\n");
          for (int i = 0; i < acount && pos < cap - 256; i++)
          {
             cJSON *v = cJSON_Parse(attempts[i].value);
@@ -2070,13 +2031,13 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
                }
             }
 
-            ctx_appendf(buf, cap, &pos, "- Tried: %s\n  Result: %s\n", ap, oc);
+            ctx_appendf(&context, cap, &pos, "- Tried: %s\n  Result: %s\n", ap, oc);
             if (ls[0])
-               ctx_appendf(buf, cap, &pos, "  Lesson: %s\n", ls);
+               ctx_appendf(&context, cap, &pos, "  Lesson: %s\n", ls);
 
             cJSON_Delete(v);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -2087,13 +2048,13 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       int tcount = kb_client_task_list(TASK_IN_PROGRESS, NULL, 8, active_tasks, 8);
       if (tcount > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Active Tasks\n");
+         ctx_appendf(&context, cap, &pos, "# Active Tasks\n");
          for (int i = 0; i < tcount && pos < cap - 256; i++)
          {
-            ctx_appendf(buf, cap, &pos, "- [%s] %s\n", active_tasks[i].state,
+            ctx_appendf(&context, cap, &pos, "- [%s] %s\n", active_tasks[i].state,
                         active_tasks[i].title);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -2108,14 +2069,14 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       {
          if (!has_failures)
          {
-            ctx_appendf(buf, cap, &pos, "# Recent Failures\n");
+            ctx_appendf(&context, cap, &pos, "# Recent Failures\n");
             has_failures = 1;
          }
-         ctx_appendf(buf, cap, &pos, "- [%s] %.120s\n", fails[i].role[0] ? fails[i].role : "?",
+         ctx_appendf(&context, cap, &pos, "- [%s] %.120s\n", fails[i].role[0] ? fails[i].role : "?",
                      fails[i].error[0] ? fails[i].error : "unknown");
       }
       if (has_failures)
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
    }
 
    /* Recent execution history: skip. Execution traces from other delegates
@@ -2123,37 +2084,37 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
     * Each delegate starts fresh — it has the task prompt and relevant context
     * from memory/index, which is sufficient. */
 
-   exec_context_boundary(&source, pos, EXEC_PLATFORM_POLICY);
+   context.kind = EXEC_PLATFORM_POLICY;
 
    /* Guardrail warnings */
    {
       const char *mode = config_guardrail_mode();
       if (strcmp(mode, MODE_DENY) == 0)
       {
-         ctx_appendf(buf, cap, &pos,
+         ctx_appendf(&context, cap, &pos,
                      "# Guardrails\n"
                      "Mode: strict. Writes to sensitive files and high blast-radius "
                      "operations will be blocked.\n\n");
       }
       else if (strcmp(mode, MODE_APPROVE) == 0)
       {
-         ctx_appendf(buf, cap, &pos,
+         ctx_appendf(&context, cap, &pos,
                      "# Guardrails\n"
                      "Mode: approve. Writes to sensitive files will trigger warnings.\n\n");
       }
    }
 
-   exec_context_boundary(&source, pos, EXEC_OPERATOR_POLICY);
+   context.kind = EXEC_OPERATOR_POLICY;
 
    /* Project contract */
    char *contract = agent_load_project_contract(NULL);
    if (contract)
    {
-      ctx_appendf(buf, cap, &pos, "%s\n", contract);
+      ctx_appendf(&context, cap, &pos, "%s\n", contract);
       free(contract);
    }
 
-   exec_context_boundary(&source, pos, EXEC_TOOL_EVIDENCE);
+   context.kind = EXEC_TOOL_EVIDENCE;
 
    /* Environment capabilities */
    {
@@ -2161,89 +2122,33 @@ static char *agent_build_exec_context_recorded(const agent_t *agent, const agent
       int n = db1_env_capability_list(caps, 20);
       if (n > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Environment\n");
+         ctx_appendf(&context, cap, &pos, "# Environment\n");
          for (int i = 0; i < n && pos < cap - 128; i++)
-            ctx_appendf(buf, cap, &pos, "  %-20s %s\n", caps[i].key, caps[i].value);
-         ctx_appendf(buf, cap, &pos, "\n");
+            ctx_appendf(&context, cap, &pos, "  %-20s %s\n", caps[i].key, caps[i].value);
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
-   exec_context_boundary(
-       &source, pos, agent->exec_system_prompt[0] ? EXEC_OPERATOR_POLICY : EXEC_PLATFORM_POLICY);
+   context.kind = agent->exec_system_prompt[0] ? EXEC_OPERATOR_POLICY : EXEC_PLATFORM_POLICY;
 
    /* Instructions */
-   ctx_appendf(buf, cap, &pos, "%s",
+   ctx_appendf(&context, cap, &pos, "%s",
                agent->exec_system_prompt[0] ? agent->exec_system_prompt
                                             : default_exec_instructions);
 
    kb_client_memory_scope_context_clear();
-   exec_context_boundary(&source, pos, source.kind);
-   if (typed && exec_context_message(&source, buf, typed))
+   cJSON *validated = context.failed ? NULL : aimee_ir_message_json(&context.message);
+   if (!validated)
    {
       if (error && error_len)
          snprintf(error, error_len, "canonical execution context admission failed");
-      free(buf);
-      return NULL;
+      aimee_message_free(&context.message);
+      return -1;
    }
-   return buf;
-}
-
-int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
-                                        const char *role, const char *custom_prompt,
-                                        int skip_kb_context, aimee_message_t *out, char *error,
-                                        size_t error_len)
-{
-   if (!out)
-      return -1;
-   char *view = agent_build_exec_context_recorded(agent, network, role, custom_prompt,
-                                                  skip_kb_context, out, error, error_len);
-   if (!view)
-      return -1;
-   free(view);
+   cJSON_Delete(validated);
+   aimee_message_free(out);
+   *out = context.message;
    return 0;
-}
-/* Read-only inspection compatibility. Never feed this string to model execution. */
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom_prompt,
-                                       int skip_kb_context, char *error, size_t error_len)
-{
-   return agent_build_exec_context_recorded(agent, network, role, custom_prompt, skip_kb_context,
-                                            NULL, error, error_len);
-}
-
-char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
-                               const char *custom_prompt)
-{
-   return agent_build_exec_context_ex(agent, network, custom_prompt, 0);
-}
-
-/* --- Ephemeral SSH ---
- * Implemented in posix/agent_context.c (POSIX) and windows/agent_context.c (Windows). */
-
-/* --- Context command (Item 10) --- */
-
-void agent_print_context(const agent_config_t *cfg)
-{
-   if (!cfg || cfg->agent_count == 0)
-   {
-      printf("No agents configured.\n");
-      return;
-   }
-
-   agent_t *ag = &((agent_config_t *)cfg)->agents[0]; /* use first agent for context */
-   const agent_network_t *net = cfg->network.ssh_entry[0] ? &cfg->network : NULL;
-
-   char error[512];
-   char *ctx = agent_build_exec_context_checked(ag, net, NULL, NULL, 0, error, sizeof(error));
-   if (ctx)
-   {
-      printf("%s\n", ctx);
-      free(ctx);
-   }
-   else
-   {
-      printf("Failed to assemble context: %s\n", error);
-   }
 }
 
 /* --- Logging ---

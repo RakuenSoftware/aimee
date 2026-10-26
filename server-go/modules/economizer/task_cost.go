@@ -1,7 +1,7 @@
 package economizer
 
-// Task-cost reporting is an observe-only owner contract. It never supplies a
-// Proof or authorizes a reduction. Monetary amounts are decimal nanodollars,
+// Task-cost reporting is an observe-only owner contract. It never authorizes
+// a reduction. Monetary amounts are decimal nanodollars,
 // encoded as strings so native JSON adapters cannot round integer accounting.
 import (
 	"bytes"

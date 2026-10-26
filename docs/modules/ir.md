@@ -152,6 +152,13 @@ controls, account-bound cache/history admission, credential custody, cross-wire 
 Responses ingress and remaining IR consumers still require cutover. The current
 [handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
 
+Canonical requests may carry `system_scalar` as an optional layout preference.
+The Anthropic egress codec emits a scalar only for one uncached TEXT block;
+appended or cache-marked system blocks remain an array. Host assembly retains
+only typed system blocks, cache flags and this preference, without a manufactured
+native `raw.system` copy. External ingress replay sidecars remain owned by their
+translation boundary. The preference carries no content authority.
+
 ## Dependencies and consumers
 
 - `module-runtime`: supplies the required lifecycle and extension contracts used by every core profile.

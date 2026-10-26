@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react';
 import {
   cacheBelongsToAccount,
+  validMessages,
+  reconcileSessionMessages,
   legacyProviderAliasIDs,
   isPristineDefaultSession,
   mergePersistedSessions,
@@ -63,10 +65,12 @@ function blankSession(name: string): Session {
 }
 
 interface LegacyTab {
+  title?: string;
   sessionId?: string;
   aimeeSid?: string;
   sid?: string;
   messages?: SessionMessage[];
+  workflowChannel?: string;
 }
 
 function loadLegacyTabs(): Map<string, LegacyTab> {
@@ -74,48 +78,39 @@ function loadLegacyTabs(): Map<string, LegacyTab> {
   try {
     const parsed = JSON.parse(localStorage.getItem(LEGACY_TABS_KEY) || '[]') as LegacyTab[];
     if (Array.isArray(parsed)) {
-      for (const tab of parsed) if (tab?.sessionId) out.set(tab.sessionId, tab);
+      parsed.forEach((tab, index) => { if (tab && typeof tab === 'object') out.set(tab.sessionId || tab.aimeeSid || `legacy-${index}`, tab); });
     }
   } catch { /* ignore */ }
   return out;
 }
 
-function normalizeMessages(value: unknown): SessionMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((message): message is SessionMessage => {
-    if (!message || typeof message !== 'object') return false;
-    const candidate = message as Partial<SessionMessage>;
-    return (candidate.role === 'user' || candidate.role === 'assistant' || candidate.role === 'narration') &&
-      typeof candidate.text === 'string';
-  });
-}
-
 function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(SESSIONS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Session>[];
-      if (Array.isArray(parsed) && parsed.length) {
-        const legacyTabs = loadLegacyTabs();
-        return parsed.map((session, i) => {
-          const legacy = typeof session.id === 'string' ? legacyTabs.get(session.id) : undefined;
-          const aimeeSid = (typeof session.aimeeSid === 'string' && session.aimeeSid) ||
-            legacy?.aimeeSid || newAimeeSessionID();
-          return {
-            id: typeof session.id === 'string' && session.id ? session.id : aimeeSid,
-            name: typeof session.name === 'string' && session.name ? session.name : `Session ${i + 1}`,
-            projectRoot: typeof session.projectRoot === 'string' ? session.projectRoot : '',
-            projectName: typeof session.projectName === 'string' ? session.projectName : '',
-            claudeSid: (typeof session.claudeSid === 'string' && session.claudeSid) || legacy?.sid || '',
-            aimeeSid,
-            // Presence attachments are browser-process-local and cannot be resumed.
-            attachId: '',
-            messages: normalizeMessages(session.messages).length
-              ? normalizeMessages(session.messages)
-              : normalizeMessages(legacy?.messages),
-          };
-        });
-      }
+    const legacyTabs = loadLegacyTabs();
+    const parsed: Partial<Session>[] = raw ? JSON.parse(raw) : [...legacyTabs].map(([id, tab]) => ({
+      id, name: tab.title, aimeeSid: tab.aimeeSid, claudeSid: tab.sid,
+    }));
+    if (Array.isArray(parsed) && parsed.length) {
+      return parsed.map((session, i) => {
+        const candidate = legacyTabs.get(session.id || '') ?? [...legacyTabs.values()].find(tab => tab.aimeeSid && tab.aimeeSid === session.aimeeSid);
+        const legacy = !session.aimeeSid || !candidate?.aimeeSid || candidate.aimeeSid === session.aimeeSid ? candidate : undefined;
+        const aimeeSid = (typeof session.aimeeSid === 'string' && session.aimeeSid) ||
+          legacy?.aimeeSid || newAimeeSessionID();
+        return {
+          id: typeof session.id === 'string' && session.id ? session.id : aimeeSid,
+          name: typeof session.name === 'string' && session.name ? session.name : `Session ${i + 1}`,
+          projectRoot: typeof session.projectRoot === 'string' ? session.projectRoot : '',
+          projectName: typeof session.projectName === 'string' ? session.projectName : '',
+          claudeSid: (typeof session.claudeSid === 'string' && session.claudeSid) || legacy?.sid || '',
+          aimeeSid,
+          // Presence attachments are browser-process-local and cannot be resumed.
+          attachId: '',
+          workflowChannel: typeof session.workflowChannel === 'string' ? session.workflowChannel
+            : typeof legacy?.workflowChannel === 'string' ? legacy.workflowChannel : undefined,
+          messages: reconcileSessionMessages(validMessages(session.messages), validMessages(legacy?.messages)),
+        };
+      });
     }
   } catch { /* ignore */ }
   return [blankSession('Session 1')];

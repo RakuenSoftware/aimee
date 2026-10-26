@@ -291,7 +291,6 @@ aimee_add_test(test_aimee_backend test_aimee_backend.c
   ../modules/translation/aimee_frontend_anthropic.c
   ../modules/translation/aimee_frontend_openai.c
   ../modules/ir/aimee_ir.c ../aimee_sha256.c)
-aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../modules/ir/aimee_ir_metrics.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c
   support/ir_seam_memory_stub.c ../server/aimee_ir_serve.c
   ../modules/ir/aimee_ir_session.c ../modules/ir/aimee_ir.c
@@ -745,12 +744,12 @@ aimee_add_test(test_core_base64 test_core_base64.c)
 
 aimee_add_test(test_aimee_responses_stream test_aimee_responses_stream.c
     ../modules/translation/aimee_responses_frontend_stream.c ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c
-    ../modules/translation/aimee_responses_stream.c ../modules/translation/aimee_backend_responses.c
+    ../modules/translation/aimee_backend_responses.c
     ../modules/ir/aimee_ir.c)
 
 aimee_add_test(test_server_responses_stream test_server_responses_stream.c
     ../server/server_responses_stream.c ../sse_parser.c
-    ../modules/translation/aimee_responses_stream.c ../modules/translation/aimee_backend_responses.c
+    ../modules/translation/aimee_backend_responses.c
     ../modules/translation/aimee_responses_frontend_stream.c ../modules/translation/aimee_frontend_openai.c
     ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)
 

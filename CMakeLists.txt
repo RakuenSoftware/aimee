@@ -673,6 +673,8 @@ set(DATA_SRCS
 
 set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
+    ${AIMEE_SRC_DIR}/server/agent_request_build.c
+    ${AIMEE_SRC_DIR}/server/server_model_execution.c
     ${AIMEE_SRC_DIR}/server/agent_result_cache.c
     ${AIMEE_SRC_DIR}/server/agent_parallel.c
     ${AIMEE_SRC_DIR}/server/agent_runtime_liveness.c

@@ -412,9 +412,9 @@ int agent_tools_catalog_filter(aimee_request_t *tools, const char *role)
    assert(!strcmp(parent_role, role ? role : "primary"));
    return 0;
 }
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom, int skip, char *error,
-                                       size_t size)
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom, int skip,
+                                        aimee_message_t *out, char *error, size_t size)
 {
    (void)network;
    (void)role;
@@ -422,20 +422,11 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    (void)error;
    (void)size;
    assert(!strcmp(agent->model, "selected-model") && skip);
-   return strdup("host environment");
-}
-int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
-                                        const char *role, const char *custom, int skip,
-                                        aimee_message_t *out, char *error, size_t size)
-{
-   char *text = agent_build_exec_context_checked(agent, network, role, custom, skip, error, size);
-   if (!text)
-      return -1;
    out->role = strdup("system");
    out->blocks = calloc(1, sizeof *out->blocks);
    assert(out->role && out->blocks);
    out->n_blocks = 1;
-   out->blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+   out->blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("host environment")};
    aimee_ir_block_set_context(&out->blocks[0], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
                               AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
    if (mode == 11)

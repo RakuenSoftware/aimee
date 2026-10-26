@@ -88,7 +88,7 @@ CONTRACTS = (
             "src/tests/test_gateway_policy.c",
         ),
         document="docs/modules/gateway.md",
-        document_markers=("gateway_policy_apply_request", "canonical include namespace"),
+        document_markers=("gateway_policy_apply_ir", "canonical include namespace"),
     ),
     Contract(
         module="gateway-delegate",

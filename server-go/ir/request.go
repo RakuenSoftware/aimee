@@ -51,6 +51,7 @@ type Request struct {
 	SourceWire           string          `json:"source_wire"`
 	CachePolicy          string          `json:"cache_policy"`
 	System               []Block         `json:"system"`
+	SystemScalar         bool            `json:"system_scalar,omitempty"`
 	Messages             []Message       `json:"messages"`
 	Tools                []Tool          `json:"tools"`
 	ToolChoice           ToolChoice      `json:"tool_choice"`

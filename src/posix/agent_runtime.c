@@ -6,7 +6,6 @@
 /* posix/agent.c: POSIX implementation of agent_execute_with_tools. */
 #include "aimee.h"
 #include "agent.h"
-#include "aimee_ir_shadow.h"
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
@@ -535,8 +534,7 @@ __attribute__((weak)) int agent_native_request_tools_disabled(void)
 
 static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                                           const agent_t *agent, const agent_network_t *network,
-                                          const char *role, const char *system_prompt,
-                                          const char *user_prompt, const aimee_request_t *seed,
+                                          const char *role, const aimee_request_t *seed,
                                           aimee_response_t *canonical, agent_result_t *out)
 {
    int turn_limit = agent_native_request_turn_limit();
@@ -548,8 +546,6 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                              .network = network,
                              .role = role,
                              .cwd = run_cmd_get_cwd(),
-                             .system_prompt = system_prompt,
-                             .user_prompt = user_prompt,
                              .canonical_request = seed,
                              .canonical_response = canonical,
                              .native_turn_limit = turn_limit,
@@ -557,8 +553,7 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
       return host;
-   /* A missing host owner is a refusal, including unseeded requests. Native
-    * execution must never fall back to an unmanaged SDK process. */
+   /* A missing host owner never authorizes an unmanaged SDK fallback. */
    memset(out, 0, sizeof *out);
    snprintf(out->error, sizeof out->error, "canonical %s execution owner unavailable",
             adapter->display_name);
@@ -566,30 +561,26 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
 }
 
 static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
-                                         const char *role, const char *system_prompt,
-                                         const char *user_prompt, int max_tokens,
+                                         const char *role, const char *user_prompt, int max_tokens,
                                          double temperature, cJSON *initial_messages,
                                          cJSON **updated_messages, agent_result_t *out,
                                          const aimee_request_t *seed,
-                                         aimee_response_t *canonical_out,
-                                         const aimee_message_t *input_message, int host_profile);
+                                         aimee_response_t *canonical_out, int host_profile);
 
 static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
-                                             const char *role, const char *system_prompt,
-                                             const char *user_prompt, int max_tokens,
-                                             double temperature, cJSON *initial_messages,
-                                             cJSON **updated_messages, agent_result_t *out,
-                                             const aimee_request_t *seed,
-                                             aimee_response_t *canonical_out,
-                                             const aimee_message_t *input_message, int host_profile)
+                                             const char *role, const char *user_prompt,
+                                             int max_tokens, double temperature,
+                                             cJSON *initial_messages, cJSON **updated_messages,
+                                             agent_result_t *out, const aimee_request_t *seed,
+                                             aimee_response_t *canonical_out, int host_profile)
 {
    const request_context_t *previous_context = request_context_get();
    int previous_script_origin = previous_context ? previous_context->operator_script_origin : 0;
    int previous = request_context_set_model_execution(1);
    aimee_response_t final = {0};
-   int rc = agent_execute_with_tools_impl(
-       agent, network, role, system_prompt, user_prompt, max_tokens, temperature, initial_messages,
-       updated_messages, out, seed, &final, input_message, host_profile);
+   int rc = agent_execute_with_tools_impl(agent, network, role, user_prompt, max_tokens,
+                                          temperature, initial_messages, updated_messages, out,
+                                          seed, &final, host_profile);
    if (!rc && out->success)
    {
       /* Native/nested owners may already retain their original response. */
@@ -655,11 +646,10 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    aimee_ir_last_user_text(request, query, sizeof query);
    aimee_response_t response = {0};
    int rc = agent_execute_with_tools_internal(
-       agent, network, NULL, request->n_system ? request->system[0].text : NULL,
-       query[0] ? query : "Continue the admitted conversation.",
+       agent, network, NULL, query[0] ? query : "Continue the admitted conversation.",
        request->has_max_tokens ? request->max_tokens : AGENT_DEFAULT_MAX_TOKENS,
        request->has_temperature ? request->temperature : 0.3, messages, updated_messages, out,
-       request, &response, NULL, 1);
+       request, &response, 1);
    aimee_response_free(&response);
    cJSON_Delete(messages);
    return rc;
@@ -699,11 +689,10 @@ static int agent_execute_owned_request_with_tools(const agent_t *agent,
    char query[4096];
    aimee_ir_last_user_text(request, query, sizeof query);
    int rc = agent_execute_with_tools_internal(
-       agent, network, role, request->n_system ? request->system[0].text : NULL,
-       query[0] ? query : "Continue the admitted conversation.",
+       agent, network, role, query[0] ? query : "Continue the admitted conversation.",
        request->has_max_tokens ? request->max_tokens : 0,
        request->has_temperature ? request->temperature : 0.3, messages, &updated, out, request,
-       response, NULL, host_profile);
+       response, host_profile);
    if (!rc && (!updated || server_session_log_history_save(updated)))
    {
       out->success = 0;
@@ -725,18 +714,16 @@ int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t
 }
 
 static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
-                                         const char *role, const char *system_prompt,
-                                         const char *user_prompt, int max_tokens,
+                                         const char *role, const char *user_prompt, int max_tokens,
                                          double temperature, cJSON *initial_messages,
                                          cJSON **updated_messages, agent_result_t *out,
                                          const aimee_request_t *seed,
-                                         aimee_response_t *canonical_out,
-                                         const aimee_message_t *input_message, int host_profile)
+                                         aimee_response_t *canonical_out, int host_profile)
 {
    if (updated_messages)
       *updated_messages = NULL;
    memset(out, 0, sizeof(*out));
-   if (!seed && !input_message)
+   if (!seed)
    {
       snprintf(out->error, sizeof out->error, "canonical execution message source is unavailable");
       return AGENT_RC_CONTEXT_REFUSED;
@@ -795,18 +782,17 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
             return -1;
          }
          int owned_acp = !strcmp(adapter->cli_kind, "acp");
-         if (seed &&
-             ((!owned_native && !owned_acp) || !server_session_log_active() ||
-              !server_session_capture_current() || aimee_ir_history_admit_host(initial_messages) ||
-              server_session_log_history_save(initial_messages)))
+         if ((!owned_native && !owned_acp) || !server_session_log_active() ||
+             !server_session_capture_current() || aimee_ir_history_admit_host(initial_messages) ||
+             server_session_log_history_save(initial_messages))
          {
             snprintf(out->error, sizeof out->error,
                      "canonical seeded execution history is unavailable");
             return AGENT_RC_CONTEXT_REFUSED;
          }
-         int rc = agent_execute_provider_session(adapter, agent, network, role, system_prompt,
-                                                 user_prompt, seed, canonical_out, out);
-         if (!rc && seed && updated_messages &&
+         int rc = agent_execute_provider_session(adapter, agent, network, role, seed, canonical_out,
+                                                 out);
+         if (!rc && updated_messages &&
              (server_session_capture_history(server_session_capture_current(), updated_messages) ||
               aimee_ir_history_admit_host(*updated_messages)))
          {
@@ -901,15 +887,13 @@ native_provider_http:
 
    /* Seed system blocks remain in the canonical request. The context builder
     * contributes host policy separately instead of flattening the first block. */
-   if (seed)
-      system_prompt = NULL;
    /* Build context-rich system prompt */
    int current_code_only = !agent_tools_knowledge_write_allowed();
    char *task_instructions =
        current_code_only ? NULL : ingress_preinject_task_instructions(NULL, user_prompt);
    aimee_message_t assembled_context = {0};
    int context_ready = !build_owned_exec_context(
-       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
+       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, NULL,
        current_code_only, task_instructions, &assembled_context, out->error, sizeof out->error);
    char *assembled_sys = context_ready ? exec_context_text_view(&assembled_context) : NULL;
    if (!assembled_sys)
@@ -1012,11 +996,8 @@ native_provider_http:
       return -1;
    }
    /* System context is assembled per request, never persisted in the session. */
-   cJSON *user_msg = seed ? NULL : aimee_ir_message_json(input_message);
-   if ((!seed && (!user_msg || !cJSON_AddItemToArray(messages, user_msg))) ||
-       (seed && server_session_log_history_save(messages)))
+   if (server_session_log_history_save(messages))
    {
-      cJSON_Delete(user_msg);
       cJSON_Delete(messages);
       aimee_request_free(&tools);
       agent_tools_set_dispatch_role(NULL);
@@ -1194,8 +1175,8 @@ native_provider_http:
          {
             aimee_message_t refreshed_context = {0};
             int ready = !build_owned_exec_context(
-                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role,
-                system_prompt, current_code_only, task_instructions, &refreshed_context, out->error,
+                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, NULL,
+                current_code_only, task_instructions, &refreshed_context, out->error,
                 sizeof out->error);
             char *refreshed = ready ? exec_context_text_view(&refreshed_context) : NULL;
             if (!refreshed)

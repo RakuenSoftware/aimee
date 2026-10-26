@@ -31,6 +31,27 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Canonical catalog shared by transport-boundary cases. Every runtime below
+ * uses the production bound constructor; no unowned transport mode exists. */
+static const server_native_tool_binding_t read_binding = {
+    .space = "aimee", .name = "read_file", .registry_name = "read_file"};
+static aimee_block_t transport_system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+static aimee_tool_t transport_function = {.name = "read_file"};
+static aimee_tool_t transport_space = {.kind = AIMEE_TOOL_NAMESPACE,
+                                       .name = "aimee",
+                                       .children = &transport_function,
+                                       .n_children = 1};
+static aimee_request_t transport_profile = {.model = "selected-model",
+                                            .frontend = AIMEE_WIRE_RESPONSES,
+                                            .system = &transport_system,
+                                            .n_system = 1,
+                                            .tools = &transport_space,
+                                            .n_tools = 1,
+                                            .prompt_cache_key = "",
+                                            .mutated = 1};
+static const char transport_launch[] =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
 static _Atomic int service_forward_probe;
 static const aimee_request_t *fixture_service_ticket;
 static _Thread_local struct
@@ -425,7 +446,7 @@ int tool_validate_ir(const aimee_tool_t *function, const char *arguments, char *
    assert(cJSON_IsObject(function->schema) && function->description);
    if (atomic_load(&cli_shell_probe))
       assert(function->name && function->schema);
-   else if (atomic_load(&mcp_execution) && strcmp(function->description, "admitted source schema"))
+   else if (strcmp(function->description, "admitted source schema"))
    {
       aimee_tool_t current = {0};
       assert(!agent_tools_execution_definition("read_file", &current));
@@ -1156,8 +1177,13 @@ static void probe_replay_scope(const char *path)
           * native scheduler names do not require a provider namespace feature. */
          for (aimee_wire_t wire = AIMEE_WIRE_ANTHROPIC; wire <= AIMEE_WIRE_RESPONSES; wire++)
          {
-            char *native = aimee_backend_render_wire(&request, wire);
-            assert(native);
+            int losses = -1;
+            char *native =
+                aimee_backend_render_wire_profile(&request, wire, AIMEE_RESPONSES_API, &losses);
+            // The Responses profile's cache key is unsupported by Anthropic.
+            assert(native && losses == (wire == AIMEE_WIRE_ANTHROPIC ? 1 : 0));
+            if (losses)
+               assert(!aimee_backend_render_wire(&request, wire));
             cJSON *rendered = aimee_ir_json_parse_frame(native, strlen(native));
             assert(rendered && cJSON_GetArraySize(cJSON_GetObjectItem(rendered, "tools")) == 1);
             free(native);
@@ -1293,13 +1319,15 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
    agent_tools_begin_turn(300);
    agent_tools_set_snap_id(3000);
-   server_native_runtime_t *copy = server_native_runtime_open(selected, owner, "session-a");
+   server_native_runtime_t *copy = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && !strcmp(baseline, changed)); /* turn/snapshot/transport nonce are ephemeral */
    server_native_runtime_close(copy);
    agent_tools_set_dispatch_role("implement");
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    assert(!strcmp(server_native_runtime_binding(original), server_native_runtime_binding(copy)));
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
@@ -1317,7 +1345,8 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
          agent_tools_knowledge_write_set(1);
       else
          agent_tools_parent_write_guard_set("/parent/alice", "/different/write/root");
-      copy = server_native_runtime_open(selected, owner, "session-a");
+      copy = server_native_runtime_open_bound_request(selected, owner, "session-a",
+                                                      &transport_profile, &read_binding, 1, NULL);
       assert(copy);
       rc = server_native_runtime_cache_scope(copy, &profile, changed);
       assert(rc == 0 && strcmp(baseline, changed));
@@ -1326,20 +1355,23 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
    const char *denied[] = {"write_file", "git_push", "write_file"};
    agent_tools_denied_set(denied, 3);
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, baseline);
    assert(rc == 0);
    server_native_runtime_close(copy);
    const char *reordered[] = {"git_push", "write_file"};
    agent_tools_denied_set(reordered, 2);
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && !strcmp(baseline, changed));
    server_native_runtime_close(copy);
    agent_source_authority_tls_set(1, "/different/source", "src/alice.c\n");
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && strcmp(baseline, changed));
@@ -1622,14 +1654,18 @@ static void test_retained_capture(const agent_t *selected, const request_context
       server_session_capture_t *capture =
           server_session_capture_open(destination, "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       const cJSON *source = server_native_runtime_source_history(runtime);
       assert(cJSON_IsArray(source) && cJSON_GetArraySize(source) == 1);
       char *initial = cJSON_PrintUnformatted(source);
       assert(initial && strstr(initial, "canonical source prompt"));
       free(initial);
       atomic_store(&expected_capture, capture);
+      atomic_store(&owned_profile_probe, 1);
+      atomic_store(&snapshot_generation, 1);
       atomic_store(&reject_proof, failure == 1);
       atomic_store(&reject_durable, failure == 2);
       captured_rows = cJSON_CreateArray();
@@ -1657,7 +1693,7 @@ static void test_retained_capture(const agent_t *selected, const request_context
       {
          char *wire = cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 1));
          assert(wire && strstr(wire, "native-turn:") && strstr(wire, ":wire-response") &&
-                strstr(wire, "wire-call:original") && strstr(wire, "exec_command") &&
+                strstr(wire, "wire-call:original") && strstr(wire, "read_file") &&
                 strstr(wire, "123.123456789012345678901234567890"));
          free(wire);
       }
@@ -1675,6 +1711,8 @@ static void test_retained_capture(const agent_t *selected, const request_context
       atomic_store(&expected_capture, NULL);
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
+      atomic_store(&owned_profile_probe, 0);
+      atomic_store(&snapshot_generation, 0);
    }
 }
 
@@ -1698,9 +1736,10 @@ static void test_native_transport_usage(const agent_t *selected, const request_c
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime && server_session_capture_bind(NULL) == capture);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+   assert(server_session_capture_bind(NULL) == capture);
    atomic_store(&expected_capture, capture);
    captured_rows = cJSON_CreateArray();
    atomic_store(&owned_profile_probe, 1);
@@ -1806,9 +1845,10 @@ static void test_native_aggregate_usage(const agent_t *selected, const request_c
          server_session_capture_t *capture = server_session_capture_open(
              "private-child", "native-turn", "webuser:alice", "session-a");
          assert(capture && !server_session_capture_bind(capture));
-         server_native_runtime_t *runtime =
-             server_native_runtime_open_request(selected, owner, "session-a", &profile);
-         assert(runtime && server_session_capture_bind(NULL) == capture);
+         server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+             selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+         assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+         assert(server_session_capture_bind(NULL) == capture);
          atomic_store(&expected_capture, capture);
          captured_rows = cJSON_CreateArray();
          atomic_store(&owned_profile_probe, 1);
@@ -1899,9 +1939,10 @@ static void test_native_buffered_refusal(const agent_t *selected, const request_
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime && server_session_capture_bind(NULL) == capture);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+   assert(server_session_capture_bind(NULL) == capture);
    atomic_store(&expected_capture, capture);
    captured_rows = cJSON_CreateArray();
    atomic_store(&owned_profile_probe, 1);
@@ -1947,10 +1988,11 @@ static void test_native_turn_limit(const agent_t *selected, const request_contex
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
    assert(runtime && !server_native_runtime_set_turn_limit(runtime, 1));
    assert(server_native_runtime_set_turn_limit(runtime, -1));
+   assert(!server_native_runtime_attest_launch(runtime, transport_launch));
    assert(server_session_capture_bind(NULL) == capture);
    atomic_store(&expected_capture, capture);
    captured_rows = cJSON_CreateArray();
@@ -2012,8 +2054,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
       if (mode == 3)
       {
          cJSON *reservation = cJSON_CreateObject();
@@ -2032,7 +2074,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
          assert(server_native_runtime_set_native_owner(runtime, reservation));
          cJSON_Delete(reservation);
       }
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
       atomic_store(&owned_profile_probe, 1);
@@ -2285,19 +2328,10 @@ static void test_native_supervised_execution(const agent_t *selected,
       const server_native_tool_binding_t bindings[] = {
           {.space = "aimee", .name = "bash", .registry_name = "bash"},
           {.space = "aimee", .name = "read_file", .registry_name = "read_file"}};
-      server_native_runtime_t *runtime =
-          mode >= 10 ? server_native_runtime_open_bound_request(
-                           selected, &selected_owner, "session-a", &profile, bindings, 2, NULL)
-                     : server_native_runtime_open_request(selected, &selected_owner, "session-a",
-                                                          &profile);
-      assert(runtime);
-      if (mode >= 10)
-      {
-         char launch[65];
-         memset(launch, 'a', 64);
-         launch[64] = 0;
-         assert(!server_native_runtime_attest_launch(runtime, launch));
-      }
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, &selected_owner, "session-a", &profile, mode >= 10 ? bindings : bindings + 1,
+          mode >= 10 ? 2 : 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
       cJSON_Delete(schema);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
@@ -2742,9 +2776,10 @@ static void test_sdk_metadata(const agent_t *selected, const request_context_t *
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       cJSON_Delete(host_metadata); /* The runtime must own the original host fields. */
       captured_rows = cJSON_CreateArray();
       atomic_store(&expected_capture, capture);
@@ -2787,33 +2822,36 @@ static void test_owned_native_context(const agent_t *selected, const request_con
                            .max_tokens = 128,
                            .has_max_tokens = 1,
                            .mutated = 1};
-   server_native_runtime_t *missing =
-       server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   server_native_runtime_t *missing = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &seed, &read_binding, 1, NULL);
    assert(!missing); /* A profile cannot replace missing durable history ownership. */
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
    seed.model = "unselected-model";
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    seed.model = "selected-model";
    seed.raw_bytes = "native request";
    seed.raw_length = strlen(seed.raw_bytes);
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    seed.raw_bytes = NULL;
    seed.raw_length = 0;
    seed.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    cJSON_Delete(seed.raw);
    seed.raw = NULL;
    aimee_request_t profile = {0};
    int cloned = aimee_ir_request_clone(&seed, &profile);
    assert(!cloned);
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
    server_native_execution_profile_t execution = {
        .sdk = "codex",
        .build_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2833,8 +2871,8 @@ static void test_owned_native_context(const agent_t *selected, const request_con
       const char *previous_epoch = execution.workspace_digest;
       execution.workspace_digest =
           "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-      server_native_runtime_t *fresh =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      server_native_runtime_t *fresh = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
       assert(fresh);
       assert(!strcmp(server_native_runtime_binding(fresh), server_native_runtime_binding(runtime)));
       const cJSON *before = server_native_runtime_source_history(runtime);
@@ -2856,9 +2894,9 @@ static void test_owned_native_context(const agent_t *selected, const request_con
    }
    free(profile.system[0].text);
    profile.system[0].text = strdup("different host profile");
-   server_native_runtime_t *other =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(other);
+   server_native_runtime_t *other = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(other && !server_native_runtime_attest_launch(other, transport_launch));
    scoped = server_native_runtime_cache_scope(other, &execution, changed);
    assert(!scoped && strcmp(baseline, changed));
    aimee_request_free(&profile);
@@ -2925,7 +2963,8 @@ static void test_source_snapshot_refusal(const agent_t *selected, const request_
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
       atomic_store(&snapshot_fault, failure);
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
       assert(!runtime && server_session_capture_failed(capture));
       server_session_capture_close(capture);
    }
@@ -2940,13 +2979,14 @@ static void test_private_source_revocation(const agent_t *selected, const reques
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       atomic_store(&destination_invalid, failure);
       int before = atomic_load(&calls);
       char response[1024];
-      request(runtime, failure == 1 ? "/v1/responses" : "/v1/mcp/call",
-              server_native_runtime_token(runtime), response);
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       assert(strstr(response, "502") && atomic_load(&calls) == before);
       assert(server_session_capture_failed(capture) && !aimee_ir_session_capture_failed());
       atomic_store(&destination_invalid, 0);
@@ -2986,7 +3026,8 @@ static void test_private_service_forward_callback(const agent_t *selected)
    fixture_service_ticket = &profile;
    server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
        selected, &owner, "service-session", &profile, NULL, 0, NULL);
-   assert(runtime && server_session_capture_bind(NULL) == capture);
+   assert(runtime);
+   assert(server_session_capture_bind(NULL) == capture);
    assert(!fixture_service_ticket && !server_native_runtime_forward_service_admitted());
    atomic_store(&expected_capture, capture);
    char launch[65];
@@ -3028,125 +3069,67 @@ int main(void)
    strcpy(b.vault_principal, "webuser:bob");
    strcpy(b.principal, "bob");
    b.capabilities = CAP_CHAT;
-   assert(!server_native_runtime_open(&selected, NULL, "session-a"));
-   assert(!server_native_runtime_open(&selected, &b, "session-a"));
+   assert(!server_native_runtime_open_bound_request(&selected, NULL, "session-a",
+                                                    &transport_profile, &read_binding, 1, NULL));
+   assert(!server_native_runtime_open_bound_request(&selected, &b, "session-a", &transport_profile,
+                                                    &read_binding, 1, NULL));
    owner_tools(1);
    atomic_store(&malformed_source, 1);
-   assert(!server_native_runtime_open(&selected, &a, "session-a"));
+   assert(!server_native_runtime_open_bound_request(&selected, &a, "session-a", &transport_profile,
+                                                    &read_binding, 1, NULL));
    atomic_store(&malformed_source, 0);
    alice_controls = server_control_scope_open("session-a", "native-turn", "webuser:alice");
-   assert(alice_controls && !server_control_scope_bind(alice_controls));
-   server_native_runtime_t *alice = server_native_runtime_open(&selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   owner_tools(0);
-   server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
-   assert(alice && bob);
-   test_unowned_beta_path(alice);
+   assert(alice_controls);
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *alice = server_native_runtime_open_bound_request(
+       &selected, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+   assert(alice);
    test_cache_profile(&selected, &a, alice);
-   test_beta_contract_binding(&selected, &a);
-   /* Destroy/change every original borrowed host value after the owner copy.
-    * Callback workers must retain each captured policy and source independently. */
-   owner_tools(1);
-   agent_tools_set_dispatch_role("changed-after-open");
-   agent_tools_set_active_toolset("coding");
-   agent_source_authority_tls_set(1, "/foreign", "foreign.c");
-   setenv("AIMEE_ACTIVE_TOOLSET", "foreign-toolset", 1);
-   setenv("AIMEE_DELEGATE_SOURCE_PATHS", "foreign-process-path", 1);
-
-   assert(strcmp(server_native_runtime_binding(alice), server_native_runtime_binding(bob)));
-   assert(strlen(server_native_runtime_token(alice)) == 64);
-   char response[1024];
-   for (int i = 0; i < 16; i++)
-   {
-      request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-      assert(strstr(response, "200 OK") && strstr(response, "webuser:alice") &&
-             strstr(response, "session-a") && !strstr(response, "forged"));
-      assert(!strstr(response, "upstream-secret"));
-      request(bob, "/v1/responses", server_native_runtime_token(bob), response);
-      assert(strstr(response, "webuser:bob") && strstr(response, "session-b"));
-   }
-   assert(!request_context_get());
-   assert(!current_credentials.vault_principal[0]);
    int before = atomic_load(&calls);
-   request(alice, "/v1/responses", server_native_runtime_token(bob), response);
+   char response[1024];
+   request(alice, "/v1/responses", "foreign-runtime-token", response);
    assert(strstr(response, "401") && atomic_load(&calls) == before);
-   request(alice, "/v1/chat/control", server_native_runtime_token(alice), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(alice, "/v1/config/set", server_native_runtime_token(alice), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(bob, "/v1/mcp/call", server_native_runtime_token(bob), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(alice, "/v1/mcp/call", server_native_runtime_token(alice), response);
-   assert(strstr(response, "200 OK") && strstr(response, "webuser:alice"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   atomic_store(&source_changed, 0);
-   atomic_store(&session_removed, 1);
-   request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   atomic_store(&session_removed, 0);
-   atomic_store(&wait_for_cancel, 1);
-   int fd = send_request(alice, "/v1/responses", server_native_runtime_token(alice));
-   for (int i = 0; i < 300 && atomic_load(&calls) == before; i++)
-      usleep(10000);
-   assert(atomic_load(&calls) > before);
-   aimee_core_socket_shutdown(fd);
-   aimee_core_socket_close(fd);
-   for (int i = 0; i < 300 && !atomic_load(&cancelled); i++)
-      usleep(10000);
-   assert(atomic_load(&cancelled));
+   const char *denied[] = {"/v1/chat/control", "/v1/config/set", "/v1/mcp/call",
+                           "/v1/mcp/recheck",  "/v1/mcp/audit",  "/v1/responses/compact"};
+   for (unsigned i = 0; i < sizeof denied / sizeof *denied; i++)
+   {
+      request(alice, denied[i], server_native_runtime_token(alice), response);
+      assert(strstr(response, "404") && atomic_load(&calls) == before);
+   }
    server_native_runtime_close(alice);
-   server_native_runtime_close(bob);
-   atomic_store(&wait_for_cancel, 0);
-   owner_tools(1);
-   agent_t api_selected = selected;
-   strcpy(api_selected.provider, "openai");
-   strcpy(api_selected.auth_type, "api_key");
-   assert(!server_control_scope_bind(alice_controls));
-   server_native_runtime_t *api = server_native_runtime_open(&api_selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   assert(api);
-   request(api, "/v1/responses", server_native_runtime_token(api), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
-   request(api, "/v1/mcp/call", server_native_runtime_token(api), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(api, "/v1/responses", server_native_runtime_token(api), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   server_native_runtime_t *rotated = server_native_runtime_open(&api_selected, &a, "session-a");
-   assert(rotated &&
-          strcmp(server_native_runtime_binding(api), server_native_runtime_binding(rotated)));
-   request(rotated, "/v1/responses", server_native_runtime_token(rotated), response);
-   assert(strstr(response, "200 OK"));
-   server_native_runtime_close(rotated);
-   server_native_runtime_close(api);
-   atomic_store(&source_changed, 0);
-   agent_t claude_selected = selected;
-   strcpy(claude_selected.provider, "anthropic");
-   strcpy(claude_selected.auth_type, "claude-oauth");
-   assert(!server_control_scope_bind(alice_controls));
-   server_native_runtime_t *claude = server_native_runtime_open(&claude_selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   assert(claude);
-   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "claude-secret"));
-   request(claude, "/v1/mcp/call", server_native_runtime_token(claude), response);
-   assert(strstr(response, "200 OK"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   rotated = server_native_runtime_open(&claude_selected, &a, "session-a");
-   assert(rotated &&
-          strcmp(server_native_runtime_binding(claude), server_native_runtime_binding(rotated)));
-   request(rotated, "/v1/messages", server_native_runtime_token(rotated), response);
-   assert(strstr(response, "200 OK"));
-   server_native_runtime_close(rotated);
-   server_native_runtime_close(claude);
-   atomic_store(&source_changed, 0);
+   assert(server_session_capture_bind(NULL) == capture);
+   server_session_capture_close(capture);
+   test_beta_contract_binding(&selected, &a);
+   /* Selected API-key and OAuth source rotation changes replay identity and
+    * invalidates the old bound runtime before any model dispatch. */
+   for (int vendor = 0; vendor < 2; vendor++)
+   {
+      owner_tools(1);
+      capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      agent_t connection = selected;
+      strcpy(connection.provider, vendor ? "anthropic" : "openai");
+      strcpy(connection.auth_type, vendor ? "claude-oauth" : "api_key");
+      server_native_runtime_t *original = server_native_runtime_open_bound_request(
+          &connection, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(original && !server_native_runtime_attest_launch(original, transport_launch));
+      atomic_store(&source_changed, 1);
+      server_native_runtime_t *rotated = server_native_runtime_open_bound_request(
+          &connection, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(rotated && strcmp(server_native_runtime_binding(original),
+                               server_native_runtime_binding(rotated)));
+      before = atomic_load(&calls);
+      request(original, "/v1/responses", server_native_runtime_token(original), response);
+      assert(strstr(response, "502") && atomic_load(&calls) == before);
+      server_native_runtime_close(rotated);
+      server_native_runtime_close(original);
+      atomic_store(&source_changed, 0);
+      assert(server_session_capture_bind(NULL) == capture);
+      server_session_capture_close(capture);
+   }
    test_retained_capture(&selected, &a);
    test_native_transport_usage(&selected, &a, 0, 0, 0);
    test_native_transport_usage(&selected, &a, 1, 0, 0);

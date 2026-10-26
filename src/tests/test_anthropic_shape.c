@@ -14,6 +14,7 @@ static void set_system(cJSON *output, const char *text, int cache, int minimum)
 {
    aimee_request_t request = {.frontend = AIMEE_WIRE_ANTHROPIC, .model = strdup("fixture")};
    assert(!anthropic_ir_set_host_system(&request, text, cache, minimum));
+   assert(!request.raw && !request.raw_bytes);
    cJSON *native = anthropic_backend_build(&request);
    assert(native);
    cJSON *system = cJSON_DetachItemFromObjectCaseSensitive(native, "system");
@@ -140,9 +141,33 @@ static void test_min_chars_applies_to_stable_prefix(void)
    PASS("shape: min_chars floors on the stable prefix, not the whole prompt");
 }
 
+static void test_scalar_preference_preserves_added_blocks(void)
+{
+   aimee_request_t request = {.frontend = AIMEE_WIRE_ANTHROPIC, .model = strdup("fixture")};
+   assert(!anthropic_ir_set_host_system(&request, "policy", 0, 0));
+   assert(request.system_scalar && !request.raw);
+   request.system = realloc(request.system, 2 * sizeof *request.system);
+   assert(request.system);
+   request.system[1] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("additional policy")};
+   request.n_system = 2;
+   cJSON *native = anthropic_backend_build(&request);
+   const cJSON *system = cJSON_GetObjectItemCaseSensitive(native, "system");
+   assert(cJSON_IsArray(system) && cJSON_GetArraySize(system) == 2);
+   assert(!strcmp(cJSON_GetStringValue(
+                      cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(system, 1), "text")),
+                  "additional policy"));
+   cJSON_Delete(native);
+   assert(aimee_backend_host_profile_valid(&request));
+   request.raw = cJSON_Parse("{\"system\":\"retired native host sidecar\"}");
+   assert(request.raw && !aimee_backend_host_profile_valid(&request));
+   aimee_request_free(&request);
+   PASS("shape: scalar preference never discards appended blocks");
+}
+
 int main(void)
 {
    printf("anthropic_shape: unit tests\n");
+   test_scalar_preference_preserves_added_blocks();
    test_plain_string_when_unmarked();
    test_cached_block_when_marked();
    test_empty_system_adds_nothing();

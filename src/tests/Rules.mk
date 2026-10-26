@@ -309,7 +309,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
  $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json $(TESTPREFIX)/unit-test-kb-http-common \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent \
-               $(TESTPREFIX)/unit-test-agent-repair \
                $(TESTPREFIX)/unit-test-agent-apikey \
                $(TESTPREFIX)/unit-test-script-runner \
                $(TESTPREFIX)/unit-test-provider-cli-adapter \
@@ -435,7 +434,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-bedrock-dispatch \
                $(TESTPREFIX)/unit-test-kb-http-client \
                $(TESTPREFIX)/unit-test-vault-kms \
-               $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
                $(TESTPREFIX)/unit-test-openai-ingress-ir \
                $(TESTPREFIX)/unit-test-aimee-ir-session \
@@ -1105,6 +1103,9 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-native-source-issuers \
                 $(TESTPREFIX)/unit-test-native-delegate-source $(TESTPREFIX)/unit-test-native-service-runtime-source $(TESTPREFIX)/unit-test-native-provider-turn-limit
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-acp-service-source
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-aux-ir
+TEST_TARGETS += $(TESTPREFIX)/unit-test-roadmap-request-origin
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-sweep-ir
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -1703,23 +1704,6 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
 
 
 
-# message_history_repair tests split out of test_agent.c (2000-line limit).
-# Mirrors unit-test-agent's link line so message_history_repair (agent_bridge.o,
-# pulled via the shared object set) and cJSON resolve; gc-sections drops the rest.
-$(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
-                      \
-                       \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/modules/delegates/delegate_driver.o \
-                      $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
-                      $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o \
-                      $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
-                      $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
-                      $(OBJDIR)/server/cli_session.o \
-                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-# agents.json secret-serialization test split out of test_agent.c (2000-line
-# limit). Mirrors unit-test-agent's link line.
 $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_stub.o $(OBJDIR)/tests/test_agent_apikey.o \
                      $(OBJDIR)/db1_store_ready.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
@@ -2757,16 +2741,6 @@ $(TESTPREFIX)/unit-test-vault-kms-hwm-live: $(OBJDIR)/tests/test_vault_kms_hwm_l
                                   $(OBJDIR)/modules/vault/vault_hwm.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Slice 3: IR shadow observer (pure — cJSON only).
-$(TESTPREFIX)/unit-test-aimee-ir-shadow: $(OBJDIR)/tests/test_aimee_ir_shadow.o \
-                                        $(OBJDIR)/server/aimee_ir_shadow.o \
-                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
-                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
-                                         \
-                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
-                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # Slice 5: IR live request-build (pure — cJSON only).
 $(TESTPREFIX)/unit-test-aimee-ir-session: $(OBJDIR)/tests/test_aimee_ir_session.o \
                                           $(OBJDIR)/modules/ir/aimee_ir_session.o \
@@ -2789,7 +2763,7 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-openai-ingress-ir: $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_openai_ingress_ir.o \
+$(TESTPREFIX)/unit-test-openai-ingress-ir: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_openai_ingress_ir.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_session.o \
                                        $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/modules/translation/wire_codec.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
@@ -4329,7 +4303,7 @@ $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingres
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
-$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
@@ -4342,7 +4316,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/server/shadow_mirror.o $(OBJDI
 # response. The shape tests stub the request-side policy helpers so they
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
-$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
@@ -4354,14 +4328,14 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/shadow_mirror.o $(O
 # Same minimal-link pattern as the buffered P2c test above; the SSE replay
 # helper + police function exercise the buffered-fetch + replay flow when
 # `gateway_prevent_subagents` is ON.
-$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
     $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-pipeline: $(OBJDIR)/tests/test_gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_pipeline.o
@@ -5068,7 +5042,7 @@ $(TESTPREFIX)/unit-test-agent-runtime-messages: $(OBJDIR)/tests/test_agent_runti
 
 $(TESTPREFIX)/unit-test-minimax-tool-call-args: $(OBJDIR)/tests/test_minimax_tool_call_args.o \
                                     $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
-                                    $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                                     $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                     $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5787,7 +5761,7 @@ $(TESTPREFIX)/unit-test-openai-shape: $(OBJDIR)/tests/test_openai_shape.o $(OBJD
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/tests/test_openai_chat_policed.o \
+$(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/tests/test_openai_chat_policed.o \
                            $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                            $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                            $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
@@ -7265,13 +7239,13 @@ $(TESTPREFIX)/unit-test-server-native-tool-admission: \
 
 $(TESTPREFIX)/unit-test-aimee-responses-stream: $(OBJDIR)/tests/test_aimee_responses_stream.o \
     $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
-    $(OBJDIR)/modules/translation/aimee_responses_stream.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-responses-stream: $(OBJDIR)/tests/test_server_responses_stream.o \
     $(OBJDIR)/server/server_responses_stream.o $(OBJDIR)/sse_parser.o \
-    $(OBJDIR)/modules/translation/aimee_responses_stream.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7401,7 +7375,7 @@ $(TESTPREFIX)/unit-test-agent-request-controls: $(OBJDIR)/tests/test_agent_reque
 $(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/test_delegate_result_envelope.o $(OBJDIR)/server/server_delegate_input.o $(OBJDIR)/server/liveness.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-openai-run-terminal: $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_openai_run_terminal.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-openai-run-terminal: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_openai_run_terminal.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-delegate-status-ir: $(OBJDIR)/tests/test_delegate_status_ir.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
@@ -7686,15 +7660,12 @@ $(TESTPREFIX)/unit-test-workspace-add-noscan: $(WORKSPACE_IDENTITY_OBJS)
 # Exercise the real retired delegate reply compatibility handler through HTTP.
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/server/server_compute_mailbox.o $(OBJDIR)/server/server_session_question.o
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-aux-ir
 $(TESTPREFIX)/unit-test-server-aux-ir: $(OBJDIR)/tests/test_server_aux_ir.o $(OBJDIR)/json_fluent.o $(OBJDIR)/server/server_jobs_aux.o $(OBJDIR)/server/server_delegate_input.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-roadmap-request-origin
 $(TESTPREFIX)/unit-test-roadmap-request-origin: $(OBJDIR)/tests/test_roadmap_request_origin.o $(OBJDIR)/modules/roadmap/roadmap_milestone.o $(OBJDIR)/modules/roadmap/roadmap_reassess.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-sweep-ir
 $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 

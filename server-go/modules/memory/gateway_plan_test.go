@@ -72,22 +72,22 @@ func TestGatewayContextPlanAuthorityAndQuery(t *testing.T) {
 	}
 }
 
-func TestGatewayPlanQueryBoundAndTextMode(t *testing.T) {
+func TestGatewayPlanCanonicalQueryBound(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_RECALL_GATE", "off")
 	h := NewHandler(nil)
 	fallback := strings.Repeat("x", 16382) + "界 suffix"
-	steps := gatewayPlanForTest(t, h, map[string]any{"phase": "text", "last_user_text": fallback})
+	steps := gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}, "last_user_text": fallback})
 	query := steps[0].Args["query"].(string)
-	if len(steps) != 1 || len(query) != 16382 || !utf8.ValidString(query) {
+	if len(steps) != 3 || len(query) != 16382 || !utf8.ValidString(query) {
 		t.Fatal(len(steps), len(query))
 	}
 	provided := strings.Repeat("q", 17000)
-	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "text", "provided_query": provided, "last_user_text": fallback})
-	if len(steps) != 1 || steps[0].Args["query"] != provided {
+	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}, "provided_query": provided, "last_user_text": fallback})
+	if len(steps) != 3 || steps[0].Args["query"] != provided {
 		t.Fatal("provided query truncated or guidance added")
 	}
-	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "text"})
-	if len(steps) != 0 {
+	steps = gatewayPlanForTest(t, h, map[string]any{"phase": "context", "roles": []string{"assistant"}})
+	if len(steps) != 2 {
 		t.Fatal(steps)
 	}
 }
@@ -108,10 +108,17 @@ func TestGatewayPlanEnforcedGateAndValidation(t *testing.T) {
 		`{"operation":"gateway-plan","phase":"unknown"}`,
 		`{"operation":"gateway-plan","phase":null}`,
 		`{"operation":"gateway-plan","phase":1}`,
-		`{"operation":"gateway-plan","phase":"text","provided_query":null}`,
-		`{"operation":"gateway-plan","phase":"text","last_user_text":false}`,
+		`{"operation":"gateway-plan","phase":"text"}`,
+		`{"operation":"gateway-plan","phase":"context","provided_query":null}`,
+		`{"operation":"gateway-plan","phase":"context","last_user_text":false}`,
 	} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
+		var args map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			t.Fatal(err)
+		}
+		args["request"], _ = json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
+		encoded, _ := json.Marshal(args)
+		frame, _ := bus.EncodeCommand("runtime", encoded)
 		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
@@ -166,7 +173,8 @@ func TestGatewayPlanUsesOnlyHostProvidedResourceFacts(t *testing.T) {
 		})
 	}
 	for _, raw := range []string{`null`, `true`, `"guidance"`, `[null]`, `[""]`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"text","provided_resources":`+raw+`}`))
+		request, _ := json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"context","request":`+string(request)+`,"provided_resources":`+raw+`}`))
 		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}

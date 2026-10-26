@@ -142,8 +142,9 @@ struct cJSON *responses_backend_build(const aimee_request_t *ir);
  * Caller proves resume prefix and account scope; upstream replay guard still
  * validates opaque reasoning when these items reach the selected model. */
 struct cJSON *aimee_codex_history_items(const aimee_request_t *history);
-/* Owned native snapshot assembled at the Responses SSE entry boundary. */
-struct cJSON *responses_backend_sse_object(const char *body);
+/* Native JSON or buffered SSE enters the same Responses event/snapshot owner. */
+int responses_backend_decode_body(const char *body, aimee_response_t *out, char *error,
+                                  size_t capacity);
 /* Reasoning text out of a Responses `reasoning` output item, from its `summary`.
  * SHARED by the backend (provider response) and frontend (client request) parsers,
  * which had independently assumed `summary` is a bare string.

@@ -31,8 +31,8 @@ static void test_native_sdk_identity(const agent_t *selected, const request_cont
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
-   server_native_runtime_t *baseline =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   server_native_runtime_t *baseline = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
    assert(baseline);
    server_native_execution_profile_t execution = {
        .sdk = "claude",
@@ -51,14 +51,14 @@ static void test_native_sdk_identity(const agent_t *selected, const request_cont
    assert(!strcmp(profile.system[1].cache_control, "ephemeral") &&
           !strcmp(profile.system[1].cache_ttl, "1h") && profile.system[1].message_group == 7);
    assert(profile.system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
-          profile.system[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          profile.system[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
           profile.system[0].context.trust == AIMEE_CTX_TRUST_VERIFIED &&
           profile.system[0].context.model_visible);
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   server_native_runtime_t *same =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime && same);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   server_native_runtime_t *same = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && same && !server_native_runtime_attest_launch(runtime, transport_launch));
    assert(!server_native_runtime_cache_scope(runtime, &execution, after));
    assert(!server_native_runtime_cache_scope(same, &execution, repeated));
    assert(strcmp(before, after) && !strcmp(after, repeated));

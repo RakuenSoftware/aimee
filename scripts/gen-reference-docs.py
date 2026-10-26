@@ -1016,7 +1016,6 @@ ENV_DESC = {
     "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
     "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),
     "AIMEE_IR_RESP_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical response IR."),
-    "AIMEE_IR_SHADOW": ("Diagnostics & misc", "Run the canonical IR path in comparison/shadow mode."),
     "AIMEE_IR_STREAM_RELAY": ("Diagnostics & misc", "Enable the canonical streaming-response relay."),
     "AIMEE_KB_HARDENED": ("Knowledge base (aimee-kb)", "Require the hardened KB custody and transport posture at startup."),
     "AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID": ("Knowledge base (aimee-kb)", "Custody identifier for the key that signs JWKS manifests."),

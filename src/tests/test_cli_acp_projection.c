@@ -4,7 +4,6 @@
 #undef main
 #include <assert.h>
 #include <aimee/ir/session_event.h>
-#ifndef ACP_OLD_PROJECTION_PROBE
 static char *legacy_large_dispatch(const char *text, const char *session)
 {
    assert(!strcmp(text, "large") && !strcmp(session, "editor"));
@@ -48,14 +47,11 @@ static void legacy_large_run_loop(void)
    fclose(in);
    fclose(out);
 }
-#endif
 
 int main(void)
 {
    setvbuf(stdout, NULL, _IONBF, 0);
-#ifndef ACP_OLD_PROJECTION_PROBE
    legacy_large_run_loop();
-#endif
    char text[18001], id[1201], name[1025];
    for (size_t i = 0; i < sizeof text - 1; i++)
       text[i] = i % 2 ? '"' : '\\';
@@ -70,15 +66,11 @@ int main(void)
    assert(saved >= 0);
    fflush(stdout);
    assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
-#ifdef ACP_OLD_PROJECTION_PROBE
-   acp_stream_delta(text, "editor-session");
-#else
    acp_stream_context_t context = {.session = "editor-session"};
    acp_stream_delta(text, &context);
    acp_stream_tool("started", id, name, &context);
    acp_stream_tool("failed", id, name, &context);
    assert(!context.failed);
-#endif
    fflush(stdout);
    assert(dup2(saved, STDOUT_FILENO) >= 0);
    close(saved);
@@ -105,16 +97,11 @@ int main(void)
       count++;
       cJSON_Delete(j);
    }
-#ifdef ACP_OLD_PROJECTION_PROBE
-   assert(count == 1);
-#else
    assert(count == 3);
-#endif
    free(line);
    fclose(capture);
    char tiny[8] = "stale";
    assert(acp_build_update_notification("editor", text, tiny, sizeof tiny) < 0 && !tiny[0]);
-#ifndef ACP_OLD_PROJECTION_PROBE
    FILE *full = fopen("/dev/full", "w");
    assert(full);
    saved = dup(STDOUT_FILENO);
@@ -127,7 +114,6 @@ int main(void)
    assert(dup2(saved, STDOUT_FILENO) >= 0);
    close(saved);
    fclose(full);
-#endif
    puts("ACP exact projection: large TEXT/opaque IDs, failed tool, buffer and output failures "
         "passed");
    return 0;

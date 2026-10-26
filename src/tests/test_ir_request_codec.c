@@ -128,8 +128,32 @@ static void negative(void)
       cJSON_AddItemToArray(tools, cJSON_Duplicate(cJSON_GetArrayItem(tools, 0), 1));
    unchanged(j);
 }
+static void test_system_scalar_roundtrip(void)
+{
+   aimee_request_t request = {0}, parsed = {0}, clone = {0};
+   assert(!aimee_ir_request_from_text(&request, "policy", "task", 0, -1));
+   request.system_scalar = 1;
+   cJSON *json = aimee_ir_request_json(&request);
+   assert(json && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "system_scalar")));
+   assert(!aimee_ir_request_parse(json, &parsed) && parsed.system_scalar);
+   assert(!aimee_ir_request_clone(&parsed, &clone) && clone.system_scalar);
+   assert(aimee_ir_request_wire_equal(&request, &clone));
+   clone.system_scalar = 0;
+   assert(!aimee_ir_request_wire_equal(&request, &clone));
+   cJSON_ReplaceItemInObjectCaseSensitive(json, "system_scalar", cJSON_CreateString("true"));
+   aimee_request_free(&parsed);
+   assert(aimee_ir_request_parse(json, &parsed));
+   request.system_scalar = 2;
+   assert(aimee_ir_request_admit(&request));
+   aimee_request_free(&request);
+   aimee_request_free(&parsed);
+   aimee_request_free(&clone);
+   cJSON_Delete(json);
+}
+
 int main(void)
 {
+   test_system_scalar_roundtrip();
    roundtrip();
    negative();
    puts("IR request codec: PASS");

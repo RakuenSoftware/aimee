@@ -1366,7 +1366,7 @@ static int request_equal(const aimee_request_t *a, const aimee_request_t *b, int
       return 1;
    if (!a || !b)
       return 0;
-   if (a->cache_policy != b->cache_policy)
+   if ((wire && a->system_scalar != b->system_scalar) || a->cache_policy != b->cache_policy)
       return 0;
    if (!blocks_eq(a->system, a->n_system, b->system, b->n_system, wire))
       return 0;
@@ -1811,7 +1811,8 @@ int aimee_ir_request_admit(const aimee_request_t *request)
        request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_system && !request->system) ||
        (request->n_messages && !request->messages) || (request->n_tools && !request->tools))
       return -1;
-   if (request->frontend < AIMEE_WIRE_UNKNOWN || request->frontend > AIMEE_WIRE_RESPONSES ||
+   if ((request->system_scalar != 0 && request->system_scalar != 1) ||
+       request->frontend < AIMEE_WIRE_UNKNOWN || request->frontend > AIMEE_WIRE_RESPONSES ||
        request->cache_policy < AIMEE_CACHE_DEFAULT ||
        request->cache_policy > AIMEE_CACHE_STABLE_PREFIX ||
        request->tool_choice < AIMEE_TOOL_CHOICE_UNSET ||

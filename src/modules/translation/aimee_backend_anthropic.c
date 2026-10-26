@@ -664,19 +664,9 @@ int anthropic_ir_set_host_system(aimee_request_t *ir, const char *system, int ca
       if (!prepared.system[1].text)
          goto fail;
    }
-   /* This translation-owned sidecar records only native system representation.
-    * It contains no alternate conversation, tools or model authority. */
-   prepared.raw = cJSON_CreateObject();
-   cJSON *native = mark ? blocks_to_anthropic(prepared.system, prepared.n_system, 1)
-                        : cJSON_CreateString(system);
-   if (!prepared.raw || !native || !cJSON_AddItemToObject(prepared.raw, "system", native))
-   {
-      cJSON_Delete(native);
-      goto fail;
-   }
    ir->system = prepared.system;
    ir->n_system = prepared.n_system;
-   ir->raw = prepared.raw;
+   ir->system_scalar = !mark;
    return 0;
 fail:
    aimee_request_free(&prepared);
@@ -837,6 +827,18 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
       {
          cJSON_Delete(out);
          return NULL;
+      }
+      if (preserve_cache && ir->system_scalar && ir->n_system == 1 &&
+          ir->system[0].type == AIMEE_BLK_TEXT && !ir->system[0].cache_control &&
+          !ir->system[0].cache_ttl)
+      {
+         cJSON_Delete(sys);
+         sys = cJSON_CreateString(ir->system[0].text ? ir->system[0].text : "");
+         if (!sys)
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
       }
       cJSON_AddItemToObject(out, "system", sys);
       if (!preserve_cache)

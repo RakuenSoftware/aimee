@@ -26,9 +26,6 @@ int server_native_runtime_forward_service_admitted(void);
  * capture owner, independently of the producer connection, until callbacks join.
  * Model responses commit through that owner before replay-proof capture; message
  * identities include the host callback nonce, while tool identities stay exact. */
-server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
-                                                    const request_context_t *owner,
-                                                    const char *session_id);
 /* Host-prepared, post-policy profile. Copies every owned field; profile must
  * have no original native request bytes and must match the selected model.
  * A retained running capture is required. Every model callback uses its fresh
@@ -37,10 +34,6 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
  * post-policy catalog before tool completion is released to the SDK. Parallel
  * model callbacks refuse rather than fork history.
  * This constructor alone does not attest a launch or activate SDK execution. */
-server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
-                                                            const request_context_t *owner,
-                                                            const char *session_id,
-                                                            const aimee_request_t *profile);
 /* Explicit host binding from an advertised logical tool to the existing
  * registry. mcp_name is the exact MCP tools/list name, or NULL for Codex tools.
  * This is a derived protocol mapping, never a registry or effect permission. */

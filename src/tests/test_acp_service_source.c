@@ -503,11 +503,9 @@ int main(int argc, char **argv)
    aimee_session_event_t initial = {
        .kind = AIMEE_SESSION_MESSAGE, .message_id = "actual-user-source", .message = &message};
    assert(!aimee_ir_session_emit(&initial));
-   provider_cli_cfg_t cfg = {.agent = &selected,
-                             .role = "reviewer",
-                             .cwd = worktree,
-                             .canonical_request = &request,
-                             .user_prompt = block.text};
+   provider_cli_cfg_t cfg = {
+       .agent = &selected, .role = "reviewer", .cwd = worktree, .canonical_request = &request};
+   /* The canonical request alone supplies the task; no flat prompt mirror. */
    agent_result_t result = {0};
    int rc = server_acp_execute_owned(&cfg, &result);
    if (rc)

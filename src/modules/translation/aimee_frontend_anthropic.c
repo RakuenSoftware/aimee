@@ -225,6 +225,7 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
 
    /* system: string -> one text block; array -> blocks */
    const cJSON *sys = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "system");
+   out->system_scalar = cJSON_IsString(sys);
    if (parse_content(sys, &out->system, &out->n_system) != 0)
       goto oom;
 

@@ -1,5 +1,4 @@
-/* Weak request-shadow support for minimal runtime fixtures. */
-#include "aimee_ir_shadow.h"
+/* Weak canonical response/governance peers for minimal runtime fixtures. */
 #include "modules/governance/gw_stage_governance.h"
 
 /* The minimal agent-runtime link does not carry the separately supervised

@@ -574,6 +574,8 @@ cJSON *aimee_ir_request_json(const aimee_request_t *request)
        !add_string(out, "cache_policy",
                    request->cache_policy == AIMEE_CACHE_STABLE_PREFIX ? "stable_prefix" : "native"))
       goto fail;
+   if (request->system_scalar && !cJSON_AddBoolToObject(out, "system_scalar", 1))
+      goto fail;
    cJSON *system = cJSON_AddArrayToObject(out, "system"),
          *messages = cJSON_AddArrayToObject(out, "messages"),
          *tools = cJSON_AddArrayToObject(out, "tools");

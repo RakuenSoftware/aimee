@@ -591,26 +591,6 @@ class IRBypassTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "retired-api"):
             checker.check(self.root)
 
-    def test_core_repair_cannot_detect_provider_history(self):
-        for field in ("tool_calls", "function_call", "function_call_output", "tool_use_id"):
-            with self.subTest(field=field):
-                self.source("src/server/agent_bridge.c", f"""
-                    int message_history_repair(cJSON *history) {{
-                        return lookup(history, "{field}");
-                    }}
-                """)
-                with self.assertRaisesRegex(ValueError, "native-history-field"):
-                    checker.check(self.root)
-        self.source("src/server/agent_bridge.c", """
-            int message_history_repair(cJSON *history) { return repair_ir(history); }
-            cJSON *compatibility_output(void) { return lookup(native, "tool_calls"); }
-        """)
-        checker.check(self.root)
-        for symbol in ("tool_call_normalize_assistant_arguments", "tool_call_sanitize_assistant_arguments"):
-            self.source("src/server/rogue.c", symbol + "(message);")
-            with self.assertRaisesRegex(ValueError, "retired-api"):
-                checker.check(self.root)
-
     def test_native_hook_envelopes_stop_at_entry_adapter(self):
         for relative in checker.CANONICAL_HOOK_FILES:
             path = self.source(relative, 'lookup(payload, "tool_input");')

@@ -15,8 +15,14 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
-RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
+RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h', 'src/server/aimee_ir_shadow.c', 'src/headers/aimee_ir_shadow.h', 'server-go/modules/economizer/gateway_wire.go', 'server-go/modules/economizer/planner_openai.go', 'server-go/modules/economizer/planner_anthropic.go', 'server-go/modules/economizer/proof.go')
 RETIRED = (
+    "aimee_ir_shadow_observe_request", "gateway_policy_apply_request",
+    "gateway_policy_strip_tools", "gateway_policy_pin_model", "message_history_repair",
+    "server_native_runtime_open", "server_native_runtime_open_request",
+    "agent_build_exec_context", "agent_build_exec_context_ex",
+    "agent_build_exec_context_for_role", "agent_build_exec_context_checked",
+    "responses_backend_sse_object",
     "gateway_handle_message", "gateway_send_text", "rpc_chat_send_stream",
     "mirror_record", "delivery_router_send", "tts_synthesize",
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
@@ -301,8 +307,6 @@ def findings(root: Path) -> list[dict]:
         view_spans = (profile_function_spans(source, {
             "compute_terminal_outcome", "delegate_build_result_response"})
             if relative == "src/server/server_compute.c" else [])
-        history_spans = (profile_function_spans(source, {"message_history_repair"})
-                         if relative == "src/server/agent_bridge.c" else [])
         native_control_spans = (profile_function_spans(source, {
             "aimee_claude_frame_ir_decode", "aimee_codex_frame_ir_decode", "aimee_codex_reply_ir_decode",
             "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
@@ -363,7 +367,7 @@ def findings(root: Path) -> list[dict]:
                 continue
             if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
                 continue
-            if rule == "native-history-field" and not canonical and not history_spans:
+            if rule == "native-history-field" and not canonical:
                 continue
             for match in pattern.finditer(source):
                 if rule == "native-control-history" and not any(
@@ -371,9 +375,6 @@ def findings(root: Path) -> list[dict]:
                     continue
                 if rule == "native-history-field" and any(
                         start <= match.start() < end for start, end in view_spans):
-                    continue
-                if rule == "native-history-field" and not canonical and not any(
-                        start <= match.start() < end for start, end in history_spans):
                     continue
                 if rule == "native-tool-reparse" and relative == "src/server/agent_bridge.c" and not any(
                         start <= match.start() < end for start, end in profile_spans):

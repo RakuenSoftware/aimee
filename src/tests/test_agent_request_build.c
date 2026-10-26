@@ -483,7 +483,7 @@ static void test_canonical_history_egress_projection(void)
          *raw_snapshot = cJSON_Duplicate(request.raw, 1);
    assert(snapshot && raw_snapshot && agent_host_request_supported(&request, 0));
    aimee_request_t projected = {0};
-   assert(!agent_request_project_model(&request, &projected));
+   assert(!aimee_ir_request_project_model(&request, &projected));
    assert(projected.n_messages == 3 && projected.n_system == 2 &&
           projected.messages[1].n_blocks == 1 && projected.messages[0].content_scalar &&
           projected.messages[0].compaction_boundary && !projected.raw);

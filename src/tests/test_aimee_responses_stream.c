@@ -1,4 +1,5 @@
 #include <aimee/translation/aimee_ir_stream.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
@@ -128,8 +129,67 @@ static void initial_usage_observation(void)
    aimee_ir_response_builder_free(&observed);
 }
 
+/* The same real native frames enter buffered and live paths. Late done items
+ * supply opaque/tool state omitted from the terminal response. */
+static void buffered_live_parity(void)
+{
+   const char *frames[] = {
+       "{\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"m\","
+       "\"type\":\"message\"}}",
+       "{\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_"
+       "id\":\"m\",\"delta\":\"Hel\"}",
+       "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"m\",\"type\":"
+       "\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}}",
+       "{\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"r\","
+       "\"type\":\"reasoning\"}}",
+       "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"r\",\"type\":"
+       "\"reasoning\",\"encrypted_content\":\"cipher\",\"content\":[{\"type\":\"reasoning_text\","
+       "\"text\":\"opaque\"}],\"summary\":[]}}",
+       "{\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"id\":\"f\","
+       "\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"read\",\"namespace\":\"fs\"}}",
+       "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"f\",\"type\":"
+       "\"function_call\",\"call_id\":\"c\",\"name\":\"read\",\"namespace\":\"fs\",\"arguments\":"
+       "\"{\\\"n\\\":123.1234567890123456789}\"}}",
+       "{\"type\":\"response.completed\",\"response\":{\"id\":\"result\",\"status\":\"completed\","
+       "\"metadata\":{\"native\":true},\"output\":[{\"id\":\"m\",\"type\":\"message\",\"content\":["
+       "]}],\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}}"};
+   char body[8192] = "", error[128];
+   size_t used = 0;
+   int count = 0;
+   aimee_ir_response_builder_free(&observed);
+   aimee_responses_stream_t *stream = aimee_responses_stream_new();
+   assert(stream);
+   for (size_t i = 0; i < sizeof frames / sizeof *frames; i++)
+   {
+      cJSON *frame = cJSON_Parse(frames[i]);
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "type"));
+      assert(type && !aimee_responses_stream_feed(stream, type, frame, sink, &count));
+      int n = snprintf(body + used, sizeof body - used, "event: %s\ndata: %s\n\n", type, frames[i]);
+      assert(n > 0 && (size_t)n < sizeof body - used);
+      used += (size_t)n;
+      cJSON_Delete(frame);
+   }
+   aimee_response_t live = {0}, buffered = {0};
+   assert(!aimee_responses_stream_take(stream, &live));
+   assert(!responses_backend_decode_body(body, &buffered, error, sizeof error));
+   assert(cJSON_Compare(live.raw, buffered.raw, 1));
+   assert(live.n_content == 3 && buffered.n_content == 3 && live.usage_in == 7 &&
+          buffered.usage_out == 2 && live.stop_reason == buffered.stop_reason);
+   assert(!strcmp(buffered.content[0].text, "Hello") &&
+          !strcmp(buffered.content[1].thinking_encrypted_content, "cipher") &&
+          !strcmp(buffered.content[2].tool_namespace, "fs"));
+   char *arguments = cJSON_PrintUnformatted(buffered.content[2].tool_input);
+   assert(arguments && strstr(arguments, "123.1234567890123456789"));
+   free(arguments);
+   aimee_response_free(&live);
+   aimee_response_free(&buffered);
+   aimee_responses_stream_free(stream);
+   aimee_ir_response_builder_free(&observed);
+}
+
 int main(void)
 {
+   buffered_live_parity();
    initial_usage_observation();
    refusal_projection();
    int count;

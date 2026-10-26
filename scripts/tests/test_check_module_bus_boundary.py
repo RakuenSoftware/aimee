@@ -68,6 +68,20 @@ class ModuleBusBoundaryTests(unittest.TestCase):
         checker.validate(REPO)
         self.assert_fixture(lambda root: None, None)
 
+    def test_shared_model_data_registration_is_exact(self) -> None:
+        path = "src/modules/tools/agent_tools.c"
+        header = "aimee/ir/aimee_ir.h"
+        registered = {CROSSING, (path, header)}
+        self.assert_fixture(self.append(path, f"#include <{header}>\n"), None, registered)
+        self.assert_fixture(
+            self.append(path, "#include <aimee/ir/session_event.h>\n"),
+            "undeclared-cross-module", registered,
+        )
+        self.assert_fixture(
+            self.append("src/modules/workspace/workspace.c", f"#include <{header}>\n"),
+            "undeclared-cross-module", registered,
+        )
+
     def test_a_new_peer_include_is_rejected(self) -> None:
         self.assert_fixture(
             self.append("src/modules/workspace/workspace.c", "#include <aimee/tools/agent_tools.h>\n"),

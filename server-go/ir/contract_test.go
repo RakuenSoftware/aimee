@@ -231,3 +231,20 @@ func TestCacheOnlyProjectionRequiresARealOmission(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestSystemScalarTransportProvenance(t *testing.T) {
+	raw := `{"version":1,"source_wire":"anthropic","cache_policy":"native","system_scalar":true,"system":[{"type":"text","text":"policy"}],"messages":[],"tools":[],"tool_choice":{"mode":"unset"},"stream":false,"stop_sequences":[]}`
+	request, err := DecodeRequest([]byte(raw))
+	if err != nil || !request.SystemScalar {
+		t.Fatal(request, err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil || !strings.Contains(string(encoded), `"system_scalar":true`) {
+		t.Fatal(string(encoded), err)
+	}
+	for _, value := range []string{`"true"`, `1`, `null`} {
+		if _, err := DecodeRequest([]byte(strings.Replace(raw, `"system_scalar":true`, `"system_scalar":`+value, 1))); err == nil {
+			t.Fatal("accepted nonboolean scalar provenance", value)
+		}
+	}
+}

@@ -1766,7 +1766,7 @@ static void test_native_alias_uses_provider_model(void)
    aimee_request_t canonical = {0};
    char error[128];
    assert(!messages_prepare_request(body, &agent, 1, &canonical, error, sizeof error));
-   char *wire = anthropic_build_prov_body(NULL, &canonical, AIMEE_WIRE_ANTHROPIC, 0);
+   char *wire = agent_render_gateway_request_ir(NULL, &canonical, AIMEE_WIRE_ANTHROPIC);
    cJSON *native = wire ? cJSON_Parse(wire) : NULL;
    assert(native && !strcmp(cJSON_GetStringValue(obj(native, "model")), "actual-provider-model"));
    assert(cJSON_Compare(obj(request, "system"), obj(native, "system"), 1));
@@ -1891,7 +1891,7 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
                                      sizeof error));
    aimee_frontend_state_scope_t previous =
        aimee_frontend_bind_state_guard(discard_unproved_signature, NULL);
-   char *wire = anthropic_build_prov_body(NULL, &request, AIMEE_WIRE_ANTHROPIC, 0);
+   char *wire = agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_ANTHROPIC);
    assert(wire && !strstr(wire, "source signature") && !strstr(wire, "source thought"));
    assert(opaque_guard_calls == 1);
    free(wire);
@@ -1900,7 +1900,7 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
    assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
                                      sizeof error));
    previous = aimee_frontend_bind_state_guard(discard_unproved_signature, &request);
-   assert(!anthropic_build_prov_body(NULL, &request, AIMEE_WIRE_ANTHROPIC, 0) &&
+   assert(!agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_ANTHROPIC) &&
           !request.messages && !request.model);
    aimee_request_free(&request);
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
@@ -1919,6 +1919,14 @@ static int capture_empty_projection(const aimee_session_event_t *event, void *co
    cJSON_Delete(json);
    empty_projection_count++;
    return reject_empty_projection;
+}
+static int unexpected_upstream_errors;
+static void count_upstream_error(int status, const char *body, char *error, size_t size)
+{
+   (void)status;
+   (void)body;
+   unexpected_upstream_errors++;
+   snprintf(error, size, "unexpected upstream error");
 }
 static void test_native_empty_assistant_projection_requires_capture(void)
 {
@@ -1939,7 +1947,30 @@ static void test_native_empty_assistant_projection_requires_capture(void)
       int status = messages_buffered(request, response, sizeof response);
       assert(empty_projection_count == 1);
       if (rejected)
+      {
          assert(status == 500 && !g_post_count && aimee_ir_session_capture_failed());
+         /* The shared executor also serves the OpenAI edge: a local render
+          * refusal must retain its diagnostic without claiming an upstream call. */
+         aimee_ir_session_set_sink(capture_empty_projection, NULL);
+         agent_t selected = {0};
+         snprintf(selected.model, sizeof selected.model, "m");
+         aimee_request_t canonical = {0};
+         aimee_response_t output = {0};
+         char error[256];
+         assert(!messages_prepare_request(request, &selected, 1, &canonical, error, sizeof error));
+         messages_http_error_t edge_error = {0};
+         server_model_execution_options_t options = {.retry_attempts = 1,
+                                                     .upstream_error = count_upstream_error,
+                                                     .native_error = messages_native_error,
+                                                     .error_context = &edge_error};
+         unexpected_upstream_errors = 0;
+         assert(server_model_execute_prepared(&selected, &canonical, &output, error, sizeof error,
+                                              &options) == SERVER_MODEL_RENDER_REFUSED);
+         assert(!g_post_count && !unexpected_upstream_errors && !edge_error.status &&
+                !edge_error.body && strstr(error, "cannot represent the canonical request"));
+         aimee_response_free(&output);
+         aimee_request_free(&canonical);
+      }
       else
       {
          assert(status == 200 && g_post_count == 1);

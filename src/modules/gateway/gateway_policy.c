@@ -2,10 +2,8 @@
  * CORE layer: cJSON + config + guardrails only; no DB, network, or agent state. */
 #include "aimee.h" /* size macros for agent_types.h (MAX_PATH_LEN) */
 #include <aimee/gateway/gateway_policy.h>
-#include "cJSON.h"
 #include "config.h"
-#include "json_fluent.h" /* jo_cstr */
-#include <stdlib.h>      /* free — for the dropped-entry arguments cleanup in P2c */
+#include <stdlib.h> /* free — for the dropped-entry arguments cleanup in P2c */
 #include <string.h>
 
 /* From guardrails (guardrails_orchestrator.c). Forward-declared rather than
@@ -39,52 +37,6 @@ int gateway_prevent_subagents_enabled(void)
    if (g_delegates_available_provider && g_delegates_available_provider())
       return 1;
    return config_gateway_prevent_subagents() ? 1 : 0;
-}
-
-static int pin_model_enabled(void)
-{
-   return config_gateway_pin_model() ? 1 : 0;
-}
-
-/* A tool entry's name, regardless of API shape. */
-static const char *tool_entry_name(const cJSON *tool, int openai_shape)
-{
-   if (openai_shape)
-      return jo_cstr(cJSON_GetObjectItemCaseSensitive((cJSON *)tool, "function"), "name");
-   return jo_cstr(tool, "name");
-}
-
-/* The name a tool_choice object forces, or "" if it does not force a named tool. */
-static const char *tool_choice_name(const cJSON *tc, int openai_shape)
-{
-   if (!cJSON_IsObject(tc))
-      return "";
-   if (openai_shape)
-      return jo_cstr(cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "function"), "name");
-   return jo_cstr(tc, "name");
-}
-
-int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
-{
-   cJSON *t;
-   int stripped = 0;
-
-   if (!cJSON_IsArray(tools) || !gateway_prevent_subagents_enabled())
-      return 0;
-
-   for (t = tools->child; t;)
-   {
-      cJSON *next = t->next;
-      const char *name = tool_entry_name(t, tools_openai_shape);
-      if (name && name[0] && is_subagent_tool_name(name))
-      {
-         cJSON_DetachItemViaPointer(tools, t);
-         cJSON_Delete(t);
-         stripped++;
-      }
-      t = next;
-   }
-   return stripped;
 }
 
 static int police_ir_catalog(aimee_tool_t *tools, int *count)
@@ -126,55 +78,6 @@ int gateway_policy_apply_ir(aimee_request_t *request)
    }
    request->mutated = 1;
    return removed;
-}
-
-int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
-{
-   cJSON *tools;
-   int stripped;
-
-   if (!req)
-      return 0;
-
-   tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
-   stripped = gateway_policy_strip_tools(tools, tools_openai_shape);
-   if (!stripped)
-      return 0;
-
-   if (cJSON_GetArraySize(tools) == 0)
-   {
-      /* No tools left: drop the empty array (providers reject `tools: []`) AND any
-       * tool_choice — a forced/`any`/`required` choice with no tools is a 400
-       * upstream, so leaving it would break the request. */
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "tools");
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "tool_choice");
-   }
-   else
-   {
-      /* Tools remain: relax tool_choice only if it forced a removed tool (absent
-       * = auto). `auto`/`any`/`required` and choices naming a surviving tool are
-       * left untouched. */
-      cJSON *tc = cJSON_GetObjectItemCaseSensitive(req, "tool_choice");
-      const char *forced = tool_choice_name(tc, tools_openai_shape);
-      if (forced && forced[0] && is_subagent_tool_name(forced))
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "tool_choice");
-   }
-
-   return stripped;
-}
-
-int gateway_policy_pin_model(cJSON *req, const char *agent_model)
-{
-   const char *cur;
-
-   if (!req || !agent_model || !agent_model[0] || !pin_model_enabled())
-      return 0;
-   cur = jo_cstr(req, "model");
-   if (cur && strcmp(cur, agent_model) == 0)
-      return 0; /* already the pinned model — nothing to change */
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
-   cJSON_AddStringToObject(req, "model", agent_model);
-   return 1;
 }
 
 /* Response-side (P2c). Same canonical mapping and config gate as the request

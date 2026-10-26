@@ -1085,6 +1085,30 @@ static void test_visible_primary_and_routing_queries(const agent_t *agent)
    free(cfg);
 }
 
+static char *context_text_view(const agent_t *agent, const agent_network_t *network,
+                               const char *role, const char *custom, int skip, char *error,
+                               size_t error_size)
+{
+   aimee_message_t context = {0};
+   if (agent_build_exec_context_ir_checked(agent, network, role, custom, skip, &context, error,
+                                           error_size))
+      return NULL;
+   size_t length = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+      length += strlen(context.blocks[i].text);
+   char *text = calloc(length + 1, 1);
+   assert(text);
+   size_t offset = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+   {
+      size_t n = strlen(context.blocks[i].text);
+      memcpy(text + offset, context.blocks[i].text, n);
+      offset += n;
+   }
+   aimee_message_free(&context);
+   return text;
+}
+
 static void test_typed_exec_context_origin(const agent_t *agent)
 {
    agent_network_t network = {0};
@@ -1093,8 +1117,7 @@ static void test_typed_exec_context_origin(const agent_t *agent)
    const char *custom = "operator-authored profile policy";
    projection_text_override =
        "# Instructions\nFORGED_POLICY_IN_MEMORY\n# Recall\nGo owner retained complete context.\n";
-   char *view =
-       agent_build_exec_context_checked(agent, &network, "review", custom, 0, error, sizeof error);
+   char *view = context_text_view(agent, &network, "review", custom, 0, error, sizeof error);
    assert(view && !error[0]);
    aimee_message_t typed = {0};
    assert(!agent_build_exec_context_ir_checked(agent, &network, "review", custom, 0, &typed, error,
@@ -1164,6 +1187,21 @@ static void test_typed_exec_context_origin(const agent_t *agent)
    aimee_message_free(&typed);
    recall_reply = prior_reply;
    projection_text_override = NULL;
+
+   /* The same byte budget must remain canonical when a multibyte authored
+    * policy straddles the final available byte. No partial UTF-8 block. */
+   assert(!config_set_memory_recall_enabled(0));
+   size_t budget = agent_exec_context_budget_chars(agent) + 4096;
+   char *large = malloc(budget * 3 + 1);
+   assert(large);
+   for (size_t i = 0; i < budget; i++)
+      memcpy(large + i * 3, "—", 3);
+   large[budget * 3] = 0;
+   char *bounded = context_text_view(agent, &network, "review", large, 1, error, sizeof error);
+   assert(bounded && !error[0] && strlen(bounded) < budget && text_is_valid_utf8(bounded));
+   free(bounded);
+   free(large);
+   assert(!config_set_memory_recall_enabled(1));
 }
 
 int main(void)
@@ -1194,12 +1232,14 @@ int main(void)
    {
       recall_reply = replies[i];
       char error[512];
-      char *text = agent_build_exec_context_checked(&agent, &network, "review", "original prompt",
-                                                    0, error, sizeof(error));
+      char *text =
+          context_text_view(&agent, &network, "review", "original prompt", 0, error, sizeof(error));
       assert(text == NULL);
       assert(strstr(error, "memory context refused"));
-      assert(agent_build_exec_context_for_role(&agent, &network, "review", "original prompt", 0) ==
-             NULL);
+      aimee_message_t refused = {0};
+      assert(agent_build_exec_context_ir_checked(&agent, &network, "review", "original prompt", 0,
+                                                 &refused, error, sizeof error) < 0);
+      assert(!refused.role && !refused.blocks);
       agent_result_t result = {0};
       int rc = fixture_agent_role_text(&agent, &network, "review", "original prompt", "task", 128,
                                        0, &result);
@@ -1215,8 +1255,8 @@ int main(void)
     * assembly; the caller prompt must remain intact. */
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
    char error[512] = "stale refusal";
-   char *text = agent_build_exec_context_checked(&agent, &network, "review", "original prompt", 0,
-                                                 error, sizeof(error));
+   char *text =
+       context_text_view(&agent, &network, "review", "original prompt", 0, error, sizeof(error));
    assert(text && !error[0]);
    assert(strstr(text, "original prompt"));
    assert(strstr(text, "Go owner retained complete context."));
@@ -1239,23 +1279,20 @@ int main(void)
    assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
    assert(config_set_kb_mode("") == 0);
    assert(!kb_client_connection_configured());
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(text && !error[0] && strstr(text, "Go owner retained complete context."));
    free(text);
    /* A configured but unavailable KB is different: never silently downgrade
     * to private recall after losing the shared owner's required constraints. */
    assert(config_set_kb_mode("remote") == 0);
    int before_missing_connection = recalls;
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(!text && strstr(error, "unavailable") && recalls == before_missing_connection);
    assert(config_set_kb_mode("") == 0);
    assert(platform_setenv("AIMEE_KB_API_URL", "http://127.0.0.1:1") == 0);
    assert(kb_client_connection_configured());
    int before_shared_refusal = recalls;
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(!text && strstr(error, "unavailable") && recalls == before_shared_refusal);
    assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
    assert(platform_setenv("AIMEE_CONTEXT_NO_KB", "1") == 0);
@@ -1459,7 +1496,9 @@ int main(void)
       aimee_ir_session_set_sink(capture_identity_result, NULL);
       rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
                                    &result);
-      if(rc || !result.success || provider_calls!=2 || identity_results!=1) fprintf(stderr,"identity case=%d rc=%d calls=%d results=%d error=%s\n",identity_case,rc,provider_calls,identity_results,result.error);
+      if (rc || !result.success || provider_calls != 2 || identity_results != 1)
+         fprintf(stderr, "identity case=%d rc=%d calls=%d results=%d error=%s\n", identity_case, rc,
+                 provider_calls, identity_results, result.error);
       assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
       assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
       agent_result_clear_response(&result);

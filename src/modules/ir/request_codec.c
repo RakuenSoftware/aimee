@@ -240,11 +240,11 @@ static int system_blocks(const cJSON *blocks, aimee_request_t *out)
 int aimee_ir_request_parse(const cJSON *json, aimee_request_t *out)
 {
    if (!out || !aimee_ir_json_unique(json) ||
-       FIELDS(json, "version", "model", "source_wire", "cache_policy", "system", "messages",
-              "tools", "tool_choice", "parallel_tool_calls", "max_tokens", "temperature", "top_p",
-              "top_k", "stream", "stop_sequences", "metadata", "service_tier", "prompt_cache_key",
-              "prompt_cache_retention", "prompt_cache_options", "reasoning_effort",
-              "reasoning_summary", "provider_config", "output_format"))
+       FIELDS(json, "version", "model", "source_wire", "cache_policy", "system", "system_scalar",
+              "messages", "tools", "tool_choice", "parallel_tool_calls", "max_tokens",
+              "temperature", "top_p", "top_k", "stream", "stop_sequences", "metadata",
+              "service_tier", "prompt_cache_key", "prompt_cache_retention", "prompt_cache_options",
+              "reasoning_effort", "reasoning_summary", "provider_config", "output_format"))
       return -1;
    const cJSON *version = get(json, "version");
    if (!cJSON_IsNumber(version) || version->valuedouble != 1)
@@ -256,6 +256,10 @@ int aimee_ir_request_parse(const cJSON *json, aimee_request_t *out)
        enumeration(json, "cache_policy", caches, 2, &cache, 1) ||
        system_blocks(get(json, "system"), &result))
       goto fail;
+   const cJSON *scalar = get(json, "system_scalar");
+   if (scalar && !cJSON_IsBool(scalar))
+      goto fail;
+   result.system_scalar = cJSON_IsTrue(scalar);
    result.cache_policy = (aimee_cache_policy_t)cache;
    const cJSON *messages = get(json, "messages"), *tools = get(json, "tools"),
                *stops = get(json, "stop_sequences");
@@ -347,4 +351,48 @@ int aimee_ir_request_parse(const cJSON *json, aimee_request_t *out)
 fail:
    aimee_request_free(&result);
    return -1;
+}
+
+cJSON *aimee_ir_request_history_json(const aimee_request_t *request)
+{
+   if (!request)
+      return NULL;
+   cJSON *history = cJSON_CreateArray();
+   if (!history)
+      return NULL;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(&request->messages[i]);
+      if (!message || !cJSON_AddItemToArray(history, message))
+      {
+         cJSON_Delete(message);
+         cJSON_Delete(history);
+         return NULL;
+      }
+   }
+   return history;
+}
+int aimee_ir_request_history_replace(aimee_request_t *request, const cJSON *history)
+{
+   int count = cJSON_GetArraySize(history);
+   if (!request || !cJSON_IsArray(history) || count > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   aimee_request_t replacement = {0};
+   replacement.messages = count ? calloc((size_t)count, sizeof *replacement.messages) : NULL;
+   if (count && !replacement.messages)
+      return -1;
+   replacement.n_messages = count;
+   for (int i = 0; i < count; i++)
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &replacement.messages[i]))
+      {
+         aimee_request_free(&replacement);
+         return -1;
+      }
+   for (int i = 0; i < request->n_messages; i++)
+      aimee_message_free(&request->messages[i]);
+   free(request->messages);
+   request->messages = replacement.messages;
+   request->n_messages = replacement.n_messages;
+   request->mutated = 1;
+   return 0;
 }

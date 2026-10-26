@@ -42,7 +42,8 @@ render IR deltas as Anthropic stream events. They do not decode Bedrock binary f
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
 
-Incremental Responses conversion lives in `aimee_responses_stream.c` and
+Responses buffered and incremental decoding share the native event owner in
+`aimee_backend_responses.c`; client encoding remains in
 `aimee_responses_frontend_stream.c` under this module. The backend emits canonical text,
 reasoning and function-argument deltas before completion, then reconciles prefixes and item
 snapshots through the existing full Responses decoder. The frontend preserves authored message

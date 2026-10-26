@@ -808,7 +808,6 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    server_acp_resources_t *resources = NULL;
    aimee_request_t captured = {0};
    aimee_message_t *latest = NULL;
-   aimee_block_t host_system = {0}, *system_view = NULL;
    aimee_request_t task = {0};
    cJSON *history = NULL;
    void *previous_sink_context = NULL;
@@ -820,7 +819,7 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    char *container_arguments[ACP_COMMAND_ARGS + 24] = {0};
    agent_request_creds_t credentials;
    memset(&credentials, 0, sizeof credentials);
-   if (!cfg || !cfg->agent || !cfg->agent->enabled ||
+   if (!cfg || !cfg->agent || !cfg->canonical_request || !cfg->agent->enabled ||
        strnlen(selected.cli_kind, sizeof selected.cli_kind) == sizeof selected.cli_kind ||
        strnlen(selected.cli_cmd, sizeof selected.cli_cmd) == sizeof selected.cli_cmd ||
        strnlen(selected.name, sizeof selected.name) == sizeof selected.name || !selected.name[0] ||
@@ -904,64 +903,24 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
       if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &captured.messages[i]))
          goto done;
    latest = &captured.messages[captured.n_messages - 1];
-   if (strcmp(latest->role, "user") || latest->n_blocks < 1 ||
-       (!cfg->canonical_request &&
-        (latest->n_blocks != 1 || latest->blocks[0].type != AIMEE_BLK_TEXT ||
-         !latest->blocks[0].text)))
+   if (strcmp(latest->role, "user") || latest->n_blocks < 1)
       goto done;
-   if (cfg->canonical_request)
+   const aimee_request_t *seed = cfg->canonical_request;
+   if (seed->n_messages != 1 && seed->n_messages != captured.n_messages)
+      goto done;
+   for (int i = 0; i < seed->n_messages; i++)
    {
-      const aimee_request_t *seed = cfg->canonical_request;
-      if (seed->n_messages != 1 && seed->n_messages != captured.n_messages)
+      cJSON *expected = aimee_ir_message_json(&seed->messages[i]);
+      const cJSON *actual =
+          cJSON_GetArrayItem(history, seed->n_messages == 1 ? captured.n_messages - 1 : i);
+      int exact = expected && cJSON_Compare(expected, actual, 1);
+      cJSON_Delete(expected);
+      if (!exact)
          goto done;
-      for (int i = 0; i < seed->n_messages; i++)
-      {
-         cJSON *expected = aimee_ir_message_json(&seed->messages[i]);
-         const cJSON *actual =
-             cJSON_GetArrayItem(history, seed->n_messages == 1 ? captured.n_messages - 1 : i);
-         int exact = expected && cJSON_Compare(expected, actual, 1);
-         cJSON_Delete(expected);
-         if (!exact)
-            goto done;
-      }
-      /* Borrow the entire admitted request; the native boundary must refuse
-       * controls it cannot represent, never discard them before qualification. */
-      task = *seed;
-      if (cfg->system_prompt && cfg->system_prompt[0])
-      {
-         aimee_response_t system_text = {.content = task.system, .n_content = task.n_system};
-         char *joined = aimee_ir_response_text_alloc(&system_text);
-         if (!joined)
-            goto done;
-         int present = !strcmp(joined, cfg->system_prompt);
-         free(joined);
-         for (int i = 0; i < task.n_system; i++)
-            present |= task.system[i].type == AIMEE_BLK_TEXT && task.system[i].text &&
-                       !strcmp(task.system[i].text, cfg->system_prompt);
-         if (!present)
-         {
-            if (task.n_system >= AIMEE_IR_MAX_BLOCKS ||
-                !(system_view = calloc((size_t)task.n_system + 1, sizeof *system_view)))
-               goto done;
-            if (task.n_system)
-               memcpy(system_view, task.system, (size_t)task.n_system * sizeof *system_view);
-            system_view[task.n_system++] =
-                (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = (char *)cfg->system_prompt};
-            task.system = system_view;
-         }
-      }
    }
-   else
-   {
-      if (strcmp(latest->blocks[0].text, cfg->user_prompt))
-         goto done;
-      if (cfg->system_prompt && cfg->system_prompt[0])
-      {
-         host_system = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = (char *)cfg->system_prompt};
-         task.system = &host_system;
-         task.n_system = 1;
-      }
-   }
+   /* Both host constructors supply canonical policy/task/control custody.
+    * The external ACP boundary alone projects it to the peer's prompt format. */
+   task = *seed;
    task.messages = captured.messages;
    task.n_messages = captured.n_messages;
    provider_cli_cfg_t represented = *cfg;
@@ -1159,7 +1118,6 @@ int server_acp_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
    provider_cli_cfg_t owned = *cfg;
    owned.agent = &selected;
    owned.canonical_request = &task;
-   owned.user_prompt = latest->blocks[0].text;
    owned.acp_host = &launch;
    owned.cwd = owner.cwd;
    owned.session_id = owner.session;
@@ -1225,7 +1183,6 @@ done:
       memcpy(restored.request_id, previous_request_id, sizeof restored.request_id);
       request_context_set(&restored);
    }
-   free(system_view);
    aimee_request_free(&captured);
    cJSON_Delete(history);
    if (owner.executable_fd >= 0)
