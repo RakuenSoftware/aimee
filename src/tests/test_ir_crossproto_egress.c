@@ -49,6 +49,90 @@ static void same(const char *label, const char *anth_wire, const char *oai_wire)
    free(o);
 }
 
+static void test_service_tier_protocol_custody(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   const char *inputs[] = {"{\"model\":\"m\",\"service_tier\":\"future-tier\",\"messages\":[{"
+                           "\"role\":\"user\",\"content\":\"task\"}]}",
+                           "{\"model\":\"m\",\"service_tier\":\"future-tier\",\"input\":\"task\"}"};
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(inputs[i], strlen(inputs[i]), wires[i], &request, error,
+                                        sizeof error));
+      assert(request.service_tier && !strcmp(request.service_tier, "future-tier"));
+      for (int j = 0; j < 2; j++)
+      {
+         char *bytes = aimee_backend_render_wire(&request, wires[j]);
+         cJSON *body = bytes ? cJSON_Parse(bytes) : NULL;
+         assert(body && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "service_tier")),
+                                "future-tier"));
+         cJSON_Delete(body);
+         free(bytes);
+      }
+      aimee_request_free(&request);
+   }
+   const char *invalid[] = {"{\"service_tier\":7,\"messages\":[]}",
+                            "{\"service_tier\":7,\"input\":\"task\"}"};
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      assert(aimee_frontend_parse_wire(invalid[i], strlen(invalid[i]), wires[i], &request, error,
+                                       sizeof error) < 0);
+      aimee_request_free(&request);
+   }
+   puts("  OpenAI Chat/Responses service tier survives canonical cross-protocol custody OK");
+}
+
+static void test_responses_control_profiles(void)
+{
+   aimee_request_t source = {0};
+   assert(!aimee_ir_request_from_text(&source, NULL, "Preserve the canonical request.", 123, 0.4));
+   source.has_top_p = 1;
+   source.top_p = 0.8;
+   source.metadata = aimee_ir_json_parse_frame("{\"exact\":9007199254740993123456789}",
+                                               strlen("{\"exact\":9007199254740993123456789}"));
+   source.service_tier = strdup("auto");
+   source.has_parallel_tool_calls = 1;
+   source.parallel_tool_calls = 0;
+   cJSON *before = aimee_ir_request_json(&source);
+   assert(before);
+   char *bytes = aimee_backend_render_wire(&source, AIMEE_WIRE_RESPONSES);
+   cJSON *body = bytes ? cJSON_Parse(bytes) : NULL;
+   assert(body && !aimee_backend_request_control_losses(&source, AIMEE_WIRE_RESPONSES, body));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "max_output_tokens")) == 123);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "temperature")) == 0.4);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "top_p")) == 0.8);
+   assert(strstr(bytes, "9007199254740993123456789"));
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "parallel_tool_calls")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "stream")));
+   free(bytes);
+   cJSON_Delete(body);
+   assert(!aimee_backend_render_wire_profile(&source, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_CODEX,
+                                             NULL));
+   int losses = -1;
+   bytes = aimee_backend_render_wire_profile(&source, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_CODEX,
+                                             &losses);
+   body = bytes ? cJSON_Parse(bytes) : NULL;
+   assert(body && losses == 4 && cJSON_HasObjectItem(body, "service_tier") &&
+          cJSON_HasObjectItem(body, "parallel_tool_calls") &&
+          !cJSON_HasObjectItem(body, "metadata"));
+   free(bytes);
+   cJSON_Delete(body);
+   source.has_top_k = 1;
+   source.top_k = 17;
+   assert(!aimee_backend_render_wire(&source, AIMEE_WIRE_RESPONSES));
+   source.has_top_k = 0;
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   aimee_request_free(&source);
+   puts("  Responses API preserves supported controls; Codex requires explicit loss admission OK");
+}
+
 static void test_exact_native_request_bytes(void)
 {
    const char *bodies[] = {
@@ -57,7 +141,7 @@ static void test_exact_native_request_bytes(void)
        "[{\"type\":\"text\",\"text\":\"prefix\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":"
        "\"1h\"}}], \"messages\": [{\"role\":\"user\",\"content\":\"hello\"}]\n} \n",
        "{ \"model\": \"native\", \"messages\": [{\"role\":\"user\",\"content\":\"hello\"}] }\n",
-       "{ \"model\": \"native\", \"input\": \"hello\", \"store\": false, \"stream\": true }\n"};
+       "{ \"model\": \"native\", \"input\": \"hello\", \"store\": true, \"stream\": false }\n"};
    const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
                                  AIMEE_WIRE_RESPONSES};
    for (int i = 0; i < 3; i++)
@@ -1080,22 +1164,30 @@ static void test_prompt_cache_controls(void)
       assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
                                         sizeof error));
       char *native = aimee_backend_render_wire(&request, wires[source]);
-      assert(native && !strcmp(native, body));
+      assert(source ? native == NULL : native && !strcmp(native, body));
       free(native);
       assert(!strcmp(request.prompt_cache_key, "tenant/user") &&
              !strcmp(request.prompt_cache_retention, "24h"));
       for (int target = 0; target < 2; target++)
       {
-         native = aimee_backend_render_wire(&request, wires[target]);
+         int losses = -1;
+         native = aimee_backend_render_wire_profile(&request, wires[target], AIMEE_RESPONSES_API,
+                                                    &losses);
+         assert(losses == (target ? 1 : 0));
          cJSON *output = native ? cJSON_Parse(native) : NULL;
          assert(output &&
                 !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_key")),
                         "tenant/user"));
          assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_retention")),
                         "24h"));
-         assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
-                              request.prompt_cache_options, 1));
-         assert(strstr(native, "0.123456789012345678901234567890"));
+         if (!target)
+         {
+            assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
+                                 request.prompt_cache_options, 1));
+            assert(strstr(native, "0.123456789012345678901234567890"));
+         }
+         else
+            assert(!cJSON_HasObjectItem(output, "prompt_cache_options"));
          cJSON_Delete(output);
          free(native);
       }
@@ -1124,8 +1216,12 @@ static void test_prompt_cache_controls(void)
                                       cJSON_Parse("0.123456789012345678901234567891"));
             expected = "0.123456789012345678901234567891";
          }
-         native = aimee_backend_render_wire(&request, wires[source]);
-         assert(native && strstr(native, expected));
+         int losses = -1;
+         native = aimee_backend_render_wire_profile(&request, wires[source], AIMEE_RESPONSES_API,
+                                                    &losses);
+         assert(losses == (source ? 1 : 0));
+         assert(native && (source && change == 2 ? !strstr(native, expected)
+                                                 : strstr(native, expected) != NULL));
          free(native);
       }
       cJSON *canonical = aimee_ir_request_json(&request);
@@ -1635,6 +1731,8 @@ int main(void)
    test_foreign_reasoning_switch_preserves_canonical_state();
    test_history_entry_migration();
    printf("cross-protocol anthropic egress byte-identity:\n");
+   test_service_tier_protocol_custody();
+   test_responses_control_profiles();
    test_exact_native_request_bytes();
    test_native_message_group_replay();
    test_canonical_replay_egress();

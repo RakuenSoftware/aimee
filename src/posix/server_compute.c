@@ -972,17 +972,19 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.aimee_session_id = aimee_sid;
    preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
    preq.cwd = use_cwd;
-   preq.system_prompt = system_prompt ? system_prompt : "";
-   preq.message = &cctx->ir_input;
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_message(&request, system_prompt, &cctx->ir_input, 0, -1);
+   preq.request = &request;
    preq.task_request = cctx->req;
-   preq.max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-   preq.temperature = 0.3;
 
    char session_id[128];
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-   int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   int rc = request_rc
+                ? AGENT_RC_CONTEXT_REFUSED
+                : primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   aimee_request_free(&request);
    agent_tools_set_tool_event_cb(NULL, NULL);
    if (result.clean_retry_attempt[0])
       stream_event(cctx, "retry_attempt", "id", result.clean_retry_attempt);

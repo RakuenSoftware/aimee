@@ -20,9 +20,7 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
                                       agent_result_t *out);
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const aimee_message_t *message,
-                                     int max_tokens, double temperature,
-                                     struct cJSON *initial_messages,
+                                     const aimee_request_t *request, struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out);
 
 /* Complete canonical conversation for the server-owned tool loop. No user

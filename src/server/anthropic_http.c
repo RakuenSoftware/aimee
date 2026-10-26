@@ -574,12 +574,26 @@ static int messages_estimate_tokens(const aimee_request_t *request)
 }
 
 /* Rendering never reimports a second native projection. */
-static char *anthropic_build_prov_body(aimee_request_t *request, aimee_wire_t wire, int stream)
+static char *anthropic_build_prov_body(const agent_t *agent, aimee_request_t *request,
+                                       aimee_wire_t wire, int stream)
 {
    request->stream = stream;
    if (aimee_frontend_guard_state(request, NULL, 0) || aimee_ir_request_admit(request))
       return NULL;
-   char *body = aimee_backend_render_wire(request, wire);
+   int controls = 0;
+   char *body = aimee_backend_render_wire_profile(
+       request, wire,
+       agent && !strcmp(agent->provider, "chatgpt") ? AIMEE_RESPONSES_CODEX : AIMEE_RESPONSES_API,
+       &controls);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = request->model,
+                                  .projection_boundary = "request",
+                                  .projection_request_controls = controls};
+   if (body && controls && aimee_ir_session_emit(&event))
+   {
+      free(body);
+      return NULL;
+   }
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(request, wire, &projection);
    if (body && aimee_ir_session_emit_projection_full(
@@ -716,7 +730,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    for (int attempt = 0; attempt < 2; attempt++)
    {
       free(prov_body);
-      prov_body = anthropic_build_prov_body(&policy, wire, responses_wire);
+      prov_body = anthropic_build_prov_body(ag, &policy, wire, responses_wire);
       if (!prov_body)
       {
          status = write_error(resp, cap, 500, "api_error",
@@ -1351,7 +1365,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
-   prov_body = anthropic_build_prov_body(&policy,
+   prov_body = anthropic_build_prov_body(ag, &policy,
                                          parity           ? AIMEE_WIRE_ANTHROPIC
                                          : responses_wire ? AIMEE_WIRE_RESPONSES
                                                           : AIMEE_WIRE_OPENAI_CHAT,

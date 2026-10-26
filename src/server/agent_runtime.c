@@ -685,7 +685,7 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
       snprintf(out->error, sizeof out->error, "selected model cannot honor generation token cap");
       return AGENT_RC_CONTEXT_REFUSED;
    }
-   if (is_chatgpt_provider(&local) && (request->has_max_tokens || request->has_temperature))
+   if (!agent_request_controls_supported(&local, request))
    {
       snprintf(out->error, sizeof out->error, "selected model cannot honor generation controls");
       return AGENT_RC_CONTEXT_REFUSED;

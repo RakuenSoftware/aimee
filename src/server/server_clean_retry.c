@@ -74,7 +74,8 @@ int server_clean_retry_begin(const primary_session_request_t *req, cJSON **messa
    }
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "request_id", ctx->request_id);
-   cJSON *input = aimee_ir_message_json(req->message);
+   cJSON *input = aimee_ir_message_json(
+       req->request && req->request->n_messages == 1 ? &req->request->messages[0] : NULL);
    char *input_json = input ? cJSON_PrintUnformatted(input) : NULL;
    cJSON_Delete(input);
    if (!input_json || !cJSON_AddStringToObject(body, "input", input_json))

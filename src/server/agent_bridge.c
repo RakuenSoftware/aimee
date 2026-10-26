@@ -546,21 +546,6 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
        agent_request_project_model(&ir, &projected) ||
        aimee_backend_preserve_host_extensions(&ir, &projected, wire))
       goto done;
-   int omitted_controls = 0;
-   if (host_profile && wire == AIMEE_WIRE_RESPONSES)
-   {
-      omitted_controls = projected.has_max_tokens + projected.has_temperature;
-      projected.has_max_tokens = projected.has_temperature = 0;
-   }
-   if (omitted_controls)
-   {
-      aimee_session_event_t report = {.kind = AIMEE_SESSION_PROJECTION,
-                                      .projection_model = agent->name,
-                                      .projection_boundary = "request",
-                                      .projection_request_controls = omitted_controls};
-      if (aimee_ir_session_emit(&report))
-         goto done;
-   }
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&projected, wire, &projection);
    if (aimee_ir_session_emit_projection_full(projected.model, projection.omitted_reasoning_blocks,
@@ -571,6 +556,19 @@ cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t
    rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&projected)
               : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&projected)
                                              : openai_backend_build(&projected);
+   if (rendered)
+   {
+      int losses = aimee_backend_request_control_losses(seed ? seed : &ir, wire, rendered);
+      aimee_session_event_t report = {.kind = AIMEE_SESSION_PROJECTION,
+                                      .projection_model = agent->name,
+                                      .projection_boundary = "request",
+                                      .projection_request_controls = losses};
+      if (losses && (!host_profile || aimee_ir_session_emit(&report)))
+      {
+         cJSON_Delete(rendered);
+         rendered = NULL;
+      }
+   }
    if (rendered && dispatch_catalog)
    {
       aimee_request_free(dispatch_catalog);

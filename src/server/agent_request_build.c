@@ -43,6 +43,32 @@ int agent_request_project_model(const aimee_request_t *request, aimee_request_t 
    return aimee_ir_request_project_model(request, out);
 }
 
+int agent_request_controls_supported(const agent_t *agent, const aimee_request_t *request)
+{
+   aimee_request_t owned = {0};
+   if (!agent || aimee_ir_request_admit(request))
+      return 0;
+   /* Native/ACP execution owns its source, budget and control admission. A
+    * provider label alone cannot select an HTTP contract for that boundary.
+    * Adapters that resolve to HTTP still pass the final seeded render check. */
+   if (!strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) ||
+       !strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) ||
+       !strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI))
+      return 1;
+   if (agent_request_project_model(request, &owned))
+      return 0;
+   aimee_wire_t wire = is_chatgpt_provider(agent)     ? AIMEE_WIRE_RESPONSES
+                       : is_anthropic_provider(agent) ? AIMEE_WIRE_ANTHROPIC
+                                                      : AIMEE_WIRE_OPENAI_CHAT;
+   cJSON *body = wire == AIMEE_WIRE_RESPONSES   ? responses_backend_build(&owned)
+                 : wire == AIMEE_WIRE_ANTHROPIC ? anthropic_backend_build(&owned)
+                                                : openai_backend_build(&owned);
+   int supported = body && !aimee_backend_request_control_losses(request, wire, body);
+   cJSON_Delete(body);
+   aimee_request_free(&owned);
+   return supported;
+}
+
 cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t *request)
 {
    aimee_request_t owned = {0};
@@ -59,6 +85,14 @@ cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t 
       body = is_chatgpt_provider(agent)     ? responses_backend_build(&owned)
              : is_anthropic_provider(agent) ? anthropic_backend_build(&owned)
                                             : openai_backend_build(&owned);
+   aimee_wire_t wire = is_chatgpt_provider(agent)     ? AIMEE_WIRE_RESPONSES
+                       : is_anthropic_provider(agent) ? AIMEE_WIRE_ANTHROPIC
+                                                      : AIMEE_WIRE_OPENAI_CHAT;
+   if (body && aimee_backend_request_control_losses(request, wire, body))
+   {
+      cJSON_Delete(body);
+      body = NULL;
+   }
    if (body && is_anthropic_provider(agent) &&
        aimee_ir_session_emit_projection_full(agent->name[0] ? agent->name : agent->model, 0, 0, 0,
                                              anthropic_ir_omitted_empty_messages(&owned),
@@ -147,42 +181,14 @@ fail:
    return -1;
 }
 
-static int omitted_number(const cJSON *body, const char *key, int present, double expected)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(body, key);
-   return present && (!cJSON_IsNumber(value) || value->valuedouble != expected);
-}
-
-/* Count actual source-control losses at the completed provider boundary. Host
- * defaults are not losses, and block/cache projection has its own counters. */
+/* Host profile changes must be recorded before the request can leave Aimee. */
 static int host_control_projection(const agent_t *agent, const aimee_request_t *source,
                                    const aimee_request_t *projected, const cJSON *body)
 {
-   int omitted =
-       omitted_number(body, is_chatgpt_provider(agent) ? "max_output_tokens" : "max_tokens",
-                      source->has_max_tokens, source->max_tokens) +
-       omitted_number(body, "temperature", source->has_temperature, source->temperature) +
-       omitted_number(body, "top_p", source->has_top_p, source->top_p) +
-       omitted_number(body, "top_k", source->has_top_k, source->top_k);
-   omitted += source->thinking && !cJSON_HasObjectItem(body, "thinking");
-   omitted += source->metadata && !cJSON_HasObjectItem(body, "metadata");
-   omitted += source->service_tier && !cJSON_HasObjectItem(body, "service_tier");
-   omitted += source->prompt_cache_key && !cJSON_HasObjectItem(body, "prompt_cache_key");
-   omitted +=
-       source->prompt_cache_retention && !cJSON_HasObjectItem(body, "prompt_cache_retention");
-   omitted += source->prompt_cache_options && !cJSON_HasObjectItem(body, "prompt_cache_options");
-   omitted += source->has_parallel_tool_calls && !cJSON_HasObjectItem(body, "parallel_tool_calls");
-   omitted += source->n_stop && !cJSON_HasObjectItem(body, "stop") &&
-              !cJSON_HasObjectItem(body, "stop_sequences");
-   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(body, "reasoning");
-   const cJSON *output = cJSON_GetObjectItemCaseSensitive(body, "output_config");
-   omitted += source->reasoning_summary && !cJSON_HasObjectItem(reasoning, "summary");
-   omitted += source->reasoning_effort && !cJSON_HasObjectItem(body, "reasoning_effort") &&
-              !cJSON_HasObjectItem(reasoning, "effort") && !cJSON_HasObjectItem(output, "effort");
-   const cJSON *text = cJSON_GetObjectItemCaseSensitive(body, "text");
-   omitted += source->output_format.kind > AIMEE_OUTPUT_TEXT &&
-              !cJSON_HasObjectItem(body, "response_format") &&
-              !cJSON_HasObjectItem(text, "format") && !cJSON_HasObjectItem(output, "format");
+   aimee_wire_t wire = is_chatgpt_provider(agent)     ? AIMEE_WIRE_RESPONSES
+                       : is_anthropic_provider(agent) ? AIMEE_WIRE_ANTHROPIC
+                                                      : AIMEE_WIRE_OPENAI_CHAT;
+   int omitted = aimee_backend_request_control_losses(source, wire, body);
    int empty = is_anthropic_provider(agent) ? anthropic_ir_omitted_empty_messages(projected) : 0;
    if (!omitted && !empty)
       return 0;

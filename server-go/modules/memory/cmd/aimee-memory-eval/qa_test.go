@@ -65,7 +65,10 @@ func TestQAUsesIsolatedModuleAndScoredFailureAttempt(t *testing.T) {
 	second := strings.ReplaceAll(sample, "nebula location is Orion", "beta-only nebula location is Orion")
 	path := datasetFile(t, "["+first+","+second+"]")
 	calls, answers := 0, 0
-	model := func(_ context.Context, system, prompt string, tokens int) (modelReply, error) {
+	model := func(_ context.Context, input *canonical.Request) (modelReply, error) {
+		system, prompt, tokens := qaFixtureViews(input)
+		assertQATaskOrigins(t, input)
+		_, _, _ = system, prompt, tokens
 		calls++
 		if system == answerSystem {
 			answers++
@@ -116,7 +119,9 @@ func TestQAUsesIsolatedModuleAndScoredFailureAttempt(t *testing.T) {
 	for _, badJudge := range []bool{false, true} {
 		calls = 0
 		output.Reset()
-		opts.model = func(_ context.Context, system, prompt string, tokens int) (modelReply, error) {
+		opts.model = func(_ context.Context, input *canonical.Request) (modelReply, error) {
+			system, prompt, tokens := qaFixtureViews(input)
+			_, _, _ = system, prompt, tokens
 			calls++
 			if calls >= 3 && !badJudge {
 				return modelReply{}, errors.New("model unavailable")
@@ -140,7 +145,9 @@ func TestLongMemQAAndModuleMissReports(t *testing.T) {
 	sample := strings.Replace(longmemSample, `"question":`, `"answer":"Orion","question":`, 1)
 	path := datasetFile(t, "["+sample+","+sample+"]")
 	var output bytes.Buffer
-	model := func(_ context.Context, system, prompt string, tokens int) (modelReply, error) {
+	model := func(_ context.Context, input *canonical.Request) (modelReply, error) {
+		system, prompt, tokens := qaFixtureViews(input)
+		_, _, _ = system, prompt, tokens
 		if system == judgeSystem {
 			return qaFixtureReply(`{"score":1}`, 0, 0), nil
 		}
@@ -217,7 +224,7 @@ func TestAgentModelUsesRegisteredCanonicalCLIWithoutShell(t *testing.T) {
 	response := qaFixtureReply("Orion", 4, 1)
 	script := qaCLI(t, qaWire(t, "", response.Output), true)
 	prompt := "$(exit 9); " + string(rune(96)) + "exit 8" + string(rune(96))
-	reply, err := agentModel(script)(context.Background(), "system", prompt, 256)
+	reply, err := agentModel(script)(context.Background(), qaFixtureRequest("system", prompt, 256))
 	if err != nil || reply.Response != "Orion" || reply.PromptTokens != 4 || reply.CompletionTokens != 1 || reply.Output == nil {
 		t.Fatal(reply, err)
 	}
@@ -236,12 +243,12 @@ func TestAgentModelUsesRegisteredCanonicalCLIWithoutShell(t *testing.T) {
 		t.Fatal(r)
 	}
 	policy, evidence := r.System[0].Context, r.Messages[0].Blocks[0].Context
-	if policy.Origin != 3 || policy.Authority != 2 || policy.Trust != 2 || evidence.Origin != 5 || evidence.Authority != 1 || evidence.Trust != 2 {
+	if policy.Origin != 2 || policy.Authority != 3 || policy.Trust != 2 || evidence.Origin != 6 || evidence.Authority != 1 || evidence.Trust != 2 {
 		t.Fatal(policy, evidence)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := agentModel(script)(ctx, "system", "question", 256); err == nil {
+	if _, err := agentModel(script)(ctx, qaFixtureRequest("system", "question", 256)); err == nil {
 		t.Fatal("cancelled model accepted")
 	}
 }
@@ -252,24 +259,24 @@ func TestAgentModelRejectsLegacyFlatResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := qaCLI(t, legacy, false)
-	if _, err := agentModel(script)(context.Background(), "system", "prompt", 256); err == nil {
+	if _, err := agentModel(script)(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil {
 		t.Fatal("legacy flat response accepted")
 	}
 }
 func TestCheckedModelRequiresCanonicalAuthority(t *testing.T) {
-	model := func(context.Context, string, string, int) (modelReply, error) {
+	model := func(context.Context, *canonical.Request) (modelReply, error) {
 		return modelReply{Response: "POISONED complete answer", PromptTokens: 9}, nil
 	}
-	if _, err := checkedModel(context.Background(), model, "system", "prompt", 1); err == nil {
+	if _, err := checkedModel(context.Background(), model, qaFixtureRequest("system", "prompt", 1)); err == nil {
 		t.Fatal("injected raw model answer accepted")
 	}
-	model = func(context.Context, string, string, int) (modelReply, error) {
+	model = func(context.Context, *canonical.Request) (modelReply, error) {
 		r := qaFixtureReply("real", 7, 2)
 		r.Response = "POISONED"
 		r.PromptTokens = 99
 		return r, nil
 	}
-	r, err := checkedModel(context.Background(), model, "system", "prompt", 1)
+	r, err := checkedModel(context.Background(), model, qaFixtureRequest("system", "prompt", 1))
 	if err != nil || r.Response != "real" || r.PromptTokens != 7 || r.CompletionTokens != 2 {
 		t.Fatal(r, err)
 	}
@@ -281,29 +288,29 @@ func TestAgentModelCanonicalTerminalAdmission(t *testing.T) {
 			r := *text
 			r.StopReason = stop
 			script := qaCLI(t, qaWire(t, "", &r), true)
-			reply, err := agentModel(script)(context.Background(), "system", "prompt", 256)
+			reply, err := agentModel(script)(context.Background(), qaFixtureRequest("system", "prompt", 256))
 			if err == nil || reply.Output == nil || reply.Output.StopReason != stop || reply.Response != "" {
 				t.Fatal("noncomplete canonical output lost or promoted", stop, reply, err)
 			}
 		})
 	}
-	if _, err := agentModel(qaCLI(t, qaWire(t, "error", text), true))(context.Background(), "system", "prompt", 256); err == nil {
+	if _, err := agentModel(qaCLI(t, qaWire(t, "error", text), true))(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil {
 		t.Fatal("host error promoted to success")
 	}
 	media := *text
 	media.Blocks = []canonical.ResponseBlock{{Block: canonical.Block{Type: "image", MediaType: "image/png", MediaRef: "https://example.invalid/image"}}}
-	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &media), true))(context.Background(), "system", "prompt", 256); err == nil {
+	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &media), true))(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil {
 		t.Fatal("media entered QA text grading")
 	}
 	usage := *text
 	usage.Usage = canonical.ZeroUsage()
 	usage.Usage = canonical.ResponseUsage{Unobserved: true}
-	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), "system", "prompt", 256); err == nil || !strings.Contains(err.Error(), "observed provider token usage") {
+	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil || !strings.Contains(err.Error(), "observed provider token usage") {
 		t.Fatal("unknown usage promoted to measured evaluation", err)
 	}
 	usage.Usage = canonical.ZeroUsage()
 	usage.Usage.Input = "18446744073709551615"
-	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), "system", "prompt", 256); err == nil {
+	if _, err := agentModel(qaCLI(t, qaWire(t, "ok", &usage), true))(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil {
 		t.Fatal("overflow usage silently converted")
 	}
 }
@@ -312,10 +319,10 @@ func TestAgentModelBoundsOutput(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nhead -c 1048577 /dev/zero\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agentModel(script)(context.Background(), "system", "prompt", 256); err == nil {
+	if _, err := agentModel(script)(context.Background(), qaFixtureRequest("system", "prompt", 256)); err == nil {
 		t.Fatal("oversized model output accepted")
 	}
-	if _, err := agentModel(script)(context.Background(), "system", strings.Repeat("x", 1<<20), 256); err == nil || !strings.Contains(err.Error(), "request exceeds") {
+	if _, err := agentModel(script)(context.Background(), qaFixtureRequest("system", strings.Repeat("x", 1<<20), 256)); err == nil || !strings.Contains(err.Error(), "request exceeds") {
 		t.Fatal("oversized request reached subprocess", err)
 	}
 }
@@ -326,7 +333,9 @@ func TestQAUnanswerableKeepsGoldOutOfReader(t *testing.T) {
 	sample = strings.Replace(sample, `"question":`, `"answer":"GOLD_CANARY","question":`, 1)
 	var output bytes.Buffer
 	calls := 0
-	model := func(_ context.Context, system, prompt string, _ int) (modelReply, error) {
+	model := func(_ context.Context, input *canonical.Request) (modelReply, error) {
+		system, prompt, tokens := qaFixtureViews(input)
+		_, _, _ = system, prompt, tokens
 		calls++
 		if system == answerSystem {
 			if strings.Contains(prompt, "GOLD_CANARY") || strings.Contains(prompt, "Unanswerable from") {
@@ -352,7 +361,7 @@ func TestAgentModelJudgeSamplingAndCanonicalProjection(t *testing.T) {
 	a, b, thinking := "Or", "ion", "private reasoning"
 	response.Blocks = []canonical.ResponseBlock{{Block: canonical.Block{Type: "text", Text: &a}}, {Block: canonical.Block{Type: "thinking", Text: &thinking}}, {Block: canonical.Block{Type: "text", Text: &b}}}
 	script := qaCLI(t, qaWire(t, "", response), true)
-	result, err := agentModel(script)(context.Background(), judgeSystem, "candidate evidence", 64)
+	result, err := agentModel(script)(context.Background(), judgeEvaluationRequest("question", "gold", "candidate evidence", nil))
 	if err != nil || result.Response != "Orion" {
 		t.Fatal(result, err)
 	}
@@ -372,7 +381,7 @@ func TestAgentModelJudgeSamplingAndCanonicalProjection(t *testing.T) {
 func TestAgentModelNULRejectedBeforeCLI(t *testing.T) {
 	script := qaCLI(t, qaWire(t, "ok", qaFixtureReply("valid", 1, 1).Output), true)
 	for _, pair := range [][2]string{{"bad" + string(rune(0)), "prompt"}, {"system", "bad" + string(rune(0))}} {
-		if _, err := agentModel(script)(context.Background(), pair[0], pair[1], 64); err == nil {
+		if _, err := agentModel(script)(context.Background(), qaFixtureRequest(pair[0], pair[1], 64)); err == nil {
 			t.Fatal("NUL input accepted")
 		}
 	}
@@ -387,7 +396,7 @@ func TestAgentModelRejectsContradictoryHostError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 256)
+		reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), qaFixtureRequest("system", "prompt", 256))
 		if err == nil {
 			t.Fatal("contradictory host error promoted to answer")
 		}
@@ -401,7 +410,7 @@ func TestAgentModelCLISuccessEnvelopeAndFailureAuthority(t *testing.T) {
 	for _, status := range []string{"", "ok"} {
 		t.Run("success-status-"+status, func(t *testing.T) {
 			wire := qaWire(t, status, canonical.TextResponse("actual CLI answer"))
-			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32)
+			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), qaFixtureRequest("system", "prompt", 32))
 			if err != nil || reply.Output == nil || reply.Response != "actual CLI answer" {
 				t.Fatal(reply, err)
 			}
@@ -413,7 +422,7 @@ func TestAgentModelCLISuccessEnvelopeAndFailureAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32)
+			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), qaFixtureRequest("system", "prompt", 32))
 			if err == nil || reply.Output == nil || reply.Response != "" {
 				t.Fatal("invalid status granted answer authority", reply, err)
 			}
@@ -430,14 +439,14 @@ func TestAgentModelCLISuccessEnvelopeAndFailureAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.Close()
-			reply, err := agentModel(script)(context.Background(), "system", "prompt", 32)
+			reply, err := agentModel(script)(context.Background(), qaFixtureRequest("system", "prompt", 32))
 			if err == nil || reply.Output == nil || reply.Response != "" {
 				t.Fatal("failed transport promoted canonical diagnostic", reply, err)
 			}
 		})
 	}
 	for _, wire := range []string{`{}`, `{"ir":null}`, `{"status":"ok"}`, `{"ir":{"schema":"wrong"}}`} {
-		if reply, err := agentModel(qaCLI(t, []byte(wire), true))(context.Background(), "system", "prompt", 32); err == nil || reply.Response != "" {
+		if reply, err := agentModel(qaCLI(t, []byte(wire), true))(context.Background(), qaFixtureRequest("system", "prompt", 32)); err == nil || reply.Response != "" {
 			t.Fatal("missing or malformed canonical observation accepted", reply, err)
 		}
 	}
@@ -445,7 +454,7 @@ func TestAgentModelCLISuccessEnvelopeAndFailureAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32); err != nil || reply.Response != "no host error" {
+	if reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), qaFixtureRequest("system", "prompt", 32)); err != nil || reply.Response != "no host error" {
 		t.Fatal(reply, err)
 	}
 }
@@ -467,7 +476,7 @@ func TestAgentModelLiveRegisteredCLI(t *testing.T) {
 		{"IR_QA_TOOL", canonical.StopToolUse},
 	} {
 		t.Run(test.prompt, func(t *testing.T) {
-			reply, err := agentModel(executable)(context.Background(), "Use only the supplied evidence.", test.prompt, 256)
+			reply, err := agentModel(executable)(context.Background(), qaFixtureRequest("Use only the supplied evidence.", test.prompt, 256))
 			if reply.Output == nil || !reply.Output.Valid() || reply.Output.StopReason != test.stop || reply.Output.Usage.Input != "10" || reply.Output.Usage.Output != "2" {
 				t.Fatalf("actual CLI canonical observation lost: reply=%+v error=%v", reply, err)
 			}
@@ -479,5 +488,103 @@ func TestAgentModelLiveRegisteredCLI(t *testing.T) {
 				t.Fatal("declined/incomplete actual CLI observation promoted to QA answer", reply, err)
 			}
 		})
+	}
+}
+
+// Synthetic authored source for transport-only tests; production task producers
+// are separately exercised by the dataset QA fixtures above.
+func qaFixtureRequest(system, prompt string, tokens int) *canonical.Request {
+	temperature := .3
+	if system == judgeSystem {
+		temperature = 0
+	}
+	return &canonical.Request{Version: 1, SourceWire: "unspecified", CachePolicy: "native",
+		System:   []canonical.Block{qaBlock(system, 2, 3, 2)},
+		Messages: []canonical.Message{{Role: "user", ContentScalar: true, Blocks: []canonical.Block{qaBlock(prompt, 6, 1, 2)}}},
+		Tools:    []canonical.Tool{}, Stops: []string{}, ToolChoice: canonical.ToolChoice{Mode: "none"}, MaxTokens: &tokens, Temperature: &temperature}
+}
+func qaFixtureViews(input *canonical.Request) (system, prompt string, tokens int) {
+	for _, block := range input.System {
+		if block.Text != nil {
+			system += *block.Text
+		}
+	}
+	for _, message := range input.Messages {
+		for _, block := range message.Blocks {
+			if block.Text != nil {
+				prompt += *block.Text
+			}
+		}
+	}
+	if input.MaxTokens != nil {
+		tokens = *input.MaxTokens
+	}
+	return
+}
+
+func assertQATaskOrigins(t *testing.T, input *canonical.Request) {
+	t.Helper()
+	if !input.Valid() || len(input.System) != 1 || input.System[0].Context == nil {
+		t.Fatal("QA producer omitted canonical policy")
+	}
+	policy := input.System[0].Context
+	if policy.Origin != 1 || policy.Authority != 3 || policy.Trust != 4 {
+		t.Fatal("fixed grading policy lost its host origin", policy)
+	}
+	system, _, _ := qaFixtureViews(input)
+	blocks := input.Messages[0].Blocks
+	want := [][3]int{{2, 2, 2}, {6, 1, 2}, {1, 2, 4}}
+	if system == judgeSystem {
+		want = [][3]int{{2, 1, 2}, {2, 1, 2}, {7, 1, 2}, {1, 2, 4}}
+		if len(blocks) > 1 && strings.Contains(*blocks[1].Text, "Unanswerable from supplied history") {
+			want[1] = [3]int{1, 2, 4}
+		}
+	}
+	if len(blocks) != len(want) {
+		t.Fatalf("QA blocks=%d want=%d", len(blocks), len(want))
+	}
+	for i, expected := range want {
+		context := blocks[i].Context
+		if context == nil || context.Origin != expected[0] || context.Authority != expected[1] || context.Trust != expected[2] || !context.ModelVisible {
+			t.Fatalf("QA source block %d has wrong custody: %+v", i, context)
+		}
+	}
+}
+
+func TestAgentModelPreservesCompleteCanonicalInput(t *testing.T) {
+	input := judgeEvaluationRequest("question 漢字", "gold", "candidate", nil)
+	temperature, topP := .17, .8
+	input.Temperature, input.TopP = &temperature, &topP
+	input.Stops = []string{"END"}
+	input.Metadata = json.RawMessage(`{"exact":9007199254740993123456789}`)
+	input.ServiceTier = "future-tier"
+	input.Messages[0].Blocks[1].Context.RevisionDomain = "qa-source"
+	input.Messages[0].Blocks[1].Context.RevisionScope = "unit"
+	input.Messages[0].Blocks[1].Context.RevisionEpoch = "17"
+	before, err := json.Marshal(input)
+	if err != nil || !input.Valid() {
+		t.Fatal("invalid source", err)
+	}
+	script := qaCLI(t, qaWire(t, "ok", qaFixtureReply("kept", 3, 1).Output), true)
+	if _, err := agentModel(script)(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := os.ReadFile(script + ".request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		IR *canonical.Request `json:"ir"`
+	}
+	if !canonical.Decode(wire, &envelope) || envelope.IR == nil {
+		t.Fatal("missing canonical stdin")
+	}
+	sent, err := json.Marshal(envelope.IR)
+	if err != nil || !bytes.Equal(before, sent) {
+		t.Fatal("QA transport changed canonical request", err)
+	}
+	after, _ := json.Marshal(input)
+	if !bytes.Equal(before, after) {
+		t.Fatal("QA transport mutated its borrowed source")
 	}
 }

@@ -25,17 +25,12 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
 }
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const aimee_message_t *message,
-                                     int max_tokens, double temperature,
-                                     struct cJSON *initial_messages,
+                                     const aimee_request_t *request, struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out)
 {
    (void)agent;
    (void)network;
-   (void)system_prompt;
-   (void)max_tokens;
-   (void)temperature;
-   (void)message;
+   (void)request;
    (void)initial_messages;
    if (updated_messages)
       *updated_messages = NULL;

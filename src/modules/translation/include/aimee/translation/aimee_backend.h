@@ -16,6 +16,24 @@ struct cJSON;
 /* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
  * Independent semantic comparison detects edits even when their flag was missed. */
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
+/* The Responses API and the authenticated Codex transport have distinct
+ * control contracts. This choice belongs to the provider boundary, not IR. */
+typedef enum
+{
+   AIMEE_RESPONSES_API = 0,
+   AIMEE_RESPONSES_CODEX = 1
+} aimee_responses_profile_t;
+/* A non-NULL loss output authorizes a host projection; its owner must record
+ * that loss before sending. NULL requires every source control to survive. */
+char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wire_t wire,
+                                        aimee_responses_profile_t profile, int *control_losses);
+int aimee_backend_request_control_losses(const aimee_request_t *source, aimee_wire_t wire,
+                                         const struct cJSON *rendered);
+int responses_backend_control_losses(const aimee_request_t *request,
+                                     aimee_responses_profile_t profile);
+struct cJSON *responses_backend_build_profile(const aimee_request_t *request,
+                                              aimee_responses_profile_t profile);
+
 /* Completed JSON/SSE entry boundary. Owns parsing and canonical admission; no
  * fallback to legacy parsers or projection occurs. */
 int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
@@ -113,9 +131,10 @@ int openai_family_add_prompt_cache(struct cJSON *out, const aimee_request_t *req
 /* Parse an OpenAI chat.completion response into the IR. */
 int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
 
-/* Build an OpenAI Responses API request from the IR (codex): system blocks ->
- * `instructions`; messages -> `input` items (message / function_call); tools ->
- * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
+/* Build the authenticated Codex transport from IR. Use the profile API for
+ * generic Responses controls. This low-level renderer reports no losses itself;
+ * execution owners must enforce responses_backend_control_losses before HTTP.
+ * System -> instructions; messages/tools retain their native item structure. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
 /* Canonical history -> stable Codex thread/inject_items output boundary.
  * Returns owned Responses input items, preserving roles/order/full tool IDs.

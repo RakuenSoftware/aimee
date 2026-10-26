@@ -940,13 +940,26 @@ static int openai_ir_append_policy(aimee_request_t *request, char *policy)
    request->mutated = 1;
    return 0;
 }
-static char *openai_build_ir_body(aimee_request_t *request, aimee_wire_t wire)
+static char *openai_build_ir_body(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire)
 {
    if (aimee_frontend_guard_state(request, NULL, 0))
       return NULL;
    if (aimee_ir_request_admit(request))
       return NULL;
-   char *body = aimee_backend_render_wire(request, wire);
+   int controls = 0;
+   char *body = aimee_backend_render_wire_profile(
+       request, wire,
+       agent && !strcmp(agent->provider, "chatgpt") ? AIMEE_RESPONSES_CODEX : AIMEE_RESPONSES_API,
+       &controls);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = request->model,
+                                  .projection_boundary = "request",
+                                  .projection_request_controls = controls};
+   if (body && controls && aimee_ir_session_emit(&event))
+   {
+      free(body);
+      return NULL;
+   }
    if (!body)
       return NULL;
    aimee_wire_projection_report_t projection;
@@ -1032,7 +1045,7 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
                      !gw_ir_response_completion_armed(request);
    if (incremental)
       request->stream = 1;
-   char *body = openai_build_ir_body(request, wire);
+   char *body = openai_build_ir_body(agent, request, wire);
    if (!body)
    {
       snprintf(error, capacity, "the selected provider cannot represent the canonical request");

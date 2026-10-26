@@ -377,8 +377,9 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       memset(out, 0, sizeof(*out));
    if (session_id_out && session_id_len > 0)
       session_id_out[0] = '\0';
-   if (!req || !req->agent || !out || !req->message || !req->message->role ||
-       strcmp(req->message->role, "user") || req->message->n_blocks < 1)
+   if (!req || !req->agent || !out || !req->request ||
+       !agent_request_with_tools_supported(req->request) || req->request->n_messages != 1 ||
+       strcmp(req->request->messages[0].role, "user"))
    {
       if (out)
          snprintf(out->error, sizeof(out->error), "invalid primary session request");
@@ -473,10 +474,10 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    ingress_preinject_set_task_requirements(req->task_request);
 
    cJSON *updated_messages = NULL;
-   int max_tokens = req->max_tokens > 0 ? req->max_tokens : AGENT_DEFAULT_MAX_TOKENS;
-   double temperature = req->temperature >= 0.0 ? req->temperature : 0.3;
    char retry_attempt[65] = {0};
-   char *retry_summary = NULL, *retry_system = NULL;
+   char *retry_summary = NULL;
+   aimee_request_t retry_request = {0};
+   const aimee_request_t *request = req->request;
    int rc = 0;
    if (cJSON_GetObjectItemCaseSensitive(req->task_request, "clean_retry"))
    {
@@ -489,19 +490,32 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
          rc = server_clean_retry_begin(req, &initial_messages, &retry_summary, retry_attempt,
                                        out->error, sizeof(out->error));
    }
-   const char *system = req->system_prompt;
    if (rc == 0 && retry_summary && retry_summary[0])
    {
-      const char *base = system ? system : "";
-      size_t size = strlen(base) + strlen(retry_summary) + 64;
-      retry_system = malloc(size);
-      if (!retry_system)
-         rc = -1;
+      if (aimee_ir_request_clone(request, &retry_request))
+         rc = AGENT_RC_CONTEXT_REFUSED;
       else
       {
-         snprintf(retry_system, size, "%s\n<host-retry-summary>\n%s\n</host-retry-summary>", base,
-                  retry_summary);
-         system = retry_system;
+         aimee_message_t *message = &retry_request.messages[0];
+         aimee_block_t *blocks =
+             message->n_blocks < AIMEE_IR_MAX_BLOCKS
+                 ? realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks)
+                 : NULL;
+         if (!blocks)
+            rc = AGENT_RC_CONTEXT_REFUSED;
+         else
+         {
+            message->blocks = blocks;
+            message->content_scalar = 0;
+            aimee_block_t *block = &blocks[message->n_blocks++];
+            *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(retry_summary)};
+            aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                                       AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL,
+                                       NULL, 0);
+            if (!block->text || aimee_ir_request_admit(&retry_request))
+               rc = AGENT_RC_CONTEXT_REFUSED;
+            request = &retry_request;
+         }
       }
    }
    cJSON *retry_task = NULL;
@@ -517,8 +531,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       ingress_preinject_set_task_requirements(retry_task);
    }
    if (rc == 0)
-      rc = agent_execute_session_with_tools(req->agent, req->network, system, req->message,
-                                            max_tokens, temperature, initial_messages,
+      rc = agent_execute_session_with_tools(req->agent, req->network, request, initial_messages,
                                             &updated_messages, out);
    if (retry_attempt[0])
    {
@@ -533,7 +546,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    ingress_preinject_set_task_requirements(NULL);
    cJSON_Delete(retry_task);
    free(retry_summary);
-   free(retry_system);
+   aimee_request_free(&retry_request);
 
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */

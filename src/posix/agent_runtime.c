@@ -13,6 +13,7 @@
 #include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include "agent_request_build.h"
 #include "server_session_log.h"
 #include "server_session_capture.h"
 #include <openssl/crypto.h>
@@ -191,16 +192,6 @@ static int agent_durable_cancelled(char *buf, size_t bufsz)
       return 1;
    }
    return agent_delegation_stopped(buf, bufsz);
-}
-
-static int is_chatgpt_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "chatgpt") == 0;
-}
-
-static int is_anthropic_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "anthropic") == 0;
 }
 
 static int agent_allows_json_content_rescue(const agent_t *agent)
@@ -643,24 +634,35 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
 }
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const aimee_message_t *message,
-                                     int max_tokens, double temperature, cJSON *initial_messages,
+                                     const aimee_request_t *request, cJSON *initial_messages,
                                      cJSON **updated_messages, agent_result_t *out)
 {
-   if (!message || !message->role || strcmp(message->role, "user") || message->n_blocks < 1)
-      return -1;
-   /* Routing policy may inspect text; the loop appends the original IR message. */
-   const char *query = "Continue the admitted conversation.";
-   for (int i = 0; i < message->n_blocks; i++)
-      if (message->blocks[i].type == AIMEE_BLK_TEXT && message->blocks[i].text &&
-          message->blocks[i].text[0] && aimee_ir_block_model_visible(&message->blocks[i]))
-      {
-         query = message->blocks[i].text;
-         break;
-      }
-   return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, query, max_tokens,
-                                            temperature, initial_messages, updated_messages, out,
-                                            NULL, NULL, message, 0);
+   if (updated_messages)
+      *updated_messages = NULL;
+   if (!agent || !out || !agent_request_with_tools_supported(request) || request->n_messages != 1 ||
+       strcmp(request->messages[0].role, "user"))
+      return AGENT_RC_CONTEXT_REFUSED;
+   cJSON *messages = aimee_ir_history_clone(initial_messages);
+   cJSON *input = aimee_ir_message_json(&request->messages[0]);
+   if (!messages || !input || !cJSON_AddItemToArray(messages, input))
+   {
+      cJSON_Delete(input);
+      cJSON_Delete(messages);
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   /* Routing gets a visible view; execution retains the full canonical request. */
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   aimee_response_t response = {0};
+   int rc = agent_execute_with_tools_internal(
+       agent, network, NULL, request->n_system ? request->system[0].text : NULL,
+       query[0] ? query : "Continue the admitted conversation.",
+       request->has_max_tokens ? request->max_tokens : AGENT_DEFAULT_MAX_TOKENS,
+       request->has_temperature ? request->temperature : 0.3, messages, updated_messages, out,
+       request, &response, NULL, 1);
+   aimee_response_free(&response);
+   cJSON_Delete(messages);
+   return rc;
 }
 
 static int agent_execute_owned_request_with_tools(const agent_t *agent,
@@ -675,8 +677,7 @@ static int agent_execute_owned_request_with_tools(const agent_t *agent,
    memset(out, 0, sizeof *out);
    /* Runs own the server catalog; unsupported client policy is explicit. */
    if (!agent_request_with_tools_supported(request) ||
-       (!host_profile && is_chatgpt_provider(agent) &&
-        (request->has_max_tokens || request->has_temperature)))
+       (!host_profile && !agent_request_controls_supported(agent, request)))
    {
       snprintf(out->error, sizeof out->error,
                "run request contains unsupported execution controls");

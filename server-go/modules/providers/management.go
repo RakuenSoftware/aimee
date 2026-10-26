@@ -245,7 +245,13 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 						count++
 					}
 				}
-				out = append(out, object{"name": str(p, "name"), "provider": str(p, "provider"), "endpoint": str(p, "endpoint"), "auth_type": str(p, "auth_type"), "model_count": count})
+				view := object{"name": str(p, "name"), "provider": str(p, "provider"), "endpoint": str(p, "endpoint"), "auth_type": str(p, "auth_type"), "model_count": count}
+				for _, field := range []string{"backend", "cli_kind", "cli_cmd", "session_reuse"} {
+					if value, present := p[field]; present {
+						view[field] = value
+					}
+				}
+				out = append(out, view)
 			}
 			return object{"status": "ok", "providers": out}, nil
 		case "provider.save_connection":
@@ -319,6 +325,11 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 		}
 	}
 	key := str(a, "api_key")
+	transport := copyObject(p)
+	transport["provider"], transport["endpoint"], transport["auth_type"] = protocol, endpoint, auth
+	if err := applyConnectionTransport(transport, a); err != nil {
+		return nil, err
+	}
 	if err := m.credential(ctx, req, name, key); err != nil {
 		return nil, err
 	}
@@ -328,6 +339,13 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 		delete(p, "api_key_ref")
 	}
 	p["provider"], p["endpoint"], p["auth_type"] = protocol, endpoint, auth
+	for _, field := range []string{"backend", "cli_kind", "cli_cmd", "session_reuse"} {
+		if value, ok := transport[field]; ok {
+			p[field] = value
+		} else {
+			delete(p, field)
+		}
+	}
 	for _, model := range rows(root, "models") {
 		if owns(p, model) {
 			applyConnection(model, p)

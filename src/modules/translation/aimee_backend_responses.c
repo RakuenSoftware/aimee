@@ -110,12 +110,29 @@ cJSON *aimee_codex_history_items(const aimee_request_t *history)
    return items;
 }
 
+int responses_backend_control_losses(const aimee_request_t *ir, aimee_responses_profile_t profile)
+{
+   cJSON *body = responses_backend_build_profile(ir, profile);
+   int losses = body ? aimee_backend_request_control_losses(ir, AIMEE_WIRE_RESPONSES, body) : -1;
+   cJSON_Delete(body);
+   return losses;
+}
+
 cJSON *responses_backend_build(const aimee_request_t *ir)
 {
-   if (aimee_ir_request_admit(ir))
+   return responses_backend_build_profile(ir, AIMEE_RESPONSES_CODEX);
+}
+
+cJSON *responses_backend_build_profile(const aimee_request_t *ir, aimee_responses_profile_t profile)
+{
+   if (aimee_ir_request_admit(ir) ||
+       (profile != AIMEE_RESPONSES_API && profile != AIMEE_RESPONSES_CODEX))
       return NULL;
    cJSON *out = cJSON_CreateObject();
-   if (!out || openai_family_add_prompt_cache(out, ir))
+   aimee_request_t cache = {.prompt_cache_key = ir->prompt_cache_key,
+                            .prompt_cache_retention =
+                                profile == AIMEE_RESPONSES_API ? ir->prompt_cache_retention : NULL};
+   if (!out || openai_family_add_prompt_cache(out, &cache))
    {
       cJSON_Delete(out);
       return NULL;
@@ -144,13 +161,26 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
    }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
-   /* NOTE: no max_output_tokens -- the legacy build omits it and codex/gpt-5.5
-    * 400s on "Unsupported parameter: max_output_tokens" (verified live). */
+   /* Generic Responses supports these controls. The authenticated Codex
+    * request contract does not; callers must refuse or report their omission. */
+   if (profile == AIMEE_RESPONSES_API)
+   {
+      if (ir->has_max_tokens)
+         cJSON_AddNumberToObject(out, "max_output_tokens", ir->max_tokens);
+      if (ir->has_temperature)
+         cJSON_AddNumberToObject(out, "temperature", ir->temperature);
+      if (ir->has_top_p)
+         cJSON_AddNumberToObject(out, "top_p", ir->top_p);
+      if (ir->metadata && !cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1)))
+         goto fail;
+   }
+   if (ir->service_tier && !cJSON_AddStringToObject(out, "service_tier", ir->service_tier))
+      goto fail;
    /* Responses/codex REQUIREMENTS (verified live: codex 400s with "Store must be
     * set to false" otherwise): store=false, and the API is SSE-based so stream is
     * always on (the caller accumulates + parses the SSE). */
    cJSON_AddBoolToObject(out, "store", 0);
-   cJSON_AddBoolToObject(out, "stream", 1);
+   cJSON_AddBoolToObject(out, "stream", profile == AIMEE_RESPONSES_CODEX || ir->stream);
    cJSON *include = cJSON_AddArrayToObject(out, "include");
    cJSON_AddItemToArray(include, cJSON_CreateString("reasoning.encrypted_content"));
    /* system blocks -> `instructions` (Responses' system field); a default keeps
@@ -877,4 +907,72 @@ fail:
    cJSON_Delete(state.items);
    cJSON_Delete(state.terminal);
    return NULL;
+}
+
+static int omitted_number(const cJSON *body, const char *key, int present, double expected)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(body, key);
+   return present && (!cJSON_IsNumber(value) || value->valuedouble != expected);
+}
+
+static int omitted_string(const cJSON *body, const char *key, const char *expected)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(body, key);
+   return expected && (!cJSON_IsString(value) || strcmp(value->valuestring, expected));
+}
+
+static int omitted_object(const cJSON *body, const char *key, const cJSON *expected)
+{
+   return expected && !cJSON_Compare(expected, cJSON_GetObjectItemCaseSensitive(body, key), 1);
+}
+
+static int omitted_parallel(const aimee_request_t *source, aimee_wire_t wire, const cJSON *body)
+{
+   if (!source->has_parallel_tool_calls)
+      return 0;
+   if (wire == AIMEE_WIRE_ANTHROPIC)
+   {
+      const cJSON *choice = cJSON_GetObjectItemCaseSensitive(body, "tool_choice");
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(choice, "type"));
+      if (type && !strcmp(type, "none"))
+         return 0; /* No tool calls also satisfies the parallelism restriction. */
+      const cJSON *disabled = cJSON_GetObjectItemCaseSensitive(choice, "disable_parallel_tool_use");
+      /* Anthropic's absent flag allows parallel calls by default. */
+      return cJSON_IsTrue(disabled) == !!source->parallel_tool_calls;
+   }
+   const cJSON *parallel = cJSON_GetObjectItemCaseSensitive(body, "parallel_tool_calls");
+   return !cJSON_IsBool(parallel) || cJSON_IsTrue(parallel) != !!source->parallel_tool_calls;
+}
+
+/* Compare source controls with the completed provider representation. */
+int aimee_backend_request_control_losses(const aimee_request_t *source, aimee_wire_t wire,
+                                         const cJSON *body)
+{
+   if (!source || !cJSON_IsObject(body))
+      return -1;
+   int omitted =
+       omitted_number(body, wire == AIMEE_WIRE_RESPONSES ? "max_output_tokens" : "max_tokens",
+                      source->has_max_tokens, source->max_tokens) +
+       omitted_number(body, "temperature", source->has_temperature, source->temperature) +
+       omitted_number(body, "top_p", source->has_top_p, source->top_p) +
+       omitted_number(body, "top_k", source->has_top_k, source->top_k);
+   omitted += omitted_object(body, "thinking", source->thinking);
+   omitted += omitted_object(body, "metadata", source->metadata);
+   omitted += omitted_string(body, "service_tier", source->service_tier);
+   omitted += omitted_string(body, "prompt_cache_key", source->prompt_cache_key);
+   omitted += omitted_string(body, "prompt_cache_retention", source->prompt_cache_retention);
+   omitted += omitted_object(body, "prompt_cache_options", source->prompt_cache_options);
+   omitted += omitted_parallel(source, wire, body);
+   omitted += source->n_stop && !cJSON_HasObjectItem(body, "stop") &&
+              !cJSON_HasObjectItem(body, "stop_sequences");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(body, "reasoning");
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(body, "output_config");
+   omitted += source->reasoning_summary && !cJSON_HasObjectItem(reasoning, "summary");
+   omitted += source->reasoning_effort && !cJSON_HasObjectItem(body, "reasoning_effort") &&
+              !cJSON_HasObjectItem(reasoning, "effort") && !cJSON_HasObjectItem(output, "effort");
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(body, "text");
+   omitted += source->output_format.kind > AIMEE_OUTPUT_TEXT &&
+              !cJSON_HasObjectItem(body, "response_format") &&
+              !cJSON_HasObjectItem(text, "format") && !cJSON_HasObjectItem(output, "format");
+   return omitted;
 }

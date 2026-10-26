@@ -47,6 +47,47 @@ it("edits a connection while preserving an unchanged key", async () => {
   expect(body).toEqual({ name: "work", provider: "openai", endpoint: "https://new/v1", auth_type: "bearer", create: false });
 });
 
+it("enrolls Codex through its connection and round-trips execution mode", async () => {
+  const codex = { ...work, name: "codex", provider: "chatgpt", auth_type: "codex-oauth", backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true };
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [codex] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<Providers />);
+  fireEvent.click(await screen.findByText("Edit provider"));
+  expect((screen.getByLabelText("Execution") as HTMLSelectElement).value).toBe("codex");
+  fireEvent.click(screen.getByText("Save provider"));
+  await screen.findByText("Provider saved");
+  const native = JSON.parse(fetcher.mock.calls.find(c => c[0] === "/api/providers/save")![1].body);
+  expect(native).toMatchObject({ backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true, auth_type: "codex-oauth" });
+  expect(native.api_key).toBeUndefined();
+
+  fireEvent.click(screen.getByText("Edit provider"));
+  fireEvent.change(screen.getByLabelText("Execution"), { target: { value: "http" } });
+  fireEvent.click(screen.getByText("Save provider"));
+  await waitFor(() => expect(fetcher.mock.calls.filter(c => c[0] === "/api/providers/save")).toHaveLength(2));
+  const direct = JSON.parse(fetcher.mock.calls.filter(c => c[0] === "/api/providers/save")[1][1].body);
+  expect(direct.backend).toBe("http");
+  expect(direct.cli_kind).toBeUndefined();
+  expect(direct.api_key).toBeUndefined();
+});
+
+it.each(["openai", "anthropic"])("clears Codex dispatch when an unattached connection becomes %s", async provider => {
+  const codex = { ...work, name: "codex", model_count: 0, provider: "chatgpt", auth_type: "codex-oauth", backend: "provider-cli", cli_kind: "codex", cli_cmd: "codex", session_reuse: true };
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [codex] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<Providers />);
+  fireEvent.click(await screen.findByText("Edit provider"));
+  fireEvent.change(screen.getByLabelText("Provider type"), { target: { value: provider } });
+  expect(screen.queryByLabelText("Execution")).toBeNull();
+  fireEvent.click(screen.getByText("Save provider"));
+  await screen.findByText("Provider saved");
+  const saved = JSON.parse(fetcher.mock.calls.find(c => c[0] === "/api/providers/save")![1].body);
+  expect(saved).toMatchObject({ provider, backend: "http", create: false });
+  expect(saved.cli_kind).toBeUndefined();
+  expect(saved.cli_cmd).toBeUndefined();
+  expect(saved.session_reuse).toBeUndefined();
+  expect(saved.api_key).toBeUndefined();
+});
+
 it("requires explicit deletion confirmation and keeps failed deletes visible", async () => {
   const fetcher = vi.fn(async (path: string) => path === "/api/providers/remove" ? reply({ error: "Save failed" }, false) : reply({ providers: [work] }));
   vi.stubGlobal("fetch", fetcher);

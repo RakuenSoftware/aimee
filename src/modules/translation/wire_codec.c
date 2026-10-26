@@ -156,8 +156,34 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
       return rc;
    return admit_owned_request(out, error, error_capacity);
 }
+static cJSON *render_profile(const aimee_request_t *request, aimee_wire_t wire,
+                             aimee_responses_profile_t profile)
+{
+   return wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_build(request)
+          : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_build(request)
+          : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_build_profile(request, profile)
+                                           : NULL;
+}
+
+static int replay_controls_supported(const aimee_request_t *request, aimee_wire_t wire,
+                                     aimee_responses_profile_t profile)
+{
+   cJSON *native = render_profile(request, wire, profile);
+   int supported = native && !aimee_backend_request_control_losses(request, wire, native);
+   cJSON_Delete(native);
+   return supported;
+}
+
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire)
 {
+   return aimee_backend_render_wire_profile(request, wire, AIMEE_RESPONSES_API, NULL);
+}
+
+char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wire_t wire,
+                                        aimee_responses_profile_t profile, int *control_losses)
+{
+   if (control_losses)
+      *control_losses = 0;
    if (aimee_ir_request_admit(request))
       return NULL;
    if (aimee_ir_request_needs_model_projection(request))
@@ -170,12 +196,12 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
          aimee_request_free(&projected);
          return NULL;
       }
-      char *body = aimee_backend_render_wire(&projected, wire);
+      char *body = aimee_backend_render_wire_profile(&projected, wire, profile, control_losses);
       aimee_request_free(&projected);
       return body;
    }
    int native_transport =
-       wire != AIMEE_WIRE_RESPONSES ||
+       wire != AIMEE_WIRE_RESPONSES || profile == AIMEE_RESPONSES_API ||
        (request->stream && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request->raw, "store")));
    if (native_transport &&
        !(wire == AIMEE_WIRE_ANTHROPIC && anthropic_ir_omitted_empty_messages(request)) &&
@@ -193,7 +219,7 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
          int unchanged = same_model && aimee_ir_request_wire_equal(request, &original) &&
                          cJSON_Compare(request->raw, original.raw, 1);
          aimee_request_free(&original);
-         if (unchanged &&
+         if (unchanged && replay_controls_supported(request, wire, profile) &&
              (wire != AIMEE_WIRE_ANTHROPIC || aimee_anthropic_replay_valid(request, request->raw)))
          {
             char *copy = malloc(request->raw_length + 1);
@@ -205,11 +231,11 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
       else
          aimee_request_free(&original);
    }
-   cJSON *native = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_build(request)
-                   : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_build(request)
-                   : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_build(request)
-                                                    : NULL;
-   char *bytes = native ? cJSON_PrintUnformatted(native) : NULL;
+   cJSON *native = render_profile(request, wire, profile);
+   int losses = native ? aimee_backend_request_control_losses(request, wire, native) : 0;
+   if (control_losses)
+      *control_losses = losses;
+   char *bytes = native && (!losses || control_losses) ? cJSON_PrintUnformatted(native) : NULL;
    cJSON_Delete(native);
    return bytes;
 }

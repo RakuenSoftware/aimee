@@ -20,6 +20,20 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
+## Current work remains active
+
+The earlier completion claim was premature. Runtime `361fefa7f` has verified
+Claude and direct ChatGPT browser paths, but native Codex browser execution and
+the main retained Claude historical continuation failures remain unresolved.
+Historical positive receipts below qualify their stated cases only.
+
+The follow-up implementation repairs request-control projection, workflow and
+primary-session IR construction at origin, typed retry observations, canonical
+QA callback requests, and normal provider connection enrollment for native Codex.
+Focused checks pass; independent review and qualification of the combined runtime
+are still required. No claim of all-model browser coverage
+or project-wide IR completion is established by the older runtime receipts.
+
 ## Current qualification: runtime 361fefa7f
 
 The implemented runtime is source `361fefa7f5aa02c9fb03ed6d1a8d00ba58a7e382`,
@@ -897,8 +911,8 @@ There are 216 IR rows after those two sends; every prior row remains exact.
 Credentials, grants, SDK binaries, installed products and TLS remain unchanged
 through the browser checks. All three services are healthy and no SDK process
 or native reservation remains active. The installed internal draft boundary
-refuses a legacy non-IR payload before model transport. Both requested goals
-are complete for this retained QA runtime and the audited implementation.
+refuses a legacy non-IR payload before model transport. This historical receipt does not establish completion of either goal across
+the current project and all required browser paths.
 The proof is `/var/tmp/aimee-ir-browser-final-recovery/summary.json`; final UI,
 SDK resume and state receipts are in `/var/tmp/aimee-ir-browser-31e2c4b95-native-ui/`
 and `/var/tmp/aimee-ir-browser-31e2c4b95-default-ui/`. This documentation-only

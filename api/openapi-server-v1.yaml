@@ -2948,8 +2948,8 @@ paths:
   /provider/save_connection:
     post:
       summary: Create or edit a saved provider connection
-      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, create: { type: boolean, default: false } } } } } }
+      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models. A connection also owns its execution transport. Choose backend provider-cli with cli_kind codex to use the Codex agent, or backend http for the direct model API. Switching to http clears native execution settings.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, backend: { type: string, enum: [http, provider-cli] }, cli_kind: { type: string }, cli_cmd: { type: string }, session_reuse: { type: boolean }, create: { type: boolean, default: false } } } } } }
       responses: { "200": { description: Saved connection or typed error, content: { application/json: { schema: { type: object } } } } }
   /provider/remove_connection:
     post:

@@ -271,6 +271,11 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       cJSON_AddNumberToObject(out, "top_k", ir->top_k);
    if (ir->metadata)
       cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1));
+   if (ir->service_tier && !cJSON_AddStringToObject(out, "service_tier", ir->service_tier))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    if (ir->stream)
    {
       cJSON_AddBoolToObject(out, "stream", 1);

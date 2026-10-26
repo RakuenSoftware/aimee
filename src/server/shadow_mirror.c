@@ -378,8 +378,9 @@ static int mirror_fields_supported(const aimee_request_t *request, int legacy)
    char *legacy_body = legacy ? mirror_text_request(request) : NULL;
    cJSON *canonical = legacy                                      ? cJSON_Parse(legacy_body)
                       : request->frontend == AIMEE_WIRE_ANTHROPIC ? anthropic_backend_build(request)
-                      : request->frontend == AIMEE_WIRE_RESPONSES ? responses_backend_build(request)
-                                                                  : openai_backend_build(request);
+                      : request->frontend == AIMEE_WIRE_RESPONSES
+                          ? responses_backend_build_profile(request, AIMEE_RESPONSES_API)
+                          : openai_backend_build(request);
    free(legacy_body);
    if (!canonical)
       return 0;

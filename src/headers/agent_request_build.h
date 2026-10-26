@@ -14,6 +14,8 @@ extern "C"
 
    struct cJSON;
 
+   /* HTTP control preflight; native/ACP owners retain their own admission order. */
+   int agent_request_controls_supported(const agent_t *agent, const aimee_request_t *request);
    int is_chatgpt_provider(const agent_t *agent);
    int is_anthropic_provider(const agent_t *agent);
 

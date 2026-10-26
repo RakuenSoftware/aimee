@@ -52,7 +52,7 @@ func projectModelReply(reply modelReply) (modelReply, error) {
 	return reply, nil
 }
 
-type evaluationModel func(context.Context, string, string, int) (modelReply, error)
+type evaluationModel func(context.Context, *canonical.Request) (modelReply, error)
 
 type limitedModelOutput struct{ buffer bytes.Buffer }
 
@@ -69,31 +69,17 @@ func (b *limitedModelOutput) Write(p []byte) (int, error) {
 // The registered tool-free canonical owner never enters agentic hint,
 // worktree, tool or feedback paths. Stdin avoids shell and argv interpolation.
 func agentModel(executable string) evaluationModel {
-	return func(ctx context.Context, system, prompt string, tokens int) (modelReply, error) {
+	return func(ctx context.Context, input *canonical.Request) (modelReply, error) {
 		var reply modelReply
 		if executable == "" {
 			return reply, errors.New("QA requires -agent-executable (the configured aimee CLI)")
 		}
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		if strings.IndexByte(system, 0) >= 0 || strings.IndexByte(prompt, 0) >= 0 {
-			return reply, errors.New("evaluation model request contains NUL")
-		}
-		temperature := .3
-		if system == judgeSystem {
-			temperature = 0
-		}
-		policy := canonical.Context{Origin: 3, Authority: 2, Trust: 2, Sensitivity: 1, ModelVisible: true}
-		evidence := canonical.Context{Origin: 5, Authority: 1, Trust: 2, Sensitivity: 1, ModelVisible: true}
-		input := canonical.Request{Version: 1, SourceWire: "unspecified", CachePolicy: "native",
-			System:   []canonical.Block{{Type: "text", Text: &system, Context: &policy}},
-			Messages: []canonical.Message{{Role: "user", ContentScalar: true, Blocks: []canonical.Block{{Type: "text", Text: &prompt, Context: &evidence}}}},
-			Tools:    []canonical.Tool{}, Stops: []string{}, ToolChoice: canonical.ToolChoice{Mode: "none"},
-			MaxTokens: &tokens, Temperature: &temperature}
-		if !input.Valid() {
+		if input == nil || !input.Valid() {
 			return reply, errors.New("evaluation request is not admitted canonical IR")
 		}
-		request, err := json.Marshal(map[string]any{"ir": &input})
+		request, err := json.Marshal(map[string]any{"ir": input})
 		if err != nil {
 			return reply, err
 		}
@@ -157,8 +143,11 @@ func judgeScore(s string) (int, error) {
 	}
 	return *result.Score, nil
 }
-func checkedModel(ctx context.Context, model evaluationModel, system, prompt string, tokens int) (modelReply, error) {
-	reply, err := model(ctx, system, prompt, tokens)
+func checkedModel(ctx context.Context, model evaluationModel, request *canonical.Request) (modelReply, error) {
+	if request == nil || !request.Valid() {
+		return modelReply{}, errors.New("evaluation request is not admitted canonical IR")
+	}
+	reply, err := model(ctx, request)
 	if err != nil {
 		return reply, err
 	}
@@ -171,7 +160,7 @@ func checkedModel(ctx context.Context, model evaluationModel, system, prompt str
 	}
 	// Keep the legacy byte/4 fallback visibly labelled in the report.
 	if reply.PromptTokens == 0 {
-		reply.PromptTokens = (len(system)+3)/4 + (len(prompt)+3)/4
+		reply.PromptTokens = qaRequestEstimatedTokens(request)
 	}
 	if reply.CompletionTokens == 0 {
 		reply.CompletionTokens = (len(reply.Response) + 3) / 4
@@ -229,16 +218,11 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 				if contextText == "" {
 					contextText = "[no retrieved context]"
 				}
-				prompt := fmt.Sprintf("Question: %s\n\nRetrieved memory context:\n%s\nFinal answer:", row.Query, contextText)
-				answer, err := checkedModel(ctx, opts.model, answerSystem, prompt, 256)
+				answer, err := checkedModel(ctx, opts.model, answerEvaluationRequest(row.Query, contextText))
 				if err != nil {
 					return err
 				}
-				prompt = fmt.Sprintf("Question: %s\nGold answer: %s\nCandidate answer: %s\n\nReturn JSON only.", row.Query, row.Answer, answer.Response)
-				if row.Answerable != nil && !*row.Answerable {
-					prompt = fmt.Sprintf("Question: %s\nUnanswerable from supplied history. Score 1 only for explicit abstention without asserting an answer.\nCandidate answer: %s\nReturn JSON only.", row.Query, answer.Response)
-				}
-				judge, err := checkedModel(ctx, opts.model, judgeSystem, prompt, 64)
+				judge, err := checkedModel(ctx, opts.model, judgeEvaluationRequest(row.Query, row.Answer, answer.Response, row.Answerable))
 				if err != nil {
 					return err
 				}

@@ -76,10 +76,13 @@ int main(void)
    strcpy(ctx.request_id, "request");
    primary_session_request_t req = {
        .aimee_session_id = "session",
-       .message = &(aimee_message_t){
-           .role = "user",
-           .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "current user constraints"},
-           .n_blocks = 1}};
+       .request =
+           &(aimee_request_t){.n_messages = 1,
+                              .messages = &(aimee_message_t){
+                                  .role = "user",
+                                  .blocks = &(aimee_block_t){.type = AIMEE_BLK_TEXT,
+                                                             .text = "current user constraints"},
+                                  .n_blocks = 1}}};
    cJSON *input = cJSON_Parse(
        "{\"clean_retry\":{\"previous_attempt\":\"prior\",\"replace_constraints\":true}}");
    req.task_request = input;

@@ -448,6 +448,20 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       aimee_request_free(out);
       return -1;
    }
+   const cJSON *tier = cJSON_GetObjectItemCaseSensitive(req, "service_tier");
+   if (tier && !cJSON_IsNull(tier))
+   {
+      if (!cJSON_IsString(tier) || !tier->valuestring || !tier->valuestring[0])
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid service_tier");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->service_tier = strdup(tier->valuestring);
+      if (!out->service_tier)
+         goto oom;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);

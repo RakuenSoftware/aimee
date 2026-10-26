@@ -476,11 +476,15 @@ func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
 		WorkItem: workflowstore.WorkItem{Repo: repo},
 		Proposal: "Document only the self-update limitation.",
 	}
-	prompt, err := documentDelegatePrompt(t.Context(), request, repo)
+	input, err := documentDelegateInput(t.Context(), request, repo, "documenter")
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	prompt := fixtureInputText(input)
+	assertWorkflowOrigin(t, input, "Document only the self-update limitation.", 3, 2, 2)
+	assertWorkflowOrigin(t, input, "+accepted change", 4, 1, 2)
+	assertWorkflowOrigin(t, input, "Do not infer work from unrelated repository history", 1, 2, 4)
 	for _, required := range []string{
 		"ORIGINAL REQUEST:\nDocument only the self-update limitation.",
 		"ACCEPTED IMPLEMENTATION DIFF:",

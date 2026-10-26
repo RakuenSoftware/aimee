@@ -1766,7 +1766,7 @@ static void test_native_alias_uses_provider_model(void)
    aimee_request_t canonical = {0};
    char error[128];
    assert(!messages_prepare_request(body, &agent, 1, &canonical, error, sizeof error));
-   char *wire = anthropic_build_prov_body(&canonical, AIMEE_WIRE_ANTHROPIC, 0);
+   char *wire = anthropic_build_prov_body(NULL, &canonical, AIMEE_WIRE_ANTHROPIC, 0);
    cJSON *native = wire ? cJSON_Parse(wire) : NULL;
    assert(native && !strcmp(cJSON_GetStringValue(obj(native, "model")), "actual-provider-model"));
    assert(cJSON_Compare(obj(request, "system"), obj(native, "system"), 1));
@@ -1891,7 +1891,7 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
                                      sizeof error));
    aimee_frontend_state_scope_t previous =
        aimee_frontend_bind_state_guard(discard_unproved_signature, NULL);
-   char *wire = anthropic_build_prov_body(&request, AIMEE_WIRE_ANTHROPIC, 0);
+   char *wire = anthropic_build_prov_body(NULL, &request, AIMEE_WIRE_ANTHROPIC, 0);
    assert(wire && !strstr(wire, "source signature") && !strstr(wire, "source thought"));
    assert(opaque_guard_calls == 1);
    free(wire);
@@ -1900,8 +1900,8 @@ static void test_native_provenance_is_rechecked_at_actual_egress(void)
    assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
                                      sizeof error));
    previous = aimee_frontend_bind_state_guard(discard_unproved_signature, &request);
-   assert(!anthropic_build_prov_body(&request, AIMEE_WIRE_ANTHROPIC, 0) && !request.messages &&
-          !request.model);
+   assert(!anthropic_build_prov_body(NULL, &request, AIMEE_WIRE_ANTHROPIC, 0) &&
+          !request.messages && !request.model);
    aimee_request_free(&request);
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }

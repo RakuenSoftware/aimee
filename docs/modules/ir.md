@@ -303,5 +303,10 @@ inventories, symbols and native-boundary rules remain enforced.
 
 Canonical execution histories use `aimee_ir_history_clone`; it refuses provider-shaped
 messages. Legacy storage imports are owned by the explicit translation boundary.
-Browser submissions, pending sends and primary-session input carry canonical
-messages; the host assigns context authority before capture and execution.
+Browser submissions and queued sends carry canonical messages; the host assigns
+context authority before capture and execution. Primary-session execution accepts
+a canonical `aimee_request_t` with its system blocks and explicit controls intact.
+The browser leaves unauthored sampling controls unset so the selected agent
+resolves its configured defaults. Clean-retry observations enter an owned request
+clone as `MEMORY` / `EVIDENCE` / `UNVERIFIED` blocks, preserving the original
+user message and policy blocks.
