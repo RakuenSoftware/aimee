@@ -2343,7 +2343,17 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
    }
    if (!content)
-      content = mcp_gateway_tool_dispatch(tool, jargs);
+   {
+      cJSON *gateway_result = mcp_gateway_tool_dispatch(tool, jargs);
+      if (gateway_result)
+      {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(gateway_result, "isError")))
+            served_outcome("error", "tool_error");
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_ok(conn, gateway_result);
+      }
+   }
    if (!content)
       content = server_mcp_process_tool(tool, jargs);
    if (!content)

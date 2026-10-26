@@ -510,6 +510,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-gateway \
                $(TESTPREFIX)/unit-test-gateway-telegram \
                $(TESTPREFIX)/unit-test-gateway-ntfy-webhook \
+               $(TESTPREFIX)/unit-test-gateway-webhook-ir \
                $(TESTPREFIX)/unit-test-gateway-stt-pairing \
                $(TESTPREFIX)/unit-test-gateway-stt \
                $(TESTPREFIX)/unit-test-gateway-tts \
@@ -4024,6 +4025,7 @@ $(TESTPREFIX)/unit-test-mcp-gateway-tools: $(OBJDIR)/tests/test_mcp_gateway_tool
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pairing.o \
+                                             $(OBJDIR)/modules/ir/session_event.o \
                                              $(OBJDIR)/modules/ir/aimee_ir.o \
                                              $(OBJDIR)/gateway/stt.o \
                                              $(OBJDIR)/gateway/pairing.o \
@@ -4045,8 +4047,9 @@ $(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/test_gateway_stt.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/test_gateway_tts.o \
-    $(OBJDIR)/gateway/tts.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+    $(OBJDIR)/gateway/tts.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread -lcrypto
 
 $(TESTPREFIX)/unit-test-gateway-ntfy: $(OBJDIR)/tests/test_gateway_ntfy.o \
     $(OBJDIR)/gateway/platform_ntfy.o
@@ -7694,3 +7697,10 @@ $(TESTPREFIX)/unit-test-roadmap-request-origin: $(OBJDIR)/tests/test_roadmap_req
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-sweep-ir
 $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Actual authenticated webhook parser/lifetime, isolated from model and delivery.
+$(OBJDIR)/tests/test_gateway_webhook_ir.o: gateway/platform_webhook.c gateway/gateway_ir.h
+$(TESTPREFIX)/unit-test-gateway-webhook-ir: $(OBJDIR)/tests/test_gateway_webhook_ir.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread

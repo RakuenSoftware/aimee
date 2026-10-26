@@ -42,7 +42,7 @@ must split those responsibilities before assigning them to IR or translation. IR
 ingress parsing, provider-specific body construction, response composition outside the typed result, or
 `shadow_mirror.c` lifecycle behavior.
 
-### Canonical session contract (migration in progress)
+### Canonical session contract
 
 `aimee/ir/session_event.h` serializes typed IR messages and deltas without native provider
 sidecars. Messages carry roles and stable message identities; opaque tool IDs correlate uses
@@ -56,8 +56,10 @@ scope digest, exact canonical block digest, source wire and (for Anthropic) the 
 binding. It contains no credentials or transcript. C, Go and browser consumers validate the same
 shape; history and browser projection advance past it without creating model messages. Parsing
 this event alone never establishes provenance or authorizes replay. The scoped native runtime captures evidence from actual upstream canonical responses and
-checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
-activation and live cache/history adoption remain separate, unfinished work.
+checks it at entry and after restored history/policy edits, before egress. The configured native execution owner selects the measured SDK launcher and cache
+controller; replay metadata alone cannot activate either. Warm resume and cold
+canonical-history adoption are qualified separately under their actual source,
+context, credential and SDK bindings.
 
 The host-only `native_checkpoint` event commits an attested scope, current-context digest,
 canonical-prefix digest and message count (1–4096), harness (`codex` or `claude`), opaque native
@@ -65,9 +67,11 @@ handle and random claim identity. It contains no prompt or credential. C, Go and
 its shape; model-history loading and browser projection advance past it without creating model
 content. The native cache controller additionally verifies the owner, source-log continuity,
 completed source turn and canonical history, and atomically consumes a versioned checkpoint before
-handing out a resume handle. Parsing metadata alone grants no replay authority. Production SDK
-callers have not selected this controller; native adoption/profile/compaction fidelity remains a
-separate qualification before activation.
+handing out a resume handle. Parsing metadata alone grants no replay authority. Production native SDK callers use this controller. An unchanged admitted profile may
+resume its registered handle; a changed catalog, credential lineage or launch binding
+requires the owner to select a new scope and adopt authenticated canonical history.
+Old handles and histories remain preserved. Profile changes are not permission to
+force a warm handle or accept an arbitrary scope.
 
 Thinking deltas can carry `thinking_id` and `encrypted_content` at `BLOCK_START` or
 `BLOCK_DELTA`, using the same field names as complete blocks. These are complete opaque values,
@@ -86,6 +90,22 @@ retains owned IR through governance and tool dispatch; its persisted history con
 `role`/`blocks` messages. Provider request histories are rendered at the egress boundary. Legacy
 provider arrays cross an explicit migration adapter before execution; mixed or unknown content
 fails admission rather than becoming an empty response.
+
+External messaging adapters admit an owned canonical USER Message before releasing
+vendor JSON. Gateway RPC, process mirrors, delivery routing and TTS dispatch retain
+canonical messages and all ordered blocks. The shared CLI subscriber returns owned
+Message collections, including opaque state and tool arguments/results, and refuses
+unfinished snapshots at terminal execution. Human CLI/ACP displays and external
+platform/TTS adapters own their text projections.
+
+Original attachments remain separate non-model-visible IMAGE or DOCUMENT file
+assets; generic DOCUMENT can retain an audio MIME type. ASR adds a derived,
+unverified USER task block with source provenance while retaining the original
+asset. Attachment hashes are recorded when available; an unreadable non-audio
+attachment does not discard valid authored text. ASR source validation remains
+separate from generic message admission. Inert sidecars never promote roles or
+policy authority. These are compiled gateway contracts and fixture coverage, not
+an assertion that a messaging platform has been configured or contacted.
 
 Buffered responses publish `TURN_START`, a complete message, and `TURN_STOP`, retaining canonical
 stop reasons and input/output, cache-read/write and reasoning usage. A `TURN_STOP` may also

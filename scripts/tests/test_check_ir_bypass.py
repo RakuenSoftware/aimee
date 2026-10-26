@@ -28,6 +28,24 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_gateway_cannot_resume_raw_message_contracts_or_display_subscriber(self):
+        for name in ("gateway_handle_message", "gateway_send_text", "rpc_chat_send_stream",
+                     "mirror_record", "delivery_router_send", "tts_synthesize"):
+            path = self.source("src/gateway/gateway_ctx.c", f"void f() {{ {name}(text); }}")
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            path.unlink()
+        for relative in ("src/gateway/gateway_ctx.c", "src/gateway/tts.c", "src/gateway/mirror.c"):
+            for name in ("cli_chat_request_stream", "cli_chat_stream", "cli_ir_user_message"):
+                path = self.source(relative, f"void f() {{ {name}(text); }}")
+                with self.subTest(relative=relative, name=name), self.assertRaisesRegex(
+                        ValueError, "gateway-display-conversation"):
+                    checker.check(self.root)
+                path.unlink()
+        self.source("src/cli_chat_stream.c", "void display() { cli_chat_request_stream(text); }")
+        self.source("src/gateway/gateway_ctx.c", "void f() { rpc_chat_send_stream_ir(message); }")
+        checker.check(self.root)
+
     def test_first_party_transports_cannot_emit_text_messages(self):
         for relative in ("src/cli_chat_stream.c", "src/cli_v1_routes.c",
                          "src/cli_v1_routes_e.c", "src/gateway/gateway_ctx.c"):

@@ -2,6 +2,8 @@
 #define _GNU_SOURCE
 #endif
 #include "../gateway/tts.h"
+#include "../gateway/gateway_ir.h"
+#include <aimee/ir/session_event.h>
 #include "agent_exec.h"
 #include "cJSON.h"
 #include "log.h"
@@ -17,6 +19,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Existing plain engine fixtures enter through a canonical assistant origin. */
+static int tts_synthesize(const char *text, char **out)
+{
+   if (!text || !text[0])
+   {
+      if (out)
+         *out = NULL;
+      return -1;
+   }
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT,
+                          .text = (char *)text,
+                          .context =
+                              gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1)};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   return tts_synthesize_ir(&message, 1, out);
+}
 static const char *expected_text, *expected_voice, *expected_model, *expected_format;
 static int http_status = 200, large_audio, empty_audio;
 static const unsigned char audio[] = {'R', 0, 'I', 'F', 'F', 0xff, 0, 'X'};
@@ -151,6 +169,32 @@ int main(int argc, char **argv)
       assert(!tts_synthesize(text, &path));
       check_file(path, audio, sizeof audio, provider ? ".wav" : ".mp3");
       remove_audio(path);
+      if (!provider)
+      {
+         char *prefix = strndup(text, 32768);
+         assert(prefix);
+         aimee_block_t first[2] = {{.type = AIMEE_BLK_TEXT, .text = prefix},
+                                   {.type = AIMEE_BLK_THINKING,
+                                    .thinking_id = "opaque-id",
+                                    .thinking_encrypted_content = "private reasoning retained"}};
+         aimee_block_t second[2] = {
+             {.type = AIMEE_BLK_TEXT,
+              .text = "hidden text must not reach speech",
+              .context = gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 0)},
+             {.type = AIMEE_BLK_TEXT, .text = text + 32768}};
+         aimee_message_t messages[2] = {{.role = "assistant", .blocks = first, .n_blocks = 2},
+                                        {.role = "assistant", .blocks = second, .n_blocks = 2}};
+         cJSON *before = aimee_ir_message_json(messages);
+         assert(!tts_synthesize_ir(messages, 2, &path));
+         check_file(path, audio, sizeof audio, ".mp3");
+         remove_audio(path);
+         cJSON *after = aimee_ir_message_json(messages);
+         assert(before && after && cJSON_Compare(before, after, 1));
+         assert(!strcmp(first[1].thinking_encrypted_content, "private reasoning retained"));
+         cJSON_Delete(before);
+         cJSON_Delete(after);
+         free(prefix);
+      }
       pthread_t a, b;
       assert(!pthread_create(&a, NULL, synthesize, NULL));
       assert(!pthread_create(&b, NULL, synthesize, NULL));

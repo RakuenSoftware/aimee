@@ -25,12 +25,63 @@ typedef struct
    size_t length, capacity, parts;
    uint64_t sequence;
    int http_status;
-   int started, completed, failed;
+   int started, completed, failed, project_text;
    part_t *blocks;
    void (*text)(const char *, void *);
    cli_chat_tool_fn tool;
    void *context;
+   aimee_request_t conversation;
+   char **message_ids;
+   unsigned char *message_final;
 } subscriber_t;
+
+static int retain_message(subscriber_t *s, const char *id, const aimee_message_t *message,
+                          int final)
+{
+   int index = 0;
+   for (; index < s->conversation.n_messages; index++)
+      if (!strcmp(s->message_ids[index], id))
+         break;
+   aimee_request_t source = {.messages = (aimee_message_t *)message, .n_messages = 1}, copy = {0};
+   if (aimee_ir_request_clone(&source, &copy))
+      return -1;
+   if (index == s->conversation.n_messages)
+   {
+      if (index >= AIMEE_IR_MAX_BLOCKS)
+         goto failed;
+      aimee_message_t *messages =
+          realloc(s->conversation.messages, (size_t)(index + 1) * sizeof *messages);
+      if (!messages)
+         goto failed;
+      s->conversation.messages = messages;
+      char **ids = realloc(s->message_ids, (size_t)(index + 1) * sizeof *ids);
+      if (!ids)
+         goto failed;
+      s->message_ids = ids;
+      unsigned char *complete = realloc(s->message_final, (size_t)index + 1);
+      if (!complete)
+         goto failed;
+      s->message_final = complete;
+      ids[index] = strdup(id);
+      if (!ids[index])
+         goto failed;
+      s->conversation.n_messages++;
+   }
+   else
+   {
+      if ((s->message_final[index] && !final) ||
+          strcmp(s->conversation.messages[index].role, message->role))
+         goto failed;
+      aimee_message_free(s->conversation.messages + index);
+   }
+   s->message_final[index] = (unsigned char) final;
+   s->conversation.messages[index] = copy.messages[0];
+   free(copy.messages);
+   return 0;
+failed:
+   aimee_request_free(&copy);
+   return -1;
+}
 static const char *string(const cJSON *o, const char *key)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, key));
@@ -92,7 +143,7 @@ static int text(subscriber_t *s, part_t *p, const char *value, int snapshot)
    if (!value[0])
       return 0;
    if (append(&p->text, &p->length, &p->capacity, value) ||
-       append(&s->reply, &s->length, &s->capacity, value))
+       (s->project_text && append(&s->reply, &s->length, &s->capacity, value)))
       return -1;
    if (s->text)
       s->text(value, s->context);
@@ -168,6 +219,8 @@ static int message(subscriber_t *s, const cJSON *event)
          }
       }
    }
+   if (!rc)
+      rc = retain_message(s, id, &m, !cJSON_IsTrue(partial));
    aimee_message_free(&m);
    return rc;
 }
@@ -216,6 +269,9 @@ static int consume(cJSON *envelope, void *context)
          goto fail;
       for (part_t *p = s->blocks; p; p = p->next)
          if ((p->kind == AIMEE_BLK_TEXT && !p->final) || (p->announced && !p->finished))
+            goto fail;
+      for (int i = 0; i < s->conversation.n_messages; i++)
+         if (!s->message_final[i])
             goto fail;
       s->completed = 1;
       return 1; /* POSIX closes after the durable host terminal; Windows may keep draining. */
@@ -267,14 +323,16 @@ fail:
    s->failed = 1;
    return -1;
 }
-char *cli_chat_request_stream(const char *endpoint, const char *bearer, const cJSON *request,
-                              int timeout, void (*text_cb)(const char *, void *),
-                              cli_chat_tool_fn tool_cb, void *context)
+static char *request_stream(const char *endpoint, const char *bearer, const cJSON *request,
+                            int timeout, void (*text_cb)(const char *, void *),
+                            cli_chat_tool_fn tool_cb, void *context,
+                            cli_chat_result_t *conversation)
 {
    subscriber_t s = {.session = string(request, "aimee_session_id"),
                      .text = text_cb,
                      .tool = tool_cb,
-                     .context = context};
+                     .context = context,
+                     .project_text = conversation == NULL};
    cJSON *copy = cJSON_IsObject(request) && aimee_ir_json_unique(request)
                      ? cJSON_Duplicate(request, 1)
                      : NULL;
@@ -314,13 +372,53 @@ char *cli_chat_request_stream(const char *endpoint, const char *bearer, const cJ
    }
    free(s.turn);
    free(s.actor);
+   for (int i = 0; i < s.conversation.n_messages; i++)
+      free(s.message_ids[i]);
+   free(s.message_ids);
+   free(s.message_final);
    if (delivery || s.http_status != 200 || s.failed || !s.completed)
    {
+      aimee_request_free(&s.conversation);
       free(s.reply);
       fprintf(stderr, "aimee chat: canonical turn failed or stream ended before completion\n");
       return NULL;
    }
+   if (conversation)
+      *conversation = (cli_chat_result_t){.messages = s.conversation.messages,
+                                          .n_messages = s.conversation.n_messages};
+   else
+      aimee_request_free(&s.conversation);
    return s.reply ? s.reply : strdup("");
+}
+void cli_chat_result_free(cli_chat_result_t *result)
+{
+   if (!result)
+      return;
+   aimee_request_t owner = {.messages = result->messages, .n_messages = result->n_messages};
+   aimee_request_free(&owner);
+   memset(result, 0, sizeof *result);
+}
+int cli_chat_request_stream_ir(const char *endpoint, const char *bearer, const cJSON *request,
+                               int timeout, cli_chat_result_t *conversation)
+{
+   if (!conversation)
+      return -1;
+   memset(conversation, 0, sizeof *conversation);
+   char *display =
+       request_stream(endpoint, bearer, request, timeout, NULL, NULL, NULL, conversation);
+   if (!display)
+   {
+      cli_chat_result_free(conversation);
+      return -1;
+   }
+   free(display);
+   return 0;
+}
+char *cli_chat_request_stream(const char *endpoint, const char *bearer, const cJSON *request,
+                              int timeout, void (*text_cb)(const char *, void *),
+                              cli_chat_tool_fn tool_cb, void *context)
+{
+   return request_stream(endpoint, bearer, request, timeout, text_cb, tool_cb, context, NULL);
 }
 char *cli_chat_stream(const char *sock, const char *session, const char *message,
                       void (*text_cb)(const char *, void *), cli_chat_tool_fn tool_cb,

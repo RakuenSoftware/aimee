@@ -20,7 +20,140 @@ personally authenticated gh. No connector writes, coauthor trailers or branding.
 Production promotion follows merge to main and the independent review requirement
 in `OWNERS.md`.
 
-## Current work remains active
+## Current QA topology: one active instance and one Claude connection
+
+The user paused the larger IR/browser goal, requested consolidation of the
+duplicated QA connections, then requested resumed IR work with all agents. That cleanup keeps exactly one active QA
+instance: `aimee-ir-clean-361fefa7f` at `https://192.168.0.67:8451`. Its existing
+Claude connection is `ir-clean-361fefa7f-claude`, used by the existing default alias
+`ir-clean-361fefa7f-primary`. All15 ChatGPT aliases remain unchanged.
+
+The four other owned QA projects are offline fixtures, with all12 preserved
+containers stopped and restart policy `no`: `aimee-internal-ir-fresh-1b3875369`,
+`aimee-internal-ir-fresh-601aff47e`, `aimee-internal-ir-fresh-d8511ad41`, and
+`aimee-ir-clean-ab1059c6f`. Their histories, volumes, images, configuration,
+encrypted credentials and SDK caches are preserved. Their connection records are
+archival data, not active connections. Ports8445/8447/8449 are closed;8451 is live.
+
+Do not restart these fixtures, clone Claude credentials into another QA instance,
+or reuse old multi-instance build/test wrappers. Future authorized work uses the
+single active QA instance and its connection. Restoring an offline fixture needs
+an explicit topology decision that preserves one active connection. No `.100`
+or real user deployment was investigated or modified. The gateway/IR repair has resumed after preserving its18 work-in-progress files.
+
+Authoritative consolidation proof:
+`/var/tmp/aimee-five-qa-Claude-consolidate/proof.json`.
+The live guest manifest is
+`/opt/aimee-single-claude-consolidation-38f813090682565e-proof/active-archived-manifest.json`.
+Active history retains all1680 rows; archived last-verified counts are76,128,360
+and93 respectively. All protected configuration/cache/Vault/SDK/workspace hashes
+were checked, and archived live SQL histories/native/jobs were compared after
+app shutdown before stopping their databases. No images, volumes or data were
+removed. The separately approved renewal completed once on this existing active Claude
+connection: HTTP200 acknowledged, exactly one encrypted source entry changed,
+all34 other entries and all1680 prior IR rows/config/cache remained exact. No
+provider or model request was made during that cleanup. Proof:
+`/var/tmp/aimee-fresh-Claude-renewal-next-held/import-custody-proof.json`.
+The wrapper failure after acknowledgement is preserved separately; independent
+acknowledgement/custody checks pass and the POST was never retried.
+
+## Gateway source follow-up: tested, awaiting image qualification
+
+The gateway migration now retains owned canonical USER Message blocks at external
+Telegram/webhook ingress, through local RPC, ordered CLI subscriber results,
+process mirrors, delivery routing and TTS dispatch. Vendor JSON is released only
+after admission has taken ownership. Every attachment remains a separate hidden
+IMAGE/DOCUMENT file asset; ASR retains its original audio source and adds a
+separate unverified USER task transcript. Unreadable non-audio attachments do not
+discard valid text, and inert sidecars cannot change authority or role.
+
+The typed collector preserves ordered full messages, opaque state, media and
+exact tool JSON. Terminal execution cannot turn an unfinished snapshot into a
+completed answer. Human CLI/ACP displays and actual external adapters own text
+projection. The webhook freed-text bug is fixed and exercised by the real HMAC
+HTTP branch under sanitizers. Eight focused gateway suites pass normally and
+under ASan/UBSan; IR guards, format, full gateway linkage and thin CLI purity pass.
+Independent frozen-source review:
+`/var/tmp/aimee-ir-gateway-independent-final-review.json`.
+
+A separate confirmed MCP defect returned a fabricated delivery acknowledgement
+without a wired gateway owner. It now returns an explicit typed unavailable tool
+error. The question formatter retains long UTF8 input safely and its descriptor
+accurately assigns presentation to the client. Normal/sanitizer handler and
+forwarding tests pass. No messaging owner was added and no external platform was
+contacted. The standalone gateway entrypoint remains unwired; do not claim live
+Telegram/ntfy/webhook delivery. Positive collector coverage is the production
+HTTP-over-UDS canonical NDJSON fixture, not a fabricated scoped CLI chat call.
+
+The numeric embedding and OCR artifact caller audit found no confirmed existing
+conversation reconstruction in those specific producers; its exact domain-origin
+traces are in `/var/tmp/aimee-ir-embedding-seam-audit.md`. This is finite evidence,
+not an inference from a type name or a claim that numeric vectors are messages.
+
+The currently installed image is still f3. Next: build the clean follow-up,
+upgrade only the single active QA with full1680-row renewed-credential custody,
+then run the reviewed six-send historical Claude/HTTP/retained Codex and restart
+checks, responsive replay and isolated canonical channel validation. Never restart
+archived fixtures or clone their credentials. All earlier failures remain sealed.
+
+## Previous checkpoint before QA consolidation: gateway repair remains open
+
+The deployed QA runtime is source `f3f9fc79e306e028c8ed0668f28be220fa0caf49`,
+image `sha256:38034163da4634831eea3d839b7380d6003202449cb2e8988cfdf947d8f1d257`.
+The branch is pushed. Both goals remain active; do not claim project-wide IR or
+all-model completion. QA browser addresses are `https://192.168.0.67:8447`
+(retained main) and `https://192.168.0.67:8451` (fresh qualification).
+
+The canonical build verifies 87 runtime products and 19 modules. Targeted agent
+and native execution tests pass normally and under ASan/UBSan; IR guards, format,
+docs and ownership gates pass. Ninety C target runs belong to the preceding 553
+source; the narrow f3 changes have their own tests and source-equivalence proof,
+not a claim that the entire old suite was rerun on f3. Five installed CLI negative
+cases pass on MAIN's exact image, with UID/GID1000, zero capabilities, NNP1 and
+clean temporary HOME. Its custody snapshot predates subsequent model activity.
+
+Both f3 upgrades preserve every prior IR row (MAIN335, fresh1199), protected
+credentials/caches/grants/SDK state and source authority. Same-key public
+certificate renewal is measured separately. The earlier build pause/restoration
+also preserves the separate 1b project's 76 rows and measured protected state.
+
+Fresh Claude on MAIN completed an actual README read and a same-session no-tool
+word count of 2, using the registered SDK resume binding. Exactly two sends took
+place. Original335 rows remain exact. One subsequent final-source check on the
+original7db SID again returns reasoning_extraction (18014 input, zero output
+tokens). All353 prior rows remain exact; MAIN is idle at360. Normal new-catalog
+cold replay was owner-selected; there was no forced old handle, credential import,
+history pruning or retry. The fresh success does not relabel that retained failure.
+
+All14 f3 pairs in the finite seven-model HTTP/native matrix pass with actual
+nonempty README grounding and same-session no-tool recall. The final retained
+fresh-Claude361 continuation stops before SDK/model launch on OAuth refresh429;
+that saved connection was not covered by the approved MAIN-only renewal. No retry
+or credential import follows. Native1 also survives a same-image app restart with
+its registered thread. Retained native1 crosses the catalog change successfully:
+old history's tool ID/name/arguments/result bytes/order appear exactly once in the
+new SDK thread. Scope/context changes are source-derived from the changed tool
+schema and owned launch/workspace binding; old registered handles remain exact.
+Original qualification-harness failures and historical model failures stay sealed.
+See `/var/tmp/aimee-live-codex-f3f9fc79e-held` for per-phase receipts and final index.
+
+A broader audit has found another real conversation seam omitted from the earlier
+finite caller list: gateway messaging/STT/delivery/TTS carries internal message
+strings and loses canonical model blocks before delivery. The webhook adapter
+also reads a text pointer after freeing its vendor JSON owner. The roundtable
+agent owns the canonical gateway repair, CLI result-message collection, all
+attachment retention and lifetime fix. Changes are source-only until reviewed,
+tested, committed and qualified in a new image. No external messaging sends are
+authorized for gateway validation; use boundary fixtures. Do not describe f3 as
+fixing these remaining gaps. Embedding and speech/OCR caller exclusions are being
+reconciled against actual origins, not assumed from DTO names.
+
+MAIN passive responsive replay and one literal canonical-channel send are owned
+by the message-path agent, using the360-row final idle baseline; no model calls.
+No more original7db model checks or credential imports are planned. Preserve the
+user's two goals, the .100/KB/learning exclusions, old histories and cache guards.
+
+## Previous checkpoint: 553 (superseded)
 
 The latest deployed and pushed runtime is `5530a8c59`, image
 `sha256:41158b0d903d0b436545514495daa3033eca8472838328ef8efcf59bf0036e4b`.

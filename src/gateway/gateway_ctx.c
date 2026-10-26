@@ -17,7 +17,8 @@
 #include "aimee_home.h"
 #include "cli_client.h"
 #include "cli_chat_stream.h"
-#include "cli_ir.h"
+#include "gateway_ir.h"
+#include <aimee/ir/session_event.h>
 #include <cJSON.h>
 #include <unistd.h>
 
@@ -143,25 +144,26 @@ static int rpc_launch_run(char *sid_out, size_t sid_cap)
    return 0;
 }
 
-static char *rpc_chat_send_stream(const char *aimee_sid, const char *message)
+static int rpc_chat_send_stream_ir(const char *aimee_sid, const aimee_message_t *message,
+                                   cli_chat_result_t *reply)
 {
    char endpoint[4200];
    if (gw_v1_endpoint(endpoint, sizeof(endpoint)))
-      return NULL;
+      return -1;
    cJSON *req = cJSON_CreateObject();
    /* No "method" — the POST /v1/chat/stream route maps to chat.send_stream. */
-   cJSON *canonical = cli_ir_user_message(message, NULL, NULL);
+   cJSON *canonical = aimee_ir_message_json(message);
    if (!canonical || !cJSON_AddItemToObject(req, "message", canonical))
    {
       cJSON_Delete(canonical);
       cJSON_Delete(req);
-      return NULL;
+      return -1;
    }
    cJSON_AddStringToObject(req, "aimee_session_id", aimee_sid);
    cJSON_AddStringToObject(req, "cwd", "/");
-   char *reply = cli_chat_request_stream(endpoint, NULL, req, 120000, NULL, NULL, NULL);
+   int rc = cli_chat_request_stream_ir(endpoint, NULL, req, 120000, reply);
    cJSON_Delete(req);
-   return reply;
+   return rc;
 }
 
 gateway_ctx_t *gateway_ctx_new(void)
@@ -184,6 +186,7 @@ void gateway_ctx_free(gateway_ctx_t *ctx)
          a->shutdown(a);
    }
    pthread_mutex_destroy(&ctx->session_mutex);
+   mirror_clear();
    free(ctx);
 }
 
@@ -196,23 +199,13 @@ static void reply_origin(gateway_ctx_t *ctx, const session_source_t *src, const 
    snprintf(origin.chat_id, sizeof(origin.chat_id), "%s", src->chat_id);
    if (src->thread_id[0])
       snprintf(origin.thread_id, sizeof(origin.thread_id), "%s", src->thread_id);
-   gateway_send_text(ctx, &origin, text);
-   mirror_record(src->platform, src->chat_id, "out", text);
-}
-
-/* Returns 1 if the attachment path looks like an audio clip worth transcribing. */
-static int attachment_is_audio(const attachment_t *a)
-{
-   if (!a)
-      return 0;
-   if (a->mime[0] && strncmp(a->mime, "audio/", 6) == 0)
-      return 1;
-   const char *p = a->path;
-   const char *dot = strrchr(p, '.');
-   if (!dot)
-      return 0;
-   return strcmp(dot, ".oga") == 0 || strcmp(dot, ".ogg") == 0 || strcmp(dot, ".mp3") == 0 ||
-          strcmp(dot, ".wav") == 0 || strcmp(dot, ".m4a") == 0 || strcmp(dot, ".flac") == 0;
+   aimee_block_t block = {
+       .type = AIMEE_BLK_TEXT,
+       .text = (char *)text,
+       .context = gateway_context(AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_EVIDENCE, 1)};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   gateway_send_message(ctx, &origin, &message);
+   (void)mirror_record_ir(src, "out", &message);
 }
 
 int gateway_parse_pr_command(const char *args, char *ws, size_t ws_cap, char *title,
@@ -470,10 +463,11 @@ static int handle_slash_command(gateway_ctx_t *ctx, const session_source_t *src,
    return 0; /* unknown slash text — let it flow to the agent */
 }
 
-int gateway_handle_message(gateway_ctx_t *ctx, const session_source_t *src, const char *text,
-                           const attachment_t *attachments, int nattach)
+int gateway_handle_message_ir(gateway_ctx_t *ctx, const session_source_t *src,
+                              const aimee_message_t *input)
 {
-   if (!ctx || !src || !src->platform[0])
+   if (!ctx || !src || !src->platform[0] || gateway_message_admit(input) ||
+       strcmp(input->role, "user"))
       return -1;
 
    /* 1. Authorization. Unknown users are issued an out-of-band pairing code
@@ -506,39 +500,85 @@ int gateway_handle_message(gateway_ctx_t *ctx, const session_source_t *src, cons
    snprintf(session_key, sizeof(session_key), "%s", _sk);
    free(_sk);
 
-   /* 3. Transcribe a voice/audio attachment into the message text, when present. */
-   char transcript[4096] = {0};
-   const char *effective_text = text ? text : "";
-   int voice_in = (nattach > 0 && attachments && attachment_is_audio(&attachments[0]));
-   if (voice_in)
+   /* Retain the original canonical source, including every attachment and
+    * authored text block. Derived ASR never becomes operator policy. */
+   aimee_message_t message = {0};
+   if (gateway_message_clone(input, &message))
+      return -1;
+   int voice_in = 0, status = -1, inbound_mirrored = 0;
+   int first_asset = -1, voice_command = -1;
+   for (int i = 0; i < input->n_blocks; i++)
    {
-      if (stt_transcribe_file(attachments[0].path, transcript, sizeof(transcript)) == 0 &&
-          transcript[0])
+      const aimee_block_t *asset = input->blocks + i;
+      const char *path = gateway_asset_path(asset);
+      if (!path)
+         continue;
+      if (first_asset < 0)
+         first_asset = i;
+      aimee_block_t derived = {.type = AIMEE_BLK_TEXT};
+      if (gateway_audio_block(asset))
       {
+         voice_in = 1;
+         char transcript[4096] = {0};
+         if (stt_transcribe_file(path, transcript, sizeof transcript) || !transcript[0])
+         {
+            reply_origin(ctx, src, "Voice transcription is unavailable. Please type your message.");
+            status = 0;
+            goto message_done;
+         }
          if (stt_is_hallucination(transcript))
          {
-            LOG_INFO("gateway", "dropping likely-hallucinated transcript for %s/%s", src->platform,
-                     src->chat_id);
             reply_origin(ctx, src,
                          "I couldn't make out that voice message. Could you type it instead?");
-            return 0;
+            status = 0;
+            goto message_done;
          }
-         effective_text = transcript;
+         if (gateway_message_append_transcript(&message, i, transcript))
+         {
+            reply_origin(ctx, src, "Voice transcription is unavailable. Please type your message.");
+            status = 0;
+            goto message_done;
+         }
+         if (i == first_asset)
+            voice_command = message.n_blocks - 1;
+         continue;
       }
       else
       {
-         LOG_WARN("gateway", "voice transcription failed for %s", attachments[0].path);
-         reply_origin(ctx, src, "Voice transcription is unavailable. Please type your message.");
-         return 0;
+         /* Existing model file-read behavior gets a separate evidence hint;
+          * the original asset remains canonical and is not rendered as a
+          * provider-unsupported file URL. No task concatenation/reimport. */
+         derived.context = gateway_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE, 1);
+         size_t size = strlen(path) + sizeof "[Attachment: ]";
+         derived.text = malloc(size);
+         if (!derived.text)
+            goto message_done;
+         snprintf(derived.text, size, "[Attachment: %s]", path);
+      }
+      if (gateway_message_append(&message, &derived))
+      {
+         aimee_block_free_contents(&derived);
+         goto message_done;
       }
    }
-
-   /* Record the inbound message in the delivery mirror. */
-   mirror_record(src->platform, src->chat_id, "in", effective_text[0] ? effective_text : "(empty)");
-
-   /* 3b. Slash commands routed before agent dispatch. */
-   if (handle_slash_command(ctx, src, session_key, effective_text))
-      return 0;
+   if (gateway_message_admit(&message) || mirror_record_ir(src, "in", &message))
+      goto message_done;
+   inbound_mirrored = 1;
+   /* Legacy voice commands use the first attachment's ASR utterance; file
+    * hints and later attachment transcripts are never parsed as commands.
+    * All source blocks still remain in the canonical model message. */
+   char *command_view = voice_command < 0 ? gateway_message_text_view(input, 1) : NULL;
+   const char *command_text =
+       voice_command >= 0 ? message.blocks[voice_command].text : command_view;
+   if (!command_text)
+      goto message_done;
+   int command = handle_slash_command(ctx, src, session_key, command_text);
+   free(command_view);
+   if (command)
+   {
+      status = 0;
+      goto message_done;
+   }
 
    /* 4. The gateway reaches the co-located aimee-server over its /v1 surface
     * (each call below is a stateless POST to the local aimee-http.sock). */
@@ -553,81 +593,89 @@ int gateway_handle_message(gateway_ctx_t *ctx, const session_source_t *src, cons
    if (!aimee_sid[0])
    {
       if (rpc_launch_run(aimee_sid, sizeof(aimee_sid)) != 0)
-         return -1;
+         goto message_done;
       pthread_mutex_lock(&ctx->session_mutex);
       session_store_locked(ctx, session_key, aimee_sid);
       pthread_mutex_unlock(&ctx->session_mutex);
       LOG_INFO("gateway", "created session %s for key %s", aimee_sid, session_key);
    }
 
-   /* 6. Build message. A non-audio attachment is noted by path; audio was
-    * already transcribed into effective_text above. */
-   const char *msg = effective_text;
-   char *full_msg = NULL;
-   if (nattach > 0 && attachments && attachments[0].path[0] &&
-       !attachment_is_audio(&attachments[0]))
+   cli_chat_result_t reply = {0};
+   if (rpc_chat_send_stream_ir(aimee_sid, &message, &reply))
+      goto message_done;
+   delivery_target_t origin = {0};
+   snprintf(origin.platform, sizeof origin.platform, "%s", src->platform);
+   snprintf(origin.chat_id, sizeof origin.chat_id, "%s", src->chat_id);
+   snprintf(origin.thread_id, sizeof origin.thread_id, "%s", src->thread_id);
+   aimee_message_t *authored =
+       calloc((size_t)(reply.n_messages ? reply.n_messages : 1), sizeof *authored);
+   int authored_count = 0;
+   if (!authored)
    {
-      size_t extra = strlen(msg) + 128;
-      full_msg = malloc(extra);
-      if (full_msg)
-      {
-         snprintf(full_msg, extra, "[Attachment: %s]\n%s", attachments[0].path, msg);
-         msg = full_msg;
-      }
+      cli_chat_result_free(&reply);
+      goto message_done;
    }
-
-   /* 7. Send turn, collect streamed response */
-   char *response = rpc_chat_send_stream(aimee_sid, msg);
-   free(full_msg);
-
-   /* 8. Deliver response back and mirror it */
-   delivery_target_t origin;
-   memset(&origin, 0, sizeof(origin));
-   snprintf(origin.platform, sizeof(origin.platform), "%s", src->platform);
-   snprintf(origin.chat_id, sizeof(origin.chat_id), "%s", src->chat_id);
-   if (src->thread_id[0])
-      snprintf(origin.thread_id, sizeof(origin.thread_id), "%s", src->thread_id);
-   if (response && response[0])
+   for (int i = 0; i < reply.n_messages; i++)
    {
-      delivery_router_send(ctx, &origin, response, NULL, 0);
-      mirror_record(src->platform, src->chat_id, "out", response);
-
-      /* Voice-out (§13): when the operator sent a voice memo and TTS is
-       * enabled, also deliver a spoken reply. Best-effort, never fatal. */
-      if (voice_in && tts_enabled())
+      const aimee_message_t *part = reply.messages + i;
+      if (!strcmp(part->role, "user"))
+         continue;
+      if (mirror_record_ir(src, !strcmp(part->role, "assistant") ? "out" : "tool", part))
+         goto reply_done;
+      if (!strcmp(part->role, "assistant"))
+         authored[authored_count++] = *part; /* Borrowed view, never reconstructed. */
+   }
+   if (authored_count && delivery_router_send_ir(ctx, &origin, authored, authored_count))
+      goto reply_done;
+   if (voice_in && authored_count && tts_enabled())
+   {
+      char *path = NULL;
+      if (!tts_synthesize_ir(authored, authored_count, &path) && path)
       {
-         char *audio_path = NULL;
-         if (tts_synthesize(response, &audio_path) == 0 && audio_path)
+         attachment_t artifact = {0};
+         snprintf(artifact.path, sizeof artifact.path, "%s", path);
+         const char *ext = strrchr(path, '.');
+         snprintf(artifact.mime, sizeof artifact.mime, "%s",
+                  ext && !strcmp(ext, ".mp3") ? "audio/mpeg" : "audio/wav");
+         aimee_message_t audio = {0};
+         if (!gateway_message_import_external(NULL, &artifact, 1, &audio))
          {
-            attachment_t voice_out;
-            memset(&voice_out, 0, sizeof(voice_out));
-            snprintf(voice_out.path, sizeof(voice_out.path), "%s", audio_path);
-            const char *ext = strrchr(audio_path, '.');
-            snprintf(voice_out.mime, sizeof(voice_out.mime), "%s",
-                     (ext && strcmp(ext, ".mp3") == 0) ? "audio/mpeg" : "audio/wav");
-            delivery_router_send(ctx, &origin, NULL, &voice_out, 1);
-            unlink(audio_path);
-            free(audio_path);
+            free(audio.role);
+            audio.role = strdup("assistant");
+            for (int i = 0; i < audio.n_blocks; i++)
+               audio.blocks[i].context =
+                   gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1);
+            if (audio.role)
+            {
+               (void)mirror_record_ir(src, "out", &audio);
+               (void)delivery_router_send_ir(ctx, &origin, &audio, 1);
+            }
+            aimee_message_free(&audio);
          }
-         else
-            LOG_WARN("gateway", "TTS synthesis failed for session %s", aimee_sid);
+         unlink(path);
+         free(path);
       }
+      else
+         LOG_WARN("gateway", "TTS synthesis failed for session %s", aimee_sid);
    }
-   else
-      LOG_WARN("gateway", "empty response from session %s", aimee_sid);
-   free(response);
-   return 0;
+   status = 0;
+reply_done:
+   free(authored);
+   cli_chat_result_free(&reply);
+message_done:
+   if (!inbound_mirrored)
+      (void)mirror_record_ir(src, "in", &message);
+   aimee_message_free(&message);
+   return status;
 }
 
-int gateway_send_text(gateway_ctx_t *ctx, const delivery_target_t *target, const char *text)
+int gateway_send_message(gateway_ctx_t *ctx, const delivery_target_t *target,
+                         const aimee_message_t *message)
 {
-   (void)ctx;
-   if (!target || !text)
+   if (!target)
       return -1;
-   platform_adapter_t *adapter = gateway_platform_find(target->platform);
-   if (!adapter)
-      return -1;
-   return adapter->send_text(adapter, target, text);
+   delivery_target_t owned = *target;
+   return delivery_router_send_ir(ctx, &owned, message, 1);
 }
 
 int gateway_authorize_user(gateway_ctx_t *ctx, const session_source_t *src)

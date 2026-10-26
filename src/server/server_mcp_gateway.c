@@ -1,91 +1,124 @@
-/* server_mcp_gateway.c: gateway-specific MCP tool handlers (send_message, ask_user).
- * Called from server_mcp.c via mcp_gateway_tool_dispatch when tool is
- * "send_message" or "ask_user". */
-
-#include "aimee.h"
-#include <cJSON.h>
+/* Gateway MCP results. No delivery owner is currently wired into the server. */
+#include "server_mcp_gateway.h"
 #include "delivery_target.h"
-#include "log.h"
-#include <stdio.h>
+#include <cJSON.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
-static cJSON *text_content(const char *text)
+/* Complete MCP tool result; transport success is independent of tool failure. */
+static cJSON *tool_result(const char *text, int is_error)
 {
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *item = cJSON_CreateObject();
-   cJSON_AddStringToObject(item, "type", "text");
-   cJSON_AddStringToObject(item, "text", text ? text : "");
-   cJSON_AddItemToArray(arr, item);
-   return arr;
+   cJSON *result = cJSON_CreateObject(), *content = cJSON_CreateArray(),
+         *item = cJSON_CreateObject();
+   if (!result || !content || !item || !cJSON_AddStringToObject(result, "status", "ok") ||
+       !cJSON_AddBoolToObject(result, "isError", is_error) ||
+       !cJSON_AddStringToObject(item, "type", "text") ||
+       !cJSON_AddStringToObject(item, "text", text ? text : ""))
+      goto failed;
+   if (!cJSON_AddItemToArray(content, item))
+      goto failed;
+   item = NULL;
+   if (!cJSON_AddItemToObject(result, "content", content))
+      goto failed;
+   return result;
+failed:
+   cJSON_Delete(item);
+   cJSON_Delete(content);
+   cJSON_Delete(result);
+   return NULL;
 }
-
-/* Returns a newly-allocated text-content cJSON* or NULL on dispatch failure.
- * Caller must cJSON_Delete the returned value. */
+static int reserve_text(size_t *size, const char *text)
+{
+   size_t n = strlen(text);
+   if (n > SIZE_MAX - *size)
+      return -1;
+   *size += n;
+   return 0;
+}
+static void copy_text(char **cursor, const char *text)
+{
+   size_t n = strlen(text);
+   memcpy(*cursor, text, n);
+   *cursor += n;
+}
+/* Size before copying. No fixed buffer, UTF8 truncation or snprintf cursor. */
+static char *format_question(const char *question, const cJSON *choices)
+{
+   int count = cJSON_IsArray(choices) ? cJSON_GetArraySize(choices) : 0;
+   if (count > 4)
+      count = 4;
+   const char *labels[4] = {0};
+   const char *tail = count ? ". Other (type your answer)\n\n" : "\n(Type your answer)";
+   size_t size = 1;
+   if (reserve_text(&size, question) || reserve_text(&size, tail))
+      return NULL;
+   if (count)
+   {
+      if (reserve_text(&size, "1\n"))
+         return NULL;
+      for (int i = 0; i < count; i++)
+      {
+         labels[i] = cJSON_GetStringValue(cJSON_GetArrayItem(choices, i));
+         if (labels[i] && (reserve_text(&size, "1. \n") || reserve_text(&size, labels[i])))
+            return NULL;
+      }
+   }
+   char *text = malloc(size), *cursor = text;
+   if (!text)
+      return NULL;
+   if (count)
+   {
+      for (int i = 0; i < count; i++)
+         if (labels[i])
+         {
+            *cursor++ = (char)('1' + i);
+            copy_text(&cursor, ". ");
+            copy_text(&cursor, labels[i]);
+            *cursor++ = '\n';
+         }
+      *cursor++ = (char)('1' + count);
+      copy_text(&cursor, tail);
+      copy_text(&cursor, question);
+      *cursor++ = '\n';
+   }
+   else
+   {
+      copy_text(&cursor, question);
+      copy_text(&cursor, tail);
+   }
+   *cursor = 0;
+   return text;
+}
 cJSON *mcp_gateway_tool_dispatch(const char *tool, cJSON *jargs)
 {
    if (!tool || !jargs)
       return NULL;
-
-   if (strcmp(tool, "send_message") == 0)
+   if (!strcmp(tool, "send_message"))
    {
-      cJSON *target = cJSON_GetObjectItemCaseSensitive(jargs, "target");
-      cJSON *text = cJSON_GetObjectItemCaseSensitive(jargs, "text");
-      if (!text || !cJSON_IsString(text) || !text->valuestring[0])
-         return text_content("error: text required");
-      if (!target || !cJSON_IsString(target) || !target->valuestring[0])
-         return text_content("error: target required");
-
-      delivery_target_t dt;
-      if (delivery_target_parse(target->valuestring, &dt) != 0)
-         return text_content("error: target invalid");
-
-      char buf[DELIVERY_TARGET_PLATFORM_MAX + DELIVERY_TARGET_CHAT_MAX + 32];
-      if (delivery_target_format(&dt, buf, sizeof(buf)) == 0)
-      {
-         char out[512];
-         snprintf(out, sizeof(out), "sent: %s", buf);
-         return text_content(out);
-      }
-      return text_content("error: target format failed");
+      const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "text"));
+      const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "target"));
+      if (!text || !text[0])
+         return tool_result("error: text required", 1);
+      if (!target || !target[0])
+         return tool_result("error: target required", 1);
+      delivery_target_t parsed;
+      if (delivery_target_parse(target, &parsed))
+         return tool_result("error: target invalid", 1);
+      return tool_result("error: gateway delivery unavailable; no message was sent", 1);
    }
-
-   if (strcmp(tool, "ask_user") == 0)
+   if (!strcmp(tool, "ask_user"))
    {
-      cJSON *question = cJSON_GetObjectItemCaseSensitive(jargs, "question");
-      if (!question || !cJSON_IsString(question) || !question->valuestring[0])
-         return text_content("error: question required");
-
-      cJSON *choices = cJSON_GetObjectItemCaseSensitive(jargs, "choices");
-      char out[4096];
-      if (choices && cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0)
-      {
-         int n = cJSON_GetArraySize(choices);
-         if (n > 4)
-            n = 4;
-         int pos = 0;
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *item = cJSON_GetArrayItem(choices, i);
-            if (cJSON_IsString(item))
-            {
-               int w = snprintf(out + pos, sizeof(out) - (size_t)pos, "%d. %s\n", i + 1,
-                                item->valuestring);
-               if (w > 0)
-                  pos += w;
-            }
-         }
-         int w = snprintf(out + pos, sizeof(out) - (size_t)pos,
-                          "%d. Other (type your answer)\n\n%s\n", n + 1, question->valuestring);
-         if (w > 0)
-            pos += w;
-         return text_content(out);
-      }
-      else
-      {
-         snprintf(out, sizeof(out), "%s\n(Type your answer)", question->valuestring);
-         return text_content(out);
-      }
+      const char *question =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "question"));
+      if (!question || !question[0])
+         return tool_result("error: question required", 1);
+      char *text = format_question(question, cJSON_GetObjectItemCaseSensitive(jargs, "choices"));
+      if (!text)
+         return tool_result("error: question formatting unavailable", 1);
+      cJSON *result = tool_result(text, 0);
+      free(text);
+      return result;
    }
-
    return NULL;
 }

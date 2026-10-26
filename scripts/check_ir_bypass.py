@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED_OWNERS = ('src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h')
 RETIRED = (
+    "gateway_handle_message", "gateway_send_text", "rpc_chat_send_stream",
+    "mirror_record", "delivery_router_send", "tts_synthesize",
     "dispatch_tool_call", "dispatch_tool_call_ctx", "dispatch_tool_call_ctx_status",
     "agent_build_request", "agent_build_request_ir", "agent_prepare_request_ir",
     "plugin_chook_apply_pre_llm",
@@ -168,6 +170,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "gateway-display-conversation": re.compile(r"\b(?:cli_chat_request_stream|cli_chat_stream|cli_ir_user_message)\s*\("),
     "public-context-reset": re.compile(
         r'\bmemset\s*\(\s*&[^,;\n]*\.context\s*,\s*0\s*,|'
         r'\.context\s*=\s*\(\s*aimee_context_meta_t\s*\)\s*\{\s*0\s*\}'),
@@ -305,6 +308,8 @@ def findings(root: Path) -> list[dict]:
             "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
             if relative == "src/modules/translation/harness_ir.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "gateway-display-conversation" and not relative.startswith("src/gateway/"):
+                continue
             if rule == "public-context-reset" and relative not in {
                     "src/posix/server_compute.c", "src/server/server_agent.c"}:
                 continue

@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "tts.h"
+#include "gateway_ir.h"
 #include "agent_exec.h"
 #include "cJSON.h"
 #include "log.h"
@@ -161,7 +162,7 @@ static int tts_remote(const char *text, const char *url, const char *auth, const
    return result;
 }
 
-int tts_synthesize(const char *text, char **out)
+static int synthesize_text(const char *text, char **out)
 {
    if (!out)
       return -1;
@@ -198,4 +199,22 @@ int tts_synthesize(const char *text, char **out)
       return result;
    }
    return tts_local(text, out);
+}
+
+int tts_synthesize_ir(const aimee_message_t *messages, int count, char **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!messages || count < 1)
+      return -1;
+   for (int i = 0; i < count; i++)
+      if (gateway_message_admit(messages + i))
+         return -1;
+   char *text = gateway_message_text_view(messages, count);
+   if (!text)
+      return -1;
+   int rc = synthesize_text(text, out);
+   free(text);
+   return rc;
 }
