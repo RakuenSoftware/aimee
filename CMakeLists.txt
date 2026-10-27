@@ -80,23 +80,28 @@ set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
 # come from the commit pinned in dependencies/ouroboros-ring.lock.json, fetched
 # and content-checked at configure time, or from a local ring checkout named by
 # OURO_RING_LOCAL. Nothing here links the ring: the CMake targets need only its
-# headers, and the server and KB that host it are built by src/Makefile.
-set(OURO_RING_LOCAL "$ENV{OURO_RING_LOCAL}" CACHE PATH
-    "Local ouroboros-ring checkout to build against instead of the pinned commit")
-if(OURO_RING_LOCAL)
-    get_filename_component(OURO_RING_DIR "${OURO_RING_LOCAL}" ABSOLUTE)
-else()
-    set(OURO_RING_DIR "${CMAKE_BINARY_DIR}/deps/ouroboros-ring")
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}" -I
-                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_ouroboros_ring.py" "${OURO_RING_DIR}"
-        RESULT_VARIABLE OURO_RING_FETCH_RESULT)
-    if(NOT OURO_RING_FETCH_RESULT EQUAL 0)
-        message(FATAL_ERROR "could not provide the pinned ouroboros ring in ${OURO_RING_DIR}; see the message above")
+# headers, and the server and KB that host it are built by src/Makefile. The
+# thin client never touches the ring, so a thin-client build (the only build on
+# Windows and macOS) neither fetches nor sees it.
+set(AIMEE_OURO_RING_INCLUDE_DIR "")
+if(NOT AIMEE_THIN_CLIENT)
+    set(OURO_RING_LOCAL "$ENV{OURO_RING_LOCAL}" CACHE PATH
+        "Local ouroboros-ring checkout to build against instead of the pinned commit")
+    if(OURO_RING_LOCAL)
+        get_filename_component(OURO_RING_DIR "${OURO_RING_LOCAL}" ABSOLUTE)
+    else()
+        set(OURO_RING_DIR "${CMAKE_BINARY_DIR}/deps/ouroboros-ring")
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -I
+                    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_ouroboros_ring.py" "${OURO_RING_DIR}"
+            RESULT_VARIABLE OURO_RING_FETCH_RESULT)
+        if(NOT OURO_RING_FETCH_RESULT EQUAL 0)
+            message(FATAL_ERROR "could not provide the pinned ouroboros ring in ${OURO_RING_DIR}; see the message above")
+        endif()
     endif()
+    set(AIMEE_OURO_RING_INCLUDE_DIR "${OURO_RING_DIR}/c/include")
 endif()
-set(AIMEE_OURO_RING_INCLUDE_DIR "${OURO_RING_DIR}/c/include")
 
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
