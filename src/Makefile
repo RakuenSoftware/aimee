@@ -485,8 +485,8 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # that installation before anything compiles: OURO_RING_PREFIX=/path uses an
 # installed ring, OURO_RING_SOURCE=/path builds a ring checkout, and otherwise
 # the named release is fetched, content-checked and built with the ring's own
-# build, with this build's compiler and extra flags (and the GCC IPA bit-CP
-# workaround above, which the ring's code is as exposed to as aimee's).
+# build, with this build's compiler and extra flags. Compiler workarounds the
+# ring's own code needs are the ring build's business, not this Makefile's.
 # A dry run (-n, -q; also the -p database queries tools read the link graph
 # with) provides nothing and names the last-provided installation instead.
 # Only the first word of MAKEFLAGS carries single-letter flags, and only when it
@@ -498,7 +498,7 @@ else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
 else
-OURO_RING_PKGCONFIG := $(shell OURO_RING_CC='$(CC)' OURO_RING_CFLAGS='$(IPA_BIT_CP_FIX) $(PIC_FLAGS) $(EXTRA_C_FLAGS)' \
+OURO_RING_PKGCONFIG := $(shell OURO_RING_CC='$(CC)' OURO_RING_CFLAGS='$(PIC_FLAGS) $(EXTRA_C_FLAGS)' \
                          python3 ../scripts/provide_ouroboros_ring.py build/deps/ouroboros-ring)
 ifeq ($(strip $(OURO_RING_PKGCONFIG)),)
 $(error could not provide an ouroboros ring in the range dependencies/ouroboros-ring.json names; see the message above)
