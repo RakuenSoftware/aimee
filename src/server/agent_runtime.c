@@ -564,10 +564,11 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
       aimee_request_t enhanced = {0};
       int prepared = !hint || !use_tools || !host_request_with_hint(request, hint, &enhanced);
       free(hint);
-      int rc = prepared ? agent_retry_dispatch_one(ag, &cfg->network, role,
-                                                   enhanced.n_messages ? &enhanced : request,
-                                                   use_tools, out)
-                        : AGENT_RC_CONTEXT_REFUSED;
+      agent_result_clear_response(out);
+      int rc = prepared
+                   ? agent_dispatch_one(ag, &cfg->network, role,
+                                        enhanced.n_messages ? &enhanced : request, use_tools, out)
+                   : AGENT_RC_CONTEXT_REFUSED;
       aimee_request_free(&enhanced);
 
       if (rc == 0)
@@ -903,7 +904,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          aimee_log(LOG_INFO, "agent", "fallback: trying agent '%s'", fb->name);
-         rc = agent_retry_dispatch_one(fb, &cfg->network, role, original, 1 /* use_tools */, out);
+         agent_result_clear_response(out);
+         rc = agent_dispatch_one(fb, &cfg->network, role, original, 1 /* use_tools */, out);
          if (rc == 0)
             ag = fb; /* update ag for post-run logging (health recorded by dispatch_one) */
       }
@@ -2176,7 +2178,6 @@ int agent_get_stats(const char *name, agent_stats_t *out, int max)
       s->total_cache_write_tokens = (int)rows[i].total_cache_write_tokens;
       s->total_cache_read_tokens = (int)rows[i].total_cache_read_tokens;
       s->total_estimated_cost_usd = rows[i].total_estimated_cost_usd;
-      s->unknown_usage_calls = rows[i].unknown_usage_calls;
    }
    return n;
 }

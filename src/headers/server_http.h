@@ -502,12 +502,11 @@ extern "C"
    typedef int (*server_http_ready_fn)(char *resp, int cap);
    void server_http_set_ready_provider(server_http_ready_fn fn);
 
-   /* Readiness sampler (server/server_ready.c). Registration starts a background
-    * first sample and installs the I/O-free snapshot provider. Stop wakes and
-    * joins that worker before module-bus shutdown. sample_now remains an explicit
-    * synchronous sampling API for callers that own the dependency lifetime. */
+   /* Readiness sampler (server/server_ready.c). server_ready_register() takes
+    * one sample synchronously, starts the background sampler, and registers the
+    * provider above. server_ready_sample_now() forces a synchronous sample so a
+    * caller never has to wait on the interval. */
    void server_ready_register(void);
-   void server_ready_stop(void);
    void server_ready_sample_now(void);
 
    /* The readiness decision as a pure function (no globals, locks, or I/O), so

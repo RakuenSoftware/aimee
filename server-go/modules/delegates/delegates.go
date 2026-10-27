@@ -13,7 +13,6 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
-	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 const (
@@ -42,32 +41,6 @@ var aliases = map[string]string{
 // because prompts and responses are variable-sized bus messages.
 func NewHandler(executor Executor) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if invocation.StageID == delegatecontract.StageTriggerScope {
-			if invocation.PrincipalClass != 1 || invocation.PrincipalRef != delegatecontract.WorkflowPrincipal {
-				return nil, bus.ModuleStatusInvalidRequest
-			}
-			resolver, ok := executor.(interface {
-				ResolveTriggerExecutionScope(context.Context, delegatecontract.TriggerExecutionScopeRequest) (string, error)
-			})
-			if !ok {
-				return nil, bus.ModuleStatusInternal
-			}
-			var decoded delegatecontract.TriggerExecutionScopeRequest
-			if !canonical.Decode(request, &decoded) || !decoded.Valid() {
-				return nil, bus.ModuleStatusInvalidRequest
-			}
-			ctx, cancel := cancelledContext(invocation.Cancelled)
-			defer cancel()
-			scope, err := resolver.ResolveTriggerExecutionScope(ctx, decoded)
-			if err != nil || !delegatecontract.ValidExecutionScope(scope) {
-				return nil, bus.ModuleStatusInternal
-			}
-			reply, err := json.Marshal(delegatecontract.TriggerExecutionScopeReply{ExecutionScope: scope})
-			if err != nil {
-				return nil, bus.ModuleStatusInternal
-			}
-			return reply, bus.ModuleStatusOK
-		}
 		if invocation.StageID == StageGroupPlan {
 			planner, ok := executor.(interface {
 				PlanGroup(context.Context, []delegatecontract.GroupPlanSeat) ([]string, error)

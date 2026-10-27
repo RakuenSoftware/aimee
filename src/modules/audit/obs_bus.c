@@ -231,7 +231,6 @@ static struct
    obs_bus_guardrail_sink_fn guardrail;
    void *guardrail_ctx;
    obs_bus_durable_sink_fn durable;
-   obs_bus_durable_batch_sink_fn durable_batch;
    void *durable_ctx;
    obs_bus_sink_idle_fn sink_idle;
    void *sink_idle_ctx;
@@ -489,37 +488,23 @@ static uint32_t flush_pending_durable(void)
    {
       pthread_mutex_lock(&durable_lock);
       durable_pending_t *p = g.durable_head;
-      durable_pending_t *nodes[OBS_BUS_DURABLE_BATCH_MAX];
-      obs_bus_durable_record_t records[OBS_BUS_DURABLE_BATCH_MAX];
-      size_t count = 0;
-      for (durable_pending_t *row = p;
-           row && count < (sinks.durable_batch ? OBS_BUS_DURABLE_BATCH_MAX : 1); row = row->next)
-      {
-         nodes[count] = row;
-         records[count++] =
-             (obs_bus_durable_record_t){row->action, row->subject, row->verdict, row->detail};
-      }
       pthread_mutex_unlock(&durable_lock);
-      int accepted = sinks.durable_batch
-                         ? sinks.durable_batch(records, count, sinks.durable_ctx) == 0
-                         : persist_durable(p->action, p->subject, p->verdict, p->detail);
-      if (!accepted)
+      if (!persist_durable(p->action, p->subject, p->verdict, p->detail))
       {
+         /* PostgreSQL may not be ready when the KB daemon starts. Retry the
+          * retained row without turning the audit sink into a 5 kHz poller. */
          g.durable_retry_after_ns = now + 1000000000ull;
          break;
       }
-      /* Producers may have appended while the sink ran. Only the successfully
-       * committed prefix is removed; the final node's current next is retained. */
       pthread_mutex_lock(&durable_lock);
-      g.durable_head = nodes[count - 1]->next;
+      g.durable_head = p->next;
       if (!g.durable_head)
          g.durable_tail = NULL;
-      atomic_fetch_sub(&g.durable_pending_count, count);
+      atomic_fetch_sub(&g.durable_pending_count, 1);
       pthread_mutex_unlock(&durable_lock);
-      for (size_t i = 0; i < count; i++)
-         free(nodes[i]);
-      atomic_fetch_add_explicit(&g.written, count, memory_order_relaxed);
-      n += (uint32_t)count;
+      free(p);
+      atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+      n++;
    }
    if (!atomic_load(&g.durable_pending_count))
       g.durable_retry_after_ns = 0;
@@ -668,6 +653,7 @@ static uint32_t drain(void)
    bus_event_t ev;
    while (bus_client_poll(&g.consumer, &ev) == BUS_CLIENT_OK)
    {
+      atomic_fetch_add_explicit(&g.processed, 1, memory_order_relaxed); /* this event is handled */
       int wrote = 0;
       if (ev.frame.event_kind == KIND_AUDIT_ACTION)
       {
@@ -701,10 +687,8 @@ static uint32_t drain(void)
          else if (wrote < 0)
             n++; /* accepted into the durable retry queue */
       }
-      /* Publish completion only after the write or queue handoff. Flush's
-       * acquire must not observe a polled event before its writer can see it.
-       * As before, an unrecognized polled frame also completes its outcome. */
-      atomic_fetch_add_explicit(&g.processed, 1, memory_order_release);
+      else
+         continue;
    }
    return n;
 }
@@ -1836,27 +1820,18 @@ int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
    return 0;
 }
 
-int obs_bus_set_durable_batch_sink(obs_bus_durable_sink_fn single,
-                                   obs_bus_durable_batch_sink_fn batch, void *ctx)
+int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
 {
-   if (batch && !single)
-      return -1;
    pthread_mutex_lock(&start_lock);
    if (g.started)
    {
       pthread_mutex_unlock(&start_lock);
       return -1;
    }
-   sinks.durable = single;
-   sinks.durable_batch = single ? batch : NULL;
-   sinks.durable_ctx = single ? ctx : NULL;
+   sinks.durable = sink;
+   sinks.durable_ctx = sink ? ctx : NULL;
    pthread_mutex_unlock(&start_lock);
    return 0;
-}
-
-int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
-{
-   return obs_bus_set_durable_batch_sink(sink, NULL, ctx);
 }
 
 int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx)
@@ -2264,8 +2239,6 @@ void obs_bus_stop(void)
    module_clients_destroy();
    bus_host_destroy(&g.host);
    bus_runtime_policy_free(&g.runtime_policy);
-   const uint64_t durable_unwritten = atomic_load(&g.durable_pending_count);
-   const unsigned guardrail_pending = g.writer_count;
    if (g.durable_head)
    {
       uint64_t pending = g.durable_pending_count;
@@ -2281,16 +2254,7 @@ void obs_bus_stop(void)
    pthread_mutex_destroy(&g.pub_lock);
    g.started = 0;
    g.terminated = 1; /* a lazy emit must not resurrect the bus after shutdown */
-   const uint64_t written = atomic_load(&g.written);
-   const uint64_t dropped = atomic_load(&g.dropped);
    pthread_mutex_unlock(&start_lock);
-   /* Log after termination and unlocking: logging must not reenter a live bus.
-    * These aggregate counts expose drain failures without retaining payloads. */
-   aimee_log(
-       LOG_INFO, "obs_bus",
-       "shutdown drain: durable_unwritten=%llu guardrail_pending=%u written=%llu dropped=%llu",
-       (unsigned long long)durable_unwritten, guardrail_pending, (unsigned long long)written,
-       (unsigned long long)dropped);
 }
 
 void obs_bus_flush(void)

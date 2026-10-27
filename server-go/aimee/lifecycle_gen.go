@@ -119,7 +119,6 @@ type WorkItemGet struct {
 	ReservationState   string
 	SourcePath         string
 	UpdatedAt          string
-	ExecutionScope     string
 }
 
 // WorkItemList is the row work_item_list answers with.
@@ -146,7 +145,6 @@ type WorkItemList struct {
 	ReservationState   string
 	SourcePath         string
 	UpdatedAt          string
-	ExecutionScope     string
 }
 
 // WorkItemListLru is the row work_item_list_lru answers with.
@@ -173,7 +171,6 @@ type WorkItemListLru struct {
 	ReservationState   string
 	SourcePath         string
 	UpdatedAt          string
-	ExecutionScope     string
 }
 
 // LifecycleEventList is the row lifecycle_event_list answers with.
@@ -257,8 +254,8 @@ func (c *Client) WorkItemGet(ctx context.Context, workItemID string) (WorkItemGe
 	if status != statusOK {
 		return out, &StatusError{Op: "work_item_get", Status: status}
 	}
-	if len(reply) != 23 {
-		return out, fmt.Errorf("%w: work_item_get wants 23 fields, got %d", ErrMalformed, len(reply))
+	if len(reply) != 22 {
+		return out, fmt.Errorf("%w: work_item_get wants 22 fields, got %d", ErrMalformed, len(reply))
 	}
 	out.WorkItemID = reply[0]
 	out.Repo = reply[1]
@@ -298,7 +295,6 @@ func (c *Client) WorkItemGet(ctx context.Context, workItemID string) (WorkItemGe
 	out.ReservationState = reply[19]
 	out.SourcePath = reply[20]
 	out.UpdatedAt = reply[21]
-	out.ExecutionScope = reply[22]
 	return out, nil
 }
 
@@ -517,11 +513,11 @@ func (c *Client) WorkItemCountRecentBySubmitter(ctx context.Context, submitter s
 	return recent, nil
 }
 
-func (c *Client) WorkItemSubmitCapped(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, submitter string, maxActive int, rateMax int, rateSecs int, executionScope string) (int, error) {
+func (c *Client) WorkItemSubmitCapped(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, submitter string, maxActive int, rateMax int, rateSecs int) (int, error) {
 	if c == nil || c.caller == nil {
 		return 0, ErrConfig
 	}
-	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, submitter, Itoa(maxActive), Itoa(rateMax), Itoa(rateSecs), executionScope}
+	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, submitter, Itoa(maxActive), Itoa(rateMax), Itoa(rateSecs)}
 	status, reply, err := c.callFields(ctx, opWorkItemSubmitCapped, fields)
 	if err != nil {
 		return 0, err
@@ -729,7 +725,7 @@ func (c *Client) WorkItemList(ctx context.Context, max int) ([]WorkItemList, err
 	if status != statusOK {
 		return nil, &StatusError{Op: "work_item_list", Status: status}
 	}
-	rows, err := Rows(reply, 23)
+	rows, err := Rows(reply, 22)
 	if err != nil {
 		return nil, err
 	}
@@ -774,7 +770,6 @@ func (c *Client) WorkItemList(ctx context.Context, max int) ([]WorkItemList, err
 		item.ReservationState = row[19]
 		item.SourcePath = row[20]
 		item.UpdatedAt = row[21]
-		item.ExecutionScope = row[22]
 		out = append(out, item)
 	}
 	return out, nil
@@ -792,7 +787,7 @@ func (c *Client) WorkItemListLru(ctx context.Context, max int) ([]WorkItemListLr
 	if status != statusOK {
 		return nil, &StatusError{Op: "work_item_list_lru", Status: status}
 	}
-	rows, err := Rows(reply, 23)
+	rows, err := Rows(reply, 22)
 	if err != nil {
 		return nil, err
 	}
@@ -837,7 +832,6 @@ func (c *Client) WorkItemListLru(ctx context.Context, max int) ([]WorkItemListLr
 		item.ReservationState = row[19]
 		item.SourcePath = row[20]
 		item.UpdatedAt = row[21]
-		item.ExecutionScope = row[22]
 		out = append(out, item)
 	}
 	return out, nil
@@ -1674,11 +1668,11 @@ func (c *Client) WfeClaimFrozenCreates(ctx context.Context, parentID string, wor
 	return out, nil
 }
 
-func (c *Client) WfeCreateWorkItem(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, mode string, submitter string, parentID string, sourcePath string, maxCostUSD float64, rootCap int, executionScope string) (int, error) {
+func (c *Client) WfeCreateWorkItem(ctx context.Context, workItemID string, repo string, proposalPath string, workflowName string, workflowVersion string, startStage string, mode string, submitter string, parentID string, sourcePath string, maxCostUSD float64, rootCap int) (int, error) {
 	if c == nil || c.caller == nil {
 		return 0, ErrConfig
 	}
-	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, mode, submitter, parentID, sourcePath, Ftoa(maxCostUSD), Itoa(rootCap), executionScope}
+	fields := []string{workItemID, repo, proposalPath, workflowName, workflowVersion, startStage, mode, submitter, parentID, sourcePath, Ftoa(maxCostUSD), Itoa(rootCap)}
 	status, reply, err := c.callFields(ctx, opWfeCreateWorkItem, fields)
 	if err != nil {
 		return 0, err

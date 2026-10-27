@@ -27,7 +27,6 @@ static int g_exec_exit; /* the exit code it reports */
 static int g_last_timeout_ms;
 static const char *g_stdout_text;
 static const char *g_stderr_text;
-static int g_write_rc;
 static char g_last_write_path[256];
 static char g_last_write_content[256];
 
@@ -74,7 +73,7 @@ static int fake_write_file(delegate_backend_t *self, void *state, const char *pa
    (void)state;
    snprintf(g_last_write_path, sizeof(g_last_write_path), "%s", path ? path : "");
    snprintf(g_last_write_content, sizeof(g_last_write_content), "%s", content ? content : "");
-   return g_write_rc;
+   return 0;
 }
 
 static int fake_list_dir(delegate_backend_t *self, void *state, const char *path, char ***out)
@@ -111,7 +110,6 @@ static int g_state = 1; /* a non-NULL handle */
 
 static void reset(void)
 {
-   g_write_rc = 0;
    g_exec_calls = 0;
    g_exec_rc = 0;
    g_exec_exit = 0;
@@ -258,10 +256,6 @@ static void test_read_write_map_to_the_backend(void)
    /* len 0 with NULL data writes an empty file, per the contract. */
    assert(p->write_all(p, "empty.c", NULL, 0) == 0);
    assert(strcmp(g_last_write_content, "") == 0);
-   g_write_rc = SCOPED_WRITE_OUTCOME_UNKNOWN;
-   assert(p->write_all(p, "uncertain.c", "partial", 7) == SCOPED_WRITE_OUTCOME_UNKNOWN);
-   g_write_rc = -1;
-   assert(p->write_all(p, "failed.c", "", 0) == -1);
    printf("  PASS: read_write_map_to_the_backend\n");
 }
 
@@ -318,65 +312,9 @@ static void test_list_globs_and_stat_reads_kind_and_size(void)
    printf("  PASS: list_globs_and_stat_reads_kind_and_size\n");
 }
 
-static int scope_progress_calls;
-static const delegate_exec_scope_t *expected_scope;
-static int scope_progress(void *context)
-{
-   assert(context == &scope_progress_calls);
-   scope_progress_calls++;
-   return 0;
-}
-static int fake_scoped_exec(delegate_backend_t *self, void *state, const char *command,
-                            int timeout_ms, const delegate_exec_scope_t *scope,
-                            delegate_exec_result_t *result)
-{
-   assert(scope == expected_scope && scope->replace_environment == 1);
-   assert(scope->environment && !strcmp(scope->environment[0], "SCOPE=owned"));
-   assert(scope->progress && !scope->progress(scope->context));
-   int rc = fake_exec(self, state, command, timeout_ms, result);
-   if (strstr(command, "partial"))
-   {
-      snprintf(result->stdout_buf, result->stdout_cap, "captured-before-transport-failure");
-      return -1;
-   }
-   return rc;
-}
-static void test_explicit_scope_is_forwarded_without_ambient_fallback(void)
-{
-   delegate_backend_t backend = g_fake;
-   backend.exec_scoped = fake_scoped_exec;
-   ws_container_provider_t container;
-   assert(!ws_container_provider_init(&container, &backend, &g_state));
-   const workspace_provider_t *provider = &container.base;
-   assert(provider->exec_shell_scoped);
-   char *environment[] = {"SCOPE=owned", NULL};
-   delegate_exec_scope_t scope = {.environment = environment,
-                                  .replace_environment = 1,
-                                  .progress = scope_progress,
-                                  .context = &scope_progress_calls};
-   expected_scope = &scope;
-   reset();
-   scope_progress_calls = 0;
-   g_stdout_text = "scoped-output";
-   int exit = -1;
-   char *output = provider->exec_shell_scoped(provider, "scoped-command", 1234, &scope, &exit);
-   assert(output && !strcmp(output, "scoped-output") && exit == 0);
-   assert(g_exec_calls == 1 && scope_progress_calls == 1 && g_last_timeout_ms == 1234);
-   free(output);
-   output = provider->exec_shell_scoped(provider, "partial", 1234, &scope, &exit);
-   assert(output && strstr(output, "captured-before-transport-failure") && exit == -1);
-   free(output);
-   backend.exec_scoped = NULL;
-   reset();
-   output = provider->exec_shell_scoped(provider, "must-not-fallback", 1234, &scope, &exit);
-   assert(!output && exit == -1 && !g_exec_calls);
-   puts("  PASS: explicit scope forwarded, unknown partial retained, unsupported scope refused");
-}
-
 int main(void)
 {
    printf("test_workspace_provider_container:\n");
-   test_explicit_scope_is_forwarded_without_ambient_fallback();
    test_init_refuses_a_half_bound_provider();
    test_exec_argv_is_shell_quoted();
    test_exec_shell_combines_output_and_reports_exit();

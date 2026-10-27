@@ -36,16 +36,3 @@ it('shows native inference unavailability neutrally instead of failed or healthy
   expect(screen.queryByText('available', { exact: true })).toBeNull();
   expect(screen.queryByText('unavailable', { exact: true })).toBeNull();
 });
-
-it.each([
- [0, 0, true, '$0.0000'],
- [0, 1, false, '$0.0000 observed; 1 call with unknown usage'],
- [2, 1, false, '$2.0000 observed; 1 call with unknown usage'],
-])('shows model observed subtotal %s with usage knowledge', async (cost, unknown, complete, expected) => {
- vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
-  url === '/api/models' ? { models: [{ name: 'metric-model', model: 'http', provider: 'openai', enabled: true }] } :
-  url === '/api/models/stats' ? { stats: [{ name: 'metric-model', total_calls: 2, successful_calls: 2, failed_calls: 0, success_rate: 1, avg_latency_ms: 1, prompt_tokens: 0, completion_tokens: 0, estimated_cost_usd: cost, unknown_usage_calls: unknown, usage_complete: complete }] } : {},
- ))));
- render(<Models />);
- expect(await screen.findByText(expected)).toBeTruthy();
-});

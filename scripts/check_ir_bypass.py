@@ -192,7 +192,6 @@ RULES = {
         r'\bcJSON_AddStringToObject\s*\([^,]+,\s*"(?:message|prompt|system_prompt|original_request)"\s*,'),
     "native-control-reparse": re.compile(r"\b(?:anthropic_backend_parse|anthropic_frontend_parse|anthropic_stream_to_deltas)\s*\("),
     "native-control-history": re.compile(r"\b(?:message|delta|harness_output_decode)\s*\("),
-    "acp-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "codex-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "delegate-model-bypass": re.compile(r"\b(?:exec\.Command(?:Context)?|[A-Za-z_]\w*\.TextResponse)\s*\("),
     "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen|subprocess\.(?:run|Popen|check_output)|asyncio\.create_subprocess_(?:exec|shell))\s*\("),
@@ -236,8 +235,6 @@ PYTHON_HISTORY_FIELD = re.compile('(?P<quote>["\'])' +
 # These consumers have completed their history/algorithm cutover. Provider
 # adapters are intentionally outside this set; newly migrated consumers join it.
 CANONICAL_FILES = DISCORD_MODEL_FILES | {
-    "src/server/server_acp_execution.c", "src/server/server_acp_resources.c",
-    "src/server/server_provider_cli_execute.c",
     "src/posix/agent_runtime.c", "src/posix/server_compute.c", "src/server/session_compact.c",
     "src/server/router_advise.c", "src/server/server_compute.c",
     "src/server/aux_router.c", "src/server/server_cron.c",
@@ -366,8 +363,6 @@ def findings(root: Path) -> list[dict]:
                     not relative.endswith(".c") or relative == "src/server/agent_runtime.c"):
                 continue
             if rule in {"native-control-reparse", "native-control-history"} and relative != "src/modules/translation/harness_ir.c":
-                continue
-            if rule == "acp-ambient-launch" and relative != "src/server/cli_acp.c":
                 continue
             if rule == "codex-ambient-launch" and relative != "src/server/cli_codex.c":
                 continue

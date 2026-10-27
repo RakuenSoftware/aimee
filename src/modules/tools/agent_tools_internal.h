@@ -14,9 +14,8 @@ struct cJSON;
 int agent_tools_classification(const char *name);
 /* Takes ownership of admitted_arguments when non-NULL. */
 
-char *agent_tools_dispatch_file_owned(const char *name, int timeout_ms, int *is_error,
-                                      struct cJSON *admitted_arguments,
-                                      agent_tool_file_resource_fn execute, void *context);
+char *agent_tools_dispatch_ir_owned(const char *name, int timeout_ms, int *is_error,
+                                    struct cJSON *admitted_arguments);
 
 /* Parse native exec outcome at its tool-owner entry boundary. Borrowed static
  * verdict/reason are returned only for a classified failure. */

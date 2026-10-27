@@ -92,7 +92,7 @@ func (r agentRegistry) roster() []agentEntry {
 }
 
 // RegistryExecutor selects the current configured registration. Native providers
-// execute through the canonical, source-scoped C host owner. Unstructured and
+// execute through the canonical, C host owner. Unstructured and
 // unknown CLI commands are never internal model candidates or execution fallbacks.
 type RegistryExecutor struct {
 	host     delegatecontract.StageCaller
@@ -182,11 +182,11 @@ func enabled(a agentEntry) bool { return a.Enabled == nil || bool(*a.Enabled) }
 
 func available(a agentEntry) bool { return a.Available == nil || bool(*a.Available) }
 
-var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude, Codex or ACP host registration")
+var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude or Codex host registration")
 
 func canonicalModelAdapter(a agentEntry) bool {
 	switch strings.ToLower(strings.TrimSpace(a.CLIKind)) {
-	case "claude", "claude-code", "codex", "acp":
+	case "claude", "claude-code", "codex":
 		return true
 	default:
 		return false

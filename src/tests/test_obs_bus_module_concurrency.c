@@ -113,197 +113,8 @@ static void test_expired_deadline_does_not_block(void)
    assert(elapsed < 1000000000ULL);
 }
 
-/* A production KB durability sink reaches PostgreSQL through this same bus.
- * Calling it on the pump thread makes even a typed refusal time out. */
-static atomic_int durable_ready;
-static atomic_int durable_writes;
-static int durable_module_sink(const char *role, const char *principal, const char *action,
-                               const char *subject, const char *verdict, const char *detail,
-                               void *context)
-{
-   (void)role;
-   (void)principal;
-   (void)subject;
-   (void)verdict;
-   (void)detail;
-   (void)context;
-   if (!atomic_load(&durable_ready))
-      return -1;
-   char reply[16];
-   uint32_t length = 0;
-   assert(obs_bus_module_call(11267, 3, 1, now_ns() + 1000000000ULL, "probe", 5, reply,
-                              sizeof reply, &length, NULL,
-                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
-   if (strcmp(action, "test.provider.audit") == 0)
-      atomic_fetch_add(&durable_writes, 1);
-   return 0;
-}
-
-/* Freeze the actual consumer between polling and dispatch. A flush must wait
- * for this handoff, rather than treating a polled event as persisted work. */
-static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t handoff_changed = PTHREAD_COND_INITIALIZER;
-static int handoff_armed, handoff_polled, handoff_release;
-static int flush_waiting, flush_returned;
-static atomic_int handoff_persisted;
-
-static _Thread_local int handoff_flush_thread;
-static int handoff_nanosleep(const struct timespec *request, struct timespec *remaining)
-{
-   if (handoff_flush_thread)
-   {
-      pthread_mutex_lock(&handoff_lock);
-      flush_waiting = 1;
-      pthread_cond_broadcast(&handoff_changed);
-      pthread_mutex_unlock(&handoff_lock);
-   }
-   return nanosleep(request, remaining);
-}
-
-static void handoff_audit_action_log(const char *actor, const char *tool, const char *hash,
-                                     const char *command, const char *mode, const char *reason,
-                                     const char *verdict, long long task_id)
-{
-   pthread_mutex_lock(&handoff_lock);
-   if (handoff_armed && !strcmp(tool, "test.handoff"))
-   {
-      handoff_polled = 1;
-      pthread_cond_broadcast(&handoff_changed);
-      while (!handoff_release)
-         pthread_cond_wait(&handoff_changed, &handoff_lock);
-   }
-   pthread_mutex_unlock(&handoff_lock);
-   audit_action_log(actor, tool, hash, command, mode, reason, verdict, task_id);
-   if (!strcmp(tool, "test.handoff"))
-      atomic_fetch_add(&handoff_persisted, 1);
-}
-
-/* Exercise the production consumer and flush with only its existing audit
- * sink and wait primitive intercepted. No shipped test hooks are required. */
-#define audit_action_log handoff_audit_action_log
-#define nanosleep        handoff_nanosleep
+/* Capture/privacy checks below inspect the production tap directly. */
 #include "../modules/audit/obs_bus.c"
-#undef nanosleep
-#undef audit_action_log
-
-static void wait_for_handoff(int *condition)
-{
-   struct timespec limit;
-   clock_gettime(CLOCK_REALTIME, &limit);
-   limit.tv_sec += 3;
-   while (!*condition)
-      assert(pthread_cond_timedwait(&handoff_changed, &handoff_lock, &limit) == 0);
-}
-
-static void *flush_handoff(void *unused)
-{
-   (void)unused;
-   pthread_mutex_lock(&handoff_lock);
-   handoff_flush_thread = 1;
-   pthread_mutex_unlock(&handoff_lock);
-   obs_bus_flush();
-   pthread_mutex_lock(&handoff_lock);
-   flush_returned = 1;
-   pthread_cond_broadcast(&handoff_changed);
-   pthread_mutex_unlock(&handoff_lock);
-   return NULL;
-}
-
-static void test_flush_waits_for_handoff(void)
-{
-   char home[256];
-   snprintf(home, sizeof home, "%s/aimee-handoff-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(home) && !setenv("AIMEE_HOME", home, 1));
-   audit_log_open();
-   assert(!obs_bus_start());
-   obs_bus_flush();
-   pthread_mutex_lock(&handoff_lock);
-   handoff_armed = 1;
-   pthread_mutex_unlock(&handoff_lock);
-   obs_bus_emit("operator", "test.handoff", "args", "owned", "mode", "ok", "allow", 0);
-   pthread_mutex_lock(&handoff_lock);
-   wait_for_handoff(&handoff_polled);
-   pthread_mutex_unlock(&handoff_lock);
-   pthread_t thread;
-   assert(!pthread_create(&thread, NULL, flush_handoff, NULL));
-   pthread_mutex_lock(&handoff_lock);
-   struct timespec limit;
-   clock_gettime(CLOCK_REALTIME, &limit);
-   limit.tv_sec += 3;
-   while (!flush_waiting && !flush_returned)
-      assert(!pthread_cond_timedwait(&handoff_changed, &handoff_lock, &limit));
-   /* Old publication order returns here before the sink has seen the event. */
-   assert(flush_waiting && !flush_returned && !atomic_load(&handoff_persisted));
-   handoff_release = 1;
-   pthread_cond_broadcast(&handoff_changed);
-   pthread_mutex_unlock(&handoff_lock);
-   assert(!pthread_join(thread, NULL));
-   assert(flush_returned && atomic_load(&handoff_persisted) == 1);
-   assert(obs_bus_written() == 1 && !obs_bus_dropped());
-   obs_bus_stop();
-   puts("  flush waits for consumer handoff and persistence: ok");
-}
-
-static atomic_int batch_ready, batch_calls, batch_rows, batch_attempts, largest_batch;
-static char expected[139][32];
-static int batch_sink(const obs_bus_durable_record_t *rows, size_t count, void *ctx)
-{
-   (void)ctx;
-   assert(count && count <= OBS_BUS_DURABLE_BATCH_MAX);
-   atomic_fetch_add(&batch_attempts, 1);
-   if (!atomic_load(&batch_ready))
-      return -1;
-   if ((int)count > atomic_load(&largest_batch))
-      atomic_store(&largest_batch, (int)count);
-   int offset = atomic_load(&batch_rows);
-   for (size_t i = 0; i < count; i++)
-   {
-      assert(!strcmp(rows[i].action, "test.batch"));
-      assert(!strcmp(rows[i].subject, expected[offset + (int)i]));
-   }
-   /* A producer appends while the callback owns borrowed prefix views. */
-   if (offset == 0)
-      obs_bus_emit_durable_event("test.batch", expected[130], "ok", "{}");
-   atomic_fetch_add(&batch_calls, 1);
-   atomic_fetch_add(&batch_rows, (int)count);
-   return 0;
-}
-static void test_batch_retry(void)
-{
-   char home[256];
-   snprintf(home, sizeof home, "%s/aimee-busbatch-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(home) && !setenv("AIMEE_HOME", home, 1));
-   audit_log_open();
-   assert(obs_bus_set_durable_batch_sink(NULL, batch_sink, NULL) < 0);
-   assert(!obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL));
-   assert(!obs_bus_start());
-   assert(obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL) < 0);
-   /* A synchronous action still calls the single sink, even with batching on. */
-   atomic_store(&durable_ready, 1);
-   assert(!obs_bus_commit_action("operator", "sync.test", "args", "command", "mode", "ok", "allow",
-                                 0));
-   assert(!atomic_load(&batch_attempts));
-
-   for (int i = 0; i < 139; i++)
-      snprintf(expected[i], sizeof expected[i], "fifo-%d", i);
-   for (int i = 0; i < 130; i++)
-      obs_bus_emit_durable_event("test.batch", expected[i], "ok", "{}");
-   for (int i = 0; i < 2000 && !atomic_load(&batch_attempts); i++)
-      usleep(1000);
-   assert(atomic_load(&batch_attempts) && !atomic_load(&batch_rows));
-   atomic_store(&batch_ready, 1);
-   obs_bus_flush();
-   /* The callback publishes after the first flush snapshots its target. */
-   obs_bus_flush();
-   assert(atomic_load(&batch_rows) == 131 && atomic_load(&batch_calls) >= 3);
-   assert(obs_bus_written() == 131 && !obs_bus_dropped());
-   assert(atomic_load(&largest_batch) > 1);
-   for (int i = 131; i < 139; i++)
-      obs_bus_emit_durable_event("test.batch", expected[i], "ok", "{}");
-   obs_bus_stop();
-   assert(atomic_load(&batch_rows) == 139 && obs_bus_written() == 139 && !obs_bus_dropped());
-   puts("  queued batch FIFO/retry/concurrent enqueue: ok");
-}
 
 static aimee_module_status_t source_lookup_callback(const aimee_module_invocation_t *invocation,
                                                     const uint8_t *request, uint32_t length,
@@ -574,25 +385,6 @@ int main(void)
    int capture_status = 0;
    assert(waitpid(capture_child, &capture_status, 0) == capture_child &&
           WIFEXITED(capture_status) && WEXITSTATUS(capture_status) == 0);
-   pid_t handoff_child = fork();
-   assert(handoff_child >= 0);
-   if (!handoff_child)
-   {
-      test_flush_waits_for_handoff();
-      exit(0);
-   }
-   int handoff_status = 0;
-   assert(waitpid(handoff_child, &handoff_status, 0) == handoff_child &&
-          WIFEXITED(handoff_status) && WEXITSTATUS(handoff_status) == 0);
-   pid_t child = fork();
-   assert(child >= 0);
-   if (!child)
-   {
-      test_batch_retry();
-      exit(0);
-   }
-   int status = 0;
-   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
    printf("obs_bus_module_concurrency:\n");
    char home[256];
    snprintf(home, sizeof home, "%s/aimee-busconc-XXXXXX", platform_tmpdir());
@@ -603,9 +395,6 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
-   assert(!obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL));
-   /* The legacy setter must clear a previously configured optional batch. */
-   assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
    {
       fprintf(stderr, "FAIL: obs_bus_start\n");
@@ -613,19 +402,12 @@ int main(void)
    }
 
    obs_bus_module_service_t *service = test_embedded_callback_service();
-   obs_bus_emit_durable_event("test.provider.audit", "startup", "ok", "{}");
    test_calls_overlap();
    test_expired_deadline_does_not_block();
 
-   atomic_store(&durable_ready, 1);
-   obs_bus_flush();
-   assert(atomic_load(&durable_writes) == 1);
-   for (int i = 0; i < 8; i++)
-      obs_bus_emit_durable_event("test.provider.audit", "shutdown", "ok", "{}");
    obs_bus_stop();
    obs_bus_module_service_stop(&service);
    assert(!service);
-   assert(atomic_load(&durable_writes) == 9);
    assert(obs_bus_dropped() == 0);
    printf("ok\n");
    return 0;

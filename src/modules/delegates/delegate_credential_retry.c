@@ -1,4 +1,3 @@
-#include "agent_retry_usage.h"
 /* delegate_credential_retry.c: same-request retry within a credential pool. */
 
 #include <aimee/delegates/delegate_credential_retry.h>
@@ -102,10 +101,15 @@ static int result_failed_for_pool(const agent_result_t *result, int rc)
    return !agent_rc_is_local_refusal(rc) && (rc != 0 || !result || !result->success);
 }
 
-static void result_add_prior_metrics(agent_result_t *result, agent_result_t *prior)
+static void result_add_prior_metrics(agent_result_t *result, const agent_result_t *prior)
 {
-   if (result && prior)
-      agent_retry_merge_attempt(result, prior, 0);
+   if (!result || !prior)
+      return;
+   result->turns += prior->turns;
+   result->tool_calls += prior->tool_calls;
+   result->prompt_tokens += prior->prompt_tokens;
+   result->completion_tokens += prior->completion_tokens;
+   result->latency_ms += prior->latency_ms;
 }
 
 int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, const char *role,

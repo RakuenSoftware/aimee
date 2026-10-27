@@ -7,8 +7,6 @@
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
-#include "server_native_delegate_source.h"
-#include "server_acp_execution.h"
 #include "server_native_cache.h"
 #include "server_native_cache_lease.h"
 #include "server_native_containment.h"
@@ -1056,11 +1054,6 @@ static int native_registry_open(native_execution_t *execution, const request_con
       }
       bindings[i].name = tool->name;
    }
-   if (owner->vault_transport == ATTEST_NONE &&
-       server_native_delegate_source_runtime_prepare(cfg->role, cfg->agent, &execution->selected,
-                                                     cfg->canonical_request, profile,
-                                                     execution->source_session))
-      goto done;
    execution->runtime = server_native_runtime_open_bound_request(&execution->selected, owner,
                                                                  execution->source_session, profile,
                                                                  bindings, profile->n_tools, error);
@@ -1517,7 +1510,7 @@ static int native_claude_execute(native_execution_t *execution, const provider_c
    return claude_headless_run(owned, native_bind, execution, out);
 }
 
-int server_native_execute_owned(const provider_cli_cfg_t *cfg, agent_result_t *out)
+int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
    if (!out)
       return -1;

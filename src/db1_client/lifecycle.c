@@ -57,9 +57,9 @@ int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
    char slot17[32];
    char slot18[32];
    memset(out, 0, sizeof *out);
-   char *const values[] = {out->work_item_id, out->repo, out->proposal_path, out->workflow_name, out->workflow_version, out->current_stage, out->state, out->mode, out->pause_reason, out->paused_state, out->content_hash, out->pr_ref, out->worktree, out->submitter, out->parent_id, slot15, slot16, slot17, slot18, out->reservation_state, out->source_path, out->updated_at, out->execution_scope};
-   const size_t caps[] = {sizeof out->work_item_id, sizeof out->repo, sizeof out->proposal_path, sizeof out->workflow_name, sizeof out->workflow_version, sizeof out->current_stage, sizeof out->state, sizeof out->mode, sizeof out->pause_reason, sizeof out->paused_state, sizeof out->content_hash, sizeof out->pr_ref, sizeof out->worktree, sizeof out->submitter, sizeof out->parent_id, sizeof slot15, sizeof slot16, sizeof slot17, sizeof slot18, sizeof out->reservation_state, sizeof out->source_path, sizeof out->updated_at, sizeof out->execution_scope};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_GET, fields, 1, values, caps, 23, NULL);
+   char *const values[] = {out->work_item_id, out->repo, out->proposal_path, out->workflow_name, out->workflow_version, out->current_stage, out->state, out->mode, out->pause_reason, out->paused_state, out->content_hash, out->pr_ref, out->worktree, out->submitter, out->parent_id, slot15, slot16, slot17, slot18, out->reservation_state, out->source_path, out->updated_at};
+   const size_t caps[] = {sizeof out->work_item_id, sizeof out->repo, sizeof out->proposal_path, sizeof out->workflow_name, sizeof out->workflow_version, sizeof out->current_stage, sizeof out->state, sizeof out->mode, sizeof out->pause_reason, sizeof out->paused_state, sizeof out->content_hash, sizeof out->pr_ref, sizeof out->worktree, sizeof out->submitter, sizeof out->parent_id, sizeof slot15, sizeof slot16, sizeof slot17, sizeof slot18, sizeof out->reservation_state, sizeof out->source_path, sizeof out->updated_at};
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_GET, fields, 1, values, caps, 22, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
@@ -198,7 +198,7 @@ int db1_work_item_count_recent_by_submitter(const char *submitter, int secs)
    return (int)strtoll(slot0, NULL, 10);
 }
 
-int db1_work_item_submit_capped(const char *work_item_id, const char *repo, const char *proposal_path, const char *workflow_name, const char *workflow_version, const char *start_stage, const char *submitter, int max_active, int rate_max, int rate_secs, const char *execution_scope)
+int db1_work_item_submit_capped(const char *work_item_id, const char *repo, const char *proposal_path, const char *workflow_name, const char *workflow_version, const char *start_stage, const char *submitter, int max_active, int rate_max, int rate_secs)
 {
    if (!work_item_id || !work_item_id[0])
       return -1;
@@ -208,11 +208,11 @@ int db1_work_item_submit_capped(const char *work_item_id, const char *repo, cons
    snprintf(arg8, sizeof arg8, "%d", rate_max);
    char arg9[32];
    snprintf(arg9, sizeof arg9, "%d", rate_secs);
-   const char *fields[] = {work_item_id, repo ? repo : "", proposal_path ? proposal_path : "", workflow_name ? workflow_name : "", workflow_version ? workflow_version : "", start_stage ? start_stage : "", submitter ? submitter : "", arg7, arg8, arg9, execution_scope ? execution_scope : ""};
+   const char *fields[] = {work_item_id, repo ? repo : "", proposal_path ? proposal_path : "", workflow_name ? workflow_name : "", workflow_version ? workflow_version : "", start_stage ? start_stage : "", submitter ? submitter : "", arg7, arg8, arg9};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED, fields, 11, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED, fields, 10, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -338,8 +338,8 @@ int db1_work_item_list_bounded(db1_work_item_t **out, int max)
    db1_work_item_t *wire_held = calloc((size_t)max, sizeof *wire_held);
    if (!wire_held)
       return -1;
-   char **wire_values = malloc((size_t)max * 23u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 23u * sizeof *wire_caps);
+   char **wire_values = malloc((size_t)max * 22u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 22u * sizeof *wire_caps);
    char (*wire_scratch)[32] = malloc((size_t)max * 4u * sizeof *wire_scratch);
    if (!wire_values || !wire_caps || !wire_scratch)
    {
@@ -352,65 +352,63 @@ int db1_work_item_list_bounded(db1_work_item_t **out, int max)
    memset(wire_held, 0, (size_t)max * sizeof *wire_held);
    for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      wire_values[wire_row * 23u + 0u] = wire_held[wire_row].work_item_id;
-      wire_caps[wire_row * 23u + 0u] = sizeof wire_held[wire_row].work_item_id;
-      wire_values[wire_row * 23u + 1u] = wire_held[wire_row].repo;
-      wire_caps[wire_row * 23u + 1u] = sizeof wire_held[wire_row].repo;
-      wire_values[wire_row * 23u + 2u] = wire_held[wire_row].proposal_path;
-      wire_caps[wire_row * 23u + 2u] = sizeof wire_held[wire_row].proposal_path;
-      wire_values[wire_row * 23u + 3u] = wire_held[wire_row].workflow_name;
-      wire_caps[wire_row * 23u + 3u] = sizeof wire_held[wire_row].workflow_name;
-      wire_values[wire_row * 23u + 4u] = wire_held[wire_row].workflow_version;
-      wire_caps[wire_row * 23u + 4u] = sizeof wire_held[wire_row].workflow_version;
-      wire_values[wire_row * 23u + 5u] = wire_held[wire_row].current_stage;
-      wire_caps[wire_row * 23u + 5u] = sizeof wire_held[wire_row].current_stage;
-      wire_values[wire_row * 23u + 6u] = wire_held[wire_row].state;
-      wire_caps[wire_row * 23u + 6u] = sizeof wire_held[wire_row].state;
-      wire_values[wire_row * 23u + 7u] = wire_held[wire_row].mode;
-      wire_caps[wire_row * 23u + 7u] = sizeof wire_held[wire_row].mode;
-      wire_values[wire_row * 23u + 8u] = wire_held[wire_row].pause_reason;
-      wire_caps[wire_row * 23u + 8u] = sizeof wire_held[wire_row].pause_reason;
-      wire_values[wire_row * 23u + 9u] = wire_held[wire_row].paused_state;
-      wire_caps[wire_row * 23u + 9u] = sizeof wire_held[wire_row].paused_state;
-      wire_values[wire_row * 23u + 10u] = wire_held[wire_row].content_hash;
-      wire_caps[wire_row * 23u + 10u] = sizeof wire_held[wire_row].content_hash;
-      wire_values[wire_row * 23u + 11u] = wire_held[wire_row].pr_ref;
-      wire_caps[wire_row * 23u + 11u] = sizeof wire_held[wire_row].pr_ref;
-      wire_values[wire_row * 23u + 12u] = wire_held[wire_row].worktree;
-      wire_caps[wire_row * 23u + 12u] = sizeof wire_held[wire_row].worktree;
-      wire_values[wire_row * 23u + 13u] = wire_held[wire_row].submitter;
-      wire_caps[wire_row * 23u + 13u] = sizeof wire_held[wire_row].submitter;
-      wire_values[wire_row * 23u + 14u] = wire_held[wire_row].parent_id;
-      wire_caps[wire_row * 23u + 14u] = sizeof wire_held[wire_row].parent_id;
-      wire_values[wire_row * 23u + 15u] = wire_scratch[wire_row * 4u + 0u];
-      wire_caps[wire_row * 23u + 15u] = sizeof wire_scratch[wire_row * 4u + 0u];
-      wire_values[wire_row * 23u + 16u] = wire_scratch[wire_row * 4u + 1u];
-      wire_caps[wire_row * 23u + 16u] = sizeof wire_scratch[wire_row * 4u + 1u];
-      wire_values[wire_row * 23u + 17u] = wire_scratch[wire_row * 4u + 2u];
-      wire_caps[wire_row * 23u + 17u] = sizeof wire_scratch[wire_row * 4u + 2u];
-      wire_values[wire_row * 23u + 18u] = wire_scratch[wire_row * 4u + 3u];
-      wire_caps[wire_row * 23u + 18u] = sizeof wire_scratch[wire_row * 4u + 3u];
-      wire_values[wire_row * 23u + 19u] = wire_held[wire_row].reservation_state;
-      wire_caps[wire_row * 23u + 19u] = sizeof wire_held[wire_row].reservation_state;
-      wire_values[wire_row * 23u + 20u] = wire_held[wire_row].source_path;
-      wire_caps[wire_row * 23u + 20u] = sizeof wire_held[wire_row].source_path;
-      wire_values[wire_row * 23u + 21u] = wire_held[wire_row].updated_at;
-      wire_caps[wire_row * 23u + 21u] = sizeof wire_held[wire_row].updated_at;
-      wire_values[wire_row * 23u + 22u] = wire_held[wire_row].execution_scope;
-      wire_caps[wire_row * 23u + 22u] = sizeof wire_held[wire_row].execution_scope;
+      wire_values[wire_row * 22u + 0u] = wire_held[wire_row].work_item_id;
+      wire_caps[wire_row * 22u + 0u] = sizeof wire_held[wire_row].work_item_id;
+      wire_values[wire_row * 22u + 1u] = wire_held[wire_row].repo;
+      wire_caps[wire_row * 22u + 1u] = sizeof wire_held[wire_row].repo;
+      wire_values[wire_row * 22u + 2u] = wire_held[wire_row].proposal_path;
+      wire_caps[wire_row * 22u + 2u] = sizeof wire_held[wire_row].proposal_path;
+      wire_values[wire_row * 22u + 3u] = wire_held[wire_row].workflow_name;
+      wire_caps[wire_row * 22u + 3u] = sizeof wire_held[wire_row].workflow_name;
+      wire_values[wire_row * 22u + 4u] = wire_held[wire_row].workflow_version;
+      wire_caps[wire_row * 22u + 4u] = sizeof wire_held[wire_row].workflow_version;
+      wire_values[wire_row * 22u + 5u] = wire_held[wire_row].current_stage;
+      wire_caps[wire_row * 22u + 5u] = sizeof wire_held[wire_row].current_stage;
+      wire_values[wire_row * 22u + 6u] = wire_held[wire_row].state;
+      wire_caps[wire_row * 22u + 6u] = sizeof wire_held[wire_row].state;
+      wire_values[wire_row * 22u + 7u] = wire_held[wire_row].mode;
+      wire_caps[wire_row * 22u + 7u] = sizeof wire_held[wire_row].mode;
+      wire_values[wire_row * 22u + 8u] = wire_held[wire_row].pause_reason;
+      wire_caps[wire_row * 22u + 8u] = sizeof wire_held[wire_row].pause_reason;
+      wire_values[wire_row * 22u + 9u] = wire_held[wire_row].paused_state;
+      wire_caps[wire_row * 22u + 9u] = sizeof wire_held[wire_row].paused_state;
+      wire_values[wire_row * 22u + 10u] = wire_held[wire_row].content_hash;
+      wire_caps[wire_row * 22u + 10u] = sizeof wire_held[wire_row].content_hash;
+      wire_values[wire_row * 22u + 11u] = wire_held[wire_row].pr_ref;
+      wire_caps[wire_row * 22u + 11u] = sizeof wire_held[wire_row].pr_ref;
+      wire_values[wire_row * 22u + 12u] = wire_held[wire_row].worktree;
+      wire_caps[wire_row * 22u + 12u] = sizeof wire_held[wire_row].worktree;
+      wire_values[wire_row * 22u + 13u] = wire_held[wire_row].submitter;
+      wire_caps[wire_row * 22u + 13u] = sizeof wire_held[wire_row].submitter;
+      wire_values[wire_row * 22u + 14u] = wire_held[wire_row].parent_id;
+      wire_caps[wire_row * 22u + 14u] = sizeof wire_held[wire_row].parent_id;
+      wire_values[wire_row * 22u + 15u] = wire_scratch[wire_row * 4u + 0u];
+      wire_caps[wire_row * 22u + 15u] = sizeof wire_scratch[wire_row * 4u + 0u];
+      wire_values[wire_row * 22u + 16u] = wire_scratch[wire_row * 4u + 1u];
+      wire_caps[wire_row * 22u + 16u] = sizeof wire_scratch[wire_row * 4u + 1u];
+      wire_values[wire_row * 22u + 17u] = wire_scratch[wire_row * 4u + 2u];
+      wire_caps[wire_row * 22u + 17u] = sizeof wire_scratch[wire_row * 4u + 2u];
+      wire_values[wire_row * 22u + 18u] = wire_scratch[wire_row * 4u + 3u];
+      wire_caps[wire_row * 22u + 18u] = sizeof wire_scratch[wire_row * 4u + 3u];
+      wire_values[wire_row * 22u + 19u] = wire_held[wire_row].reservation_state;
+      wire_caps[wire_row * 22u + 19u] = sizeof wire_held[wire_row].reservation_state;
+      wire_values[wire_row * 22u + 20u] = wire_held[wire_row].source_path;
+      wire_caps[wire_row * 22u + 20u] = sizeof wire_held[wire_row].source_path;
+      wire_values[wire_row * 22u + 21u] = wire_held[wire_row].updated_at;
+      wire_caps[wire_row * 22u + 21u] = sizeof wire_held[wire_row].updated_at;
    }
    uint32_t wire_filled = 0;
    int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_LIST, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 23), &wire_filled);
+                           (uint32_t)(max * 22), &wire_filled);
    free(wire_values);
    free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 23u != 0u)
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 22u != 0u)
    {
       free(wire_scratch);
       free(wire_held);
       return -1;
    }
-   int wire_rows = (int)(wire_filled / 23u);
+   int wire_rows = (int)(wire_filled / 22u);
    for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
       wire_held[wire_row].cum_cost_usd = strtod(wire_scratch[wire_row * 4u + 0u], NULL);
@@ -435,8 +433,8 @@ int db1_work_item_list_lru_bounded(db1_work_item_t **out, int max)
    db1_work_item_t *wire_held = calloc((size_t)max, sizeof *wire_held);
    if (!wire_held)
       return -1;
-   char **wire_values = malloc((size_t)max * 23u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 23u * sizeof *wire_caps);
+   char **wire_values = malloc((size_t)max * 22u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 22u * sizeof *wire_caps);
    char (*wire_scratch)[32] = malloc((size_t)max * 4u * sizeof *wire_scratch);
    if (!wire_values || !wire_caps || !wire_scratch)
    {
@@ -449,65 +447,63 @@ int db1_work_item_list_lru_bounded(db1_work_item_t **out, int max)
    memset(wire_held, 0, (size_t)max * sizeof *wire_held);
    for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      wire_values[wire_row * 23u + 0u] = wire_held[wire_row].work_item_id;
-      wire_caps[wire_row * 23u + 0u] = sizeof wire_held[wire_row].work_item_id;
-      wire_values[wire_row * 23u + 1u] = wire_held[wire_row].repo;
-      wire_caps[wire_row * 23u + 1u] = sizeof wire_held[wire_row].repo;
-      wire_values[wire_row * 23u + 2u] = wire_held[wire_row].proposal_path;
-      wire_caps[wire_row * 23u + 2u] = sizeof wire_held[wire_row].proposal_path;
-      wire_values[wire_row * 23u + 3u] = wire_held[wire_row].workflow_name;
-      wire_caps[wire_row * 23u + 3u] = sizeof wire_held[wire_row].workflow_name;
-      wire_values[wire_row * 23u + 4u] = wire_held[wire_row].workflow_version;
-      wire_caps[wire_row * 23u + 4u] = sizeof wire_held[wire_row].workflow_version;
-      wire_values[wire_row * 23u + 5u] = wire_held[wire_row].current_stage;
-      wire_caps[wire_row * 23u + 5u] = sizeof wire_held[wire_row].current_stage;
-      wire_values[wire_row * 23u + 6u] = wire_held[wire_row].state;
-      wire_caps[wire_row * 23u + 6u] = sizeof wire_held[wire_row].state;
-      wire_values[wire_row * 23u + 7u] = wire_held[wire_row].mode;
-      wire_caps[wire_row * 23u + 7u] = sizeof wire_held[wire_row].mode;
-      wire_values[wire_row * 23u + 8u] = wire_held[wire_row].pause_reason;
-      wire_caps[wire_row * 23u + 8u] = sizeof wire_held[wire_row].pause_reason;
-      wire_values[wire_row * 23u + 9u] = wire_held[wire_row].paused_state;
-      wire_caps[wire_row * 23u + 9u] = sizeof wire_held[wire_row].paused_state;
-      wire_values[wire_row * 23u + 10u] = wire_held[wire_row].content_hash;
-      wire_caps[wire_row * 23u + 10u] = sizeof wire_held[wire_row].content_hash;
-      wire_values[wire_row * 23u + 11u] = wire_held[wire_row].pr_ref;
-      wire_caps[wire_row * 23u + 11u] = sizeof wire_held[wire_row].pr_ref;
-      wire_values[wire_row * 23u + 12u] = wire_held[wire_row].worktree;
-      wire_caps[wire_row * 23u + 12u] = sizeof wire_held[wire_row].worktree;
-      wire_values[wire_row * 23u + 13u] = wire_held[wire_row].submitter;
-      wire_caps[wire_row * 23u + 13u] = sizeof wire_held[wire_row].submitter;
-      wire_values[wire_row * 23u + 14u] = wire_held[wire_row].parent_id;
-      wire_caps[wire_row * 23u + 14u] = sizeof wire_held[wire_row].parent_id;
-      wire_values[wire_row * 23u + 15u] = wire_scratch[wire_row * 4u + 0u];
-      wire_caps[wire_row * 23u + 15u] = sizeof wire_scratch[wire_row * 4u + 0u];
-      wire_values[wire_row * 23u + 16u] = wire_scratch[wire_row * 4u + 1u];
-      wire_caps[wire_row * 23u + 16u] = sizeof wire_scratch[wire_row * 4u + 1u];
-      wire_values[wire_row * 23u + 17u] = wire_scratch[wire_row * 4u + 2u];
-      wire_caps[wire_row * 23u + 17u] = sizeof wire_scratch[wire_row * 4u + 2u];
-      wire_values[wire_row * 23u + 18u] = wire_scratch[wire_row * 4u + 3u];
-      wire_caps[wire_row * 23u + 18u] = sizeof wire_scratch[wire_row * 4u + 3u];
-      wire_values[wire_row * 23u + 19u] = wire_held[wire_row].reservation_state;
-      wire_caps[wire_row * 23u + 19u] = sizeof wire_held[wire_row].reservation_state;
-      wire_values[wire_row * 23u + 20u] = wire_held[wire_row].source_path;
-      wire_caps[wire_row * 23u + 20u] = sizeof wire_held[wire_row].source_path;
-      wire_values[wire_row * 23u + 21u] = wire_held[wire_row].updated_at;
-      wire_caps[wire_row * 23u + 21u] = sizeof wire_held[wire_row].updated_at;
-      wire_values[wire_row * 23u + 22u] = wire_held[wire_row].execution_scope;
-      wire_caps[wire_row * 23u + 22u] = sizeof wire_held[wire_row].execution_scope;
+      wire_values[wire_row * 22u + 0u] = wire_held[wire_row].work_item_id;
+      wire_caps[wire_row * 22u + 0u] = sizeof wire_held[wire_row].work_item_id;
+      wire_values[wire_row * 22u + 1u] = wire_held[wire_row].repo;
+      wire_caps[wire_row * 22u + 1u] = sizeof wire_held[wire_row].repo;
+      wire_values[wire_row * 22u + 2u] = wire_held[wire_row].proposal_path;
+      wire_caps[wire_row * 22u + 2u] = sizeof wire_held[wire_row].proposal_path;
+      wire_values[wire_row * 22u + 3u] = wire_held[wire_row].workflow_name;
+      wire_caps[wire_row * 22u + 3u] = sizeof wire_held[wire_row].workflow_name;
+      wire_values[wire_row * 22u + 4u] = wire_held[wire_row].workflow_version;
+      wire_caps[wire_row * 22u + 4u] = sizeof wire_held[wire_row].workflow_version;
+      wire_values[wire_row * 22u + 5u] = wire_held[wire_row].current_stage;
+      wire_caps[wire_row * 22u + 5u] = sizeof wire_held[wire_row].current_stage;
+      wire_values[wire_row * 22u + 6u] = wire_held[wire_row].state;
+      wire_caps[wire_row * 22u + 6u] = sizeof wire_held[wire_row].state;
+      wire_values[wire_row * 22u + 7u] = wire_held[wire_row].mode;
+      wire_caps[wire_row * 22u + 7u] = sizeof wire_held[wire_row].mode;
+      wire_values[wire_row * 22u + 8u] = wire_held[wire_row].pause_reason;
+      wire_caps[wire_row * 22u + 8u] = sizeof wire_held[wire_row].pause_reason;
+      wire_values[wire_row * 22u + 9u] = wire_held[wire_row].paused_state;
+      wire_caps[wire_row * 22u + 9u] = sizeof wire_held[wire_row].paused_state;
+      wire_values[wire_row * 22u + 10u] = wire_held[wire_row].content_hash;
+      wire_caps[wire_row * 22u + 10u] = sizeof wire_held[wire_row].content_hash;
+      wire_values[wire_row * 22u + 11u] = wire_held[wire_row].pr_ref;
+      wire_caps[wire_row * 22u + 11u] = sizeof wire_held[wire_row].pr_ref;
+      wire_values[wire_row * 22u + 12u] = wire_held[wire_row].worktree;
+      wire_caps[wire_row * 22u + 12u] = sizeof wire_held[wire_row].worktree;
+      wire_values[wire_row * 22u + 13u] = wire_held[wire_row].submitter;
+      wire_caps[wire_row * 22u + 13u] = sizeof wire_held[wire_row].submitter;
+      wire_values[wire_row * 22u + 14u] = wire_held[wire_row].parent_id;
+      wire_caps[wire_row * 22u + 14u] = sizeof wire_held[wire_row].parent_id;
+      wire_values[wire_row * 22u + 15u] = wire_scratch[wire_row * 4u + 0u];
+      wire_caps[wire_row * 22u + 15u] = sizeof wire_scratch[wire_row * 4u + 0u];
+      wire_values[wire_row * 22u + 16u] = wire_scratch[wire_row * 4u + 1u];
+      wire_caps[wire_row * 22u + 16u] = sizeof wire_scratch[wire_row * 4u + 1u];
+      wire_values[wire_row * 22u + 17u] = wire_scratch[wire_row * 4u + 2u];
+      wire_caps[wire_row * 22u + 17u] = sizeof wire_scratch[wire_row * 4u + 2u];
+      wire_values[wire_row * 22u + 18u] = wire_scratch[wire_row * 4u + 3u];
+      wire_caps[wire_row * 22u + 18u] = sizeof wire_scratch[wire_row * 4u + 3u];
+      wire_values[wire_row * 22u + 19u] = wire_held[wire_row].reservation_state;
+      wire_caps[wire_row * 22u + 19u] = sizeof wire_held[wire_row].reservation_state;
+      wire_values[wire_row * 22u + 20u] = wire_held[wire_row].source_path;
+      wire_caps[wire_row * 22u + 20u] = sizeof wire_held[wire_row].source_path;
+      wire_values[wire_row * 22u + 21u] = wire_held[wire_row].updated_at;
+      wire_caps[wire_row * 22u + 21u] = sizeof wire_held[wire_row].updated_at;
    }
    uint32_t wire_filled = 0;
    int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_LIST_LRU, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 23), &wire_filled);
+                           (uint32_t)(max * 22), &wire_filled);
    free(wire_values);
    free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 23u != 0u)
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 22u != 0u)
    {
       free(wire_scratch);
       free(wire_held);
       return -1;
    }
-   int wire_rows = (int)(wire_filled / 23u);
+   int wire_rows = (int)(wire_filled / 22u);
    for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
       wire_held[wire_row].cum_cost_usd = strtod(wire_scratch[wire_row * 4u + 0u], NULL);
@@ -1224,7 +1220,7 @@ int db1_wfe_claim_frozen_creates(const db1_wfe_frozen_claim_t *claim, db1_wfe_fr
    return 0;
 }
 
-int db1_wfe_create_work_item(const char *work_item_id, const char *repo, const char *proposal_path, const char *workflow_name, const char *workflow_version, const char *start_stage, const char *mode, const char *submitter, const char *parent_id, const char *source_path, double max_cost_usd, int root_cap, const char *execution_scope)
+int db1_wfe_create_work_item(const char *work_item_id, const char *repo, const char *proposal_path, const char *workflow_name, const char *workflow_version, const char *start_stage, const char *mode, const char *submitter, const char *parent_id, const char *source_path, double max_cost_usd, int root_cap)
 {
    if (!work_item_id || !work_item_id[0] || !proposal_path || !proposal_path[0] || !workflow_name || !workflow_name[0] || !start_stage || !start_stage[0])
       return -1;
@@ -1232,11 +1228,11 @@ int db1_wfe_create_work_item(const char *work_item_id, const char *repo, const c
    snprintf(arg10, sizeof arg10, "%.17g", (double)max_cost_usd);
    char arg11[32];
    snprintf(arg11, sizeof arg11, "%d", root_cap);
-   const char *fields[] = {work_item_id, repo ? repo : "", proposal_path, workflow_name, workflow_version ? workflow_version : "", start_stage, mode ? mode : "", submitter ? submitter : "", parent_id ? parent_id : "", source_path ? source_path : "", arg10, arg11, execution_scope ? execution_scope : ""};
+   const char *fields[] = {work_item_id, repo ? repo : "", proposal_path, workflow_name, workflow_version ? workflow_version : "", start_stage, mode ? mode : "", submitter ? submitter : "", parent_id ? parent_id : "", source_path ? source_path : "", arg10, arg11};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_CREATE_WORK_ITEM, fields, 13, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_CREATE_WORK_ITEM, fields, 12, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);

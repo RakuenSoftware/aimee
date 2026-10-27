@@ -4,7 +4,6 @@
  * rh_dev_submit and the MCP handler both call dev_submit_run, declared in
  * server_http.h. */
 #include "server_http.h" /* dev_submit_run contract */
-#include "server_native_delegate_source.h"
 #include "cJSON.h"
 #include "aimee_home.h"           /* aimee_home */
 #include "router_advise.h"        /* router_autonomous_pick / router_autonomous_audit */
@@ -133,10 +132,6 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       snprintf(err, errlen, "%s", rerr[0] ? rerr : "failed to resolve workflow");
       return 500;
    }
-   char execution_scope[SERVER_NATIVE_DELEGATE_SCOPE_LEN];
-   if (server_native_delegate_source_mint_for_workspace("workflow", wf_repo, execution_scope, err,
-                                                        errlen))
-      return 403;
    /* Name the artifact after the RUN, not after the clock. Keyed on time+pid,
     * two submits landing in the same second from one server shared a path: the
     * second overwrote the first's proposal, both rows pointed at it, and the
@@ -144,9 +139,7 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
     * already unique, which is exactly the property the filename needs. */
    snprintf(ppath, sizeof ppath, "%s/%s.md", dir, id);
    int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
-                                        max_active, rate_max, rate_secs, execution_scope);
-   if (sr != 0)
-      (void)server_native_delegate_source_revoke(execution_scope);
+                                        max_active, rate_max, rate_secs);
    if (sr == 1)
    {
       snprintf(err, errlen, "too many active autonomous runs for this principal");
@@ -177,7 +170,6 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
    if (!pf)
    {
       db1_work_item_set_terminal(id, "abandoned");
-      (void)server_native_delegate_source_revoke(execution_scope);
       snprintf(err, errlen, "could not persist proposal");
       return 500;
    }

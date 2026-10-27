@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"strings"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/delegate"
@@ -61,8 +59,8 @@ func (r *RegistryExecutor) executeHost(ctx context.Context, request contract.Inv
 		fail.Error = "canonical native execution owner unavailable"
 		return fail
 	}
-	if !contract.ValidExecutionScope(request.ExecutionScope) || request.Operation == "" || len(request.Operation) > 256 || !utf8.ValidString(request.Operation) || strings.ContainsAny(request.Operation, "\x00\r\n") || request.Input == nil || !request.Input.Valid() {
-		fail.Error = "native execution requires an admitted request and host-issued source scope"
+	if request.Input == nil || !request.Input.Valid() {
+		fail.Error = "native execution requires an admitted canonical request"
 		return fail
 	}
 	// Selection is a host-validated registry identity, never arbitrary cli_cmd.
@@ -107,28 +105,4 @@ func (r *RegistryExecutor) executeHost(ctx context.Context, request contract.Inv
 		return fail
 	}
 	return result
-}
-
-func (r *RegistryExecutor) ResolveTriggerExecutionScope(ctx context.Context, request contract.TriggerExecutionScopeRequest) (string, error) {
-	if r.host == nil || !request.Valid() {
-		return "", errors.New("registered trigger host source unavailable")
-	}
-	body, err := json.Marshal(struct {
-		Version             int                                   `json:"version"`
-		Action              string                                `json:"action"`
-		Registration        contract.TriggerExecutionRegistration `json:"registration"`
-		ConfigurationSHA256 string                                `json:"configuration_sha256"`
-	}{contract.WireVersion, "trigger_scope", request.Registration, request.ConfigurationSHA256})
-	if err != nil {
-		return "", err
-	}
-	reply, err := r.host.Call(ctx, HostExecuteEvent, HostExecuteStage, hostTrace.Add(1), 30*time.Second, body)
-	if err != nil {
-		return "", err
-	}
-	var scope contract.TriggerExecutionScopeReply
-	if !canonical.Decode(reply, &scope) || !contract.ValidExecutionScope(scope.ExecutionScope) {
-		return "", errors.New("invalid host trigger execution scope")
-	}
-	return scope.ExecutionScope, nil
 }

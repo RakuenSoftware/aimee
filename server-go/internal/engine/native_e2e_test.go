@@ -281,24 +281,10 @@ nodes:
 		t.Fatal(err)
 	}
 	handler.SetConfigStore(externalConfigStore{Store: configStore})
-	// This fixture has synthetic agents and a fake forge. Its source issuer is
-	// synthetic too; real C MAC attestation belongs to the host integration.
-	syntheticScope := strings.Repeat("e", 64)
-	issuerCalls := 0
-	handler.SetTriggerExecutionScopeResolver(func(_ context.Context, request api.TriggerExecutionScopeRequest) (string, error) {
-		issuerCalls++
-		if !request.Valid() || request.Registration.Origin != "config" || request.Registration.Source != "watch-dir" || request.Registration.Workspace != repo || request.Registration.Pipeline != "build" {
-			t.Fatal("source issuer received a different registered fixture")
-		}
-		return syntheticScope, nil
-	})
 	handler.ScanTriggers(context.Background())
 	items, err := store.WorkItems(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("scanner items=%v err=%v", items, err)
-	}
-	if issuerCalls != 1 || items[0].ExecutionScope != syntheticScope {
-		t.Fatalf("synthetic source not preserved: issuer calls=%d scope=%q", issuerCalls, items[0].ExecutionScope)
 	}
 	rootID := items[0].ID
 	worktrees, err := NewWorktreeManager(store, filepath.Join(root, "trees"))

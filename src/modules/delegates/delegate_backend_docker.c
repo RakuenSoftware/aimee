@@ -1,27 +1,28 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
-#endif
-/* Docker delegate resources. Go owns creation and runtime posture admission.
- * Ordinary workspaces retain their shell-backed file and execution operations.
- * Strict ACP workspaces hold an immutable container/daemon lease and start a
- * read-only trusted file owner before the external agent. Its bounded private
- * R/W/P/D pipe supplies file bytes; scoped exec preserves producer cancellation
- * and environment. Confirmed retirement releases the held resource artifacts.
- * Failed retirement transfers exact lease custody to the existing reaper. */
+/* delegate_backend_docker.c: see delegate_backend_docker.h.
+ *
+ * acquire() runs `docker create --name <container> -v <workspace>:
+ * /workspace -w /workspace <image> sleep infinity`, then `docker
+ * start <container>`. exec() rides `docker exec -i <container> bash
+ * -c '<b64-wrapped>'`, captures stdout/stderr/exit_code through pipes.
+ * release() does `docker stop` (hibernate=1) or `docker rm -f`
+ * (hibernate=0).
+ *
+ * File ops (read_file/write_file/list_dir) all route through
+ * docker_exec — read does `cat <path>` then C-side slices for
+ * offset/limit, write b64-encodes content and decodes inside the
+ * container, list does `ls -1A` and splits lines. All paths are
+ * workspace-relative (anchored at /workspace); absolute paths and
+ * '..' segments are rejected.
+ *
+ * Cwd persistence is partial: set_cwd writes to the local state
+ * struct and exec() prefixes `cd <cwd> &&` to subsequent commands
+ * when set. */
 
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "util.h"
-#include <pthread.h>
 
 #include "aimee.h"      /* MAX_PATH_LEN */
 #include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
-#include "cJSON.h"
-#include "cli_native_spawn_guard.h"
-#include "scoped_file_io.h"
-#include "delegate_docker_internal.h"
-static int docker_owned_capture(docker_state_t *state, const char *const argv[], char **out,
-                                size_t maximum, int timeout_ms, int input_fd);
-static int server_runs_in_container(void);
 
 #include <assert.h>
 
@@ -29,8 +30,7 @@ static int server_runs_in_container(void);
  * only outward channel: `--network none` cuts every IP route, and AIMEE_API_ENDPOINT
  * points the baked-in `aimee` CLI at this socket, so `aimee git_commit`,
  * `aimee web_search`, `aimee memory ...` reach the server (and nothing else). */
-#define DELEGATE_SOCK_PATH    "/run/aimee/aimee-http.sock"
-#define DELEGATE_OWNER_HELPER "/run/aimee/owner-io"
+#define DELEGATE_SOCK_PATH "/run/aimee/aimee-http.sock"
 
 #include <ctype.h>
 #include <errno.h>
@@ -39,14 +39,9 @@ static int server_runs_in_container(void);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <poll.h>
-#include "child_environment.h"
+#include <sys/select.h>
 #include "log.h"
 #include <sys/stat.h>
-#if defined(__linux__)
-#include <sys/file.h>
-#include <dirent.h>
-#endif
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -54,74 +49,22 @@ static int server_runs_in_container(void);
 
 /* RFC 4648 base64 — same as the SSH backend uses. Kept local so this
  * source file stays standalone (no shared b64 header yet). */
-static char *docker_exec_environment(const delegate_exec_scope_t *scope)
-{
-   char *quoted[128] = {0};
-   size_t count = 0, bytes = 32;
-   if (scope && scope->replace_environment != 0 && scope->replace_environment != 1)
-      return NULL;
-   for (char *const *entry = scope ? scope->environment : NULL; entry && *entry; entry++)
-   {
-      const char *equal = strchr(*entry, '=');
-      if (!equal || equal == *entry || equal - *entry >= 64 || count == 128 ||
-          strlen(*entry) > 65536 - bytes)
-         goto failed;
-      quoted[count] = shell_quote(*entry);
-      if (!quoted[count] || strlen(quoted[count]) >= 65536 - bytes)
-         goto failed;
-      bytes += strlen(quoted[count]) + 1;
-      count++;
-   }
-   char *prefix = malloc(bytes);
-   if (!prefix)
-      goto failed;
-   size_t used = (size_t)snprintf(prefix, bytes, "%s",
-                                  !scope                       ? ""
-                                  : scope->replace_environment ? "/usr/bin/env -i "
-                                                               : "/usr/bin/env ");
-   for (size_t i = 0; i < count; i++)
-   {
-      used += (size_t)snprintf(prefix + used, bytes - used, "%s ", quoted[i]);
-      free(quoted[i]);
-   }
-   return prefix;
-failed:
-   for (size_t i = 0; i < 128; i++)
-      free(quoted[i]);
-   return NULL;
-}
-
 static int docker_build_exec_command(const char *container_name, const char *wrapped_script,
-                                     int timeout_ms, const delegate_exec_scope_t *scope,
-                                     const char *engine, char **out_cmd)
+                                     int timeout_ms, char **out_cmd)
 {
    if (out_cmd)
       *out_cmd = NULL;
    if (!container_name || !container_name[0] || !wrapped_script || !out_cmd)
       return -1;
 
-   char *environment = docker_exec_environment(scope);
-   char *endpoint = engine && engine[0] ? shell_quote(engine) : strdup("");
-   if (!environment || !endpoint)
-   {
-      free(environment);
-      free(endpoint);
-      return -1;
-   }
    size_t script_len = strlen(wrapped_script);
    size_t b64_cap = ((script_len + 2) / 3) * 4 + 1;
    char *b64 = malloc(b64_cap);
    if (!b64)
-   {
-      free(environment);
-      free(endpoint);
       return -1;
-   }
    if (util_b64_encode(wrapped_script, script_len, b64, b64_cap) < 0)
    {
       free(b64);
-      free(environment);
-      free(endpoint);
       return -1;
    }
 
@@ -133,32 +76,23 @@ static int docker_build_exec_command(const char *container_name, const char *wra
     * deadline so docker has time to return the bounded result. The delegate image
     * is Ubuntu and already requires coreutils for the base64 transport. */
    int inner_timeout_ms = timeout_ms > 100 ? timeout_ms - 100 : timeout_ms;
-   size_t need = strlen(container_name) + b64_cap + strlen(environment) + strlen(endpoint) + 320;
+   size_t need = strlen(container_name) + b64_cap + 256;
    char *cmd = malloc(need);
    if (!cmd)
    {
       free(b64);
-      free(environment);
-      free(endpoint);
       return -1;
    }
-   const char *bash = scope ? "/bin/bash" : "bash";
-   const char *decode = scope ? "/usr/bin/base64" : "base64";
-   const char *timer = scope ? "/usr/bin/timeout" : "timeout";
    int n;
    if (inner_timeout_ms > 0)
       n = snprintf(cmd, need,
-                   "docker%s%s exec -i %s %s%s -c \"echo '%s' | %s -d | "
-                   "%s --signal=TERM --kill-after=1s %d.%03ds %s\"",
-                   endpoint[0] ? " --host " : "", endpoint, container_name, environment, bash, b64,
-                   decode, timer, inner_timeout_ms / 1000, inner_timeout_ms % 1000, bash);
+                   "docker exec -i %s bash -c \"echo '%s' | base64 -d | "
+                   "timeout --signal=TERM --kill-after=1s %d.%03ds bash\"",
+                   container_name, b64, inner_timeout_ms / 1000, inner_timeout_ms % 1000);
    else
-      n = snprintf(cmd, need, "docker%s%s exec -i %s %s%s -c \"echo '%s' | %s -d | %s\"",
-                   endpoint[0] ? " --host " : "", endpoint, container_name, environment, bash, b64,
-                   decode, bash);
+      n = snprintf(cmd, need, "docker exec -i %s bash -c \"echo '%s' | base64 -d | bash\"",
+                   container_name, b64);
    free(b64);
-   free(environment);
-   free(endpoint);
    if (n < 0 || (size_t)n >= need)
    {
       free(cmd);
@@ -171,10 +105,25 @@ static int docker_build_exec_command(const char *container_name, const char *wra
 int delegate_backend_docker_build_exec_command(const char *container_name,
                                                const char *wrapped_script, char **out_cmd)
 {
-   return docker_build_exec_command(container_name, wrapped_script, 0, NULL, NULL, out_cmd);
+   return docker_build_exec_command(container_name, wrapped_script, 0, out_cmd);
 }
 
 /* --- container lifecycle --- */
+
+typedef struct
+{
+   char container_name[128];
+   char image[256];
+   char workspace_host[MAX_PATH_LEN]; /* host-side mount point */
+   char cwd[MAX_PATH_LEN];            /* in-container cwd, defaults to /workspace */
+   /* The in-container working directory, and what relative tool paths resolve
+    * against. Per-state, not the global resolve_docker_workdir(): a caller-provided
+    * tree is mounted at its OWN absolute host path (see docker_build_mounts), so
+    * /workspace is not where its files live. Anchoring resolution on a global while
+    * the mount moved is how a tool would read the wrong tree and report it as
+    * missing. */
+   char workdir[MAX_PATH_LEN];
+} docker_state_t;
 
 /* The in-container forwarder the package proxy bridges through. */
 #define DELEGATE_PKG_PROXY_URL  "http://127.0.0.1:3129"
@@ -201,6 +150,13 @@ static const char *resolve_docker_workdir(void)
 
 /* Pick the docker binary. Tests substitute a fake-docker fixture
  * via AIMEE_DOCKER_BIN. Production runs default to "docker". */
+static const char *resolve_docker_bin(void)
+{
+   const char *override = getenv("AIMEE_DOCKER_BIN");
+   if (override && override[0])
+      return override;
+   return "docker";
+}
 
 int delegate_backend_docker_translate_mount_path(const char *container_path,
                                                  const char *mount_table, char *out, size_t outsz)
@@ -255,108 +211,8 @@ int delegate_backend_docker_translate_mount_path(const char *container_path,
  * source. Inspect this container's mounts and translate the socket to its host
  * source. A host-native server has no inspectable self container, so it keeps the
  * original path. */
-/* A single pinned-daemon inspect supplies both translations and bind recursion
- * facts. Propagation is deliberately irrelevant: only BindOptions.NonRecursive
- * describes the observer layout. The Go owner checks relevant source/owner paths. */
-int docker_controller_snapshot(docker_state_t *owner, const char *encoded, char **table)
-{
-   cJSON *snapshot = encoded ? cJSON_ParseWithOpts(encoded, NULL, 1) : NULL;
-   const cJSON *mounts = cJSON_GetObjectItemCaseSensitive(snapshot, "mounts");
-   const cJSON *configured = cJSON_GetObjectItemCaseSensitive(snapshot, "configured");
-   cJSON *bindings = cJSON_CreateArray();
-   char *out = calloc(1, 8192);
-   size_t used = 0;
-   int valid = cJSON_IsArray(mounts) && (cJSON_IsArray(configured) || cJSON_IsNull(configured)) &&
-               bindings && out;
-   const cJSON *item;
-   cJSON_ArrayForEach(item, mounts)
-   {
-      const char *source = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Source"));
-      const char *target =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Destination"));
-      if (!valid || !source || !target || strpbrk(source, "\t\r\n") || strpbrk(target, "\t\r\n"))
-      {
-         valid = 0;
-         break;
-      }
-      int size = snprintf(out + used, 8192 - used, "%s\t%s\n", target, source);
-      if (size < 0 || (size_t)size >= 8192 - used)
-      {
-         valid = 0;
-         break;
-      }
-      used += (size_t)size;
-   }
-   cJSON_ArrayForEach(item, configured)
-   {
-      if (!valid)
-         break;
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Type"));
-      if (!type)
-      {
-         valid = 0;
-         break;
-      }
-      if (strcmp(type, "bind"))
-         continue;
-      const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "BindOptions");
-      const cJSON *nonrecursive = cJSON_GetObjectItemCaseSensitive(options, "NonRecursive");
-      if ((options && !cJSON_IsNull(options) && !cJSON_IsObject(options)) ||
-          (nonrecursive && !cJSON_IsBool(nonrecursive)))
-      {
-         valid = 0;
-         break;
-      }
-      const char *source = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Source"));
-      const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "Target"));
-      int matched = 0;
-      const cJSON *actual;
-      cJSON_ArrayForEach(actual, mounts)
-      {
-         const char *actual_source =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(actual, "Source"));
-         const char *actual_target =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(actual, "Destination"));
-         if (source && target && actual_source && actual_target && !strcmp(source, actual_source) &&
-             !strcmp(target, actual_target))
-            matched = 1;
-      }
-      if (!matched)
-      {
-         if (cJSON_IsTrue(nonrecursive))
-            valid = 0;
-         continue;
-      }
-      cJSON *binding = cJSON_CreateObject();
-      if (!binding || !cJSON_AddStringToObject(binding, "source", source) ||
-          !cJSON_AddStringToObject(binding, "target", target) ||
-          !cJSON_AddBoolToObject(binding, "non_recursive", cJSON_IsTrue(nonrecursive)))
-      {
-         cJSON_Delete(binding);
-         valid = 0;
-         break;
-      }
-      cJSON_AddItemToArray(bindings, binding);
-   }
-   char *facts = valid ? cJSON_PrintUnformatted(bindings) : NULL;
-   if (!facts || snprintf(owner->controller_binds, sizeof owner->controller_binds, "%s", facts) >=
-                     (int)sizeof owner->controller_binds)
-      valid = 0;
-   free(facts);
-   cJSON_Delete(bindings);
-   cJSON_Delete(snapshot);
-   if (!valid)
-   {
-      free(out);
-      return -1;
-   }
-   *table = out;
-   return 0;
-}
-
-static int docker_host_path_for_container(docker_state_t *owner, const char *container,
-                                          const char *container_path, char *out, size_t outsz,
-                                          char *table, size_t table_capacity)
+static int docker_host_path_for_container(const char *container, const char *container_path,
+                                          char *out, size_t outsz)
 {
    if (!container || !container[0])
    {
@@ -364,44 +220,19 @@ static int docker_host_path_for_container(docker_state_t *owner, const char *con
       return n < 0 || (size_t)n >= outsz ? -1 : 0;
    }
 
-   const char *argv[] = {
-       resolve_docker_bin(),
-       "inspect",
-       "--format",
-       owner ? "{\"mounts\":{{json .Mounts}},\"configured\":{{json .HostConfig.Mounts}}}"
-             : "{{range .Mounts}}{{printf \"%s\\t%s\\n\" .Destination .Source}}{{end}}",
-       container,
-       NULL};
+   const char *argv[] = {resolve_docker_bin(),
+                         "inspect",
+                         "--format",
+                         "{{range .Mounts}}{{printf \"%s\\t%s\\n\" .Destination .Source}}{{end}}",
+                         container,
+                         NULL};
    char *mounts = NULL;
-   int inspected =
-       owner ? docker_owned_capture(owner, argv, &mounts, 1 << 20, DOCKER_PROBE_TIMEOUT_MS, -1)
-             : safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &mounts, 1 << 20,
-                                                 DOCKER_PROBE_TIMEOUT_MS);
-   if (inspected != 0)
+   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &mounts, 1 << 20,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
    {
       free(mounts);
-      if (owner)
-         return -1;
       int n = snprintf(out, outsz, "%s", container_path);
       return n < 0 || (size_t)n >= outsz ? -1 : 0;
-   }
-   if (owner)
-   {
-      char *translated = NULL;
-      int valid = docker_controller_snapshot(owner, mounts, &translated);
-      free(mounts);
-      mounts = translated;
-      if (valid)
-         return -1;
-   }
-   if (table && table_capacity)
-   {
-      if (!mounts || strlen(mounts) >= table_capacity)
-      {
-         free(mounts);
-         return -1;
-      }
-      memcpy(table, mounts, strlen(mounts) + 1);
    }
    int rc = delegate_backend_docker_translate_mount_path(container_path, mounts ? mounts : "", out,
                                                          outsz);
@@ -409,20 +240,13 @@ static int docker_host_path_for_container(docker_state_t *owner, const char *con
    return rc;
 }
 
-static int docker_host_path_for_self(docker_state_t *owner, const char *container_path, char *out,
-                                     size_t outsz, char *table, size_t table_capacity)
+static int docker_host_path_for_self(const char *container_path, char *out, size_t outsz)
 {
-   if (owner && !server_runs_in_container())
-   {
-      int n = snprintf(out, outsz, "%s", container_path);
-      return n < 0 || (size_t)n >= outsz ? -1 : 0;
-   }
    char self[128];
    if (gethostname(self, sizeof(self)) != 0)
       self[0] = '\0';
    self[sizeof(self) - 1] = '\0';
-   return docker_host_path_for_container(owner, self, container_path, out, outsz, table,
-                                         table_capacity);
+   return docker_host_path_for_container(self, container_path, out, outsz);
 }
 
 static int server_runs_in_container(void)
@@ -454,42 +278,6 @@ static int run_docker(const char *const argv[])
    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-/* The strict handle holds the exact daemon socket inode. Never let a later
- * process-global Docker context/host setting redirect an owned operation. */
-static int docker_owned_capture(docker_state_t *state, const char *const argv[], char **out,
-                                size_t maximum, int timeout_ms, int input_fd)
-{
-   if (!state || !state->engine_endpoint[0])
-      return safe_exec_capture_cwd_env_fd_timeout(argv, NULL, NULL, out, maximum, timeout_ms,
-                                                  input_fd, input_fd >= 0 ? 0 : -1);
-   const char *command[128] = {"/bin/sh",
-                               "-c",
-                               "exec \"$@\" 2>/dev/null",
-                               "owned-docker",
-                               state->docker_binary,
-                               "--host",
-                               state->engine_endpoint};
-   size_t n = 7;
-   for (size_t i = 1; argv && argv[i]; i++)
-   {
-      if (n + 1 >= sizeof command / sizeof *command)
-         return -1;
-      command[n++] = argv[i];
-   }
-   command[n] = NULL;
-   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
-                          NULL};
-   return safe_exec_capture_cwd_env_fd_timeout(command, NULL, environment, out, maximum, timeout_ms,
-                                               input_fd, input_fd >= 0 ? 0 : -1);
-}
-static int docker_owned_run(docker_state_t *state, const char *const argv[])
-{
-   char *out = NULL;
-   int rc = docker_owned_capture(state, argv, &out, 65536, 30000, -1);
-   free(out);
-   return rc;
-}
-
 /* True when `name` is one of ours. The container-name prefix is matched HERE
  * rather than with `docker ps --filter name=^aimee-delegate-`: the anchored regex
  * is a Docker-ism, and runtimes that treat the name filter as a literal substring
@@ -514,65 +302,7 @@ static int is_container_id(const char *id)
    return 1;
 }
 
-/* Prefix/age cleanup owns only ordinary delegates. Private owner evidence is
- * an exclusion, never an admission verdict: even a broken private mount/startup
- * must remain under its retained journal's exact-container cleanup authority.
- * An unavailable or ambiguous inspect cannot establish ordinary ownership. */
-static int docker_is_ordinary_delegate(const char *id)
-{
-   const char *argv[] = {resolve_docker_bin(),
-                         "inspect",
-                         "--type",
-                         "container",
-                         "--format",
-                         "{\"mounts\":{{json .Mounts}},\"entrypoint\":{{json "
-                         "(index .Config \"Entrypoint\")}},\"labels\":{{json "
-                         "(index .Config \"Labels\")}}}",
-                         id,
-                         NULL};
-   char *out = NULL;
-   int ordinary = 0;
-   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 65536, DOCKER_PROBE_TIMEOUT_MS) !=
-       0)
-      goto done;
-   cJSON *report = out ? cJSON_ParseWithOpts(out, NULL, 1) : NULL;
-   if (!cJSON_IsObject(report) || cJSON_GetArraySize(report) != 3)
-      goto parsed;
-   const cJSON *mounts = cJSON_GetObjectItemCaseSensitive(report, "mounts");
-   const cJSON *entrypoint = cJSON_GetObjectItemCaseSensitive(report, "entrypoint");
-   if (!cJSON_IsArray(mounts) || (!cJSON_IsArray(entrypoint) && !cJSON_IsNull(entrypoint)))
-      goto parsed;
-   const cJSON *labels = cJSON_GetObjectItemCaseSensitive(report, "labels");
-   if ((!cJSON_IsObject(labels) && !cJSON_IsNull(labels)) ||
-       cJSON_GetObjectItemCaseSensitive(labels, "io.aimee.delegate.owner-lease"))
-      goto parsed;
-   const cJSON *item;
-   cJSON_ArrayForEach(item, mounts)
-   {
-      const cJSON *target = cJSON_GetObjectItemCaseSensitive(item, "Destination");
-      const cJSON *source = cJSON_GetObjectItemCaseSensitive(item, "Source");
-      if (!cJSON_IsObject(item) || !cJSON_IsString(target) || !cJSON_IsString(source))
-         goto parsed;
-      const char *basename = strrchr(source->valuestring, '/');
-      if (!strcmp(target->valuestring, DELEGATE_OWNER_HELPER) ||
-          (basename && !strcmp(basename, "/owner-io")))
-         goto parsed;
-   }
-   cJSON_ArrayForEach(item, entrypoint)
-   {
-      if (!cJSON_IsString(item) || !strcmp(item->valuestring, DELEGATE_OWNER_HELPER))
-         goto parsed;
-   }
-   ordinary = 1;
-parsed:
-   cJSON_Delete(report);
-done:
-   free(out);
-   if (!ordinary)
-      LOG_WARN("delegate-sandbox", "retaining delegate %s: private or unconfirmed cleanup owner",
-               id);
-   return ordinary;
-}
+static const char *resolve_delegate_egress_bin(void);
 
 /* Private verifier workers use owner labels and per-worker locks, never
  * the ordinary delegate prefix or age cutoff. Failed reaps retain workers. */
@@ -604,7 +334,6 @@ static void reap_private_verifier_orphans(void)
 int delegate_backend_docker_remove_orphans(void)
 {
    reap_private_verifier_orphans();
-   int recovered = docker_recover_journal();
    const char *list_argv[] = {resolve_docker_bin(), "ps", "-a", "--format",
                               "{{.ID}} {{.Names}}", NULL};
    char *out = NULL;
@@ -614,7 +343,7 @@ int delegate_backend_docker_remove_orphans(void)
       free(out);
       return -1;
    }
-   int removed = recovered;
+   int removed = 0;
    char *save = NULL;
    for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
    {
@@ -628,8 +357,6 @@ int delegate_backend_docker_remove_orphans(void)
          LOG_WARN("delegate-sandbox", "refusing invalid orphan container id from docker: %s", id);
          continue;
       }
-      if (!docker_is_ordinary_delegate(id))
-         continue;
       const char *remove_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
       if (run_docker(remove_argv) == 0)
          removed++;
@@ -666,7 +393,6 @@ static time_t docker_utc_epoch(int y, int mo, int d, int h, int mi, int s)
  * turn is never removed. Returns the count removed, or -1 on a docker error. */
 int delegate_backend_docker_reap_aged(int max_age_secs)
 {
-   int pending_removed = docker_reap_pending() + docker_recover_journal();
    const char *list_argv[] = {resolve_docker_bin(), "ps", "--format",
                               "{{.ID}} {{.Names}} {{.CreatedAt}}", NULL};
    char *out = NULL;
@@ -677,7 +403,7 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
       return -1;
    }
    time_t now = time(NULL);
-   int removed = pending_removed;
+   int removed = 0;
    char *save = NULL;
    for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
    {
@@ -699,8 +425,6 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
       }
       time_t created = docker_utc_epoch(yy, mo, dd, hh, mi, ss) - off_secs;
       if (created <= 0 || (long)(now - created) < max_age_secs)
-         continue;
-      if (!docker_is_ordinary_delegate(id))
          continue;
       const char *rm_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
       if (run_docker(rm_argv) == 0)
@@ -985,14 +709,14 @@ static void docker_mount_table(char *out, size_t cap)
 /* Remove the forwarder binary from the container so a half-configured proxy delegate
  * can't be left with an unusable-but-present forwarder it could relaunch pointed at an
  * arbitrary UDS path. Best-effort. */
-static void docker_pkg_forwarder_strip(docker_state_t *state, const char *container)
+static void docker_pkg_forwarder_strip(const char *container)
 {
    const char *rm_argv[] = {
        "docker", "exec", container, "rm", "-f", "/usr/local/bin/aimee-forwarder", NULL};
-   (void)(state ? docker_owned_run(state, rm_argv) : run_docker(rm_argv));
+   (void)run_docker(rm_argv);
 }
 
-static int docker_forwarder_start(docker_state_t *state, const char *container, unsigned port)
+static void docker_pkg_forwarder_setup(const char *container)
 {
    /* Fixed, canonical ship path — never operator/env-overridable, so nothing can
     * point the copy at an attacker-controlled binary. */
@@ -1004,38 +728,33 @@ static int docker_forwarder_start(docker_state_t *state, const char *container, 
                 "package-access=proxy but forwarder binary '%s' is missing — sandbox package "
                 "installs will fail (ship aimee-forwarder in the aimee-server image)",
                 bin);
-      return -1;
+      return;
    }
    char dst[MAX_PATH_LEN + 64];
    snprintf(dst, sizeof(dst), "%s:/usr/local/bin/aimee-forwarder", container);
    const char *cp_argv[] = {"docker", "cp", bin, dst, NULL};
-   if ((state ? docker_owned_run(state, cp_argv) : run_docker(cp_argv)) != 0)
+   if (run_docker(cp_argv) != 0)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox", "forwarder `docker cp` into %s failed", container);
-      return -1;
+      return;
    }
-   char port_env[48];
-   snprintf(port_env, sizeof port_env, "AIMEE_FORWARDER_PORT=%u", port);
-   const char *ex_argv[] = {"docker", "exec",
-                            "-d",     container,
-                            "env",    "AIMEE_FORWARDER_SOCK=" DELEGATE_SOCK_PATH,
-                            port_env, "/usr/local/bin/aimee-forwarder",
+   const char *ex_argv[] = {"docker",
+                            "exec",
+                            "-d",
+                            container,
+                            "env",
+                            "AIMEE_FORWARDER_SOCK=" DELEGATE_SOCK_PATH,
+                            "AIMEE_FORWARDER_PORT=3129",
+                            "/usr/local/bin/aimee-forwarder",
                             NULL};
-   if ((state ? docker_owned_run(state, ex_argv) : run_docker(ex_argv)) != 0)
+   if (run_docker(ex_argv) != 0)
    {
       /* Copied but not running: strip it rather than leave a relaunchable binary. */
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "starting package forwarder in %s failed — stripping the binary", container);
-      docker_pkg_forwarder_strip(state, container);
-      return -1;
-   }
-   return 0;
-}
-
-static void docker_pkg_forwarder_setup(docker_state_t *state, const char *container)
-{
-   if (docker_forwarder_start(state, container, 3129))
+      docker_pkg_forwarder_strip(container);
       return;
+   }
    /* apt does not honour http_proxy through every transport — drop in an explicit
     * proxy config too. Best-effort (needs a root-writable /etc/apt; a non-root
     * delegate still gets the env vars, which cover apt's http/https transports). */
@@ -1049,47 +768,29 @@ static void docker_pkg_forwarder_setup(docker_state_t *state, const char *contai
                              "Acquire::https::Proxy \"http://127.0.0.1:3129\";\\n' "
                              "> /etc/apt/apt.conf.d/99aimee-proxy 2>/dev/null || true",
                              NULL};
-   (void)(state ? docker_owned_run(state, apt_argv) : run_docker(apt_argv));
+   (void)run_docker(apt_argv);
    aimee_log(LOG_INFO, "delegate-sandbox",
              "package proxy armed in %s (127.0.0.1:3129 -> aimee UDS; egress via aimee)",
              container);
+}
+
+static const char *resolve_delegate_egress_bin(void)
+{
+   const char *override = getenv("AIMEE_DELEGATE_EGRESS_BIN");
+   return override && override[0] ? override : "aimee-delegate-egress";
 }
 
 /* C discovers canonical filesystem/socket facts. The Go egress module alone
  * decides the container shape, creates or resumes it, and verifies its complete
  * runtime posture before returning a name. There is deliberately no network or
  * isolation-policy argument at this boundary. */
-/* Only an exact typed helper failure reaches diagnostics. Never log its raw body. */
-static const char *docker_acquire_failure_stage(const char *output)
-{
-   static const char *const stages[] = {
-       "arguments",          "control-socket",  "helper-identity",
-       "lease-open",         "daemon-identity", "sandbox-spec",
-       "controller-custody", "container-name",  "image-observation",
-       "container-start",    "posture",         "receipt-source",
-       "receipt-encoding"};
-   cJSON *root = output ? cJSON_ParseWithOpts(output, NULL, 1) : NULL;
-   const char *schema = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "schema"));
-   const char *stage = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stage"));
-   const char *result = "unavailable";
-   if (cJSON_IsObject(root) && cJSON_GetArraySize(root) == 2 && schema &&
-       !strcmp(schema, "aimee.delegate-acquire-error.v1") && stage)
-      for (size_t i = 0; i < sizeof stages / sizeof stages[0]; i++)
-         if (!strcmp(stage, stages[i]))
-            result = stages[i];
-   cJSON_Delete(root);
-   return result;
-}
-
 static int docker_acquire(delegate_backend_t *self, const char *task_id,
                           const delegate_backend_config_t *cfg, void **state_out)
 {
    (void)self;
    if (state_out)
       *state_out = NULL;
-   if (!task_id || !task_id[0] || !state_out || !cfg ||
-       (cfg->checked_resource != 0 && cfg->checked_resource != 1) || !cfg->workspace ||
-       !cfg->workspace[0])
+   if (!task_id || !task_id[0] || !state_out || !cfg || !cfg->workspace || !cfg->workspace[0])
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "a full source workspace is required; refusing an empty sandbox");
@@ -1099,45 +800,13 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    docker_state_t *st = calloc(1, sizeof(*st));
    if (!st)
       return -1;
-   st->engine_fd = st->lease_fd = st->lease_parent_fd = st->lease_owners_fd = st->cleanup_slot = -1;
-   st->artifact_helper_fd = st->artifact_socket_fd = -1;
-   st->file_owner = st->forwarder = st->package_forwarder =
-       (cli_native_stdio_t){.in_fd = -1, .out_fd = -1, .pidfd = -1};
-   st->launcher_fd = st->launcher_cwd_fd = -1;
-   if (snprintf(st->docker_binary, sizeof st->docker_binary, "%s", resolve_docker_bin()) >=
-       (int)sizeof st->docker_binary)
-   {
-      docker_state_destroy(st);
-      return -1;
-   }
-   int checked = cfg->control_socket || cfg->checked_resource;
-   st->private_io = cfg->control_socket != NULL;
-   if (checked && docker_capture_binary(st))
-   {
-      LOG_ERROR("delegate-sandbox", "checked Docker client unavailable");
-      docker_state_destroy(st);
-      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-   }
-   if (checked && cfg->hibernate_on_exit)
-   {
-      LOG_ERROR("delegate-sandbox", "checked resources cannot hibernate");
-      docker_state_destroy(st);
-      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-   }
-   if (checked && (docker_cleanup_reserve(st) || docker_pin_engine(st)))
-   {
-      LOG_ERROR("delegate-sandbox", "checked resource requires a pinnable local Unix Docker "
-                                    "endpoint; remote transport is unsupported");
-      docker_state_destroy(st);
-      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-   }
 
    char real[MAX_PATH_LEN] = "", repo[MAX_PATH_LEN] = "", gitdir[MAX_PATH_LEN] = "";
    if (!realpath(cfg->workspace, real))
    {
       aimee_log(LOG_ERROR, "delegate-sandbox", "workspace '%s' does not resolve: %s",
                 cfg->workspace, strerror(errno));
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    struct stat wst;
@@ -1146,14 +815,14 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "workspace '%s' is not a complete git checkout; refusing", real);
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
            sizeof(st->workspace_host) ||
        (size_t)snprintf(st->workdir, sizeof(st->workdir), "%s", real) >= sizeof(st->workdir))
    {
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    snprintf(st->cwd, sizeof(st->cwd), "%s", st->workdir);
@@ -1163,16 +832,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    char container_sock[MAX_PATH_LEN + 32] = "";
    char host_sock[MAX_PATH_LEN + 32] = "";
    const char *aimee_h = aimee_home();
-   if (cfg->control_socket)
-   {
-      if ((size_t)snprintf(container_sock, sizeof container_sock, "%s", cfg->control_socket) >=
-          sizeof container_sock)
-      {
-         docker_state_destroy(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
-   }
-   else if (aimee_h && aimee_h[0])
+   if (aimee_h && aimee_h[0])
       snprintf(container_sock, sizeof(container_sock), "%s/aimee-http.sock", aimee_h);
    struct stat socket_stat;
    if (!container_sock[0] || lstat(container_sock, &socket_stat) != 0 ||
@@ -1181,72 +841,29 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "required sole-egress socket '%s' is missing or not a Unix socket",
                 container_sock[0] ? container_sock : "<unresolved>");
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   char mount_table[8192];
-   docker_mount_table(mount_table, sizeof(mount_table));
-   int socket_path_result =
-       docker_host_path_for_self(checked ? st : NULL, container_sock, host_sock, sizeof(host_sock),
-                                 checked ? mount_table : NULL, checked ? sizeof mount_table : 0);
+   int socket_path_result = docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
    if (socket_path_result < 0 || (server_runs_in_container() && socket_path_result != 1))
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "cannot map sole-egress socket into the Docker daemon namespace; refusing");
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
 
+   char mount_table[8192];
+   docker_mount_table(mount_table, sizeof(mount_table));
    char userflag[64];
    snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
-   char helper_check[MAX_PATH_LEN + 32] = "", helper_source[MAX_PATH_LEN + 32] = "";
-   if (cfg->control_socket)
-   {
-      const char *check_leaf = strrchr(container_sock, '/'), *source_leaf = strrchr(host_sock, '/');
-      if (!cfg->control_helper_sha256 || strlen(cfg->control_helper_sha256) != 64 ||
-          !is_container_id(cfg->control_helper_sha256) || !check_leaf || !source_leaf ||
-          strcmp(check_leaf + 1, "aimee-http.sock") || strcmp(source_leaf + 1, "aimee-http.sock") ||
-          snprintf(helper_check, sizeof helper_check, "%.*s/owner-io",
-                   (int)(check_leaf - container_sock),
-                   container_sock) >= (int)sizeof helper_check ||
-          snprintf(helper_source, sizeof helper_source, "%.*s/owner-io",
-                   (int)(source_leaf - host_sock), host_sock) >= (int)sizeof helper_source)
-      {
-         docker_state_destroy(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
-   }
 
-   if (checked && docker_lease_open(st, cfg->control_socket))
-   {
-      docker_state_destroy(st);
-      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-   }
-   const char *argv[52];
+   const char *argv[40];
    int n = 0;
    argv[n++] = resolve_delegate_egress_bin();
    argv[n++] = "acquire";
-   if (checked)
-   {
-      argv[n++] = cfg->control_socket ? "--receipt-json" : "--resource-receipt-json";
-      argv[n++] = "--lease-fd";
-      argv[n++] = "3";
-      argv[n++] = "--lease-check";
-      argv[n++] = st->lease_check;
-      argv[n++] = "--engine-endpoint";
-      argv[n++] = st->engine_endpoint;
-   }
-   if (cfg->control_socket)
-   {
-      argv[n++] = "--helper-check";
-      argv[n++] = helper_check;
-      argv[n++] = "--helper-source";
-      argv[n++] = helper_source;
-      argv[n++] = "--helper-sha256";
-      argv[n++] = cfg->control_helper_sha256;
-   }
    argv[n++] = "--docker";
-   argv[n++] = st->docker_binary;
+   argv[n++] = resolve_docker_bin();
    argv[n++] = "--task";
    argv[n++] = task_id;
    argv[n++] = "--image";
@@ -1272,11 +889,6 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       argv[n++] = "--writes-allowed";
    if (cfg->pkg_proxy)
       argv[n++] = "--proxy";
-   if (checked && st->controller_binds[0])
-   {
-      argv[n++] = "--controller-binds";
-      argv[n++] = st->controller_binds;
-   }
    if (mount_table[0])
    {
       argv[n++] = "--mount-table";
@@ -1286,84 +898,19 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    argv[n] = NULL;
 
    char *out = NULL;
-   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
-                          NULL};
-   int rc = checked ? safe_exec_capture_cwd_env_fd_timeout(argv, NULL, environment, &out, 8192,
-                                                           70000, st->lease_fd, 3)
-                    : safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 4096, 70000);
+   int rc = safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 4096, 70000);
    if (rc != 0 || !out)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "Go egress module could not establish and verify delegate %s; stage=%s; refusing",
-                task_id, docker_acquire_failure_stage(out));
+                "Go egress module could not establish and verify delegate %s; refusing", task_id);
       free(out);
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    size_t len = strlen(out);
    while (len && isspace((unsigned char)out[len - 1]))
       out[--len] = '\0';
-   cJSON *receipt = checked ? cJSON_ParseWithOpts(out, NULL, 1) : NULL;
-   const char *name =
-       checked ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "name")) : out;
-   if (checked)
-   {
-      const char *engine =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "engine_endpoint"));
-      const char *helper =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "helper_source"));
-      const char *helper_target =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "helper_target"));
-      const char *helper_sha =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "helper_sha256"));
-      const char *startup =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "trusted_startup"));
-      const char *schema =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "schema"));
-      const char *id =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "container_id"));
-      const char *image =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "image_id"));
-      const char *workdir =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "workdir"));
-      const char *source =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "control_socket_source"));
-      const char *target =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "control_socket_target"));
-      int private_valid = cfg->control_socket && engine && !strcmp(engine, st->engine_endpoint) &&
-                          helper && !strcmp(helper, helper_source) && helper_target &&
-                          !strcmp(helper_target, DELEGATE_OWNER_HELPER) && helper_sha &&
-                          !strcmp(helper_sha, cfg->control_helper_sha256) && startup &&
-                          !strcmp(startup, "owner-io-idle-guard-v1");
-      if (!(cfg->control_socket
-                ? private_valid
-                : engine && !strcmp(engine, st->engine_endpoint) &&
-                      !strcmp(cJSON_GetStringValue(
-                                  cJSON_GetObjectItemCaseSensitive(receipt, "resource_mode"))
-                                  ? cJSON_GetStringValue(
-                                        cJSON_GetObjectItemCaseSensitive(receipt, "resource_mode"))
-                                  : "",
-                              "ordinary-container")) ||
-          !schema ||
-          strcmp(schema, cfg->control_socket ? "aimee.container-acquire.v1"
-                                             : "aimee.container-resource.v1") ||
-          !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "fresh_container")) || !id ||
-          strlen(id) != 64 || !is_container_id(id) || !image || strlen(image) != 71 ||
-          strncmp(image, "sha256:", 7) || !is_container_id(image + 7) || !workdir ||
-          strcmp(workdir, st->workdir) || !source || strcmp(source, host_sock) || !target ||
-          strcmp(target, DELEGATE_SOCK_PATH) ||
-          !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(receipt, "verified_posture")))
-      {
-         cJSON_Delete(receipt);
-         free(out);
-         docker_state_destroy(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
-      snprintf(st->container_id, sizeof st->container_id, "%s", id);
-      snprintf(st->image_id, sizeof st->image_id, "%s", image);
-   }
-   if (!name)
-      name = "";
+   char *name = out;
    while (*name && isspace((unsigned char)*name))
       name++;
    if (!name[0] || strpbrk(name, " \t\r\n") ||
@@ -1373,295 +920,15 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       aimee_log(LOG_ERROR, "delegate-sandbox",
                 "Go egress module returned an invalid container name");
       free(out);
-      cJSON_Delete(receipt);
-      docker_state_destroy(st);
+      free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   cJSON_Delete(receipt);
    free(out);
 
-   if (cfg->pkg_proxy && !cfg->control_socket)
-      docker_pkg_forwarder_setup(checked ? st : NULL,
-                                 checked ? st->container_id : st->container_name);
+   if (cfg->pkg_proxy)
+      docker_pkg_forwarder_setup(st->container_name);
    *state_out = st;
    return 0;
-}
-
-static int delegate_backend_docker_owned_identity(void *state, char container_id[65],
-                                                  char image_id[72])
-{
-   docker_state_t *owner = state;
-   if (!owner || owner->retired || strlen(owner->container_id) != 64 ||
-       strlen(owner->image_id) != 71 || !container_id || !image_id)
-      return -1;
-   memcpy(container_id, owner->container_id, 65);
-   memcpy(image_id, owner->image_id, 72);
-   return 0;
-}
-static int delegate_backend_docker_owned_transport(void *state, const char **binary,
-                                                   const char **engine_endpoint)
-{
-   docker_state_t *owner = state;
-   char id[65], image[72];
-   if (!binary || !engine_endpoint || delegate_backend_docker_owned_identity(state, id, image) ||
-       owner->engine_fd < 0 || !owner->engine_endpoint[0] || !owner->docker_binary[0])
-      return -1;
-   *binary = owner->docker_binary;
-   *engine_endpoint = owner->engine_endpoint;
-   return 0;
-}
-static int docker_file_live(docker_state_t *owner, long long deadline)
-{
-   return owner && !owner->retired && owner->file_validate &&
-          !owner->file_validate(owner->file_context) && util_now_ms() < deadline;
-}
-static int docker_transport_io(docker_state_t *owner, const cli_native_stdio_t *transport,
-                               int writing, char *bytes, size_t length, long long deadline)
-{
-   int fd = writing ? transport->in_fd : transport->out_fd;
-   size_t offset = 0;
-   while (offset < length)
-   {
-      if (!docker_file_live(owner, deadline))
-         return -1;
-      long long remaining = deadline - util_now_ms();
-      struct pollfd pending = {.fd = fd, .events = writing ? POLLOUT : POLLIN};
-      int ready = poll(&pending, 1, remaining > 100 ? 100 : (int)remaining);
-      if (ready < 0 && errno == EINTR)
-         continue;
-      if (ready < 0 || (pending.revents & POLLNVAL))
-         return -1;
-      if (!ready)
-         continue;
-      ssize_t n = writing ? write(fd, bytes + offset, length - offset)
-                          : read(fd, bytes + offset, length - offset);
-      if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
-         continue;
-      if (n <= 0)
-         return -1;
-      offset += (size_t)n;
-   }
-   return 0;
-}
-static int docker_transport_line(docker_state_t *owner, const cli_native_stdio_t *transport,
-                                 char *line, size_t capacity, long long deadline)
-{
-   for (size_t i = 0; i + 1 < capacity; i++)
-   {
-      if (docker_transport_io(owner, transport, 0, line + i, 1, deadline))
-         return -1;
-      if (line[i] == '\n')
-      {
-         line[i] = 0;
-         return 0;
-      }
-   }
-   return -1;
-}
-static int delegate_backend_docker_file_owner_start(void *state, int executable_fd, int cwd_fd,
-                                                    const char *selected_command,
-                                                    int (*validate)(void *), void *context,
-                                                    long long deadline_ms)
-{
-   docker_state_t *owner = state;
-   char id[65], image[72];
-   if (!owner || !owner->private_io || delegate_backend_docker_owned_identity(state, id, image) ||
-       owner->file_ready || owner->file_started || owner->file_owner.pid || !selected_command ||
-       !selected_command[0] || !validate || validate(context) || util_now_ms() >= deadline_ms)
-      return -1;
-   owner->file_started = 1;
-   owner->launcher_fd = cli_native_pin_fd(executable_fd);
-   owner->launcher_cwd_fd = cli_native_pin_fd(cwd_fd);
-   if (owner->launcher_fd < 0 || owner->launcher_cwd_fd < 0)
-      return -1;
-   owner->file_validate = validate;
-   owner->file_context = context;
-   owner->file_deadline = deadline_ms;
-   char *argv[] = {owner->docker_binary,
-                   "--host",
-                   owner->engine_endpoint,
-                   "exec",
-                   "-i",
-                   "--workdir",
-                   owner->workdir,
-                   owner->container_id,
-                   DELEGATE_OWNER_HELPER,
-                   "--file-serve",
-                   owner->workdir,
-                   (char *)selected_command,
-                   NULL};
-   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
-                          NULL};
-   if (cli_native_stdio_spawn(executable_fd, cwd_fd, argv, environment, validate, context,
-                              &owner->file_owner))
-      return -1;
-   char ready[128], trailing;
-   size_t command_length, home_length, mcp_length;
-   if (docker_transport_line(owner, &owner->file_owner, ready, sizeof ready, deadline_ms) ||
-       sscanf(ready, "raw-owner-v1 ready %zu %zu %zu %c", &command_length, &home_length,
-              &mcp_length, &trailing) != 3 ||
-       !command_length || command_length >= sizeof owner->prepared_command || !home_length ||
-       home_length >= sizeof owner->prepared_home || mcp_length >= sizeof owner->prepared_mcp ||
-       docker_transport_io(owner, &owner->file_owner, 0, owner->prepared_command, command_length,
-                           deadline_ms) ||
-       docker_transport_io(owner, &owner->file_owner, 0, owner->prepared_home, home_length,
-                           deadline_ms) ||
-       (mcp_length && docker_transport_io(owner, &owner->file_owner, 0, owner->prepared_mcp,
-                                          mcp_length, deadline_ms)))
-   {
-      cli_native_stdio_close(&owner->file_owner);
-      return -1;
-   }
-   owner->prepared_command[command_length] = owner->prepared_home[home_length] =
-       owner->prepared_mcp[mcp_length] = 0;
-   if (strlen(owner->prepared_command) != command_length ||
-       strlen(owner->prepared_home) != home_length || strlen(owner->prepared_mcp) != mcp_length ||
-       owner->prepared_command[0] != '/' || owner->prepared_home[0] != '/' ||
-       (mcp_length && owner->prepared_mcp[0] != '/'))
-   {
-      cli_native_stdio_close(&owner->file_owner);
-      return -1;
-   }
-   owner->file_ready = 1;
-   return 0;
-}
-static int delegate_backend_docker_owned_prepared(void *state, const char **command,
-                                                  const char **home, const char **mcp_command)
-{
-   docker_state_t *owner = state;
-   if (!owner || !owner->private_io || !owner->file_ready || owner->retired || !command || !home ||
-       !mcp_command)
-      return -1;
-   *command = owner->prepared_command;
-   *home = owner->prepared_home;
-   *mcp_command = owner->prepared_mcp;
-   return 0;
-}
-static int docker_owned_file_request(void *state, const char *path, char operation,
-                                     const char *content, size_t length, int timeout_ms, char **out,
-                                     size_t *out_length, int *unknown)
-{
-   docker_state_t *owner = state;
-   int writing = operation == 'W' || operation == 'P';
-   if (out)
-      *out = NULL;
-   if (out_length)
-      *out_length = 0;
-   if (unknown)
-      *unknown = 0;
-   if (!owner || !out || !out_length || !unknown || !owner->file_ready || owner->file_busy ||
-       owner->file_requests >= 4096 ||
-       (operation != 'R' && operation != 'W' && operation != 'P' && operation != 'D') || !path ||
-       !path[0] || strlen(path) > 4095 || length > SCOPED_FILE_IO_MAX || (!content && length) ||
-       (!writing && length))
-      return -1;
-   owner->file_busy = 1;
-   owner->file_requests++;
-   long long deadline = owner->file_deadline, now = util_now_ms();
-   if (timeout_ms > 0 && now + timeout_ms < deadline)
-      deadline = now + timeout_ms;
-   char header[96], trailing;
-   int n =
-       snprintf(header, sizeof header, "raw-file-v1 %c %zu %zu\n", operation, strlen(path), length);
-   int rc = -1, status;
-   size_t received;
-   if (n < 0 || (size_t)n >= sizeof header ||
-       docker_transport_io(owner, &owner->file_owner, 1, header, (size_t)n, deadline) ||
-       docker_transport_io(owner, &owner->file_owner, 1, (char *)path, strlen(path), deadline) ||
-       (length &&
-        docker_transport_io(owner, &owner->file_owner, 1, (char *)content, length, deadline)))
-      goto failed;
-   *unknown = writing; /* A lost response cannot prove no admitted write occurred. */
-   if (docker_transport_line(owner, &owner->file_owner, header, sizeof header, deadline) ||
-       sscanf(header, "raw-file-v1 %d %zu %c", &status, &received, &trailing) != 2 || status < 0 ||
-       status > 2 || received > SCOPED_FILE_IO_MAX || ((writing || status) && received))
-      goto failed;
-   if (status)
-   {
-      *unknown = status == 2;
-      owner->file_busy = 0;
-      return -1;
-   }
-   if (!writing)
-   {
-      *out = malloc(received + 1);
-      if (!*out || docker_transport_io(owner, &owner->file_owner, 0, *out, received, deadline))
-         goto failed;
-      (*out)[received] = 0;
-      *out_length = received;
-   }
-   if (!docker_file_live(owner, deadline))
-      goto failed;
-   *unknown = 0;
-   rc = 0;
-   owner->file_busy = 0;
-   return rc;
-failed:
-   owner->file_ready = 0; /* No retry/resynchronization after an uncertain frame. */
-   owner->file_busy = 0;
-   free(*out);
-   *out = NULL;
-   *out_length = 0;
-   return -1;
-}
-
-static int delegate_backend_docker_owned_file(void *state, const char *path, int writing,
-                                              const char *content, size_t length, int timeout_ms,
-                                              char **out, size_t *out_length, int *unknown)
-{
-   return docker_owned_file_request(state, path, writing ? 'W' : 'R', content, length, timeout_ms,
-                                    out, out_length, unknown);
-}
-
-static int delegate_backend_docker_owned_forwarder(void *state, unsigned port)
-{
-   docker_state_t *owner = state;
-   if (!owner || !owner->private_io)
-      return -1;
-   char id[65], image[72];
-   cli_native_stdio_t *process = port == 3129 ? &owner->package_forwarder : &owner->forwarder;
-   if ((port != 3131 && port != 3129) || delegate_backend_docker_owned_identity(state, id, image) ||
-       !owner->file_ready || process->pid)
-      return -1;
-   char *argv[] = {owner->docker_binary,
-                   "--host",
-                   owner->engine_endpoint,
-                   "exec",
-                   "-i",
-                   owner->container_id,
-                   DELEGATE_OWNER_HELPER,
-                   "--owned-forwarder",
-                   port == 3129 ? "3129" : "3131",
-                   DELEGATE_SOCK_PATH,
-                   NULL};
-   char *environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "HOME=/nonexistent",
-                          NULL};
-   if (cli_native_stdio_spawn(owner->launcher_fd, owner->launcher_cwd_fd, argv, environment,
-                              owner->file_validate, owner->file_context, process))
-      return -1;
-   char ready[64];
-   if (docker_transport_line(owner, process, ready, sizeof ready, owner->file_deadline) ||
-       strcmp(ready, "raw-forwarder-v1 ready"))
-   {
-      cli_native_stdio_close(process);
-      return -1;
-   }
-   return 0;
-}
-
-static int delegate_backend_docker_owned_retire(void *state)
-{
-   docker_state_t *owner = state;
-   char id[65], image[72];
-   if (delegate_backend_docker_owned_identity(state, id, image))
-      return owner && owner->retired ? 0 : -1;
-   owner->file_ready = 0;
-   cli_native_stdio_close(&owner->file_owner);
-   cli_native_stdio_close(&owner->forwarder);
-   cli_native_stdio_close(&owner->package_forwarder);
-   owner->file_validate = NULL;
-   owner->file_context = NULL;
-   return owner->lease_fd >= 0 ? docker_cleanup_lease(owner) : -1;
 }
 
 static void docker_release(delegate_backend_t *self, void *state, int hibernate)
@@ -1670,42 +937,32 @@ static void docker_release(delegate_backend_t *self, void *state, int hibernate)
    if (!state)
       return;
    docker_state_t *st = state;
-   if (st->container_id[0])
-   {
-      if (delegate_backend_docker_owned_retire(st))
-         LOG_ERROR("delegate-sandbox", "owned container retirement was not verified");
-      docker_state_destroy(st);
-      return;
-   }
-   const char *identity = st->container_name;
-   if (identity[0] && !st->retired)
+   if (st->container_name[0])
    {
       if (hibernate)
       {
          /* Stop only; container persists for next acquire. */
-         const char *argv[] = {"docker", "stop", identity, NULL};
+         const char *argv[] = {"docker", "stop", st->container_name, NULL};
          (void)run_docker(argv);
       }
       else
       {
          /* Force-remove (kills if running, removes container). */
-         const char *argv[] = {"docker", "rm", "-f", identity, NULL};
+         const char *argv[] = {"docker", "rm", "-f", st->container_name, NULL};
          (void)run_docker(argv);
       }
    }
-   docker_state_destroy(st);
+   free(st);
 }
 
-static int docker_exec_scoped(delegate_backend_t *self, void *state, const char *command,
-                              int timeout_ms, const delegate_exec_scope_t *scope,
-                              delegate_exec_result_t *result_out)
+static int docker_exec(delegate_backend_t *self, void *state, const char *command, int timeout_ms,
+                       delegate_exec_result_t *result_out)
 {
    (void)self;
-   if (!state || ((docker_state_t *)state)->retired || !command || !result_out)
+   if (!state || !command || !result_out)
       return -1;
    docker_state_t *st = state;
    long long start = util_now_ms();
-   result_out->exit_code = -1;
 
    /* Prefix `cd <cwd> &&` when set_cwd has been called. The container
     * default cwd is /workspace (see -w flag at create); set_cwd lets
@@ -1714,28 +971,18 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
    const char *to_run = command;
    if (st->cwd[0] && strcmp(st->cwd, resolve_docker_workdir()) != 0)
    {
-      char *quoted_cwd = shell_quote(st->cwd);
-      if (!quoted_cwd)
-      {
-         return -1;
-      }
-      size_t need = strlen(quoted_cwd) + strlen(command) + 16;
+      size_t need = strlen(st->cwd) + strlen(command) + 16;
       prefixed = malloc(need);
-      if (!prefixed)
+      if (prefixed)
       {
-         free(quoted_cwd);
-         return -1;
+         snprintf(prefixed, need, "cd %s && %s", st->cwd, command);
+         to_run = prefixed;
       }
-      snprintf(prefixed, need, "cd %s && %s", quoted_cwd, command);
-      free(quoted_cwd);
-      to_run = prefixed;
    }
 
    /* Build the docker shell command via the iter-37 b64 helper. */
    char *docker_cmd = NULL;
-   if (docker_build_exec_command(st->container_id[0] ? st->container_id : st->container_name,
-                                 to_run, timeout_ms, scope, st->engine_endpoint,
-                                 &docker_cmd) != 0 ||
+   if (docker_build_exec_command(st->container_name, to_run, timeout_ms, &docker_cmd) != 0 ||
        !docker_cmd)
    {
       free(prefixed);
@@ -1746,25 +993,13 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
    /* If AIMEE_DOCKER_BIN is set, swap the leading "docker" in the
     * built command for the override binary. Production runs leave
     * the env unset and the leading "docker" wins via PATH. */
-   const char *bin_override = st->container_id[0] ? st->docker_binary : getenv("AIMEE_DOCKER_BIN");
-   char *quoted_binary = bin_override ? shell_quote(bin_override) : NULL;
-   if (bin_override && !quoted_binary)
-   {
-      free(docker_cmd);
-      return -1;
-   }
-   bin_override = quoted_binary;
+   const char *bin_override = getenv("AIMEE_DOCKER_BIN");
    if (bin_override && bin_override[0] && strncmp(docker_cmd, "docker ", 7) == 0)
    {
       size_t bin_len = strlen(bin_override);
       size_t tail_len = strlen(docker_cmd) - 6; /* "docker" is 6 chars */
       char *swapped = malloc(bin_len + tail_len + 1);
-      if (!swapped)
-      {
-         free(quoted_binary);
-         free(docker_cmd);
-         return -1;
-      }
+      if (swapped)
       {
          memcpy(swapped, bin_override, bin_len);
          memcpy(swapped + bin_len, docker_cmd + 6, tail_len + 1);
@@ -1773,7 +1008,6 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       }
    }
 
-   free(quoted_binary);
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
    if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
@@ -1790,20 +1024,6 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       return -1;
    }
 
-   int *descriptors[] = {&out_pipe[0], &out_pipe[1], &err_pipe[0], &err_pipe[1]};
-   for (size_t i = 0; i < 4; i++)
-   {
-      int pinned = fcntl(*descriptors[i], F_DUPFD_CLOEXEC, 10);
-      if (pinned < 0)
-      {
-         for (size_t j = 0; j < 4; j++)
-            close(*descriptors[j]);
-         free(docker_cmd);
-         return -1;
-      }
-      close(*descriptors[i]);
-      *descriptors[i] = pinned;
-   }
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -1816,136 +1036,100 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
    }
    if (pid == 0)
    {
-      (void)setpgid(0, 0);
-      int null_input = open("/dev/null", O_RDONLY | O_CLOEXEC);
-      int input = null_input < 0 ? -1 : fcntl(null_input, F_DUPFD_CLOEXEC, 10);
-      if (null_input >= 0)
-         close(null_input);
-      if (input < 0 || dup2(input, STDIN_FILENO) < 0)
-         _exit(126);
-      close(input);
-      char *client_environment[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
-                                    "HOME=/nonexistent", NULL};
-      int environment_failed =
-          st->container_id[0] ? child_environment_install(client_environment, 1)
-                              : (scope && child_environment_install(scope->environment,
-                                                                    scope->replace_environment));
-      if (environment_failed || dup2(out_pipe[1], STDOUT_FILENO) < 0 ||
-          dup2(err_pipe[1], STDERR_FILENO) < 0)
-         _exit(126);
-      /* Original pipe descriptors are all >=10 and cannot close mapped stdio. */
+      dup2(out_pipe[1], STDOUT_FILENO);
+      dup2(err_pipe[1], STDERR_FILENO);
       close(out_pipe[0]);
       close(out_pipe[1]);
       close(err_pipe[0]);
       close(err_pipe[1]);
-      execl("/bin/sh", "sh", "-c", docker_cmd, (char *)NULL);
+      execlp("sh", "sh", "-c", docker_cmd, (char *)NULL);
       _exit(127);
    }
    free(docker_cmd);
    close(out_pipe[1]);
    close(err_pipe[1]);
 
-   (void)setpgid(pid, pid);
-   int nonblocking = 1;
-   for (int i = 0; i < 2; i++)
-   {
-      int fd = i ? err_pipe[0] : out_pipe[0];
-      int flags = fcntl(fd, F_GETFL);
-      if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK))
-         nonblocking = 0;
-   }
    long long deadline = timeout_ms > 0 ? start + timeout_ms : 0;
-   size_t out_off = 0, err_off = 0;
-   int open_stream[2] = {1, 1}, reaped = 0, status = 0, interrupted = !nonblocking;
-   while (!interrupted && (open_stream[0] || open_stream[1] || !reaped))
+   size_t out_off = 0;
+   size_t err_off = 0;
+   int out_open = 1, err_open = 1;
+   while (out_open || err_open)
    {
-      if (!reaped)
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      int maxfd = -1;
+      if (out_open)
       {
-         pid_t done = waitpid(pid, &status, WNOHANG);
-         if (done == pid)
-            reaped = 1;
-         else if (done < 0 && errno != EINTR)
+         FD_SET(out_pipe[0], &rfds);
+         if (out_pipe[0] > maxfd)
+            maxfd = out_pipe[0];
+      }
+      if (err_open)
+      {
+         FD_SET(err_pipe[0], &rfds);
+         if (err_pipe[0] > maxfd)
+            maxfd = err_pipe[0];
+      }
+      struct timeval tv = {1, 0};
+      if (deadline > 0)
+      {
+         long long remaining = deadline - util_now_ms();
+         if (remaining <= 0)
          {
-            interrupted = 1;
+            kill(pid, SIGTERM);
             break;
          }
+         tv.tv_sec = remaining / 1000;
+         tv.tv_usec = (remaining % 1000) * 1000;
       }
-      if (!open_stream[0] && !open_stream[1] && reaped)
-         break;
-      if ((scope && scope->progress && scope->progress(scope->context)) ||
-          (deadline && util_now_ms() >= deadline))
-      {
-         interrupted = 1;
-         break;
-      }
-      struct pollfd streams[2] = {{open_stream[0] ? out_pipe[0] : -1, POLLIN, 0},
-                                  {open_stream[1] ? err_pipe[0] : -1, POLLIN, 0}};
-      int ready = poll(streams, 2, 100);
-      if (ready < 0)
+      int sel = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+      if (sel < 0)
       {
          if (errno == EINTR)
             continue;
-         interrupted = 1;
          break;
       }
-      for (int i = 0; i < 2; i++)
+      if (sel == 0)
+         continue;
+      if (out_open && FD_ISSET(out_pipe[0], &rfds))
       {
-         if (!streams[i].revents)
-            continue;
-         if (streams[i].revents & POLLNVAL)
+         if (result_out->stdout_buf && out_off + 1 < result_out->stdout_cap)
          {
-            interrupted = 1;
-            break;
+            ssize_t r = read(out_pipe[0], result_out->stdout_buf + out_off,
+                             result_out->stdout_cap - 1 - out_off);
+            if (r <= 0)
+               out_open = 0;
+            else
+               out_off += (size_t)r;
          }
-         char discard[4096];
-         char *buffer = i ? result_out->stderr_buf : result_out->stdout_buf;
-         size_t capacity = i ? result_out->stderr_cap : result_out->stdout_cap;
-         size_t *offset = i ? &err_off : &out_off;
-         size_t available = buffer && *offset + 1 < capacity ? capacity - *offset - 1 : 0;
-         ssize_t count = read(streams[i].fd, available ? buffer + *offset : discard,
-                              available ? available : sizeof discard);
-         if (count > 0)
+         else
          {
-            if (available)
-               *offset += (size_t)count;
-         }
-         else if (!count)
-            open_stream[i] = 0;
-         else if (errno != EAGAIN && errno != EINTR)
-         {
-            interrupted = 1;
-            break;
+            char throwaway[4096];
+            if (read(out_pipe[0], throwaway, sizeof(throwaway)) <= 0)
+               out_open = 0;
          }
       }
-      if (interrupted)
-         break;
+      if (err_open && FD_ISSET(err_pipe[0], &rfds))
+      {
+         if (result_out->stderr_buf && err_off + 1 < result_out->stderr_cap)
+         {
+            ssize_t r = read(err_pipe[0], result_out->stderr_buf + err_off,
+                             result_out->stderr_cap - 1 - err_off);
+            if (r <= 0)
+               err_open = 0;
+            else
+               err_off += (size_t)r;
+         }
+         else
+         {
+            char throwaway[4096];
+            if (read(err_pipe[0], throwaway, sizeof(throwaway)) <= 0)
+               err_open = 0;
+         }
+      }
    }
    close(out_pipe[0]);
    close(err_pipe[0]);
-   if (interrupted)
-   {
-      /* Joining the local transport is NOT proof the remote exec stopped.
-       * The owning runtime must retire its immutable container before terminal. */
-      kill(-pid, SIGTERM);
-      kill(pid, SIGTERM);
-      long long grace = util_now_ms() + 200;
-      while (!reaped && util_now_ms() < grace)
-      {
-         pid_t done = waitpid(pid, &status, WNOHANG);
-         if (done == pid || (done < 0 && errno != EINTR))
-            reaped = 1;
-         else
-            (void)poll(NULL, 0, 10);
-      }
-      kill(-pid, SIGKILL);
-      if (!reaped)
-      {
-         kill(pid, SIGKILL);
-         while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
-         {
-         }
-      }
-   }
 
    /* Terminate where the OUTPUT ends, not at the end of the buffer.
     *
@@ -1976,58 +1160,17 @@ static int docker_exec_scoped(delegate_backend_t *self, void *state, const char 
       result_out->stderr_buf[result_out->stderr_cap - 1] = '\0';
    }
 
-   result_out->exit_code = !interrupted && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+   int status = 0;
+   waitpid(pid, &status, 0);
+   result_out->exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
    result_out->latency_ms = (int)(util_now_ms() - start);
-   return interrupted || !WIFEXITED(status) ? -1 : 0;
-}
-static int docker_exec(delegate_backend_t *self, void *state, const char *command, int timeout_ms,
-                       delegate_exec_result_t *result_out)
-{
-   return docker_exec_scoped(self, state, command, timeout_ms, NULL, result_out);
+   return 0;
 }
 
 /* Workspace path validation: reject absolute paths and any '..' segment
  * so the in-container workspace sandbox is honest. Resolves `rel`
  * against the container's WORKDIR (/workspace by default) so the same
  * path the caller hands in lands in the same place across exec calls. */
-/* Collapse harmless spelling without touching the host filesystem. Keep a
- * terminal directory marker: reading/writing file/ or file/. must still fail. */
-static int docker_normalize_workspace_path(char *path, size_t capacity)
-{
-   size_t length = strlen(path), read_at = 0, used = 1;
-   int directory =
-       length && (path[length - 1] == '/' || (length >= 2 && !strcmp(path + length - 2, "/.")));
-   if (!length || path[0] != '/' || capacity < 2)
-      return -1;
-   while (read_at < length)
-   {
-      while (read_at < length && path[read_at] == '/')
-         read_at++;
-      size_t start = read_at;
-      while (read_at < length && path[read_at] != '/')
-         read_at++;
-      size_t n = read_at - start;
-      if (!n || (n == 1 && path[start] == '.'))
-         continue;
-      if (n == 2 && path[start] == '.' && path[start + 1] == '.')
-         return -1;
-      if (used + n + (used > 1) >= capacity)
-         return -1;
-      if (used > 1)
-         path[used++] = '/';
-      memmove(path + used, path + start, n);
-      used += n;
-   }
-   if (directory && used > 1)
-   {
-      if (used + 1 >= capacity)
-         return -1;
-      path[used++] = '/';
-   }
-   path[used] = 0;
-   return 0;
-}
-
 static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel, char *out,
                                        size_t outsz)
 {
@@ -2064,13 +1207,13 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
       {
          if (snprintf(out, outsz, "%s", rel) >= (int)outsz)
             return -1;
-         return docker_normalize_workspace_path(out, outsz);
+         return 0;
       }
       return -1;
    }
    if (snprintf(out, outsz, "%s/%s", workdir, rel) >= (int)outsz)
       return -1;
-   return docker_normalize_workspace_path(out, outsz);
+   return 0;
 }
 
 static int docker_read_file(delegate_backend_t *self, void *state, const char *p, int offset,
@@ -2081,50 +1224,46 @@ static int docker_read_file(delegate_backend_t *self, void *state, const char *p
    if (!state || !p || !out || offset < 0 || limit < 0)
       return -1;
    docker_state_t *st = state;
-   char abs[MAX_PATH_LEN], *buf = NULL;
-   if (docker_resolve_in_workspace(st, p, abs, sizeof abs))
+   char abs[MAX_PATH_LEN];
+   if (docker_resolve_in_workspace(st, p, abs, sizeof(abs)) != 0)
       return -1;
-   size_t cap = limit > 0 ? (size_t)limit : SCOPED_FILE_IO_MAX, n = 0;
-   if (st->private_io)
+   /* `cat <abs>` via docker_exec; slice in C for offset/limit. limit=0
+    * means "to EOF" capped at 16 MiB to bound malloc. */
+   size_t cap = limit > 0 ? (size_t)limit : 16 * 1024 * 1024;
+   size_t buf_cap = cap + (size_t)offset + 1;
+   char *buf = malloc(buf_cap);
+   char *err = malloc(4096);
+   if (!buf || !err)
    {
-      int unknown = 0;
-      if (docker_owned_file_request(st, abs, 'R', NULL, 0, 30000, &buf, &n, &unknown) ||
-          memchr(buf, 0, n))
-      {
-         free(buf);
-         return -1;
-      }
-   }
-   else
-   {
-      size_t buf_cap = cap + (size_t)offset + 1;
-      buf = malloc(buf_cap);
-      char *err = malloc(4096), *quoted = shell_quote(abs);
-      char command[MAX_PATH_LEN * 4 + 16];
-      if (!buf || !err || !quoted ||
-          snprintf(command, sizeof command, "cat %s", quoted) >= (int)sizeof command)
-      {
-         free(buf);
-         free(err);
-         free(quoted);
-         return -1;
-      }
-      free(quoted);
-      delegate_exec_result_t result = {0, 0, buf, buf_cap, err, 4096};
-      int failed = docker_exec(self, state, command, 30000, &result) || result.exit_code;
+      free(buf);
       free(err);
-      if (failed)
-      {
-         free(buf);
-         return -1;
-      }
-      n = strlen(buf);
+      return -1;
    }
-   size_t start = (size_t)offset < n ? (size_t)offset : n;
-   size_t take = n - start < cap ? n - start : cap;
-   memmove(buf, buf + start, take);
-   buf[take] = 0;
-   *out = buf;
+   delegate_exec_result_t r = {0, 0, buf, buf_cap, err, 4096};
+   char cmd[MAX_PATH_LEN + 16];
+   snprintf(cmd, sizeof(cmd), "cat %s", abs);
+   if (docker_exec(self, state, cmd, 30000, &r) != 0 || r.exit_code != 0)
+   {
+      free(buf);
+      free(err);
+      return -1;
+   }
+   free(err);
+   size_t n = strlen(buf);
+   if ((size_t)offset > n)
+      offset = (int)n;
+   size_t avail = n - (size_t)offset;
+   size_t take = avail < cap ? avail : cap;
+   char *slice = malloc(take + 1);
+   if (!slice)
+   {
+      free(buf);
+      return -1;
+   }
+   memcpy(slice, buf + offset, take);
+   slice[take] = '\0';
+   free(buf);
+   *out = slice;
    return 0;
 }
 
@@ -2138,17 +1277,6 @@ static int docker_write_file(delegate_backend_t *self, void *state, const char *
    if (docker_resolve_in_workspace(st, p, abs, sizeof(abs)) != 0)
       return -1;
 
-   if (st->private_io)
-   {
-      char *bytes = NULL;
-      size_t length = 0;
-      int unknown = 0;
-      int rc = docker_owned_file_request(st, abs, 'P', content, strlen(content), 30000, &bytes,
-                                         &length, &unknown);
-      free(bytes);
-      return rc && unknown ? SCOPED_WRITE_OUTCOME_UNKNOWN : rc;
-   }
-
    size_t clen = strlen(content);
    size_t b64_cap = ((clen + 2) / 3) * 4 + 1;
    char *b64 = malloc(b64_cap);
@@ -2159,39 +1287,17 @@ static int docker_write_file(delegate_backend_t *self, void *state, const char *
       free(b64);
       return -1;
    }
-   /* Quote the actual parent directly; command substitution loses newline names. */
-   char *parent = strdup(abs), *quoted = shell_quote(abs), *parent_quoted = NULL;
-   if (parent)
-   {
-      char *slash = strrchr(parent, '/');
-      if (slash)
-      {
-         slash[slash == parent ? 1 : 0] = 0;
-         parent_quoted = shell_quote(parent);
-      }
-   }
-   free(parent);
-   if (!quoted || !parent_quoted)
-   {
-      free(b64);
-      free(quoted);
-      free(parent_quoted);
-      return -1;
-   }
-   size_t cmd_cap = strlen(quoted) + strlen(parent_quoted) + b64_cap + 128;
+   /* mkdir -p parent then b64-decode into the file. */
+   size_t cmd_cap = strlen(abs) * 2 + b64_cap + 128;
    char *cmd = malloc(cmd_cap);
    if (!cmd)
    {
       free(b64);
-      free(quoted);
-      free(parent_quoted);
       return -1;
    }
-   snprintf(cmd, cmd_cap, "mkdir -p %s && printf '%%s' '%s' | base64 -d > %s", parent_quoted, b64,
-            quoted);
+   snprintf(cmd, cmd_cap, "mkdir -p \"$(dirname %s)\" && echo '%s' | base64 -d > %s", abs, b64,
+            abs);
    free(b64);
-   free(quoted);
-   free(parent_quoted);
 
    char out[256] = {0}, err[256] = {0};
    delegate_exec_result_t r = {0, 0, out, sizeof(out), err, sizeof(err)};
@@ -2220,60 +1326,11 @@ static int docker_list_dir(delegate_backend_t *self, void *state, const char *p,
       return -1;
    }
 
-   if (st->private_io)
-   {
-      char *bytes = NULL;
-      size_t length = 0;
-      int unknown = 0;
-      if (docker_owned_file_request(st, abs, 'D', NULL, 0, 30000, &bytes, &length, &unknown))
-         return -1;
-      size_t count = 0;
-      for (size_t i = 0; i < length;)
-      {
-         char *end = memchr(bytes + i, 0, length - i);
-         if (!end || end == bytes + i || ++count > 65536)
-         {
-            free(bytes);
-            return -1;
-         }
-         i = (size_t)(end - bytes) + 1;
-      }
-      char **entries = calloc(count + 1, sizeof *entries);
-      if (!entries)
-      {
-         free(bytes);
-         return -1;
-      }
-      size_t offset = 0;
-      for (size_t i = 0; i < count; i++)
-      {
-         entries[i] = strdup(bytes + offset);
-         if (!entries[i])
-         {
-            for (size_t j = 0; j < i; j++)
-               free(entries[j]);
-            free(entries);
-            free(bytes);
-            return -1;
-         }
-         offset += strlen(bytes + offset) + 1;
-      }
-      free(bytes);
-      *entries_out = entries;
-      return (int)count;
-   }
-
    char buf[64 * 1024] = {0};
    char err[4096] = {0};
    delegate_exec_result_t r = {0, 0, buf, sizeof(buf), err, sizeof(err)};
-   char *quoted = shell_quote(abs);
-   char cmd[MAX_PATH_LEN * 4 + 16];
-   if (!quoted || snprintf(cmd, sizeof cmd, "ls -1A %s", quoted) >= (int)sizeof cmd)
-   {
-      free(quoted);
-      return -1;
-   }
-   free(quoted);
+   char cmd[MAX_PATH_LEN + 16];
+   snprintf(cmd, sizeof(cmd), "ls -1A %s", abs);
    int xrc = docker_exec(self, state, cmd, 30000, &r);
    if (xrc != 0 || r.exit_code != 0)
    {
@@ -2343,24 +1400,12 @@ static int docker_set_cwd(delegate_backend_t *self, void *state, const char *pat
    return 0;
 }
 
-static const delegate_owned_resources_t g_owned_resources = {
-    .identity = delegate_backend_docker_owned_identity,
-    .retire = delegate_backend_docker_owned_retire,
-    .forwarder = delegate_backend_docker_owned_forwarder,
-    .transport = delegate_backend_docker_owned_transport,
-    .file_owner_start = delegate_backend_docker_file_owner_start,
-    .prepared = delegate_backend_docker_owned_prepared,
-    .file = delegate_backend_docker_owned_file,
-};
-
 static delegate_backend_t g_docker = {
-    .owned_resources = &g_owned_resources,
     .name = "docker",
     .description = "long-lived container per task_id",
     .acquire = docker_acquire,
     .release = docker_release,
     .exec = docker_exec,
-    .exec_scoped = docker_exec_scoped,
     .read_file = docker_read_file,
     .write_file = docker_write_file,
     .list_dir = docker_list_dir,

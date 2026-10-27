@@ -45,45 +45,6 @@ void td_outcome_set(const char *verdict, const char *reason)
    agent_tools_dispatch_outcome.reason = reason;
    agent_tools_dispatch_outcome.explicit_verdict = 1;
 }
-struct agent_tools_effect_scope
-{
-   ti_effect_contract_t effect;
-   agent_tools_dispatch_outcome_t outcome;
-   int active, authorized;
-   struct agent_tools_effect_scope *previous;
-};
-static _Thread_local agent_tools_effect_scope_t *effect_scope;
-int agent_tools_effect_scope_push(agent_tools_effect_scope_t **out)
-{
-   if (!out || *out)
-      return -1;
-   agent_tools_effect_scope_t *scope = calloc(1, sizeof *scope);
-   if (!scope)
-      return -1;
-   scope->effect = g_effect;
-   scope->outcome = agent_tools_dispatch_outcome;
-   scope->active = g_effect_active;
-   scope->authorized = g_effect_authorized;
-   scope->previous = effect_scope;
-   td_outcome_reset();
-   g_effect_authorized = 0;
-   effect_scope = scope;
-   *out = scope;
-   return 0;
-}
-int agent_tools_effect_scope_pop(agent_tools_effect_scope_t *scope)
-{
-   if (!scope || effect_scope != scope)
-      return -1;
-   g_effect = scope->effect;
-   agent_tools_dispatch_outcome = scope->outcome;
-   g_effect_active = scope->active;
-   g_effect_authorized = scope->authorized;
-   effect_scope = scope->previous;
-   free(scope);
-   return 0;
-}
-
 void agent_tools_set_effect_authorized(int authorized)
 {
    g_effect_authorized = !!authorized;
@@ -401,8 +362,8 @@ int agent_tools_classification(const char *name)
    return agent_tools_effect_classification(name, g_tool_classifier);
 }
 
-static char *dispatch_ir_owned(const aimee_tool_t *admitted, const cJSON *arguments, int timeout_ms,
-                               int *is_error, agent_tool_file_resource_fn execute, void *context)
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const cJSON *arguments,
+                                       int timeout_ms, int *is_error)
 {
    if (is_error)
       *is_error = 1;
@@ -422,25 +383,5 @@ static char *dispatch_ir_owned(const aimee_tool_t *admitted, const cJSON *argume
       cJSON_Delete(args);
       return safe_strdup("error: admitted tool arguments are not canonical");
    }
-   return agent_tools_dispatch_file_owned(admitted->name, timeout_ms, is_error, args, execute,
-                                          context);
-}
-
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const cJSON *arguments,
-                                       int timeout_ms, int *is_error)
-{
-   return dispatch_ir_owned(admitted, arguments, timeout_ms, is_error, NULL, NULL);
-}
-char *dispatch_tool_file_resource_ctx_status(const aimee_tool_t *admitted, const cJSON *arguments,
-                                             int timeout_ms, agent_tool_file_resource_fn execute,
-                                             void *context, int *is_error)
-{
-   if (!execute || !admitted || !admitted->name ||
-       (strcmp(admitted->name, "read_file") && strcmp(admitted->name, "write_file")))
-   {
-      if (is_error)
-         *is_error = 1;
-      return safe_strdup("error: invalid file resource owner");
-   }
-   return dispatch_ir_owned(admitted, arguments, timeout_ms, is_error, execute, context);
+   return agent_tools_dispatch_ir_owned(admitted->name, timeout_ms, is_error, args);
 }

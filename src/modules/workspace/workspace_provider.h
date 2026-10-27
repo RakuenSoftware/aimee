@@ -2,7 +2,6 @@
 #define WORKSPACE_PROVIDER_H 1
 
 #include <stddef.h>
-#include "scoped_execution.h"
 
 #define DELEGATE_DETACHED_CHANNEL_DOWN_JSON                                                        \
    "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the serving "    \
@@ -137,10 +136,6 @@ struct workspace_provider
       tool call that launched it. */
    char *(*exec_shell_timeout)(const workspace_provider_t *p, const char *cmd, int timeout_ms,
                                int *exit_code);
-   /* Explicit lexical producer environment/progress. No provider fallback when
-    * requested: unsupported implementations must refuse, never run on the host. */
-   char *(*exec_shell_scoped)(const workspace_provider_t *p, const char *cmd, int timeout_ms,
-                              const struct delegate_exec_scope *scope, int *exit_code);
 
    /* Run `argv` (NULL-terminated) with `stdin_data` (`stdin_len` bytes, may be
     * NULL/0) written to the child's stdin, in working directory `cwd` (NULL =

@@ -86,11 +86,7 @@ typedef struct
 static pthread_mutex_t g_ready_mtx = PTHREAD_MUTEX_INITIALIZER;
 static ready_snapshot_t g_snap; /* guarded by g_ready_mtx */
 static pthread_t g_ready_thread;
-static int g_ready_thread_started; /* guarded by g_ready_lifecycle_mtx */
-/* Serialize start/stop, without holding the snapshot lock across a join. */
-static pthread_mutex_t g_ready_lifecycle_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_ready_wake = PTHREAD_COND_INITIALIZER;
-static int g_ready_stop_requested; /* guarded by g_ready_mtx */
+static int g_ready_thread_started;
 
 #define READY_INTERVAL_DEFAULT 15
 #define READY_STALE_DEFAULT    60
@@ -305,44 +301,12 @@ void server_ready_sample_now(void)
 static void *ready_sampler_main(void *arg)
 {
    (void)arg;
-   pthread_mutex_lock(&g_ready_mtx);
-   while (!g_ready_stop_requested)
+   for (;;)
    {
-      pthread_mutex_unlock(&g_ready_mtx);
       server_ready_sample_now();
-      pthread_mutex_lock(&g_ready_mtx);
-      struct timespec next;
-      clock_gettime(CLOCK_REALTIME, &next);
-      next.tv_sec += ready_interval_secs();
-      while (!g_ready_stop_requested)
-      {
-         int rc = pthread_cond_timedwait(&g_ready_wake, &g_ready_mtx, &next);
-         if (rc == ETIMEDOUT)
-            break;
-      }
+      sleep((unsigned)ready_interval_secs());
    }
-   pthread_mutex_unlock(&g_ready_mtx);
    return NULL;
-}
-
-/* Dependency RPCs belong to the sampler until its in-flight sample returns.
- * Wake its interval wait, then join before the caller drains the module bus. */
-void server_ready_stop(void)
-{
-   pthread_mutex_lock(&g_ready_lifecycle_mtx);
-   if (g_ready_thread_started)
-   {
-      pthread_mutex_lock(&g_ready_mtx);
-      g_ready_stop_requested = 1;
-      pthread_cond_broadcast(&g_ready_wake);
-      pthread_mutex_unlock(&g_ready_mtx);
-      pthread_join(g_ready_thread, NULL);
-      g_ready_thread_started = 0;
-      pthread_mutex_lock(&g_ready_mtx);
-      memset(&g_snap, 0, sizeof(g_snap));
-      pthread_mutex_unlock(&g_ready_mtx);
-   }
-   pthread_mutex_unlock(&g_ready_lifecycle_mtx);
 }
 
 /* The readiness decision, as a pure function of a snapshot and a clock: no
@@ -430,8 +394,6 @@ static int ready_provider(char *resp, int cap)
 {
    pthread_mutex_lock(&g_ready_mtx);
    ready_snapshot_t s = g_snap;
-   if (g_ready_stop_requested)
-      s.sampled_at = 0;
    pthread_mutex_unlock(&g_ready_mtx);
 
    int db1_ok = (s.db1 == DEP_UNKNOWN) ? -1 : (s.db1 == DEP_OK);
@@ -462,15 +424,11 @@ static int ready_provider(char *resp, int cap)
  * for a server that genuinely has not checked yet. */
 void server_ready_register(void)
 {
-   pthread_mutex_lock(&g_ready_lifecycle_mtx);
    if (!g_ready_thread_started)
    {
-      pthread_mutex_lock(&g_ready_mtx);
-      g_ready_stop_requested = 0;
-      memset(&g_snap, 0, sizeof(g_snap));
-      pthread_mutex_unlock(&g_ready_mtx);
       if (pthread_create(&g_ready_thread, NULL, ready_sampler_main, NULL) == 0)
       {
+         pthread_detach(g_ready_thread);
          g_ready_thread_started = 1;
       }
       else
@@ -484,5 +442,4 @@ void server_ready_register(void)
    }
 
    server_http_set_ready_provider(ready_provider);
-   pthread_mutex_unlock(&g_ready_lifecycle_mtx);
 }

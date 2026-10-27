@@ -1,7 +1,7 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
-#include "server_native_delegate_source.h"
+#include "server_native_delegate.h"
 #include "ingress_preinject.h"
 #include "server_native_cli.h"
 #include <aimee/core/connection/auth.h>
@@ -85,7 +85,7 @@ struct server_native_runtime
 };
 
 /* Only native_perform activates this callback-local proof. The service bit is
- * retained from the private constructor's consumed source capability; neither
+ * retained from the authenticated delegate callback; neither
  * request JSON nor an actor/transport label can set it. Nested callbacks restore
  * the prior proof before any context/resource leases are released. */
 static _Thread_local const server_native_runtime_t *forward_runtime;
@@ -1609,8 +1609,7 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
 {
    if (error)
       error[0] = 0;
-   int service_source =
-       server_native_delegate_source_runtime_consume(selected, owner, profile, session_id);
+   int service_source = server_native_delegate_active();
    if (!selected || !selected->enabled || !owner || !profile || !owner->vault_principal[0] ||
        (!service_source && (owner->vault_transport <= ATTEST_TCP_BEARER ||
                             owner->vault_transport > ATTEST_MTLS_CLIENT)) ||

@@ -27,7 +27,6 @@
   "tests": [
     "src/tests/test_aimee_ir.c",
     "src/tests/test_aimee_ir_metrics.c",
-    "src/tests/test_panel_ir_contract.c",
     "src/tests/test_ir_module_plan.c",
     "src/tests/test_ir_session_event.c",
     "src/tests/test_ir_request_codec.c"

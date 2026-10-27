@@ -6,7 +6,6 @@ import (
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -106,7 +105,7 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			run := panel.Run{ExecutionScope: strings.Repeat("a", 64), ID: "live-capacity-" + string(rune('a'+i)),
+			run := panel.Run{ID: "live-capacity-" + string(rune('a'+i)),
 				Request:  canonical.TaskRequest("", "review the implementation under overlapping delegate load"),
 				Reviewed: panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
 			result, err := panel.Convene(t.Context(), delegates, run, reviewPanel, "")

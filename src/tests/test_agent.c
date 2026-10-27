@@ -136,7 +136,6 @@ void test_parent_write_guard_allows_workspace_chain(void);
 void test_parent_write_guard_allows_readonly_printf(void);
 void test_detached_dead_channel_reports_clear_error(void);
 void test_container_bash_runs_in_sandbox(void);
-void test_container_write_retains_unknown_effect(void);
 void test_container_execute_script_runs_in_sandbox(void);
 void otel_init(const char *endpoint, const char *service_name, const char *session)
 {
@@ -1142,58 +1141,6 @@ static char *structured_resource_refusal(const char *verdict, char *result, int 
    return strdup("{\"status\":\"refused\",\"reason\":\"fixture_resource_unavailable\","
                  "\"dispatch_allowed\":false}");
 }
-static int file_resource_calls;
-static char *owned_file_resource(const char *name, const cJSON *arguments, void *context,
-                                 int *is_error)
-{
-   assert(!strcmp(name, "read_file"));
-   const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(arguments, "path"));
-   assert(path && !strcmp(path, context));
-   file_resource_calls++;
-   *is_error = 0;
-   return strdup("ok");
-}
-static int normalize_file_resource(const char *name, cJSON **args, const char *cwd, const char *sid,
-                                   int authorized)
-{
-   (void)cwd;
-   (void)sid;
-   (void)authorized;
-   assert(!strcmp(name, "read_file"));
-   assert(cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(*args, "path"),
-                               "/fixture/final-owner"));
-   return 0;
-}
-static char *file_resource_receipt(const char *verdict, char *result, int *is_error)
-{
-   assert(!strcmp(verdict, "ok") && !*is_error);
-   return result;
-}
-static void test_file_resource_requires_final_owner(void)
-{
-   aimee_tool_t definition = {
-       .kind = AIMEE_TOOL_FUNCTION,
-       .name = "read_file",
-       .schema = cJSON_Parse("{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
-                             "\"required\":[\"path\"],\"additionalProperties\":false}")};
-   assert(definition.schema);
-   int failed = 0;
-   file_resource_calls = 0;
-   agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
-   char *result = fixture_dispatch_file_text(&definition, "{\"path\":\"incoming-relative\"}", 1000,
-                                             owned_file_resource, "/fixture/final-owner", &failed);
-   assert(result && failed && !file_resource_calls &&
-          strstr(result, "fixture_resource_unavailable"));
-   free(result);
-   agent_tools_register_action_owner(normalize_file_resource, file_resource_receipt);
-   result = fixture_dispatch_file_text(&definition, "{\"path\":\"incoming-relative\"}", 1000,
-                                       owned_file_resource, "/fixture/final-owner", &failed);
-   assert(result && !failed && file_resource_calls == 1);
-   free(result);
-   agent_tools_register_action_owner(NULL, NULL);
-   cJSON_Delete(definition.schema);
-}
-
 static void test_dispatch_carries_owner_failure_status(void)
 {
    agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
@@ -2282,155 +2229,8 @@ static void test_agent_is_exec_role(void)
    assert(agent_is_exec_role(&agent, "execute") == 0);
 }
 
-typedef struct
-{
-   char release[1024], pidfile[1024];
-   int calls, fail, nested;
-} bash_progress_fixture_t;
-static int bash_progress_fixture(void *context)
-{
-   bash_progress_fixture_t *fixture = context;
-   fixture->calls++;
-   if (access(fixture->pidfile, F_OK))
-      return 0;
-   if (fixture->nested)
-   {
-      agent_tools_effect_scope_t *scope = NULL;
-      assert(!agent_tools_effect_scope_push(&scope));
-      int failed = 0;
-      char *result =
-          fixture_dispatch_tool_status("unknown_nested_fixture_tool", "{}", 1000, &failed);
-      assert(result && failed && strstr(result, "error: unknown tool"));
-      free(result);
-      assert(!agent_tools_effect_scope_pop(scope));
-      fixture->nested = 0;
-   }
-   if (fixture->fail)
-      return -1;
-   int fd = open(fixture->release, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
-   assert(fd >= 0 && !close(fd));
-   return 0;
-}
-static void test_nested_effect_ownership(void)
-{
-   cJSON *outer = cJSON_Parse("{\"path\":\"/fixture/outer\",\"content\":\"outer\"}");
-   cJSON *inner = cJSON_Parse("{\"path\":\"/fixture/inner\",\"content\":\"inner\"}");
-   assert(outer && inner);
-   agent_tools_effect_propose("write_file", outer, AIMEE_TOOL_CLASS_WRITE);
-   assert(agent_tools_effect_postcondition_pending());
-   agent_tools_effect_scope_t *scope = NULL, *nested = NULL;
-   assert(!agent_tools_effect_scope_push(&scope));
-   assert(agent_tools_effect_scope_push(&scope));
-   assert(!agent_tools_effect_postcondition_pending());
-   agent_tools_effect_propose("write_file", inner, AIMEE_TOOL_CLASS_WRITE);
-   assert(!agent_tools_effect_validate_and_execute("write_file", inner, AIMEE_TOOL_CLASS_WRITE));
-   assert(!agent_tools_effect_scope_push(&nested));
-   assert(agent_tools_effect_scope_pop(scope));
-   assert(!agent_tools_effect_scope_pop(nested));
-   agent_tools_effect_finish("error", "inner failed");
-   assert(!agent_tools_effect_scope_pop(scope));
-   assert(agent_tools_effect_postcondition_pending());
-   assert(!agent_tools_effect_validate_and_execute("write_file", outer, AIMEE_TOOL_CLASS_WRITE));
-   agent_tools_effect_finish("error", "outer cleanup");
-   /* Outer authorization must neither leak inward nor disappear after return. */
-   agent_tools_set_effect_authorized(1);
-   agent_tools_effect_propose("git_push", outer, AIMEE_TOOL_CLASS_REMOTE);
-   scope = NULL;
-   assert(!agent_tools_effect_scope_push(&scope));
-   agent_tools_effect_propose("git_push", outer, AIMEE_TOOL_CLASS_REMOTE);
-   assert(agent_tools_effect_validate_and_execute("git_push", outer, AIMEE_TOOL_CLASS_REMOTE));
-   assert(!agent_tools_effect_scope_pop(scope));
-   assert(!agent_tools_effect_validate_and_execute("git_push", outer, AIMEE_TOOL_CLASS_REMOTE));
-   agent_tools_effect_propose("git_push", outer, AIMEE_TOOL_CLASS_REMOTE);
-   assert(!agent_tools_effect_validate_and_execute("git_push", outer, AIMEE_TOOL_CLASS_REMOTE));
-   agent_tools_effect_finish("error", "outer cleanup");
-   cJSON_Delete(outer);
-   cJSON_Delete(inner);
-}
-
-static void test_bash_lexical_scope(void)
-{
-   test_nested_effect_ownership();
-   assert(!setenv("AIMEE_ENV_AMBIENT_SECRET", "parent-secret", 1));
-   char *outer_env[] = {"PATH=/usr/bin:/bin", "AIMEE_ENV_SCOPE_TEST=outer", NULL};
-   char *inner_env[] = {"PATH=/bin", "AIMEE_ENV_SCOPE_TEST=inner", NULL};
-   agent_tools_bash_scope_t outer = {.environment = outer_env, .replace_environment = 1};
-   agent_tools_bash_scope_t previous = agent_tools_bind_bash_scope(&outer);
-   agent_tools_bash_scope_t inner = {.environment = inner_env, .replace_environment = 1};
-   agent_tools_bash_scope_t saved_outer = agent_tools_bind_bash_scope(&inner);
-   char *wire = tool_bash("printf '%s|%s|%s' \"${AIMEE_ENV_AMBIENT_SECRET-unset}\" "
-                          "\"$AIMEE_ENV_SCOPE_TEST\" \"$PATH\"",
-                          5000);
-   cJSON *value = cJSON_Parse(wire);
-   assert(value &&
-          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(value, "stdout")), "unset|inner|/bin"));
-   cJSON_Delete(value);
-   free(wire);
-   agent_tools_bind_bash_scope(&saved_outer);
-   wire = tool_bash("printf '%s' \"$AIMEE_ENV_SCOPE_TEST\"", 5000);
-   value = cJSON_Parse(wire);
-   assert(value && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(value, "stdout")), "outer"));
-   cJSON_Delete(value);
-   free(wire);
-   assert(!strcmp(getenv("AIMEE_ENV_AMBIENT_SECRET"), "parent-secret"));
-   agent_tools_bind_bash_scope(&previous);
-   unsetenv("AIMEE_ENV_AMBIENT_SECRET");
-
-   char directory[1024], command[4096];
-   assert(snprintf(directory, sizeof directory, "%s/bash-progress-XXXXXX", platform_tmpdir()) <
-          (int)sizeof directory);
-   assert(mkdtemp(directory));
-   bash_progress_fixture_t fixture = {0};
-   assert(snprintf(fixture.release, sizeof fixture.release, "%s/release", directory) <
-          (int)sizeof fixture.release);
-   assert(snprintf(fixture.pidfile, sizeof fixture.pidfile, "%s/pid", directory) <
-          (int)sizeof fixture.pidfile);
-   outer.progress = bash_progress_fixture;
-   outer.context = &fixture;
-   previous = agent_tools_bind_bash_scope(&outer);
-   assert(snprintf(command, sizeof command,
-                   "printf '%%s' \"$$\" > '%s'; exec 1>&- 2>&-; while [ ! -e '%s' ]; do /bin/sleep "
-                   "0.01; done",
-                   fixture.pidfile, fixture.release) < (int)sizeof command);
-   wire = tool_bash(command, 5000);
-   value = cJSON_Parse(wire);
-   assert(value && cJSON_GetObjectItem(value, "exit_code")->valueint == 0 && fixture.calls > 0);
-   cJSON_Delete(value);
-   free(wire);
-   assert(!unlink(fixture.pidfile) && !unlink(fixture.release));
-   fixture.nested = 1;
-   cJSON *arguments = cJSON_CreateObject();
-   assert(arguments && cJSON_AddStringToObject(arguments, "command", command));
-   char *arguments_wire = cJSON_PrintUnformatted(arguments);
-   assert(arguments_wire);
-   int outer_failed = 1;
-   wire = fixture_dispatch_tool_status("bash", arguments_wire, 5000, &outer_failed);
-   value = cJSON_Parse(wire);
-   assert(value && !outer_failed && cJSON_GetObjectItem(value, "exit_code")->valueint == 0);
-   cJSON_Delete(value);
-   free(wire);
-   free(arguments_wire);
-   cJSON_Delete(arguments);
-   assert(!unlink(fixture.pidfile) && !unlink(fixture.release));
-   fixture.fail = 1;
-   wire = tool_bash(command, 5000);
-   value = cJSON_Parse(wire);
-   assert(value && cJSON_IsTrue(cJSON_GetObjectItem(value, "cancelled")) &&
-          cJSON_GetObjectItem(value, "exit_code")->valueint == -1);
-   FILE *pidfile = fopen(fixture.pidfile, "r");
-   long child = 0;
-   assert(pidfile && fscanf(pidfile, "%ld", &child) == 1 && !fclose(pidfile) && child > 0);
-   errno = 0;
-   assert(kill((pid_t)child, 0) < 0 && errno == ESRCH);
-   cJSON_Delete(value);
-   free(wire);
-   agent_tools_bind_bash_scope(&previous);
-   assert(!unlink(fixture.pidfile) && !rmdir(directory));
-}
-
 static void test_tool_bash(void)
 {
-   test_bash_lexical_scope();
    /* The native CLI bridge overlays only the actual shell child; pooled host
     * threads and subsequent ordinary commands retain their environment. */
    setenv("AIMEE_ENV_SCOPE_TEST", "parent-only", 1);
@@ -4867,7 +4667,6 @@ int main(int argc, char **argv)
    test_script_rpc_admission_process(test_executable);
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
-   test_file_resource_requires_final_owner();
    test_codex_oauth_request_creds();
    test_codex_credentials_follow_selected_registration();
    test_codex_oauth_reads_vault_only();
@@ -4949,7 +4748,6 @@ int main(int argc, char **argv)
    test_parent_write_guard_allows_readonly_printf();
    test_detached_dead_channel_reports_clear_error();
    test_container_bash_runs_in_sandbox();
-   test_container_write_retains_unknown_effect();
    test_container_execute_script_runs_in_sandbox();
    test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent();
    test_git_tools_default_to_session_worktree();

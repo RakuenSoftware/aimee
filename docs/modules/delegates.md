@@ -125,25 +125,6 @@ delegation. Registration alone does not prove a backend is selected by the live 
 readiness must trace acquisition, command/filesystem use, release, credentials, and result delivery for a
 supported journey. At least one policy-allowed agent/provider/backend path is required.
 
-Actual workspace dispatches require a checked container resource: the creator records a fresh
-immutable container/image identity and a held Unix daemon endpoint before execution. Ordinary images
-retain their ENTRYPOINT, healthcheck, callback, and filesystem behavior; this resource receipt grants
-no ACP private I/O or MCP/profile authority. Unchecked management and WFE hibernation remain separate
-supported lifecycles. Checked remote Docker transport is refused before creation until a qualified
-remote transport owner exists.
-
-The private Docker lease component owns bounded deferred cleanup and restart recovery through the
-existing reaper. Durable v2 private-I/O and v3 ordinary-resource journals retain the actual daemon ID;
-a new endpoint must requalify that same ID. Known identities retire exactly; unresolved creation
-requires complete creator evidence, and absence of a name is not a quiescence receipt. Ordinary
-journals own only their nonce parent and journal, never the global callback socket. Source and Git
-metadata binds that expose the private owner directory are refused before intent publication, using
-held kernel mount/inode evidence across bind aliases and reachable recursive submounts. A
-relevant controller bind attested as nonrecursive is explicitly unsupported because it can hide host
-submounts from that evidence; normal recursive layouts remain supported. Privileged host remounts
-outside the producer's attested view remain a trusted-host boundary. Failed retirement blocks completion and retains
-custody for retry. Older v1 journals cannot authorize a replacement daemon endpoint.
-
 ## Configuration and activation
 
 - `runtime_toggle.supported`: `false`; delegation is core while individual agents, providers, and backends are configurable.

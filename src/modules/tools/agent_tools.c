@@ -2,7 +2,6 @@
 #include "child_environment.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
-#include "scoped_execution.h"
 #include "aimee_home.h"
 #include "economizer.h"
 #include "log.h"
@@ -44,27 +43,16 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/wait.h>
-static _Thread_local agent_tools_bash_scope_t bash_scope;
-agent_tools_bash_scope_t agent_tools_bind_bash_scope(const agent_tools_bash_scope_t *scope)
-{
-   agent_tools_bash_scope_t previous = bash_scope;
-   bash_scope = scope ? *scope : (agent_tools_bash_scope_t){0};
-   return previous;
-}
-agent_tools_bash_scope_t agent_tools_bash_scope_snapshot(void)
-{
-   return bash_scope;
-}
+static _Thread_local char *const *bash_environment;
 char *const *agent_tools_bind_bash_environment(char *const environment[])
 {
-   char *const *previous = bash_scope.environment;
-   bash_scope.environment = environment;
-   bash_scope.replace_environment = 0;
+   char *const *previous = bash_environment;
+   bash_environment = environment;
    return previous;
 }
 static void bash_install_child_environment(void)
 {
-   if (child_environment_install(bash_scope.environment, bash_scope.replace_environment))
+   if (child_environment_overlay(bash_environment))
       _exit(126);
 }
 
@@ -78,11 +66,6 @@ static int bash_delegate_cancel_requested(void)
    return (agent_request_cancelled && agent_request_cancelled()) ||
           (job_id > 0 && db1_agent_job_is_cancelled && db1_agent_job_is_cancelled(job_id)) ||
           (agent_delegation_stop_requested && agent_delegation_stop_requested(NULL, 0));
-}
-static int container_bash_progress(void *context)
-{
-   const agent_tools_bash_scope_t *scope = context;
-   return bash_delegate_cancel_requested() || (scope->progress && scope->progress(scope->context));
 }
 /* Single source of truth for the per-result MODEL-VISIBLE tool-output cap.
  * Reads tool_output_max_bytes from config (mtime-cached) and clamps it via the
@@ -146,8 +129,6 @@ static void bash_prepend_path_dir(char *buf, size_t buf_len, const char *dir)
 }
 static void bash_prepare_child_path(void)
 {
-   if (bash_scope.replace_environment)
-      return;
    char path_buf[8192];
    const char *old_path = getenv("PATH");
    snprintf(path_buf, sizeof(path_buf), "%s", old_path ? old_path : "");
@@ -781,8 +762,6 @@ char *tool_bash(const char *command, int timeout_ms)
       cJSON_AddStringToObject(r, "stdout", out);
       cJSON_AddStringToObject(r, "stderr", "");
       cJSON_AddNumberToObject(r, "exit_code", exit_code);
-      if (exit_code == -1)
-         cJSON_AddTrueToObject(r, "effects_unknown");
       free(out);
       char *res = cJSON_PrintUnformatted(r);
       cJSON_Delete(r);
@@ -796,7 +775,7 @@ char *tool_bash(const char *command, int timeout_ms)
     * sandbox entirely (the file tools already route into the container; bash/script
     * were the hole). Run in the delegate's worktree: it is bind-mounted
     * path-identically, so the same absolute path is valid inside the container. */
-   if (ws && ws->kind == WS_PROVIDER_CONTAINER)
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
    {
       const char *cwd = run_cmd_get_cwd();
       char *wrapped = NULL;
@@ -817,31 +796,23 @@ char *tool_bash(const char *command, int timeout_ms)
          wrapped = w.data ? safe_strdup(w.data) : NULL;
          dstr_free(&w);
       }
-      if (cwd && cwd[0] && !wrapped)
-         return safe_strdup(
-             "{\"stdout\":\"\",\"stderr\":\"cannot bind container cwd\",\"exit_code\":-1}");
       int exit_code = -1;
-      agent_tools_bash_scope_t snapshot = agent_tools_bash_scope_snapshot();
-      delegate_exec_scope_t scope = {.environment = snapshot.environment,
-                                     .replace_environment = snapshot.replace_environment,
-                                     .progress = container_bash_progress,
-                                     .context = &snapshot};
-      char *out = ws->exec_shell_scoped
-                      ? ws->exec_shell_scoped(ws, wrapped ? wrapped : command, timeout_ms, &scope,
-                                              &exit_code)
-                      : NULL; /* Scoped execution cannot fall back to ambient or host execution. */
+      char *out =
+          ws->exec_shell_timeout
+              ? ws->exec_shell_timeout(ws, wrapped ? wrapped : command, timeout_ms, &exit_code)
+              : ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
       /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
        * failed/typo'd/nonexistent install is never recorded (and can't poison later
        * image builds). Best-effort, cheap pre-filtered inside observe(). */
       if (exit_code == 0)
          sandbox_learned_observe(cwd, command);
-      /* A transport failure may follow remote effects. Only the owning runtime's
-       * immutable-container retirement can establish remote quiescence. */
+      /* exit_code == -1 with no capture means docker exec could not run the command
+       * at all (transport failure) — distinct from a real command that exits 0 with
+       * empty output, which the container provider returns as NULL out / exit 0. */
       if (exit_code == -1 && !out)
-         return safe_strdup(
-             "{\"stdout\":\"\",\"stderr\":\"delegate container execution failed; "
-             "effects may be incomplete\",\"exit_code\":-1,\"effects_unknown\":true}");
+         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run "
+                            "the command in the delegate container\",\"exit_code\":-1}");
       cJSON *r = cJSON_CreateObject();
       cJSON_AddStringToObject(r, "stdout", out ? out : "");
       cJSON_AddStringToObject(r, "stderr", "");
@@ -857,8 +828,7 @@ char *tool_bash(const char *command, int timeout_ms)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
    sandbox_config_t sbox_cfg;
    config_sandbox(&sbox_cfg);
-   sbox_cfg.child_environment = bash_scope.environment;
-   sbox_cfg.child_environment_replace = bash_scope.replace_environment;
+   sbox_cfg.child_environment = bash_environment;
    const char *guard_ro = agent_tools_parent_write_guard_root();
    const char *guard_rw = agent_tools_parent_write_guard_write_root();
    int guarded_parent = guard_ro && guard_ro[0];
@@ -1068,8 +1038,7 @@ char *tool_bash(const char *command, int timeout_ms)
    }
    while (stdout_open || stderr_open || !reaped)
    {
-      if ((bash_scope.progress && bash_scope.progress(bash_scope.context)) ||
-          bash_delegate_cancel_requested())
+      if (bash_delegate_cancel_requested())
       {
          cancelled = 1;
          break;
@@ -1206,19 +1175,6 @@ char *tool_bash(const char *command, int timeout_ms)
 static const char *validate_file_path(const char *path, char *resolved, size_t resolved_len)
 {
    return guardrails_check_sensitive_path(path, resolved, resolved_len);
-}
-
-const char *agent_tools_validate_file_resource(const char *path, int writing)
-{
-   char resolved[MAX_PATH_LEN];
-   const char *error = validate_file_path(path, resolved, sizeof resolved);
-   if (error)
-      return error;
-   if (writing && agent_tools_readonly_delegate_blocks())
-      return "error: write blocked: read-only delegate (not write-capable)";
-   if (writing && agent_tools_parent_write_guard_blocks(path, NULL))
-      return "error: write blocked: parent worktree is read-only for delegates";
-   return NULL;
 }
 
 const char *path_in_thread_cwd(const char *path, char *buf, size_t buf_len)
@@ -1401,9 +1357,14 @@ char *tool_write_file(const char *path, const char *content)
 {
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
-   const char *err = agent_tools_validate_file_resource(actual_path, 1);
+   char resolved[MAX_PATH_LEN];
+   const char *err = validate_file_path(actual_path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+   if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
+      return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
    if (!text_is_valid_utf8(content))
       return safe_strdup("error: content is not valid UTF-8; refusing text-file write");
 
@@ -1424,16 +1385,9 @@ char *tool_write_file(const char *path, const char *content)
       }
    }
 
-   int write_status = ws->write_all(ws, actual_path, content, content ? strlen(content) : 0);
-   if (write_status != 0)
+   if (ws->write_all(ws, actual_path, content, content ? strlen(content) : 0) != 0)
    {
       free(old_content);
-      if (write_status == SCOPED_WRITE_OUTCOME_UNKNOWN)
-      {
-         td_outcome_set("error", "effects_unknown");
-         return safe_strdup("{\"status\":\"failed\",\"effects_unknown\":true,\"error\":"
-                            "\"file write outcome unknown; inspect target before retrying\"}");
-      }
       char errbuf[512];
       snprintf(errbuf, sizeof(errbuf), "error: cannot write %s", actual_path);
       return safe_strdup(errbuf);

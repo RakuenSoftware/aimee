@@ -1,5 +1,5 @@
 #include "server_native_runtime.h"
-#include "server_native_delegate_source.h"
+#include "server_native_delegate.h"
 #include "server_native_sdk_profile.h"
 #include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
@@ -63,21 +63,13 @@ static _Thread_local struct
    const workspace_provider_t *workspace;
    char cwd[MAX_PATH_LEN];
 } service_saved_callback;
-/* Controlled source-owner dependency for downstream runtime scope tests. Only
- * an exact-profile one-shot fixture ticket can admit NONE here. The separate
- * source/runtime composition fixture links the real HMAC owner and tests forged
- * actors/profiles and consumption; this stub is not a claim of real minting. */
-int server_native_delegate_source_runtime_consume(const agent_t *selected,
-                                                  const request_context_t *owner,
-                                                  const aimee_request_t *profile,
-                                                  const char *session)
+/* The authenticated service callback is mocked here; its owner fixture tests
+ * the actual callback admission and lifetime separately. */
+int server_native_delegate_active(void)
 {
-   int valid = fixture_service_ticket && fixture_service_ticket == profile && selected && owner &&
-               owner->vault_transport == ATTEST_NONE && !owner->trusted && owner->model_execution &&
-               !strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server") &&
-               session && !strcmp(session, "service-session");
-   fixture_service_ticket = NULL; /* Controlled source-owner dependency, always one-shot. */
-   return valid;
+   int active = fixture_service_ticket != NULL;
+   fixture_service_ticket = NULL;
+   return active;
 }
 
 static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];

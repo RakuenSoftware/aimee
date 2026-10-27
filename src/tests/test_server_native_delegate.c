@@ -1,7 +1,7 @@
 #include "server_native_delegate.h"
-#include "server_native_delegate_source.h"
 #include "server_native_history.h"
 #include "agent_exec.h"
+#include "agent_config.h"
 #include "server_delegate_input.h"
 #include "request_context.h"
 #include <aimee/audit/obs_bus.h>
@@ -14,64 +14,66 @@
 #include <time.h>
 
 static aimee_request_t bound_request;
-static int bound, ran, unbound, allow = 1, terminal = 1, loaded, seen_tools, seen_turns;
-static request_context_t actor = {.vault_principal = "webuser:source-owner"};
+static int ran, allow = 1, terminal = 1, loaded, seen_tools;
+static request_context_t actor = {.vault_principal = "previous-owner"};
 static const agent_request_cancel_scope_t *cancel_scope;
-static int trigger_calls, trigger_allowed = 1;
-int server_native_delegate_source_trigger(const cJSON *registration, const char *digest,
-                                          char handle[65], char *error, size_t capacity)
+static agent_request_creds_t credentials;
+static char directory[MAX_PATH_LEN];
+static agent_t registration;
+int agent_load_config(agent_config_t *config)
 {
-   (void)error;
-   (void)capacity;
-   assert(cancel_scope);
-   trigger_calls++;
-   assert(cJSON_IsObject(registration) &&
-          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(registration, "id")),
-                  "registered-trigger"));
-   assert(strlen(digest) == 64);
-   if (!trigger_allowed)
-      return -1;
-   memset(handle, 'b', 64);
-   handle[64] = 0;
-   return 0;
-}
-int server_native_delegate_source_bind(const char *handle, unsigned principal,
-                                       const char *operation, const char *role,
-                                       const char *registration, const char *workdir,
-                                       const aimee_request_t *request, int tools, int max_turns,
-                                       long timeout, server_native_delegate_source_scope_t **scope,
-                                       agent_config_t *config, agent_t *selected, char *error,
-                                       size_t capacity)
-{
-   (void)error;
-   (void)capacity;
    (void)config;
-   assert(cancel_scope);
-   bound++;
-   assert(principal == 76 && strlen(handle) == 64 && !strcmp(operation, "work-item-1"));
-   assert(!strcmp(role, "review") && !strcmp(registration, "native-model") &&
-          !strcmp(workdir, "/owned/task"));
-   assert(request->n_messages == 1 &&
-          !strcmp(request->messages[0].blocks[0].text, "actual request"));
-   assert(timeout == 60000);
-   seen_tools = tools;
-   seen_turns = max_turns;
-   if (!allow)
-      return -1;
-   aimee_request_free(&bound_request);
-   assert(!aimee_ir_request_clone(request, &bound_request));
-   strcpy(selected->name, "native-model");
-   selected->enabled = 1;
-   selected->max_turns = 3;
-   *scope = (server_native_delegate_source_scope_t *)1;
+   memset(&registration, 0, sizeof registration);
+   strcpy(registration.name, "native-model");
+   registration.enabled = 1;
+   registration.max_turns = 3;
    return 0;
 }
-void server_native_delegate_source_unbind(server_native_delegate_source_scope_t *scope)
+agent_t *agent_find(agent_config_t *config, const char *name)
 {
-   if (scope)
-      unbound++;
+   (void)config;
+   assert(!strcmp(name, "native-model"));
+   return allow ? &registration : NULL;
 }
-static int effective_admitted, persona_known = 1, final_allowed = 1;
+int agent_has_role(const agent_t *agent, const char *role)
+{
+   return agent == &registration && !strcmp(role, "review");
+}
+void request_context_snapshot(request_context_snapshot_t *out)
+{
+   *out = (request_context_snapshot_t){.active = 1, .value = actor};
+}
+void request_context_restore(const request_context_snapshot_t *saved)
+{
+   actor = saved->value;
+}
+void request_context_set(const request_context_t *context)
+{
+   actor = *context;
+}
+void agent_request_creds_snapshot(agent_request_creds_t *out)
+{
+   *out = credentials;
+}
+void agent_request_creds_restore(const agent_request_creds_t *value)
+{
+   credentials = *value;
+}
+const char *run_cmd_get_cwd(void)
+{
+   return directory;
+}
+void run_cmd_set_cwd(const char *path)
+{
+   snprintf(directory, sizeof directory, "%s", path ? path : "");
+}
+int db1_server_session_create(const char *session, const char *kind, const char *principal)
+{
+   assert(!strncmp(session, "delegate-", 9) && !strcmp(kind, "delegate") &&
+          !strcmp(principal, "server"));
+   return 0;
+}
+static int persona_known = 1;
 int persona_exists(const char *workdir, const char *persona)
 {
    assert(!strcmp(workdir, "/owned/task") && !strcmp(persona, "architect"));
@@ -103,17 +105,6 @@ static void assert_effective_source(const aimee_request_t *request)
    original.mutated = bound_request.mutated;
    assert(aimee_ir_request_equal(&original, &bound_request));
 }
-int server_native_delegate_source_admit(server_native_delegate_source_scope_t *scope,
-                                        const char *persona, const aimee_request_t *request,
-                                        char *error, size_t capacity)
-{
-   (void)error;
-   (void)capacity;
-   assert(scope && !strcmp(persona, "architect"));
-   assert_effective_source(request);
-   effective_admitted++;
-   return final_allowed ? 0 : -1;
-}
 const request_context_t *request_context_get(void)
 {
    return &actor;
@@ -137,7 +128,10 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
                                       const char *role, int tools, const aimee_request_t *request,
                                       aimee_response_t *response, agent_result_t *result)
 {
-   assert(selected->max_turns == 3);
+   assert(selected->max_turns == 3 && server_native_delegate_active());
+   assert(!strcmp(actor.principal, "server") && !strcmp(actor.vault_principal, "server") &&
+          actor.vault_transport == ATTEST_NONE && !actor.trusted);
+   assert(!strcmp(directory, "/owned/task"));
    assert_effective_source(request);
    ran++;
    assert(!strcmp(role, "review") && tools == seen_tools && cancel_scope);
@@ -175,8 +169,7 @@ int server_native_history_load(const char *session, const char *principal, const
                                int running, cJSON **history, cJSON **receipts)
 {
    loaded++;
-   assert(!strcmp(session, "actual-child") && !strcmp(principal, "webuser:source-owner") && !turn &&
-          !running);
+   assert(!strcmp(session, "actual-child") && !strcmp(principal, "server") && !turn && !running);
    *history = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"actual "
                           "request\"}]},{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\","
                           "\"text\":\"actual result\"}]}]");
@@ -194,8 +187,7 @@ int server_native_history_load(const char *session, const char *principal, const
 static cJSON *request(void)
 {
    return cJSON_Parse(
-       "{\"version\":3,\"operation\":\"work-item-1\",\"execution_scope\":"
-       "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role\":\"review\","
+       "{\"version\":3,\"operation\":\"work-item-1\",\"role\":\"review\","
        "\"persona\":\"architect\","
        "\"model\":\"native-model\",\"workdir\":\"/owned/"
        "task\",\"tools\":false,\"max_turns\":3,\"execution_timeout_ms\":60000,\"ir\":{\"version\":"
@@ -216,6 +208,9 @@ static aimee_module_invocation_t invocation(void)
 }
 static cJSON *call(cJSON *request, aimee_module_invocation_t *inv, aimee_module_status_t expected)
 {
+   aimee_request_free(&bound_request);
+   assert(!aimee_ir_request_parse(cJSON_GetObjectItemCaseSensitive(request, "ir"), &bound_request));
+   seen_tools = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "tools"));
    char *body = cJSON_PrintUnformatted(request);
    uint8_t out[65536];
    uint32_t count = 0;
@@ -237,8 +232,10 @@ static void test_success_and_decline(void)
    cJSON *reply = call(request(), &inv, AIMEE_MODULE_STATUS_OK);
    assert(reply &&
           !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "done"));
-   assert(bound == 1 && ran == 1 && unbound == 1 && loaded == 1 && !seen_tools && seen_turns == 3 &&
-          !cancel_scope);
+   assert(ran == 1 && loaded == 1 && !seen_tools && !cancel_scope &&
+          !server_native_delegate_active());
+   assert(!strcmp(actor.vault_principal, "previous-owner") && !directory[0] &&
+          !credentials.session_id[0]);
    char *wire = cJSON_PrintUnformatted(reply);
    assert(!strstr(wire, "POISONED DISPLAY") && strstr(wire, "actual result"));
    cJSON_free(wire);
@@ -286,36 +283,31 @@ static void test_fences(void)
       cJSON_ReplaceItemInObjectCaseSensitive(capped_request, "max_turns",
                                              cJSON_CreateNumber(requested_caps[i]));
       cJSON *capped_reply = call(capped_request, &capped_inv, AIMEE_MODULE_STATUS_OK);
-      assert(seen_turns ==
-             requested_caps[i]); /* Source owner selected.max_turns=3 remains authoritative. */
+
       cJSON_Delete(capped_reply);
    }
-   int calls = ran, binds = bound;
+   int calls = ran;
    aimee_module_invocation_t inv = invocation();
    inv.source_principal_ref = 10;
    call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(bound == binds);
+   assert(ran == calls);
    inv = invocation();
    cJSON *j = request();
    cJSON_AddStringToObject(j, "actor", "forged");
    call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(bound == binds);
+   assert(ran == calls);
    j = request();
    cJSON_AddItemToObject(cJSON_GetObjectItemCaseSensitive(j, "ir"), "metadata",
                          cJSON_CreateObject());
    call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(bound == binds);
+   assert(ran == calls);
    j = request();
    cJSON_ReplaceItemInObjectCaseSensitive(j, "execution_timeout_ms", cJSON_CreateNumber(0));
    call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(bound == binds);
+   assert(ran == calls);
    persona_known = 0;
    call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
    persona_known = 1;
-   assert(ran == calls && !cancel_scope);
-   final_allowed = 0;
-   call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   final_allowed = 1;
    assert(ran == calls && !cancel_scope);
    allow = 0;
    call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
@@ -358,40 +350,10 @@ static void test_original_system_blocks_preserved(void)
    aimee_request_free(&source);
 }
 
-static void test_trigger(void)
-{
-   const char *body = "{\"version\":3,\"action\":\"trigger_scope\",\"registration\":{\"id\":"
-                      "\"registered-trigger\"},\"configuration_sha256\":"
-                      "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}";
-   aimee_module_invocation_t inv = invocation();
-   cJSON *reply = call(cJSON_Parse(body), &inv, AIMEE_MODULE_STATUS_OK);
-   const char *scope =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "execution_scope"));
-   assert(scope && strlen(scope) == 64 && scope[0] == 'b' && trigger_calls == 1);
-   cJSON_Delete(reply);
-   cJSON *j = cJSON_Parse(body);
-   cJSON_AddStringToObject(j, "actor", "forged");
-   call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(trigger_calls == 1);
-   j = cJSON_Parse(body);
-   cJSON_ReplaceItemInObjectCaseSensitive(j, "configuration_sha256",
-                                          cJSON_CreateString("not-a-hash"));
-   call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(trigger_calls == 1);
-   inv.source_principal_ref = 64;
-   call(cJSON_Parse(body), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   assert(trigger_calls == 1);
-   inv = invocation();
-   trigger_allowed = 0;
-   call(cJSON_Parse(body), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
-   trigger_allowed = 1;
-   assert(trigger_calls == 2);
-}
 int main(void)
 {
    test_success_and_decline();
    test_fences();
-   test_trigger();
    test_original_system_blocks_preserved();
    aimee_request_free(&bound_request);
    puts("native delegate bridge: PASS");

@@ -26,7 +26,7 @@ func expectedMounts(spec SandboxSpec, mountTable string) map[string]struct{} {
 	expected := make(map[string]struct{}, len(spec.Mounts))
 	for _, mount := range spec.Mounts {
 		source := mount.Source
-		if mountTable != "" && mount.Kind != SandboxControlSocket && mount.Kind != SandboxOwnerHelper {
+		if mountTable != "" && mount.Kind != SandboxControlSocket {
 			source = TranslateMountPath(source, mountTable)
 		}
 		runtimeWritable := "true"

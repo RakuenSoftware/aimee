@@ -46,7 +46,6 @@ typedef struct
    char reservation_state[24]; /* "" | reserved | unresolved | actual */
    char source_path[1024];
    char updated_at[32];
- char execution_scope[65]; /* immutable host-issued opaque authorization handle */
 } db1_work_item_t;
 
 typedef struct
@@ -122,7 +121,7 @@ int db1_work_item_count_recent_by_submitter(const char *submitter, int secs);
 int db1_work_item_submit_capped(const char *work_item_id, const char *repo,
                                 const char *proposal_path, const char *workflow_name,
                                 const char *workflow_version, const char *start_stage,
-                                const char *submitter, int max_active, int rate_max, int rate_secs, const char *execution_scope);
+                                const char *submitter, int max_active, int rate_max, int rate_secs);
 /* Set terminal state (accepted | rejected | abandoned) and clear pause. */
 int db1_work_item_set_terminal(const char *work_item_id, const char *state);
 

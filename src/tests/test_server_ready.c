@@ -15,20 +15,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
-#include <stdatomic.h>
-#include <errno.h>
-#include <time.h>
-#include <unistd.h>
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
-static atomic_int g_db1_probe_calls;
-static atomic_int g_kb_probe_calls;
+static int g_db1_probe_calls;
+static int g_kb_probe_calls;
 static int g_kb_configured;
-static pthread_mutex_t g_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_probe_cond = PTHREAD_COND_INITIALIZER;
-static int g_block_probe, g_probe_entered, g_stop_returned;
-static _Atomic(server_http_ready_fn) g_provider;
 int kb_client_connection_configured(void)
 {
    return g_kb_configured;
@@ -37,12 +28,6 @@ int kb_client_connection_configured(void)
 int db1_store_probe(void)
 {
    g_db1_probe_calls++;
-   pthread_mutex_lock(&g_probe_mutex);
-   g_probe_entered = 1;
-   pthread_cond_broadcast(&g_probe_cond);
-   while (g_block_probe)
-      pthread_cond_wait(&g_probe_cond, &g_probe_mutex);
-   pthread_mutex_unlock(&g_probe_mutex);
    return 1;
 }
 
@@ -56,7 +41,7 @@ int kb_client_health(kb_health_t *out)
 
 void server_http_set_ready_provider(server_http_ready_fn fn)
 {
-   atomic_store(&g_provider, fn);
+   (void)fn;
 }
 
 void kb_client_dependency_health(kb_client_dependency_health_t *out)
@@ -65,14 +50,12 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    snprintf(out->state, sizeof(out->state), "closed");
 }
 
-static atomic_int g_runtime_web_checked;
-static atomic_int g_module_probe_calls;
-static atomic_int g_skills_trigger_checked;
-static atomic_int g_git_ref_checked;
+static int g_runtime_web_checked;
+static int g_skills_trigger_checked;
+static int g_git_ref_checked;
 
 int obs_bus_module_available(uint32_t event_kind)
 {
-   g_module_probe_calls++;
    if (event_kind == AIMEE_RUNTIME_WEB_EVENT_CLASSIFY)
       g_runtime_web_checked = 1;
    if (event_kind == AIMEE_SKILLS_EVENT_TRIGGER)
@@ -80,148 +63,6 @@ int obs_bus_module_available(uint32_t event_kind)
    if (event_kind == AIMEE_GIT_EVENT_REF_VALIDATE)
       g_git_ref_checked = 1;
    return 1;
-}
-
-/* Observe dependency traffic and completed stop calls, rather than sampler
- * implementation details. Every wait has a test-only wall-clock bound. */
-static struct timespec deadline_ms(long ms)
-{
-   struct timespec t;
-   assert(clock_gettime(CLOCK_REALTIME, &t) == 0);
-   t.tv_sec += ms / 1000;
-   t.tv_nsec += (ms % 1000) * 1000000L;
-   if (t.tv_nsec >= 1000000000L)
-   {
-      t.tv_sec++;
-      t.tv_nsec -= 1000000000L;
-   }
-   return t;
-}
-
-static int wait_flag(int *flag, long ms)
-{
-   struct timespec end = deadline_ms(ms);
-   pthread_mutex_lock(&g_probe_mutex);
-   while (!*flag)
-   {
-      int rc = pthread_cond_timedwait(&g_probe_cond, &g_probe_mutex, &end);
-      if (rc == ETIMEDOUT)
-         break;
-      assert(rc == 0);
-   }
-   int observed = *flag;
-   pthread_mutex_unlock(&g_probe_mutex);
-   return observed;
-}
-
-static void wait_ready(void)
-{
-   struct timespec end = deadline_ms(2000), now;
-   char body[2048];
-   for (;;)
-   {
-      server_http_ready_fn fn = atomic_load(&g_provider);
-      assert(fn);
-      if (fn(body, sizeof body) == 200)
-         return;
-      assert(clock_gettime(CLOCK_REALTIME, &now) == 0);
-      assert(now.tv_sec < end.tv_sec || (now.tv_sec == end.tv_sec && now.tv_nsec < end.tv_nsec));
-      struct timespec pause = {.tv_nsec = 1000000};
-      nanosleep(&pause, NULL);
-   }
-}
-
-static void *stop_sampler(void *arg)
-{
-   (void)arg;
-   server_ready_stop();
-   pthread_mutex_lock(&g_probe_mutex);
-   g_stop_returned = 1;
-   pthread_cond_broadcast(&g_probe_cond);
-   pthread_mutex_unlock(&g_probe_mutex);
-   return NULL;
-}
-
-static void *cycle_sampler(void *arg)
-{
-   (void)arg;
-   for (int i = 0; i < 16; i++)
-   {
-      server_ready_register();
-      server_ready_stop();
-   }
-   return NULL;
-}
-
-static void test_sampler_lifecycle(void)
-{
-   /* Registration remains nonblocking even while its first dependency is held.
-    * Stop must join that in-flight sample before its callers retire the bus. */
-   setenv("AIMEE_READY_INTERVAL_SECS", "3600", 1);
-   pthread_mutex_lock(&g_probe_mutex);
-   g_block_probe = 1;
-   g_probe_entered = g_stop_returned = 0;
-   pthread_mutex_unlock(&g_probe_mutex);
-   server_ready_register();
-   assert(wait_flag(&g_probe_entered, 2000));
-   char body[2048];
-   int probes = atomic_load(&g_db1_probe_calls);
-   int first_status = atomic_load(&g_provider)(body, sizeof body);
-   assert(atomic_load(&g_db1_probe_calls) == probes); /* render never probes */
-   pthread_t stopper;
-   assert(pthread_create(&stopper, NULL, stop_sampler, NULL) == 0);
-   assert(!wait_flag(&g_stop_returned, 100));
-   assert(first_status == 503);
-   pthread_mutex_lock(&g_probe_mutex);
-   g_block_probe = 0;
-   pthread_cond_broadcast(&g_probe_cond);
-   pthread_mutex_unlock(&g_probe_mutex);
-   assert(wait_flag(&g_stop_returned, 2000));
-   pthread_join(stopper, NULL);
-   assert(atomic_load(&g_provider)(body, sizeof body) == 503);
-
-   /* A 3600-second interval must be interruptible, not a sleep that stop joins. */
-   g_stop_returned = 0;
-   server_ready_register();
-   wait_ready();
-   assert(pthread_create(&stopper, NULL, stop_sampler, NULL) == 0);
-   assert(wait_flag(&g_stop_returned, 2000));
-   pthread_join(stopper, NULL);
-   server_ready_stop(); /* idempotent */
-
-   /* Cross a real normal sampling deadline after stopping. Neither DB/KB nor
-    * any module may be called again by the retired worker. */
-   setenv("AIMEE_READY_INTERVAL_SECS", "1", 1);
-   server_ready_register();
-   wait_ready();
-   server_ready_stop();
-   probes = atomic_load(&g_db1_probe_calls);
-   int kb = atomic_load(&g_kb_probe_calls), modules = atomic_load(&g_module_probe_calls);
-   struct timespec end = deadline_ms(1250);
-   pthread_mutex_lock(&g_probe_mutex);
-   while (atomic_load(&g_db1_probe_calls) == probes)
-   {
-      int rc = pthread_cond_timedwait(&g_probe_cond, &g_probe_mutex, &end);
-      if (rc == ETIMEDOUT)
-         break;
-      assert(rc == 0);
-   }
-   pthread_mutex_unlock(&g_probe_mutex);
-   assert(atomic_load(&g_db1_probe_calls) == probes);
-   assert(atomic_load(&g_kb_probe_calls) == kb);
-   assert(atomic_load(&g_module_probe_calls) == modules);
-   assert(atomic_load(&g_provider)(body, sizeof body) == 503);
-   server_ready_sample_now(); /* explicit synchronous API remains usable */
-   assert(atomic_load(&g_db1_probe_calls) == probes + 1);
-   /* Concurrent owners cannot detach a worker or race start against its join. */
-   pthread_t cycles[2];
-   for (int i = 0; i < 2; i++)
-      assert(pthread_create(&cycles[i], NULL, cycle_sampler, NULL) == 0);
-   for (int i = 0; i < 2; i++)
-      pthread_join(cycles[i], NULL);
-   server_ready_stop();
-   assert(atomic_load(&g_provider)(body, sizeof body) == 503);
-   unsetenv("AIMEE_READY_INTERVAL_SECS");
 }
 
 #define NOW 1000000L
@@ -415,7 +256,6 @@ int main(void)
    assert(strstr(resp, "audit_capacity"));
    capacity.audit_capacity_failed = 0;
    assert(server_ready_render(1, 1, &capacity, NOW - 5, NOW, 60, resp, sizeof(resp)) == 200);
-   test_sampler_lifecycle();
    printf("server_ready: OK\n");
    return 0;
 }

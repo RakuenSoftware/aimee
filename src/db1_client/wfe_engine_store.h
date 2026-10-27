@@ -313,7 +313,7 @@ extern "C"
                                 const char *proposal_path, const char *workflow_name,
                                 const char *workflow_version, const char *start_stage,
                                 const char *mode, const char *submitter, const char *parent_id,
-                                const char *source_path, double max_cost_usd, int root_cap, const char *execution_scope);
+                                const char *source_path, double max_cost_usd, int root_cap);
 
 #ifdef __cplusplus
 }

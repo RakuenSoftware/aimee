@@ -55,12 +55,11 @@ static char *wsc_shell_quote(const char *raw)
  * command's exit code, or -1 if the backend could not run it at all. `*out` (when
  * non-NULL) receives a malloc'd NUL-terminated capture; caller frees. */
 static int wsc_run(const ws_container_provider_t *self, const char *cmd, int timeout_ms, char **out,
-                   size_t max_out, const delegate_exec_scope_t *scope)
+                   size_t max_out)
 {
    if (out)
       *out = NULL;
-   if (!self || !self->backend || !self->backend->exec || !cmd ||
-       (scope && !self->backend->exec_scoped))
+   if (!self || !self->backend || !self->backend->exec || !cmd)
       return -1;
 
    size_t cap = (max_out && max_out < WSC_EXEC_CAP) ? max_out : WSC_EXEC_CAP;
@@ -80,8 +79,13 @@ static int wsc_run(const ws_container_provider_t *self, const char *cmd, int tim
                                .stderr_buf = ebuf,
                                .stderr_cap = cap + 1};
    ws_container_provider_t *mut = wsc_self(&self->base);
-   int rc = scope ? mut->backend->exec_scoped(mut->backend, mut->state, cmd, timeout_ms, scope, &r)
-                  : mut->backend->exec(mut->backend, mut->state, cmd, timeout_ms, &r);
+   int rc = mut->backend->exec(mut->backend, mut->state, cmd, timeout_ms, &r);
+   if (rc != 0)
+   {
+      free(sbuf);
+      free(ebuf);
+      return -1; /* transport failure, distinct from a non-zero exit code */
+   }
 
    if (out)
    {
@@ -104,7 +108,7 @@ static int wsc_run(const ws_container_provider_t *self, const char *cmd, int tim
    }
    free(sbuf);
    free(ebuf);
-   return rc ? -1 : r.exit_code;
+   return r.exit_code;
 }
 
 static int wsc_read_all(const workspace_provider_t *p, const char *path, char **out, size_t *len)
@@ -161,7 +165,7 @@ static int wsc_write_all(const workspace_provider_t *p, const char *path, const 
    }
    int rc = self->backend->write_file(self->backend, self->state, path, tmp ? tmp : "");
    free(tmp);
-   return rc == 0 ? 0 : rc == SCOPED_WRITE_OUTCOME_UNKNOWN ? SCOPED_WRITE_OUTCOME_UNKNOWN : -1;
+   return rc == 0 ? 0 : -1;
 }
 
 static int wsc_stat(const workspace_provider_t *p, const char *path, ws_stat_t *st)
@@ -185,7 +189,7 @@ static int wsc_stat(const workspace_provider_t *p, const char *path, ws_stat_t *
    free(q);
 
    char *out = NULL;
-   if (wsc_run(self, cmd, 0, &out, 256, NULL) < 0 || !out)
+   if (wsc_run(self, cmd, 0, &out, 256) < 0 || !out)
    {
       free(out);
       return 0;
@@ -288,7 +292,7 @@ static int wsc_exec(const workspace_provider_t *p, const char *const argv[], cha
       dstr_append_str(&cmd, q);
       free(q);
    }
-   int rc = cmd.data ? wsc_run(self, cmd.data, 0, out, max_out, NULL) : -1;
+   int rc = cmd.data ? wsc_run(self, cmd.data, 0, out, max_out) : -1;
    dstr_free(&cmd);
    return rc;
 }
@@ -297,7 +301,7 @@ static char *wsc_exec_shell(const workspace_provider_t *p, const char *cmd, int 
 {
    ws_container_provider_t *self = wsc_self(p);
    char *out = NULL;
-   int rc = wsc_run(self, cmd, 0, &out, WSC_EXEC_CAP, NULL);
+   int rc = wsc_run(self, cmd, 0, &out, WSC_EXEC_CAP);
    if (exit_code)
       *exit_code = rc; /* -1 on spawn/transport failure, per the contract */
    return out;
@@ -308,19 +312,9 @@ static char *wsc_exec_shell_timeout(const workspace_provider_t *p, const char *c
 {
    ws_container_provider_t *self = wsc_self(p);
    char *out = NULL;
-   int rc = wsc_run(self, cmd, timeout_ms, &out, WSC_EXEC_CAP, NULL);
+   int rc = wsc_run(self, cmd, timeout_ms, &out, WSC_EXEC_CAP);
    if (exit_code)
       *exit_code = rc; /* -1 on spawn/transport failure, per the contract */
-   return out;
-}
-
-static char *wsc_exec_shell_scoped(const workspace_provider_t *p, const char *cmd, int timeout_ms,
-                                   const delegate_exec_scope_t *scope, int *exit_code)
-{
-   char *out = NULL;
-   int rc = wsc_run(wsc_self(p), cmd, timeout_ms, &out, WSC_EXEC_CAP, scope);
-   if (exit_code)
-      *exit_code = rc;
    return out;
 }
 
@@ -340,7 +334,6 @@ int ws_container_provider_init(ws_container_provider_t *out, delegate_backend_t 
    out->base.exec = wsc_exec;
    out->base.exec_shell = wsc_exec_shell;
    out->base.exec_shell_timeout = wsc_exec_shell_timeout;
-   out->base.exec_shell_scoped = wsc_exec_shell_scoped;
    /* exec_stream stays NULL: the backend has no streaming op, and the contract
     * permits NULL. A provider-CLI delegate (`claude -p`) therefore cannot yet run
     * through this provider — it needs streaming to surface a turn. Tracked. */

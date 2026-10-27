@@ -29,7 +29,7 @@ const sinceFilter = `($1 <= 0 OR created_at >= now() - make_interval(hours => $1
 // failure rather than a caller reading a cell that moved.
 const (
 	tokenAuditGroupedCells   = 5
-	tokenAuditDashboardCells = 10
+	tokenAuditDashboardCells = 9
 )
 
 const (
@@ -45,17 +45,13 @@ const (
 
 	tokenAuditCostForDelegationSQL = `SELECT COALESCE(SUM(estimated_cost_usd), 0)
 	                                    FROM token_audit
-	                                   WHERE delegation_id = $1 AND ` + realizedFilter + `
-	                                  HAVING COUNT(*) > 0 AND NOT EXISTS (SELECT 1 FROM token_audit
-	                                           WHERE delegation_id = $1 AND usage_kind = 'unobserved')`
+	                                   WHERE delegation_id = $1 AND ` + realizedFilter
 
-	// An accounting total requires at least one row and no explicitly missing usage.
-	// This total includes estimated and avoided costs; missing usage cannot become
-	// free spend when other attempts have known usage.
+	// The "_ex" form counts every kind, not only realized spend: it answers
+	// "what did this delegation cost including what was estimated or avoided",
+	// which is a different question from what is billable.
 	tokenAuditCostForDelegationExSQL = `SELECT COALESCE(SUM(estimated_cost_usd), 0)
-	                                      FROM token_audit WHERE delegation_id = $1
-	                                     HAVING COUNT(*) > 0
-	                                        AND COUNT(*) FILTER (WHERE usage_kind = 'unobserved') = 0`
+	                                      FROM token_audit WHERE delegation_id = $1`
 
 	// The supervisor/worker split, as ONE row of twelve.
 	//
@@ -110,19 +106,18 @@ const (
 
 	// The dashboard is an AGGREGATE by tool and role, not a list of calls.
 	tokenAuditListDashboardSQL = `SELECT tool_name, role,
-	                                     COALESCE(SUM(prompt_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
-	                                     COALESCE(SUM(completion_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
-	                                     COALESCE(SUM(cache_write_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
-	                                     COALESCE(SUM(cache_read_tokens) FILTER (WHERE ` + realizedFilter + `)::bigint, 0),
-	                                     COALESCE(SUM(estimated_cost_usd) FILTER (WHERE ` + realizedFilter + `), 0),
+	                                     COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                                     COALESCE(SUM(completion_tokens)::bigint, 0),
+	                                     COALESCE(SUM(cache_write_tokens)::bigint, 0),
+	                                     COALESCE(SUM(cache_read_tokens)::bigint, 0),
+	                                     COALESCE(SUM(estimated_cost_usd), 0),
 	                                     COUNT(*),
 	                                     COALESCE(to_char(MAX(created_at) AT TIME ZONE 'utc',
-	                                              'YYYY-MM-DD HH24:MI:SS'), ''),
-                                     COUNT(*) FILTER (WHERE usage_kind IS NULL OR usage_kind NOT IN ('realized', '', 'avoided'))
+	                                              'YYYY-MM-DD HH24:MI:SS'), '')
 	                                FROM token_audit
-	                               WHERE usage_kind IS NULL OR usage_kind <> 'avoided'
+	                               WHERE ` + realizedFilter + `
 	                               GROUP BY tool_name, role
-	                               ORDER BY COALESCE(SUM(estimated_cost_usd) FILTER (WHERE ` + realizedFilter + `), 0) DESC,
+	                               ORDER BY COALESCE(SUM(estimated_cost_usd), 0) DESC,
 	                                        MAX(created_at) DESC
 	                               LIMIT $1`
 )
@@ -310,20 +305,19 @@ func tokenAuditListDashboard(ctx context.Context, q store.Queryer, f []string) (
 	return collect(ctx, q, tokenAuditListDashboardSQL, tokenAuditDashboardCells,
 		func(scan func(...any) error) ([]string, error) {
 			var (
-				unknown                       int64
 				tool, role, lastSeen          string
 				prompt, completion, cw, cr, n int64
 				cost                          float64
 			)
 			if err := scan(&tool, &role, &prompt, &completion, &cw, &cr,
-				&cost, &n, &lastSeen, &unknown); err != nil {
+				&cost, &n, &lastSeen); err != nil {
 				return nil, err
 			}
 			return []string{
 				tool, role,
 				store.I64toa(prompt), store.I64toa(completion),
 				store.I64toa(cw), store.I64toa(cr),
-				store.Ftoa(cost), store.I64toa(n), lastSeen, store.I64toa(unknown),
+				store.Ftoa(cost), store.I64toa(n), lastSeen,
 			}, nil
 		}, max)
 }

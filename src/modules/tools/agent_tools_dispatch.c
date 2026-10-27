@@ -715,8 +715,7 @@ static char *td_tool_output_get(cJSON *args, const char *name, const char *dispa
 }
 
 static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cwd,
-                          const char *dispatch_sid, int timeout_ms,
-                          agent_tool_file_resource_fn execute, void *context)
+                          const char *dispatch_sid, int timeout_ms)
 {
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
@@ -735,15 +734,6 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
       int raw = (rawj && cJSON_IsBool(rawj)) ? cJSON_IsTrue(rawj) : 0;
       if (modej && cJSON_IsString(modej) && strcmp(modej->valuestring, "outline") == 0)
          result = tool_read_outline(p->valuestring);
-      else if (execute)
-      {
-         int failed = 1;
-         result = execute(name, args, context, &failed);
-         td_outcome_set(failed || !result ? "error" : "ok", failed == SCOPED_WRITE_OUTCOME_UNKNOWN
-                                                                ? "effects_unknown"
-                                                            : failed || !result ? "file_resource"
-                                                                                : "");
-      }
       else
          result = tool_read_file(p->valuestring, offset, limit, raw);
 
@@ -859,8 +849,7 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
 }
 
 static char *td_write_file(cJSON *args, const char *name, const char *dispatch_cwd,
-                           const char *dispatch_sid, int timeout_ms,
-                           agent_tool_file_resource_fn execute, void *context)
+                           const char *dispatch_sid, int timeout_ms)
 {
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
@@ -887,17 +876,7 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
       {
          /* Auto-snapshot: record pre-write state in the persistent rewind DB */
          auto_snapshot_record(p->valuestring);
-         if (execute)
-         {
-            int failed = 1;
-            result = execute(name, args, context, &failed);
-            td_outcome_set(failed || !result ? "error" : "ok",
-                           failed == SCOPED_WRITE_OUTCOME_UNKNOWN ? "effects_unknown"
-                           : failed || !result                    ? "file_resource"
-                                                                  : "");
-         }
-         else
-            result = tool_write_file(p->valuestring, content_str);
+         result = tool_write_file(p->valuestring, content_str);
       }
       /* Record the write under the active delegation id (when running
        * as a delegate) or the dispatch session id otherwise. Pairs with
@@ -2041,8 +2020,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
-static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *args,
-                                    agent_tool_file_resource_fn execute, void *context)
+static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *args)
 {
    if (!args)
    {
@@ -2228,13 +2206,13 @@ static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *arg
    else if (strcmp(name, "execute_script") == 0)
       result = td_execute_script(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "read_file") == 0)
-      result = td_read_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms, execute, context);
+      result = td_read_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "tool_output_get") == 0)
       result = td_tool_output_get(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "edit_file") == 0)
       result = td_edit_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "write_file") == 0)
-      result = td_write_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms, execute, context);
+      result = td_write_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "list_files") == 0)
       result = td_list_files(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "verify") == 0)
@@ -2416,13 +2394,12 @@ static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *arg
    return result;
 }
 
-char *agent_tools_dispatch_file_owned(const char *name, int timeout_ms, int *is_error,
-                                      cJSON *admitted_arguments,
-                                      agent_tool_file_resource_fn execute, void *context)
+char *agent_tools_dispatch_ir_owned(const char *name, int timeout_ms, int *is_error,
+                                    cJSON *admitted_arguments)
 {
    agent_tools_emit_tool_event("started", name);
    td_outcome_reset();
-   char *result = dispatch_admitted_tool(name, timeout_ms, admitted_arguments, execute, context);
+   char *result = dispatch_admitted_tool(name, timeout_ms, admitted_arguments);
    agent_tools_emit_tool_event("completed", name);
 
    /* Completion audit (a no-op unless the server installed a bridge). Fires once

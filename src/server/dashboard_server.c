@@ -82,8 +82,6 @@ char *api_metrics(void)
       cJSON_AddNumberToObject(obj, "cache_write_tokens", (double)rows[i].cache_write_tokens);
       cJSON_AddNumberToObject(obj, "cache_read_tokens", (double)rows[i].cache_read_tokens);
       cJSON_AddNumberToObject(obj, "estimated_cost_usd", rows[i].estimated_cost_usd);
-      cJSON_AddNumberToObject(obj, "unknown_usage_calls", rows[i].unknown_usage_calls);
-      cJSON_AddBoolToObject(obj, "usage_complete", rows[i].unknown_usage_calls == 0);
       cJSON_AddItemToArray(arr, obj);
    }
    char *json = cJSON_PrintUnformatted(arr);
@@ -114,8 +112,6 @@ SERVER_DASHBOARD_FALLBACK char *api_token_audit(void)
       cJSON_AddNumberToObject(obj, "cache_write_tokens", (double)rows[i].cache_write_tokens);
       cJSON_AddNumberToObject(obj, "cache_read_tokens", (double)rows[i].cache_read_tokens);
       cJSON_AddNumberToObject(obj, "estimated_cost_usd", rows[i].estimated_cost_usd);
-      cJSON_AddNumberToObject(obj, "unknown_usage_calls", rows[i].unknown_usage_calls);
-      cJSON_AddBoolToObject(obj, "usage_complete", rows[i].unknown_usage_calls == 0);
       /* These rows are REALIZED spend (the reader filters out estimated/avoided/
        * partial); declare it so consumers report realized separately (§7). */
       cJSON_AddStringToObject(obj, "usage_kind", "realized");

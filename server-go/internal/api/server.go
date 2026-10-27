@@ -18,20 +18,18 @@ import (
 )
 
 type Server struct {
-	db                   *workflowstore.Store
-	artifacts            *wfe.ArtifactStore
-	workflowDir          string
-	workflows            *wfe.Registry
-	config               appconfig.Service
-	mux                  *http.ServeMux
-	notify               func()
-	cancel               func(string)
-	cleanupWorktree      func(context.Context, workflowstore.WorkItem) error
-	triggerScopeMu       sync.RWMutex
-	triggerScopeResolver TriggerExecutionScopeResolver
-	triggerMu            sync.Mutex
-	triggerErrorsMu      sync.Mutex
-	triggerErrors        map[string]string
+	db              *workflowstore.Store
+	artifacts       *wfe.ArtifactStore
+	workflowDir     string
+	workflows       *wfe.Registry
+	config          appconfig.Service
+	mux             *http.ServeMux
+	notify          func()
+	cancel          func(string)
+	cleanupWorktree func(context.Context, workflowstore.WorkItem) error
+	triggerMu       sync.Mutex
+	triggerErrorsMu sync.Mutex
+	triggerErrors   map[string]string
 }
 
 func New(db *workflowstore.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {

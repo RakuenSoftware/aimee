@@ -1,4 +1,3 @@
-import { UsageCost } from "../components/UsageCost";
 import { useEffect, useState, useCallback } from 'react';
 import { Badge, Button, Panel, EmptyState, StatusDot, DataTable } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant, Column } from '@rakuensoftware/smoothgui';
@@ -80,8 +79,6 @@ interface TokenAudit {
   cache_write_tokens: number;
   cache_read_tokens: number;
   estimated_cost_usd: number;
-  unknown_usage_calls?: number;
-  usage_complete?: boolean;
   call_count: number;
   last_seen: string;
 }
@@ -392,24 +389,20 @@ function MemoryPanel({ data }: { data: MemoryStat[] }) {
 }
 
 /* Cost / Token spend — realized spend rolled up per role, plus a headline total. */
-type CostRow = [string, { tokens: number; cost: number; calls: number; unknown: number; complete: boolean }];
+type CostRow = [string, { tokens: number; cost: number; calls: number }];
 
 function CostPanel({ data }: { data: TokenAudit[] }) {
   const totalCost = data.reduce((n, r) => n + (r.estimated_cost_usd || 0), 0);
-  const unknownCalls = data.reduce((n, r) => n + (r.unknown_usage_calls ?? 0), 0);
-  const usageComplete = data.every(r => r.usage_complete === true);
   const totalTokens = data.reduce(
     (n, r) => n + (r.prompt_tokens || 0) + (r.completion_tokens || 0), 0);
   // Roll up per role so the table stays compact regardless of tool cardinality.
-  const byRole = new Map<string, { tokens: number; cost: number; calls: number; unknown: number; complete: boolean }>();
+  const byRole = new Map<string, { tokens: number; cost: number; calls: number }>();
   for (const r of data) {
     const key = r.role || r.tool_name || '—';
-    const cur = byRole.get(key) ?? { tokens: 0, cost: 0, calls: 0, unknown: 0, complete: true };
+    const cur = byRole.get(key) ?? { tokens: 0, cost: 0, calls: 0 };
     cur.tokens += (r.prompt_tokens || 0) + (r.completion_tokens || 0);
     cur.cost += r.estimated_cost_usd || 0;
     cur.calls += r.call_count || 0;
-    cur.unknown += r.unknown_usage_calls ?? 0;
-    cur.complete &&= r.usage_complete === true;
     byRole.set(key, cur);
   }
   const rows = [...byRole.entries()].sort((a, b) => b[1].tokens - a[1].tokens);
@@ -417,7 +410,7 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
     { key: 'role', label: 'Role', render: ([role]) => e(role) },
     { key: 'calls', label: 'Calls', align: 'right', render: ([, v]) => v.calls },
     { key: 'tokens', label: 'Tokens', align: 'right', render: ([, v]) => fmtCompact(v.tokens) },
-    { key: 'cost', label: 'Cost', align: 'right', render: ([, v]) => <UsageCost subtotal={v.cost} unknownCalls={v.unknown} complete={v.complete} /> },
+    { key: 'cost', label: 'Cost', align: 'right', render: ([, v]) => fmtUsd(v.cost) },
   ];
   return (
     <Panel title="Cost / Tokens" count={rows.length}>
@@ -427,12 +420,12 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px 10px' }}>
             <div style={{ padding: '8px', border: '1px solid var(--sg-border-light)', borderRadius: '6px', background: 'var(--sg-surface-alt)' }}>
-              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Observed tokens</div>
+              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Total tokens</div>
               <div style={{ color: 'var(--sg-text)', fontSize: '18px', fontWeight: 600 }}>{fmtCompact(totalTokens)}</div>
             </div>
             <div style={{ padding: '8px', border: '1px solid var(--sg-border-light)', borderRadius: '6px', background: 'var(--sg-surface-alt)' }}>
-              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Observed realized cost</div>
-              <div style={{ color: 'var(--sg-text)', fontSize: '18px', fontWeight: 600 }}><UsageCost subtotal={totalCost} unknownCalls={unknownCalls} complete={usageComplete} /></div>
+              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Realized cost</div>
+              <div style={{ color: 'var(--sg-text)', fontSize: '18px', fontWeight: 600 }}>{fmtUsd(totalCost)}</div>
             </div>
           </div>
           <div style={{ flex: 1, overflow: 'auto' }}>

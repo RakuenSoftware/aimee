@@ -1,4 +1,3 @@
-import { UsageCost } from "../components/UsageCost";
 /* Models: model selection, limits, prices, and routing configuration. */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Panel, Badge, Spinner, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
@@ -51,8 +50,6 @@ interface ModelStats {
   cache_write_tokens: number;
   cache_read_tokens: number;
   estimated_cost_usd: number;
-  unknown_usage_calls?: number;
-  usage_complete?: boolean;
 }
 
 // POST /api/models/probe -> live reachability of one model.
@@ -368,8 +365,8 @@ function ModelCard({
                 label="tokens (in/out)"
                 value={`${fmt(stats.prompt_tokens)} / ${fmt(stats.completion_tokens)}`}
               />
-              {(stats.total_calls > 0) && (
-                <KeyValue label="observed cost" value={<UsageCost subtotal={stats.estimated_cost_usd} unknownCalls={stats.unknown_usage_calls} complete={stats.usage_complete} />} />
+              {stats.estimated_cost_usd > 0 && (
+                <KeyValue label="est. cost" value={`$${stats.estimated_cost_usd.toFixed(4)}`} />
               )}
             </>
           ) : (

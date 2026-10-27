@@ -3,10 +3,8 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
@@ -31,10 +28,7 @@ func (s *Server) ScanTriggers(ctx context.Context) {
 		if request.Error != "" {
 			continue
 		}
-		// Only this owner-built registry descriptor can request service authority.
-		// Merely scanning an idle rule must not decrypt credentials or mint scope.
-		executionCtx := context.WithValue(ctx, registeredTriggerContextKey{}, registeredTriggerContext{registration: triggerRegistration(request)})
-		if err := s.scanTrigger(executionCtx, request); err != nil {
+		if err := s.scanTrigger(ctx, request); err != nil {
 			s.setTriggerError(request, err.Error())
 			slog.Error("scan workflow trigger", "workspace", request.Workspace, "workflow", request.Pipeline, "error", err)
 		} else {
@@ -478,15 +472,10 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 		_ = s.artifacts.DeleteWorkItem(workItemID)
 		return "", "", fmt.Errorf("%w (admission paused: trigger.max_concurrent is 0)", workflowstore.ErrAdmissionFull)
 	}
-	executionCtx, scopeErr := s.triggerExecutionContext(ctx)
-	if scopeErr != nil {
-		_ = s.artifacts.DeleteWorkItem(workItemID)
-		return "", "", scopeErr
-	}
 	if err := s.db.AdmitRoot(ctx, workflowstore.CreateWorkItem{
 		ID: workItemID, Repo: workspace, ProposalPath: identity, WorkflowName: definition.Name,
 		WorkflowVersion: definition.Version, StartStage: start, Mode: request.Mode,
-		SourcePath: proposalPath, MaxCostUSD: request.MaxSpend, ExecutionScope: delegate.ExecutionScopeFromContext(executionCtx),
+		SourcePath: proposalPath, MaxCostUSD: request.MaxSpend,
 	}, cap); err != nil {
 		_ = s.artifacts.DeleteWorkItem(workItemID)
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -529,49 +518,4 @@ func mintWorkItemID() (string, error) {
 		return "", fmt.Errorf("mint work-item id: %w", err)
 	}
 	return "wi_" + hex.EncodeToString(random[:]), nil
-}
-
-// TriggerExecutionRegistration is the exact operator-owned descriptor selected
-// by triggerRequests, never the body of manual trigger.fire.
-type TriggerExecutionRegistration = delegate.TriggerExecutionRegistration
-type TriggerExecutionScopeRequest = delegate.TriggerExecutionScopeRequest
-type TriggerExecutionScopeResolver func(context.Context, TriggerExecutionScopeRequest) (string, error)
-
-func (s *Server) SetTriggerExecutionScopeResolver(resolver TriggerExecutionScopeResolver) {
-	s.triggerScopeMu.Lock()
-	s.triggerScopeResolver = resolver
-	s.triggerScopeMu.Unlock()
-}
-
-type registeredTriggerContextKey struct{}
-type registeredTriggerContext struct{ registration TriggerExecutionRegistration }
-
-func triggerRegistration(request triggerFireRequest) TriggerExecutionRegistration {
-	return TriggerExecutionRegistration{Origin: request.Origin, Source: request.Source, Event: request.Event, Workspace: request.Workspace, Ref: request.Ref, Pipeline: request.Pipeline, Mode: request.Mode, MaxSpendUSD: request.MaxSpend}
-}
-func (s *Server) triggerExecutionContext(ctx context.Context) (context.Context, error) {
-	marker, registered := ctx.Value(registeredTriggerContextKey{}).(registeredTriggerContext)
-	if !registered {
-		return ctx, nil
-	} // Manual requests use only the trusted C outer scope.
-	registration := marker.registration
-	if registration.Origin != "config" && registration.Origin != "workflow" {
-		return nil, errors.New("workflow trigger has no registered execution source")
-	}
-	bytes, err := json.Marshal(registration)
-	if err != nil {
-		return nil, errors.New("invalid registered trigger configuration")
-	}
-	digest := sha256.Sum256(bytes)
-	s.triggerScopeMu.RLock()
-	resolver := s.triggerScopeResolver
-	s.triggerScopeMu.RUnlock()
-	if resolver == nil {
-		return nil, errors.New("workflow trigger host execution source unavailable")
-	}
-	scope, err := resolver(ctx, TriggerExecutionScopeRequest{Version: delegate.WireVersion, Registration: registration, ConfigurationSHA256: hex.EncodeToString(digest[:])})
-	if err != nil || !delegate.ValidExecutionScope(scope) {
-		return nil, errors.New("workflow trigger host execution source unavailable")
-	}
-	return delegate.WithExecutionScope(ctx, scope), nil
 }

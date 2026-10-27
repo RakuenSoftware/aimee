@@ -146,7 +146,6 @@ extern "C"
       int64_t cache_write_tokens;
       int64_t cache_read_tokens;
       double estimated_cost_usd;
-      int unknown_usage_calls; /* Total usage/cost is incomplete when nonzero. */
    } db1_agent_log_metric_t;
 
    int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max);
@@ -162,7 +161,6 @@ extern "C"
       int64_t total_cache_write_tokens;
       int64_t total_cache_read_tokens;
       double total_estimated_cost_usd;
-      int unknown_usage_calls; /* Total usage/cost is incomplete when nonzero. */
    } db1_agent_log_agent_stats_t;
 
    /* Per-agent_name stats across agent_log JOIN token_audit. If

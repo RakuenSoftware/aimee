@@ -191,7 +191,6 @@ extern "C"
       double estimated_cost_usd;
       int call_count;
       char last_seen[DB1_TOKEN_AUDIT_TS_LEN];
-      int unknown_usage_calls; /* Total usage/cost is incomplete when nonzero. */
    } db1_token_audit_dashboard_row_t;
 
    /* Aggregate totals, optionally filtered to the last `since_hours`.
