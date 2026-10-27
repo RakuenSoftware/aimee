@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The workflow control stage carried over the event bus.
@@ -106,9 +106,9 @@ func (r *controlRecorder) WriteHeader(status int) {
 // grant pins the single executable that may attach as it. So the program that
 // owns the control plane serves the advance decision too, rather than a second
 // process claiming the same identity.
-func NewHandler(mux http.Handler) bus.ModuleHandler {
+func NewHandler(mux http.Handler) ring.ModuleHandler {
 	control := NewControlHandler(mux)
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		switch invocation.StageID {
 		case StageAdvance:
 			return Handle(invocation, request)
@@ -119,7 +119,7 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 		case StageAutonomousRoute:
 			return handleAutonomousRoute(invocation, request)
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }
@@ -128,19 +128,19 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 //
 // The mux is passed in rather than constructed here so the stage depends on the
 // routing surface alone, not on the store, engine and config that assemble it.
-func NewControlHandler(mux http.Handler) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewControlHandler(mux http.Handler) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if mux == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		// Advance and control share a module and are told apart only by stage id,
 		// so an advance id arriving here is a protocol error, not a control call.
 		if invocation.StageID != StageControl {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var decoded ControlRequest
 		if err := json.Unmarshal(request, &decoded); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if !controlMethods[decoded.Method] {
 			return controlError(http.StatusMethodNotAllowed, "unsupported workflow control method")
@@ -152,7 +152,7 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 			return controlError(http.StatusBadRequest, "invalid workflow control request")
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 
 		target := decoded.Path
@@ -186,23 +186,23 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 	}
 }
 
-func controlError(status int, message string) ([]byte, bus.ModuleStatus) {
+func controlError(status int, message string) ([]byte, ring.ModuleStatus) {
 	body, err := json.Marshal(map[string]string{"error": message})
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return encodeControl(ControlResponse{Status: status, Body: string(body)})
 }
 
-func encodeControl(response ControlResponse) ([]byte, bus.ModuleStatus) {
+func encodeControl(response ControlResponse) ([]byte, ring.ModuleStatus) {
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	if uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
 func containsControlChars(values ...string) bool {

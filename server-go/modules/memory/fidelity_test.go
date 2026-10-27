@@ -7,25 +7,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestFidelityRuntimeAdmission(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		h := NewHandler(nil, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":"turn"}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 7}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":"turn"}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 7}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("public principal admitted", status)
 		}
 		for _, turn := range []string{"", strings.Repeat("x", 129)} {
 			body, _ := json.Marshal(map[string]any{"operation": "fidelity-read", "turn_id": turn})
-			frame, _ := bus.EncodeCommand("runtime", body)
-			if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", body)
+			if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal("invalid turn admitted", status)
 			}
 		}
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal("missing store hidden", status)
 		}
 	}
@@ -100,8 +100,8 @@ func TestFidelityPostgresModule(t *testing.T) {
 				if _, err := db.Exec(ctx, `UPDATE artifacts SET payload=$1::jsonb WHERE id='report'`, payload); err != nil {
 					t.Fatal(err)
 				}
-				frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":" turn "}`))
-				if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInternal {
+				frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":" turn "}`))
+				if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInternal {
 					t.Fatal("malformed report fabricated", payload, status)
 				}
 			}
@@ -113,8 +113,8 @@ func TestFidelityPostgresModule(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		backend, _ := NewPostgresDataStore(db, placement)
 		h := NewHandler(nil, WithDataStore(placement, backend))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":"turn"}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInternal {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"fidelity-read","turn_id":"turn"}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInternal {
 			t.Fatal("query failure became absent evidence", status)
 		}
 	}

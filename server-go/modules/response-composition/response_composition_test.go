@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func compositionRequest(fields [fieldCount]string, stream bool) []byte {
@@ -32,9 +32,9 @@ func compositionRequest(fields [fieldCount]string, stream bool) []byte {
 
 func responseKey(t *testing.T, fields [fieldCount]string, stream bool) string {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageCompose},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageCompose},
 		compositionRequest(fields, stream))
-	if status != bus.ModuleStatusOK || len(response) < 4 ||
+	if status != ring.ModuleStatusOK || len(response) < 4 ||
 		binary.LittleEndian.Uint32(response[0:4]) != responseMagic {
 		t.Fatalf("response = %x, status = %d", response, status)
 	}
@@ -70,22 +70,22 @@ func TestCompositionRejectsMalformedAndExpiredRequests(t *testing.T) {
 	fields := [fieldCount]string{"uid:1", "source", "provider", "model", "endpoint"}
 	request := compositionRequest(fields, false)
 	request[6]--
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCompose}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCompose}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("field-count status = %d", status)
 	}
 	request = compositionRequest(fields, false)
 	request = append(request, 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCompose}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCompose}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("trailing-byte status = %d", status)
 	}
 	fields[0] = strings.Repeat("p", 129)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCompose},
-		compositionRequest(fields, false)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCompose},
+		compositionRequest(fields, false)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("principal-length status = %d", status)
 	}
 	fields[0] = "uid:1"
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCompose, DeadlineNS: 1},
-		compositionRequest(fields, false)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCompose, DeadlineNS: 1},
+		compositionRequest(fields, false)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }

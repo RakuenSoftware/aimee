@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestBreakerTripsAndExpires(t *testing.T) {
@@ -71,14 +71,14 @@ func TestBreakerStaysBounded(t *testing.T) {
 	}
 }
 
-func postStatus(t *testing.T, h bus.ModuleHandler, req PostStatusRequest) PostStatusResponse {
+func postStatus(t *testing.T, h ring.ModuleHandler, req PostStatusRequest) PostStatusResponse {
 	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, st := h(bus.ModuleInvocation{StageID: StagePostStatus}, body)
-	if st != bus.ModuleStatusOK {
+	out, st := h(ring.ModuleInvocation{StageID: StagePostStatus}, body)
+	if st != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", st)
 	}
 	var resp PostStatusResponse
@@ -163,8 +163,8 @@ func TestTrippedBreakerBlocksTheNextReduction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, st := h(bus.ModuleInvocation{StageID: StageReduce}, body)
-		if st != bus.ModuleStatusOK {
+		out, st := h(ring.ModuleInvocation{StageID: StageReduce}, body)
+		if st != ring.ModuleStatusOK {
 			t.Fatalf("status = %v", st)
 		}
 		var resp ReduceResponse

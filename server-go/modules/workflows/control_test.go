@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func controlCall(t *testing.T, mux http.Handler, request ControlRequest) ControlResponse {
@@ -16,8 +16,8 @@ func controlCall(t *testing.T, mux http.Handler, request ControlRequest) Control
 		t.Fatalf("encode request: %v", err)
 	}
 	handler := NewControlHandler(mux)
-	body, status := handler(bus.ModuleInvocation{StageID: StageControl}, encoded)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{StageID: StageControl}, encoded)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("expected OK status, got %v", status)
 	}
 	var response ControlResponse
@@ -135,16 +135,16 @@ func TestControlAnswersMalformedTargetWithoutPanic(t *testing.T) {
 // Advance and control share a module and are told apart only by stage id.
 func TestControlRejectsTheAdvanceStageID(t *testing.T) {
 	handler := NewControlHandler(http.NewServeMux())
-	_, status := handler(bus.ModuleInvocation{StageID: StageAdvance}, []byte(`{"method":"GET","path":"/v1/workflow"}`))
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := handler(ring.ModuleInvocation{StageID: StageAdvance}, []byte(`{"method":"GET","path":"/v1/workflow"}`))
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("expected InvalidRequest, got %v", status)
 	}
 }
 
 func TestControlRejectsUndecodableRequest(t *testing.T) {
 	handler := NewControlHandler(http.NewServeMux())
-	_, status := handler(bus.ModuleInvocation{StageID: StageControl}, []byte("not json"))
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := handler(ring.ModuleInvocation{StageID: StageControl}, []byte("not json"))
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("expected InvalidRequest, got %v", status)
 	}
 }
@@ -195,9 +195,9 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 	})
 	handler := NewHandler(mux)
 
-	control, status := handler(bus.ModuleInvocation{StageID: StageControl},
+	control, status := handler(ring.ModuleInvocation{StageID: StageControl},
 		[]byte(`{"method":"GET","path":"/v1/workflow/items"}`))
-	if status != bus.ModuleStatusOK || !reached {
+	if status != ring.ModuleStatusOK || !reached {
 		t.Fatalf("control stage did not reach the mux: status=%v reached=%v", status, reached)
 	}
 	var response ControlResponse
@@ -210,11 +210,11 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 
 	// An advance request must reach the decision, not the mux. A malformed one is
 	// rejected by the decision itself, which is proof it was routed there.
-	if _, status := handler(bus.ModuleInvocation{StageID: StageAdvance}, []byte("short")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageAdvance}, []byte("short")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("advance stage not routed to the decision: %v", status)
 	}
 
-	if _, status := handler(bus.ModuleInvocation{StageID: 99}, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: 99}, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown stage must be rejected, got %v", status)
 	}
 }

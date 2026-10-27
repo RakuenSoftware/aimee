@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,8 +25,8 @@ func exerciseVectorVerifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	handler := NewHandler(executor, WithDataStore(PlacementKB, backend))
 	call := func(args string) map[string]any {
 		t.Helper()
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "verify", args)
-		if status != bus.ModuleStatusOK || result["status"] != "ok" {
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "verify", args)
+		if status != ring.ModuleStatusOK || result["status"] != "ok" {
 			t.Fatal(result, status)
 		}
 		return result
@@ -71,8 +71,8 @@ func exerciseVectorVerifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if _, err := tx.Exec(ctx, `RESET ROLE; REVOKE SELECT ON kb_embeddings FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	_, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "verify", `{}`)
-	if status != bus.ModuleStatusInternal {
+	_, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "verify", `{}`)
+	if status != ring.ModuleStatusInternal {
 		t.Fatalf("missing grant became status %d", status)
 	}
 	if _, err := tx.Exec(ctx, `RESET ROLE; GRANT SELECT ON kb_embeddings TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {

@@ -1120,7 +1120,10 @@ def parse_env_vars():
     """Every literal AIMEE_* env read in native and Go runtime sources, excluding tests."""
     found = set()
     for f in sorted(SRC.rglob("*")):
-        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
+        # src/build holds build output and the fetched ouroboros ring, which is
+        # another repository's code, not aimee's runtime configuration surface.
+        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix() or \
+                f.relative_to(SRC).parts[:1] == ("build",):
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
         for m in ENV_RE.finditer(text):
@@ -1253,7 +1256,10 @@ EXT_DESC = {
 def parse_external_env():
     found = set()
     for f in sorted(SRC.rglob("*")):
-        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
+        # src/build holds build output and the fetched ouroboros ring, which is
+        # another repository's code, not aimee's runtime configuration surface.
+        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix() or \
+                f.relative_to(SRC).parts[:1] == ("build",):
             continue
         for m in EXT_RE.finditer(f.read_text(encoding="utf-8", errors="ignore")):
             v = m.group(1)

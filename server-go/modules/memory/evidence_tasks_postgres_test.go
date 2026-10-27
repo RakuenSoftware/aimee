@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -84,9 +84,9 @@ func TestEvidenceTemporalCanonicalOwnerPostgres(t *testing.T) {
 	cfg.ExecuteRecovery = true
 	body, _ := json.Marshal(DataRequest{Operation: "typed-context", TypedContext: cfg, Assertions: &assertionSearchRequest{}, Query: subject, Limit: 32})
 	outer := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
-	for _, caller := range []*bus.CommandContext{nil, {Authenticated: true, Principal: "model", UserAuthority: false}, {Principal: "forged", UserAuthority: true}} {
-		_, status := handleData(handlerOptions{placement: PlacementKB, data: outer, commandContext: caller}, bus.ModuleInvocation{}, body)
-		if status != bus.ModuleStatusInvalidRequest {
+	for _, caller := range []*ring.CommandContext{nil, {Authenticated: true, Principal: "model", UserAuthority: false}, {Principal: "forged", UserAuthority: true}} {
+		_, status := handleData(handlerOptions{placement: PlacementKB, data: outer, commandContext: caller}, ring.ModuleInvocation{}, body)
+		if status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("unadmitted recovery", status)
 		}
 	}

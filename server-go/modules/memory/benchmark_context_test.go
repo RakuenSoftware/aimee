@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -45,17 +45,17 @@ func TestBenchmarkContextBudget(t *testing.T) {
 func TestBenchmarkContextHostBoundary(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"benchmark-context","query":"test"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"benchmark-context","query":"test"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("missing store became empty context")
 		}
 	}
 }
 
-func exerciseBenchmarkContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseBenchmarkContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -94,8 +94,8 @@ func exerciseBenchmarkContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		t.Fatal("explicit scope widened", result)
 	}
 	exec(`RESET ROLE; REVOKE SELECT ON memories FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	frame, _ := bus.EncodeCommand("runtime", raw)
-	if encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+	frame, _ := ring.EncodeCommand("runtime", raw)
+	if encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 		t.Fatal("retrieval failure masked", string(encoded))
 	}
 }

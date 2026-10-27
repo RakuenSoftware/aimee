@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type labelAuditStore struct {
@@ -43,8 +43,8 @@ func TestLabelAuditUsesOwnerOrderWithoutGoldInjection(t *testing.T) {
 		t.Fatal(reply, s.calls)
 	}
 	s.err = errors.New("storage unavailable")
-	frame, _ := bus.EncodeCommand("audit", raw)
-	if _, status := NewHandler(nil, WithDataStore(PlacementKB, s))(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+	frame, _ := ring.EncodeCommand("audit", raw)
+	if _, status := NewHandler(nil, WithDataStore(PlacementKB, s))(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 		t.Fatal("failed read published successful audit")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -79,13 +79,13 @@ func TestPageRankBoundsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
-	raw, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"pagerank","ids":[1,2]}`))
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 99}, raw); status != bus.ModuleStatusInvalidRequest {
+	raw, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"pagerank","ids":[1,2]}`))
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 99}, raw); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("non-host admitted", status)
 	}
 	for _, body := range []string{`{"operation":"pagerank"}`, `{"operation":"pagerank","ids":[1,1]}`, `{"operation":"pagerank","ids":[1],"weight":null}`, `{"operation":"pagerank","ids":[1],"iterations":null}`, `{"operation":"pagerank","ids":[1],"relations":null}`, `{"operation":"pagerank","ids":[1],"iterations":17}`} {
-		raw, _ := bus.EncodeCommand("runtime", []byte(body))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, raw); status != bus.ModuleStatusInvalidRequest {
+		raw, _ := ring.EncodeCommand("runtime", []byte(body))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, raw); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(body, status)
 		}
 	}
@@ -128,14 +128,14 @@ func exercisePageRankReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	args := map[string]any{"operation": "pagerank", "ids": ids, "project": "pagerank-local", "iterations": 8, "weight": 1.2, "relations": []string{"depends_on"}}
-	call := func() (pageRankResult, bus.ModuleStatus) {
+	call := func() (pageRankResult, ring.ModuleStatus) {
 		t.Helper()
 		raw, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", raw)
-		reply, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+		frame, _ := ring.EncodeCommand("runtime", raw)
+		reply, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
 		var result pageRankResult
-		if status == bus.ModuleStatusOK {
-			raw, err := bus.DecodeCommandResult(reply)
+		if status == ring.ModuleStatusOK {
+			raw, err := ring.DecodeCommandResult(reply)
 			if err != nil || json.Unmarshal(raw, &result) != nil {
 				t.Fatal(string(raw), err)
 			}
@@ -144,7 +144,7 @@ func exercisePageRankReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	}
 	before := pageRankMetricState.snapshot()
 	got, status := call()
-	if status != bus.ModuleStatusOK || got.Candidates != 5 || len(got.Scores) != 5 || got.Edges != 8 || got.Scores[0].ID != ids[0] || got.Scores[0].Score != 1.2 {
+	if status != ring.ModuleStatusOK || got.Candidates != 5 || len(got.Scores) != 5 || got.Edges != 8 || got.Scores[0].ID != ids[0] || got.Scores[0].Score != 1.2 {
 		t.Fatal(got, status)
 	}
 	if pageRankMetricState.snapshot().Samples != before.Samples+1 {
@@ -158,27 +158,27 @@ func exercisePageRankReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	args["scope"] = Scope{Type: ScopeProject, Value: "pagerank-local"}
 	args["include_all"] = true
 	got, status = call()
-	if status != bus.ModuleStatusOK || got.Candidates != 4 || got.Edges != 6 {
+	if status != ring.ModuleStatusOK || got.Candidates != 4 || got.Edges != 6 {
 		t.Fatal("exact scope widened", got, status)
 	}
 	delete(args, "scope")
 	delete(args, "project")
 	delete(args, "include_all")
 	got, status = call()
-	if status != bus.ModuleStatusOK || got.Candidates != 1 || len(got.Scores) != 0 {
+	if status != ring.ModuleStatusOK || got.Candidates != 1 || len(got.Scores) != 0 {
 		t.Fatal("context leaked", got, status)
 	}
 	args["project"] = "pagerank-local"
 	exec(`RESET ROLE; INSERT INTO memory_links(source_id,target_id,relation) SELECT 9007199254743799,9007199254743800,'depends_on' FROM generate_series(1,8193); SET LOCAL ROLE aimee_store_runtime`)
 	before = pageRankMetricState.snapshot()
-	if _, status = call(); status != bus.ModuleStatusInternal {
+	if _, status = call(); status != ring.ModuleStatusInternal {
 		t.Fatal("graph overflow accepted", status)
 	}
 	if !reflect.DeepEqual(before, pageRankMetricState.snapshot()) {
 		t.Fatal("failed scoring recorded as success")
 	}
 	exec(`RESET ROLE; REVOKE SELECT ON memory_links FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	if _, status = call(); status != bus.ModuleStatusInternal {
+	if _, status = call(); status != ring.ModuleStatusInternal {
 		t.Fatal("SQL refusal treated as no links", status)
 	}
 }

@@ -208,7 +208,7 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
        * failure. The module answers it as CAPABILITY_ABSENT precisely so this
        * layer can pass it on; collapsing it into -1 here is what let the poll
        * loop treat a permanent condition as a transient one. */
-      return (rc == (int)AIMEE_MODULE_CALL_CAPABILITY_ABSENT) ? WS_RUNNER_IO_UNSERVED : -1;
+      return (rc == (int)OURO_MODULE_CALL_CAPABILITY_ABSENT) ? WS_RUNNER_IO_UNSERVED : -1;
    }
 
    const uint8_t *body = NULL;

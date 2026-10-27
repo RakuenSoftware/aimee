@@ -121,7 +121,7 @@ int main(void)
    uint32_t module_response_len = 0;
    assert(obs_bus_module_call(5889, 1, 1, now_ns() + 1000000000ULL, "probe", 5, module_response,
                               sizeof module_response, &module_response_len, NULL,
-                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    assert(module_response_len == 0);
 
    /* Emit N rows over the bus, each with a distinct task id (0..N-1) so the

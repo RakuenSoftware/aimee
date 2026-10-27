@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func (args commandArgs) integer(name string, fallback int) int {
@@ -17,13 +17,13 @@ func (args commandArgs) integer(name string, fallback int) int {
 	return int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
 }
 
-func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleQueryCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if verb == "list_unused_l2" && args.stringOr("view", "") == "stale" {
 		return handleStaleInspection(options, invocation, args)
 	}
 	request := DataRequest{IncludeAll: true}
 	scoped := false
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
@@ -80,30 +80,30 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	case "effectiveness_stats":
 		request.Operation = "effectiveness-stats"
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
 	case "key_exists":
 		if response.Allowed == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["exists"] = *response.Allowed
 	case "find_id_by_key_kind":
 		if len(response.IDs) != 1 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["id"] = response.IDs[0]
 		if args.stringOr("view", "") == "native" {
@@ -146,7 +146,7 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	case "effectiveness_stats":
 		s := response.Effectiveness
 		if s == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["stats"] = map[string]any{"avg_effectiveness": s.Average, "low_effectiveness_count": s.LowCount, "high_impact_count": s.HighImpactCount, "never_surfaced_l2": s.NeverSurfacedL2}
 	}
@@ -156,7 +156,7 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	return commandResult(result)
 }
 
-func inspectionOutput(payload any, text string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func inspectionOutput(payload any, text string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	format := args.stringOr("format", "json")
 	if format == "text" {
 		return commandResult(map[string]any{"status": "ok", "output": text})
@@ -166,22 +166,22 @@ func inspectionOutput(payload any, text string, args commandArgs) ([]byte, bus.M
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	output, err := memoryJSONOutput(raw, args)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(map[string]any{"status": "ok", "output": output + "\n"})
 }
 
 // The stale provenance console is a composite read. Both queries must succeed
 // before emitting any output; an unavailable half is not an empty result.
-func handleStaleInspection(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleStaleInspection(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	var unused, superseded DataResponse
 	for i, raw := range []string{`{"operation":"unused-l2","days":14,"limit":256,"include_all":true}`, `{"operation":"superseded-keys","min_versions":3,"limit":256,"include_all":true}`} {
 		data, status := handleData(options, invocation, []byte(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		out := &unused
@@ -189,7 +189,7 @@ func handleStaleInspection(options handlerOptions, invocation bus.ModuleInvocati
 			out = &superseded
 		}
 		if json.Unmarshal(data, out) != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 	}
 	rows := make([]map[string]any, 0, len(unused.Records))

@@ -430,10 +430,17 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                 self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
                 # Exact dispatch/catalog changes do not permit semantic drift,
                 # removed assertions, duplicate blocks or edits to their bodies.
+                # The config stub's only reviewed change is the ring rename, so
+                # its drifts edit a stub body and a renamed result instead.
+                stub = path.endswith("/config_module_stub.c")
                 for drift in (
-                    current.replace("lsp", "unreviewed_lsp", 1),
+                    current.replace("return -1;", "return 0;", 1)
+                    if stub else current.replace("lsp", "unreviewed_lsp", 1),
                     current + blocks[0]["release_text"],
                     current.replace(blocks[0]["release_text"], "", 1),
+                    current.replace("*result = OURO_MODULE_CALL_OK;",
+                                    "*result = OURO_MODULE_CALL_INVALID_REQUEST;", 1)
+                    if stub else
                     current.replace("git_push", "git_status", 1)
                     if "test_mcp" in path else
                     current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)

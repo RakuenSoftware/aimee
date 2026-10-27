@@ -4,7 +4,7 @@
 #endif
 
 #include "headers/module_commands.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
 #include "aimee_sha256.h"
@@ -65,7 +65,7 @@
 #define INVOKE_RESPONSE_MAGIC  0x53504d43u /* "CMPS" */
 #define INVOKE_REQUEST_HEADER  16u
 #define INVOKE_RESPONSE_HEADER 12u
-#define INVOKE_MAX_RESPONSE    AIMEE_MODULE_MESSAGE_MAX_BODY
+#define INVOKE_MAX_RESPONSE    OURO_MODULE_MESSAGE_MAX_BODY
 #define INVOKE_TIMEOUT_MS      60000
 
 /* One registered command's owned backing.
@@ -208,7 +208,7 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
    size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
    size_t verb_len = strlen(verb);
    size_t request_len = header_len + verb_len + args_len + context_len;
-   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
+   if (request_len > OURO_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
    {
       free(context_json);
       free(args_json);
@@ -243,15 +243,14 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
       return NULL;
    }
    uint32_t response_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), request,
        (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
    free(request);
 
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "command %s: invoke failed: %s", verb,
-               aimee_module_call_result_name(rc));
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb, ouro_module_call_result_name(rc));
       free(response);
       return NULL;
    }
@@ -472,14 +471,14 @@ static int admit_pending(uint32_t declare_kind, const char *module_id, const uns
    if (!ack)
       return 0;
    uint32_t out_len = 0;
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        declare_kind, AIMEE_PLUGIN_STAGE_DECLARE, 0, aimee_module_call_deadline_ns(60000), request,
        sizeof request, ack, DECL_MAX_RESPONSE, &out_len, NULL, NULL);
    free(ack);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       LOG_WARN("commands", "module %s: admission verdict not delivered: %s", module_id,
-               aimee_module_call_result_name(rc));
+               ouro_module_call_result_name(rc));
       return 0;
    }
    LOG_INFO("commands", "module %s: plugin %s by the OSV gate", module_id,
@@ -507,19 +506,19 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
     * and the second is the declaration that follows it. One retry only -- a
     * module that keeps asking is misbehaving, and looping would spin the gate. */
    int rounds = 0;
-   aimee_module_call_result_t rc;
+   ouro_module_call_result_t rc;
    for (;;)
    {
       response_len = 0;
       rc = obs_bus_module_call(declare_kind, declare_stage, 0, aimee_module_call_deadline_ns(5000),
                                request, sizeof request, response, DECL_MAX_RESPONSE, &response_len,
                                NULL, NULL);
-      if (rc != AIMEE_MODULE_CALL_OK)
+      if (rc != OURO_MODULE_CALL_OK)
       {
          LOG_WARN("commands", "module %s declaration failed: %s", module_id,
-                  aimee_module_call_result_name(rc));
+                  ouro_module_call_result_name(rc));
          if (err_out)
-            snprintf(err_out, err_cap, "declaration failed: %s", aimee_module_call_result_name(rc));
+            snprintf(err_out, err_cap, "declaration failed: %s", ouro_module_call_result_name(rc));
          free(response);
          return -1;
       }

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -95,7 +95,7 @@ func (a *BusAuthorizer) Do(ctx context.Context, traceID uint64, request HTTPRequ
 
 func encodeHTTPResponse(response HTTPResponse) ([]byte, error) {
 	if len(response.Location) > 65535 || len(response.Error) > 65535 ||
-		httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body) > int(bus.ModuleMessageMaxBody) {
+		httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body) > int(ring.ModuleMessageMaxBody) {
 		return nil, errors.New("egress HTTP response exceeds the module body limit")
 	}
 	out := make([]byte, httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body))
@@ -149,54 +149,54 @@ func validHTTPHeaders(purpose string, headers map[string]string, credentialPrese
 	return true
 }
 
-func (p policy) handleHTTP(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (p policy) handleHTTP(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	var request HTTPRequest
 	if json.Unmarshal(body, &request) != nil || invocation.Cancelled() ||
-		request.MaxResponseBytes <= 0 || request.MaxResponseBytes > int64(bus.ModuleMessageMaxBody-httpHeaderBytes) ||
+		request.MaxResponseBytes <= 0 || request.MaxResponseBytes > int64(ring.ModuleMessageMaxBody-httpHeaderBytes) ||
 		request.TimeoutMS <= 0 || time.Duration(request.TimeoutMS)*time.Millisecond > maxHTTPTimeout ||
 		!validHTTPHeaders(request.Purpose, request.Headers, request.CredentialPresent) ||
 		request.RequestSHA256 != RequestDigest(request.Method, request.TargetURL, request.Body, request.CredentialPresent) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	decision := p.decide(invocation, request.Request)
 	if !decision.Allowed {
 		encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "egress denied: " + decision.Reason})
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	var bearer []byte
 	if request.Purpose == "forge" {
 		parsed, err := url.Parse(decision.Target)
 		if err != nil || !forgeCredentialTargetAllowed(request.CredentialScope, request.CredentialResource,
 			request.Method, parsed.EscapedPath()) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		bearer, err = p.credentials.decrypt(time.Now(), invocation, request, parsed.Hostname())
 		if err != nil {
 			encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "egress denied: " + err.Error()})
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
 	} else if request.Purpose == "provider" {
 		if invocation.PrincipalRef != ProvidersClientRef {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if request.CredentialPresent {
 			parsed, err := url.Parse(decision.Target)
 			if err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			bearer, err = p.credentials.decrypt(time.Now(), invocation, request, parsed.Scheme+"://"+parsed.Host)
 			if err != nil {
 				encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "provider credential unavailable: " + err.Error()})
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
 		}
 	} else if request.Purpose == "memory-backend" {
 		if invocation.PrincipalRef != MemoryClientRef || request.Credential != nil || request.CredentialScope != "" || request.CredentialResource != "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if request.CredentialPresent {
 			if request.CredentialHandle != "memory-backend" || p.backendCredentials == nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(5*time.Second))
 			var err error
@@ -204,25 +204,25 @@ func (p policy) handleHTTP(invocation bus.ModuleInvocation, body []byte) ([]byte
 			cancel()
 			if err != nil {
 				encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "memory backend credential unavailable"})
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
 		} else if request.CredentialHandle != "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	} else if request.CredentialPresent || request.Credential != nil || request.CredentialHandle != "" ||
 		request.CredentialScope != "" || request.CredentialResource != "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response := p.executeHTTP(invocation, request, decision, bearer)
 	clear(bearer)
 	encoded, err := encodeHTTPResponse(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
-func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest, decision Decision, bearer []byte) HTTPResponse {
+func (p policy) executeHTTP(invocation ring.ModuleInvocation, request HTTPRequest, decision Decision, bearer []byte) HTTPResponse {
 	parsed, err := url.Parse(decision.Target)
 	if err != nil {
 		return HTTPResponse{Error: "egress: invalid authorized target"}

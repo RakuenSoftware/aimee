@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -35,7 +35,7 @@ func TestBriefingBudget(t *testing.T) {
 
 // The packaged NOBYPASSRLS runtime exercises the old native briefing and
 // scope-before-LIMIT assertions, including persisted policy selection.
-func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -102,12 +102,12 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 	run := func(limit int) (briefingBundle, []byte) {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"scope_context": true, "project": "brief-project", "workspace": "brief-workspace", "limit_tokens": limit})
-		frame, _ := bus.EncodeCommand("briefing", args)
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("briefing", args)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
-		raw, err := bus.DecodeCommandResult(encoded)
+		raw, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
 			t.Fatal(err)
 		}

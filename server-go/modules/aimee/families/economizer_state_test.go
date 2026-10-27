@@ -9,7 +9,7 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // memStore is the family's persistence without a database. It also counts
@@ -46,7 +46,7 @@ func (m *memStore) save(_ context.Context, key, blob string) error {
 // shipped client expects, so a test can drive the real client against the real
 // handler with no bus in between.
 type handlerCaller struct {
-	handler bus.ModuleHandler
+	handler ring.ModuleHandler
 	t       *testing.T
 }
 
@@ -56,8 +56,8 @@ func (h handlerCaller) Call(_ context.Context, event, stage uint32, _ uint64,
 	if event != EventState {
 		h.t.Fatalf("client called event %d, module serves %d", event, EventState)
 	}
-	response, status := h.handler(bus.ModuleInvocation{StageID: stage}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := h.handler(ring.ModuleInvocation{StageID: stage}, frame)
+	if status != ring.ModuleStatusOK {
 		// The bus reports a non-OK module status as a transport failure, so the
 		// client never sees a payload for one.
 		return nil, fmt.Errorf("module status %v", status)
@@ -142,8 +142,8 @@ func TestSaveRefusesOverLongPayload(t *testing.T) {
 	// Past the client, which caps first -- the module may not trust a frame just
 	// because the shipped client would not have sent it.
 	frame := encodeFrame(opStateSave, "conv-1", strings.Repeat("x", StateMax))
-	response, status := handler(bus.ModuleInvocation{StageID: StageState}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := handler(ring.ModuleInvocation{StageID: StageState}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if got := decodeStatus(t, response); got != statusTooLong {
@@ -167,9 +167,9 @@ func TestStoreFailureIsReportedInBandNotAsTransportError(t *testing.T) {
 			backing := newMemStore()
 			backing.failOn = test.fail
 			handler := newHandler(backing)
-			response, status := handler(bus.ModuleInvocation{StageID: StageState},
+			response, status := handler(ring.ModuleInvocation{StageID: StageState},
 				encodeFrame(test.op, "conv-1", ""))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %v, want OK with an in-band failure", status)
 			}
 			if got := decodeStatus(t, response); got != statusFailed {
@@ -184,25 +184,25 @@ func TestStoreFailureIsReportedInBandNotAsTransportError(t *testing.T) {
 func TestBadKeyIsInBandButMalformedFrameIsInvalidRequest(t *testing.T) {
 	handler := newHandler(newMemStore())
 
-	response, status := handler(bus.ModuleInvocation{StageID: StageState},
+	response, status := handler(ring.ModuleInvocation{StageID: StageState},
 		encodeFrame(opStateLoad, "", ""))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("empty key: status = %v, want OK", status)
 	}
 	if got := decodeStatus(t, response); got != statusInvalid {
 		t.Fatalf("empty key: status = %d, want %d (invalid)", got, statusInvalid)
 	}
 
-	response, status = handler(bus.ModuleInvocation{StageID: StageState},
+	response, status = handler(ring.ModuleInvocation{StageID: StageState},
 		encodeFrame(opStateLoad, "conv\x00truncated", ""))
-	if status != bus.ModuleStatusOK || decodeStatus(t, response) != statusInvalid {
+	if status != ring.ModuleStatusOK || decodeStatus(t, response) != statusInvalid {
 		t.Fatalf("NUL key: status = %v / %d, want OK / invalid", status, decodeStatus(t, response))
 	}
 
 	for _, name := range []string{"short", "key-length-lies", "payload-length-lies", "trailing-bytes"} {
 		t.Run(name, func(t *testing.T) {
-			if _, status := handler(bus.ModuleInvocation{StageID: StageState},
-				malformedFrame(name)); status != bus.ModuleStatusInvalidRequest {
+			if _, status := handler(ring.ModuleInvocation{StageID: StageState},
+				malformedFrame(name)); status != ring.ModuleStatusInvalidRequest {
 				t.Fatalf("status = %v, want InvalidRequest", status)
 			}
 		})
@@ -211,12 +211,12 @@ func TestBadKeyIsInBandButMalformedFrameIsInvalidRequest(t *testing.T) {
 
 func TestUnknownOpAndWrongStageAreRefused(t *testing.T) {
 	handler := newHandler(newMemStore())
-	if _, status := handler(bus.ModuleInvocation{StageID: StageState},
-		encodeFrame(99, "conv-1", "")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageState},
+		encodeFrame(99, "conv-1", "")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown op: status = %v, want InvalidRequest", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageState + 1},
-		encodeFrame(opStateLoad, "conv-1", "")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageState + 1},
+		encodeFrame(opStateLoad, "conv-1", "")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong stage: status = %v, want InvalidRequest", status)
 	}
 }

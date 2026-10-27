@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func worktreePlanRequest(writesAllowed bool, delegateID string) []byte {
@@ -37,9 +37,9 @@ func decodeWorktreePlan(t *testing.T, response []byte) (isolated, readOnly bool,
 		string(name)
 }
 
-func callWorktreePlan(t *testing.T, writesAllowed bool, delegateID string) ([]byte, bus.ModuleStatus) {
+func callWorktreePlan(t *testing.T, writesAllowed bool, delegateID string) ([]byte, ring.ModuleStatus) {
 	t.Helper()
-	return Handle(bus.ModuleInvocation{StageID: StageWorktreePlan},
+	return Handle(ring.ModuleInvocation{StageID: StageWorktreePlan},
 		worktreePlanRequest(writesAllowed, delegateID))
 }
 
@@ -47,7 +47,7 @@ func callWorktreePlan(t *testing.T, writesAllowed bool, delegateID string) ([]by
 // delegates in one session cannot land in the same directory.
 func TestWorktreePlanStageWriteRoleIsIsolated(t *testing.T) {
 	response, status := callWorktreePlan(t, true, "delegate-7")
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	isolated, readOnly, name := decodeWorktreePlan(t, response)
@@ -64,7 +64,7 @@ func TestWorktreePlanStageWriteRoleIsIsolated(t *testing.T) {
 
 func TestWorktreePlanStageReadRoleGetsDedicatedReadOnlyTree(t *testing.T) {
 	response, status := callWorktreePlan(t, false, "delegate-7")
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	isolated, readOnly, name := decodeWorktreePlan(t, response)
@@ -85,7 +85,7 @@ func TestWorktreePlanStageReadRoleGetsDedicatedReadOnlyTree(t *testing.T) {
 func TestWorktreePlanStageCarriesTheLongestAcceptedName(t *testing.T) {
 	name := strings.Repeat("a", workNameMax)
 	response, status := callWorktreePlan(t, true, name)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	_, _, got := decodeWorktreePlan(t, response)
@@ -101,14 +101,14 @@ func TestWorktreePlanStageRefusesUnusableNames(t *testing.T) {
 		"", "../escape", "has space", "-leading-dash", "a/b",
 		"quote'd", strings.Repeat("a", workNameMax+1),
 	} {
-		if _, status := callWorktreePlan(t, true, id); status != bus.ModuleStatusInvalidRequest {
+		if _, status := callWorktreePlan(t, true, id); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("delegate id %q: status = %v, want InvalidRequest", id, status)
 		}
 	}
 }
 
 func TestWorktreePlanStageReadOnlyRejectsUnsafeName(t *testing.T) {
-	if _, status := callWorktreePlan(t, false, "../escape"); status != bus.ModuleStatusInvalidRequest {
+	if _, status := callWorktreePlan(t, false, "../escape"); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("status = %v, want InvalidRequest", status)
 	}
 }
@@ -142,16 +142,16 @@ func TestWorktreePlanStageRejectsMalformedRequests(t *testing.T) {
 	cases["wrong version"] = badVersion
 
 	for name, request := range cases {
-		_, status := Handle(bus.ModuleInvocation{StageID: StageWorktreePlan}, request)
-		if status != bus.ModuleStatusInvalidRequest {
+		_, status := Handle(ring.ModuleInvocation{StageID: StageWorktreePlan}, request)
+		if status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestWorktreePlanStageHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageWorktreePlan, DeadlineNS: 1}
-	if _, status := Handle(invocation, worktreePlanRequest(true, "d1")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageWorktreePlan, DeadlineNS: 1}
+	if _, status := Handle(invocation, worktreePlanRequest(true, "d1")); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }

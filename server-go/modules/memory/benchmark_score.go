@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/retrievalmetrics"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type benchmarkScore struct {
@@ -34,24 +34,24 @@ func benchmarkExpectedIDs(args commandArgs, maximum int) ([]int64, bool) {
 	return expected, true
 }
 
-func handleBenchmarkScore(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleBenchmarkScore(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, validQuery := args.stringValue("query")
 	expected, validIDs := benchmarkExpectedIDs(args, 128)
 	if !validQuery || !validIDs {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: query, Limit: 20})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	if len(response.Records) > 20 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := benchmarkScore{Status: "ok", IDs: make([]string, len(response.Records))}
 	retrieved := make([]int64, len(response.Records))
 	for i, record := range response.Records {
 		if record.ID <= 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		retrieved[i], result.IDs[i] = record.ID, strconv.FormatInt(record.ID, 10)
 	}

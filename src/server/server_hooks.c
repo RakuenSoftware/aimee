@@ -63,20 +63,35 @@ static memory_redirect_verdict_t memory_redirect_bus(const char *operation, cons
    return result;
 }
 
+/* The home a harness memory path is relative to. The path describes the CLIENT's
+ * filesystem, so the client's forwarded home wins over this server's HOME (a
+ * remote server's own home prefixes no client path). Classification itself,
+ * including the fallback for clients that forward no home, is the Go owner's. */
+static const char *memory_intercept_home(const cJSON *req)
+{
+   const char *forwarded =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_home"));
+   if (forwarded && forwarded[0] == '/' && strlen(forwarded) < 1024)
+      return forwarded;
+   return getenv("HOME");
+}
+
 /* Server-side central agent-memory interception. Classification and storage
  * both cross the Go memory data stage; the retired .md is never materialized.
  * Returns 2 (deny, with msg) when intercepted/rejected, else 0. */
 int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len)
 {
-   const char *home = getenv("HOME");
    if (!call || call->type != AIMEE_BLK_TOOL_USE || !call->tool_name ||
-       (call->tool_namespace && call->tool_namespace[0]) || !client || !client[0] || !home ||
-       !home[0] || !hmem_scope_for_client(client))
+       (call->tool_namespace && call->tool_namespace[0]) || !client || !client[0] ||
+       !hmem_scope_for_client(client))
       return 0;
    const char *tool = call->tool_name;
    const cJSON *ti = call->tool_input;
    if (!cJSON_IsObject(ti))
+      return 0;
+   const char *home = memory_intercept_home(req);
+   if (!home || !home[0])
       return 0;
 
    if (strcmp(tool, "Bash") == 0)

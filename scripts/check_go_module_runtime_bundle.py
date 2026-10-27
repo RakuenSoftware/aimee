@@ -70,9 +70,17 @@ def main() -> int:
                 if not (repository / "runtime/main.go").is_file() or \
                         (repository / "runtime/main.c").exists():
                     return fail(f"{module_id}: isolated repository is not Go-only at runtime")
-                canonical_bus = exporter.go_bus_sources(module_id)
+                # The ring is a dependency, never a copy: an export that carried
+                # its own bus drifted from every later ring fix (aimee-module-config
+                # did until 2026-10-27).
+                if (repository / "server-go/bus").exists():
+                    return fail(f"{module_id}: isolated repository carries a private ring copy")
+                ring_pin = exporter.go_dependency_version("github.com/RakuenSoftware/ouroboros-ring/go")
+                go_mod = (repository / "go.mod").read_text(encoding="utf-8")
+                if f"github.com/RakuenSoftware/ouroboros-ring/go {ring_pin}" not in go_mod:
+                    return fail(f"{module_id}: isolated go.mod does not require the pinned ring")
                 shared_sources = exporter.go_process_shared_sources(module_id)
-                for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", []),
+                for relative in [*shared_sources, *descriptor.get("go_sources", []),
                                  *descriptor.get("go_assets", [])]:
                     if (repository / relative).read_bytes() != (ROOT / relative).read_bytes():
                         return fail(f"{module_id}: isolated repository changed {relative}")

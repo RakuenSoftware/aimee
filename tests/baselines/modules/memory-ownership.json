@@ -12,7 +12,7 @@
         "server-go/modules/memory/memory.go",
         "server-go/modules/memory/client_test.go",
         "server-go/modules/memory/runtime_role_test.go",
-        "scripts/test_bus_conformance.sh"
+        "scripts/fetch_ouroboros_ring.py"
       ],
       "cutover_dependency": "Completed: Go owner registered in both placements; the production and fixture callers use its declared stages."
     },
@@ -24,7 +24,7 @@
         "src/tests/test_server_memory_get.c",
         "src/tests/test_module_json_call.c",
         "src/tests/test_mcp_memory_answer.c",
-        "scripts/test_bus_conformance.sh",
+        "scripts/fetch_ouroboros_ring.py",
         "server-go/cmd/aimee-module/main_test.go",
         "src/tests/test_module_runtime.c"
       ],
@@ -96,7 +96,7 @@
       "reason": "C tests exercise external C owners. Native memory domain parity is tested in Go. Test-only stubs supply protocol replies, not a shipping fallback.",
       "evidence": [
         "scripts/check_tests_are_run.py",
-        "scripts/test_bus_conformance.sh",
+        "scripts/fetch_ouroboros_ring.py",
         "server-go/modules/memory/public_records_test.go"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
@@ -1878,12 +1878,13 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "ba7f0a60514c63d5058b6e31fd7583b4ba7d06ad175682562f9a7b1b740c1c5a",
+      "sha256": "761c8d09d9b2f3519db4c608cdffe0a6bddf16b735e45be65cfea20826c3c568",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
@@ -1915,7 +1916,8 @@
         "memory_insert_epistemic_ex",
         "memory_insert_ex"
       ],
-      "sha256": "092c35cde685ac1430e4dcacc178d9ee4e345de61f2f50cdcb6e2220f7ec053b"
+      "sha256": "3f18ccfbe932655bc936c4b59398f67e03d31a188fa72051359f2a7aef04bc45",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/modules/kb/include/aimee/kb/graph_kinds.h": {
       "disposition": "storage-protocol",
@@ -2148,13 +2150,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "2e78687c674ee2725269c3f0e47fb22f5fff19b2a1f66c0132ffc4fab2d5a814",
+      "sha256": "d43626077e090476c6cc2235bf5a87be6aea24736bba4ff82a1c8af81d80a64a",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
-      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval.",
       "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval."
     },
     "src/server/server.c": {
@@ -2163,8 +2165,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "32d58994f0796ecd4954c6c6db47be5fae90b0e149a3001f3f8cd52f3e0e469a",
-      "boundary_review": "2026-10-20 PR #3052: Registers the host verification owner before native catalogs are snapshotted. Existing memory hooks and ownership are untouched. This records source-boundary review, not independent production-promotion approval. Added only the canonical projection delivery worker include and single owned init/shutdown calls; shutdown joins before store teardown. Exact reversal restores the previous reviewed source hash. Memory hooks, transport, framing and Go ownership are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the native execution owner header and joined bounded-custody shutdown after provider/compute drains. Removing exactly those two lines restores the prior reviewed hash; no memory hook or transport changed and no production-promotion approval is implied. The native session reconciliation callback is registered through the typed primary adapter hook before HTTP admission. Removing exactly that include and registration restores the prior reviewed hash; no shared-library server dependency or memory ownership change. Registers the typed host-only history loader and source-aware canonical admission callback, with their declarations, before HTTP admission. Exact removal of those four lines restores the previously reviewed hash. No memory ownership, transport or stage change; not independent production-promotion approval. Registers the source-bound unknown-effect callback used after baseline policy permits, adding only its header and single startup registration. Exact reversal restores the prior reviewed source; memory boundaries remain unchanged. This is not independent production approval. Unregisters the four host-only history/recovery/policy callbacks only after joined compute and native custody shutdown, before shared store teardown. Removing exactly those shutdown registrations restores the previous reviewed hash; memory hooks remain unchanged, without independent production approval. Follow-up lifecycle review supersedes the preceding unregister statement: the bounded detached-delegate drain does not prove every caller joined. The four registrations now precede worker creation and remain fail-closed for the process lifetime; only those exact callback lines moved/clears were removed. Existing memory hooks and ownership remain unchanged. No production-promotion approval is implied. The registered unknown-effect callback now has explicit preparation/final/revoke stages so approval binds final owner-rewritten arguments; only the callback symbol changed here. Existing memory transport and ownership remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only the typed registered GUI-clone custody callback and its early host registration. The callback requires the existing attested PAM actor and tool capability; the Git owner returns a held descriptor only for an actually registered published clone. Reviewed against test_git_project.c and test_workspace_turn.c, including transport spoofing and foreign-root refusals. Memory hooks, request framing, account identity and Go memory ownership are unchanged. This is source-boundary analysis, not independent production-promotion approval. 2026-10-21 PR #3057: Registers the typed owner-checked native browse-recovery callback before workers and HTTP admission. Exact removal of this single registration restores the prior reviewed source hash. Browser recovery validates all scoped native records, preserves exact process-local writers and retains physical lease, fresh database authority and containment quiescence proofs for abandoned owners. Existing strict model admission, memory hooks, transport and Go memory ownership remain unchanged. This records host-boundary analysis, not independent production-promotion approval."
+      "sha256": "df5c6d1b9c90fd54f46e62ca71a3c646c1b39284cd6f0b21321a23127fc0c234",
+      "boundary_review": "2026-10-20 PR #3052: Registers the host verification owner before native catalogs are snapshotted. Existing memory hooks and ownership are untouched. This records source-boundary review, not independent production-promotion approval. Added only the canonical projection delivery worker include and single owned init/shutdown calls; shutdown joins before store teardown. Exact reversal restores the previous reviewed source hash. Memory hooks, transport, framing and Go ownership are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the native execution owner header and joined bounded-custody shutdown after provider/compute drains. Removing exactly those two lines restores the prior reviewed hash; no memory hook or transport changed and no production-promotion approval is implied. The native session reconciliation callback is registered through the typed primary adapter hook before HTTP admission. Removing exactly that include and registration restores the prior reviewed hash; no shared-library server dependency or memory ownership change. Registers the typed host-only history loader and source-aware canonical admission callback, with their declarations, before HTTP admission. Exact removal of those four lines restores the previously reviewed hash. No memory ownership, transport or stage change; not independent production-promotion approval. Registers the source-bound unknown-effect callback used after baseline policy permits, adding only its header and single startup registration. Exact reversal restores the prior reviewed source; memory boundaries remain unchanged. This is not independent production approval. Unregisters the four host-only history/recovery/policy callbacks only after joined compute and native custody shutdown, before shared store teardown. Removing exactly those shutdown registrations restores the previous reviewed hash; memory hooks remain unchanged, without independent production approval. Follow-up lifecycle review supersedes the preceding unregister statement: the bounded detached-delegate drain does not prove every caller joined. The four registrations now precede worker creation and remain fail-closed for the process lifetime; only those exact callback lines moved/clears were removed. Existing memory hooks and ownership remain unchanged. No production-promotion approval is implied. The registered unknown-effect callback now has explicit preparation/final/revoke stages so approval binds final owner-rewritten arguments; only the callback symbol changed here. Existing memory transport and ownership remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only the typed registered GUI-clone custody callback and its early host registration. The callback requires the existing attested PAM actor and tool capability; the Git owner returns a held descriptor only for an actually registered published clone. Reviewed against test_git_project.c and test_workspace_turn.c, including transport spoofing and foreign-root refusals. Memory hooks, request framing, account identity and Go memory ownership are unchanged. This is source-boundary analysis, not independent production-promotion approval. 2026-10-21 PR #3057: Registers the typed owner-checked native browse-recovery callback before workers and HTTP admission. Exact removal of this single registration restores the prior reviewed source hash. Browser recovery validates all scoped native records, preserves exact process-local writers and retains physical lease, fresh database authority and containment quiescence proofs for abandoned owners. Existing strict model admission, memory hooks, transport and Go memory ownership remain unchanged. This records host-boundary analysis, not independent production-promotion approval. 2026-10-27 PR #3064: session_start validates the harness client name ([a-z0-9_-]{1,32}) instead of requiring a harness-memory scope before minting a hook identity, so non-claude clients (codex) can be trusted; the identity stays bound to session, client and principal. Memory interception still checks the scope itself, and no memory symbol, transport or Go ownership changed. Exact reversal of the helper and that one condition restores the prior reviewed hash; not independent production-promotion approval."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2201,8 +2203,8 @@
       "symbols": [
         "server_module_memory_data"
       ],
-      "sha256": "60f3408d474bd0eb22637a7f964b79aae9238229f13f223e14d19c1d320c041c",
-      "boundary_review": "IR #3036: the existing memory interception host reads borrowed canonical tool arguments instead of reparsing a native hook argument string. The registered Go memory stage still owns classification and storage policy; its request fields, scope hints and spill behavior are unchanged. This records source-boundary reasoning, not independent production approval."
+      "sha256": "d038d25a23521da5cb13dcf142311d1834cc4657f05e99e2be69b003e767c7af",
+      "boundary_review": "IR #3036: the existing memory interception host reads borrowed canonical tool arguments instead of reparsing a native hook argument string. The registered Go memory stage still owns classification and storage policy; its request fields, scope hints and spill behavior are unchanged. This records source-boundary reasoning, not independent production approval. 2026-10-27 PR #3064: The home sent to the Go redirect classifier is the client's forwarded harness_home when present, otherwise this server's HOME as before. Classification, including the fallback that takes a client's home from the memory path, stays in the Go owner (redirect.go). No memory symbol or transport changed; not independent production-promotion approval."
     },
     "src/server/server_http_routes.c": {
       "disposition": "protocol-catalog",
@@ -2222,9 +2224,9 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "d37c05610ae54e17ac2406238986bd9bb23ac1139ffc07c38f94605f0eef2b36",
+      "sha256": "c9c1fa982af4398ddbb4610b325fe3c983e53fdf255a0c3b676b26fbb7fa260f",
       "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval. Git now uses an independent nested workspace binding instead of changing/releasing the enclosing turn binding; its memory adapter symbols and paths remain unchanged. This is boundary analysis, not independent approval. The existing negative Git resolution return now frees its owned diagnostic before returning the same refusal. 2026-10-20: Git acquires the registered workspace scope before remapping its client path; failed acquisition cannot fall through, and a retained mirror cwd bypasses stale session routing. Replacing only dispatch_git_tool_inner with its previous body reproduces HEAD byte-for-byte. All memory adapter symbols, transport, admission and eligibility remain unchanged; this is boundary analysis, not independent release approval.",
-      "boundary_review": "2026-10-20 PR #3052: Configured verification uses the same Git scope/session restoration dispatcher; native calls use its supported synchronous owner. Existing memory handlers and scope checks are unchanged. This records source-boundary review, not independent production-promotion approval. 2026-10-21 PR #3057: Shared the unchanged HTTP active-project injection with the native MCP boundary, which now deep-copies admitted arguments and resolves absent project metadata only from the host-installed cwd. Explicit project keys remain untouched; missing host identity cannot fall back to a basename or model-supplied cwd. Actual wrapper and project-resolver regressions cover unavailable/empty KB, immutable inputs and foreign cwd refusal. Memory hooks, account identities, bus framing and Go memory ownership remain unchanged. This is source-boundary analysis, not independent production-promotion approval. 2026-10-27 PR #3065: Changes only tool_get_help's unknown-topic reply, which now lists the help sections from the embedded agent doc instead of pointing at a no-argument call. No memory hook, symbol, transport or Go memory ownership changed; exact reversal of that branch restores the prior reviewed hash. Not independent production-promotion approval."
+      "boundary_review": "2026-10-20 PR #3052: Configured verification uses the same Git scope/session restoration dispatcher; native calls use its supported synchronous owner. Existing memory handlers and scope checks are unchanged. This records source-boundary review, not independent production-promotion approval. 2026-10-21 PR #3057: Shared the unchanged HTTP active-project injection with the native MCP boundary, which now deep-copies admitted arguments and resolves absent project metadata only from the host-installed cwd. Explicit project keys remain untouched; missing host identity cannot fall back to a basename or model-supplied cwd. Actual wrapper and project-resolver regressions cover unavailable/empty KB, immutable inputs and foreign cwd refusal. Memory hooks, account identities, bus framing and Go memory ownership remain unchanged. This is source-boundary analysis, not independent production-promotion approval. 2026-10-27 PR #3064: git_clone binds its cwd argument through the registered-workspace check (mcp_git_bind_clone_cwd) and refuses a cwd outside every workspace, instead of running with no directory bound. Memory symbols, transport, admission and scope handling are unchanged. This is source-boundary analysis, not independent production-promotion approval. 2026-10-27 PR #3065: Changes only tool_get_help's unknown-topic reply, which now lists the help sections from the embedded agent doc instead of pointing at a no-argument call. No memory hook, symbol, transport or Go memory ownership changed; exact reversal of that branch restores the prior reviewed hash. Not independent production-promotion approval."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2248,7 +2250,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "6a7c329b0f92a1c27efa12769608cd2dc006a8a98188f23f66c6a4230b045f09"
+      "sha256": "36f44a44e3432ea83c99dbf575a3a66231a3388e88726ec7329e23e99f0f1ea6",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2257,7 +2260,8 @@
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear"
       ],
-      "sha256": "0eafc391b60698590d469375334aa8b0a840c646c89b0234116a3cb15d309651"
+      "sha256": "3c6346b78f2c9c71dea77b5bd6a14d52b835eb4d0b914693284b0b1086d31881",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_memory_review.c": {
       "disposition": "host-transport",
@@ -2266,7 +2270,8 @@
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear"
       ],
-      "sha256": "39653be23e3896eb0f1394d620e74bb9685870400a1a7c3e6194a3b506315adf"
+      "sha256": "27e57f1881b4e70ed4c4933142ca94c7c830bbe13f4d2185692acc0470354145",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_ready.c": {
       "disposition": "host-transport",
@@ -2516,7 +2521,8 @@
         "server_module_memory_data",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "f8076b8da80ee143adb7ffe6afb84541a8eaba855fc2589c6da6435d76a847e6"
+      "sha256": "26bdcd85d3657dd75d46bd2c995e3a362d8ab960ebd0d4a0c84cf3ce7aadedf8",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/tests/test_pgvec_neardup.c": {
       "disposition": "legacy-fixture",
@@ -2666,12 +2672,13 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
+      "sha256": "bdc6987b6c6e7b37aa073c467f7c5aa373b30d8d975cdd7070b66271733800e4",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/tests/test_server_erasure_protocol.c": {
       "disposition": "host-fixture",
@@ -2691,7 +2698,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "ae5c617ecfd2da7d308f4420faaf654899723014def3f05eb8da6818aa0c5671"
+      "sha256": "19ce816317b816d60385dfc33263d8421f88ca20bab4ec8f90751e8b0322a456",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/config_client_contract.c": {
       "disposition": "host-transport",

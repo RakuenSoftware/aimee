@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestProxyIPv4Policy(t *testing.T) {
@@ -152,14 +152,14 @@ func TestRewriteProxyHead(t *testing.T) {
 	}
 }
 
-func invokeProxy(t *testing.T, handler bus.ModuleHandler, stage uint32, request any) ProxyRequestPolicyResponse {
+func invokeProxy(t *testing.T, handler ring.ModuleHandler, stage uint32, request any) ProxyRequestPolicyResponse {
 	t.Helper()
 	body, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, status := handler(bus.ModuleInvocation{StageID: stage}, body)
-	if status != bus.ModuleStatusOK {
+	response, status := handler(ring.ModuleInvocation{StageID: stage}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("stage %d status = %v", stage, status)
 	}
 	var decoded ProxyRequestPolicyResponse
@@ -194,8 +194,8 @@ func TestProxyPolicyStages(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(ProxyAddressPolicyRequest{IP: "169.254.169.254"})
-	response, status := handler(bus.ModuleInvocation{StageID: StageProxyAddress}, body)
-	if status != bus.ModuleStatusOK {
+	response, status := handler(ring.ModuleInvocation{StageID: StageProxyAddress}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("address status = %v", status)
 	}
 	var address ProxyAddressPolicyResponse

@@ -405,12 +405,12 @@ static int mutate_model_concurrency(cJSON *request, int remove)
 
 cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
                                     size_t max_body, int timeout_ms,
-                                    aimee_module_call_result_t *result)
+                                    ouro_module_call_result_t *result)
 {
    (void)max_body;
    (void)timeout_ms;
    if (result)
-      *result = AIMEE_MODULE_CALL_INVALID_REQUEST;
+      *result = OURO_MODULE_CALL_INVALID_REQUEST;
    if (event_kind != 4609u || stage_id != 1u || !cJSON_IsObject(request))
    {
       cJSON_Delete(request);
@@ -534,6 +534,6 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
    cJSON_Delete(request);
    pthread_mutex_unlock(&g_lock);
    if (result)
-      *result = AIMEE_MODULE_CALL_OK;
+      *result = OURO_MODULE_CALL_OK;
    return response;
 }

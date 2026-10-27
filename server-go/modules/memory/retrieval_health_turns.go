@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Optional process-local ownership, never a global "last request" heuristic.
@@ -115,7 +115,7 @@ func (s *sourceReleaseState) healthTurnObserved(handle string, acknowledged bool
 		}
 	}
 }
-func (s *sourceReleaseState) healthTurnFinish(args commandArgs) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) healthTurnFinish(args commandArgs) ([]byte, ring.ModuleStatus) {
 	handle := args.stringOr("health_turn_handle", "")
 	if !releaseTokenValid(handle) {
 		return commandResult(commandError("unavailable", "health turn owner unavailable"))

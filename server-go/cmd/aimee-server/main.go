@@ -17,7 +17,6 @@ import (
 	"time"
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	appconfig "github.com/JBailes/aimee/server-go/config"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
@@ -27,6 +26,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/observability"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func configuredForge(url, socket string) (engine.Forge, error) {
@@ -127,7 +127,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("attach to the module bus: %v", err)
 	}
-	caller, err := bus.NewConcurrentModuleCaller(rootCtx, attached)
+	caller, err := ring.NewConcurrentModuleCaller(rootCtx, attached)
 	if err != nil {
 		log.Fatalf("module bus caller: %v", err)
 	}
@@ -362,12 +362,12 @@ func main() {
 	{
 		busSocket := *moduleBusSocket
 		go func() {
-			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
+			err := ring.RunModuleProcess(rootCtx, ring.ModuleProcessConfig{
 				SocketPath:     busSocket,
 				ModuleName:     "workflows",
 				PrincipalClass: 1,
 				PrincipalRef:   20,
-				Stages: []bus.ModuleStage{
+				Stages: []ring.ModuleStage{
 					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
 					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
 					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
@@ -415,11 +415,11 @@ func envInt(name string, fallback int) int {
 // attachWithRetry dials the module bus until it answers or the deadline passes.
 // The socket is created by the daemon and the engine may be started beside it,
 // so "not there yet" is an ordinary boot state rather than a misconfiguration.
-func attachWithRetry(ctx context.Context, socket string, within time.Duration) (*bus.Client, error) {
+func attachWithRetry(ctx context.Context, socket string, within time.Duration) (*ring.Client, error) {
 	deadline := time.Now().Add(within)
 	var last error
 	for {
-		attached, err := bus.ConnectClient(ctx, socket, engine.BusPrincipalClass,
+		attached, err := ring.ConnectClient(ctx, socket, engine.BusPrincipalClass,
 			engine.WFEBusPrincipalRef)
 		if err == nil {
 			return attached, nil

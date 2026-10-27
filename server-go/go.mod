@@ -3,7 +3,8 @@ module github.com/JBailes/aimee/server-go
 go 1.26.10
 
 require (
-	github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260824205422-3d2964383b91
+	github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157
+	github.com/RakuenSoftware/ouroboros-ring/go v0.0.0-20261027122832-35b033ec6ce8
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.24.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1

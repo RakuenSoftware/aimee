@@ -10,18 +10,18 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	ep "github.com/JBailes/aimee/server-go/modules/execution-policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestOperatorCancelHostOnlyAndReservedNamespace(t *testing.T) {
 	frame, _ := wire.EncodeFields(opSessionIRCancel, []string{"owner", "s", "turn"})
 	db := newSessDB()
-	_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-	if !Sessions.Ops[opSessionIRCancel].HostOnly || status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+	if !Sessions.Ops[opSessionIRCancel].HostOnly || status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("model token acquired operator cancellation", status)
 	}
 	for _, payload := range []string{operatorCancelPayload, `{"kind":"message","message_id":"fake","payload":{"role":"assistant","blocks":[]}}`} {

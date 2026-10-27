@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a scripted database -----------------------------------------------------
@@ -144,8 +144,8 @@ func call(t *testing.T, db store.DB, op uint32, fields []string) int {
 		t.Fatalf("encode: %v", err)
 	}
 	response, status := JTIReplay.Handler(db)(
-		bus.ModuleInvocation{StageID: StageJTIReplay}, frame)
-	if status != bus.ModuleStatusOK {
+		ring.ModuleInvocation{StageID: StageJTIReplay}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK -- the C client maps any other status to -1, "+
 			"which is not one of the result codes", status)
 	}
@@ -403,8 +403,8 @@ func TestWrongFieldCountIsRefused(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			frame, _ := wire.EncodeFields(test.op, make([]string, test.n))
 			response, status := JTIReplay.Handler(&scriptedDB{})(
-				bus.ModuleInvocation{StageID: StageJTIReplay}, frame)
-			if status != bus.ModuleStatusOK {
+				ring.ModuleInvocation{StageID: StageJTIReplay}, frame)
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %v", status)
 			}
 			if got, _, _ := wire.DecodeFields(response); got != store.StatusInvalid {

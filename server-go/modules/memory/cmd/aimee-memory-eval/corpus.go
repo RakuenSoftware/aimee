@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func readEvaluationJSON(path string, target any) error {
@@ -232,11 +232,11 @@ func evaluationExecutor(ctx context.Context, command, socket string) (egress.Exe
 	if socket == "" {
 		return nil, nil, errors.New("HTTP embedding requires a module bus socket for governed egress")
 	}
-	client, err := bus.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
+	client, err := ring.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
 	if err != nil {
 		return nil, nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		return nil, nil, err

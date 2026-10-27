@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -31,8 +31,8 @@ func exerciseVectorRepairReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	handler := NewHandler(executor, WithDataStore(PlacementKB, backend))
 	call := func(args string) map[string]any {
 		t.Helper()
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "repair", args)
-		if status != bus.ModuleStatusOK || result["status"] != "ok" {
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "repair", args)
+		if status != ring.ModuleStatusOK || result["status"] != "ok" {
 			t.Fatal(result, status)
 		}
 		return result
@@ -87,8 +87,8 @@ func exerciseVectorRepairReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if result["mode"] != "all" || result["repaired"] != float64(1) {
 		t.Fatal(result)
 	}
-	result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "repair", `{"memory_id":-1}`)
-	if status != bus.ModuleStatusOK || result["kind"] != "invalid_argument" {
+	result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "repair", `{"memory_id":-1}`)
+	if status != ring.ModuleStatusOK || result["kind"] != "invalid_argument" {
 		t.Fatal(result, status)
 	}
 }

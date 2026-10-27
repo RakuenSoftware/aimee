@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var errEntityTransition = errors.New("memory: entity transition no longer applies")
@@ -18,13 +18,13 @@ func entityMutationID(args commandArgs, key string) (int64, bool) {
 	return args.decimalID(key)
 }
 
-func handleEntityMutation(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleEntityMutation(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	operation, action := args.stringOr("operation", ""), args.stringOr("action", "")
 	console := operation == "entity-review"
-	fail := func(code int, kind, message string) ([]byte, bus.ModuleStatus) {
+	fail := func(code int, kind, message string) ([]byte, ring.ModuleStatus) {
 		if console {
 			return ontologyHTTP(code, map[string]string{"error": message})
 		}
@@ -57,19 +57,19 @@ func handleEntityMutation(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return fail(503, "unavailable", "entity mutation unavailable")
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	var result struct {
 		Status  string `json:"status"`
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(response.Payload, &result) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	code := 200
 	if result.Status == "error" {

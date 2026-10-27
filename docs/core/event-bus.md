@@ -1,173 +1,26 @@
-# Core C event bus
+# The ouroboros ring
 
-**Owner:** runtime core
-**Paths:** `src/core/event_bus/`, `server-go/bus/`, `rust/aimee-bus/`
+The local shared-memory transport inside `aimee-server` and `aimee-kb` is the
+ouroboros ring. It is a contract of its own, with C, Go and Rust reference
+implementations, in
+[RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring):
+what it owns and does not, its requirements (R1 to R6), the wire and segment
+specification, the frozen vectors and what conforming means for a new
+implementation are all there (`spec/`, `vectors/`).
 
-`libaimee-core-event-bus.a` is the single POSIX implementation consumed by
-`aimee-server` and `aimee-kb`. Each daemon hosts an independent local bus for
-the modules in its own container. The thin client does not link it, and the bus
-never carries server-to-KB or thinclient-to-server traffic.
+What stays in aimee:
 
-```mermaid
-flowchart LR
-    TC[thin client] -->|UDS or authenticated /v1| SR[server resource plane]
+- **The pin.** `dependencies/ouroboros-ring.lock.json` names the ring commit and a
+  digest of its content. `scripts/fetch_ouroboros_ring.py` fetches and checks it
+  before anything compiles, and `server-go/go.mod` requires the Go module at the
+  same commit (`make go-unit-tests` checks the two agree).
+- **The host's embedding.** `src/modules/audit/obs_bus.c` hosts the ring in each
+  daemon: admission grants from `*.grant` files, the tap into audit and
+  guardrail stores, capture, and the refused role refs of this instance.
+- **Instance roles.** `src/modules/audit/instance_identity.c`: which daemon an
+  instance is, the reserved role identities (server 34, KB 35), and the
+  first-boot identity latch.
+- **The link boundary.** `scripts/check_bus_blast_radius.sh`: only the server and
+  KB link `libouroboros-ring.a`.
 
-    subgraph SERVER[aimee-server daemon]
-        SR <--> SB[server bus host]
-        SB <--> S1[private queue pair<br/>module A]
-        SB <--> S2[private queue pair<br/>module B]
-        SB --> ST[server full-stream tap]
-    end
-
-    SR -->|authenticated typed /v1| KR
-
-    subgraph KB[aimee-kb daemon]
-        KR[KB resource plane] <--> KBH[KB bus host]
-        KBH <--> K1[private queue pair<br/>module A]
-        KBH <--> K2[private queue pair<br/>module B]
-        KBH --> KT[KB full-stream tap]
-    end
-```
-
-The two hosts use the same library and wire contract but share no rings, arena,
-sequence, or tap. Crossing the daemon boundary returns to authenticated network
-transport through the resource planes.
-
-## Owns
-
-- wire frame and version negotiation;
-- control, private queue-pair, and arena layouts;
-- SPSC rings and bounded credits;
-- client admission and reap;
-- publish, subscribe, request/reply, cancellation, and typed absence;
-- host sequence, observer routing, and full-stream tap;
-- capture format and observational replay;
-- local `SOCK_SEQPACKET` module attachment and descriptor grant;
-- C/Go/Rust wire and layout vectors and conformance.
-
-## Does not own
-
-- network transport between services;
-- module business schemas beyond stable kind registration;
-- credential or user authentication policy;
-- WORM storage or external witnessing;
-- workflow scheduling;
-- deterministic module execution replay;
-- hostile-code sandboxing.
-
-## Contracts
-
-Per-source FIFO is guaranteed. The host stamps global accepted order before routing. `publish` success
-means accepted into the producer ring, not consumed or durable. Backpressure is bounded and declared
-per kind. Arena references use generation and holder checks and are released on consumer completion
-or reap. A client in another process reads an arena payload through the read-only lease view the
-host mirrors after the control header, and returns its reference with a holder-checked
-`LEASE_RELEASE` control notification (D12 in `docs/dev/EVENT_BUS_DECISIONS.md`); arena production
-stays co-located.
-
-The tap is the only core full-stream observer. Ordinary clients receive only authorized kinds.
-
-Public headers live under `src/core/event_bus/include/aimee/core/event_bus`.
-`bus_attach.h` is shared attach wire state, so an external module client does
-not include the host implementation. `bus_endpoint.h` creates the local attach
-socket; after `bus_client_attach_as` completes, the socket is no longer the data
-path and the module uses only its mappings. Admission and event-kind grants are
-daemon policy injected into the core host.
-
-External C module repositories consume the host-free
-`aimee-core-event-bus-client` target. Go modules use the pure-Go client and
-process runtime under `server-go/bus`; it mirrors authenticated attach, AMOD
-fragmentation, deadlines, cancellation, bounded concurrent handlers,
-heartbeats, and host-epoch shutdown without cgo. Rust modules use the Rust
-reference client and process runtime under `rust/aimee-bus`, which mirrors the
-same contract and links nothing from the C or Go implementations. It is the
-third independent client of the one C host, and provides both halves of the
-module contract: the process runtime and a module caller with the C core
-caller's outcomes. `make -C src rust-bus-tests` holds it to the wire and layout
-vectors, to interop with the C host, to the C module-runtime caller, and runs
-the Rust caller as its own admitted process against both C and Rust modules. The shared host runtime in `bus_runtime.c`
-owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
-configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
-policies at `<config>/modules.d/<daemon>`; the environment can override those
-with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
-
-`src/modules/process-contracts.json` declares the implementation language for supervised
-processes. The executable in `server-go/cmd/aimee-module` selects an isolated identity from its
-basename and serves that module's admitted stages without cgo.
-
-The current process catalog contains 26 Go identities: `config`, `memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, `response-composition`,
-`execution-policy`, `governance`, `workflows`, `roundtable`, `kb-synthesis`, `runtime-web`,
-`control-web`, `benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, `egress`,
-`providers`, `server` and `kb`. Placement and activation select the running set; the Server and
-KB role identities never run together. The catalog contains no supervised C KB_STORE process.
-The Go PostgreSQL module serves both placements. Transitional module-owned C resource/domain
-code remains, and C adapters used as parity fixtures do not establish a second policy owner.
-
-Some stages remain deliberately bounded decisions:
-
-- **workflows** owns the deterministic advance admission classification, and is
-  not a second workflow lifecycle runtime. The server's interactive advance
-  executor requests that classification over the event bus and refuses to mutate
-  workflow state when the process call fails.
-- **kb-synthesis** owns the pure grounding decision, leaving the curator worker,
-  provider, and persistence lifecycle where they are.
-- **runtime-web** owns RPC fault classification. The provider remains the owner of
-  HTTPS, browser authentication, sessions, routing, proxy transport, and assets.
-- **control-web** owns proxy-route authorization. HTTPS, OIDC/session handling,
-  CSRF, credential selection, proxy transport, and assets remain provider-owned.
-
-The server requests the runtime-web decision over the event bus and adds the
-returned HTTP status to its RPC error envelope. The physical Go web provider
-consumes that status with no local classification policy, and missing or invalid
-module output remains a generic 502 transport failure.
-
-Control web's physical Go provider imports the same policy package. The KB
-console-admin containment is event-bus-only: the route layer asks the separately
-supervised control-web module and fails closed if no valid decision arrives, and
-the KB keeps no duplicate local allowlist.
-
-Four more production paths refuse to decide locally when their process is absent:
-
-- **benchmarks.** The live `memory.benchmark` RPC sends each bounded retrieval
-  result set for MRR, NDCG@K, and recall@K scoring. An unavailable or invalid
-  response fails the RPC with no in-process fallback. Offline harnesses keep their
-  local primitives because they do not run inside either daemon.
-- **skills.** The process serves both the review-nudge predicate and
-  trigger-frontmatter matching. Guardrails resolves the skill file locally but
-  requests the trigger decision over the bus, and transport or decode failure is
-  treated conservatively as a match, so the advisory cannot be bypassed by losing
-  the module.
-- **learning.** Event `6145` returns the sink mask for each supported signal before
-  the router mutates storage. Missing, failed, or malformed output aborts ingestion
-  with no local routing fallback; the C signal policy exists only behind the parity
-  handler and focused tests.
-- **memory.** The context pre-injection path requests confidence from event `5893`.
-  Missing, failed, or malformed output suppresses the envelope rather than falling
-  back to a local `low` classification, and the formatter accepts only the three
-  validated process-returned tiers.
-
-Every strict `*.grant` policy binds one principal class/reference to an exact
-absolute executable (resolved and compared with Linux `SO_PEERCRED` and
-`/proc/<pid>/exe`), an expected UID, and explicit publish, subscribe, request,
-and serve kind lists. The host installs all grants before returning mappings,
-overwrites client-claimed source/principal fields, and returns a typed
-capability-denied event when a module attempts undeclared fresh output.
-
-The attach socket is mode `0600` and used only for the descriptor handshake.
-All event traffic remains in the daemon's local shared mappings; there is no
-server-to-KB bus and no cross-machine shared memory.
-
-## Required checks
-
-- wire unit tests and corrupt-frame rejection;
-- C/Go/Rust golden wire and layout vectors, held to their generators, and live conformance;
-- cross-process arena reads and reference release (D12) in all three clients;
-- ring/arena ASAN and TSAN lanes;
-- admission and cross-client isolation;
-- flow control, overflow, cancellation, and reap;
-- capture classification and byte-exact arena materialization;
-- audit durability, retention, replay, and shutdown race;
-- dispatch performance gate.
-
-See [Event bus](../EVENT_BUS.md) for the working guide.
+What aimee carries on the ring is described in [Event bus](../EVENT_BUS.md).

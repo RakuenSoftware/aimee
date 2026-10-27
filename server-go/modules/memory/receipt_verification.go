@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // This verifies a caller-supplied commitment, not the origin or durable inclusion
@@ -167,9 +167,9 @@ func decodePreparedReceipt(raw []byte) (*providerReceiptEvent, bool) {
 	return &event, true
 }
 
-func handleReceiptVerification(_ handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleReceiptVerification(_ handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	var envelopeOK bool
 	args, envelopeOK = commandDomainArgs(args, "memory.verify_receipt")

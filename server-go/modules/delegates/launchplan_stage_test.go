@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // A request builder, mirroring what the C encoder writes.
@@ -99,8 +99,8 @@ func TestLaunchPlanStageRoundTrip(t *testing.T) {
 			LaunchOwnedFile{Path: "src/a.c", Exists: true}).
 		packet("rev", "review", "check it", "review", "delegate_result_v1")
 
-	response, status := handleLaunchPlan(bus.ModuleInvocation{}, req.bytes())
-	if status != bus.ModuleStatusOK {
+	response, status := handleLaunchPlan(ring.ModuleInvocation{}, req.bytes())
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	d := decodeLaunchResponse(t, response)
@@ -125,8 +125,8 @@ func TestLaunchPlanStageRoundTrip(t *testing.T) {
 // no steps or tasks to write.
 func TestLaunchPlanStageCarriesTheRefusal(t *testing.T) {
 	req := newLaunchReq(0, "delegate_plan_v2", "a plan").missing().packets(0)
-	response, status := handleLaunchPlan(bus.ModuleInvocation{}, req.bytes())
-	if status != bus.ModuleStatusOK {
+	response, status := handleLaunchPlan(ring.ModuleInvocation{}, req.bytes())
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("a refusal is a valid answer, not a bad request: %v", status)
 	}
 	d := decodeLaunchResponse(t, response)
@@ -146,8 +146,8 @@ func TestLaunchPlanStageReportsRepairsAndWarnings(t *testing.T) {
 			LaunchOwnedFile{Path: "util.c", Candidates: []string{"src/util.c"}},
 			LaunchOwnedFile{Path: "src/new.c"})
 
-	response, status := handleLaunchPlan(bus.ModuleInvocation{}, req.bytes())
-	if status != bus.ModuleStatusOK {
+	response, status := handleLaunchPlan(ring.ModuleInvocation{}, req.bytes())
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	d := decodeLaunchResponse(t, response)
@@ -200,7 +200,7 @@ func TestLaunchPlanStageRejectsMalformedRequests(t *testing.T) {
 		"empty":          nil,
 		"header only":    good[:8],
 	} {
-		if _, status := handleLaunchPlan(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handleLaunchPlan(ring.ModuleInvocation{}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: want InvalidRequest, got %v", name, status)
 		}
 	}
@@ -210,7 +210,7 @@ func TestLaunchPlanStageHonoursCancellation(t *testing.T) {
 	req := newLaunchReq(1, "delegate_plan_v1", "a plan").missing().packets(0).bytes()
 	// An expired deadline is a cancellation: a plan decided after its caller
 	// stopped waiting would be written by nobody.
-	if _, status := handleLaunchPlan(bus.ModuleInvocation{DeadlineNS: 1}, req); status != bus.ModuleStatusCancelled {
+	if _, status := handleLaunchPlan(ring.ModuleInvocation{DeadlineNS: 1}, req); status != ring.ModuleStatusCancelled {
 		t.Errorf("want Cancelled, got %v", status)
 	}
 }

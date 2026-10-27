@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -59,7 +59,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY scoped ON memories USING(scope_value=current_setting('aimee.memory_scope_value',true));
  SET LOCAL ROLE memory_validity_test`)
-	caller := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:diagnostic", TransportIdentity: "fixture"}
+	caller := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:diagnostic", TransportIdentity: "fixture"}
 	for _, placement := range []Placement{PlacementKB, PlacementServer} {
 		backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: placement}
 		handler := NewHandler(nil, WithDataStore(placement, backend))
@@ -76,7 +76,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 			}
 			body, _ := json.Marshal(args)
 			result, status := invokeContextCommand(t, handler, 0, caller, "validity", string(body))
-			if status != bus.ModuleStatusOK || result["status"] != "ok" || result["store"] != map[Placement]string{PlacementServer: "user", PlacementKB: "kb"}[placement] {
+			if status != ring.ModuleStatusOK || result["status"] != "ok" || result["store"] != map[Placement]string{PlacementServer: "user", PlacementKB: "kb"}[placement] {
 				t.Fatal(placement, id, result, status)
 			}
 			encoded, _ := json.Marshal(result["decision"])
@@ -84,9 +84,9 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 			if json.Unmarshal(encoded, &decision) != nil {
 				t.Fatal(result)
 			}
-			raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
+			raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
 			var read DataResponse
-			if status != bus.ModuleStatusOK || json.Unmarshal(raw, &read) != nil {
+			if status != ring.ModuleStatusOK || json.Unmarshal(raw, &read) != nil {
 				t.Fatal(status, string(raw))
 			}
 			if decision.Eligible != (len(read.Records) == 1) || decision.Eligible != (id == 1) {
@@ -104,7 +104,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 				t.Fatal("missing observation", decision)
 			}
 		}
-		denied, _ := invokeContextCommand(t, handler, 0, bus.CommandContext{Authenticated: true, Principal: "model:fixture"}, "validity", `{"id":1}`)
+		denied, _ := invokeContextCommand(t, handler, 0, ring.CommandContext{Authenticated: true, Principal: "model:fixture"}, "validity", `{"id":1}`)
 		if denied["kind"] != "unauthorized" {
 			t.Fatal(denied)
 		}
@@ -126,15 +126,15 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 				{Operation: "get", ID: 10, Project: "hidden", IncludeAll: true},
 				{Operation: "get", ID: 10, IncludeAll: true},
 			} {
-				raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, bus.ModuleInvocation{}, dataRequest(t, request))
+				raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, ring.ModuleInvocation{}, dataRequest(t, request))
 				var response DataResponse
-				if status == bus.ModuleStatusOK && (json.Unmarshal(raw, &response) != nil || len(response.Records) != 0) {
+				if status == ring.ModuleStatusOK && (json.Unmarshal(raw, &response) != nil || len(response.Records) != 0) {
 					t.Fatal("ordinary serving widened verified scope", request, string(raw))
 				}
 			}
-			raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, bus.ModuleInvocation{}, dataRequest(t, DataRequest{Operation: "get", ID: 1, IncludeAll: true}))
+			raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, ring.ModuleInvocation{}, dataRequest(t, DataRequest{Operation: "get", ID: 1, IncludeAll: true}))
 			var inherited DataResponse
-			if status != bus.ModuleStatusOK || json.Unmarshal(raw, &inherited) != nil || len(inherited.Records) != 1 {
+			if status != ring.ModuleStatusOK || json.Unmarshal(raw, &inherited) != nil || len(inherited.Records) != 1 {
 				t.Fatal("ordinary serving failed to inherit verified scope", status, string(raw))
 			}
 			serviceCaller := caller

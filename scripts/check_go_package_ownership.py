@@ -72,11 +72,6 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "and benchmarks modules own the observable evaluation operations. "
         "Keeping this arithmetic outside both avoids a cyclic module dependency.",
     ),
-    "server-go/bus": (
-        "substrate",
-        "The event bus client, module runtime and wire. Every module imports it; "
-        "it cannot itself be a module.",
-    ),
     "server-go/cmd/aimee-module": (
         "host",
         "The multicall binary module processes are spawned as, and the dispatch "

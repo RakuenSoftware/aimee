@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	appconfig "github.com/JBailes/aimee/server-go/config"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // BackendSettings is non-secret startup configuration. Credentials remain in Vault.
@@ -72,12 +72,12 @@ func ResolveBackendSettings(values map[string]any, lookup func(string) string) (
 // The process-local environment keeps existing adapter/egress constructors using
 // the same frozen settings, with deployment environment overrides taking priority.
 func ConfigureBackendProcess(ctx context.Context, socket string, principal uint32) error {
-	client, err := bus.ConnectClient(ctx, socket, 1, principal)
+	client, err := ring.ConnectClient(ctx, socket, 1, principal)
 	if err != nil {
 		return err
 	}
 	defer client.Detach()
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -56,8 +56,8 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals"} {
 		exec(read("schema_personal_memory_" + name + ".sql"))
 	}
-	human := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
-	model := &bus.CommandContext{Authenticated: true, Principal: "fixture:model", TransportIdentity: "fixture:mcp"}
+	human := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
+	model := &ring.CommandContext{Authenticated: true, Principal: "fixture:model", TransportIdentity: "fixture:mcp"}
 	begin := func(c *pgx.Conn) pgx.Tx {
 		t.Helper()
 		tx, err := c.Begin(ctx)
@@ -69,25 +69,25 @@ func TestPersonalCorrectionReview(t *testing.T) {
 		}
 		return tx
 	}
-	invoke := func(tx pgx.Tx, caller *bus.CommandContext, req DataRequest) (DataResponse, bus.ModuleStatus) {
+	invoke := func(tx pgx.Tx, caller *ring.CommandContext, req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		backend, err := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
+		if status == ring.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
 			t.Fatal("bad response")
 		}
 		return out, status
 	}
-	call := func(caller *bus.CommandContext, req DataRequest) DataResponse {
+	call := func(caller *ring.CommandContext, req DataRequest) DataResponse {
 		t.Helper()
 		tx := begin(conn)
 		defer tx.Rollback(context.Background())
 		out, status := invoke(tx, caller, req)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s status %v", req.Operation, status)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -154,7 +154,7 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	review := correctionReviewRequest{ProposalID: proposal.ID, Digest: proposal.Digest, Expected: proposal.Target, Action: "approve"}
 	request := DataRequest{Operation: "correction-review", CorrectionReview: &review}
 	tx := begin(conn)
-	if _, status := invoke(tx, model, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invoke(tx, model, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("model approved private draft", status)
 	}
 	_ = tx.Rollback(ctx)
@@ -167,7 +167,7 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	// Late decision failure must roll back canonical payload, history and outbox.
 	exec(`ALTER TABLE user_memory_correction_proposals ADD CONSTRAINT fixture_review_failure CHECK(state='pending')`)
 	tx = begin(conn)
-	if _, status := invoke(tx, human, request); status != bus.ModuleStatusInternal {
+	if _, status := invoke(tx, human, request); status != ring.ModuleStatusInternal {
 		t.Fatal("late decision failure accepted", status)
 	}
 	_ = tx.Rollback(ctx)
@@ -202,13 +202,13 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	tx = begin(conn)
 	runtimeBackend, _ := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
 	runtimeHandler := NewHandler(nil, WithDataStore(PlacementServer, runtimeBackend))
-	if _, status := invokeContextCommand(t, runtimeHandler, 41, *human, "runtime", string(runtimeArgs)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invokeContextCommand(t, runtimeHandler, 41, *human, "runtime", string(runtimeArgs)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("plugin forged host review context", status)
 	}
-	for _, caller := range []bus.CommandContext{*model, *human} {
+	for _, caller := range []ring.CommandContext{*model, *human} {
 		envelope, status := invokeContextCommand(t, runtimeHandler, 0, caller, "runtime", string(runtimeArgs))
 		inner, _ := envelope["json"].(string)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		if caller.UserAuthority {
@@ -270,12 +270,12 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	defer firstTx.Rollback(context.Background())
 	defer secondTx.Rollback(context.Background())
 	first, status := invoke(firstTx, human, raceRequest)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	type result struct {
 		out    DataResponse
-		status bus.ModuleStatus
+		status ring.ModuleStatus
 	}
 	done := make(chan result, 1)
 	go func() { out, status := invoke(secondTx, human, raceRequest); done <- result{out, status} }()
@@ -299,7 +299,7 @@ func TestPersonalCorrectionReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := <-done
-	if next.status != bus.ModuleStatusOK || !extract(next.out).Replayed || extract(next.out).DecisionID != extract(first).DecisionID {
+	if next.status != ring.ModuleStatusOK || !extract(next.out).Replayed || extract(next.out).DecisionID != extract(first).DecisionID {
 		t.Fatal("concurrent review duplicated decision", next)
 	}
 	if err := secondTx.Commit(ctx); err != nil {

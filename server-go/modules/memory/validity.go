@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // EligibilityDecision describes the actual read predicate at one database
@@ -108,8 +108,8 @@ func (s *postgresDataStore) validity(ctx context.Context, id int64, policy *Memo
 	return result, nil
 }
 
-func handleValidityCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+func handleValidityCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	var ok bool
@@ -162,18 +162,18 @@ func handleValidityCommand(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	raw, _ := json.Marshal(request)
 	body, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "validity owner unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(body, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Read != nil && response.Read.ErrorCode != "" {
 		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
 	}
 	if len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

@@ -47,7 +47,6 @@ $(OBJDIR)/kb_store/kb_store_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
 $(OBJDIR)/kb_store/db_postgres.o: C_FLAGS += -DAIMEE_PG_STMT_COUNTER=1
 endif
 
-
 # kb_store_test_shim.o's flags depend on AIMEE_TEST_PG, and a flag change is invisible to
 # make: its source and headers are untouched, so switching modes in the same OBJDIR
 # reuses the object built for the OTHER backend. Everything then links and 90-odd
@@ -95,11 +94,11 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 # obs_bus now exposes the authenticated external-module listener. Focused tests
 # link the bus as loose objects, so keep its two new implementation objects in
 # one fixture rather than duplicating them in every target below.
-OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
-                    $(OBJDIR)/core/event_bus/bus_runtime.o \
-                    $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                    $(OBJDIR)/core/event_bus/module_client.o \
-                    $(OBJDIR)/core/event_bus/module_protocol.o \
+OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o \
+                    $(OBJDIR)/ouroboros-ring/runtime.o \
+                    $(OBJDIR)/ouroboros-ring/endpoint.o \
+                    $(OBJDIR)/ouroboros-ring/module_client.o \
+                    $(OBJDIR)/ouroboros-ring/module_protocol.o \
                     $(OBJDIR)/aimee_sha256.o
 TEST_WORM_OBJS = $(OBJDIR)/modules/audit/audit_worm.o \
                  $(OBJDIR)/modules/audit/audit_worm_chain.o \
@@ -134,10 +133,10 @@ unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-manage
 
 P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
     $(OBS_BUS_LINK_OBJS) $(OBJDIR)/modules/audit/audit_replay.o \
-    $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_attach.o $(OBJDIR)/core/event_bus/bus_host.o \
-    $(OBJDIR)/core/event_bus/bus_route.o $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-    $(OBJDIR)/core/event_bus/bus_ring.o $(OBJDIR)/core/event_bus/bus_arena.o \
-    $(OBJDIR)/core/event_bus/bus_wire.o $(OBJDIR)/core/event_bus/bus_capture.o \
+    $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/attach.o $(OBJDIR)/ouroboros-ring/host.o \
+    $(OBJDIR)/ouroboros-ring/route.o $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+    $(OBJDIR)/ouroboros-ring/ring.o $(OBJDIR)/ouroboros-ring/arena.o \
+    $(OBJDIR)/ouroboros-ring/wire.o $(OBJDIR)/ouroboros-ring/capture.o \
                            $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) \
                            $(SERVER_CMD_OBJS) $(CORE_OBJS) $(PLATFORM_OBJS) \
                            $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o
@@ -154,7 +153,7 @@ P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OB
 # appeared to work when a previous server build happened to leave them behind.
 $(TESTPREFIX)/unit-test-server-management-listener-live: \
     $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) \
-    $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+    $(OURO_RING_LIB) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_SERVER)
 
 # Common object sets for tests
@@ -213,13 +212,13 @@ $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentia
 # This bundle carries guardrails_action_audit.o and guardrails_semantic.o, which
 # reference obs_bus_emit / obs_bus_emit_guardrail — so every test linking it
 # also needs the bus objects. Test binaries list them individually for focused
-# fixtures; shipping daemons consume only libaimee-core-event-bus.a. guardrail_events.o /
+# fixtures; shipping daemons consume only libouroboros-ring.a. guardrail_events.o /
 # aimee_home.o / log.o are already in TEST_DATA_OBJS.
 BUS_TEST_OBJS = $(OBS_BUS_LINK_OBJS) \
-                $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_attach.o $(OBJDIR)/core/event_bus/bus_host.o \
-                $(OBJDIR)/core/event_bus/bus_route.o $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                $(OBJDIR)/core/event_bus/bus_ring.o $(OBJDIR)/core/event_bus/bus_arena.o \
-                $(OBJDIR)/core/event_bus/bus_wire.o $(OBJDIR)/core/event_bus/bus_capture.o
+                $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/attach.o $(OBJDIR)/ouroboros-ring/host.o \
+                $(OBJDIR)/ouroboros-ring/route.o $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                $(OBJDIR)/ouroboros-ring/ring.o $(OBJDIR)/ouroboros-ring/arena.o \
+                $(OBJDIR)/ouroboros-ring/wire.o $(OBJDIR)/ouroboros-ring/capture.o
 # The delegate loop builds requests and imports history through translation.
 # Carry its complete IR boundary in every fixture that links the runtime bundle.
 TEST_WORKSPACE_OBJS_EXTRA += $(BUS_TEST_OBJS) \
@@ -250,7 +249,6 @@ $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surfa
 $(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
 $(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: \
     $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/db1_client/telemetry.o $(OBJDIR)/db1_client/transport.o
-
 
 $(TESTPREFIX)/unit-test-kb-client-search: $(OBJDIR)/modules/kb_client/kb_client_pii.o \
     $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
@@ -431,25 +429,13 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-rrf \
                $(TESTPREFIX)/unit-test-kb-graph-analytics $(TESTPREFIX)/unit-test-lessons-cite-tracker $(TESTPREFIX)/unit-test-lessons-reflect $(TESTPREFIX)/unit-test-lessons-actuate $(TESTPREFIX)/unit-test-lessons-session-capture $(TESTPREFIX)/unit-test-kb-doc-hash \
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
-               $(TESTPREFIX)/unit-test-bus-wire \
-               $(TESTPREFIX)/unit-test-bus-layout \
-               $(TESTPREFIX)/unit-test-module-protocol \
-               $(TESTPREFIX)/unit-test-bus-ring \
-               $(TESTPREFIX)/unit-test-bus-region \
-               $(TESTPREFIX)/unit-test-bus-arena \
-               $(TESTPREFIX)/unit-test-bus-host \
-               $(TESTPREFIX)/unit-test-bus-route \
                $(TESTPREFIX)/unit-test-bus-flow \
-               $(TESTPREFIX)/unit-test-bus-client \
-               $(TESTPREFIX)/unit-test-bus-endpoint \
-               $(TESTPREFIX)/unit-test-bus-runtime \
                $(TESTPREFIX)/unit-test-module-runtime \
                $(TESTPREFIX)/unit-test-module-json-call \
                $(TESTPREFIX)/unit-test-economizer-module-client \
                $(TESTPREFIX)/unit-test-delegate-egress-adapter \
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
-               $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-kb-store-code-audit \
                $(TESTPREFIX)/unit-test-bus-guardrail-durability \
@@ -615,6 +601,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
                $(TESTPREFIX)/unit-test-git-pr-stage \
+               $(TESTPREFIX)/unit-test-git-pr-failures-log \
                $(TESTPREFIX)/unit-test-git-cred-inject \
                $(TESTPREFIX)/unit-test-git-ssh-agent \
                $(TESTPREFIX)/unit-test-webchat-git-leak \
@@ -821,6 +808,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-bus-audit-replay-tool \
                $(TESTPREFIX)/unit-test-bus-audit-retention \
                $(TESTPREFIX)/unit-test-bus-capture-gaps \
+               $(TESTPREFIX)/unit-test-instance-identity \
                $(TESTPREFIX)/unit-test-execution-policy-bus \
                $(TESTPREFIX)/unit-test-bus-config-autonomy \
                $(TESTPREFIX)/unit-test-git-verify-state-bus \
@@ -1045,7 +1033,6 @@ ifdef AIMEE_TREESITTER
 TEST_TARGETS += $(TESTPREFIX)/unit-test-code-treesitter
 endif
 
-
 TEST_TARGETS += $(TESTPREFIX)/unit-test-core-base64
 $(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 # Binaries outside TEST_TARGETS whose link line names the core archives (via
@@ -1249,7 +1236,6 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 $(TESTPREFIX)/unit-test-util: $(OBJDIR)/tests/test_util.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                      $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-roundtable-brief: $(OBJDIR)/tests/test_roundtable_brief.o $(OBJDIR)/server/server_compute_roundtable.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1668,8 +1654,6 @@ $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compa
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-
-
 # Restored. Deleted with the C store as "store-coupled", which was true of
 # seven lines out of 673 assertions: db1_init/db1_shutdown for the fixture and
 # five db1_session_state_delete calls that are TEARDOWN between cases, not
@@ -1691,8 +1675,6 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
                              $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o \
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-
 
 # message_history_repair tests split out of test_agent.c (2000-line limit).
 # Mirrors unit-test-agent's link line so message_history_repair (agent_bridge.o,
@@ -1879,7 +1861,6 @@ $(TESTPREFIX)/unit-test-server-memory-benchmark: \
                      $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
                       $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                       $(OBJDIR)/modules/delegates/delegate_launch_args.o \
@@ -1953,7 +1934,6 @@ learning-citation-eval: $(TESTPREFIX)/learning-implicit-replay
 		--heuristics citation_then_repair,citation_then_continuation \
 		--predictions $(OBJDIR)/learning_citation_preds.jsonl
 
-
 $(TESTPREFIX)/unit-test-render: $(OBJDIR)/tests/test_render.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1967,7 +1947,6 @@ $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOC
                                $(OBJDIR)/kb_store/cross_repo_resolver.o $(OBJDIR)/code_match.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-graph-scoring: $(OBJDIR)/tests/test_graph_scoring.o \
     $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
@@ -1980,7 +1959,6 @@ $(TESTPREFIX)/unit-test-entity-nodes: $(OBJDIR)/tests/test_entity_nodes.o \
     $(OBJDIR)/kb_store/entity_nodes.o $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-memory-lanes: $(OBJDIR)/tests/test_memory_lanes.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1992,13 +1970,8 @@ $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
-
 # Mock-pattern demonstrator: exercises the same wm.h contract using the
 # in-memory implementation. Same test source, different backing.
-
-
 
 $(TESTPREFIX)/unit-test-extractors-extra: $(OBJDIR)/tests/test_extractors_extra.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2072,7 +2045,6 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_provider_credential.o \
                       $(OBJDIR)/modules/vault/agent_credentials.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
 $(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/turn_registry.o $(OBJDIR)/server/server_learning_approaches.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/module_commands.o
@@ -2173,7 +2145,6 @@ $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.
 	                                  $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 # The embedder catalog is deliberately free of server deps so it links against cJSON
 # alone — the point of splitting it out of server_state.c.
 $(TESTPREFIX)/unit-test-embedder-catalog: $(OBJDIR)/tests/test_embedder_catalog.o \
@@ -2184,7 +2155,6 @@ $(TESTPREFIX)/unit-test-embedder-catalog: $(OBJDIR)/tests/test_embedder_catalog.
 $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-agent-admission: $(OBJDIR)/tests/test_agent_admission.o $(OBJDIR)/server/agent_admission.o
 	$(TESTLINK) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
@@ -2250,7 +2220,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
@@ -2259,7 +2229,6 @@ $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_brea
 
 $(TESTPREFIX)/unit-test-dependency-breaker: $(OBJDIR)/tests/test_dependency_breaker.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
-
 
 $(TESTPREFIX)/unit-test-web-egress: $(OBJDIR)/tests/test_web_egress.o \
                                     $(OBJDIR)/posix/web_egress.o \
@@ -2304,7 +2273,6 @@ $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S4 autonomous-parity routing policy (pure; no engine/DB deps).
-$(OBJDIR)/tests/test_wfe_autonomous_route.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomous_route.o \
                                     $(OBJDIR)/modules/workflows/wfe_autonomous_route.o \
                                     $(OBJDIR)/module_json_call.o \
@@ -2317,6 +2285,15 @@ $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomou
 # stubbed inside the test TU (and abort), which is why no agent_exec object is
 # linked here.
 $(TESTPREFIX)/unit-test-git-pr-stage: $(OBJDIR)/tests/test_git_pr_stage.o \
+                                    $(OBJDIR)/modules/git/git_pr_api.o \
+                                    $(OBJDIR)/egress_credential_envelope.o \
+                                    $(OBJDIR)/modules/git/git_pr_ci_grade.o \
+                                    $(OBJDIR)/module_json_call.o \
+                                    $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+# What `git pr failures` returns from a job log: bounded, and cut at the failed step.
+$(TESTPREFIX)/unit-test-git-pr-failures-log: $(OBJDIR)/tests/test_git_pr_failures_log.o \
                                     $(OBJDIR)/modules/git/git_pr_api.o \
                                     $(OBJDIR)/egress_credential_envelope.o \
                                     $(OBJDIR)/modules/git/git_pr_ci_grade.o \
@@ -2453,7 +2430,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
                            \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
@@ -2497,7 +2474,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
                            $(OBJDIR)/log.o $(OBJDIR)/modules/audit/audit_action.o $(DB1_CLIENT_OBJS) \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
@@ -2555,10 +2532,8 @@ $(TESTPREFIX)/unit-test-server-write-tier-db1: \
                            $(OBJDIR)/log.o $(OBJDIR)/modules/audit/audit_action.o $(DB1_CLIENT_OBJS) \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
-
-
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_status_authority.o \
@@ -2655,7 +2630,6 @@ $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication: \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening: \
     $(OBJDIR)/tests/test_kb_mgmt_offline_hardening.o \
@@ -2833,12 +2807,9 @@ $(TESTPREFIX)/unit-test-wfe-router-catalog: $(OBJDIR)/tests/test_wfe_router_cata
 
 # Config-extensible blocks + safety blocks share the blocks/engine/registry deps.
 
-
 $(TESTPREFIX)/unit-test-wfe-failure-taxonomy: $(OBJDIR)/tests/test_wfe_failure_taxonomy.o \
                                     $(OBJDIR)/modules/workflows/wfe_iface.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-
 
 # Human-gate reject routing (retry_on_reject): pure def-query, no DB.
 $(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o \
@@ -2893,7 +2864,6 @@ $(TESTPREFIX)/unit-test-wfe-sliced-build: $(OBJDIR)/tests/test_wfe_sliced_build.
 $(TESTPREFIX)/unit-test-provider-catalog: $(OBJDIR)/tests/test_provider_catalog.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-cmd-branch: $(OBJDIR)/tests/test_cmd_branch.o $(OBJDIR)/cmd_branch.o \
                            $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
@@ -2912,7 +2882,6 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
 
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 # Restored, with test_agent_delegate_root.c which shares the binary. 826 + 103
 # assertions about agent behaviour, deleted with the C store.
@@ -2994,8 +2963,6 @@ $(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_con
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
                                $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                $(CONFIG_CLIENT_TEST_OBJS) \
@@ -3004,11 +2971,11 @@ $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/yaml.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS) $(OBJDIR)/interaction_event_names.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/module_runtime_fixture.o \
-                           $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                           $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                            \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
-                           $(CORE_EVENT_BUS_LIB) | $(OBJDIR)/aimee-memory-fixture
+                           $(OURO_RING_LIB) | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-platform-process: $(OBJDIR)/tests/test_platform_process.o \
@@ -3069,83 +3036,7 @@ $(TESTPREFIX)/unit-test-kb-doc-hash: $(OBJDIR)/tests/test_kb_doc_hash.o \
                                      $(OBJDIR)/kb/kb_doc_hash.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lcrypto
 
-# Event-bus wire codec (feature tree slice 1). Pure: no DB, no shared memory.
-# BUS_VECTOR_DIR points at the committed golden vectors so the binary can run
-# from any cwd; those bytes are the cross-language conformance authority (D8).
-# The main Makefile scopes -Icore/event_bus/include to the bus objects. Test
-# translation units that exercise the public contract opt in below.
-$(OBJDIR)/tests/test_bus_wire.o: C_FLAGS += -Icore/event_bus/include -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
-$(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
-                                  $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-# Event-bus layout vectors (D12 follow-up): region, ring, attach, lease-view and
-# AMOD layouts held to the implementation-independent table the C, Go and Rust
-# clients share.
-$(OBJDIR)/tests/test_bus_layout.o: C_FLAGS += -Icore/event_bus/include -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
-$(TESTPREFIX)/unit-test-bus-layout: $(OBJDIR)/tests/test_bus_layout.o \
-                                    $(OBJDIR)/core/event_bus/bus_region.o \
-                                    $(OBJDIR)/core/event_bus/bus_ring.o \
-                                    $(OBJDIR)/core/event_bus/module_protocol.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-$(OBJDIR)/tests/test_module_protocol.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-module-protocol: $(OBJDIR)/tests/test_module_protocol.o \
-                                         $(OBJDIR)/core/event_bus/module_protocol.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-# Event-bus SPSC ring (feature tree slice 2). Pure: no DB, no shared memory —
-# the ring lives in caller-supplied memory, which is what lets it land before
-# the region layout is settled.
-$(OBJDIR)/tests/test_bus_ring.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-ring: $(OBJDIR)/tests/test_bus_ring.o \
-                                  $(OBJDIR)/core/event_bus/bus_ring.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-# Event-bus region layout (feature tree slice 3). Uses memfd_create + mmap; no
-# DB. Links the ring (slice 2) since a queue-pair region contains two rings.
-$(OBJDIR)/tests/test_bus_region.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-region: $(OBJDIR)/tests/test_bus_region.o \
-                                    $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_ring.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-# Event-bus arena lease allocator (feature tree slice 4). Host-private; no shared
-# memory of its own, no DB — it manages spans over a caller-supplied buffer.
-$(OBJDIR)/tests/test_bus_arena.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-arena: $(OBJDIR)/tests/test_bus_arena.o \
-                                   $(OBJDIR)/core/event_bus/bus_arena.o \
-                                   $(OBJDIR)/core/event_bus/bus_region.o \
-                                   $(OBJDIR)/core/event_bus/bus_ring.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-# Event-bus host: admission, fd passing, reaping (feature tree slice 5). Uses
-# memfd + socketpair; no DB. Links region, ring and arena.
-$(OBJDIR)/tests/test_bus_host.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-host: $(OBJDIR)/tests/test_bus_host.o \
-                                  $(OBJDIR)/core/event_bus/bus_attach.o \
-                                  $(OBJDIR)/core/event_bus/bus_host.o \
-                                  $(OBJDIR)/core/event_bus/bus_route.o \
-                                  $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                  $(OBJDIR)/core/event_bus/bus_ring.o \
-                                  $(OBJDIR)/core/event_bus/bus_arena.o \
-                                  $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-# Event-bus routing + tap (feature tree slice 6).
-$(OBJDIR)/tests/test_bus_route.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-route: $(OBJDIR)/tests/test_bus_route.o \
-                                   $(OBJDIR)/core/event_bus/bus_attach.o \
-                                   $(OBJDIR)/core/event_bus/bus_host.o \
-                                   $(OBJDIR)/core/event_bus/bus_route.o \
-                                   $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                   $(OBJDIR)/core/event_bus/bus_ring.o \
-                                   $(OBJDIR)/core/event_bus/bus_arena.o \
-                                   $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
 # Event-bus flow control (feature tree slice 7).
-$(OBJDIR)/tests/test_bus_flow.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
                                   $(OBJDIR)/config_client_contract.o $(PLATFORM_BASIC_OBJS) \
                                   $(OBS_BUS_LINK_OBJS) \
@@ -3155,90 +3046,49 @@ $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
                                   $(OBJDIR)/dstr.o \
                                   $(OBJDIR)/log.o \
                                   $(OBJDIR)/cJSON.o \
-                                  $(OBJDIR)/core/event_bus/bus_client.o \
-                                  $(OBJDIR)/core/event_bus/bus_attach.o \
-                                  $(OBJDIR)/core/event_bus/bus_host.o \
-                                  $(OBJDIR)/core/event_bus/bus_route.o \
-                                  $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                  $(OBJDIR)/core/event_bus/bus_ring.o \
-                                  $(OBJDIR)/core/event_bus/bus_arena.o \
-                                  $(OBJDIR)/core/event_bus/bus_wire.o \
-                                  $(OBJDIR)/core/event_bus/bus_capture.o \
+                                  $(OBJDIR)/ouroboros-ring/client.o \
+                                  $(OBJDIR)/ouroboros-ring/attach.o \
+                                  $(OBJDIR)/ouroboros-ring/host.o \
+                                  $(OBJDIR)/ouroboros-ring/route.o \
+                                  $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                  $(OBJDIR)/ouroboros-ring/ring.o \
+                                  $(OBJDIR)/ouroboros-ring/arena.o \
+                                  $(OBJDIR)/ouroboros-ring/wire.o \
+                                  $(OBJDIR)/ouroboros-ring/capture.o \
                                   $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
-
-# Event-bus C reference client (feature tree slice 8).
-$(OBJDIR)/tests/test_bus_client.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-client: $(OBJDIR)/tests/test_bus_client.o \
-                                    $(OBJDIR)/core/event_bus/bus_client.o \
-                                    $(OBJDIR)/core/event_bus/bus_attach.o \
-                                    $(OBJDIR)/core/event_bus/bus_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_route.o \
-                                    $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_ring.o \
-                                    $(OBJDIR)/core/event_bus/bus_arena.o \
-                                    $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-$(OBJDIR)/tests/test_bus_endpoint.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-endpoint: $(OBJDIR)/tests/test_bus_endpoint.o \
-                                      $(OBJDIR)/core/event_bus/bus_endpoint.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-.PHONY: unit-test-bus-endpoint
-unit-test-bus-endpoint: $(TESTPREFIX)/unit-test-bus-endpoint
-	$<
-
-$(OBJDIR)/tests/test_bus_runtime.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-runtime: $(OBJDIR)/tests/test_bus_runtime.o \
-                                     $(OBJDIR)/core/event_bus/bus_runtime.o \
-                                     $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                                     $(OBJDIR)/core/event_bus/bus_client.o \
-                                     $(OBJDIR)/core/event_bus/bus_attach.o \
-                                     $(OBJDIR)/core/event_bus/bus_host.o \
-                                     $(OBJDIR)/core/event_bus/bus_route.o \
-                                     $(OBJDIR)/core/event_bus/bus_region.o \
-                                     $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                     $(OBJDIR)/core/event_bus/bus_ring.o \
-                                     $(OBJDIR)/core/event_bus/bus_arena.o \
-                                     $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: unit-test-bus-runtime
-unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
-	$<
 
 # The conformance run drives every component in process-contracts.json, so this
 # test names their event kinds -- including execution-policy's, whose include
 # root is granted per-object rather than in the base flags.
-$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include \
+$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += \
                                                   -Imodules/execution-policy/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
-                                        $(OBJDIR)/core/event_bus/module_client.o \
-                                        $(OBJDIR)/core/event_bus/module_runtime.o \
-                                        $(OBJDIR)/core/event_bus/module_protocol.o \
-                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
-                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                                        $(OBJDIR)/core/event_bus/bus_client.o \
-                                        $(OBJDIR)/core/event_bus/bus_attach.o \
-                                        $(OBJDIR)/core/event_bus/bus_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_route.o \
-                                        $(OBJDIR)/core/event_bus/bus_region.o \
-                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_ring.o \
-                                        $(OBJDIR)/core/event_bus/bus_arena.o \
-                                        $(OBJDIR)/core/event_bus/bus_wire.o \
+                                        $(OBJDIR)/modules/audit/instance_identity.o \
+                                        $(OBJDIR)/ouroboros-ring/module_client.o \
+                                        $(OBJDIR)/ouroboros-ring/module_runtime.o \
+                                        $(OBJDIR)/ouroboros-ring/module_protocol.o \
+                                        $(OBJDIR)/ouroboros-ring/runtime.o \
+                                        $(OBJDIR)/ouroboros-ring/endpoint.o \
+                                        $(OBJDIR)/ouroboros-ring/client.o \
+                                        $(OBJDIR)/ouroboros-ring/attach.o \
+                                        $(OBJDIR)/ouroboros-ring/host.o \
+                                        $(OBJDIR)/ouroboros-ring/route.o \
+                                        $(OBJDIR)/ouroboros-ring/region.o \
+                                        $(OBJDIR)/ouroboros-ring/region_host.o \
+                                        $(OBJDIR)/ouroboros-ring/ring.o \
+                                        $(OBJDIR)/ouroboros-ring/arena.o \
+                                        $(OBJDIR)/ouroboros-ring/wire.o \
                                         $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
-$(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
-$(OBJDIR)/tests/test_module_json_call.o: C_FLAGS += -Icore/event_bus/include
+$(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Imodules/sandbox/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
                                         $(OBJDIR)/config_client_contract.o \
                                         $(OBJDIR)/server/module_stage_adapters.o \
                                         $(OBJDIR)/module_commands.o \
                                         $(OBJDIR)/module_json_call.o \
-                                        $(OBJDIR)/cJSON.o $(CORE_EVENT_BUS_LIB)
+                                        $(OBJDIR)/cJSON.o $(OURO_RING_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 unit-test-module-json-call: $(TESTPREFIX)/unit-test-module-json-call
@@ -3253,7 +3103,6 @@ $(TESTPREFIX)/unit-test-delegate-egress-adapter: \
 unit-test-delegate-egress-adapter: $(TESTPREFIX)/unit-test-delegate-egress-adapter
 	$<
 
-$(OBJDIR)/tests/test_economizer_module_client.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-economizer-module-client: \
                                         $(OBJDIR)/tests/test_economizer_module_client.o \
                                         $(OBJDIR)/modules/economizer/economizer_module_client.o \
@@ -3278,8 +3127,8 @@ unit-test-sandbox-learned-observe: $(TESTPREFIX)/unit-test-sandbox-learned-obser
 unit-test-module-runtime: $(TESTPREFIX)/unit-test-module-runtime
 	$<
 
-$(OBJDIR)/tests/test_routing_module.o: C_FLAGS += -Icore/event_bus/include -Imodules/routing/include
-$(OBJDIR)/modules/routing/module_adapter.o: C_FLAGS += -Icore/event_bus/include -Imodules/routing/include
+$(OBJDIR)/tests/test_routing_module.o: C_FLAGS += -Imodules/routing/include
+$(OBJDIR)/modules/routing/module_adapter.o: C_FLAGS += -Imodules/routing/include
 $(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
                                         $(OBJDIR)/modules/routing/module_adapter.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
@@ -3299,7 +3148,6 @@ postgres-knowledge-replay: tests/test_postgres_local_session.c
 	@test -n "$$AIMEE_KB_STORE_REPLAY_URL" || { echo "postgres-knowledge-replay requires an isolated replay database" >&2; exit 1; }
 	cd ../server-go && AIMEE_MEMORY_REPLAY_REQUIRED=1 go test -race -count=1 ./modules/memory -run '^TestMemoryRuntimeRoleReplay$$'
 	cd ../server-go && AIMEE_DB_TEST_URL="$$AIMEE_KB_STORE_REPLAY_URL" AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 ./modules/postgres
-
 
 # Live workflow tests must not silently skip because a binary or database is
 # absent. Each fixture owns an isolated schema and restricted runtime role.
@@ -3347,51 +3195,18 @@ unit-tests-pg:
 	$(MAKE) AIMEE_TEST_PG=1 kb-store-test-template
 	$(MAKE) AIMEE_TEST_PG=1 unit-tests
 
-
-# Event-bus conformance host harness (feature tree slice 10). A test binary that
-# exposes the C host on a Unix socket so the Go reference client can interoperate
-# with it across a process boundary. Never linked into a shipping target.
-$(OBJDIR)/tests/bus_conformance_host.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/bus-conformance-host: $(OBJDIR)/tests/bus_conformance_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_client.o \
-                                    $(OBJDIR)/core/event_bus/bus_attach.o \
-                                    $(OBJDIR)/core/event_bus/bus_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_route.o \
-                                    $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                    $(OBJDIR)/core/event_bus/bus_ring.o \
-                                    $(OBJDIR)/core/event_bus/bus_arena.o \
-                                    $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: bus-conformance-host
-bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
-
-# Event-bus capture + observational replay (feature tree slice 11).
-$(OBJDIR)/tests/test_bus_capture.o: C_FLAGS += -Icore/event_bus/include
-$(TESTPREFIX)/unit-test-bus-capture: $(OBJDIR)/tests/test_bus_capture.o \
-                                     $(OBJDIR)/core/event_bus/bus_capture.o \
-                                     $(OBJDIR)/core/event_bus/bus_client.o \
-                                     $(OBJDIR)/core/event_bus/bus_attach.o \
-                                     $(OBJDIR)/core/event_bus/bus_host.o \
-                                     $(OBJDIR)/core/event_bus/bus_route.o \
-                                     $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                     $(OBJDIR)/core/event_bus/bus_ring.o \
-                                     $(OBJDIR)/core/event_bus/bus_arena.o \
-                                     $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
 # Event-bus dispatch benchmark (feature tree slice 12). Built -O2 for a realistic
 # measurement; a test binary, never linked into a shipping target.
-$(OBJDIR)/tests/bus_bench.o: C_FLAGS += -Icore/event_bus/include -O2
+$(OBJDIR)/tests/bus_bench.o: C_FLAGS += -O2
 $(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
-                        $(OBJDIR)/core/event_bus/bus_client.o \
-                        $(OBJDIR)/core/event_bus/bus_attach.o \
-                        $(OBJDIR)/core/event_bus/bus_host.o \
-                        $(OBJDIR)/core/event_bus/bus_route.o \
-                        $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                        $(OBJDIR)/core/event_bus/bus_ring.o \
-                        $(OBJDIR)/core/event_bus/bus_arena.o \
-                        $(OBJDIR)/core/event_bus/bus_wire.o
+                        $(OBJDIR)/ouroboros-ring/client.o \
+                        $(OBJDIR)/ouroboros-ring/attach.o \
+                        $(OBJDIR)/ouroboros-ring/host.o \
+                        $(OBJDIR)/ouroboros-ring/route.o \
+                        $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                        $(OBJDIR)/ouroboros-ring/ring.o \
+                        $(OBJDIR)/ouroboros-ring/arena.o \
+                        $(OBJDIR)/ouroboros-ring/wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 .PHONY: bus-bench
@@ -3408,8 +3223,6 @@ bus-bench: $(TESTPREFIX)/bus-bench
 #
 # It needs Go. A missing toolchain fails the target rather than skipping it:
 # skipping would silently retire the only correctness coverage the ledger has.
-$(OBJDIR)/tests/test_git_verify_state_bus.o: C_FLAGS += -Icore/event_bus/include
-
 # Every Go source the binary is built from, not just the two directories it
 # served when it was git-only: a family edited without a rebuild here means
 # the suites test the previous binary and say nothing about it.
@@ -3449,7 +3262,6 @@ unit-test-git-verify-state-bus: $(TESTPREFIX)/unit-test-git-verify-state-bus $(O
 # A second, distinct module over the bus: the real config_autonomy_lookup served
 # as a request/reply and checked against a direct call (proves the RPC pattern is
 # not memory-specific). Reuses BUS_MEM_OBJS for config + its deps. Test binary only.
-$(OBJDIR)/tests/test_bus_config_autonomy.o: C_FLAGS += -Icore/event_bus/include
 # The config surface plus the basics, for tests that stand up a real bus.
 #
 # This used to carry the C store's memory domain as well -- user_memory.o, db.o,
@@ -3496,37 +3308,35 @@ unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
 # migrated onto the bus. Emits N rows through the real obs_bus producer/consumer
 # and requires the real ledger to hold exactly N, each once, zero drops. Links
 # obs_bus + audit_ledger + the bus + the shared support objects. Test binary only.
-$(OBJDIR)/tests/test_bus_audit_durability.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_durability.o \
                                               $(OBS_BUS_LINK_OBJS) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
-                                              $(OBJDIR)/core/event_bus/bus_client.o \
-                                              $(OBJDIR)/core/event_bus/bus_attach.o \
-                                              $(OBJDIR)/core/event_bus/bus_host.o \
-                                              $(OBJDIR)/core/event_bus/bus_route.o \
-                                              $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                              $(OBJDIR)/core/event_bus/bus_ring.o \
-                                              $(OBJDIR)/core/event_bus/bus_arena.o \
-                                              $(OBJDIR)/core/event_bus/bus_wire.o \
-                                              $(OBJDIR)/core/event_bus/bus_capture.o \
+                                              $(OBJDIR)/ouroboros-ring/client.o \
+                                              $(OBJDIR)/ouroboros-ring/attach.o \
+                                              $(OBJDIR)/ouroboros-ring/host.o \
+                                              $(OBJDIR)/ouroboros-ring/route.o \
+                                              $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                              $(OBJDIR)/ouroboros-ring/ring.o \
+                                              $(OBJDIR)/ouroboros-ring/arena.o \
+                                              $(OBJDIR)/ouroboros-ring/wire.o \
+                                              $(OBJDIR)/ouroboros-ring/capture.o \
                                               $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
-
 
 $(TESTPREFIX)/unit-test-obs-bus-module-concurrency: $(OBJDIR)/tests/test_obs_bus_module_concurrency.o \
                                               $(OBS_BUS_LINK_OBJS) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
-                                              $(OBJDIR)/core/event_bus/bus_client.o \
-                                              $(OBJDIR)/core/event_bus/bus_attach.o \
-                                              $(OBJDIR)/core/event_bus/bus_host.o \
-                                              $(OBJDIR)/core/event_bus/bus_route.o \
-                                              $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                              $(OBJDIR)/core/event_bus/bus_ring.o \
-                                              $(OBJDIR)/core/event_bus/bus_arena.o \
-                                              $(OBJDIR)/core/event_bus/bus_wire.o \
-                                              $(OBJDIR)/core/event_bus/bus_capture.o \
+                                              $(OBJDIR)/ouroboros-ring/client.o \
+                                              $(OBJDIR)/ouroboros-ring/attach.o \
+                                              $(OBJDIR)/ouroboros-ring/host.o \
+                                              $(OBJDIR)/ouroboros-ring/route.o \
+                                              $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                              $(OBJDIR)/ouroboros-ring/ring.o \
+                                              $(OBJDIR)/ouroboros-ring/arena.o \
+                                              $(OBJDIR)/ouroboros-ring/wire.o \
+                                              $(OBJDIR)/ouroboros-ring/capture.o \
                                               $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3538,20 +3348,19 @@ unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
 # speed). Emits N rows, then reads the real capture file back and requires every
 # governed-action row to replay in order, reconstructed field-for-field. Same
 # link set as durability plus bus_capture.o. Test binary only.
-$(OBJDIR)/tests/test_bus_audit_replay.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-audit-replay: $(OBJDIR)/tests/test_bus_audit_replay.o \
                                           $(OBS_BUS_LINK_OBJS) \
                                           $(OBJDIR)/modules/audit/audit_ledger.o \
                                           $(OBJDIR)/aimee_home.o \
-                                          $(OBJDIR)/core/event_bus/bus_client.o \
-                                          $(OBJDIR)/core/event_bus/bus_attach.o \
-                                          $(OBJDIR)/core/event_bus/bus_host.o \
-                                          $(OBJDIR)/core/event_bus/bus_route.o \
-                                          $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                          $(OBJDIR)/core/event_bus/bus_ring.o \
-                                          $(OBJDIR)/core/event_bus/bus_arena.o \
-                                          $(OBJDIR)/core/event_bus/bus_wire.o \
-                                          $(OBJDIR)/core/event_bus/bus_capture.o \
+                                          $(OBJDIR)/ouroboros-ring/client.o \
+                                          $(OBJDIR)/ouroboros-ring/attach.o \
+                                          $(OBJDIR)/ouroboros-ring/host.o \
+                                          $(OBJDIR)/ouroboros-ring/route.o \
+                                          $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                          $(OBJDIR)/ouroboros-ring/ring.o \
+                                          $(OBJDIR)/ouroboros-ring/arena.o \
+                                          $(OBJDIR)/ouroboros-ring/wire.o \
+                                          $(OBJDIR)/ouroboros-ring/capture.o \
                                           $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3561,20 +3370,19 @@ unit-test-bus-audit-replay: $(TESTPREFIX)/unit-test-bus-audit-replay
 
 # audit-on-bus capture RETENTION: a restart retains prior sessions' replay streams
 # but the files stay bounded. Same link set as replay/durability.
-$(OBJDIR)/tests/test_bus_audit_retention.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_retention.o \
                                              $(OBS_BUS_LINK_OBJS) \
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/core/event_bus/bus_client.o \
-                                             $(OBJDIR)/core/event_bus/bus_attach.o \
-                                             $(OBJDIR)/core/event_bus/bus_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_route.o \
-                                             $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_ring.o \
-                                             $(OBJDIR)/core/event_bus/bus_arena.o \
-                                             $(OBJDIR)/core/event_bus/bus_wire.o \
-                                             $(OBJDIR)/core/event_bus/bus_capture.o \
+                                             $(OBJDIR)/ouroboros-ring/client.o \
+                                             $(OBJDIR)/ouroboros-ring/attach.o \
+                                             $(OBJDIR)/ouroboros-ring/host.o \
+                                             $(OBJDIR)/ouroboros-ring/route.o \
+                                             $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                             $(OBJDIR)/ouroboros-ring/ring.o \
+                                             $(OBJDIR)/ouroboros-ring/arena.o \
+                                             $(OBJDIR)/ouroboros-ring/wire.o \
+                                             $(OBJDIR)/ouroboros-ring/capture.o \
                                              $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3584,22 +3392,27 @@ unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
 
 # Capture absence and pruning must be readable back from the real SQLite WORM
 # ledger, not merely observed through a test callback.
-$(OBJDIR)/tests/test_bus_capture_gaps.o: C_FLAGS += -Icore/event_bus/include
+# aimee's instance roles and first-boot identity latch, moved out of the ring.
+$(TESTPREFIX)/unit-test-instance-identity: $(OBJDIR)/tests/test_instance_identity.o \
+                                           $(OBJDIR)/modules/audit/instance_identity.o \
+                                           $(OURO_RING_LIB)
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
 $(TESTPREFIX)/unit-test-bus-capture-gaps: $(OBJDIR)/tests/test_bus_capture_gaps.o \
                                              $(OBS_BUS_LINK_OBJS) \
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(TEST_WORM_OBJS) \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/core/event_bus/bus_client.o \
-                                             $(OBJDIR)/core/event_bus/bus_attach.o \
-                                             $(OBJDIR)/core/event_bus/bus_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_route.o \
-                                             $(OBJDIR)/core/event_bus/bus_region.o \
-                                             $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_ring.o \
-                                             $(OBJDIR)/core/event_bus/bus_arena.o \
-                                             $(OBJDIR)/core/event_bus/bus_wire.o \
-                                             $(OBJDIR)/core/event_bus/bus_capture.o \
+                                             $(OBJDIR)/ouroboros-ring/client.o \
+                                             $(OBJDIR)/ouroboros-ring/attach.o \
+                                             $(OBJDIR)/ouroboros-ring/host.o \
+                                             $(OBJDIR)/ouroboros-ring/route.o \
+                                             $(OBJDIR)/ouroboros-ring/region.o \
+                                             $(OBJDIR)/ouroboros-ring/region_host.o \
+                                             $(OBJDIR)/ouroboros-ring/ring.o \
+                                             $(OBJDIR)/ouroboros-ring/arena.o \
+                                             $(OBJDIR)/ouroboros-ring/wire.o \
+                                             $(OBJDIR)/ouroboros-ring/capture.o \
                                              $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3619,21 +3432,20 @@ unit-test-execution-policy-bus: $(TESTPREFIX)/unit-test-execution-policy-bus
 
 # The operator replay TOOL (audit_replay.c, behind aimee-server --audit-replay):
 # render a capture file's governed-action rows. Adds audit_replay.o to the set.
-$(OBJDIR)/tests/test_bus_audit_replay_tool.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_replay_tool.o \
                                                $(OBS_BUS_LINK_OBJS) \
                                                $(OBJDIR)/modules/audit/audit_replay.o \
                                                $(OBJDIR)/modules/audit/audit_ledger.o \
                                                $(OBJDIR)/aimee_home.o \
-                                               $(OBJDIR)/core/event_bus/bus_client.o \
-                                               $(OBJDIR)/core/event_bus/bus_attach.o \
-                                               $(OBJDIR)/core/event_bus/bus_host.o \
-                                               $(OBJDIR)/core/event_bus/bus_route.o \
-                                               $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                               $(OBJDIR)/core/event_bus/bus_ring.o \
-                                               $(OBJDIR)/core/event_bus/bus_arena.o \
-                                               $(OBJDIR)/core/event_bus/bus_wire.o \
-                                               $(OBJDIR)/core/event_bus/bus_capture.o \
+                                               $(OBJDIR)/ouroboros-ring/client.o \
+                                               $(OBJDIR)/ouroboros-ring/attach.o \
+                                               $(OBJDIR)/ouroboros-ring/host.o \
+                                               $(OBJDIR)/ouroboros-ring/route.o \
+                                               $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                               $(OBJDIR)/ouroboros-ring/ring.o \
+                                               $(OBJDIR)/ouroboros-ring/arena.o \
+                                               $(OBJDIR)/ouroboros-ring/wire.o \
+                                               $(OBJDIR)/ouroboros-ring/capture.o \
                                                $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3658,15 +3470,15 @@ $(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o 
                                          $(OBJDIR)/modules/vault/vault_kek_cache.o \
                                          $(OBJDIR)/modules/vault/vault_server_key.o \
                                          $(OBJDIR)/aimee_home.o \
-                                         $(OBJDIR)/core/event_bus/bus_client.o \
-                                         $(OBJDIR)/core/event_bus/bus_attach.o \
-                                         $(OBJDIR)/core/event_bus/bus_host.o \
-                                         $(OBJDIR)/core/event_bus/bus_route.o \
-                                         $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                         $(OBJDIR)/core/event_bus/bus_ring.o \
-                                         $(OBJDIR)/core/event_bus/bus_arena.o \
-                                         $(OBJDIR)/core/event_bus/bus_wire.o \
-                                         $(OBJDIR)/core/event_bus/bus_capture.o \
+                                         $(OBJDIR)/ouroboros-ring/client.o \
+                                         $(OBJDIR)/ouroboros-ring/attach.o \
+                                         $(OBJDIR)/ouroboros-ring/host.o \
+                                         $(OBJDIR)/ouroboros-ring/route.o \
+                                         $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                         $(OBJDIR)/ouroboros-ring/ring.o \
+                                         $(OBJDIR)/ouroboros-ring/arena.o \
+                                         $(OBJDIR)/ouroboros-ring/wire.o \
+                                         $(OBJDIR)/ouroboros-ring/capture.o \
                                          $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3689,15 +3501,15 @@ $(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audi
                                            $(OBJDIR)/modules/audit/audit_action.o \
                                            $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                            $(OBJDIR)/aimee_home.o \
-                                           $(OBJDIR)/core/event_bus/bus_client.o \
-                                           $(OBJDIR)/core/event_bus/bus_attach.o \
-                                           $(OBJDIR)/core/event_bus/bus_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_route.o \
-                                           $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_ring.o \
-                                           $(OBJDIR)/core/event_bus/bus_arena.o \
-                                           $(OBJDIR)/core/event_bus/bus_wire.o \
-                                           $(OBJDIR)/core/event_bus/bus_capture.o \
+                                           $(OBJDIR)/ouroboros-ring/client.o \
+                                           $(OBJDIR)/ouroboros-ring/attach.o \
+                                           $(OBJDIR)/ouroboros-ring/host.o \
+                                           $(OBJDIR)/ouroboros-ring/route.o \
+                                           $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                           $(OBJDIR)/ouroboros-ring/ring.o \
+                                           $(OBJDIR)/ouroboros-ring/arena.o \
+                                           $(OBJDIR)/ouroboros-ring/wire.o \
+                                           $(OBJDIR)/ouroboros-ring/capture.o \
                                            $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3717,15 +3529,15 @@ $(TESTPREFIX)/unit-test-bus-tool-completion: $(OBJDIR)/tests/test_bus_tool_compl
                                              $(OBJDIR)/modules/audit/audit_action.o \
                                              $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/core/event_bus/bus_client.o \
-                                             $(OBJDIR)/core/event_bus/bus_attach.o \
-                                             $(OBJDIR)/core/event_bus/bus_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_route.o \
-                                             $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                             $(OBJDIR)/core/event_bus/bus_ring.o \
-                                             $(OBJDIR)/core/event_bus/bus_arena.o \
-                                             $(OBJDIR)/core/event_bus/bus_wire.o \
-                                             $(OBJDIR)/core/event_bus/bus_capture.o \
+                                             $(OBJDIR)/ouroboros-ring/client.o \
+                                             $(OBJDIR)/ouroboros-ring/attach.o \
+                                             $(OBJDIR)/ouroboros-ring/host.o \
+                                             $(OBJDIR)/ouroboros-ring/route.o \
+                                             $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                             $(OBJDIR)/ouroboros-ring/ring.o \
+                                             $(OBJDIR)/ouroboros-ring/arena.o \
+                                             $(OBJDIR)/ouroboros-ring/wire.o \
+                                             $(OBJDIR)/ouroboros-ring/capture.o \
                                              $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3744,15 +3556,15 @@ $(TESTPREFIX)/unit-test-bus-memory-audit: $(OBJDIR)/tests/test_bus_memory_audit.
                                           $(OBJDIR)/modules/audit/audit_action.o \
                                           $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                           $(OBJDIR)/aimee_home.o \
-                                          $(OBJDIR)/core/event_bus/bus_client.o \
-                                          $(OBJDIR)/core/event_bus/bus_attach.o \
-                                          $(OBJDIR)/core/event_bus/bus_host.o \
-                                          $(OBJDIR)/core/event_bus/bus_route.o \
-                                          $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                          $(OBJDIR)/core/event_bus/bus_ring.o \
-                                          $(OBJDIR)/core/event_bus/bus_arena.o \
-                                          $(OBJDIR)/core/event_bus/bus_wire.o \
-                                          $(OBJDIR)/core/event_bus/bus_capture.o \
+                                          $(OBJDIR)/ouroboros-ring/client.o \
+                                          $(OBJDIR)/ouroboros-ring/attach.o \
+                                          $(OBJDIR)/ouroboros-ring/host.o \
+                                          $(OBJDIR)/ouroboros-ring/route.o \
+                                          $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                          $(OBJDIR)/ouroboros-ring/ring.o \
+                                          $(OBJDIR)/ouroboros-ring/arena.o \
+                                          $(OBJDIR)/ouroboros-ring/wire.o \
+                                          $(OBJDIR)/ouroboros-ring/capture.o \
                                           $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
@@ -3762,74 +3574,33 @@ unit-test-bus-memory-audit: $(TESTPREFIX)/unit-test-bus-memory-audit
 
 # Shutdown race: concurrent producers vs obs_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
-$(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_race.o \
                                            $(OBJDIR)/server/obs_bus_adapter.o \
                                            $(TEST_WORM_OBJS) \
                                            $(OBS_BUS_LINK_OBJS) \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/aimee_home.o \
-                                           $(OBJDIR)/core/event_bus/bus_client.o \
-                                           $(OBJDIR)/core/event_bus/bus_attach.o \
-                                           $(OBJDIR)/core/event_bus/bus_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_route.o \
-                                           $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_ring.o \
-                                           $(OBJDIR)/core/event_bus/bus_arena.o \
-                                           $(OBJDIR)/core/event_bus/bus_wire.o \
-                                           $(OBJDIR)/core/event_bus/bus_capture.o \
+                                           $(OBJDIR)/ouroboros-ring/client.o \
+                                           $(OBJDIR)/ouroboros-ring/attach.o \
+                                           $(OBJDIR)/ouroboros-ring/host.o \
+                                           $(OBJDIR)/ouroboros-ring/route.o \
+                                           $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
+                                           $(OBJDIR)/ouroboros-ring/ring.o \
+                                           $(OBJDIR)/ouroboros-ring/arena.o \
+                                           $(OBJDIR)/ouroboros-ring/wire.o \
+                                           $(OBJDIR)/ouroboros-ring/capture.o \
                                       $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread $(PQ_LIB)
 
 .PHONY: unit-test-bus-shutdown-race
 unit-test-bus-shutdown-race: $(TESTPREFIX)/unit-test-bus-shutdown-race
 	$<
 
-.PHONY: unit-test-bus-capture
-unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
-	$<
-
-.PHONY: unit-test-bus-client
-unit-test-bus-client: $(TESTPREFIX)/unit-test-bus-client
-	$<
-
 .PHONY: unit-test-bus-flow
 unit-test-bus-flow: $(TESTPREFIX)/unit-test-bus-flow
-	$<
-
-.PHONY: unit-test-bus-route
-unit-test-bus-route: $(TESTPREFIX)/unit-test-bus-route
-	$<
-
-.PHONY: unit-test-bus-host
-unit-test-bus-host: $(TESTPREFIX)/unit-test-bus-host
-	$<
-
-.PHONY: unit-test-bus-arena
-unit-test-bus-arena: $(TESTPREFIX)/unit-test-bus-arena
-	$<
-
-.PHONY: unit-test-bus-region
-unit-test-bus-region: $(TESTPREFIX)/unit-test-bus-region
-	$<
-
-.PHONY: unit-test-bus-ring
-unit-test-bus-ring: $(TESTPREFIX)/unit-test-bus-ring
-	$<
-
-.PHONY: unit-test-bus-layout
-unit-test-bus-layout: $(TESTPREFIX)/unit-test-bus-layout
-	$<
-
-.PHONY: unit-test-bus-wire
-unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
-	$<
-
-.PHONY: unit-test-module-protocol
-unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 	$<
 
 # The bus tests are deliberately NOT in TEST_TARGETS -- each needs a special bus
@@ -3845,21 +3616,17 @@ unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 # Order-only: the archive must EXIST before these link, but relinking it must not
 # force every bus test to relink.
 BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
-   unit-test-bus-endpoint unit-test-bus-runtime \
    unit-test-git-verify-state-bus \
    unit-test-bus-config-autonomy \
    unit-test-bus-audit-durability unit-test-bus-audit-replay \
    unit-test-bus-audit-retention unit-test-bus-audit-replay-tool \
    unit-test-bus-vault-audit \
    unit-test-bus-sandbox-audit unit-test-bus-tool-completion \
-   unit-test-bus-memory-audit unit-test-bus-shutdown-race unit-test-bus-capture \
-   unit-test-bus-client unit-test-bus-flow unit-test-bus-route unit-test-bus-host \
-   unit-test-execution-policy-bus \
-   unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire \
-   unit-test-bus-layout)
+   unit-test-bus-memory-audit unit-test-bus-shutdown-race \
+   unit-test-bus-flow \
+   unit-test-execution-policy-bus)
 
 $(BUS_TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
-
 
 # Render-boundary prompt sanitizer (graph-feedback §4 / P0). Pure: no DB.
 $(TESTPREFIX)/unit-test-prompt-sanitizer: $(OBJDIR)/tests/test_prompt_sanitizer.o \
@@ -4058,7 +3825,6 @@ $(TESTPREFIX)/unit-test-report-enrichment: $(OBJDIR)/tests/test_report_enrichmen
                                         $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-
 $(TESTPREFIX)/unit-test-curator-profile: $(OBJDIR)/tests/test_curator_profile.o \
                                          $(OBJDIR)/curator_profile.o \
                                          $(OBJDIR)/hardware_probe.o \
@@ -4231,7 +3997,6 @@ $(TESTPREFIX)/unit-test-notes: $(OBJDIR)/tests/test_notes.o \
                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/tests/test_cmd_delegate.o \
                       $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                              $(OBJDIR)/modules/delegates/delegate_depth.o $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -4278,7 +4043,6 @@ $(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/module
 $(OBJDIR)/tests/test_trigger.o: tests/test_trigger.c server/trigger_scheduler.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(TEST_C_FLAGS) -I. -o $@ $<
-
 
 $(TESTPREFIX)/unit-test-kb-maintenance: $(OBJDIR)/tests/test_kb_maintenance.o \
                              $(OBJDIR)/kb_store/kb_maintenance.o \
@@ -4351,16 +4115,13 @@ $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR
 $(TESTPREFIX)/unit-test-gateway-pipeline: $(OBJDIR)/tests/test_gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_pipeline.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-
 # Slice 7: config-driven stage registry, proven through the shared pipeline.
 $(TESTPREFIX)/unit-test-gw-stage-registry: $(OBJDIR)/tests/test_gw_stage_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/modules/gateway/gateway_pipeline.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-
 # Response-stage registry + runner (Slice 1 of the response seam), self-contained.
 $(TESTPREFIX)/unit-test-gw-response-registry: $(OBJDIR)/tests/test_gw_response_registry.o $(OBJDIR)/pipeline/gw_response_registry.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 
 # Response governance stage (Slice 2): toggle proven via a counting police stub.
 $(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_response_governance_stage.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
@@ -4402,8 +4163,6 @@ $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o: modules/kb_client/k
 	@mkdir -p $(dir $@)
 	$(CC) -c $(TEST_C_FLAGS) -o $@ $<
 
-
-
 $(TESTPREFIX)/unit-test-history: $(OBJDIR)/tests/test_history.o $(OBJDIR)/history.o $(OBJDIR)/cJSON.o \
                          $(OBJDIR)/util.o $(OBJDIR)/text.o \
 $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) \
@@ -4416,15 +4175,12 @@ $(TESTPREFIX)/unit-test-events: $(OBJDIR)/tests/test_events.o $(OBJDIR)/events.o
                                 $(OBJDIR)/posix/events.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
 # deploy_apply.c is #included by the test for its statics, and the two config
 # symbols it calls are stubbed there — so this links nothing else but cJSON,
 # which deploy_apply.c uses to scope `docker compose ps` to the managed services.
 $(TESTPREFIX)/unit-test-deploy-apply: $(OBJDIR)/tests/test_deploy_apply.o \
                                       $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
-
 
 $(TESTPREFIX)/unit-test-file-ref: $(OBJDIR)/tests/test_file_ref.o \
                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -4448,7 +4204,6 @@ $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-wire-fence: \
                                   $(OBJDIR)/tests/test_wire_fence.o \
@@ -4589,7 +4344,6 @@ $(TESTPREFIX)/unit-test-ontology-evolution: $(OBJDIR)/tests/test_ontology_evolut
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
                                $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                $(TEST_DATA_OBJS_MOCK)
@@ -4614,7 +4368,6 @@ $(TESTPREFIX)/unit-test-kb-doc-pdf: $(OBJDIR)/tests/test_kb_doc_pdf.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o \
                                $(OBJDIR)/server/request_context.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4627,9 +4380,6 @@ $(TESTPREFIX)/unit-test-response-dedup: $(OBJDIR)/tests/test_response_dedup.o \
 $(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o \
                                $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-
-
 
 $(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_token_audit_load.o \
                               $(DB1_CLIENT_OBJS) $(OBJDIR)/module_json_call.o \
@@ -4894,12 +4644,6 @@ $(TESTPREFIX)/unit-test-substrate-fixtures: \
                                        $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
-
-
-
-
 $(TESTPREFIX)/unit-test-tool-args-coerce: \
                                        $(OBJDIR)/tests/test_tool_args_coerce.o \
                                        $(OBJDIR)/server/tool_args_coerce.o \
@@ -4952,7 +4696,6 @@ $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
 # DB1_CLIENT_OBJS and NOT the DB1 domain -- linking the domain would answer
 # every call in-process and prove nothing about the module.
 
-
 # The module binary is produced by the bundle exporter, not this Makefile: the
 # process contract owns which sources a module compiles, and duplicating that
 # list here would let the two drift.
@@ -4980,9 +4723,6 @@ $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-
-
-
 $(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_eval.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
@@ -4993,9 +4733,6 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
                                        $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-
-
 
 $(TESTPREFIX)/unit-test-delegate-credentials: \
                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
@@ -5203,7 +4940,6 @@ $(TESTPREFIX)/unit-test-evidence-replay: $(OBJDIR)/tests/test_evidence_replay.o 
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Live forge: the pure check-runs/combined-status -> CI verdict aggregation.
-$(OBJDIR)/tests/test_git_pr_ci_grade.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-git-pr-ci-grade: $(OBJDIR)/tests/test_git_pr_ci_grade.o \
                               $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                               $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
@@ -5668,8 +5404,6 @@ $(TESTPREFIX)/unit-test-vault-bootstrap-privilege: \
                               $(OBJDIR)/server/vault_bootstrap_privilege.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
-
-
 $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/tests/test_vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -5722,7 +5456,6 @@ $(TESTPREFIX)/unit-test-server-ready: $(OBJDIR)/tests/test_server_ready.o \
                            $(OBJDIR)/server/server_ready.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o $(OBJDIR)/dstr.o \
                            $(OBJDIR)/working_profile.o \
@@ -5761,7 +5494,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR
                            \
                            $(TEST_CORE_OBJS) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                           $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                           $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                            $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                           $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5921,7 +5654,6 @@ $(TESTPREFIX)/unit-test-verify-hook: $(OBJDIR)/tests/test_verify_hook.o \
 	                                     $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
 $(TESTPREFIX)/unit-test-process-mgr: $(OBJDIR)/tests/test_process_mgr.o \
                                       $(OBJDIR)/server/server_mcp_process.o \
                                       $(OBJDIR)/server/process_mgr.o $(OBJDIR)/cJSON.o
@@ -5958,10 +5690,6 @@ $(TESTPREFIX)/unit-test-agent-loop: $(OBJDIR)/tests/test_agent_loop.o \
                                      $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-
-
-
-
 # DB1 server-owned per-model price table (ingress-cost-accounting §2).
 
 $(TESTPREFIX)/unit-test-provider-client: $(OBJDIR)/tests/test_provider_client.o \
@@ -5995,8 +5723,6 @@ $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/
                                      $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
 $(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/tests/test_tool_validation.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -6004,8 +5730,6 @@ $(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/tests/test_tool_validation.o 
 $(TESTPREFIX)/unit-test-turn-narration: $(OBJDIR)/tests/test_turn_narration.o \
                                          $(OBJDIR)/turn_narration.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
-
 
 $(TESTPREFIX)/unit-test-cli-session: $(OBJDIR)/tests/test_cli_session.o \
                      $(OBJDIR)/server/cli_session.o \
@@ -6087,7 +5811,7 @@ $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
                            $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(OURO_RING_LIB)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-enroll: $(OBJDIR)/tests/test_kb_enroll.o \
@@ -6303,14 +6027,10 @@ $(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-
-
 $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
                      $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 # Go memory mutations, transaction rollback, authenticated publication and the
 # real daemon ledger. The former C hook fixture has been retired.
@@ -6318,7 +6038,6 @@ $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
 unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-bus-memory-audit
 	@test -n "$(AIMEE_KB_STORE_REPLAY_URL)" || { echo "AIMEE_KB_STORE_REPLAY_URL is required for the memory audit replay" >&2; exit 1; }
 	cd ../server-go && AIMEE_AUDIT_LEDGER_FIXTURE="$(abspath $<)" go test -count=1 ./modules/audit ./modules/memory -run '^(TestAction|TestMutationAudit|TestMemoryRuntimeRoleReplay)'
-
 
 # Pure helpers extracted from session_start_emit; the header is static-inline so
 # only cJSON.o is needed at link time.
@@ -6332,18 +6051,18 @@ $(TESTPREFIX)/unit-test-session-brief: $(OBJDIR)/tests/test_session_brief.o \
 
 $(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolve.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
-                     $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
+                     $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/curiosity_resolve.o \
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
-                     $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
+                     $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(OBJDIR)/modules/learning/learning_approach_memory.o \
                      $(OBJDIR)/modules/learning/learning_endogeneity.o \
@@ -6357,9 +6076,9 @@ $(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attr
 
 $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
-                     $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
+                     $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
@@ -6372,9 +6091,9 @@ $(TESTPREFIX)/unit-test-learning-eval-synthesis: $(OBJDIR)/tests/test_learning_e
 
 $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
+                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
-                     $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
+                     $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_endogeneity.o \
@@ -6392,7 +6111,6 @@ $(TESTPREFIX)/unit-test-integrity-gate: $(OBJDIR)/tests/test_integrity_gate.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-
 # Manual-inspection harness for the virtual-context rollout (AC#2/AC#3). Drives
 # the real record->flush->assemble->search->expand path with the flag on and
 # prints reviewer evidence. Source lives under tests/eval/ (outside src/tests).
@@ -6404,8 +6122,6 @@ $(TESTPREFIX)/virtual-context-inspect: $(OBJDIR)/tests/inspect_real_session.o \
                      \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-
 
 $(TESTPREFIX)/unit-test-kb-scope: $(OBJDIR)/tests/test_kb_scope.o \
                      $(OBJDIR)/kb/kb_scope.o $(PLATFORM_BASIC_OBJS)
@@ -6810,8 +6526,6 @@ $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
 
 # guardrails_semantic.o -> obs_bus_emit_guardrail, so this test now links the
 # bus (gsem_record records over it) plus the bus's own deps.
-$(OBJDIR)/tests/test_guardrails_semantic.o: C_FLAGS += -Icore/event_bus/include
-
 # Links the config closure rather than L_MINIMAL: computer_use_policy_from_config
 # reads its policy through the accessors now, so the
 # minimal link can no longer resolve it.
@@ -6824,7 +6538,6 @@ $(TESTPREFIX)/unit-test-osv-check: $(OBJDIR)/tests/test_osv_check.o \
                      $(OBJDIR)/server/osv_check.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o \
                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
@@ -6959,7 +6672,6 @@ $(TESTPREFIX)/unit-test-http-content-encoding: \
     $(OBJDIR)/tests/test_http_content_encoding.o $(OBJDIR)/http_content_encoding.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lz
 
-
 # Runtime credentials are a low-level process service used by config and client
 # code. Keep every standard unit binary link-complete even when a narrow test
 # enumerates those objects instead of using TEST_CORE_OBJS; LTO removes the
@@ -6988,7 +6700,7 @@ $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
 # archive exists therefore never reached them, and on a cold tree each one fails
 # at the link with "cannot find build/obj/libaimee-core-connection.a" rather than
 # anything about the test. Give them the same edge, for the same reason.
-$(TEST_KB_RUNTIME_TARGETS): $(OBJDIR)/modules/audit/obs_bus.o $(CORE_EVENT_BUS_LIB) | \
+$(TEST_KB_RUNTIME_TARGETS): $(OBJDIR)/modules/audit/obs_bus.o $(OURO_RING_LIB) | \
   $(CORE_CONNECTION_LIB)
 
 # ---------------------------------------------------------------- benchmark probes
@@ -7028,9 +6740,6 @@ $(OBJDIR)/aimee-providers-fixture: $(wildcard ../server-go/modules/providers/*.g
 	@mkdir -p $(dir $@)
 	cd ../server-go && $(GO) build -o "$(abspath $@)" ./modules/providers/testdata/nativefixture
 
-
-
-$(OBJDIR)/tests/test_module_commands.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-commands: $(OBJDIR)/tests/test_module_commands.o \
     $(OBJDIR)/module_commands.o $(OBJDIR)/command_registry.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
@@ -7092,8 +6801,6 @@ $(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchm
 
 $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
-
-
 
 $(TESTPREFIX)/unit-test-agent-memory-transport: $(OBJDIR)/tests/test_agent_memory_transport.o $(OBJDIR)/posix/td_search_render.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
@@ -7313,3 +7020,37 @@ $(TESTPREFIX)/unit-test-runtime-state-lookup: $(OBJDIR)/tests/test_runtime_state
 
 $(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+# Test binaries outside TEST_TARGETS and BUS_TEST_TARGETS that still link the core
+# archives through L_MINIMAL, L_CORE or L_FULL. With no rule ordering them after the
+# archives, a parallel build linked them while `ar` was still writing: PR #3064's
+# CI (2026-10-27) failed with "cannot find build/obj/libaimee-core-codec.a" for
+# mock-mcp-server and unit-test-bus-guardrail-durability-emit. The list is every
+# such target `make -p` reported that day; a new one belongs here or in TEST_TARGETS.
+CORE_LIB_LINKED_EXTRA_TARGETS := $(addprefix $(TESTPREFIX)/, \
+   aimee-witness-boot-tpm-harness \
+   aimee-witness-cadence-harness \
+   compaction-retention-probe \
+   learning-implicit-replay \
+   mock-mcp-server \
+   p7-reseal-d2b-live \
+   p7-tpm2-harness \
+   p7-vault-rewrap-live \
+   unit-test-bus-guardrail-durability-emit \
+   unit-test-content-scope-pg \
+   unit-test-kb-audit-worm-pg \
+   unit-test-kb-bedrock-live \
+   unit-test-kb-mgmt-live \
+   unit-test-kb-p2b-egress-live \
+   unit-test-panel-provider \
+   unit-test-pgvec-generation-pg \
+   unit-test-server-management-listener-live \
+   unit-test-vault-pg \
+   unit-test-witness-canary-pg \
+   unit-test-witness-checkpoint-produce-pg \
+   unit-test-witness-emit-pg \
+   unit-test-witness-recovery-pg \
+   unit-test-witness-tamper-pg \
+   virtual-context-inspect)
+
+$(CORE_LIB_LINKED_EXTRA_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)

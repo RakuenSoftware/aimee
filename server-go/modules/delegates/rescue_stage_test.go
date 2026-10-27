@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func rescueRequestBytes(text string, known []string, allowJSON bool, mode byte) []byte {
@@ -56,9 +56,9 @@ func decodeRescueResponse(t *testing.T, response []byte) RescueResult {
 
 func TestRescueStageRoundTripsACall(t *testing.T) {
 	text := "Sure.<tool_call><name>bash</name><arguments>{\"command\":\"ls\"}</arguments></tool_call>"
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRescue},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRescue},
 		rescueRequestBytes(text, []string{"bash"}, true, rescueModeParse))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	got := decodeRescueResponse(t, response)
@@ -75,18 +75,18 @@ func TestRescueStageRoundTripsACall(t *testing.T) {
 func TestRescueStageUsesTheCallersInventory(t *testing.T) {
 	text := `{"name": "deploy", "arguments": {"env": "prod"}}`
 
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRescue},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRescue},
 		rescueRequestBytes(text, []string{"bash"}, true, rescueModeParse))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	if got := decodeRescueResponse(t, response); len(got.Calls) != 0 {
 		t.Errorf("unknown tool was rescued: %+v", got.Calls)
 	}
 
-	response, status = Handle(bus.ModuleInvocation{StageID: StageRescue},
+	response, status = Handle(ring.ModuleInvocation{StageID: StageRescue},
 		rescueRequestBytes(text, []string{"deploy"}, true, rescueModeParse))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	if got := decodeRescueResponse(t, response); len(got.Calls) != 1 {
@@ -96,9 +96,9 @@ func TestRescueStageUsesTheCallersInventory(t *testing.T) {
 
 func TestRescueStageDetectModeDoesNotParse(t *testing.T) {
 	text := "<tool_call><name>bash</name><arguments>{}</arguments></tool_call>"
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRescue},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRescue},
 		rescueRequestBytes(text, []string{"bash"}, true, rescueModeDetect))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	var envelope rescueResponse
@@ -111,30 +111,30 @@ func TestRescueStageRejectsInvalidEnvelope(t *testing.T) {
 	good := rescueRequestBytes("hi", []string{"bash"}, true, rescueModeParse)
 
 	short := good[:rescueReqHeaderLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("truncated status = %d", status)
 	}
 
 	lying := rescueRequestBytes("hi", []string{"bash"}, true, rescueModeParse)
 	binary.LittleEndian.PutUint32(lying[8:12], 9999)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("length-mismatch status = %d", status)
 	}
 
 	// A name length that runs past the buffer must be refused, not read.
 	overrun := rescueRequestBytes("hi", []string{"bash"}, true, rescueModeParse)
 	binary.LittleEndian.PutUint16(overrun[rescueReqHeaderLen+2:rescueReqHeaderLen+4], 9999)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, overrun); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, overrun); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("overrunning name status = %d", status)
 	}
 
 	badMode := rescueRequestBytes("hi", []string{"bash"}, true, 7)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, badMode); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, badMode); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("bad-mode status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue, DeadlineNS: 1},
-		good); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue, DeadlineNS: 1},
+		good); status != ring.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
 	}
 }
@@ -143,8 +143,8 @@ func TestRescueStageCanonicalLongCallsAndOpaqueArguments(t *testing.T) {
 	name := strings.Repeat("long_name_", 30)
 	arguments := `{"id":9007199254740993,"ratio":0.12345678901234567890123456789,"huge":1e9000,"unicode":"\ud83d\ude80"}`
 	text := strings.Repeat("<tool_call><name>"+name+"</name><arguments>"+arguments+"</arguments></tool_call>", 40)
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{name}, false, rescueModeParse))
-	if status != bus.ModuleStatusOK {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{name}, false, rescueModeParse))
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	got := decodeRescueResponse(t, response)
@@ -160,19 +160,19 @@ func TestRescueStageCanonicalLongCallsAndOpaqueArguments(t *testing.T) {
 func TestRescueStageRefusesMalformedArgumentsAndRetiredWire(t *testing.T) {
 	for _, arguments := range []string{`[]`, `{"x":1} trailing`, `{"x":1,"x":2}`, `{"x":"\ud800"}`, `{"x":"\u0000"}`} {
 		text := "<tool_call><name>bash</name><arguments>" + arguments + "</arguments></tool_call>"
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("accepted malformed arguments %s status=%d", arguments, status)
 		}
 	}
 	retired := rescueRequestBytes("plain", nil, false, rescueModeParse)
 	retired[4] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, retired); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, retired); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("retired wire accepted")
 	}
 }
 func TestRescueCallOverflowIsNotPartialDispatch(t *testing.T) {
 	text := strings.Repeat("<tool_call><name>bash</name><arguments>{}</arguments></tool_call>", 4097)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("overflow became partial tool dispatch", status)
 	}
 }

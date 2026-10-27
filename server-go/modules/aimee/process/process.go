@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	database "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // storePrincipalRef is the store module's OUTBOUND identity, used to call the
@@ -64,7 +64,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 	if ctx == nil || moduleBusSocket == "" {
 		return aimee.NoDirectory{}, "none: db1 was asked for but there is no module bus socket"
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, aimeeDirectoryPrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, aimeeDirectoryPrincipalRef)
 	if err != nil {
 		// Reported, not silently downgraded: a module that was told to use db1
 		// and quietly did not would answer no_directory for a reason nobody
@@ -72,7 +72,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 		return aimee.NoDirectory{}, fmt.Sprintf("none: could not attach as principal %d: %v",
 			aimeeDirectoryPrincipalRef, err)
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return aimee.NoDirectory{}, fmt.Sprintf("none: no module caller: %v", err)
@@ -158,11 +158,11 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("store: no module bus to reach the postgres module on")
 	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, storePrincipalRef)
+	busClient, err := ring.ConnectClient(ctx, moduleBusSocket, 1, storePrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, busClient)
 	if err != nil {
 		busClient.Detach()
 		return nil, err

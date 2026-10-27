@@ -115,7 +115,7 @@ _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/m
 # empty). Disable the pass for GCC at compile and LTO link; clang lacks it.
 IPA_BIT_CP_FIX := $(if $(findstring clang,$(shell $(CC) --version 2>/dev/null)),,-fno-ipa-bit-cp)
 
-C_FLAGS = -Os -g -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/types/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -g -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/types/include -Icore/connection/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # KB_STORE client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -460,7 +460,7 @@ endif
 
 # --- Layer 1: Data & policy (index, rules, guardrails, workspace) ---
 # Memory policy and persistence live in server-go/modules/memory. C retains only
-# the event-bus connection adapters compiled with the server/KB products.
+# the ring connection adapters compiled with the server/KB products.
 DATA_SRCS = code_match.c rel_types.c \
             index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c modules/learning/learning_eval_synthesis.c eval_synthesis.c approach_store.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_pipeline.c modules/gateway/gateway_delegate.c \
@@ -473,10 +473,42 @@ DATA_SRCS = code_match.c rel_types.c \
 DATA_SRCS += integrity_ingress.c
 DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
-# --- Shared C connection and local event-bus libraries ---
-# Every networked C product links libaimee-core-connection. The event bus is a
+# --- Shared C connection library and the ouroboros ring ---
+# Every networked C product links libaimee-core-connection. The ring is a
 # separate local shared-memory facility linked only by aimee-server and
 # aimee-kb; it never provides transport between machines.
+#
+# The ring is not in this repository. It is built from the commit of
+# github.com/RakuenSoftware/ouroboros-ring pinned in
+# dependencies/ouroboros-ring.lock.json, fetched and content-checked into
+# OURO_RING_DIR before anything compiles. OURO_RING_LOCAL=/path/to/checkout
+# builds against a local ring checkout instead (no fetch, no pin check), for
+# changing the ring and aimee together.
+ifneq ($(strip $(OURO_RING_LOCAL)),)
+OURO_RING_DIR := $(abspath $(OURO_RING_LOCAL))
+else
+OURO_RING_DIR := build/deps/ouroboros-ring
+ifeq ($(filter clean distclean,$(MAKECMDGOALS)),)
+OURO_RING_FETCH := $(shell python3 ../scripts/fetch_ouroboros_ring.py $(OURO_RING_DIR) >&2 && echo ok)
+ifneq ($(OURO_RING_FETCH),ok)
+$(error could not provide the pinned ouroboros ring in $(OURO_RING_DIR); see the message above)
+endif
+endif
+endif
+OURO_RING_NAMES := attach wire module_client module_protocol module_runtime ring region \
+                   region_host arena route runtime host client capture endpoint
+OURO_RING_SRCS := $(OURO_RING_NAMES:%=$(OURO_RING_DIR)/c/src/%.c)
+OURO_RING_OBJS := $(OURO_RING_NAMES:%=$(OBJDIR)/ouroboros-ring/%.o)
+OURO_RING_LIB := $(OBJDIR)/libouroboros-ring.a
+C_FLAGS += -I$(OURO_RING_DIR)/c/include
+
+$(OBJDIR)/ouroboros-ring/%.o: $(OURO_RING_DIR)/c/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -I$(OURO_RING_DIR)/c/src -c -o $@ $<
+
+$(OURO_RING_LIB): $(OURO_RING_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
 export AIMEE_CORE_REQUIRED_VERSION := $(strip $(shell sed -n '1p' core/VERSION))
 AIMEE_CORE_PREFIX ?=
 ifneq ($(strip $(AIMEE_CORE_PREFIX)),)
@@ -488,9 +520,6 @@ C_FLAGS += -I$(AIMEE_CORE_PREFIX)/include
 CORE_CONNECTION_SRCS :=
 CORE_CONNECTION_OBJS :=
 CORE_CONNECTION_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
-CORE_EVENT_BUS_SRCS :=
-CORE_EVENT_BUS_OBJS :=
-CORE_EVENT_BUS_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-event-bus.a
 else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
@@ -511,24 +540,14 @@ endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
 
-CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/module_client.c core/event_bus/module_protocol.c core/event_bus/module_runtime.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_runtime.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
-CORE_EVENT_BUS_OBJS = $(CORE_EVENT_BUS_SRCS:%.c=$(OBJDIR)/%.o)
-CORE_EVENT_BUS_LIB = $(OBJDIR)/libaimee-core-event-bus.a
-
 $(CORE_CONNECTION_LIB): $(CORE_CONNECTION_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(CORE_EVENT_BUS_LIB): $(CORE_EVENT_BUS_OBJS)
-	@mkdir -p $(dir $@)
-	$(AR) rcs $@ $^
 endif
-OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o
+OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o
 AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 
-$(OBJDIR)/core/event_bus/%.o: C_FLAGS += -Icore/event_bus/include
-$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Icore/event_bus/include
-$(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
@@ -590,7 +609,7 @@ SERVER_SRCS += server/server_write_tier.c server/server_write_tier_db1.c shared/
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c server/server_http_body.c
 SERVER_SRCS += modules/economizer/gateway_mutate_wire.c
 # The one object that links vault_service to the (D7-confined) audit bus, keeping
-# vault_service.o itself bus-free; server-only, co-linked with $(CORE_EVENT_BUS_LIB).
+# vault_service.o itself bus-free; server-only, co-linked with $(OURO_RING_LIB).
 SERVER_SRCS += server/vault_audit_bridge.c
 # Likewise, the sole object linking sandbox.c to the audit bus (sandbox.o stays
 # bus-free). Server-only.
@@ -952,7 +971,7 @@ GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
 
 # All source files for linting (excluding vendored cJSON)
 ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
-           $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
+           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
@@ -1066,16 +1085,11 @@ go-unit-tests:
 		(unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 		 cd "$$module" && "$(GO)" test ./...); \
 	done
-	@echo "go-unit-tests: cross-language bus conformance"
-	@cd .. && bash scripts/test_bus_conformance.sh
+	@cd .. && python3 -I scripts/check_go_module_runtime_bundle.py
+	@# The Go ring module and the C ring sources must be the same commit; the ring's
+	@# own cross-language conformance runs in its repository.
+	@cd .. && python3 -I scripts/fetch_ouroboros_ring.py --check-go-pin
 	@echo "go-unit-tests: ok"
-
-# The Rust reference bus client (rust/aimee-bus): vectors, units, lint, and its
-# interop legs against the C host and the C module-runtime caller. Needs the
-# toolchain pinned in rust/rust-toolchain.toml.
-.PHONY: rust-bus-tests
-rust-bus-tests:
-	@cd .. && bash scripts/test_bus_rust_conformance.sh
 
 go-vulncheck:
 	@test -n "$(GOVULNCHECK)" || { echo "go-vulncheck: ERROR govulncheck is required"; exit 1; }
@@ -1123,8 +1137,7 @@ verify-local: all
 	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
-	@$(MAKE) rust-bus-tests
-	@echo "verify-local: ok (lint, unit, go-unit, rust-bus, linking)"
+	@echo "verify-local: ok (lint, unit, go-unit, linking)"
 	@echo "verify-local: NOT run here -- build-integrity, integration-tests;" \
 	      "use 'make verify-ci' before pushing a change to the shipped surface"
 
@@ -1533,7 +1546,7 @@ $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_KB_STORE_OBJS) $(SERVER_KB_STORE_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(OURO_RING_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -1547,7 +1560,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
 # enrollment tokens (now reachable from `aimee-kb enroll`). It is a leaf crypto
 # util (openssl + platform_random only), so the kb sidecar links it directly.
-$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(KB_KB_STORE_HOST_ADAPTER_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(KB_MCP_OBJS) $(TS_VENDOR_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(OBJDIR)/kb/kb_mcp_audit_bridge.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB) | $(KB_RESOLVER)
+$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(KB_KB_STORE_HOST_ADAPTER_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(KB_MCP_OBJS) $(TS_VENDOR_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(OBJDIR)/kb/kb_mcp_audit_bridge.o $(OURO_RING_LIB) $(CORE_CONNECTION_LIB) | $(KB_RESOLVER)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
@@ -1711,7 +1724,7 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/config_client_contract.o $(OBJDIR)/aimee_home.o \
                             $(PLATFORM_BASIC_OBJS) \
                             $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/aimee_sha256.o \
-                            $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
+                            $(OBS_BUS_RUNTIME_OBJ) $(OURO_RING_LIB)
 	$(CC) -o $@ $^ $(L_SERVER) $(PQ_LIB)
 
 .PHONY: write-tier-enforce-live

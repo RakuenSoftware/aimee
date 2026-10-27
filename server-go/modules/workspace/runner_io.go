@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The request/response handoff between a turn that needs work done in a tree and
@@ -135,7 +135,7 @@ func (r *rendezvous) isClosed() bool {
 // first chunk of its result. `more` says the result is a stream and the caller
 // must drain for the rest. Reports ok=false when the invocation is cancelled or
 // the client goes away mid-op — never a partial passed off as complete.
-func (r *rendezvous) submit(invocation bus.ModuleInvocation, payload []byte) (
+func (r *rendezvous) submit(invocation ring.ModuleInvocation, payload []byte) (
 	result []byte, more bool, ok bool) {
 	item := &exchange{payload: payload, chunks: make(chan chunk, ioChunkBuffer)}
 
@@ -160,7 +160,7 @@ claimed:
 }
 
 // drain pulls the next chunk of the submit currently streaming on this tree.
-func (r *rendezvous) drain(invocation bus.ModuleInvocation) ([]byte, bool, bool) {
+func (r *rendezvous) drain(invocation ring.ModuleInvocation) ([]byte, bool, bool) {
 	r.mu.Lock()
 	item := r.inflight
 	r.mu.Unlock()
@@ -171,7 +171,7 @@ func (r *rendezvous) drain(invocation bus.ModuleInvocation) ([]byte, bool, bool)
 }
 
 // take waits for one chunk, clearing the in-flight stream once the last arrives.
-func (r *rendezvous) take(invocation bus.ModuleInvocation, item *exchange) ([]byte, bool, bool) {
+func (r *rendezvous) take(invocation ring.ModuleInvocation, item *exchange) ([]byte, bool, bool) {
 	for {
 		if invocation.Cancelled() {
 			return nil, false, false
@@ -199,7 +199,7 @@ func (r *rendezvous) take(invocation bus.ModuleInvocation, item *exchange) ([]by
 // An elapsed poll is the ordinary idle case and the client simply polls again;
 // it reports cancelled rather than OK-with-nothing because cancellation
 // precedence is the bus's convention, not this module's to reinterpret.
-func (r *rendezvous) poll(invocation bus.ModuleInvocation) ([]byte, bool) {
+func (r *rendezvous) poll(invocation ring.ModuleInvocation) ([]byte, bool) {
 	r.markServing()
 	for {
 		if r.isClosed() {
@@ -260,25 +260,25 @@ func ioResponse(payload []byte, more bool) []byte {
 	return response
 }
 
-func handleRunnerIO(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRunnerIO(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < ioHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != ioRequestMagic || request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	op := request[5]
 	idLen := int(binary.LittleEndian.Uint16(request[6:8]))
 	payloadLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	if idLen == 0 || idLen > runnerIDMax || payloadLen > ioPayloadMax ||
 		len(request) != ioHeaderLen+idLen+payloadLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	switch op {
 	case IOOpSubmit, IOOpPoll, IOOpRespond, IOOpRespondPartial, IOOpDrain:
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	id := string(request[ioHeaderLen : ioHeaderLen+idLen])
@@ -296,35 +296,35 @@ func handleRunnerIO(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 		// yet" and re-polled immediately, forever, because the wait that paces
 		// the loop only happens once a rendezvous exists. Naming the condition
 		// is what lets the caller stop, back off, or say so.
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 
 	switch op {
 	case IOOpSubmit:
 		if !point.hasLiveRunner() {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		result, more, ok := point.submit(invocation, payload)
 		if !ok {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
-		return ioResponse(result, more), bus.ModuleStatusOK
+		return ioResponse(result, more), ring.ModuleStatusOK
 	case IOOpDrain:
 		next, more, ok := point.drain(invocation)
 		if !ok {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
-		return ioResponse(next, more), bus.ModuleStatusOK
+		return ioResponse(next, more), ring.ModuleStatusOK
 	case IOOpPoll:
 		next, ok := point.poll(invocation)
 		if !ok {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
-		return ioResponse(next, false), bus.ModuleStatusOK
+		return ioResponse(next, false), ring.ModuleStatusOK
 	default: // IOOpRespond / IOOpRespondPartial
 		if !point.respond(payload, op == IOOpRespond) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
-		return ioResponse(nil, false), bus.ModuleStatusOK
+		return ioResponse(nil, false), ring.ModuleStatusOK
 	}
 }

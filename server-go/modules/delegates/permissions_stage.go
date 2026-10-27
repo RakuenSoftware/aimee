@@ -1,6 +1,6 @@
 package delegates
 
-import "github.com/JBailes/aimee/server-go/bus"
+import "github.com/RakuenSoftware/ouroboros-ring/go/ring"
 
 // Resolving what a delegate may do, once.
 //
@@ -40,15 +40,15 @@ const (
 	permFlagsKnown = permFlagDefined
 )
 
-func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handlePermissions(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	r := &wireReader{buf: request}
 	if r.u32() != permissionsRequestMagic || r.u32() != uint32(wireVersion) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	flags := r.u32()
 	if flags&^permFlagsKnown != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	role := r.str()
 
@@ -56,12 +56,12 @@ func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	if flags&permFlagDefined != 0 {
 		frontmatter = r.str()
 		if len(frontmatter) > permissionsMaxDefinition {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 
 	if !r.done() {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	// An unreadable definition is a refusal, not a fallback. Falling back to the
@@ -69,10 +69,10 @@ func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	// the operator believes it holds the ones they wrote.
 	defined, err := ParseRoleDefinition(frontmatter)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	permissions := ResolveRolePermissions(role, defined)
@@ -94,5 +94,5 @@ func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	}
 	w.strings(unenforced)
 	w.strings(DeniedTools(permissions))
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }

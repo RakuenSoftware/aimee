@@ -163,11 +163,10 @@ def export_core(output_root: Path, timestamp: str) -> dict[str, object]:
     repository.mkdir()
     shutil.copytree(ROOT / "src/core", repository, dirs_exist_ok=True)
     shutil.copytree(ROOT / "examples/c-connection-client", repository / "examples/connection-client")
-    shutil.copytree(ROOT / "examples/c-event-bus-module", repository / "examples/event-bus-module")
     shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
     shutil.copy2(ROOT / "NOTICE", repository / "NOTICE")
     version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-    for example in ("connection-client", "event-bus-module"):
+    for example in ("connection-client",):
         cmake_file = repository / "examples" / example / "CMakeLists.txt"
         cmake_text = cmake_file.read_text(encoding="utf-8")
         cmake_text = re.sub(
@@ -182,8 +181,8 @@ def export_core(output_root: Path, timestamp: str) -> dict[str, object]:
 
 Version `{version}` is the single C implementation of connection, TLS/mTLS,
 Bearer authentication, deadlines/cancellation, and HTTP framing used by the
-thin client, server, and KB.  On Linux it also provides the local shared-memory
-event bus used independently inside each server or KB container.
+thin client, server, and KB. The local shared-memory ring that server and KB
+host is the ouroboros ring (github.com/RakuenSoftware/ouroboros-ring).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -212,9 +211,6 @@ jobs:
       - run: cmake --build build --config Release --parallel 2 && cmake --install build --config Release
         shell: bash
       - run: cmake -S examples/connection-client -B consumer -DCMAKE_PREFIX_PATH=\"$PWD/prefix\" && cmake --build consumer --config Release --parallel 2
-        shell: bash
-      - if: runner.os == 'Linux'
-        run: cmake -S examples/event-bus-module -B module -DCMAKE_PREFIX_PATH=\"$PWD/prefix\" && cmake --build module --config Release --parallel 2
         shell: bash
 """,
     )
@@ -293,8 +289,8 @@ def module_main(
         for stage in stages
     )
     handler_declaration = """
-extern aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *, const uint8_t *, uint32_t, uint8_t *, uint32_t,
+extern ouro_module_status_t aimee_module_handler(
+    const ouro_module_invocation_t *, const uint8_t *, uint32_t, uint8_t *, uint32_t,
     uint32_t *, void *);
 """ if has_handler else ""
     handler_value = "aimee_module_handler" if has_handler else "NULL"
@@ -312,12 +308,12 @@ extern int {init_symbol}(void);
       return 1;
    }}
 """ if init_symbol else ""
-    return f"""#include <aimee/core/event_bus/module_runtime.h>
+    return f"""#include <ouroboros/module_runtime.h>
 
 #include <stdio.h>
 {handler_declaration}{init_declaration}
 
-static const aimee_module_stage_t stages[] = {{
+static const ouro_module_stage_t stages[] = {{
 {entries}
 }};
 
@@ -328,7 +324,7 @@ int main(int argc, char **argv)
       fprintf(stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", argv[0]);
       return 2;
    }}
-{init_call}   const aimee_module_process_config_t config = {{
+{init_call}   const ouro_module_process_config_t config = {{
        .socket_path = argv[1],
        .module_name = "{module_id}",
        .principal_class = {PRINCIPAL_CLASS}u,
@@ -337,7 +333,7 @@ int main(int argc, char **argv)
        .stage_count = sizeof stages / sizeof stages[0],
        .handler = {handler_value},
    }};
-   return aimee_module_process_run(&config);
+   return ouro_module_process_run(&config);
 }}
 """
 
@@ -559,7 +555,7 @@ def c_process_cmake(module_id: str, binary: str, version: str,
         if library in CMAKE_TARGET_PACKAGES
     })
     discovery: list[str] = [f"find_package({package} REQUIRED)" for package in package_names]
-    link_items = ["aimee::aimee-core-event-bus-client"]
+    link_items = ["ouroboros::ouroboros-ring-client"]
     if pkg_config:
         discovery.extend([
             "find_package(PkgConfig REQUIRED)",
@@ -576,8 +572,9 @@ project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C
 
 include(GNUInstallDirs)
 find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-{discovery_text}{generated_setup}if(NOT TARGET aimee::aimee-core-event-bus-client)
-    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
+find_package(ouroboros-ring CONFIG REQUIRED)
+{discovery_text}{generated_setup}if(NOT TARGET ouroboros::ouroboros-ring-client)
+    message(FATAL_ERROR "{binary} requires the ouroboros ring client")
 endif()
 add_executable({binary}
     runtime/main.c
@@ -673,7 +670,7 @@ def go_module_main(module_id: str, principal_ref: int,
 """
         process_setup = """\tsqlHandler := handler.NewSQLHandler()
 \tsessionHandler := handler.NewSessionHandler(ctx)
-\tmoduleHandler := func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+\tmoduleHandler := func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 \t\tswitch invocation.StageID {
 \t\tcase handler.StageSQL: return sqlHandler(invocation, frame)
 \t\tcase handler.StageSession: return sessionHandler(invocation, frame)
@@ -713,7 +710,7 @@ import (
 \t"os/signal"
 \t"syscall"
 
-\t"github.com/JBailes/aimee/server-go/bus"
+\t"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 {handler_import}{extra_imports})
 
 func main() {{
@@ -727,15 +724,15 @@ func main() {{
 \tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 \tdefer stop()
 {process_setup}\
-\tconfig := bus.ModuleProcessConfig{{
+\tconfig := ring.ModuleProcessConfig{{
 \t\tSocketPath: os.Args[1], ModuleName: "{module_id}",
 \t\tPrincipalClass: {PRINCIPAL_CLASS}, PrincipalRef: {principal_ref},
-\t\tStages: []bus.ModuleStage{{
+\t\tStages: []ring.ModuleStage{{
 {entries}
 \t\t}},
 \t\tHandler: {handler},
 {process_options}\t}}
-\tif err := bus.RunModuleProcess(ctx, config); err != nil {{
+\tif err := ring.RunModuleProcess(ctx, config); err != nil {{
 \t\tfmt.Fprintf(os.Stderr, "aimee-module-{module_id}: %v\\n", err)
 \t\tos.Exit(1)
 \t}}
@@ -743,14 +740,13 @@ func main() {{
 """
 
 
-def go_bus_sources(module_id: str | None = None) -> list[str]:
-    """Return the canonical, non-test Go bus implementation shared by exports."""
-    return sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "server-go/bus").glob("*.go")
-        if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"aimee", "delegates", "roundtable", "providers", "memory"})
-    )
+def ouroboros_ring_commit() -> str:
+    """The ring commit aimee pins; exports build against the same one."""
+    lock = json.loads((ROOT / "dependencies/ouroboros-ring.lock.json").read_text(encoding="utf-8"))
+    commit = lock.get("commit")
+    if not isinstance(commit, str) or len(commit) != 40:
+        raise ExportError("dependencies/ouroboros-ring.lock.json: missing a full ring commit")
+    return commit
 
 
 # Shared contracts and pure helpers outside an implementation module, mapped to
@@ -866,7 +862,7 @@ def go_language_version() -> str:
 
 def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
-    direct = ["golang.org/x/sys"]
+    direct = ["golang.org/x/sys", "github.com/RakuenSoftware/ouroboros-ring/go"]
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
@@ -962,7 +958,7 @@ serve={serve}
                      "reports false success."
             )
             runtime_text = f"""It builds `{binary}` as a separate C process for the
-{', '.join(contract['placements'])} bus. Its generated grant serves exactly the
+{', '.join(contract['placements'])} ring. Its generated grant serves exactly the
 declared stage event kinds. {handler_text}
 """
             workflow = f"""name: module
@@ -982,6 +978,14 @@ jobs:
       - run: cmake -S _aimee-core -B _core-build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build _core-build --parallel 2
       - run: cmake --install _core-build --prefix "$PWD/_prefix"
+      - uses: actions/checkout@v4
+        with:
+          repository: RakuenSoftware/ouroboros-ring
+          ref: {ouroboros_ring_commit()}
+          path: _ouroboros-ring
+      - run: cmake -S _ouroboros-ring/c -B _ring-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+      - run: cmake --build _ring-build --parallel 2
+      - run: cmake --install _ring-build --prefix "$PWD/_prefix"
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/_prefix"
       - run: cmake --build build --parallel 2
       - run: test -x build/{binary}
@@ -991,12 +995,7 @@ jobs:
             if (not isinstance(go_sources, list) or not go_sources) and \
                     "external_source" not in descriptor:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
-            bus_sources = go_bus_sources(module_id)
-            if not bus_sources:
-                raise ExportError("canonical Go bus has no production sources")
             shared_sources = go_process_shared_sources(module_id)
-            for relative in bus_sources:
-                copy_file(relative, repository)
             for relative in shared_sources:
                 copy_file(relative, repository)
             shutil.copy2(ROOT / "server-go/go.sum", repository / "go.sum")
@@ -1021,7 +1020,7 @@ require (
             )
             cmake_dependencies = "\n".join(
                 f"        ${{CMAKE_CURRENT_SOURCE_DIR}}/{relative}"
-                for relative in ["runtime/main.go", *go_sources, *bus_sources, *shared_sources,
+                for relative in ["runtime/main.go", *go_sources, *shared_sources,
                                  *descriptor.get("contracts", []), *descriptor.get("go_assets", []),
                                  "go.mod", "go.sum"]
             )
@@ -1050,13 +1049,13 @@ install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
             )
             if module_id == "config":
                 runtime_text = f"""It builds `{binary}` as a pure-Go process for the
-{', '.join(contract['placements'])} bus. The exported repository includes the
+{', '.join(contract['placements'])} ring. The exported repository includes the
 exact canonical Go bus client/runtime snapshot, caller contract, handler,
 validation, and persistent store. It contains no C implementation or bridge.
 """
             else:
                 runtime_text = f"""It builds `{binary}` as a separate Go process for the
-{', '.join(contract['placements'])} bus. The exported repository includes the
+{', '.join(contract['placements'])} ring. The exported repository includes the
 exact canonical Go bus client/runtime snapshot and its repository-owned handler;
 the retained C adapter is a wire-parity fixture, not the production executable.
 """
@@ -1072,7 +1071,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-      - run: go test ./server-go/bus{" ./server-go/config" if module_id == "config" else ""} ./server-go/modules/{module_id}
+      - run: go test{" ./server-go/config" if module_id == "config" else ""} ./server-go/modules/{module_id}
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel 2
       - run: test -x build/{binary}

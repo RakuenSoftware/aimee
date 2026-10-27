@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include "db1_client/db1_module_api.h"
 #include "db1_client/wm.h"
 
@@ -25,7 +25,7 @@
 #define WM_COLUMN_WIDTH 1u
 
 static int stub_available = 1;
-static aimee_module_call_result_t stub_result = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t stub_result = OURO_MODULE_CALL_OK;
 static uint32_t stub_status = AIMEE_DB1_STATUS_OK;
 static int stub_calls;
 static uint8_t stub_request[4096];
@@ -55,11 +55,11 @@ static void cell_text(char *out, size_t cap, uint32_t row, uint32_t member)
       snprintf(out, cap, "r%um%u", row, member);
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)trace_id;
    (void)cancelled;
@@ -72,23 +72,23 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    stub_request_len = request_len < sizeof stub_request ? request_len : 0;
    if (stub_request_len)
       memcpy(stub_request, request_body, stub_request_len);
-   if (stub_result != AIMEE_MODULE_CALL_OK)
+   if (stub_result != OURO_MODULE_CALL_OK)
       return stub_result;
 
    uint8_t *out = (uint8_t *)response_body;
    if (response_capacity < 8u)
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
    if (stub_text)
    {
       uint32_t n = (uint32_t)strlen(stub_text);
       if (response_capacity < 12u + n)
-         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+         return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
       aimee_db1_put_u32(out, stub_status);
       aimee_db1_put_u32(out + 4u, 1u);
       aimee_db1_put_u32(out + 8u, n);
       memcpy(out + 12u, stub_text, n);
       *response_len = 12u + n;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    uint32_t values = stub_rows * stub_width + (uint32_t)stub_extra_values;
    aimee_db1_put_u32(out, stub_status);
@@ -100,20 +100,20 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       cell_text(text, sizeof text, i / stub_width, i % stub_width);
       uint32_t n = (uint32_t)strlen(text);
       if (response_capacity < at + 4u + n)
-         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+         return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
       aimee_db1_put_u32(out + at, n);
       at += 4u;
       memcpy(out + at, text, n);
       at += n;
    }
    *response_len = at;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static void reset(void)
 {
    stub_available = 1;
-   stub_result = AIMEE_MODULE_CALL_OK;
+   stub_result = OURO_MODULE_CALL_OK;
    stub_status = AIMEE_DB1_STATUS_OK;
    stub_calls = 0;
    stub_request_len = 0;
@@ -314,7 +314,7 @@ static void test_an_unreachable_store_returns_no_string(void)
    assert(stub_calls == 0);
 
    reset();
-   stub_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   stub_result = OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    assert(db1_wm_assemble_context("sess-1") == NULL);
 
    reset();

@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Checkpoint storage belongs to DB1. The shared memory owner selects its fact
 // projection and applies the same scoped write policy as other memory producers.
-func handleCheckpointCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleCheckpointCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	action := args.stringOr("action", "")
 	request := DataRequest{Operation: "list", Tier: "L2", Kind: "fact", Limit: 16}
 	switch action {
@@ -36,25 +36,25 @@ func handleCheckpointCommand(options handlerOptions, invocation bus.ModuleInvoca
 	commandScope(args, &request)
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "checkpoint memory operation failed"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	if action == "restore" {
 		if len(response.Records) != 1 || response.Records[0].ID <= 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "memory_id": strconv.FormatInt(response.Records[0].ID, 10)})
 	}

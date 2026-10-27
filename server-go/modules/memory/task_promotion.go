@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Issued by the host's task revision owner. It can only enter through the
@@ -41,26 +41,26 @@ func (p *taskPromotion) valid() bool {
 	id, e := strconv.ParseInt(p.Target.RecordID, 10, 64)
 	return e == nil && p.Target.ValidFor(id) && (&sourceRevalidation{SchemaVersion: 1, CheckID: p.ProjectionID, Sources: p.Sources}).valid()
 }
-func handleTaskPromotion(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleTaskPromotion(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || options.placement != PlacementServer || !verifiedRetryCaller(options.commandContext) {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	var p taskPromotion
 	if json.Unmarshal(args["promotion"], &p) != nil || !p.valid() {
 		return commandResult(commandError("invalid_argument", "invalid task promotion"))
 	}
 	if p.Principal != options.commandContext.Principal && p.Principal != options.commandContext.TransportIdentity {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{Operation: "task-projection-propose", Scope: Scope{Type: ScopeUser}, TaskPromotion: &p}
 	raw, _ := json.Marshal(request)
 	body, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(body, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }
@@ -91,7 +91,7 @@ func (s *postgresDataStore) checkTaskPromotionSources(ctx context.Context, p *ta
 	}
 	return nil
 }
-func (s *postgresDataStore) proposeTaskProjection(ctx context.Context, p *taskPromotion, caller *bus.CommandContext) (map[string]any, error) {
+func (s *postgresDataStore) proposeTaskProjection(ctx context.Context, p *taskPromotion, caller *ring.CommandContext) (map[string]any, error) {
 	if !verifiedRetryCaller(caller) || caller.ScopeKind != "" || (p.Principal != caller.Principal && p.Principal != caller.TransportIdentity) {
 		return commandError("unauthorized", "authenticated task owner required"), nil
 	}

@@ -122,6 +122,12 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args,
                                   char **mismatch_err, int path_pre_authorized);
 
+/* Bind run_cmd's cwd to a clone's `cwd` argument, the directory the clone is made
+ * in. That directory is not a repository yet, so the git-root resolver above finds
+ * nothing there. It must still be inside a registered workspace. Returns 1 bound,
+ * 0 no cwd given, -1 a cwd outside every registered workspace. */
+int mcp_git_bind_clone_cwd(cJSON *args);
+
 /* Refuse an operation that writes LOCAL git state while this workspace is served as a
  * MIRROR — the server rebuilds its own worktree from a bare mirror plus the client's
  * diff, and that rebuild is replaced on the client's next change, so the write is

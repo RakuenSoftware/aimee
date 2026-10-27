@@ -61,35 +61,29 @@ in separate sidecars; remote endpoints are also supported. Server personal vecto
 KB when it connects. The current Server config selects one KB URL; fleet routing remains design
 work. Model-specific `aimee-llm-*` synthesis artifacts are separate from the retired generic gateway.
 
-## Event bus
+## The ouroboros ring
 
-`src/core/event_bus/` provides the intra-daemon transport:
-
-| File | Contract |
-| --- | --- |
-| `bus_wire.*` | fixed little-endian frame codec and version validation |
-| `bus_ring.*` | SPSC bounded ring with release/acquire publication |
-| `bus_region.*` | read-only control, private queue pair, shared arena regions |
-| `bus_arena.*` | generation-checked leases and consumer references |
-| `bus_host.*` | admission, sequence, routing, correlation, flow control, reap, tap |
-| `bus_client.*` | C attach, publish, subscribe, request/reply, poll |
-| `bus_capture.*` | ordered CRC-checked capture and observational replay |
-| `module_protocol.*` | versioned pointer-free feature request/result envelope |
-| `module_runtime.*` | authenticated process loop, dispatch, deadline and cancellation |
+The intra-daemon transport is the ouroboros ring, a contract with C, Go and Rust
+reference implementations in its own repository
+([RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring)).
+aimee builds the C ring from the commit pinned in
+`dependencies/ouroboros-ring.lock.json` (fetched and content-checked by
+`scripts/fetch_ouroboros_ring.py` before anything compiles; `OURO_RING_LOCAL=`
+builds against a local checkout instead) and requires its Go module at the same
+commit in `server-go/go.mod`. Headers are `<ouroboros/*.h>` and every ring name
+is prefixed `ouro_`.
 
 One host owns all `memfd` creation. An admitted client receives only its queue pair and shared arena.
 The host stamps `seq` before routing and invokes the tap for every accepted event. Per-source FIFO is
 guaranteed; consumers see sparse global sequence numbers because they receive only authorized kinds.
 
-The observability bridge under `modules/audit/` is the current production consumer. It serializes
-governed actions and semantic guardrail events, drains them asynchronously to typed stores, and
-flushes capture. Server and KB bridges map memory, vault, sandbox, MCP, and tool activity into that
-contract.
+The observability bridge under `modules/audit/` is aimee's host side. It serializes governed actions
+and semantic guardrail events, drains them asynchronously to typed stores, and flushes capture.
+Server and KB bridges map memory, vault, sandbox, MCP, and tool activity into that contract.
+aimee's instance roles (server, KB) and their first-boot identity are aimee's own
+(`modules/audit/instance_identity.c`); the ring is told only which role refs each instance refuses.
 
-The Go client consumes the same golden wire vectors and links no C. Wire or layout changes require
-version negotiation, regenerated vectors only when the wire changes, and cross-language conformance.
-
-See [Event bus](../docs/EVENT_BUS.md).
+See [Event bus](../docs/EVENT_BUS.md) for what aimee carries on the ring.
 
 ## Storage ownership
 

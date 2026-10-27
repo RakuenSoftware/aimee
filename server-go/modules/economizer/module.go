@@ -3,8 +3,8 @@ package economizer
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Bus surface for the economizer module. Reduction remains the primary stage.
@@ -180,18 +180,18 @@ var reduceReasonNames = map[ReduceReason]string{
 // gets a clean one and two handlers never share a lever.
 // NewHandler serves without a state store: reductions still run, they just
 // never warm up between turns. Used where no store is reachable, and by tests.
-func NewHandler() bus.ModuleHandler {
+func NewHandler() ring.ModuleHandler {
 	return NewHandlerWithStore(nil)
 }
 
 // NewHandlerWithStore serves with somewhere to keep per-conversation reducer
 // state. A nil store is legal and means the same as NewHandler.
-func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
+func NewHandlerWithStore(store StateStore) ring.ModuleHandler {
 	breaker := NewSessionBreaker()
 	stats := NewGatewayStatsStore()
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
 		case StageTaskCost:
@@ -201,19 +201,19 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 		case StageStats:
 			var req StatsRequest
 			if err := json.Unmarshal(request, &req); err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			return handleStats(stats, &req)
 		case StagePostStatus:
 			var req PostStatusRequest
 			if err := json.Unmarshal(request, &req); err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			return handlePostStatus(breaker, stats, &req)
 		case StageReduce:
 			var req ReduceRequest
 			if !ir.Decode(request, &req) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			return handleReduce(breaker, stats, store, &req)
 		case StageJSONCompact:
@@ -225,21 +225,21 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 		case StageRecordBuild:
 			return handleRecordBuild(invocation, request)
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }
 
 func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store StateStore,
-	req *ReduceRequest) ([]byte, bus.ModuleStatus) {
+	req *ReduceRequest) ([]byte, ring.ModuleStatus) {
 	if _, err := ir.DecodeMessages(req.Messages); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// Preserve original member ordering/decimal tokens for frozen-prefix bytes;
 	// provider shapes have already been refused by the shared typed contract.
 	messages := ParseJSON(string(req.Messages))
 	if messages == nil || !messages.IsArray() {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	seam := SeamDelegate
@@ -249,7 +249,7 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 	case "delegate", "":
 		seam = SeamDelegate
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	cfg := &ReduceConfig{
@@ -291,9 +291,9 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 			Bypass: GWBypassSessionDisabled.String(),
 		})
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return body, bus.ModuleStatusOK
+		return body, ring.ModuleStatusOK
 	}
 
 	// The seam gate lives in the config, so set the one this request arrived on.
@@ -357,7 +357,7 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 		// prefix and cost the cache.
 		resp.Messages = json.RawMessage(PrintJSONUnformatted(out.Messages))
 		if _, err := ir.DecodeMessages(resp.Messages); err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 	}
 	// Persist BEFORE any bypass decision and regardless of it. The freeze
@@ -369,9 +369,9 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }
 
 // handlePostStatus applies the post-dispatch decision and owns the breaker write.
@@ -380,7 +380,7 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 // body and the socket, this has the lever. Splitting it the other way — caller
 // decides, module stores — is what left the C seam with a breaker nothing ever
 // wrote to.
-func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *PostStatusRequest) ([]byte, bus.ModuleStatus) {
+func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *PostStatusRequest) ([]byte, ring.ModuleStatus) {
 	var d GWPostDecision
 	if req.StreamReason != "" {
 		// Streaming: bytes are already with the client, so the breaker is the only
@@ -412,9 +412,9 @@ func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *Po
 
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }
 
 // handleStats returns the snapshot the HTTP surface publishes.
@@ -422,13 +422,13 @@ func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *Po
 // A call rather than a push because the counters are the module's and the HTTP
 // surface is the caller's: the side that owns the numbers hands them over when
 // the side that owns the endpoint asks.
-func handleStats(stats *GatewayStatsStore, req *StatsRequest) ([]byte, bus.ModuleStatus) {
+func handleStats(stats *GatewayStatsStore, req *StatsRequest) ([]byte, ring.ModuleStatus) {
 	if req.Op != "" && req.Op != "snapshot" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(stats.Snapshot())
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }

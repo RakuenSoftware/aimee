@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Hold initialization while the request-local datastore is copied, just as the
@@ -66,8 +66,8 @@ func TestRequestCopySharesCodeInitialization(t *testing.T) {
 	}
 	// The actual dispatcher makes further request/actor/audit-bound copies. It
 	// must reuse the published initialization and reach ordinary route validation.
-	_, status := handleDataAttempt(handlerOptions{data: backend, placement: PlacementServer}, bus.ModuleInvocation{}, DataRequest{Operation: "code-index", CodeIndex: &CodeIndexRequest{Route: "://invalid"}}, nil)
-	if status != bus.ModuleStatusInternal {
+	_, status := handleDataAttempt(handlerOptions{data: backend, placement: PlacementServer}, ring.ModuleInvocation{}, DataRequest{Operation: "code-index", CodeIndex: &CodeIndexRequest{Route: "://invalid"}}, nil)
+	if status != ring.ModuleStatusInternal {
 		t.Fatalf("invalid code route status=%v", status)
 	}
 	if n := db.reads.Load(); n != 1 {

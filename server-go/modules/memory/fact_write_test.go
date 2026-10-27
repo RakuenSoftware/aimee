@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestFactWriteDecisionCombinesOntologyAndSecretBoundary(t *testing.T) {
@@ -66,7 +66,7 @@ func TestFactWriteRefusesMissingOrContradictoryOwnerDecision(t *testing.T) {
 }
 
 func TestFactWriteFailureHasNoLocalAcceptance(t *testing.T) {
-	for _, failure := range []error{context.DeadlineExceeded, context.Canceled, &bus.ModuleCallStatusError{Status: bus.ModuleStatusCapabilityAbsent}} {
+	for _, failure := range []error{context.DeadlineExceeded, context.Canceled, &ring.ModuleCallStatusError{Status: ring.ModuleStatusCapabilityAbsent}} {
 		calls := 0
 		client, _ := NewClient(clientCallFunc(func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error) {
 			calls++

@@ -11,12 +11,12 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"github.com/JBailes/aimee/server-go/modules/memory/hillock"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type independentTransport struct{ client *http.Client }
@@ -101,16 +101,16 @@ func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "Virant", TransportIdentity: "discord"}
-	makeHandler := func(data *externalDataStore) bus.ModuleHandler {
+	actor := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "Virant", TransportIdentity: "discord"}
+	makeHandler := func(data *externalDataStore) ring.ModuleHandler {
 		return NewHandler(nil, WithDataStore(PlacementServer, data), func(options *handlerOptions) { options.commandContext = actor })
 	}
 	handler := makeHandler(data)
 	call := func(request DataRequest) DataResponse {
 		t.Helper()
 		raw, _ := json.Marshal(request)
-		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, raw)
-		if status != bus.ModuleStatusOK {
+		reply, status := handler(ring.ModuleInvocation{StageID: StageData}, raw)
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s: status %d", request.Operation, status)
 		}
 		var out DataResponse
@@ -197,7 +197,7 @@ func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 		args["project"], args["scope_context"] = "discord", true
 		raw, _ := json.Marshal(args)
 		out, status := invokeContextCommand(t, kbHandler, 0, kbActor, verb, string(raw))
-		if status != bus.ModuleStatusOK || out["error"] != nil || out["kind"] != nil {
+		if status != ring.ModuleStatusOK || out["error"] != nil || out["kind"] != nil {
 			t.Fatalf("public %s: %d %v", verb, status, out)
 		}
 		return out
@@ -234,7 +234,7 @@ func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 	destinationHandler := NewHandler(nil, WithDataStore(PlacementKB, destination))
 	importArgs, _ := json.Marshal(map[string]any{"project": "discord", "scope_context": true, "snapshot": exported})
 	imported, importStatus := invokeContextCommand(t, destinationHandler, 0, kbActor, "backend_import", string(importArgs))
-	if importStatus != bus.ModuleStatusOK || imported["imported"] != true {
+	if importStatus != ring.ModuleStatusOK || imported["imported"] != true {
 		t.Fatal(importStatus, imported)
 	}
 	copy, err := destination.Get(context.Background(), Scope{Type: ScopeProject, Value: "discord"}, int64(id))
@@ -244,7 +244,7 @@ func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 	modelCaller := kbActor
 	modelCaller.UserAuthority = false
 	_, exportStatus := invokeContextCommand(t, destinationHandler, 0, modelCaller, "backend_export", `{"project":"discord","scope_context":true}`)
-	if exportStatus != bus.ModuleStatusCapabilityAbsent {
+	if exportStatus != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal("model export bypass", exportStatus)
 	}
 	t.Setenv("AIMEE_MEMORY_BACKEND_DIR", "")
@@ -262,10 +262,10 @@ func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 		t.Fatal(err)
 	}
 	raw := []byte(`{"operation":"erase-backend","backend_subject":"Virant"}`)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 99}, raw); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData, PrincipalRef: 99}, raw); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal("foreign erasure caller", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, raw); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, raw); status != ring.ModuleStatusOK {
 		t.Fatal("owner erasure", status)
 	}
 	if err = os.WriteFile(filepath.Join(dir, "records.json"), backup, 0600); err != nil {
@@ -306,7 +306,7 @@ func TestExternalPublicListPrefersLatestAdmittedProjectRecords(t *testing.T) {
 	put(Scope{Type: ScopeProject, Value: "private"}, "PRIVATE CANARY")
 	owner := &externalDataStore{catalog: catalog, placement: PlacementKB}
 	result, status := owner.execute(ctx, DataRequest{Operation: "list", Project: "chat", Limit: 2}, project, handlerOptions{}, false)
-	if status != bus.ModuleStatusOK || len(result.Records) != 2 || result.Records[0].ID != latest.ID || result.Records[1].ID != older.ID {
+	if status != ring.ModuleStatusOK || len(result.Records) != 2 || result.Records[0].ID != latest.ID || result.Records[1].ID != older.ID {
 		t.Fatal("global/old records displaced current channel admissions", result, status)
 	}
 }

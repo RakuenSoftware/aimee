@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,14 +83,14 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	installProposalFixture(t, ctx, tx)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	client := clientForHandler(t, handler)
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true, TransportIdentity: "cert:server"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true, TransportIdentity: "cert:server"}
 	put := func(args string, verified bool) map[string]any {
 		t.Helper()
 		if !verified {
 			return runPublicCommand(t, client, "store", args)
 		}
 		r, status := invokeContextCommand(t, handler, 0, caller, "store", args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		return r
@@ -151,7 +151,7 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(err)
 	}
 	edit := fmt.Sprintf(`{"id":%.0f,"content":"failed replacement","authority":"user"}`, user["id"])
-	if r, status := invokeContextCommand(t, handler, 0, caller, "update", edit); status != bus.ModuleStatusOK || r["kind"] != "unavailable" {
+	if r, status := invokeContextCommand(t, handler, 0, caller, "update", edit); status != ring.ModuleStatusOK || r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
 	var active bool
@@ -175,7 +175,7 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		{"delete", fmt.Sprintf(`{"id":%.0f}`, user["id"])},
 	} {
 		got, status := invokeContextCommand(t, handler, 0, caller, attempt.verb, attempt.args)
-		if status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+		if status != ring.ModuleStatusOK || got["kind"] != "review_required" {
 			t.Fatal(attempt, got, status)
 		}
 	}
@@ -189,9 +189,9 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	for _, operation := range []string{"store", "update-content", "delete"} {
 		request := DataRequest{Operation: operation, ID: int64(replaced["id"].(float64)), Scope: Scope{Type: ScopeProject, Value: "app"}, Tier: "L2", Kind: "fact", Key: "user-note", Content: "legacy overwrite"}
 		body, _ := json.Marshal(request)
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, body)
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, body)
 		var result DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Code == nil || *result.Code != MutationReviewRequired {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Code == nil || *result.Code != MutationReviewRequired {
 			t.Fatal(operation, string(raw), status)
 		}
 	}
@@ -208,7 +208,7 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	other := caller
 	other.Principal = "user:bob"
 	same, status := invokeContextCommand(t, handler, 0, other, "store", `{"key":"user-note","content":"reviewed correction","authority":"user","scope_context":true,"project":"app"}`)
-	if status != bus.ModuleStatusOK || same["id"] != replaced["id"] {
+	if status != ring.ModuleStatusOK || same["id"] != replaced["id"] {
 		t.Fatal(same, status)
 	}
 	checkActor(replaced["id"], "user:alice", 30, 1)
@@ -229,15 +229,15 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	// Supersede has the same host-authorized user correction path as update.
 	supersedeSource := put(`{"key":"verified-supersede","content":"user original","authority":"user"}`, true)
 	supersedeArgs := fmt.Sprintf(`{"old_id":%.0f,"new_content":"user correction","authority":"user"}`, supersedeSource["id"])
-	for _, unverified := range []bus.CommandContext{
+	for _, unverified := range []ring.CommandContext{
 		{}, {Authenticated: true, Principal: "model:host"},
 	} {
-		if got, status := invokeContextCommand(t, handler, 0, unverified, "supersede", supersedeArgs); status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+		if got, status := invokeContextCommand(t, handler, 0, unverified, "supersede", supersedeArgs); status != ring.ModuleStatusOK || got["kind"] != "review_required" {
 			t.Fatal("supersede accepted unverified authority", unverified, got, status)
 		}
 	}
 	correction, status := invokeContextCommand(t, handler, 0, caller, "supersede", supersedeArgs)
-	if status != bus.ModuleStatusOK || correction["status"] != "ok" {
+	if status != ring.ModuleStatusOK || correction["status"] != "ok" {
 		t.Fatal("verified user correction refused", correction, status)
 	}
 	correctedMemory := correction["memory"].(map[string]any)
@@ -415,7 +415,7 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 		t.Fatal(r)
 	}
 	destroyed, status := invokeContextCommand(t, handler, 0, caller, "delete", `{"id":"9007199254740997","authority":"user","view":"server","scope_context":true,"project":"exact-id"}`)
-	if status != bus.ModuleStatusOK || destroyed["status"] != "ok" || destroyed["destroyed"] != true || destroyed["deleted"] != true {
+	if status != ring.ModuleStatusOK || destroyed["status"] != "ok" || destroyed["destroyed"] != true || destroyed["deleted"] != true {
 		t.Fatal(status, destroyed)
 	}
 	for _, id := range []string{`9007199254740993`, `"9223372036854775808"`, `"01"`, `"-1"`} {
