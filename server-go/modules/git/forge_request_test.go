@@ -188,6 +188,21 @@ func TestForgeRefusalCarriesTheForgeMessage(t *testing.T) {
 	}
 }
 
+// GitHub's real 422 says "Validation Failed" and puts the reason in "errors".
+// Dropping that list left "pr create: Validation Failed (HTTP 422)" with no cause.
+func TestForgeRefusalCarriesTheValidationErrors(t *testing.T) {
+	stub := &forgeStub{status: 422, reply: `{"message":"Validation Failed","errors":[` +
+		`{"resource":"PullRequest","code":"custom","message":"A pull request already exists for o:b."},` +
+		`{"resource":"PullRequest","field":"head","code":"invalid"}]}`}
+	stub.start(t)
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRCreate, Owner: "o", Repo: "r", Credential: forgeCredential("t")})
+	for _, want := range []string{"Validation Failed", "A pull request already exists for o:b.", "PullRequest head invalid", "422"} {
+		if !strings.Contains(out.Error, want) {
+			t.Fatalf("error = %q, want %q", out.Error, want)
+		}
+	}
+}
+
 // Status 0 with an error means we never reached the forge. A caller that cannot
 // tell that from a refusal will report a network blip as a rejected merge.
 func TestTransportFailureIsNotAForgeRefusal(t *testing.T) {
