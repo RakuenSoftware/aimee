@@ -14,8 +14,6 @@
  * produced deliberately, so the guard is shown failing on the bad frame rather
  * than merely passing on the good one. */
 #include "peer_client.h"
-#include <aimee/ir/session_event.h>
-#include "cJSON.h"
 
 #include <aimee/core/event_bus/module_client.h>
 
@@ -128,18 +126,9 @@ static const char *seen_cell(uint32_t want, char *buf, size_t cap)
    cannot come off the wire. A fixture written from the same misreading as the
    code under test confirms the misreading. */
 static const char *ROW[PEER_CLIENT_MESSAGE_WIDTH] = {
-    "msg-1",
-    "corr-1",
-    "conv-1",
-    "sess-a",
-    "uid:1000",
-    "alpha",
-    "sess-a",
-    "0",
-    "0",
-    "1787554800000000000",
-    PEER_CLIENT_BODY_PREFIX
-    "{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"hello from a\"}]}"};
+    "msg-1",       "corr-1", "conv-1", "sess-a", "uid:1000",
+    "alpha",       "sess-a", "0",      "0",      "1787554800000000000",
+    "hello from a"};
 
 static int checks;
 static void ok(int cond, const char *what)
@@ -161,26 +150,6 @@ static void reset(void)
    g_seen_len = 0;
 }
 
-/* Fixture strings are test origins; the production client accepts Message IR. */
-static peer_client_result_t fixture_peer_send(const char *from, const char *to, const char *text,
-                                              const char *conversation_id, int expect_reply,
-                                              peer_client_message_t *stamped, uint32_t *status,
-                                              int *transport)
-{
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t body = {.role = "user", .blocks = &block, .n_blocks = 1};
-   return peer_client_send(from, to, &body, conversation_id, expect_reply, stamped, status,
-                           transport);
-}
-static peer_client_result_t fixture_peer_reply(const char *from, const char *handle,
-                                               const char *text, peer_client_message_t *stamped,
-                                               uint32_t *status, int *transport)
-{
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t body = {.role = "user", .blocks = &block, .n_blocks = 1};
-   return peer_client_reply(from, handle, &body, stamped, status, transport);
-}
-
 /* ── the outcomes stay three ──────────────────────────────────────────────── */
 
 static void test_three_outcomes(void)
@@ -193,7 +162,7 @@ static void test_three_outcomes(void)
          and a caller that reads this as "the peer said no" stops trying. */
    reset();
    g_available = 0;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "no module serving delivery is a transport failure, not a refusal");
    ok(status == PEER_CLIENT_STATUS_OK,
       "a transport failure leaves status untouched (there was no status to report)");
@@ -201,7 +170,7 @@ static void test_three_outcomes(void)
    /* 2. the module answered, understood, and said no. */
    reset();
    reply_set(PEER_CLIENT_STATUS_UNKNOWN_SENDER, NULL, 0);
-   ok(fixture_peer_send("ghost", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_REFUSED,
+   ok(peer_client_send("ghost", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_REFUSED,
       "a non-zero status is a domain refusal");
    ok(status == PEER_CLIENT_STATUS_UNKNOWN_SENDER, "the refusal carries WHICH no");
    ok(strcmp(peer_client_status_name(status), "unknown_sender") == 0,
@@ -210,10 +179,10 @@ static void test_three_outcomes(void)
    /* 3. the module answered and it worked. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
-   ok(fixture_peer_send("sess-a", "sess-b", "hello from a", "conv-1", 0, &m, &status, NULL) ==
+   ok(peer_client_send("sess-a", "sess-b", "hello from a", "conv-1", 0, &m, &status, NULL) ==
           PEER_CLIENT_OK,
       "a zero status with a full row is a delivery");
-   ok(strcmp(m.body.blocks[0].text, "hello from a") == 0, "the stamped envelope carries the text");
+   ok(strcmp(m.text, "hello from a") == 0, "the stamped envelope carries the text");
    ok(strcmp(m.from_owner, "uid:1000") == 0, "and the owner the MODULE stamped, not the caller's");
    ok(m.hop == 0 && m.is_reply == 0, "hop and is_reply decode from their text cells");
    peer_client_message_free(&m);
@@ -235,7 +204,7 @@ static void test_three_outcomes(void)
       advertise parameters its handler never accepted. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
-   ok(fixture_peer_send("sess-a", "sess-b", "t", NULL, 1, &m, &status, NULL) == PEER_CLIENT_OK,
+   ok(peer_client_send("sess-a", "sess-b", "t", NULL, 1, &m, &status, NULL) == PEER_CLIENT_OK,
       "a send with expect_reply set is accepted");
    peer_client_message_free(&m);
    ok(strcmp(seen_cell(5, buf, sizeof buf), "1") == 0,
@@ -258,7 +227,7 @@ static void test_row_width(void)
       from a real one. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH - 1);
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a SHORT row is refused rather than read as a message");
 
    /* Twelve. A wider row is a newer module: cells append, so the first eleven
@@ -274,7 +243,7 @@ static void test_row_width(void)
       wide[PEER_CLIENT_MESSAGE_WIDTH] = "a cell from a newer module";
       reply_set(PEER_CLIENT_STATUS_OK, wide, PEER_CLIENT_MESSAGE_WIDTH + 1);
    }
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a WIDER row is refused too, rather than read as its first eleven cells");
 }
 
@@ -289,21 +258,21 @@ static void test_malformed(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
    put_u32(g_reply + 8, 0xfffffff0u); /* first cell claims to be enormous */
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a cell length past the end of the frame is refused, not clamped");
 
    /* Trailing bytes the frame never declared. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
    g_reply[g_reply_len++] = 0x41;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "trailing undeclared bytes are refused, not ignored");
 
    /* A header alone, with a status of OK and no cells: a send that reports
       success and delivers no envelope. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, NULL, 0);
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "OK with no row is refused: a delivery with no envelope is not a delivery");
 
    /* A corrupt hop cell. Defaulting it to zero would make a corrupt frame look
@@ -316,7 +285,7 @@ static void test_malformed(void)
       bad[7] = "not-a-number";
       reply_set(PEER_CLIENT_STATUS_OK, bad, PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a hop cell that does not parse is refused, not read as hop 0");
 
    /* And an is_reply that is neither true nor false. */
@@ -328,7 +297,7 @@ static void test_malformed(void)
       bad[8] = "yes";
       reply_set(PEER_CLIENT_STATUS_OK, bad, PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "an is_reply cell outside peerwire's grammar is refused, not read as false");
 
    /* Every spelling peerwire.Atob accepts must be accepted here, because the two
@@ -349,7 +318,7 @@ static void test_malformed(void)
          reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
          peer_client_message_t got;
          int good =
-             fixture_peer_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+             peer_client_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
              got.is_reply == 1;
          if (good)
             peer_client_message_free(&got);
@@ -365,7 +334,7 @@ static void test_malformed(void)
          reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
          peer_client_message_t got;
          int good =
-             fixture_peer_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+             peer_client_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
              got.is_reply == 0;
          if (good)
             peer_client_message_free(&got);
@@ -411,8 +380,7 @@ static void test_inbox(void)
       "a take with rows succeeds");
    ok(count == 1, "one row decodes to one message");
    ok(remaining == 5, "and REMAINING is reported, so a caller knows to ask again");
-   ok(strcmp(msgs[0].body.blocks[0].text, "hello from a") == 0,
-      "the message text survives the round trip");
+   ok(strcmp(msgs[0].text, "hello from a") == 0, "the message text survives the round trip");
    peer_client_messages_free(msgs, count);
 
    ok(get_u32(g_seen) == 3u, "take uses op 3 on the inbox stage");
@@ -513,24 +481,21 @@ static void test_transport_names(void)
    reset();
    g_available = 0;
    transport = -1;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, &transport) ==
-              PEER_CLIENT_TRANSPORT &&
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
           transport == AIMEE_MODULE_CALL_CAPABILITY_ABSENT,
       "nothing serving the stage reports capability_absent, not a bare failure");
 
    reset();
    g_transport = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    transport = -1;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, &transport) ==
-              PEER_CLIENT_TRANSPORT &&
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
           transport == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED,
       "a module that ran out of time reports deadline_exceeded");
 
    reset();
    g_transport = AIMEE_MODULE_CALL_CAPABILITY_DENIED;
    transport = -1;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, &transport) ==
-              PEER_CLIENT_TRANSPORT &&
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
           transport == AIMEE_MODULE_CALL_CAPABILITY_DENIED,
       "a grant that denied the call reports capability_denied, not 'unreachable'");
 
@@ -540,8 +505,7 @@ static void test_transport_names(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH - 1);
    transport = -1;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, &transport) ==
-              PEER_CLIENT_TRANSPORT &&
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
           transport == AIMEE_MODULE_CALL_PROTOCOL,
       "a reply of the wrong shape reports protocol, not an absent module");
 
@@ -550,7 +514,7 @@ static void test_transport_names(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_DENIED, NULL, 0);
    transport = -1;
-   ok(fixture_peer_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_REFUSED &&
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_REFUSED &&
           transport == AIMEE_MODULE_CALL_OK,
       "a refusal leaves the transport code OK: the call was judged, not lost");
 
@@ -583,7 +547,7 @@ static void test_transport_names(void)
  * A reply that silently restored hop 0 would pass every other assertion here. */
 static void test_reply_carries_the_hop(void)
 {
-   char buf[4096];
+   char buf[128];
    uint32_t status = 0;
 
    /* A message that has already travelled. */
@@ -594,7 +558,7 @@ static void test_reply_carries_the_hop(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
    peer_client_message_t got;
-   ok(fixture_peer_send("x", "y", "t", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+   ok(peer_client_send("x", "y", "t", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
           got.hop == 4,
       "a message at hop 4 decodes as hop 4");
 
@@ -606,7 +570,7 @@ static void test_reply_carries_the_hop(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
    peer_client_message_t out;
-   ok(fixture_peer_reply("me", handle, "answering", &out, &status, NULL) == PEER_CLIENT_OK,
+   ok(peer_client_reply("me", handle, "answering", &out, &status, NULL) == PEER_CLIENT_OK,
       "the reply is accepted");
    peer_client_message_free(&out);
 
@@ -623,7 +587,7 @@ static void test_reply_carries_the_hop(void)
       "the answered message's sender travels: that is who the reply goes to");
    ok(strcmp(seen_cell(3, buf, sizeof buf), "conv-1") == 0,
       "and its conversation, so the answer threads onto the same exchange");
-   ok(strstr(seen_cell(11, buf, sizeof buf), "\"text\":\"answering\"") != NULL,
+   ok(strcmp(seen_cell(11, buf, sizeof buf), "answering") == 0,
       "the reply text rides in the row's text cell, which is the module's contract");
 }
 
@@ -637,7 +601,7 @@ static void test_reply_handle_is_refused_not_guessed(void)
       the call never reached. */
    reset();
    status = 0;
-   ok(fixture_peer_reply("me", "not-a-handle", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED &&
+   ok(peer_client_reply("me", "not-a-handle", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED &&
           status == PEER_CLIENT_STATUS_BAD_REQUEST,
       "a malformed handle is the caller's error, not the module being unreachable");
    ok(g_seen_len == 0, "and nothing was sent: a handle that cannot be parsed is not dialled");
@@ -646,14 +610,14 @@ static void test_reply_handle_is_refused_not_guessed(void)
       the field exists to fix. */
    reset();
    status = 0;
-   ok(fixture_peer_reply("me", "id|corr|conv|from|origin|x", "t", &out, &status, NULL) ==
+   ok(peer_client_reply("me", "id|corr|conv|from|origin|x", "t", &out, &status, NULL) ==
           PEER_CLIENT_REFUSED,
       "a hop that does not parse is refused, not read as hop 0");
 
    /* Too few fields. */
    reset();
    status = 0;
-   ok(fixture_peer_reply("me", "id|corr|conv", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED,
+   ok(peer_client_reply("me", "id|corr|conv", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED,
       "a short handle is refused rather than partially believed");
 
    /* A message whose fields contain the separator cannot be represented, and the
@@ -673,117 +637,41 @@ static void test_reply_handle_is_refused_not_guessed(void)
       "a field containing the separator refuses the handle rather than escaping it");
 }
 
-static void test_canonical_body_custody(void)
+static void test_discarded_rows_and_literal_text(void)
 {
-   char text[] = "Keep all blocks.";
-   aimee_block_t blocks[] = {
-       {.type = AIMEE_BLK_TEXT, .text = text},
-       {.type = AIMEE_BLK_IMAGE,
-        .media_type = "image/png",
-        .media_ref = "https://fixture.invalid/image.png"},
-       {.type = AIMEE_BLK_TOOL_USE, .tool_id = "call-1", .tool_name = "inspect"}};
-   blocks[2].tool_input = cJSON_Parse("{\"nested\":[1,true,null]}");
-   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
-                              "peer-fixture", "original", 7);
-   blocks[0].message_group = 3;
-   aimee_message_t body = {
-       .role = "assistant", .blocks = blocks, .n_blocks = 3, .compaction_boundary = 1};
-   blocks[1].context.model_visible = blocks[2].context.model_visible = 1;
-   cJSON *expected = aimee_ir_message_json(&body);
-   char *raw = cJSON_PrintUnformatted(expected);
-   char *cell = malloc(strlen(raw) + sizeof(PEER_CLIENT_BODY_PREFIX));
-   sprintf(cell, "%s%s", PEER_CLIENT_BODY_PREFIX, raw);
+   const char *literal = "aimee.message.v1\n{\"role\":\"user\",\"text\":\"literal λ\"}";
    const char *row[PEER_CLIENT_MESSAGE_WIDTH];
-   for (int i = 0; i < PEER_CLIENT_MESSAGE_WIDTH; i++)
+   for (int i = 0; i < PEER_CLIENT_MESSAGE_WIDTH; ++i)
       row[i] = ROW[i];
-   row[10] = cell;
+   row[10] = literal;
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
    peer_client_message_t got;
-   uint32_t status = 0;
-   ok(peer_client_send("a", "b", &body, NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK,
-      "typed peer body accepts text, media, tool input and provenance together");
-   cJSON *actual = aimee_ir_message_json(&got.body);
-   ok(actual && cJSON_Compare(expected, actual, 1),
-      "canonical peer body survives the C wire intact");
-   cJSON_Delete(actual);
-   ok(got.body.compaction_boundary && body.compaction_boundary,
-      "canonical compaction marker survives transport and producer stays intact");
-   ok(peer_client_message_model_visible(&got), "visible rich body may reach a model projection");
-   aimee_context_meta_t context = got.body.blocks[0].context;
-   got.body.blocks[0].context = (aimee_context_meta_t){0};
-   ok(!peer_client_message_model_visible(&got),
-      "unclassified context cannot authorize model presentation");
-   got.body.blocks[0].context = context;
-   got.body.blocks[0].context.model_visible = 0;
-   ok(!peer_client_message_model_visible(&got), "hidden source context refuses model presentation");
-   got.body.blocks[0].context.model_visible = 1;
-   got.body.blocks[0].context.sensitivity = AIMEE_CTX_SENS_RESTRICTED;
-   ok(!peer_client_message_model_visible(&got),
-      "restricted source context refuses model presentation");
-   got.body.blocks[0].context.sensitivity = AIMEE_CTX_SENS_INTERNAL;
-   cJSON_Delete(got.body.blocks[2].tool_input);
-   aimee_block_t hidden = {.type = AIMEE_BLK_TEXT, .text = "hidden"};
-   aimee_ir_block_set_context(&hidden, AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 0, NULL, NULL,
-                              0);
-   got.body.blocks[2].tool_input = cJSON_CreateObject();
-   cJSON *nested = cJSON_AddArrayToObject(got.body.blocks[2].tool_input, "nested");
-   cJSON_AddItemToArray(nested, aimee_ir_block_json(&hidden));
-   ok(!peer_client_message_model_visible(&got),
-      "hidden opaque nested context refuses model presentation");
-   got.body.blocks[2].type = AIMEE_BLK_TOOL_RESULT;
-   free(got.body.role);
-   got.body.role = strdup("user");
-   got.body.blocks[2].tool_result =
-       cJSON_Parse("{\"nested\":[{\"type\":\"text\",\"context\":{\"origin\":7,\"authority\":1,"
-                   "\"trust\":2,\"sensitivity\":3,\"model_visible\":true,\"revision_domain\":\"\","
-                   "\"revision_scope\":\"\",\"revision_epoch\":\"0\"},\"text\":"
-                   "\"restricted result\"}]}");
-   cJSON_Delete(got.body.blocks[2].tool_input);
-   got.body.blocks[2].tool_input = NULL;
-   ok(!peer_client_message_model_visible(&got),
-      "restricted nested tool result refuses model presentation");
-   cJSON_Delete(got.body.blocks[2].tool_result);
-   got.body.blocks[2].tool_result =
-       cJSON_Parse("{\"context\":{\"model_visible\":false,\"sensitivity\":3},\"domain_key\":"
-                   "\"ordinary data\"}");
-   cJSON *opaque_before = cJSON_Duplicate(got.body.blocks[2].tool_result, 1);
-   ok(peer_client_message_model_visible(&got),
-      "opaque domain context keys do not create IR visibility policy");
-   ok(cJSON_Compare(opaque_before, got.body.blocks[2].tool_result, 1),
-      "presentation checks do not rewrite opaque JSON");
-   cJSON_Delete(opaque_before);
-   got.body.blocks[0].text[0] = 'X';
-   ok(!strcmp(text, "Keep all blocks."), "received body does not alias its producer");
+   uint32_t status;
+   int transport;
+   ok(peer_client_send("a", "b", literal, NULL, 0, &got, &status, &transport) == PEER_CLIENT_OK,
+      "JSON-looking Unicode peer text remains ordinary text");
+   ok(strcmp(got.text, literal) == 0, "returned literal text is byte exact");
+   char buf[256];
+   ok(strcmp(seen_cell(2, buf, sizeof buf), literal) == 0,
+      "sent text has no internal IR discriminator");
    peer_client_message_free(&got);
-   const char *bad[] = {
-       "unversioned legacy text", "aimee.message.v2\n{}",
-       PEER_CLIENT_BODY_PREFIX "{\"role\":\"user\",\"blocks\":[]} trailing",
-       PEER_CLIENT_BODY_PREFIX
-       "{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"one\",\"text\":\"two\"}]}"};
-   for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
-   {
-      row[10] = bad[i];
-      reset();
-      reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
-      ok(peer_client_send("a", "b", &body, NULL, 0, &got, &status, NULL) == PEER_CLIENT_TRANSPORT,
-         "legacy, unknown-version and malformed canonical body rows are protocol failures");
-      reset();
-      reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
-      ok(peer_client_send("a", "b", &body, NULL, 0, NULL, &status, NULL) == PEER_CLIENT_TRANSPORT,
-         "omitting the returned envelope cannot skip canonical protocol validation");
-   }
-   free(cell);
-   free(raw);
-   cJSON_Delete(expected);
-   cJSON_Delete(blocks[2].tool_input);
+   row[7] = "invalid-hop";
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   ok(peer_client_send("a", "b", "t", NULL, 0, NULL, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_PROTOCOL,
+      "discarded send output still validates row fields");
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   ok(peer_client_reply("b", "id|corr|conv|a|a|0", "t", NULL, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_PROTOCOL,
+      "discarded reply output still validates row fields");
 }
 
 int main(void)
 {
-   test_canonical_body_custody();
+   test_discarded_rows_and_literal_text();
    test_reply_carries_the_hop();
    test_reply_handle_is_refused_not_guessed();
    test_three_outcomes();

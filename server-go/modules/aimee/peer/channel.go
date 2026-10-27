@@ -1,9 +1,6 @@
 package peer
 
-import (
-	"errors"
-	canonical "github.com/JBailes/aimee/server-go/ir"
-)
+import "errors"
 
 // Channels: addressing sugar over Send, and deliberately nothing more.
 //
@@ -160,14 +157,12 @@ func (r *Registry) Channels(sessionID string) []string {
 // The returned slice has one entry per intended recipient, in sorted order,
 // each carrying its own outcome. The error return covers only whole-call
 // failures -- an unknown sender, a missing channel, a body that is too long.
-func (r *Registry) ChannelSend(from, name string, body canonical.Message, opts SendOptions) ([]Delivery, error) {
+func (r *Registry) ChannelSend(from, name, text string, opts SendOptions) ([]Delivery, error) {
 	if from == "" || !validChannelName(name) {
 		return nil, ErrBadRequest
 	}
-	if admitted, err := AdmitBody(body); err != nil {
+	if err := validateText(text); err != nil {
 		return nil, err
-	} else {
-		body = admitted
 	}
 
 	type pending struct {
@@ -233,7 +228,7 @@ func (r *Registry) ChannelSend(from, name string, body canonical.Message, opts S
 			continue
 		}
 		msg, err := r.deliver(fromS, toS, deliverSpec{
-			body:           body,
+			text:           text,
 			conversationID: conversation,
 			hop:            opts.Hop + 1,
 		})

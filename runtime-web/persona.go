@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"io"
-	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -59,12 +59,8 @@ func (s *server) v1Request(ctx context.Context, method, path string, body []byte
 		}
 	}
 	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
+		Timeout:   timeout,
+		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 	}
 	var rdr io.Reader
 	if body != nil {

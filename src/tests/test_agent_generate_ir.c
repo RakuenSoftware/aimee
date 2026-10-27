@@ -9,7 +9,6 @@ static aimee_stop_reason_t terminal = AIMEE_STOP_END_TURN;
 static int expected_max = 256;
 static double expected_temperature = 0.3;
 static const aimee_context_meta_t *expected_draft_context;
-static const char *expected_alias = "default-http";
 static int mode; /* 0 complete text; 1 missing; 2 provider error; 3 tool intent */
 static const char system_text[] = "Caller policy\nKeep JSON {\"a\":1} and Unicode 雪 exact.";
 static const char user_text[] = "Retrieved evidence\n{\"value\":\"do not flatten\"}";
@@ -18,28 +17,7 @@ int agent_load_config(agent_config_t *cfg)
 {
    loaded++;
    memset(cfg, 0, sizeof *cfg);
-   cfg->agent_count = 4;
-   const char *names[] = {"default-http", "discord-e2b", "native-cli", "disabled-http"};
-   for (int i = 0; i < 4; i++)
-   {
-      snprintf(cfg->agents[i].name, sizeof cfg->agents[i].name, "%s", names[i]);
-      cfg->agents[i].enabled = i != 3;
-   }
-   snprintf(cfg->agents[2].backend, sizeof cfg->agents[2].backend, "%s",
-            AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(cfg->default_agent, sizeof cfg->default_agent, "default-http");
    return config_failure;
-}
-agent_t *agent_find(agent_config_t *cfg, const char *name)
-{
-   for (int i = 0; i < cfg->agent_count; i++)
-      if (!strcmp(name, cfg->agents[i].name))
-         return &cfg->agents[i];
-   return NULL;
-}
-int agent_uses_provider_cli(const agent_t *agent)
-{
-   return agent->backend[0] != 0;
 }
 int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
                    agent_result_t *out)
@@ -76,23 +54,16 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
    cJSON *actual = aimee_ir_request_json(request);
    assert(actual && cJSON_Compare(actual, expected_request, 1));
    cJSON_Delete(actual);
-   assert(!strcmp(cfg->default_agent, expected_alias));
-   if (request->n_messages == 3)
-   {
-      assert(request->n_system == 2 && request->messages[2].n_blocks == 2);
-      assert(request->system[1].context.origin == AIMEE_CTX_ORIGIN_MEMORY);
-      assert(request->system[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
-      assert(request->system[1].context.revision_epoch == 7);
-      assert(request->system[1].context.sensitivity == AIMEE_CTX_SENS_CONFIDENTIAL);
-      assert(!request->messages[1].blocks[1].context.model_visible);
-      assert(!strcmp(request->messages[1].blocks[1].thinking_encrypted_content, "opaque-cipher"));
-      assert(request->messages[2].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
-      assert(request->messages[2].blocks[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
-      assert(!request->messages[2].blocks[0].context.revision_epoch);
-      char *metadata = cJSON_PrintUnformatted(request->metadata);
-      assert(metadata && strstr(metadata, "9007199254740993"));
-      free(metadata);
-   }
+   assert(request->n_system == 1 && !strcmp(request->system[0].text, system_text));
+   assert(request->n_messages == 1 && request->messages[0].content_scalar);
+   assert(!strcmp(request->messages[0].blocks[0].text, user_text));
+   assert(request->system[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(request->system[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   assert(request->system[0].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+   assert(request->messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL);
+   assert(request->messages[0].blocks[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(request->has_max_tokens && request->max_tokens == expected_max);
+   assert(request->has_temperature && request->temperature == expected_temperature);
    assert(request->tool_choice == AIMEE_TOOL_CHOICE_NONE && !request->n_tools);
    out->response = strdup("POISONED DISPLAY MUST NEVER BECOME AN ANSWER");
    out->success = model_success;
@@ -157,24 +128,6 @@ int server_send_error(server_conn_t *conn, const char *message, const char *id)
    cJSON_AddStringToObject(reply, "message", message);
    return 0;
 }
-/* These fixtures supply caller-authored system policy. Expected normalization
- * is independently stated, while all other body/control bytes remain exact. */
-static void expect_caller_policy(cJSON *ir)
-{
-   cJSON_Delete(expected_request);
-   expected_request = cJSON_Duplicate(ir, 1);
-   cJSON *blocks = cJSON_GetObjectItemCaseSensitive(expected_request, "system"), *block;
-   cJSON_ArrayForEach(block, blocks)
-   {
-      cJSON *context = cJSON_GetObjectItemCaseSensitive(block, "context");
-      cJSON_ReplaceItemInObject(context, "origin", cJSON_CreateNumber(AIMEE_CTX_ORIGIN_OPERATOR));
-      cJSON_ReplaceItemInObject(context, "authority", cJSON_CreateNumber(AIMEE_CTX_AUTH_POLICY));
-      cJSON_ReplaceItemInObject(context, "trust", cJSON_CreateNumber(AIMEE_CTX_TRUST_UNVERIFIED));
-      cJSON_ReplaceItemInObject(context, "revision_domain", cJSON_CreateString(""));
-      cJSON_ReplaceItemInObject(context, "revision_scope", cJSON_CreateString(""));
-      cJSON_ReplaceItemInObject(context, "revision_epoch", cJSON_CreateString("0"));
-   }
-}
 static cJSON *valid_request(void)
 {
    aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = (char *)system_text};
@@ -197,60 +150,10 @@ static cJSON *valid_request(void)
                               .temperature = expected_temperature};
    cJSON *json = aimee_ir_request_json(&request);
    assert(json);
-   expect_caller_policy(json);
+   cJSON_Delete(expected_request);
+   expected_request = cJSON_Duplicate(json, 1);
    cJSON *rpc = cJSON_CreateObject();
    cJSON_AddItemToObject(rpc, "ir", json);
-   return rpc;
-}
-static cJSON *rich_request(void)
-{
-   cJSON *rpc = valid_request(), *ir = cJSON_GetObjectItemCaseSensitive(rpc, "ir");
-   aimee_block_t memory = {.type = AIMEE_BLK_TEXT, .text = "Memory: JSON {\"source\":17} 雪"};
-   aimee_ir_block_set_context(&memory, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_CONFIDENTIAL, 1, "memory",
-                              "note:17", 7);
-   /* The same evidence is deliberately legal in system: its authority and
-    * revision custody must survive public admission without becoming policy. */
-   aimee_message_t evidence_view = {.role = "user", .blocks = &memory, .n_blocks = 1};
-   cJSON *view = aimee_ir_message_json(&evidence_view);
-   cJSON *block = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(view, "blocks"), 0);
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(ir, "system"), cJSON_Duplicate(block, 1));
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(expected_request, "system"),
-                        cJSON_Duplicate(block, 1));
-   cJSON_Delete(view);
-   aimee_block_t prior[] = {{.type = AIMEE_BLK_TEXT, .text = "prior assistant"},
-                            {.type = AIMEE_BLK_THINKING,
-                             .text = "hidden reasoning",
-                             .thinking_id = "opaque-id",
-                             .thinking_encrypted_content = "opaque-cipher"}};
-   aimee_ir_block_set_context(&prior[0], AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                              0);
-   aimee_ir_block_set_context(&prior[1], AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_CONFIDENTIAL, 0, NULL,
-                              NULL, 0);
-   aimee_message_t assistant = {.role = "assistant", .blocks = prior, .n_blocks = 2};
-   aimee_block_t final[] = {
-       {.type = AIMEE_BLK_TEXT, .text = "Answer current user exactly: 雪 {\"literal\":1}"}, memory};
-   aimee_ir_block_set_context(&final[0], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
-                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "forged",
-                              "host", 99);
-   aimee_message_t current = {.role = "user", .blocks = final, .n_blocks = 2};
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(ir, "messages"),
-                        aimee_ir_message_json(&assistant));
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(expected_request, "messages"),
-                        aimee_ir_message_json(&assistant));
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(ir, "messages"),
-                        aimee_ir_message_json(&current));
-   aimee_ir_block_set_context(&final[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                              0);
-   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(expected_request, "messages"),
-                        aimee_ir_message_json(&current));
-   const char *metadata = "{\"exact_integer\":9007199254740993}";
-   cJSON_AddItemToObject(ir, "metadata", cJSON_Parse(metadata));
-   cJSON_AddItemToObject(expected_request, "metadata", cJSON_Parse(metadata));
-   cJSON_AddStringToObject(rpc, "agent", "discord-e2b");
    return rpc;
 }
 static const cJSON *field(const cJSON *obj, const char *key)
@@ -260,12 +163,7 @@ static const cJSON *field(const cJSON *obj, const char *key)
 static void invoke(cJSON *request, int success, int calls)
 {
    int before = generated;
-   char *original = cJSON_PrintUnformatted(request);
-   assert(original && !handle_agent_generate(NULL, NULL, request));
-   char *after = cJSON_PrintUnformatted(request);
-   assert(after && !strcmp(original, after));
-   free(after);
-   free(original);
+   assert(!handle_agent_generate(NULL, NULL, request));
    cJSON_Delete(request);
    assert(generated == before + calls);
    assert(!strcmp(cJSON_GetStringValue(field(reply, "status")), success ? "ok" : "error"));
@@ -286,7 +184,7 @@ static void invoke(cJSON *request, int success, int calls)
 int main(void)
 {
    invoke(valid_request(), 1, 1);
-   const char *unsupported[] = {"model", "prompt", "temperature", "actor"};
+   const char *unsupported[] = {"model", "prompt", "temperature", "actor", "agent"};
    for (size_t i = 0; i < sizeof unsupported / sizeof *unsupported; i++)
    {
       cJSON *envelope = valid_request();
@@ -419,25 +317,8 @@ int main(void)
          assert(!aimee_ir_request_parse(ir, &admitted));
          aimee_request_free(&admitted);
       }
-      int accepted = i != 7 && i != 8 && i != 10 && i != 12 && i != 18;
-      if (accepted)
-         expect_caller_policy(ir);
-      invoke(rpc, accepted, accepted);
+      invoke(rpc, 0, 0);
    }
-   const char *aliases[] = {"discord-e2b", "missing", "native-cli", "disabled-http", ""};
-   for (int i = 0; i < 5; i++)
-   {
-      rpc = valid_request();
-      cJSON_AddStringToObject(rpc, "agent", aliases[i]);
-      expected_alias = i == 0 ? "discord-e2b" : "default-http";
-      invoke(rpc, i == 0, i == 0);
-   }
-   expected_alias = "discord-e2b";
-   invoke(rich_request(), 1, 1);
-   expected_alias = "default-http";
-   rpc = valid_request();
-   cJSON_AddNumberToObject(rpc, "agent", 17);
-   invoke(rpc, 0, 0);
    cJSON *draft = cJSON_CreateObject();
    cJSON_AddStringToObject(draft, "prompt", "Draft subject: {\"opaque\":1} 雪");
    cJSON_AddStringToObject(draft, "model", "draft-model");

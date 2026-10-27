@@ -3,7 +3,6 @@
 #endif
 #include "gateway/stt.h"
 #include "agent_exec.h"
-#include "log.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -18,12 +17,6 @@ static size_t reply_length;
 static int status = 200, calls;
 static const char *expected_model = "whisper-1", *expected_filename, *expected_provider = "openai";
 static char root[128], input[256];
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
 int agent_http_post_content_type_bytes(const char *url, const char *auth, const char *type,
                                        const void *bytes, size_t length, char **response,
                                        size_t *response_length, int timeout, const char *extra)

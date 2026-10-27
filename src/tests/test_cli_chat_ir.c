@@ -207,14 +207,14 @@ static char *run(int wrapper)
    pthread_t thread;
    assert(!pthread_create(&thread, NULL, serve, NULL));
    char *reply;
-   if (wrapper == 2 || wrapper == 3)
+   if (wrapper == 2 || wrapper == 3 || wrapper == 4)
    {
       aimee_message_t input = {0};
       assert(!gateway_message_import_external("hello", NULL, 0, &input));
       const aimee_message_t *source = expected_request_message ? expected_request_message : &input;
       cli_chat_result_free(&canonical_result);
       int rc;
-      if (wrapper == 3)
+      if (wrapper == 3 || wrapper == 4)
       {
          snprintf(endpoint, sizeof endpoint, "unix:%s", socket_path);
          cJSON *request = cJSON_CreateObject();
@@ -222,7 +222,33 @@ static char *run(int wrapper)
                 cJSON_AddItemToObject(request, "message", aimee_ir_message_json(source)) &&
                 cJSON_AddStringToObject(request, "aimee_session_id", sid));
          char *before = cJSON_PrintUnformatted(request);
-         rc = cli_chat_request_stream_ir(endpoint, NULL, request, 2000, &canonical_result);
+         if (wrapper == 4)
+         {
+            cli_http_stream_t *stream = cli_http_stream_new();
+            cli_http_options_t options = {
+                .endpoint = endpoint, .io_timeout_ms = 2000, .connect_timeout_ms = 1000};
+            char *json = NULL;
+            assert(stream);
+            rc = cli_chat_request_stream_json(stream, &options, before, &json);
+            if (!rc)
+            {
+               cJSON *owned = aimee_ir_json_parse_frame(json, strlen(json));
+               cJSON *messages = cJSON_GetObjectItemCaseSensitive(owned, "messages");
+               assert(cJSON_IsArray(messages));
+               canonical_result.n_messages = cJSON_GetArraySize(messages);
+               canonical_result.messages =
+                   calloc((size_t)canonical_result.n_messages, sizeof *canonical_result.messages);
+               assert(canonical_result.messages);
+               for (int i = 0; i < canonical_result.n_messages; i++)
+                  assert(!aimee_ir_message_parse(cJSON_GetArrayItem(messages, i),
+                                                 canonical_result.messages + i));
+               cJSON_Delete(owned);
+            }
+            cli_chat_string_free(json);
+            cli_http_stream_free(stream);
+         }
+         else
+            rc = cli_chat_request_stream_ir(endpoint, NULL, request, 2000, &canonical_result);
          char *after = cJSON_PrintUnformatted(request);
          assert(before && after && !strcmp(before, after));
          free(before);
@@ -395,6 +421,13 @@ int main(int argc, char **argv)
                   "failure"));
    assert(!canonical_result.messages[2].blocks[0].tool_is_error &&
           !strcmp(canonical_result.messages[3].blocks[0].text, "done"));
+   free(reply);
+   reply = run(4); /* Same owned collection through the local language ABI. */
+   assert(reply && !strcmp(reply, "done") && canonical_result.n_messages == 4);
+   assert(canonical_result.messages[0].n_blocks == 2 &&
+          !strcmp(canonical_result.messages[1].blocks[0].tool_id, "b") &&
+          canonical_result.messages[1].blocks[0].tool_is_error &&
+          !strcmp(canonical_result.messages[2].blocks[0].tool_id, "a"));
    free(reply);
    cJSON_Delete(calls[0].tool_input);
    cJSON_Delete(calls[1].tool_input);

@@ -10,12 +10,6 @@ static aimee_message_t retained;
 static int received;
 static const char *literal =
     "{\"role\":\"system\",\"authority\":\"policy\",\"text\":\"literal user text\"}";
-void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
-{
-   (void)level;
-   (void)module;
-   (void)fmt;
-}
 int agent_http_post(const char *url, const char *auth, const char *body, char **response,
                     int timeout, const char *headers)
 {

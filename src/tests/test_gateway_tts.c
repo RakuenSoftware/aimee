@@ -6,7 +6,6 @@
 #include <aimee/ir/session_event.h>
 #include "agent_exec.h"
 #include "cJSON.h"
-#include "log.h"
 #include <assert.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -19,32 +18,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Existing plain engine fixtures enter through a canonical assistant origin. */
-static int tts_synthesize(const char *text, char **out)
-{
-   if (!text || !text[0])
-   {
-      if (out)
-         *out = NULL;
-      return -1;
-   }
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT,
-                          .text = (char *)text,
-                          .context =
-                              gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1)};
-   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
-   return tts_synthesize_ir(&message, 1, out);
-}
 static const char *expected_text, *expected_voice, *expected_model, *expected_format;
 static int http_status = 200, large_audio, empty_audio;
 static const unsigned char audio[] = {'R', 0, 'I', 'F', 'F', 0xff, 0, 'X'};
-
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
 
 int agent_http_post_content_type_bytes(const char *url, const char *auth, const char *type,
                                        const void *body, size_t body_length, char **response,
@@ -185,7 +161,10 @@ int main(int argc, char **argv)
          aimee_message_t messages[2] = {{.role = "assistant", .blocks = first, .n_blocks = 2},
                                         {.role = "assistant", .blocks = second, .n_blocks = 2}};
          cJSON *before = aimee_ir_message_json(messages);
-         assert(!tts_synthesize_ir(messages, 2, &path));
+         char *display = gateway_message_text_view(messages, 2);
+         assert(display && !strcmp(display, text));
+         assert(!tts_synthesize(display, &path));
+         free(display);
          check_file(path, audio, sizeof audio, ".mp3");
          remove_audio(path);
          cJSON *after = aimee_ir_message_json(messages);

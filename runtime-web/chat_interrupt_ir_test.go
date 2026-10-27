@@ -23,6 +23,7 @@ func TestChatInterruptCanonicalMessage(t *testing.T) {
 	for _, body := range []string{`{"aimee_session_id":"session","message":"old text"}`, `{"aimee_session_id":"session","message":{"role":"assistant","blocks":[]}}`, `{"aimee_session_id":"session","aimee_session_id":"other","message":` + message + `}`} {
 		res := httptest.NewRecorder()
 		s.handleChatInterrupt(res, withUser(httptest.NewRequest("POST", "/", strings.NewReader(body)), "alice"))
+		waitFakeV1(t)
 		if res.Code != 400 {
 			t.Fatalf("accepted invalid steer: %d %s", res.Code, res.Body.String())
 		}
@@ -31,7 +32,9 @@ func TestChatInterruptCanonicalMessage(t *testing.T) {
 		t.Fatal("invalid steering reached transport")
 	}
 	res := httptest.NewRecorder()
+	beforeFakeV1(t)
 	s.handleChatInterrupt(res, withUser(httptest.NewRequest("POST", "/", strings.NewReader(`{"aimee_session_id":"session","message":`+message+`}`)), "alice"))
+	waitFakeV1(t)
 	if res.Code != 200 || calls != 1 {
 		t.Fatalf("canonical steering failed: %d %s", res.Code, res.Body.String())
 	}

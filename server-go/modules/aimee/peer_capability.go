@@ -218,10 +218,6 @@ func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 		if len(cells) != 6 {
 			return nil, nil
 		}
-		body, err := peerwire.DecodeBody(cells[2])
-		if err != nil {
-			return refuse(peerwire.StatusBadRequest)
-		}
 		hop, err := peerwire.Atoi(cells[4])
 		if err != nil {
 			return refuse(peerwire.StatusBadRequest)
@@ -234,7 +230,7 @@ func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 		if err != nil {
 			return refuse(peerwire.StatusBadRequest)
 		}
-		msg, sendErr := c.registry.Send(cells[0], cells[1], body, peer.SendOptions{
+		msg, sendErr := c.registry.Send(cells[0], cells[1], cells[2], peer.SendOptions{
 			ConversationID: cells[3],
 			Hop:            hop,
 			ExpectReply:    expectReply,
@@ -257,7 +253,7 @@ func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 		// caller sends what it is replying to plus what it is saying, and the
 		// registry re-stamps provenance either way, so a forged row cannot
 		// impersonate anyone.
-		msg, replyErr := c.registry.Reply(cells[0], answered[0], answered[0].Body)
+		msg, replyErr := c.registry.Reply(cells[0], answered[0], answered[0].Text)
 		if replyErr != nil {
 			return refuse(peerwire.StatusFor(replyErr))
 		}
@@ -392,15 +388,11 @@ func (c *PeerCapability) channel(op uint32, cells []string) ([]byte, error) {
 		if len(cells) != 5 {
 			return nil, nil
 		}
-		body, err := peerwire.DecodeBody(cells[2])
-		if err != nil {
-			return refuse(peerwire.StatusBadRequest)
-		}
 		hop, err := peerwire.Atoi(cells[4])
 		if err != nil {
 			return refuse(peerwire.StatusBadRequest)
 		}
-		deliveries, sendErr := c.registry.ChannelSend(cells[0], cells[1], body, peer.SendOptions{
+		deliveries, sendErr := c.registry.ChannelSend(cells[0], cells[1], cells[2], peer.SendOptions{
 			ConversationID: cells[3],
 			Hop:            hop,
 		})

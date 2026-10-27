@@ -6,7 +6,10 @@ IR is required core and defines Aimee's provider-neutral request, response, bloc
 usage, stop-reason, and panel-result shapes. `aimee_request_t`, `aimee_response_t`, and
 `aimee_panel_result_t` let core stages operate once
 instead of repeating logic for every wire protocol. IR does not choose a provider, authorize tools,
-route work, or define a provider's external JSON contract.
+route work, or define a provider's external JSON contract. Provider formats convert
+at the model adapters; internal model processing uses the shared IR. Ordinary
+thinclient authentication, session controls, peer messages, delivery logs and
+other application records retain their own contracts.
 
 ## Public contracts
 

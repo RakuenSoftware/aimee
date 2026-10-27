@@ -96,7 +96,7 @@ static int active_delegation_stopped(char *buf, size_t bufsz)
    return 1;
 }
 
-int agent_uses_provider_cli(const agent_t *agent)
+static int agent_uses_provider_cli(const agent_t *agent)
 {
    return agent && (strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
                     strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) == 0 ||

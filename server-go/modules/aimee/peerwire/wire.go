@@ -2,9 +2,7 @@ package peerwire
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
-	canonical "github.com/JBailes/aimee/server-go/ir"
 	"math"
 	"strconv"
 	"strings"
@@ -582,24 +580,8 @@ func textToTime(s string) (time.Time, error) {
 
 // ---- message rows --------------------------------------------------------
 
-const BodyPrefix = "aimee.message.v1\n"
-
-// DecodeBody refuses unversioned text and accepts only canonical Message IR.
-func DecodeBody(cell string) (canonical.Message, error) {
-	if !strings.HasPrefix(cell, BodyPrefix) {
-		return canonical.Message{}, ErrWire
-	}
-	cell = strings.TrimPrefix(cell, BodyPrefix)
-	messages, err := canonical.DecodeMessages([]byte("[" + cell + "]"))
-	if err != nil || len(messages) != 1 {
-		return canonical.Message{}, ErrWire
-	}
-	return messages[0], nil
-}
-
 // MessageCells renders one peer message as its fixed-width row.
 func MessageCells(m peer.Message) []string {
-	body, _ := json.Marshal(m.Body)
 	return []string{
 		m.ID,
 		m.CorrelationID,
@@ -611,7 +593,7 @@ func MessageCells(m peer.Message) []string {
 		Itoa(m.Hop),
 		Btoa(m.IsReply),
 		timeToText(m.SentAt),
-		BodyPrefix + string(body),
+		m.Text,
 	}
 }
 
@@ -686,10 +668,6 @@ func MessageRows(cells []string) ([]peer.Message, error) {
 		if err != nil {
 			return nil, ErrWire
 		}
-		body, err := DecodeBody(row[10])
-		if err != nil {
-			return nil, ErrWire
-		}
 		out = append(out, peer.Message{
 			ID:             row[0],
 			CorrelationID:  row[1],
@@ -701,7 +679,7 @@ func MessageRows(cells []string) ([]peer.Message, error) {
 			Hop:            hop,
 			IsReply:        isReply,
 			SentAt:         sentAt,
-			Body:           body,
+			Text:           row[10],
 		})
 	}
 	return out, nil

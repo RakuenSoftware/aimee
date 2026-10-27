@@ -180,7 +180,7 @@ $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o 
                  $(OBJDIR)/modules/vault/runtime_secret.o $(PLATFORM_BASIC_OBJS) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
-$(TESTPREFIX)/unit-test-http-response-framing: $(OBJDIR)/tests/test_http_response_framing.o \
+$(TESTPREFIX)/unit-test-http-response-framing: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_http_response_framing.o \
     $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
@@ -3951,7 +3951,7 @@ $(TESTPREFIX)/unit-test-gateway-telegram: $(OBJDIR)/tests/test_gateway_telegram.
                                           $(OBJDIR)/gateway/tts.o \
                                           $(OBJDIR)/delivery_target.o \
                                           $(OBJDIR)/posix/agent_bridge.o \
-                                          $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                          $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                           $(OBJDIR)/proxy_bootstrap.o \
                                           $(OBJDIR)/util.o \
                                         $(OBJDIR)/cJSON.o \
@@ -3978,7 +3978,7 @@ $(TESTPREFIX)/unit-test-gateway-ntfy-webhook: $(OBJDIR)/tests/test_gateway_ntfy_
                                               $(OBJDIR)/gateway/tts.o \
                                               $(OBJDIR)/delivery_target.o \
                                               $(OBJDIR)/posix/agent_bridge.o \
-                                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                              $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                               $(OBJDIR)/proxy_bootstrap.o \
                                               $(OBJDIR)/util.o \
                                         $(OBJDIR)/cJSON.o \
@@ -4015,23 +4015,23 @@ $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pa
                                              $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
-$(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/test_gateway_stt.o \
+$(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_stt.o \
     $(OBJDIR)/gateway/stt.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/test_gateway_tts.o \
+$(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_tts.o \
     $(OBJDIR)/gateway/tts.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread -lcrypto
 
-$(TESTPREFIX)/unit-test-gateway-ntfy: $(OBJDIR)/tests/test_gateway_ntfy.o \
+$(TESTPREFIX)/unit-test-gateway-ntfy: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_ntfy.o \
     $(OBJDIR)/gateway/platform_ntfy.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-embed-result: $(OBJDIR)/tests/test_embed_result.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lm
 
-$(TESTPREFIX)/unit-test-kb-sidecar-admission: $(OBJDIR)/tests/test_kb_sidecar_admission.o \
+$(TESTPREFIX)/unit-test-kb-sidecar-admission: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_kb_sidecar_admission.o \
     $(OBJDIR)/kb/kb_ocr_sidecar.o $(OBJDIR)/kb/kb_tsr_sidecar.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/util.o $(OBJDIR)/core/codec/base64.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
@@ -4077,14 +4077,23 @@ $(TESTPREFIX)/unit-test-openai-runs-store: $(OBJDIR)/tests/test_openai_runs_stor
 # against the SHIPPING marshallers, not a copy of them.
 $(TESTPREFIX)/unit-test-cli-argspec: $(OBJDIR)/tests/test_cli_argspec.o \
                                      $(OBJDIR)/cli_argspec.o \
-                                     $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
+                                     $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
                                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+ifeq ($(UNAME_S),Linux)
+$(OBJDIR)/tests/test_cli_http_transport.o: C_FLAGS += -DAIMEE_TEST_CONNECT_WRAPPED -fno-lto
+CLI_HTTP_TEST_CONNECT_WRAP = -Wl,--wrap=aimee_core_socket_connect_controlled
+endif
+
+$(OBJDIR)/tests/cli_http_transport_client.o: cli_client.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(CLIENT_C_FLAGS) -fno-lto -o $@ $<
+
 $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transport.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
-                                            $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                            $(OBJDIR)/tests/cli_http_transport_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                             $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(CLI_HTTP_TEST_CONNECT_WRAP)
 
 # The tool-call rescue parser and its golden corpus moved with the rule to
 # server-go/modules/delegates (rescue*.go, testdata/xml_fallback_golden.json).
@@ -4179,7 +4188,6 @@ $(TESTPREFIX)/unit-test-core-connect-budget: \
 $(TESTPREFIX)/unit-test-peer-client: \
                       $(OBJDIR)/tests/test_peer_client.o \
                       $(OBJDIR)/peer_client/peer_client.o \
-                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o \
                       $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
@@ -6899,7 +6907,7 @@ $(TESTPREFIX)/unit-test-ir-shadow-response: $(OBJDIR)/tests/test_ir_shadow_respo
                                             $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-shadow-mirror: $(OBJDIR)/tests/test_shadow_mirror.o \
+$(TESTPREFIX)/unit-test-shadow-mirror: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_shadow_mirror.o \
                                        $(OBJDIR)/server/shadow_mirror.o \
                                        $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) \
                                        $(OBJDIR)/modules/translation/wire_codec.o \
@@ -7362,7 +7370,7 @@ $(TESTPREFIX)/unit-test-agent-request-controls: $(OBJDIR)/tests/test_agent_reque
  $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/test_delegate_result_envelope.o $(OBJDIR)/server/server_delegate_input.o $(OBJDIR)/server/liveness.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_delegate_result_envelope.o $(OBJDIR)/server/server_delegate_input.o $(OBJDIR)/server/liveness.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-openai-run-terminal: $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/server/server_model_execution.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/tests/test_openai_run_terminal.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
@@ -7374,7 +7382,7 @@ $(TESTPREFIX)/unit-test-delegate-status-ir: $(OBJDIR)/tests/test_delegate_status
 $(TESTPREFIX)/unit-test-db1-agent-job-observation: $(OBJDIR)/tests/test_db1_agent_job_observation.o $(OBJDIR)/db1_client/delegation.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_delegate_input.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
+$(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Preserve the actual credential TLS; provider getters remain explicit runtime-fixture seams.
@@ -7407,10 +7415,10 @@ $(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/tests/test_canonical
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-cli-chat-ir: $(OBJDIR)/tests/test_cli_chat_ir.o $(OBJDIR)/posix/cli_client.o $(CORE_CONNECTION_LIB) \
+$(TESTPREFIX)/unit-test-cli-chat-ir: $(OBJDIR)/tests/test_cli_chat_ir.o $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(CORE_CONNECTION_LIB) \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o \
     $(OBJDIR)/modules/protocols/acp/acp_server.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) $(TLS_LIBS) -lcrypto
 
 $(TESTPREFIX)/unit-test-cli-acp-projection: $(OBJDIR)/tests/test_cli_acp_projection.o \
     $(OBJDIR)/modules/protocols/acp/acp_server.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
@@ -7661,7 +7669,7 @@ $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o 
 
 # Actual authenticated webhook parser/lifetime, isolated from model and delivery.
 $(OBJDIR)/tests/test_gateway_webhook_ir.o: gateway/platform_webhook.c gateway/gateway_ir.h
-$(TESTPREFIX)/unit-test-gateway-webhook-ir: $(OBJDIR)/tests/test_gateway_webhook_ir.o \
+$(TESTPREFIX)/unit-test-gateway-webhook-ir: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_webhook_ir.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread

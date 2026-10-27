@@ -9,5 +9,5 @@
   "channel_id": "REPLACE_WITH_DISCORD_CHANNEL_ID",
   "model": "discord-e2b",
   "allowed_user_ids": [],
-  "aimee_cli": "/usr/local/bin/aimee"
+  "aimee_library": "/usr/local/lib/libaimee-client.so"
 }

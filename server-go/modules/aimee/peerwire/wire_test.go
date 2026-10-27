@@ -156,7 +156,7 @@ func TestMessageRowRoundTrip(t *testing.T) {
 		ID: "pmsg-1", CorrelationID: "pmsg-1", ConversationID: "conv-1",
 		FromSession: "A", FromOwner: "uid:1000", FromLabel: "author",
 		OriginSession: "A", Hop: 3, IsReply: true, SentAt: sent,
-		Body: peer.ImportExternalText("body with unicode: ✓ and a quote \""),
+		Text: "body with unicode: ✓ and a quote \"",
 	}
 	cells := MessageCells(m)
 	if len(cells) != MessageWidth {
@@ -166,7 +166,7 @@ func TestMessageRowRoundTrip(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("rows: %v (%d)", err, len(got))
 	}
-	if !reflect.DeepEqual(got[0], m) {
+	if got[0] != m {
 		t.Errorf("round trip lost fields:\n got %+v\nwant %+v", got[0], m)
 	}
 }
@@ -174,11 +174,11 @@ func TestMessageRowRoundTrip(t *testing.T) {
 // A list reply carries no row count, so the caller divides — and must refuse a
 // remainder rather than hand back a short final row.
 func TestMessageRowsRefusesRemainder(t *testing.T) {
-	cells := MessageCells(peer.Message{Body: peer.ImportExternalText("fixture"), ID: "x"})
+	cells := MessageCells(peer.Message{ID: "x"})
 	if _, err := MessageRows(cells[:MessageWidth-1]); !errors.Is(err, ErrRowCount) {
 		t.Fatalf("short row: err = %v; want ErrRowCount", err)
 	}
-	two := append(MessageCells(peer.Message{Body: peer.ImportExternalText("fixture"), ID: "a"}), MessageCells(peer.Message{Body: peer.ImportExternalText("fixture"), ID: "b"})...)
+	two := append(MessageCells(peer.Message{ID: "a"}), MessageCells(peer.Message{ID: "b"})...)
 	got, err := MessageRows(two)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("two rows: %v (%d)", err, len(got))
@@ -341,13 +341,13 @@ func TestEverySentinelErrorHasItsOwnStatus(t *testing.T) {
 // wrote, so a field added and not set in that literal is zero on both sides and
 // passes.
 func TestMessageEncoderCarriesEveryField(t *testing.T) {
-	fields := reflect.TypeOf(peer.Message{Body: peer.ImportExternalText("fixture")}).NumField()
+	fields := reflect.TypeOf(peer.Message{}).NumField()
 	if fields != MessageWidth {
 		t.Fatalf("peer.Message has %d fields, MessageWidth is %d. A field the encoder "+
 			"does not carry arrives zero-valued and looks like one the sender left "+
 			"empty.", fields, MessageWidth)
 	}
-	if got := len(MessageCells(peer.Message{Body: peer.ImportExternalText("fixture")})); got != MessageWidth {
+	if got := len(MessageCells(peer.Message{})); got != MessageWidth {
 		t.Errorf("MessageCells emitted %d cells; want %d", got, MessageWidth)
 	}
 }
@@ -483,7 +483,7 @@ func TestCorruptCellsAreRefusedNotZeroed(t *testing.T) {
 
 	// The row decoder must propagate both, rather than handing back a row whose
 	// fields quietly disagree with the bytes that produced it.
-	good := MessageCells(peer.Message{Body: peer.ImportExternalText("fixture"), ID: "m1", SentAt: time.Unix(0, 1700000000123456789).UTC()})
+	good := MessageCells(peer.Message{ID: "m1", SentAt: time.Unix(0, 1700000000123456789).UTC()})
 	for _, bad := range []struct {
 		name  string
 		index int
@@ -521,14 +521,6 @@ func TestEncoderRefusesLengthsTheFrameCannotHold(t *testing.T) {
 		if !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: u32(%d) = %d, %v; want ErrUnrepresentable. A wrap here "+
 				"turns cell content into framing.", tc.name, tc.n, got, err)
-		}
-	}
-}
-
-func TestCanonicalBodyWireRefusesLegacyAndMalformed(t *testing.T) {
-	for _, cell := range []string{"legacy peer text", "aimee.message.v2\n{}", BodyPrefix + `{"role":"user","blocks":[{"type":"text","text":"one","text":"two"}]}`, BodyPrefix + `{"role":"user","blocks":[]}` + ` trailing`} {
-		if _, err := DecodeBody(cell); err == nil {
-			t.Fatalf("accepted noncanonical body: %q", cell)
 		}
 	}
 }

@@ -1659,20 +1659,8 @@ cJSON *marshal_model_generate(int argc, char **argv)
    body[count] = 0;
    cJSON *request = aimee_ir_json_parse_frame(body, count);
    free(body);
-   if (!cJSON_IsObject(request) || !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "ir")))
-   {
-      cJSON_Delete(request);
-      return NULL;
-   }
-   const cJSON *field;
-   cJSON_ArrayForEach(field,
-                      request) if (strcmp(field->string, "ir") && strcmp(field->string, "agent"))
-   {
-      cJSON_Delete(request);
-      return NULL;
-   }
-   const cJSON *alias = cJSON_GetObjectItemCaseSensitive(request, "agent");
-   if (alias && (!cJSON_IsString(alias) || !alias->valuestring[0]))
+   if (!cJSON_IsObject(request) || cJSON_GetArraySize(request) != 1 ||
+       !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "ir")))
    {
       cJSON_Delete(request);
       return NULL;

@@ -22,7 +22,7 @@ async def main():
   model.memory_context=frozen_context
   turn=await model.reply([],request["query"],request["channel_id"])
   if not isinstance(turn,ModelTurn):raise RuntimeError("no canonical model turn")
-  value={"answer":display_text(turn),"ir":turn.response}
+  value={"answer":display_text(turn),"messages":turn.messages}
   print(json.dumps(value))
 asyncio.run(main())'''
 def main():

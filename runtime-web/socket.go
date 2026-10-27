@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"net/http"
 	"path/filepath"
 	"time"
@@ -94,10 +94,7 @@ func chatIRHTTP(ctx context.Context, socketPath, username string, message json.R
 		return err
 	}
 	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-	}}
-	defer transport.CloseIdleConnections()
+	transport := &thinclient.Transport{Endpoint: "unix:" + sock}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://aimee/v1/chat/stream", bytes.NewReader(payload))
 	if err != nil {
 		return err

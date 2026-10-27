@@ -543,7 +543,9 @@ AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
 CORE_SRCS += $(IR_CONTRACT_SRCS)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
+CLIENT_TRANSPORT_SRCS = cli_client.c
+CLIENT_TRANSPORT_OBJS = $(CLIENT_TRANSPORT_SRCS:%.c=$(OBJDIR)/%.o)
+CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c $(CLIENT_TRANSPORT_SRCS) cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
 CLI_SRCS += http_content_encoding.c $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/session_event.c modules/ir/request_codec.c
 CLI_SRCS += cli_proxy.c cli_proxy_cmd.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
@@ -570,7 +572,7 @@ $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 # --- Server ---
 SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_op_runs.c server/server_compute_owner.c server/server_learning_outcome.c server/server_learning_recovery.c server/server_verification.c server/server_learning_application.c server/server_learning_approaches.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_ingress.c server/anthropic_http.c server/server_model_execution.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/ir/aimee_ir_module_plan.c server/ir_host_bindings.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/fidelity_check.c server/openai_runs_store.c server/server_api.c server/server_native_primitive.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_memory.c server/server_task_projection.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_workspace_scan.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/roundtable/roundtable_chair.c modules/webuser/webuser_runtime.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c server/wfe_live_delegate.c modules/workflows/wfe_live_forge.c modules/workflows/wfe_live_foreach.c modules/workflows/wfe_live_panel.c modules/workflows/wfe_panel_roundtable.c modules/workflows/wfe_replay_worktree.c modules/workflows/wfe_scheduler.c \
-              server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_delegate_input.c server/server_chat_ir.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_serve.c modules/translation/aimee_responses_frontend_stream.c server/server_responses_stream.c server/server_native_cache.c modules/translation/harness_ir.c modules/translation/history_ir.c modules/translation/codec_stdio.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
+              server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_delegate_input.c server/server_chat_ir.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_serve.c modules/translation/aimee_responses_frontend_stream.c server/server_responses_stream.c server/server_native_cache.c modules/translation/harness_ir.c modules/translation/history_ir.c modules/translation/codec_stdio.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c $(CLIENT_TRANSPORT_SRCS) \
               modules/roundtable/roundtable_pipeline_eval.c modules/roundtable/roundtable_pipeline_capture.c modules/roundtable/roundtable_pipeline_chunk.c server/server_pipeline.c server/server_pipeline_merge.c \
               server/agent_admission.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c modules/roundtable/roundtable_preset.c modules/roundtable/roundtable_seat_resolve.c working_profile.c \
@@ -820,7 +822,7 @@ KB_DATA_SRCS = code_match.c rel_types.c \
                dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
 KB_DATA_SRCS += integrity_ingress.c
 KB_DATA_OBJS = $(KB_DATA_SRCS:%.c=$(OBJDIR)/kb/%.o)
-KB_PLATFORM_OBJS = $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
+KB_PLATFORM_OBJS = $(CLIENT_TRANSPORT_OBJS) $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
 
 # --- §2 tree-sitter extraction front-end (opt-in: `make AIMEE_TREESITTER=1`) ---
 # Default build: code_treesitter.c compiles to a stub (no tree-sitter), so nothing is
@@ -944,7 +946,7 @@ endif
 
 # --- Gateway ---
 
-GATEWAY_SRCS = cli_chat_stream.c $(IR_BASE_SRCS) modules/ir/session_event.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
+GATEWAY_SRCS = $(CLIENT_TRANSPORT_SRCS) cli_chat_stream.c $(IR_BASE_SRCS) modules/ir/session_event.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
                gateway/delivery_router.c gateway/session_key.c \
                gateway/platform_telegram.c gateway/platform_ntfy.c gateway/platform_webhook.c \
                gateway/stt.c gateway/tts.c gateway/pairing.c gateway/gateway_pairing.c gateway/mirror.c \
@@ -1519,11 +1521,25 @@ $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-eval ./modules/memory/cmd/aimee-memory-eval
 
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
+# The SDK compiles the same client and connection owners as the CLI, with only
+# its CLI-global convenience entrypoint excluded. No alternate HTTP implementation.
+THINCLIENT_LIBRARY = ../libaimee-client.so
+THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
+THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
+$(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
+	@mkdir -p $(dir $@)
+	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(PLATFORM_FRAMEWORKS) $(EXTRA_L_FLAGS)
+$(THINCLIENT_PC): $(THINCLIENT_LIBRARY) Makefile
+	@mkdir -p $(dir $@)
+	@printf '%s\n' 'prefix=$(abspath $(dir $(THINCLIENT_LIBRARY)))' 'libdir=$${prefix}' 'includedir=$(abspath headers)' '' 'Name: aimee-client' 'Description: Shared Aimee thinclient transport' 'Version: 1.0.0' 'Libs: -L$${libdir} -laimee-client' 'Cflags: -I$${includedir}' > $@
+.PHONY: thinclient-library
+thinclient-library: $(THINCLIENT_LIBRARY) $(THINCLIENT_PC)
+
 RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod ../runtime-web/go.sum \
-	$(wildcard ../server-go/modules/runtime-web/policy/*.go)
-$(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS)
+	$(wildcard ../server-go/modules/runtime-web/policy/*.go) $(wildcard ../server-go/thinclient/*.go)
+$(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS) $(THINCLIENT_PC)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	cd ../runtime-web && go build -buildvcs=false -o "$(abspath $@)" .
+	cd ../runtime-web && PKG_CONFIG_PATH="$(abspath $(OBJDIR)/thinclient/pkgconfig):$$PKG_CONFIG_PATH" CGO_LDFLAGS='-Wl,-rpath,$$ORIGIN -Wl,-rpath,$$ORIGIN/../lib' CGO_ENABLED=1 go build -buildvcs=false -o "$(abspath $@)" .
 
 DELEGATE_EGRESS_GO_SRCS := $(shell find ../server-go/modules/delegates ../server-go/modules/sandbox ../server-go/modules/egress -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
 $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
@@ -1863,6 +1879,8 @@ install:
 	install -m 755 $(MEMORY_TRANSFER) $(PREFIX)/bin/aimee-memory-transfer
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
 	install -m 755 $(RUNTIME_WEB) $(PREFIX)/bin/aimee-runtime-web
+	@mkdir -p $(PREFIX)/lib
+	install -m 755 $(THINCLIENT_LIBRARY) $(PREFIX)/lib/libaimee-client.so
 	install -m 755 $(DELEGATE_EGRESS) $(PREFIX)/bin/aimee-delegate-egress
 	install -m 755 $(SERVER) $(PREFIX)/bin/aimee-server
 	install -m 755 $(FORWARDER) $(PREFIX)/bin/aimee-forwarder

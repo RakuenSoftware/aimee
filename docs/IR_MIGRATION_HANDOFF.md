@@ -103,27 +103,56 @@ The dispatch census reconciles 43 concrete C execution calls, seven Go delegate
 calls and 124 C transport/process sites with these traces. Two actual HTTP
 execution paths also now reject trailing bytes after the native response JSON,
 using the existing strict frame parser and a real plain/tool transport regression.
-Discord is included in the migration and uses the installed thin client:
-`aimee --json model generate` reads a canonical Request plus an optional registered
-agent alias from stdin and returns the canonical Response. Its history and repair
-turns retain canonical blocks; complete Response custody remains separate from the
-sidecar-free Message view. Provider HTTP, credentials, TLS and tokenizer code are
-removed from the bot. Memory/persona/workflow domain records remain unchanged.
-The existing generation handler now admits full tool-free IR history through the
-shared public attenuation and HTTP execution owners. Alias selection changes only
-the request-local configuration; model URLs, credentials and tools remain server-owned.
+The browser and Discord reuse the C thinclient rather than carry separate client
+transport implementations. The browser's Go binding replaces its five direct
+Unix HTTP transports; its ordinary auth/session/control/replay payloads and
+headers are unchanged. Discord loads the same client library and uses the existing
+canonical chat collector; no new public chat command or routing field is needed.
+The C owner resolves the enrolled client profile, bearer and TLS identity. Python
+keeps those credential pointers opaque and does not parse provider or NDJSON data.
+Normal server session controls allocate a bot session and select its registered
+primary. Channel/session mappings are in memory; a bot restart begins fresh model
+context, and retained server execution records are not deleted or rebound.
 
-The bot no longer makes a separate exact-token-packing claim. It sends bounded,
-intact history/evidence to the configured server and preserves the prior delivered
-history on errors or context refusal. The old tokenizer-only tests and qualification
-branch are retired; existing memory, persona, workflow and delivery assertions are
-retained against the canonical thin-client path.
+IR applies to provider-model messages, history, tools, responses and opaque model
+state. It replaces Anthropic/OpenAI/Gemini representations between model adapters.
+Ordinary peer text, status replies, delivery logs, TTS and other domain/control
+records keep their own contracts. Peer-domain framing and synthetic gateway
+model-message wrappers were removed; their validation and actual model boundaries
+remain intact. Discord's delivery/query cache is not replayed as a second model
+history; policy, identity and evidence remain separate model-input blocks.
 
-Qualification includes the Discord 124-test local suite, real subprocess wrapper
-checks, actual Python-to-C canonical admission, and normal/sanitizer handler,
-CLI-marshal and HTTP-generation fixtures. These are local source checks. The
-existing edc image and older b61 browser results do not qualify this newer source;
-a final canonical image and browser qualification are still required.
+Discord no longer depends on the migration-introduced `model.generate` operation.
+Its bot-specific Request/history/alias expansion is retired. The separate operation
+was introduced by this migration for the tool-free evaluator, not inherited from
+the original project. That evaluator remains its only non-test caller: existing
+agentic delegates are not an equivalent replacement for the plain IR owner. Ordinary
+memory/persona/workflow domain records keep their existing contracts. The bridge
+makes no client-side token-packing or output-limit guarantee; server model limits
+apply. Local failures prevent delivery/cache mutation, while the normal server
+retains the canonical execution record.
+
+Current local checks include the Discord 128-test suite, actual C-library/Python
+Unix fixtures, C collector normal/sanitizer checks, the shared Go transport's nine
+normal/race fixtures, and the complete browser-backend normal/race suites.
+The browser fixtures now explicitly synchronize handler completion and phase
+changes without altering their assertions. The corrected repository browser harness passes against the
+unchanged frontend bundle using local mocked endpoints. These are source checks,
+not live Discord, provider or new-image browser qualification.
+
+Current evidence:
+- `/var/tmp/aimee-discord-shared-client-binding/proof.json`
+- `/var/tmp/aimee-go-thinclient-final-proof.json`
+- `/var/tmp/aimee-peer-domain-undo/proof.json`
+- `/var/tmp/aimee-gateway-domain-scope-correction-proof.json`
+- `/var/tmp/aimee-current-repository-browser-harness/proof.json`
+
+The predecessor8a build completed all41 instructions and its Docker archive,
+but timed out exporting an optional full filesystem. Product qualification was
+not completed; its source-context bytecode exception and failure remain recorded
+in `/var/tmp/aimee-ir-rootless-8a9962450-build/FAILED-ATTEMPT-PROOF.json`.
+No QA import/upgrade occurred. This correction needs its own source/image and
+live browser qualification; older b61 results do not qualify it.
 
 ## Qualified source cleanup, not yet deployed
 
@@ -295,10 +324,11 @@ b61 image subsequently built, upgraded and passed the final model checks above.
 
 ## Gateway source follow-up: implemented and qualified
 
-The gateway migration now retains owned canonical USER Message blocks at external
-Telegram/webhook ingress, through local RPC, ordered CLI subscriber results,
-process mirrors, delivery routing and TTS dispatch. Vendor JSON is released only
-after admission has taken ownership. Every attachment remains a separate hidden
+The gateway retains owned canonical model input and ordered model replies across
+its model RPC/collector boundary. Delivery routing, mirrors, TTS and status replies
+use ordinary domain text/attachment contracts; visible model output is projected
+at that delivery boundary. Platform JSON is released only after admission has
+taken ownership. Every attachment remains a separate hidden
 IMAGE/DOCUMENT file asset; ASR retains its original audio source and adds a
 separate unverified USER task transcript. Unreadable non-audio attachments do not
 discard valid text, and inert sidecars cannot change authority or role.

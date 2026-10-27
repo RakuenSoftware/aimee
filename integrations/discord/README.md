@@ -4,7 +4,8 @@ This optional channel bridge posts through a configured Discord incoming webhook
 bot mentions through a Discord application. The installed Aimee thin client supplies replies through the selected registered model alias. The CPU
 bridge archives exchanges and captures human statements through Aimee’s durable
 fact pipeline; the separate GPU setup below uses the enrolled native-memory plugin.
-The bot uses a dedicated Aimee environment and does not run agent tools.
+The bot uses a dedicated Aimee environment. Tool availability follows its registered
+Aimee profile and server policy; the Python bridge does not execute model tools itself.
 
 An incoming webhook can post messages but cannot read channel chat. Two-way chat therefore needs
 a Discord application bot token as well as the webhook. The bridge requests guild message events,
@@ -43,9 +44,26 @@ chmod 600 ~/.config/aimee-discord/config.json
 ```
 
 Edit `config.json` with the absolute credential paths, server ID, channel ID, `aimee_socket`, and the registered Aimee model alias in `model`.
-Install the normal `aimee` thin client and set `aimee_cli` to its executable path.
-An optional `aimee_profile` selects an existing client profile. Provider URLs, keys,
-TLS identities, model selection and token budgeting remain in Aimee. An empty `allowed_user_ids` list permits humans who can mention the bot in the
+Install the shared Aimee thinclient (`libaimee-client.so`) and set `aimee_library` to its path.
+Build that normal CMake target from this checkout with:
+
+```sh
+cmake -S . -B build/discord-client -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON
+cmake --build build/discord-client --target aimee-client
+```
+
+Use the absolute resulting library path in a host installation; the bot image
+installs it at `/usr/local/lib/libaimee-client.so`.
+The Python binding calls the same C transport and canonical chat collector as other
+first-party clients; it does not launch a command or implement a model transport.
+An optional `aimee_profile` selects an existing client profile. TLS enrollment
+uses only that client profile; provider credentials remain in Aimee.
+The bot creates a server-issued session for each Discord channel and selects the
+registered alias through that session’s existing primary-selection API. It checks
+the session owner before changing its selection and never changes the global default.
+This channel mapping is held in memory: restarting the bot starts a fresh model
+conversation, while Aimee retains the previous session’s execution records.
+Token budgeting remains in Aimee. An empty `allowed_user_ids` list permits humans who can mention the bot in the
 configured channel; populate it to restrict use to specific Discord users. The service verifies
 that the webhook belongs to this exact server and channel before receiving turns.
 
@@ -118,13 +136,19 @@ mounts only that socket at `/run/aimee-server/aimee-http.sock`, plus an
 enrolled bot thin-client home at `/run/aimee-client`. Never mount server HOME,
 Vault files or provider credentials into the bot.
 
-The bridge invokes `aimee --json model generate`, passing `{ir: Request, agent:
-registered_alias}` over stdin. Canonical history and request controls remain IR;
-success returns `{ir: Response}` and failures return a nonzero exit status. The
-wrapper bounds input/output and kills and reaps a timed-out or cancelled child.
-It never puts prompts or provider credentials in command arguments. There is no
-direct model HTTP fallback. The server requires a tools-disabled HTTP model for
-this generation operation. The bot image contains the normal CMake thin client,
+The bridge binds `libaimee-client.so` locally, passing a canonical USER Message to
+its existing chat collector. The C client owns transport, framing and canonical
+message collection; Python does not parse provider responses or NDJSON events.
+The server owns model history, context budgeting and execution. Replies retain the
+complete ordered canonical Messages for the admitted turn. Policy, authenticated
+identity and retrieved evidence remain separate typed blocks. The local recent-dialogue
+cache supports delivery checks and memory queries; it is never replayed as a second
+model history. Repair instructions use the same server-issued session.
+
+The wrapper bounds input/output and cancels the same C connection on timeout or
+cancellation, then joins the worker before freeing it. This closes only the client
+connection; it does not submit a host-turn cancellation. Registered HTTP and native
+agents use normal Aimee chat routing. The bot image contains the shared C thinclient,
 Python bridge and dependencies; it contains no Aimee server, model or provider codec.
 
 For durable conversation memory, add a dedicated KB Compose project with fresh volumes
@@ -162,8 +186,8 @@ so two gateway clients do not answer the same mention.
 The bridge shares the KB’s network namespace and uses authenticated loopback on port
 8741. A published Docker port is a remote peer to the KB and does not establish user
 write authority. Keep this distinction: do not weaken the KB’s authority checks.
-The read-only chat server home mount supplies the Aimee Unix socket; model inference
-still uses Aimee’s existing mTLS synthesis identity.
+The read-only socket mount supplies only the Aimee HTTP socket. Model inference
+uses the server’s existing synthesis identity; that identity is not mounted into the bot.
 
 ```sh
 scripts/compose-local.sh --env-file ~/.config/aimee-discord/knowledge.env \
@@ -249,9 +273,9 @@ vector qualification. Complete facts exceeding the context allowance are omitted
 Configurations without a knowledge endpoint retain the earlier read-only
 `store=user` memory search path. They do not enable conversation fact capture.
 Incoming Discord text is accepted up to 8000 UTF-8 bytes. The bridge passes its
-bounded canonical history and evidence intact through the thin client. Aimee
-owns model budgeting and provider rendering. A server/model refusal prevents
-delivery and history mutation. The bridge does not promise the previous exact
+canonical Message and evidence intact through the thin client. Aimee
+owns canonical model history, budgeting and provider rendering. A server/model failure prevents
+delivery and mutation of the local delivered-dialogue cache; the server retains its execution history. The bridge does not promise the previous exact
 client-side token packing or eviction policy, or suppression of hidden thinking.
 
 ## Prepare a separate Aimee environment and E2B
@@ -325,12 +349,13 @@ systemctl --user start aimee-discord.service
 ```
 
 Mention the bot in the configured channel. Everyone in the same channel shares one conversation history. Each thread has its own
-shared history, separate from the parent channel and other threads; servers stay separate. Four recent turn pairs are retained in memory for up to 24 hours, with at most 128
-conversations; restart clears this recent cache. Durable capture remains in Aimee when the
+shared model session, separate from the parent channel and other threads; servers stay separate.
+A bounded recent delivery/query cache is retained in memory for up to 24 hours, with
+at most 128 conversations; restart clears this local cache while Aimee retains model history. Durable capture remains in Aimee when the
 knowledge endpoint is configured. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
-The bridge bounds recent history as whole turns and requests at most 384 reply
-tokens. Aimee owns model context budgeting and provider rendering. Queue overflow and failed inference
+The bridge bounds its recent delivery/query cache; Aimee owns model history,
+context budgeting, configured output limits and provider rendering. Queue overflow and failed inference
 are logged as metadata, without message content. The bridge does not receive attachments or audio.
 
 ## Verification
@@ -341,8 +366,9 @@ python3 -m venv .venv-discord
 .venv-discord/bin/python -m unittest discover -s integrations/discord -v
 ```
 
-Tests exercise canonical requests through a local thin-client subprocess fixture, bounded
-output, timeout/cancellation cleanup,
+Set `AIMEE_TEST_CLIENT_LIBRARY` to the compiled `libaimee-client.so` to run the
+actual shared-library/Unix-HTTP fixture tests. Tests exercise canonical requests, bounded
+output, cancellation during HTTP open/read and joined timeout cleanup,
 native admission failure, durable capture, rejected-claim archival, capture failure, same-turn
 post-commit replies, typed recall, channel admission, shared channel history across users, thread/server isolation, webhook payloads, mention suppression, Unicode
 splitting, loop prevention, queue bounds and history retention. Actual E2B inference and Discord
@@ -406,10 +432,10 @@ unknown delivery outcome retains it for explicit recovery rather than pretending
 completion. Capture/recall outages allow ordinary conversation with a visible
 memory-unavailable notice and no remembered evidence.
 
-The bridge passes canonical requests to the installed thin client. Model context
+The bridge passes canonical Messages to the installed thin client. Model context
 limits and any provider-specific tokenization are owned by Aimee; the bridge does
 not render chat templates, call a model tokenizer, or parse provider responses.
-Over-budget server/model refusals are handled without delivery or history mutation;
+Over-budget server/model failures are handled without delivery or local cache mutation;
 this does not claim equivalence to the retired client-side exact token packer.
 
 Source-bound projections retain purpose, decisions, open questions, constraints,

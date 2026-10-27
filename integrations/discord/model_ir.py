@@ -1,6 +1,6 @@
 """Canonical model values at Discord ingress and the delivery text view.
 
-These are the existing Aimee Request/Message shapes, not a provider protocol.
+These are the existing Aimee Messages, not a provider protocol.
 The thinclient validates and transports them; no provider codec lives here.
 """
 from copy import deepcopy
@@ -10,22 +10,23 @@ from dataclasses import dataclass
 @dataclass
 class ModelTurn:
     message: dict
-    response: dict
+    messages: list[dict]
+    delivery_notice: str = ""
 
 
-def response_turn(response):
-    # ResponseBlock.raw is response-only inert custody. Message's typed fields
-    # are the same canonical IR; keep the complete Response alongside its view.
-    if (response.get("schema") != "aimee.response.v1" or response.get("role") not in (None, "assistant")
-            or response.get("stop_reason") not in (1, 4)
-            or response.get("error_message") or response.get("refusal")
-            or not isinstance(response.get("blocks"), list)
+def chat_turn(messages):
+    # The shared thinclient admits the completed stream. Keep its canonical
+    # Messages intact; the final assistant Message is only the delivery view.
+    if (not isinstance(messages, list) or not messages
+            or any(not isinstance(item, dict) for item in messages)):
+        raise RuntimeError("Aimee returned no complete canonical turn")
+    final = messages[-1]
+    if (final.get("role") != "assistant" or not isinstance(final.get("blocks"), list)
             or any(not isinstance(block, dict) or block.get("type") not in ("text", "thinking")
-                   for block in response["blocks"])):
-        raise RuntimeError("Aimee returned no complete canonical response")
-    blocks = [{key: deepcopy(value) for key, value in block.items() if key != "raw"}
-              for block in response["blocks"]]
-    return ModelTurn({"role": "assistant", "blocks": blocks}, deepcopy(response))
+                   for block in final["blocks"])):
+        raise RuntimeError("Aimee returned no final canonical assistant message")
+    owned = deepcopy(messages)
+    return ModelTurn(owned[-1], owned)
 
 
 def text_block(text, *, origin=3, authority=2):
@@ -43,19 +44,17 @@ def message(role, text, *, origin=None):
 
 def display_text(value):
     """Read-only delivery/query view; never reconstruct a model Message from it."""
+    notice = value.delivery_notice if isinstance(value, ModelTurn) else ""
     value = value.message if isinstance(value, ModelTurn) else value
-    return "".join(block.get("text", "") for block in value["blocks"]
+    return notice + "".join(block.get("text", "") for block in value["blocks"]
                    if block.get("type") == "text"
                    and block.get("context", {}).get("model_visible", True)
                    and block.get("context", {}).get("sensitivity", 0) < 3)
 
 
-def request(policy, history, task, evidence=()):
-    blocks = [text_block(task)]
+def chat_message(policy, task, evidence=()):
+    # Client policy is an unverified operator instruction, not host policy.
+    blocks = [text_block(policy, origin=2), text_block(task)]
     blocks.extend(text_block(text, origin=origin, authority=1)
                   for origin, text in evidence if text)
-    return {"version": 1, "source_wire": "unspecified", "cache_policy": "native",
-            "system": [text_block(policy, origin=2, authority=3)],
-            "messages": deepcopy(history) + [{"role": "user", "blocks": blocks}],
-            "tools": [], "tool_choice": {"mode": "none"}, "max_tokens": 384,
-            "temperature": 0.5, "stream": False, "stop_sequences": []}
+    return {"role": "user", "blocks": blocks}

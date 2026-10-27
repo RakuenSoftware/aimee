@@ -32,7 +32,7 @@ cJSON *cli_request(cli_conn_t *conn, cJSON *request, int timeout_ms);
 /* Callback for streaming events. Called for each intermediate JSON message
  * that has an "event" field. Return 0 to continue, non-zero to abort. */
 /* NDJSON callbacks borrow each admitted frame. NULL reports malformed framing;
- * nonzero stops POSIX delivery. A buffered platform may already have read EOF. */
+ * nonzero stops delivery from the shared subscriber. */
 typedef int (*cli_stream_cb)(cJSON *event, void *userdata);
 
 /* Check if server is available (GET /v1/health over the local HTTP UDS).
@@ -95,18 +95,6 @@ const char *cli_v1_pathid_route_for_method(const char *method, const char **verb
  * 0 on success, -1 on overflow. */
 int cli_v1_pct_encode(const char *in, char *out, size_t cap);
 
-/* Build a minimal HTTP/1.1 request into buf[cap]:
- *   "<method> <path> HTTP/1.1\r\nHost: <host>\r\n"
- *   ["Authorization: Bearer <bearer>\r\n"]
- *   "Content-Type: application/json\r\nContent-Length: <n>\r\n"
- *   "Connection: close\r\n\r\n<body>"
- * host defaults to "localhost" when NULL/empty; the Authorization header is
- * omitted when bearer is NULL/empty; body may be NULL (Content-Length: 0).
- * Returns the total byte length written (excluding the NUL), or -1 if it does
- * not fit in cap. */
-int cli_http_build_request(const char *method, const char *path, const char *host,
-                           const char *bearer, const char *body, char *buf, size_t cap);
-
 /* Issue an HTTP/1.1 request to aimee-server's /v1 surface and return the parsed
  * JSON response body (caller cJSON_Delete()s it). `endpoint` is a UDS path
  * ("/run/aimee/http.sock" or "unix:<path>") or a TCP target ("host:port" or
@@ -120,6 +108,48 @@ int cli_http_build_request(const char *method, const char *path, const char *hos
 cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,
                         const char *body_json, const char *bearer, int timeout_ms,
                         int *http_status);
+
+/* Shared raw thinclient transport. Bodies are bytes; no domain/model schema is
+ * imposed here. Explicit metadata is request-local and never changes identity. */
+typedef struct cli_http_stream cli_http_stream_t;
+typedef struct
+{
+   const char *name, *value;
+} cli_http_header_t;
+typedef struct
+{
+   const char *endpoint, *method, *path, *bearer;
+   const cli_http_header_t *headers;
+   size_t header_count;
+   const void *body;
+   size_t body_length;
+   /* Zero IO timeout has no idle bound; connect remains finite. */
+   int connect_timeout_ms, io_timeout_ms;
+   const char *tls_home;
+} cli_http_options_t;
+typedef struct
+{
+   char *endpoint, *bearer, *tls_home;
+} cli_http_profile_t;
+/* Read the normal enrolled client configuration without changing environment,
+ * process remote state, credentials or enrollment. Explicit home wins; NULL
+ * uses the existing AIMEE_HOME/HOME/profile resolver. Caller frees the result. */
+int cli_http_profile_resolve(const char *client_home, const char *profile, cli_http_profile_t *out);
+void cli_http_profile_free(cli_http_profile_t *profile);
+int cli_remote_read_at_home(const char *home, char *url, size_t url_size, char *token,
+                            size_t token_size);
+char *cli_http_endpoint_normalize(const char *endpoint);
+cli_http_stream_t *cli_http_stream_new(void);
+int cli_http_stream_open(cli_http_stream_t *stream, const cli_http_options_t *options);
+int cli_http_stream_status(const cli_http_stream_t *stream);
+const char *cli_http_stream_headers(const cli_http_stream_t *stream);
+long cli_http_stream_read(cli_http_stream_t *stream, void *buffer, size_t length);
+/* Cancellation shuts down only this connection; it never cancels a host turn.
+ * Stop/join concurrent cancellation and readers before freeing the handle. */
+void cli_http_stream_cancel(cli_http_stream_t *stream);
+void cli_http_stream_free(cli_http_stream_t *stream);
+int cli_http_request_stream_ndjson_on(cli_http_stream_t *stream, const cli_http_options_t *options,
+                                      int *http_status, cli_stream_cb cb, void *userdata);
 
 /* Canonical NDJSON delivery: 0 for EOF/subscriber stop, -1 on transport/framing
  * failure. Only a validated subscriber terminal authorizes successful output.

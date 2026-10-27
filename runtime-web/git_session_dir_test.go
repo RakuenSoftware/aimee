@@ -26,6 +26,7 @@ func TestGitSessionDirPreservesEditorFolderAndActor(t *testing.T) {
 		strings.NewReader(`{"project":"acme/widget","session_id":"web1"}`)), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitSessionDir(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%q", rr.Code, rr.Body.String())
 	}

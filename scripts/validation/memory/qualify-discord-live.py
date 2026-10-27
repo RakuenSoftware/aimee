@@ -50,7 +50,7 @@ async def main():
    context=await memory.context(query)
    packed=json.loads(context.split('\n',1)[1])
    response=await invoke('pct exec 9211 -- python3 /tmp/aimee-discord-gateway-request.py',dict(operation='reply',context=context,query=query,channel_id=channel_id))
-   canonical=response['ir'];assert canonical['schema']=='aimee.response.v1' and canonical['stop_reason'] in (1,4)
+   canonical=response['messages'];assert isinstance(canonical,list) and canonical and canonical[-1]['role']=='assistant'
    answer=response['answer'];assert answer.strip()
    await memory.guard('acquire')
    delivered=await thread.send(f'{backend} conversation-v2 qualification (historical source replay):\n'+answer,allowed_mentions=discord.AllowedMentions.none())

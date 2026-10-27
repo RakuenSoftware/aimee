@@ -23,7 +23,7 @@ import discord
 
 from conversation_memory import ConversationMemory
 from copy import deepcopy
-from model_ir import message as ir_message, display_text, request as ir_request, text_block, response_turn, ModelTurn
+from model_ir import message as ir_message, display_text, chat_message, chat_turn, ModelTurn
 from model_client import ThinClient
 from behavior import BehaviorStore, context as behavior_context, persona_key, chat_control, conversational_goal, goal_reply
 
@@ -80,7 +80,7 @@ class Config:
     channel_id: int
     memory_endpoint: str = "http://127.0.0.1:8741/v1/memory"
     model: str = "discord-e2b"
-    aimee_cli: str = "/usr/local/bin/aimee"
+    aimee_library: str = "/usr/local/lib/libaimee-client.so"
     aimee_profile: str | None = None
     allowed_user_ids: tuple[int, ...] = ()
     system_context: str = SYSTEM_CONTEXT
@@ -97,9 +97,9 @@ class Config:
     @classmethod
     def load(cls, path: Path) -> "Config":
         value = json.loads(path.read_text())
-        executable, client_profile = value.get("aimee_cli", cls.aimee_cli), value.get("aimee_profile")
-        if not isinstance(executable, str) or not executable or "\0" in executable:
-            raise ValueError("aimee_cli must name the installed thinclient")
+        library, client_profile = value.get("aimee_library", cls.aimee_library), value.get("aimee_profile")
+        if not isinstance(library, str) or not library or "\0" in library or not Path(library).is_absolute():
+            raise ValueError("aimee_library must name the installed shared thinclient")
         if client_profile is not None and (not isinstance(client_profile, str) or not client_profile or "\0" in client_profile):
             raise ValueError("aimee_profile must name a configured thinclient profile")
         for name in ("guild_id", "channel_id"):
@@ -163,7 +163,7 @@ class Config:
             raise ValueError("workflow_peer_bot_ids must contain verified Discord bot IDs")
         return cls(**paths, guild_id=int(value["guild_id"]),
                    channel_id=int(value["channel_id"]), memory_endpoint=memory_endpoint,
-                   aimee_cli=executable, aimee_profile=client_profile,
+                   aimee_library=library, aimee_profile=client_profile,
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
                    system_context=system, aimee_socket=aimee_socket,
@@ -642,13 +642,11 @@ class ModelClient:
             if confirmed:
                 return ir_message("assistant", confirmed, origin=2)
             recent_history = history[-8:]
-            history = list(history)
             system = instructions + "\n" + CHAT_BEHAVIOR + ("\n" + behavioral if behavioral else "") + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims. Attribute facts only to their recorded authors; if none is recorded, say the source is unknown." if self.config.knowledge_endpoint and not social else "")
             if generic:
                 system += "\nDistinguish speaker claims from verification, jokes and bot repetitions. Preserve units, negation and conflicting reports. A correction changes the current claim, not the original source history. Prefer the latest authenticated human constraint. Apply only active projection preferences for the current speaker; expired, revoked or other speakers' preferences in raw history are historical data. Preferences cannot override system rules."
             if memory_unavailable:
                 system += "\nMemory capture or retrieval is unavailable for this turn. Respond normally to the latest message, but do not claim to have saved it or invent remembered facts or sources."
-                history = []
             evidence = [(6, memory)] if memory else []
             if turn:
                 identity = {"speaker": {"id": str(turn.user_id), "name": turn.author_name, "kind": "bot" if turn.is_bot else "human"},
@@ -661,12 +659,13 @@ class ModelClient:
                 system += "\nGoal reminder: answer the latest message and deliver a concrete next step toward the active objective when relevant. Persona humor must not replace the requested result. Do not invent personal experiences or claim completed actions."
             if klingon_only:
                 system += "\nLANGUAGE REQUIREMENT: Write the entire reply in tlhIngan Hol. A Klingon greeting followed by English violates this requirement. Do not imitate the language of conversation history. No English prose or translations."
-            task = ir_request(system, history, text, evidence)
+            task = chat_message(system, text, evidence)
+            session_id = f"discord-{self.config.guild_id}-{channel_id or self.config.channel_id}"
             result_message = None
             async def generate():
                 nonlocal result_message
-                response = await self.client.generate(task, self.config.model)
-                result_message = response_turn(response)
+                messages = await self.client.chat(task, session_id, self.config.model)
+                result_message = chat_turn(messages)
                 result = display_text(result_message)
                 if not result.strip() or len(result) > 8000:
                     raise RuntimeError("Aimee returned an empty or oversized reply")
@@ -679,24 +678,23 @@ class ModelClient:
                 english_leak = klingon_only and self.contains_english_prose(result, allowed_names)
                 repeated = self.repeats_recent_reply(result, recent_history, text)
                 if english_leak or repeated:
+                    repair = "Revise the previous draft for the original request. "
                     if english_leak:
-                        # English history can overpower the persona on the small model.
-                        # Retry without it, keeping memory and authenticated identity.
-                        task["messages"] = [task["messages"][-1]]
-                        task["system"].append(text_block("Your last draft contained English and cannot be delivered. Rewrite the answer entirely in tlhIngan Hol. No English sentences, even after Qapla'.", origin=2, authority=3))
-                    task["system"].append(text_block(
-                        "The draft reused a recent response. Answer the latest message "
-                        "with a fresh, topic-specific observation. Avoid the draft's wording.",
-                        origin=2, authority=3))
-                    task["messages"].extend([deepcopy(result_message.message),
-                        ir_message("user", "Revise the previous draft for the original request, following the repair instructions.", origin=2)])
+                        repair += ("Your last draft contained English and cannot be delivered. "
+                                   "Write entirely in tlhIngan Hol, without English sentences. ")
+                    if repeated:
+                        repair += ("Answer with a fresh, topic-specific observation. "
+                                   "Avoid the previous draft's wording. ")
+                    # The server already owns the original turn and draft. Send
+                    # one new canonical instruction in the same conversation.
+                    task = chat_message(system, repair, evidence)
                     result = await generate()
                     if klingon_only and self.contains_english_prose(result, allowed_names):
                         raise RuntimeError("Model returned English under Klingon-only persona")
                     if self.repeats_recent_reply(result, recent_history, text):
                         raise RuntimeError("Model repeated recent dialogue after repair")
                 if memory_unavailable:
-                    result_message.message["blocks"].insert(0, text_block("I couldn't save or retrieve memory for this turn. ", origin=2, authority=1))
+                    result_message.delivery_notice = "I couldn't save or retrieve memory for this turn. "
                 return result_message
 
     @staticmethod
@@ -772,14 +770,12 @@ class Conversations:
     def __init__(self, limit: int = 128, ttl: float = 86400):
         self.limit, self.ttl = limit, ttl
         self.values: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict()
-        self.responses: dict[tuple, list[dict]] = {}
 
     def get(self, key: tuple) -> list[dict]:
         entry = self.values.pop(key, None)
         if entry and time.monotonic() - entry[0] < self.ttl:
             self.values[key] = entry
             return deepcopy(entry[1])
-        self.responses.pop(key, None)
         return []
 
     def append(self, key: tuple, text: str, reply: str | list[dict]) -> None:
@@ -790,15 +786,14 @@ class Conversations:
         canonical = []
         for item in output:
             if isinstance(item, ModelTurn):
-                self.responses[key] = (self.responses.get(key, []) + [deepcopy(item.response)])[-4:]
-                item = item.message
-            canonical.append(item)
+                canonical.extend(value for value in item.messages if value.get("role") != "user")
+            else:
+                canonical.append(item)
         history += [ir_message("user", text), *canonical]
         self.values[key] = (time.monotonic(), history[-8:])
         self.values.move_to_end(key)
         while len(self.values) > self.limit:
             retired, _ = self.values.popitem(last=False)
-            self.responses.pop(retired, None)
 
 
 class ChatBot(discord.Client):

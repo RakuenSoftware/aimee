@@ -17,8 +17,7 @@ void gateway_ctx_free(gateway_ctx_t *ctx);
  * Parses delivery target, sends to server, routes response back. */
 int gateway_handle_message_ir(gateway_ctx_t *ctx, const session_source_t *src,
                               const aimee_message_t *message);
-int gateway_send_message(gateway_ctx_t *ctx, const delivery_target_t *target,
-                         const aimee_message_t *message);
+int gateway_send_text(gateway_ctx_t *ctx, const delivery_target_t *target, const char *text);
 
 /* Authorise a user for a given source. Returns 0 on allow, -1 on deny. */
 int gateway_authorize_user(gateway_ctx_t *ctx, const session_source_t *src);

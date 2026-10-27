@@ -1,7 +1,6 @@
 package peerwire
 
 import (
-	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"os"
 	"regexp"
 	"strconv"
@@ -186,11 +185,7 @@ func collapseSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func TestCClientPinsCanonicalBodyVersionAndStages(t *testing.T) {
-	header := cHeaderText(t)
-	if !strings.Contains(collapseSpace(header), `#define PEER_CLIENT_BODY_PREFIX "aimee.message.v1\n"`) || BodyPrefix != "aimee.message.v1\n" {
-		t.Fatal("canonical peer body discriminator drift")
-	}
+func TestCClientPinsPrincipalAndStages(t *testing.T) {
 	implementation := cImplText(t)
 	goSource, err := os.ReadFile("../serve.go")
 	if err != nil {
@@ -211,8 +206,5 @@ func TestCClientPinsCanonicalBodyVersionAndStages(t *testing.T) {
 		if uint32(got) != want {
 			t.Fatalf("C stage %s=%d, Go=%d", name, got, want)
 		}
-	}
-	if !strings.Contains(collapseSpace(header), "#define PEER_CLIENT_BODY_MAX 65536u") || peer.MaxBodyBytes != 65536 {
-		t.Fatal("canonical peer body byte bound drift")
 	}
 }

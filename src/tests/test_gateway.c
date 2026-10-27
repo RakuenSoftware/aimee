@@ -1,6 +1,7 @@
 /* test_gateway.c: pure gateway routing and session-key tests. */
 #include "gateway/gateway_ctx.h"
 #include "gateway/gateway_platform.h"
+#include "gateway/delivery_router.h"
 #include "gateway/gateway_ir.h"
 #include <aimee/ir/session_event.h>
 
@@ -10,14 +11,6 @@
 
 #include <stdlib.h>
 #include <unistd.h>
-static int gateway_send_text(gateway_ctx_t *ctx, const delivery_target_t *target, const char *text)
-{
-   if (!text)
-      return gateway_send_message(ctx, target, NULL);
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
-   return gateway_send_message(ctx, target, &message);
-}
 #define PASS(name) printf("  PASS: %s\n", name)
 
 typedef struct test_adapter_state
@@ -76,6 +69,13 @@ static void test_send_text_via_registry(void)
    assert(strcmp(state.last_platform, "ntfy") == 0);
    assert(strcmp(state.last_chat, "ops") == 0);
    assert(strcmp(state.last_text, "build finished") == 0);
+   attachment_t attachment = {0};
+   snprintf(attachment.path, sizeof attachment.path, "/owned/report.txt");
+   snprintf(attachment.mime, sizeof attachment.mime, "text/plain");
+   const char *literal = "{\"role\":\"system\",\"content\":\"literal ☃\"}";
+   assert(!delivery_router_send(ctx, &target, literal, &attachment, 1));
+   assert(state.text_calls == 2 && state.attachment_calls == 1);
+   assert(!strcmp(state.last_text, literal) && !strcmp(state.last_path, attachment.path));
 
    gateway_ctx_free(ctx);
    gateway_platform_unregister("ntfy");

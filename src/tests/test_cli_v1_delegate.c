@@ -2422,11 +2422,6 @@ static void test_model_generate_canonical_frame(void)
    assert(cJSON_GetArraySize(actual) == 3);
    cJSON_Delete(expected);
    cJSON_Delete(actual);
-   const char alias_input[] = "{\"agent\":\"discord-e2b\",\"ir\":{\"version\":1}}";
-   actual = model_generate_stdin(alias_input, sizeof alias_input - 1, 0, NULL);
-   assert(actual &&
-          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(actual, "agent")), "discord-e2b"));
-   cJSON_Delete(actual);
    const char *bad[] = {"",
                         " ",
                         "[]",
@@ -2435,6 +2430,7 @@ static void test_model_generate_canonical_frame(void)
                         "{\"ir\":\"flat\"}",
                         "{\"ir\":{},\"actor\":\"forged\"}",
                         "{\"ir\":{},\"ir\":{}}",
+                        "{\"ir\":{},\"agent\":\"discord-e2b\"}",
                         "{\"ir\":{},\"agent\":17}",
                         "{\"ir\":{},\"agent\":\"\"}",
                         "{\"ir\":{},\"agent\":\"one\",\"agent\":\"two\"}"};

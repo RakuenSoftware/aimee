@@ -2801,21 +2801,15 @@ paths:
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
   /model/generate:
     post:
-      summary: One-shot tool-free canonical model completion
+      summary: One-shot tool-free canonical text completion for evaluation
       description: >
-        Accepts {ir, agent?} with an admitted aimee.request.v1 Request, including
-        ordered history, separate system/evidence blocks and modeled controls.
-        The optional agent names an enabled registered HTTP model; omission uses
-        the configured default HTTP delegate. Provider URLs, credentials and
-        native model IDs remain server-owned. Tools must be absent, tool_choice
-        must be none and stream must be false. Public provenance is attenuated:
-        caller policy is unverified operator policy, evidence/privacy/visibility
-        remain typed and forged host authority or revision claims grant no trust.
-        Unsupported provider controls fail closed. No tools, native CLI or
-        feedback execute. Returns the complete canonical text Response, preserving
-        typed reasoning and inert provider sidecars alongside the visible answer.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [ir], properties: { ir: { type: object }, agent: { type: string, minLength: 1, description: Registered HTTP model alias } } } } } }
-      responses: { "200": { description: "{status, ir}; ir is an aimee.response.v1 text answer; the thinclient --json success projection emits {ir}", content: { application/json: { schema: { type: object } } } } }
+        Accepts {ir} with an aimee.request.v1 request containing one caller system
+        text block and one user text block, explicit max_tokens and temperature,
+        no tools, and tool_choice none. Caller instructions and retrieved evidence
+        must retain unverified provenance. Other controls are refused. Selects the
+        configured default HTTP delegate without hints, tool execution or feedback.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [ir], properties: { ir: { type: object } } } } } }
+      responses: { "200": { description: "{status, ir}; ir is a complete aimee.response.v1 text answer", content: { application/json: { schema: { type: object } } } } }
   /model/setup:
     post:
       summary: Set up an agent (async)

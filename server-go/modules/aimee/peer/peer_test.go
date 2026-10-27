@@ -2,10 +2,8 @@ package peer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"sync"
 	"testing"
@@ -86,7 +84,7 @@ func TestDirectoryAndProvenance(t *testing.T) {
 		t.Fatalf("Directory = %d entries; want 2", len(dir))
 	}
 
-	m, err := r.Send("A", "B", ImportExternalText("look at this diff"), SendOptions{})
+	m, err := r.Send("A", "B", "look at this diff", SendOptions{})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -96,8 +94,8 @@ func TestDirectoryAndProvenance(t *testing.T) {
 		t.Fatalf("Take = %d; want 1", len(got2))
 	}
 	rcv := got2[0]
-	if rcv.DisplayText() != "look at this diff" {
-		t.Errorf("Text = %q", rcv.DisplayText())
+	if rcv.Text != "look at this diff" {
+		t.Errorf("Text = %q", rcv.Text)
 	}
 	// Provenance comes from the sender's directory entry, not from an argument.
 	if rcv.FromSession != "A" || rcv.FromOwner != "uid:1000" || rcv.FromLabel != "author" {
@@ -133,7 +131,7 @@ func TestNoSilentTruncation(t *testing.T) {
 	r, _ := newTestRegistry(t, "A", "B")
 
 	long := strings.Repeat("x", MaxTextBytes+1)
-	if _, err := r.Send("A", "B", ImportExternalText(long), SendOptions{}); !errors.Is(err, ErrTooLong) {
+	if _, err := r.Send("A", "B", long, SendOptions{}); !errors.Is(err, ErrTooLong) {
 		t.Fatalf("over-long Send: err = %v; want ErrTooLong", err)
 	}
 	if r.Len("B") != 0 {
@@ -141,14 +139,14 @@ func TestNoSilentTruncation(t *testing.T) {
 	}
 
 	ok := strings.Repeat("y", PreviewBytes+10)
-	m, err := r.Send("A", "B", ImportExternalText(ok), SendOptions{})
+	m, err := r.Send("A", "B", ok, SendOptions{})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if len(m.Preview()) != PreviewBytes {
 		t.Errorf("Preview len = %d; want %d", len(m.Preview()), PreviewBytes)
 	}
-	if got := r.Take("B", 1); got[0].DisplayText() != ok {
+	if got := r.Take("B", 1); got[0].Text != ok {
 		t.Error("inbox text was truncated; it must stay authoritative")
 	}
 }
@@ -168,7 +166,7 @@ func TestDeliveryDoesNotPreempt(t *testing.T) {
 	}
 
 	turnLive = true // B is mid-turn
-	if _, err := r.Send("A", "B", ImportExternalText("while you're busy"), SendOptions{}); err != nil {
+	if _, err := r.Send("A", "B", "while you're busy", SendOptions{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -183,7 +181,7 @@ func TestDeliveryDoesNotPreempt(t *testing.T) {
 	}
 
 	turnLive = false // turn ends; B drains on its own terms
-	if got := r.Take("B", 10); len(got) != 1 || got[0].DisplayText() != "while you're busy" {
+	if got := r.Take("B", 10); len(got) != 1 || got[0].Text != "while you're busy" {
 		t.Fatalf("drain = %+v", got)
 	}
 }
@@ -193,7 +191,7 @@ func TestDeliveryDoesNotPreempt(t *testing.T) {
 func TestMessageSurvivesUnregister(t *testing.T) {
 	r, _ := newTestRegistry(t, "A", "B")
 
-	if _, err := r.Send("A", "B", ImportExternalText("read me later"), SendOptions{}); err != nil {
+	if _, err := r.Send("A", "B", "read me later", SendOptions{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	r.Unregister("B")
@@ -204,13 +202,13 @@ func TestMessageSurvivesUnregister(t *testing.T) {
 	if err := r.Register("B", "uid:1000", "cli"); err != nil {
 		t.Fatalf("re-Register: %v", err)
 	}
-	if got := r.Take("B", 1); len(got) != 1 || got[0].DisplayText() != "read me later" {
+	if got := r.Take("B", 1); len(got) != 1 || got[0].Text != "read me later" {
 		t.Fatalf("after re-attach: %+v", got)
 	}
 
 	// A session that detaches with an empty inbox is really gone.
 	r.Unregister("B")
-	if _, err := r.Send("A", "B", ImportExternalText("hello?"), SendOptions{}); !errors.Is(err, ErrNoPeer) {
+	if _, err := r.Send("A", "B", "hello?", SendOptions{}); !errors.Is(err, ErrNoPeer) {
 		t.Fatalf("send to gone session: err = %v; want ErrNoPeer", err)
 	}
 }
@@ -223,7 +221,7 @@ func replyOnce(t *testing.T, r *Registry, me, text string) <-chan error {
 		deadline := time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) {
 			if got := r.Take(me, 1); len(got) == 1 {
-				_, err := r.Reply(me, got[0], ImportExternalText(text))
+				_, err := r.Reply(me, got[0], text)
 				done <- err
 				return
 			}
@@ -242,14 +240,14 @@ func TestAskAndTimeout(t *testing.T) {
 	done := replyOnce(t, r, "B", "looks good")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	reply, askID, err := r.Ask(ctx, "A", "B", ImportExternalText("ship it?"))
+	reply, askID, err := r.Ask(ctx, "A", "B", "ship it?")
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("replier: %v", err)
 	}
-	if reply.DisplayText() != "looks good" || reply.FromSession != "B" {
+	if reply.Text != "looks good" || reply.FromSession != "B" {
 		t.Errorf("reply = %+v", reply)
 	}
 	if reply.CorrelationID != askID {
@@ -266,7 +264,7 @@ func TestAskAndTimeout(t *testing.T) {
 	// --- the timed-out ask: degrades to a send, loses nothing ---
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel2()
-	_, askID2, err := r.Ask(ctx2, "A", "B", ImportExternalText("and this?"))
+	_, askID2, err := r.Ask(ctx2, "A", "B", "and this?")
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("Ask: err = %v; want ErrTimeout", err)
 	}
@@ -281,7 +279,7 @@ func TestAskAndTimeout(t *testing.T) {
 		t.Fatalf("late replier: %v", err)
 	}
 	late := r.Take("A", 1)
-	if len(late) != 1 || late[0].DisplayText() != "late answer" {
+	if len(late) != 1 || late[0].Text != "late answer" {
 		t.Fatalf("late reply = %+v", late)
 	}
 	// It still carries the ORIGINAL correlation id: recoverable, not lost.
@@ -300,7 +298,7 @@ func TestAskCycleRefused(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		defer cancel()
-		_, _, err := r.Ask(ctx, "A", "B", ImportExternalText("you first"))
+		_, _, err := r.Ask(ctx, "A", "B", "you first")
 		askErr <- err
 	}()
 
@@ -316,7 +314,7 @@ func TestAskCycleRefused(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, _, err := r.Ask(ctx, "B", "A", ImportExternalText("no, you")); !errors.Is(err, ErrCycle) {
+	if _, _, err := r.Ask(ctx, "B", "A", "no, you"); !errors.Is(err, ErrCycle) {
 		t.Fatalf("counter-ask: err = %v; want ErrCycle", err)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
@@ -324,7 +322,7 @@ func TestAskCycleRefused(t *testing.T) {
 	}
 
 	// The refusal did not wedge B: the non-blocking fallback still works.
-	if _, err := r.Send("B", "A", ImportExternalText("fallback"), SendOptions{Hop: 1}); err != nil {
+	if _, err := r.Send("B", "A", "fallback", SendOptions{Hop: 1}); err != nil {
 		t.Errorf("fallback Send: %v", err)
 	}
 
@@ -333,7 +331,7 @@ func TestAskCycleRefused(t *testing.T) {
 	}
 
 	// Self-addressing is the smallest cycle of all.
-	if _, _, err := r.Ask(ctx, "A", "A", ImportExternalText("hello me")); !errors.Is(err, ErrCycle) {
+	if _, _, err := r.Ask(ctx, "A", "A", "hello me"); !errors.Is(err, ErrCycle) {
 		t.Errorf("self-ask: err = %v; want ErrCycle", err)
 	}
 }
@@ -347,8 +345,8 @@ func TestAskCycleTransitive(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); r.Ask(ctx, "A", "B", ImportExternalText("q")) }()
-	go func() { defer wg.Done(); r.Ask(ctx, "B", "C", ImportExternalText("q")) }()
+	go func() { defer wg.Done(); r.Ask(ctx, "A", "B", "q") }()
+	go func() { defer wg.Done(); r.Ask(ctx, "B", "C", "q") }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -361,7 +359,7 @@ func TestAskCycleTransitive(t *testing.T) {
 	// C asking A closes A→B→C→A.
 	cctx, ccancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer ccancel()
-	if _, _, err := r.Ask(cctx, "C", "A", ImportExternalText("closing the loop")); !errors.Is(err, ErrCycle) {
+	if _, _, err := r.Ask(cctx, "C", "A", "closing the loop"); !errors.Is(err, ErrCycle) {
 		t.Fatalf("transitive counter-ask: err = %v; want ErrCycle", err)
 	}
 	wg.Wait()
@@ -376,7 +374,7 @@ func TestHopBudgetTerminatesPingPong(t *testing.T) {
 		t.Fatalf("MaxHops = %d", r.MaxHops())
 	}
 
-	if _, err := r.Send("A", "B", ImportExternalText("ping"), SendOptions{}); err != nil {
+	if _, err := r.Send("A", "B", "ping", SendOptions{}); err != nil {
 		t.Fatalf("opener: %v", err)
 	}
 
@@ -391,7 +389,7 @@ func TestHopBudgetTerminatesPingPong(t *testing.T) {
 		if got[0].OriginSession != "A" {
 			t.Fatalf("origin lost at hop %d: %q", got[0].Hop, got[0].OriginSession)
 		}
-		_, last = r.Reply(at, got[0], ImportExternalText("pong"))
+		_, last = r.Reply(at, got[0], "pong")
 		exchanges++
 		if last != nil {
 			break
@@ -418,7 +416,7 @@ func TestCrossOwnerGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := r.Send("A", "B", ImportExternalText("hello"), SendOptions{}); !errors.Is(err, ErrDenied) {
+	if _, err := r.Send("A", "B", "hello", SendOptions{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("ungranted: err = %v; want ErrDenied", err)
 	}
 	if r.Len("B") != 0 {
@@ -428,7 +426,7 @@ func TestCrossOwnerGrants(t *testing.T) {
 	if err := r.Grant("uid:1000", "uid:2000"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Send("A", "B", ImportExternalText("hello"), SendOptions{}); err != nil {
+	if _, err := r.Send("A", "B", "hello", SendOptions{}); err != nil {
 		t.Fatalf("granted Send: %v", err)
 	}
 
@@ -436,14 +434,14 @@ func TestCrossOwnerGrants(t *testing.T) {
 	if r.GrantExists("uid:2000", "uid:1000") {
 		t.Error("grant leaked in the reverse direction")
 	}
-	if _, err := r.Send("B", "A", ImportExternalText("hi back"), SendOptions{}); !errors.Is(err, ErrDenied) {
+	if _, err := r.Send("B", "A", "hi back", SendOptions{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("reverse: err = %v; want ErrDenied", err)
 	}
 
 	if !r.Revoke("uid:1000", "uid:2000") {
 		t.Error("Revoke reported nothing to revoke")
 	}
-	if _, err := r.Send("A", "B", ImportExternalText("again"), SendOptions{}); !errors.Is(err, ErrDenied) {
+	if _, err := r.Send("A", "B", "again", SendOptions{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("after revoke: err = %v; want ErrDenied", err)
 	}
 	// The message authorized while the grant stood is still there.
@@ -462,25 +460,25 @@ func TestCrossOwnerGrants(t *testing.T) {
 func TestBoundsAndErrors(t *testing.T) {
 	r, _ := newTestRegistry(t, "A", "B")
 
-	if _, err := r.Send("A", "nobody", ImportExternalText("?"), SendOptions{}); !errors.Is(err, ErrNoPeer) {
+	if _, err := r.Send("A", "nobody", "?", SendOptions{}); !errors.Is(err, ErrNoPeer) {
 		t.Errorf("unknown peer: %v", err)
 	}
-	if _, err := r.Send("ghost", "B", ImportExternalText("?"), SendOptions{}); !errors.Is(err, ErrUnknownSender) {
+	if _, err := r.Send("ghost", "B", "?", SendOptions{}); !errors.Is(err, ErrUnknownSender) {
 		t.Errorf("unknown sender: %v", err)
 	}
-	if _, err := r.Send("A", "A", ImportExternalText("self"), SendOptions{}); !errors.Is(err, ErrSelf) {
+	if _, err := r.Send("A", "A", "self", SendOptions{}); !errors.Is(err, ErrSelf) {
 		t.Errorf("self send: %v", err)
 	}
-	if _, err := r.Send("A", "B", ImportExternalText("   "), SendOptions{}); !errors.Is(err, ErrBadRequest) {
+	if _, err := r.Send("A", "B", "   ", SendOptions{}); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty body: %v", err)
 	}
 
 	for i := 0; i < InboxMax; i++ {
-		if _, err := r.Send("A", "B", ImportExternalText("fill"), SendOptions{}); err != nil {
+		if _, err := r.Send("A", "B", "fill", SendOptions{}); err != nil {
 			t.Fatalf("fill %d: %v", i, err)
 		}
 	}
-	if _, err := r.Send("A", "B", ImportExternalText("one too many"), SendOptions{}); !errors.Is(err, ErrInboxFull) {
+	if _, err := r.Send("A", "B", "one too many", SendOptions{}); !errors.Is(err, ErrInboxFull) {
 		t.Fatalf("overflow: err = %v; want ErrInboxFull", err)
 	}
 	if r.Dropped("B") != 1 {
@@ -533,7 +531,7 @@ func TestConcurrentSendAndDrain(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < each; j++ {
-				_, err := r.Send("A", "B", ImportExternalText("concurrent"), SendOptions{})
+				_, err := r.Send("A", "B", "concurrent", SendOptions{})
 				mu.Lock()
 				if err == nil {
 					sent++
@@ -571,7 +569,7 @@ func TestPreviewNeverSplitsARune(t *testing.T) {
 	// Place a 3-byte rune so it straddles the bound at every offset it can.
 	for pad := PreviewBytes - 2; pad <= PreviewBytes; pad++ {
 		body := strings.Repeat("a", pad) + "\u2713" + strings.Repeat("b", 64)
-		got := Message{Body: ImportExternalText(body)}.Preview()
+		got := Message{Text: body}.Preview()
 		if !utf8.ValidString(got) {
 			t.Errorf("pad %d: preview is not valid UTF-8: %q", pad, got)
 		}
@@ -590,14 +588,14 @@ func TestPreviewNeverSplitsARune(t *testing.T) {
 
 	// A body made entirely of multi-byte characters is the same case without an
 	// ASCII run to hide behind.
-	got := Message{Body: ImportExternalText(strings.Repeat("\u4e16", 400))}.Preview()
+	got := Message{Text: strings.Repeat("\u4e16", 400)}.Preview()
 	if !utf8.ValidString(got) {
 		t.Errorf("all-multibyte preview is not valid UTF-8")
 	}
 
 	// A short body is returned whole, multi-byte or not.
 	short := "hello \u2713 world"
-	if got := (Message{Body: ImportExternalText(short)}).Preview(); got != short {
+	if got := (Message{Text: short}).Preview(); got != short {
 		t.Errorf("short body preview = %q; want the whole body", got)
 	}
 }
@@ -609,7 +607,7 @@ func TestPreviewNeverSplitsARune(t *testing.T) {
 func TestDrainDistinguishesCappedFromComplete(t *testing.T) {
 	r, _ := newTestRegistry(t, "A", "B")
 	for i := 0; i < 10; i++ {
-		if _, err := r.Send("A", "B", ImportExternalText("msg"), SendOptions{}); err != nil {
+		if _, err := r.Send("A", "B", "msg", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -629,7 +627,7 @@ func TestDrainDistinguishesCappedFromComplete(t *testing.T) {
 	// Exactly-emptying is COMPLETE, not capped: the boundary case where a naive
 	// implementation reports "maybe more" forever.
 	for i := 0; i < 3; i++ {
-		if _, err := r.Send("A", "B", ImportExternalText("msg"), SendOptions{}); err != nil {
+		if _, err := r.Send("A", "B", "msg", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -872,11 +870,11 @@ func TestDirectoryVouchedSessionsCanExchangeWithoutRegistering(t *testing.T) {
 	})
 
 	// Nothing was registered here. The directory is the only source of existence.
-	if _, err := r.Send("A", "B", ImportExternalText("hello from the directory"), SendOptions{}); err != nil {
+	if _, err := r.Send("A", "B", "hello from the directory", SendOptions{}); err != nil {
 		t.Fatalf("send between directory-known sessions: %v", err)
 	}
 	got := r.Take("B", 10)
-	if len(got) != 1 || got[0].DisplayText() != "hello from the directory" {
+	if len(got) != 1 || got[0].Text != "hello from the directory" {
 		t.Fatalf("B's inbox = %+v", got)
 	}
 	// Provenance is stamped from the directory's answer, not from the caller.
@@ -886,10 +884,10 @@ func TestDirectoryVouchedSessionsCanExchangeWithoutRegistering(t *testing.T) {
 
 	// A session the directory does NOT know stays refused, and the two failures
 	// remain distinguishable: the sender is unknown, the recipient is absent.
-	if _, err := r.Send("ghost", "B", ImportExternalText("hi"), SendOptions{}); !errors.Is(err, ErrUnknownSender) {
+	if _, err := r.Send("ghost", "B", "hi", SendOptions{}); !errors.Is(err, ErrUnknownSender) {
 		t.Errorf("unknown sender = %v; want ErrUnknownSender", err)
 	}
-	if _, err := r.Send("A", "ghost", ImportExternalText("hi"), SendOptions{}); !errors.Is(err, ErrNoPeer) {
+	if _, err := r.Send("A", "ghost", "hi", SendOptions{}); !errors.Is(err, ErrNoPeer) {
 		t.Errorf("unknown recipient = %v; want ErrNoPeer", err)
 	}
 }
@@ -900,7 +898,7 @@ func TestAdmissionWithoutADirectoryReportsNoDirectory(t *testing.T) {
 	r := New(Options{})
 	r.SetSessionOwner(func(string) (string, error) { return "", ErrNoDirectory })
 
-	_, err := r.Send("A", "B", ImportExternalText("hi"), SendOptions{})
+	_, err := r.Send("A", "B", "hi", SendOptions{})
 	if !errors.Is(err, ErrNoDirectory) {
 		t.Fatalf("send with no directory = %v; want ErrNoDirectory", err)
 	}
@@ -936,7 +934,7 @@ func TestCloseReleasesABlockedAsker(t *testing.T) {
 	go func() {
 		// No deadline of its own: if Close does not release this, the only thing
 		// that would is DefaultWaitExpiry, minutes from now.
-		_, _, err := r.Ask(context.Background(), "A", "B", ImportExternalText("are you there?"))
+		_, _, err := r.Ask(context.Background(), "A", "B", "are you there?")
 		done <- err
 	}()
 
@@ -965,89 +963,7 @@ func TestCloseReleasesABlockedAsker(t *testing.T) {
 
 	// And a call arriving after shutdown is refused rather than blocking behind
 	// the same door.
-	if _, _, err := r.Ask(context.Background(), "A", "B", ImportExternalText("still there?")); !errors.Is(err, ErrShutdown) {
+	if _, _, err := r.Ask(context.Background(), "A", "B", "still there?"); !errors.Is(err, ErrShutdown) {
 		t.Errorf("ask after Close = %v; want ErrShutdown", err)
-	}
-}
-
-// IR custody is independent of the registry's unforgeable routing envelope.
-func TestCanonicalBodyCustodyAndSize(t *testing.T) {
-	r, notes := newTestRegistry(t, "A", "B")
-	text := "Read the image and tool evidence."
-	body := canonical.Message{Role: "assistant", Boundary: true, Blocks: []canonical.Block{
-		{Type: "text", Text: &text, Context: &canonical.Context{Origin: 7, Authority: 1, Trust: 2, Sensitivity: 1, ModelVisible: true, RevisionDomain: "peer-fixture", RevisionScope: "source", RevisionEpoch: "7"}},
-		{Type: "image", MediaType: "image/png", MediaRef: "https://fixture.invalid/image.png"},
-		{Type: "tool_use", ToolID: "t1", Name: "inspect", Input: json.RawMessage(`{"nested":[1,true,null]}`), IsError: nil},
-	}}
-	before, _ := json.Marshal(body)
-	sent, err := r.Send("A", "B", body, SendOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	*body.Blocks[0].Text = "mutated sender"
-	body.Blocks[2].Input[2] = 'X'
-	*sent.Body.Blocks[0].Text = "mutated returned message"
-	*notes.notes[0].m.Body.Blocks[0].Text = "mutated notification"
-	peek := r.Inbox("B")
-	got, _ := json.Marshal(peek[0].Body)
-	if string(got) != string(before) {
-		t.Fatalf("queued IR changed: %s != %s", got, before)
-	}
-	*peek[0].Body.Blocks[0].Text = "mutated peek"
-	taken := r.Take("B", 1)
-	got, _ = json.Marshal(taken[0].Body)
-	if string(got) != string(before) {
-		t.Fatalf("peek aliased stored IR: %s", got)
-	}
-	escaped := ImportExternalText(strings.Repeat("\x01", MaxTextBytes))
-	if _, err = r.Send("A", "B", escaped, SendOptions{}); err != nil {
-		t.Fatalf("8KiB escaped text no longer fits: %v", err)
-	}
-	if _, err = r.Send("A", "B", ImportExternalText(strings.Repeat("x", MaxTextBytes+1)), SendOptions{}); !errors.Is(err, ErrTooLong) {
-		t.Fatalf("oversized text: %v", err)
-	}
-}
-
-func TestPeerPreviewRefusesHiddenAndRestrictedContext(t *testing.T) {
-	for _, sensitivity := range []int{1, 3} {
-		body := ImportExternalText("hidden credential payload")
-		body.Blocks[0].Context.ModelVisible = sensitivity == 3
-		body.Blocks[0].Context.Sensitivity = sensitivity
-		m := Message{Body: body}
-		if m.ModelVisible() || strings.Contains(m.Preview(), "credential payload") {
-			t.Fatalf("preview exposed hidden body: %s", m.Preview())
-		}
-		if m.DisplayText() != "hidden credential payload" {
-			t.Fatal("model refusal rewrote the transport/human display")
-		}
-	}
-	visible := ImportExternalText("anchor").Blocks[0].Context
-	no := false
-	hiddenText := "opaque secret"
-	hiddenBlock, _ := json.Marshal(canonical.Block{Type: "text", Text: &hiddenText, Context: &canonical.Context{Origin: 7, Authority: 1, Trust: 2, Sensitivity: 1, ModelVisible: false, RevisionEpoch: "0"}})
-	for _, raw := range []string{
-		`{"nested":[` + string(hiddenBlock) + `]}`,
-		`{"nested":[{"type":"text","text":"unclassified nested text"}]}`,
-	} {
-		body := canonical.Message{Role: "tool", Blocks: []canonical.Block{{Type: "tool_result", ToolID: "t1", IsError: &no, Context: visible, Content: json.RawMessage(raw)}}}
-		before, _ := json.Marshal(body)
-		m := Message{Body: body}
-		if m.ModelVisible() || strings.Contains(m.Preview(), "opaque secret") {
-			t.Fatal("nested canonical block bypassed peer preview fence")
-		}
-		after, _ := json.Marshal(body)
-		if string(before) != string(after) {
-			t.Fatal("projection guard changed opaque source JSON")
-		}
-	}
-	body := ImportExternalText("unclassified source")
-	body.Blocks[0].Context = nil
-	m := Message{Body: body}
-	if m.ModelVisible() || strings.Contains(m.Preview(), "unclassified source") {
-		t.Fatal("absent context authorized model exposure")
-	}
-	body = canonical.Message{Role: "tool", Blocks: []canonical.Block{{Type: "tool_result", ToolID: "t1", IsError: &no, Context: visible, Content: json.RawMessage(`{"context":{"model_visible":false,"sensitivity":3},"domain_key":"ordinary data"}`)}}}
-	if !(Message{Body: body}).ModelVisible() {
-		t.Fatal("opaque domain context keys were treated as canonical IR metadata")
 	}
 }

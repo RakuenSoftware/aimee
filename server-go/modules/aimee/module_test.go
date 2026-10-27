@@ -58,22 +58,6 @@ func (m *Module) peerRegistry() *peer.Registry {
 
 func call(t *testing.T, m *Module, stage, op uint32, cells []string) (peerwire.Status, []string) {
 	t.Helper()
-	// Legacy strings below are fixture origins, not an internal wire fallback.
-	cells = append([]string(nil), cells...)
-	index := -1
-	if (stage == peerwire.StageDelivery && op == peerwire.OpSend || stage == peerwire.StageChannel && op == peerwire.OpChannelSend) && len(cells) > 2 {
-		index = 2
-	}
-	if stage == peerwire.StageDelivery && op == peerwire.OpReply && len(cells) == 1+peerwire.MessageWidth {
-		index = len(cells) - 1
-	}
-	if index >= 0 {
-		raw, err := json.Marshal(peer.ImportExternalText(cells[index]))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cells[index] = peerwire.BodyPrefix + string(raw)
-	}
 	frame, err := peerwire.EncodeRequest(op, cells)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -227,7 +211,7 @@ func TestDeliveryStageSendAndInbox(t *testing.T) {
 	// caller can tell a complete drain from a capped one.
 	_, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxTake, []string{"B", "10"})
 	remaining, got, err := peerwire.TakeReply(cells)
-	if err != nil || len(got) != 1 || got[0].DisplayText() != "hello" {
+	if err != nil || len(got) != 1 || got[0].Text != "hello" {
 		t.Fatalf("take = %v %+v", err, got)
 	}
 	if remaining != 0 {

@@ -106,6 +106,13 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Implementation-independent memory caller framing, wire types and pure "
         "embedding identity commitments. No storage, ranking, policy or admission.",
     ),
+    "server-go/thinclient": (
+        "contract",
+        "Caller-side Go binding to the existing C thinclient transport. Owns "
+        "only request-scoped connections, not domain state, authorization policy "
+        "or module dispatch. Requests retain their server-owned API methods and "
+        "caller identity; the binding is not a separately executing module.",
+    ),
     "server-go/delegate": (
         "contract",
         "Shared caller-side contract for delegate execution, so a peer can call "

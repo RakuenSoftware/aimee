@@ -1,4 +1,3 @@
-#include <aimee/ir/session_event.h>
 #include "modules/kb_client/kb_client_pii.h"
 /* server_mcp_call_table.c: split from server_mcp.c into a real translation unit
  * (was server_mcp_call_table.inc, textually included only to stay under the
@@ -1959,10 +1958,7 @@ static cJSON *peer_message_json(const peer_client_message_t *m)
    cJSON_AddStringToObject(j, "sent_at", m->sent_at ? m->sent_at : "");
    cJSON_AddBoolToObject(j, "is_reply", m->is_reply ? 1 : 0);
    cJSON_AddNumberToObject(j, "hop", m->hop);
-   if (peer_client_message_model_visible(m))
-      cJSON_AddItemToObject(j, "body", aimee_ir_message_json(&m->body));
-   else
-      cJSON_AddStringToObject(j, "body_refused", "peer context is hidden or restricted");
+   cJSON_AddStringToObject(j, "text", m->text ? m->text : "");
    return j;
 }
 
@@ -1992,17 +1988,6 @@ static cJSON *peer_outcome_text(const char *verb, peer_client_result_t rc, uint3
    return text_content(msg);
 }
 
-/* Model-facing tool text is an external import. Internal peer calls carry IR. */
-static void peer_external_text_message(const char *text, aimee_block_t *block,
-                                       aimee_message_t *message)
-{
-   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
-                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                              0);
-   *message = (aimee_message_t){.role = "user", .blocks = block, .n_blocks = 1};
-}
-
 static cJSON *mcph_peer_send(struct mcp_call *c)
 {
    const char *self = peer_self(c);
@@ -2016,15 +2001,13 @@ static cJSON *mcph_peer_send(struct mcp_call *c)
       return text_content("error: peer_send requires 'text'");
    cJSON *jconv = cJSON_GetObjectItemCaseSensitive(c->jargs, "conversation_id");
    cJSON *jexpect = cJSON_GetObjectItemCaseSensitive(c->jargs, "expect_reply");
-   aimee_block_t block;
-   aimee_message_t body;
-   peer_external_text_message(jtext->valuestring, &block, &body);
    peer_client_message_t stamped;
    uint32_t status = PEER_CLIENT_STATUS_OK;
    int transport = 0;
-   peer_client_result_t rc = peer_client_send(
-       self, jto->valuestring, &body, cJSON_IsString(jconv) ? jconv->valuestring : NULL,
-       cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status, &transport);
+   peer_client_result_t rc =
+       peer_client_send(self, jto->valuestring, jtext->valuestring,
+                        cJSON_IsString(jconv) ? jconv->valuestring : NULL,
+                        cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status, &transport);
    if (rc != PEER_CLIENT_OK)
       return peer_outcome_text("send", rc, status, transport);
    cJSON *j = peer_message_json(&stamped);
@@ -2053,14 +2036,11 @@ static cJSON *mcph_peer_reply(struct mcp_call *c)
    if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
       return text_content("error: peer_reply requires 'text'");
 
-   aimee_block_t block;
-   aimee_message_t body;
-   peer_external_text_message(jtext->valuestring, &block, &body);
    peer_client_message_t stamped;
    uint32_t status = PEER_CLIENT_STATUS_OK;
    int transport = 0;
    peer_client_result_t rc =
-       peer_client_reply(self, jh->valuestring, &body, &stamped, &status, &transport);
+       peer_client_reply(self, jh->valuestring, jtext->valuestring, &stamped, &status, &transport);
    if (rc != PEER_CLIENT_OK)
       return peer_outcome_text("reply", rc, status, transport);
    cJSON *j = peer_message_json(&stamped);
@@ -2134,17 +2114,7 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
       char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
       if (peer_client_reply_handle(m, handle, sizeof handle) == 0)
          dstr_appendf(&body, "\n   reply_to: %s", handle);
-      if (!peer_client_message_model_visible(m))
-      {
-         dstr_appendf(&body, "\n[Peer body refused: context is hidden or restricted.]");
-         continue;
-      }
-      cJSON *message = aimee_ir_message_json(&m->body);
-      char *encoded = message ? cJSON_PrintUnformatted(message) : NULL;
-      if (encoded)
-         dstr_appendf(&body, "\n%s", encoded);
-      free(encoded);
-      cJSON_Delete(message);
+      dstr_appendf(&body, "\n%s", m->text ? m->text : "");
    }
    peer_client_messages_free(msgs, count);
    cJSON *content = text_content(body.data ? body.data : "0 message(s) taken.");

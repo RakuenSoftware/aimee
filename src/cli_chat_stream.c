@@ -326,7 +326,8 @@ fail:
 static char *request_stream(const char *endpoint, const char *bearer, const cJSON *request,
                             int timeout, void (*text_cb)(const char *, void *),
                             cli_chat_tool_fn tool_cb, void *context,
-                            cli_chat_result_t *conversation)
+                            cli_chat_result_t *conversation, cli_http_stream_t *stream,
+                            const cli_http_options_t *options)
 {
    subscriber_t s = {.session = string(request, "aimee_session_id"),
                      .text = text_cb,
@@ -354,10 +355,29 @@ static char *request_stream(const char *endpoint, const char *bearer, const cJSO
    cJSON_Delete(version);
    cJSON_Delete(controls);
    cJSON_Delete(copy);
-   int delivery = body && strlen(body) < CLIENT_MAX_RESPONSE_SIZE
-                      ? cli_http_request_stream_ndjson(endpoint, "POST", "/v1/chat/stream", body,
-                                                       bearer, timeout, &s.http_status, consume, &s)
-                      : -1;
+   cli_http_options_t selected =
+       options ? *options
+               : (cli_http_options_t){.endpoint = endpoint,
+                                      .bearer = bearer,
+                                      .connect_timeout_ms =
+                                          timeout > 0 ? timeout : CLIENT_CONNECT_TIMEOUT_MS,
+                                      .io_timeout_ms = timeout < 0 ? 0
+                                                       : timeout   ? timeout
+                                                                   : CLIENT_DEFAULT_TIMEOUT_MS};
+   selected.method = "POST";
+   selected.path = "/v1/chat/stream";
+   selected.body = body;
+   selected.body_length = body ? strlen(body) : 0;
+   int delivery = -1;
+   if (body && selected.body_length < CLIENT_MAX_RESPONSE_SIZE)
+   {
+      cli_http_stream_t *owned = stream ? NULL : cli_http_stream_new();
+      delivery = (stream || owned)
+                     ? cli_http_request_stream_ndjson_on(stream ? stream : owned, &selected,
+                                                         &s.http_status, consume, &s)
+                     : -1;
+      cli_http_stream_free(owned);
+   }
    free(body);
    for (part_t *p = s.blocks; p;)
    {
@@ -404,8 +424,8 @@ int cli_chat_request_stream_ir(const char *endpoint, const char *bearer, const c
    if (!conversation)
       return -1;
    memset(conversation, 0, sizeof *conversation);
-   char *display =
-       request_stream(endpoint, bearer, request, timeout, NULL, NULL, NULL, conversation);
+   char *display = request_stream(endpoint, bearer, request, timeout, NULL, NULL, NULL,
+                                  conversation, NULL, NULL);
    if (!display)
    {
       cli_chat_result_free(conversation);
@@ -414,12 +434,79 @@ int cli_chat_request_stream_ir(const char *endpoint, const char *bearer, const c
    free(display);
    return 0;
 }
+int cli_chat_request_stream_ir_on(cli_http_stream_t *stream, const cli_http_options_t *options,
+                                  const cJSON *request, cli_chat_result_t *conversation)
+{
+   if (!stream || !options || !conversation)
+      return -1;
+   memset(conversation, 0, sizeof *conversation);
+   char *display =
+       request_stream(NULL, NULL, request, 0, NULL, NULL, NULL, conversation, stream, options);
+   if (!display)
+   {
+      cli_chat_result_free(conversation);
+      return -1;
+   }
+   free(display);
+   return 0;
+}
+int cli_chat_request_stream_json(cli_http_stream_t *stream, const cli_http_options_t *options,
+                                 const char *request_json, char **messages_json)
+{
+   if (!messages_json)
+      return -1;
+   *messages_json = NULL;
+   if (!request_json || strlen(request_json) > 1024 * 1024)
+      return -1;
+   cJSON *request = aimee_ir_json_parse_frame(request_json, strlen(request_json));
+   cli_chat_result_t result = {0};
+   aimee_message_t input = {0};
+   int rc = !request ||
+            aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(request, "message"), &input);
+   if (!rc)
+   {
+      aimee_request_t admission = {.messages = &input, .n_messages = 1};
+      rc = aimee_ir_request_admit(&admission);
+   }
+   aimee_message_free(&input);
+   if (!rc)
+      rc = cli_chat_request_stream_ir_on(stream, options, request, &result);
+   cJSON_Delete(request);
+   cJSON *reply = rc ? NULL : cJSON_CreateObject();
+   cJSON *messages = reply ? cJSON_AddArrayToObject(reply, "messages") : NULL;
+   for (int i = 0; messages && i < result.n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(result.messages + i);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         rc = -1;
+         break;
+      }
+   }
+   if (!rc && messages)
+      *messages_json = cJSON_PrintUnformatted(reply);
+   if (*messages_json && strlen(*messages_json) > CLIENT_MAX_RESPONSE_SIZE)
+   {
+      free(*messages_json);
+      *messages_json = NULL;
+   }
+   cJSON_Delete(reply);
+   cli_chat_result_free(&result);
+   return *messages_json ? 0 : -1;
+}
+void cli_chat_string_free(char *value)
+{
+   free(value);
+}
 char *cli_chat_request_stream(const char *endpoint, const char *bearer, const cJSON *request,
                               int timeout, void (*text_cb)(const char *, void *),
                               cli_chat_tool_fn tool_cb, void *context)
 {
-   return request_stream(endpoint, bearer, request, timeout, text_cb, tool_cb, context, NULL);
+   return request_stream(endpoint, bearer, request, timeout, text_cb, tool_cb, context, NULL, NULL,
+                         NULL);
 }
+#ifndef AIMEE_CLIENT_LIBRARY
 char *cli_chat_stream(const char *sock, const char *session, const char *message,
                       void (*text_cb)(const char *, void *), cli_chat_tool_fn tool_cb,
                       void *context)
@@ -466,3 +553,4 @@ char *cli_chat_stream(const char *sock, const char *session, const char *message
    free(bearer);
    return reply;
 }
+#endif /* CLI-only process configuration convenience wrapper */

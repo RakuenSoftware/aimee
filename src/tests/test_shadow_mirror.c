@@ -18,13 +18,6 @@
 #include "shadow_mirror.h"
 #include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
-#include "log.h"
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
 
 /* ---- stub agent_http_post: capture deliveries, optionally fail ------------- */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;

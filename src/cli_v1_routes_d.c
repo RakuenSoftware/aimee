@@ -288,42 +288,6 @@ static int write_delegate_output_file(const char *path, const char *text)
  * URL becomes "tls:host:port" (native client TLS to the server's #304 TLS
  * listener); http:// becomes "tcp:host:port"; an explicit tcp:/tls:/unix:
  * endpoint passes through unchanged. Caller frees. */
-static char *cli_v1_normalize_endpoint(const char *ep)
-{
-   if (!ep || !ep[0])
-      return NULL;
-   const char *scheme = NULL;
-   const char *rest = NULL;
-   if (strncmp(ep, "https://", 8) == 0)
-   {
-      scheme = "tls:";
-      rest = ep + 8;
-   }
-   else if (strncmp(ep, "http://", 7) == 0)
-   {
-      scheme = "tcp:";
-      rest = ep + 7;
-   }
-   if (!scheme)
-      return strdup(ep); /* tcp:/tls:/unix:/host:port already */
-   /* Take host[:port], dropping any trailing path; default the port by scheme. */
-   char hostport[300];
-   size_t n = strcspn(rest, "/");
-   if (n >= sizeof(hostport))
-      n = sizeof(hostport) - 1;
-   memcpy(hostport, rest, n);
-   hostport[n] = '\0';
-   /* Strip any userinfo ("user:pass@host") so it can't corrupt the host:port the
-    * TLS/connect layer parses; credentials belong in the bearer, not the URL. */
-   char *at = strrchr(hostport, '@');
-   char *hp = at ? at + 1 : hostport;
-   char out[320];
-   if (strchr(hp, ':'))
-      snprintf(out, sizeof(out), "%s%s", scheme, hp);
-   else
-      snprintf(out, sizeof(out), "%s%s:%s", scheme, hp, strcmp(scheme, "tls:") == 0 ? "443" : "80");
-   return strdup(out);
-}
 
 char *cli_v1_client_endpoint(void)
 {
@@ -331,7 +295,7 @@ char *cli_v1_client_endpoint(void)
       return cli_native_bridge_endpoint();
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
-      return cli_v1_normalize_endpoint(env);
+      return cli_http_endpoint_normalize(env);
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the

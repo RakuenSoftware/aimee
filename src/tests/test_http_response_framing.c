@@ -3,13 +3,6 @@
 #include "../posix/agent_bridge.c"
 #include <assert.h>
 
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
-
 static void response(const char *name, const void *wire, size_t wire_length, int expected_status,
                      const void *expected_body, size_t expected_length, int keep_open)
 {

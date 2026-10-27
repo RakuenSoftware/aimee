@@ -125,12 +125,6 @@ void server_coord_dispatcher_notify(void)
 {
    coord_notified++;
 }
-void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
-{
-   (void)level;
-   (void)module;
-   (void)fmt;
-}
 static cJSON *terminal_envelope(const aimee_response_t *ir, const char *status, const char *message)
 {
    cJSON *out = cJSON_CreateObject();

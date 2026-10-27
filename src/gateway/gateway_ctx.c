@@ -186,8 +186,19 @@ void gateway_ctx_free(gateway_ctx_t *ctx)
          a->shutdown(a);
    }
    pthread_mutex_destroy(&ctx->session_mutex);
-   mirror_clear();
    free(ctx);
+}
+
+/* Model messages stay canonical until crossing into the delivery log. */
+static int mirror_model_view(const session_source_t *source, const char *direction,
+                             const aimee_message_t *message)
+{
+   char *text = gateway_message_text_view(message, 1);
+   if (!text)
+      return -1;
+   mirror_record(source->platform, source->chat_id, direction, text);
+   free(text);
+   return 0;
 }
 
 /* Reply helper: deliver a one-shot message back to the originating channel. */
@@ -199,13 +210,8 @@ static void reply_origin(gateway_ctx_t *ctx, const session_source_t *src, const 
    snprintf(origin.chat_id, sizeof(origin.chat_id), "%s", src->chat_id);
    if (src->thread_id[0])
       snprintf(origin.thread_id, sizeof(origin.thread_id), "%s", src->thread_id);
-   aimee_block_t block = {
-       .type = AIMEE_BLK_TEXT,
-       .text = (char *)text,
-       .context = gateway_context(AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_EVIDENCE, 1)};
-   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
-   gateway_send_message(ctx, &origin, &message);
-   (void)mirror_record_ir(src, "out", &message);
+   gateway_send_text(ctx, &origin, text);
+   mirror_record(src->platform, src->chat_id, "out", text);
 }
 
 int gateway_parse_pr_command(const char *args, char *ws, size_t ws_cap, char *title,
@@ -561,7 +567,7 @@ int gateway_handle_message_ir(gateway_ctx_t *ctx, const session_source_t *src,
          goto message_done;
       }
    }
-   if (gateway_message_admit(&message) || mirror_record_ir(src, "in", &message))
+   if (gateway_message_admit(&message) || mirror_model_view(src, "in", &message))
       goto message_done;
    inbound_mirrored = 1;
    /* Legacy voice commands use the first attachment's ASR utterance; file
@@ -620,62 +626,72 @@ int gateway_handle_message_ir(gateway_ctx_t *ctx, const session_source_t *src,
       const aimee_message_t *part = reply.messages + i;
       if (!strcmp(part->role, "user"))
          continue;
-      if (mirror_record_ir(src, !strcmp(part->role, "assistant") ? "out" : "tool", part))
+      if (mirror_model_view(src, !strcmp(part->role, "assistant") ? "out" : "tool", part))
          goto reply_done;
       if (!strcmp(part->role, "assistant"))
          authored[authored_count++] = *part; /* Borrowed view, never reconstructed. */
    }
-   if (authored_count && delivery_router_send_ir(ctx, &origin, authored, authored_count))
+   char *delivery_text = gateway_message_text_view(authored, authored_count);
+   if (!delivery_text)
       goto reply_done;
-   if (voice_in && authored_count && tts_enabled())
+   if (delivery_text[0] && delivery_router_send(ctx, &origin, delivery_text, NULL, 0))
+      goto delivery_done;
+   for (int m = 0; m < authored_count; m++)
+      for (int i = 0; i < authored[m].n_blocks; i++)
+      {
+         const aimee_block_t *block = authored[m].blocks + i;
+         if (!aimee_ir_block_model_visible(block) ||
+             (block->type != AIMEE_BLK_IMAGE && block->type != AIMEE_BLK_DOCUMENT))
+            continue;
+         const char *path = gateway_asset_path(block);
+         attachment_t attachment = {0};
+         if (!path || strlen(path) >= sizeof attachment.path ||
+             (block->media_type && strlen(block->media_type) >= sizeof attachment.mime))
+            goto delivery_done;
+         snprintf(attachment.path, sizeof attachment.path, "%s", path);
+         snprintf(attachment.mime, sizeof attachment.mime, "%s",
+                  block->media_type ? block->media_type : "application/octet-stream");
+         if (delivery_router_send(ctx, &origin, NULL, &attachment, 1))
+            goto delivery_done;
+      }
+   if (voice_in && delivery_text[0] && tts_enabled())
    {
       char *path = NULL;
-      if (!tts_synthesize_ir(authored, authored_count, &path) && path)
+      if (!tts_synthesize(delivery_text, &path) && path)
       {
          attachment_t artifact = {0};
          snprintf(artifact.path, sizeof artifact.path, "%s", path);
          const char *ext = strrchr(path, '.');
          snprintf(artifact.mime, sizeof artifact.mime, "%s",
                   ext && !strcmp(ext, ".mp3") ? "audio/mpeg" : "audio/wav");
-         aimee_message_t audio = {0};
-         if (!gateway_message_import_external(NULL, &artifact, 1, &audio))
-         {
-            free(audio.role);
-            audio.role = strdup("assistant");
-            for (int i = 0; i < audio.n_blocks; i++)
-               audio.blocks[i].context =
-                   gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1);
-            if (audio.role)
-            {
-               (void)mirror_record_ir(src, "out", &audio);
-               (void)delivery_router_send_ir(ctx, &origin, &audio, 1);
-            }
-            aimee_message_free(&audio);
-         }
+         (void)delivery_router_send(ctx, &origin, NULL, &artifact, 1);
          unlink(path);
          free(path);
       }
       else
          LOG_WARN("gateway", "TTS synthesis failed for session %s", aimee_sid);
    }
+   free(delivery_text);
+   delivery_text = NULL;
    status = 0;
+delivery_done:
+   free(delivery_text);
 reply_done:
    free(authored);
    cli_chat_result_free(&reply);
 message_done:
    if (!inbound_mirrored)
-      (void)mirror_record_ir(src, "in", &message);
+      (void)mirror_model_view(src, "in", &message);
    aimee_message_free(&message);
    return status;
 }
 
-int gateway_send_message(gateway_ctx_t *ctx, const delivery_target_t *target,
-                         const aimee_message_t *message)
+int gateway_send_text(gateway_ctx_t *ctx, const delivery_target_t *target, const char *text)
 {
    if (!target)
       return -1;
    delivery_target_t owned = *target;
-   return delivery_router_send_ir(ctx, &owned, message, 1);
+   return delivery_router_send(ctx, &owned, text, NULL, 0);
 }
 
 int gateway_authorize_user(gateway_ctx_t *ctx, const session_source_t *src)

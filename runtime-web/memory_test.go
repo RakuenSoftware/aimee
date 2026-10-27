@@ -54,6 +54,7 @@ func TestMemoryCenterProxyPreservesActorBodyAndStatus(t *testing.T) {
 		strings.NewReader(`{"id":42,"reason":"wrong"}`)), "alice")
 	rec := httptest.NewRecorder()
 	s.memoryProxyHandler("/v1/memory/reject")(rec, req)
+	waitFakeV1(t)
 	if rec.Code != http.StatusConflict || rec.Body.String() != `{"error":"refused"}` {
 		t.Fatalf("response code=%d body=%q", rec.Code, rec.Body.String())
 	}

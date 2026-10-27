@@ -40,6 +40,7 @@ func TestHandleGraphHubsProxiesMCP(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.handleGraphHubs(rr, httptest.NewRequest(http.MethodGet, "/api/graph/hubs?project=proj-alpha&max_results=10", nil))
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
@@ -62,6 +63,7 @@ func TestHandleGraphNeighborsProxiesMCP(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.handleGraphNeighbors(rr, httptest.NewRequest(http.MethodGet, "/api/graph/neighbors?project=p&node=hub", nil))
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
@@ -96,6 +98,7 @@ func TestHandleGraphSurprisingForwardsJudge(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.handleGraphSurprising(rr, httptest.NewRequest(http.MethodGet, "/api/graph/surprising?project=p&judge=true", nil))
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK || tool != "index_graph_surprising" {
 		t.Fatalf("code=%d tool=%q", rr.Code, tool)

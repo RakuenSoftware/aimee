@@ -1,18 +1,23 @@
-/* Canonical ring-buffer delivery log; callers own deep-cloned snapshots. */
+/* mirror.h: ring-buffer delivery log */
 #pragma once
-#include "gateway_platform.h"
-#include <aimee/ir/aimee_ir.h>
 #include <time.h>
+
 #define MAX_MIRROR_ENTRIES 256
+
 typedef struct mirror_entry
 {
    time_t ts;
-   session_source_t source;
+   char platform[32];
+   char chat_id[128];
    char direction[8];
-   aimee_message_t message;
+   char text[512];
 } mirror_entry_t;
-int mirror_record_ir(const session_source_t *source, const char *direction,
-                     const aimee_message_t *message);
+
+/* Record a message delivery event. Overwrites oldest entry when full. */
+void mirror_record(const char *platform, const char *chat_id, const char *direction,
+                   const char *text);
+
+/* Copy the most recent N entries into the provided array.
+ * Entries are returned in chronological order (oldest first).
+ * Returns the number of entries written (0 if empty). */
 int mirror_get_recent(mirror_entry_t *entries, int max_entries);
-void mirror_entries_free(mirror_entry_t *entries, int count);
-void mirror_clear(void);

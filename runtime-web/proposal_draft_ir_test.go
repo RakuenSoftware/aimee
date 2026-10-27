@@ -24,6 +24,7 @@ func TestProposalDraftCarriesCanonicalMessageAndAuthenticatedActor(t *testing.T)
 	req.Header.Set("X-Aimee-Webuser", "forged")
 	rec := httptest.NewRecorder()
 	s.handleProposalDraft(rec, req)
+	waitFakeV1(t)
 	if rec.Code != 200 || calls != 1 || !strings.Contains(rec.Body.String(), "proposal artifact") {
 		t.Fatalf("draft: code=%d calls=%d", rec.Code, calls)
 	}

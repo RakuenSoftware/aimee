@@ -56,6 +56,7 @@ func TestNormalDevSubmitCrossesCanonicalFacadeWithAuthenticatedIdentity(t *testi
 	request.Header.Set("X-Aimee-Execution-Scope", strings.Repeat("b", 64))
 	response := httptest.NewRecorder()
 	s.handleDevSubmit(response, request)
+	waitFakeV1(t)
 	if response.Code != 200 || facadeCalls != 1 || privateCalls != 0 || !strings.Contains(response.Body.String(), `"owned"`) {
 		t.Fatalf("normal public submit bypassed owner: status=%d facade=%d private=%d", response.Code, facadeCalls, privateCalls)
 	}

@@ -1,7 +1,6 @@
 #include "kb_ocr_sidecar.h"
 #include "kb_tsr_sidecar.h"
 #include "agent_exec.h"
-#include "log.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <math.h>
@@ -12,12 +11,6 @@
 static const char *response;
 static size_t response_length;
 static int status = 200, calls;
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
 int agent_http_post_content_type_bytes(const char *url, const char *auth, const char *type,
                                        const void *body, size_t body_length, char **out,
                                        size_t *out_length, int timeout, const char *extra)

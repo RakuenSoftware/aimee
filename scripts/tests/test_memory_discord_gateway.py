@@ -20,11 +20,10 @@ spec.loader.exec_module(model_ir)
 
 
 class GatewayTests(unittest.TestCase):
-    def test_embedded_helper_projects_answer_and_retains_canonical_response(self):
-        source = {"schema": "aimee.response.v1", "role": None, "stop_reason": 1,
-                  "usage": {"unobserved": True}, "raw": {"opaque": 9007199254740993},
-                  "blocks": [{"type": "thinking", "encrypted_content": "opaque"},
-                             {"type": "text", "text": "answer 古"}]}
+    def test_embedded_helper_projects_answer_and_retains_canonical_messages(self):
+        source = [{"role": "assistant", "blocks": [
+            {"type": "thinking", "encrypted_content": "opaque"},
+            {"type": "text", "text": "answer 古"}]}]
         request = {"operation": "reply", "context": "source evidence", "query": "question", "channel_id": 123}
         @dataclass
         class Config:
@@ -39,7 +38,7 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(inner.config.memory_profile, "conversation-v2")
                 self.assertEqual((history, query, channel), ([], "question", 123))
                 self.assertEqual(await inner.memory_context(), "source evidence")
-                return model_ir.response_turn(source)
+                return model_ir.chat_turn(source)
         class Session:
             async def __aenter__(self): return self
             async def __aexit__(self, *args): pass
@@ -50,7 +49,7 @@ class GatewayTests(unittest.TestCase):
                                      "aiohttp": SimpleNamespace(ClientSession=Session)}), \
                 patch("sys.stdin", io.StringIO(json.dumps(request))), redirect_stdout(output):
             exec(compile(gateway.BRIDGE_CODE, "embedded_discord_gateway", "exec"), {})
-        self.assertEqual(json.loads(output.getvalue()), {"answer": "answer 古", "ir": source})
+        self.assertEqual(json.loads(output.getvalue()), {"answer": "answer 古", "messages": source})
 
     def test_removed_tokenizer_and_native_operations_refuse_before_subprocess(self):
         for operation in ("tokenizer", "chat"):

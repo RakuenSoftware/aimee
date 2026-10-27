@@ -764,6 +764,7 @@ set(GIT_SRCS
     ${AIMEE_SRC_DIR}/modules/git/git_verify_step.c
 )
 
+set(CLIENT_TRANSPORT_SRCS ${AIMEE_SRC_DIR}/cli_client.c)
 set(CLI_SRCS
     ${HOOK_IR_SRCS}
     ${IR_BASE_SRCS}
@@ -798,7 +799,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_chat_stream.c
-    ${AIMEE_SRC_DIR}/cli_client.c
+    ${CLIENT_TRANSPORT_SRCS}
     ${AIMEE_SRC_DIR}/cli_kb_smoke.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
@@ -936,7 +937,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c
     ${AIMEE_SRC_DIR}/server/compute_pool.c
-    ${AIMEE_SRC_DIR}/cli_client.c
+    ${CLIENT_TRANSPORT_SRCS}
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
     ${AIMEE_SRC_DIR}/cli_native_bridge.c
@@ -1619,3 +1620,37 @@ add_test(NAME kb_container_packaging_plant
 add_subdirectory(src/tests)
 
 endif() # NOT AIMEE_THIN_CLIENT
+
+# One thinclient transport implementation, linked by the CLI and consumed by
+# in-process browser/Discord language bindings. No server/domain dependencies.
+if(NOT AIMEE_USE_INSTALLED_CORE)
+    set_target_properties(aimee-core-connection PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+add_library(aimee-client SHARED
+    ${CLIENT_TRANSPORT_SRCS}
+    ${AIMEE_SRC_DIR}/cli_chat_stream.c
+    ${AIMEE_SRC_DIR}/aimee_home.c
+    ${AIMEE_SRC_DIR}/aimee_sha256.c
+    ${AIMEE_SRC_DIR}/vendor/cJSON.c
+    ${IR_BASE_SRCS})
+target_include_directories(aimee-client PUBLIC ${AIMEE_SRC_DIR}/headers
+    PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/vendor/headers)
+if(NOT WIN32)
+    target_compile_options(aimee-client PRIVATE -fPIC)
+    if(NOT AIMEE_USE_INSTALLED_CORE)
+        target_compile_options(aimee-core-connection PRIVATE -fPIC)
+    endif()
+endif()
+target_link_libraries(aimee-client PRIVATE aimee-core-connection Threads::Threads OpenSSL::Crypto)
+target_compile_definitions(aimee-client PRIVATE AIMEE_CLIENT_LIBRARY)
+if(WITH_TLS)
+    target_compile_definitions(aimee-client PRIVATE WITH_TLS)
+endif()
+set_target_properties(aimee-client PROPERTIES OUTPUT_NAME aimee-client)
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/pkgconfig/aimee-client.pc" CONTENT
+"prefix=${CMAKE_BINARY_DIR}\nlibdir=\${prefix}\nincludedir=${AIMEE_SRC_DIR}/headers\n\nName: aimee-client\nDescription: Shared Aimee thinclient transport\nVersion: 1.0.0\nLibs: -L\${libdir} -laimee-client\nCflags: -I\${includedir}\n")
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/aimee-client-install.pc" CONTENT
+"prefix=\${pcfiledir}/../..\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include/aimee-client\n\nName: aimee-client\nDescription: Shared Aimee thinclient transport\nVersion: 1.0.0\nLibs: -L\${libdir} -laimee-client\nCflags: -I\${includedir}\n")
+install(TARGETS aimee-client LIBRARY DESTINATION lib COMPONENT ThinClientSDK RUNTIME DESTINATION bin COMPONENT ThinClientSDK)
+install(FILES ${AIMEE_SRC_DIR}/headers/cli_client.h DESTINATION include/aimee-client COMPONENT ThinClientSDK)
+install(FILES "${CMAKE_BINARY_DIR}/aimee-client-install.pc" DESTINATION lib/pkgconfig RENAME aimee-client.pc COMPONENT ThinClientSDK)

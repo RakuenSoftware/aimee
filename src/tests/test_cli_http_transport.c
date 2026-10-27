@@ -1,5 +1,5 @@
 /* test_cli_http_transport.c — unit tests for the CLI /v1 HTTP transport
- * primitives (cli_transport_parse / cli_http_build_request / cli_http_request).
+ * primitives (cli_transport_parse / cli_http_request).
  *
  * The round-trip test stands up a one-shot stub HTTP server on a Unix socket in
  * a background thread and drives the real cli_http_request client against it, so
@@ -17,6 +17,49 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#ifdef AIMEE_TEST_CONNECT_WRAPPED
+#include <aimee/core/connection/socket.h>
+static int tcp_connect_calls;
+aimee_core_result_t __wrap_aimee_core_socket_connect_controlled(const char *host, const char *port,
+                                                                unsigned flags,
+                                                                const aimee_core_control_t *control,
+                                                                int *out_fd)
+{
+   (void)host;
+   (void)port;
+   (void)flags;
+   (void)control;
+   ++tcp_connect_calls;
+   *out_fd = -1;
+   return AIMEE_CORE_IO_ERROR;
+}
+static void test_refuse_before_connect(void)
+{
+   cli_http_header_t header = {"aUtHoRiZaTiOn", "Bearer fixture"};
+   cli_http_options_t options = {.endpoint = "tcp:198.51.100.1:1", .method = "GET", .path = "/x"};
+   for (int kind = 0; kind < 4; ++kind)
+   {
+      options.bearer = kind == 0 ? "fixture" : NULL;
+      options.headers = kind == 1 ? &header : NULL;
+      options.header_count = kind == 1;
+      options.path = kind == 2 ? "/x\tinvalid" : kind == 3 ? "/x\177invalid" : "/x";
+      cli_http_stream_t *stream = cli_http_stream_new();
+      tcp_connect_calls = 0;
+      assert(cli_http_stream_open(stream, &options) == -1);
+      assert(tcp_connect_calls == 0);
+      cli_http_stream_free(stream);
+   }
+   /* Counter control: admitted credential-free TCP reaches the intercepted
+    * connect. No test ever opens a non-loopback network connection. */
+   options.path = "/x";
+   options.endpoint = "tcp:127.0.0.1:1";
+   cli_http_stream_t *stream = cli_http_stream_new();
+   assert(cli_http_stream_open(stream, &options) == -1);
+   assert(tcp_connect_calls == 1);
+   cli_http_stream_free(stream);
+}
+#endif
+
 /* ---- 1. transport string -> enum ---- */
 static void test_transport_parse(void)
 {
@@ -27,34 +70,6 @@ static void test_transport_parse(void)
    assert(cli_transport_parse(NULL) == CLI_TRANSPORT_SOCKET);
    assert(cli_transport_parse("bogus") == CLI_TRANSPORT_SOCKET);
    printf("  transport_parse: ok\n");
-}
-
-/* ---- 2. request builder ---- */
-static void test_build_request(void)
-{
-   char buf[1024];
-   int n = cli_http_build_request("GET", "/v1/models", NULL, NULL, NULL, buf, sizeof(buf));
-   assert(n > 0);
-   assert(strstr(buf, "GET /v1/models HTTP/1.1\r\n"));
-   assert(strstr(buf, "Host: localhost\r\n"));
-   assert(strstr(buf, "Content-Length: 0\r\n"));
-   assert(strstr(buf, "Connection: close\r\n\r\n"));
-   assert(strstr(buf, "Authorization:") == NULL);
-
-   const char *body = "{\"x\":1}"; /* strlen == 7 */
-   n = cli_http_build_request("POST", "/v1/runs", "example", "tok123", body, buf, sizeof(buf));
-   assert(n > 0);
-   assert(strstr(buf, "POST /v1/runs HTTP/1.1\r\n"));
-   assert(strstr(buf, "Host: example\r\n"));
-   assert(strstr(buf, "Authorization: Bearer tok123\r\n"));
-   assert(strstr(buf, "Content-Length: 7\r\n"));
-   assert(strstr(buf, "\r\n\r\n{\"x\":1}"));
-   assert((size_t)n == strlen(buf));
-
-   /* too-small buffer -> -1, no overflow */
-   char tiny[8];
-   assert(cli_http_build_request("GET", "/v1/models", NULL, NULL, NULL, tiny, sizeof(tiny)) == -1);
-   printf("  build_request: ok\n");
 }
 
 /* ---- 3. end-to-end round trip against a stub UDS HTTP server ---- */
@@ -78,7 +93,8 @@ static void *stub_server(void *a)
    struct sockaddr_un addr;
    memset(&addr, 0, sizeof(addr));
    addr.sun_family = AF_UNIX;
-   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", s->path);
+   assert(strlen(s->path) < sizeof(addr.sun_path));
+   memcpy(addr.sun_path, s->path, strlen(s->path) + 1);
    unlink(s->path);
    assert(bind(srv, (struct sockaddr *)&addr, sizeof(addr)) == 0);
    assert(listen(srv, 1) == 0);
@@ -317,7 +333,9 @@ int main(void)
 {
    printf("cli_http_transport:\n");
    test_transport_parse();
-   test_build_request();
+#ifdef AIMEE_TEST_CONNECT_WRAPPED
+   test_refuse_before_connect();
+#endif
    test_manifest_auth_refusal_diagnosis();
    test_v1_route_map();
    test_served_dispatch();

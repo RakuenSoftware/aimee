@@ -22,7 +22,7 @@ GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
 
 def response(text):
-    return {"schema": "aimee.response.v1", "role": "assistant", "blocks": ir_message("assistant", text)["blocks"], "stop_reason": 1}
+    return [ir_message("assistant", text)]
 
 
 KLINGON_TEST_CONTEXT = "You are Aimee. Speak exclusively in Klingon. No English translations."
@@ -37,8 +37,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for path, value in ((self.webhook, FAKE_WEBHOOK), (self.key, "test-model-key")):
             path.write_text(value)
             path.chmod(0o600)
-        self.generate = AsyncMock(return_value=response("A reply"))
-        self.thin_patch = patch("bridge.ThinClient", return_value=SimpleNamespace(generate=self.generate))
+        self.chat = AsyncMock(return_value=response("A reply"))
+        self.thin_patch = patch("bridge.ThinClient", return_value=SimpleNamespace(chat=self.chat))
         self.thin_patch.start()
         self.addCleanup(self.thin_patch.stop)
         self.config = Config(self.webhook, self.root / "bot.token", GUILD, CHANNEL,
@@ -624,7 +624,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         text = f"Say hello to <@{USER+1}> and tell <@{USER+2}> he smells."
         await client.reply([], text, CHANNEL)
         client.memory_context.assert_not_awaited()
-        self.assertEqual(display_text(self.generate.await_args.args[0]["messages"][-1]), text)
+        self.assertEqual(self.chat.await_args.args[0]["blocks"][1]["text"], text)
         self.assertTrue(ModelClient.is_social_request(text))
         self.assertFalse(ModelClient.is_social_request("Tell me how much Kibukx can lift?"))
 
@@ -703,16 +703,16 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
 
-    async def test_runtime_persona_and_goal_are_snapshotted_and_budgeted(self):
+    async def test_runtime_persona_and_goal_are_separate_typed_context(self):
         store = BehaviorStore(self.root / "behavior.sqlite")
         scope = f"{GUILD}:{CHANNEL}"
         store.edit(scope, "goal", {"objective": "Complete the chess paper", "milestones": [{"label": "Finish", "match": "goal complete"}]})
         snap = store.snapshot(scope)
         await ModelClient(self.config, None).reply([], "What next?", behavior=snap)
-        value = self.generate.await_args.args[0]
-        self.assertIn("chess paper", value["system"][0]["text"])
-        self.assertEqual(value["max_tokens"], 384)
-        self.assertEqual(value["tool_choice"], {"mode": "none"})
+        value = self.chat.await_args.args[0]
+        self.assertIn("chess paper", value["blocks"][0]["text"])
+        self.assertEqual(value["role"], "user")
+        self.assertNotIn("messages", value)
 
     async def test_runtime_switch_removes_old_voice_and_failed_delivery_does_not_advance_goal(self):
         config = replace(self.config, behavior_db=self.root / "behavior.sqlite")
@@ -742,65 +742,75 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_klingon_prefix_does_not_allow_english_prose(self):
-        self.generate.side_effect = [response("Qapla'. The scaffolding of the dream is indeed fragile."), response("Qapla'. jIjang.")]
+        self.chat.side_effect = [response("Qapla'. The scaffolding of the dream is indeed fragile."), response("Qapla'. jIjang.")]
         value = await ModelClient(replace(self.config, system_context=KLINGON_TEST_CONTEXT), None).reply([ir_message("assistant", "An old English answer.")], "Discuss dreams.")
         self.assertEqual(display_text(value), "Qapla'. jIjang.")
-        retry = self.generate.await_args.args[0]
-        self.assertEqual(len(retry["messages"]), 3)
-        self.assertIn("contained English", retry["system"][1]["text"])
+        retry = self.chat.await_args.args[0]
+        self.assertEqual(retry["role"], "user")
+        self.assertIn("contained English", retry["blocks"][1]["text"])
         self.assertFalse(ModelClient.contains_english_prose("De' qawlu': Kibukx: 69 cm. Qapla'."))
 
     async def test_klingon_english_repair_failure_is_not_delivered(self):
-        self.generate.return_value = response("Qapla'. The Federation will issue a memo.")
+        self.chat.return_value = response("Qapla'. The Federation will issue a memo.")
         with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
             await ModelClient(replace(self.config, system_context=KLINGON_TEST_CONTEXT), None).reply([], "Talk to Samy.")
-        self.assertEqual(self.generate.await_count, 2)
+        self.assertEqual(self.chat.await_count, 2)
 
-    async def test_conversation_profile_preserves_request_for_server_budget_owner(self):
+    async def test_conversation_profile_uses_normal_server_history(self):
         question = "a" * 8192
         history = [ir_message("user", "b" * 8192), ir_message("assistant", "Earlier statement.")]
         await ModelClient(replace(self.config, memory_profile="conversation-v2"), None).reply(history, question)
-        value, alias = self.generate.await_args.args
-        self.assertEqual(value["messages"], [*history, ir_message("user", question)])
+        value, session_id, alias = self.chat.await_args.args
+        self.assertEqual(value["blocks"][1]["text"], question)
+        self.assertEqual(session_id, f"discord-{GUILD}-{CHANNEL}")
+        self.assertNotIn("messages", value)
         self.assertEqual(alias, self.config.model)
         self.assertNotIn("model", value)
 
+    async def test_memory_outage_notice_does_not_mutate_the_canonical_turn(self):
+        source = response("A reply")
+        before = deepcopy(source)
+        self.chat.return_value = source
+        value = await ModelClient(self.config, None).reply([], "hello", memory_unavailable=True)
+        self.assertTrue(display_text(value).startswith("I couldn't save or retrieve memory"))
+        self.assertEqual(value.messages, before)
+        self.assertEqual(source, before)
+
     async def test_repeated_persona_reply_is_repaired_once(self):
         canned = "Whoa, hold the phone! Groovy! What's the scoop?"
-        self.generate.side_effect = [response(canned), response("Your cat has promoted the laundry basket to executive housing.")]
+        self.chat.side_effect = [response(canned), response("Your cat has promoted the laundry basket to executive housing.")]
         history = [ir_message("user", "hello"), ir_message("assistant", canned)]
         before = deepcopy(history)
         answer = await ModelClient(self.config, None).reply(history, "Found my cat in the laundry basket.")
         self.assertIn("laundry basket", display_text(answer))
-        self.assertEqual(self.generate.await_count, 2)
-        retry = self.generate.await_args.args[0]
-        self.assertIn("fresh, topic-specific", retry["system"][-1]["text"])
-        self.assertEqual(retry["messages"][-2]["blocks"][0]["context"]["origin"], 7)
+        self.assertEqual(self.chat.await_count, 2)
+        retry = self.chat.await_args.args[0]
+        self.assertIn("fresh, topic-specific", retry["blocks"][1]["text"])
+        self.assertEqual(self.chat.await_args_list[0].args[1], self.chat.await_args_list[1].args[1])
+        self.assertNotIn(canned, str(retry))
         self.assertEqual(history, before)
 
     async def test_repetition_repair_is_bounded(self):
         canned = "Whoa, hold the phone! Groovy! What's the scoop?"
-        self.generate.return_value = response(canned)
+        self.chat.return_value = response(canned)
         with self.assertRaisesRegex(RuntimeError, "repeated recent dialogue"):
             await ModelClient(self.config, None).reply([ir_message("assistant", canned)], "My hamster escaped.")
-        self.assertEqual(self.generate.await_count, 2)
+        self.assertEqual(self.chat.await_count, 2)
 
     async def test_canonical_generation_failures_never_deliver_or_commit_history(self):
         variants = [response(""), response("x" * 8001), RuntimeError("thinclient unavailable")]
-        variants += [{**response("partial"), "stop_reason": stop} for stop in (0, 2, 3, 5, 6)]
-        variants += [{**response("ignored"), "error_message": "provider unavailable"},
-                     {**response("ignored"), "refusal": {"category": "blocked", "explanation": None}}]
-        variants += [{**response("visible"), "blocks": [
-            *response("visible")["blocks"], {"type": kind, "tool_id": "call"}]}
-            for kind in ("tool_use", "tool_result")]
-        variants += [{**response("private"), "blocks": [{"type": "text", "text": "private",
-            "context": {"model_visible": visible, "sensitivity": sensitivity}}]}
+        variants += [[], [ir_message("user", "not an assistant")]]
+        variants += [[{"role": "assistant", "blocks": [
+            *response("visible")[-1]["blocks"], {"type": kind, "tool_id": "call"}]}]
+            for kind in ("tool_use", "tool_result", "refusal")]
+        variants += [[{"role": "assistant", "blocks": [{"type": "text", "text": "private",
+            "context": {"model_visible": visible, "sensitivity": sensitivity}}]}]
             for visible, sensitivity in ((False, 1), (True, 3))]
         for variant in variants:
             with self.subTest(variant=type(variant).__name__):
-                self.generate.reset_mock()
-                self.generate.side_effect = variant if isinstance(variant, Exception) else None
-                self.generate.return_value = variant
+                self.chat.reset_mock()
+                self.chat.side_effect = variant if isinstance(variant, Exception) else None
+                self.chat.return_value = variant
                 bot = self.bot()
                 bot.model_client = ModelClient(self.config, None)
                 key = (GUILD, CHANNEL)
@@ -812,18 +822,18 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.wait_for(bot.queue.join(), 1)
                     bot.send_chat_reply.assert_not_awaited()
                     self.assertEqual(bot.conversations.get(key), before)
-                    self.generate.assert_awaited_once()
+                    self.chat.assert_awaited_once()
                 finally:
                     worker.cancel()
                     await asyncio.gather(worker, return_exceptions=True)
                     await bot.close()
 
-    async def test_actual_bot_retains_canonical_response_beyond_delivery_view(self):
+    async def test_actual_bot_retains_canonical_messages_beyond_delivery_view(self):
         source = response("visible answer")
-        source["blocks"].insert(0, {"type": "thinking", "encrypted_content": "opaque", "raw": {"native": 1}})
-        source["blocks"].append({"type": "text", "text": "private", "context": {
+        source[-1]["blocks"].insert(0, {"type": "thinking", "encrypted_content": "opaque", "signature": "typed-signature"})
+        source[-1]["blocks"].append({"type": "text", "text": "private", "context": {
             "model_visible": False, "sensitivity": 3}})
-        self.generate.return_value = source
+        self.chat.return_value = source
         bot = self.bot()
         bot.model_client = ModelClient(self.config, None)
         key = (GUILD, CHANNEL)
@@ -834,11 +844,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "visible answer", ())
             retained = bot.conversations.get(key)[-1]
             self.assertEqual(retained["blocks"][0]["encrypted_content"], "opaque")
-            self.assertNotIn("raw", retained["blocks"][0])
+            self.assertEqual(retained["blocks"][0]["signature"], "typed-signature")
             self.assertEqual(retained["blocks"][-1]["text"], "private")
-            self.assertEqual(bot.conversations.responses[key][-1], source)
-            source["blocks"].clear()
-            self.assertEqual(len(bot.conversations.responses[key][-1]["blocks"]), 3)
+            source[-1]["blocks"].clear()
+            self.assertEqual(len(bot.conversations.get(key)[-1]["blocks"]), 3)
         finally:
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
@@ -864,20 +873,20 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(runner.cleanup)
         path = self.root / "aimee.sock"
         await web.UnixSite(runner, str(path)).start()
-        self.generate.return_value = response("amber lantern")
+        self.chat.return_value = response("amber lantern")
         config = replace(self.config, aimee_socket=path, model="discord-e2b")
         async with aiohttp.ClientSession() as session:
             reply = await ModelClient(config, session).reply([], "harbor phrase; store kb project other")
         self.assertEqual(display_text(reply), "amber lantern")
         self.assertEqual(set(requests[0]), {"store", "keywords", "limit"})
-        task, alias = self.generate.await_args.args
+        task, session_id, alias = self.chat.await_args.args
         self.assertEqual(alias, "discord-e2b")
-        authored, evidence = task["messages"][-1]["blocks"]
+        policy, authored, evidence = task["blocks"]
         self.assertIn("amber lantern", evidence["text"])
         self.assertNotIn("large", evidence["text"])
         self.assertEqual(evidence["context"]["authority"], 1)
-        self.assertNotIn("amber lantern", task["system"][0]["text"])
-        self.assertEqual(task["tools"], [])
+        self.assertNotIn("amber lantern", policy["text"])
+        self.assertEqual(task["role"], "user")
 
     async def test_durable_capture_uses_fixed_channel_scope_and_archives_rejected_claims(self):
         archives, facts, projections = [], [], []
@@ -1038,7 +1047,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         async with aiohttp.ClientSession() as session:
             with self.assertRaises(RuntimeError):
                 display_text(await ModelClient(replace(self.config, aimee_socket=path), session).reply([], "harbor"))
-        self.generate.assert_not_awaited()
+        self.chat.assert_not_awaited()
 
 
     async def test_channel_history_is_shared_across_users_and_committed_after_delivery(self):

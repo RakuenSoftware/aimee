@@ -4,7 +4,6 @@
 #include "../gateway/platform_ntfy.h"
 #include "agent_exec.h"
 #include "runtime_secret.h"
-#include "log.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,12 +16,6 @@ static size_t expected_length;
 static const char *expected_type;
 static int status = 200, calls, timeout_ms;
 
-void aimee_log(log_level_t level, const char *module, const char *format, ...)
-{
-   (void)level;
-   (void)module;
-   (void)format;
-}
 int gateway_platform_register(platform_adapter_t *adapter)
 {
    registered = adapter;
