@@ -344,7 +344,8 @@ jobs:
   frontend-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.55 cannot install chromium on ubuntu-latest's 26.04 image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
