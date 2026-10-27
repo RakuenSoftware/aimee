@@ -141,10 +141,14 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
     # probe's 42 sources include no ring header directly. Drop exactly those two
     # include flags;
     # every other flag, input and command must still match.
+    # Oct 27: GCC builds add -fno-ipa-bit-cp to compile and LTO link (GCC 15.2
+    # miscompiles a live int parameter as constant 0). It disables one
+    # optimization pass and adds no input; drop exactly that token.
     def without_ring_include(plan: list[str]) -> list[str]:
         return [" ".join(token for token in line.split()
                          if token not in ("-Icore/event_bus/include",
-                                          "-Ibuild/deps/ouroboros-ring/c/include"))
+                                          "-Ibuild/deps/ouroboros-ring/c/include",
+                                          "-fno-ipa-bit-cp"))
                 for line in plan]
     return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))
 # The proxy adds a thin-client source and a separate test prerequisite. Neither

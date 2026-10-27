@@ -37,7 +37,9 @@ def compilation_database(plan, directory):
             raise ValueError('compile command source is outside the native tree or missing')
         # GCC-specific warning promotion is not a Clang diagnostic policy. Real
         # parse errors still make clang-tidy fail; preserve every warning in logs.
-        args = [arg for arg in args if arg != '-Werror' and not arg.startswith('-Wl,')]
+        # GCC IPA pass switches (-fno-ipa-bit-cp) are unknown arguments to Clang.
+        args = [arg for arg in args if arg != '-Werror' and not arg.startswith('-Wl,')
+                and not arg.startswith(('-fipa-', '-fno-ipa-'))]
         entries.append(dict(directory=str(directory), arguments=args, file=str(source)))
     if not entries:
         raise ValueError('Make produced no production compile commands')
@@ -66,8 +68,9 @@ def self_test():
         directory = Path(temp)
         source = directory / 'sample.c'
         source.write_text('int main(void) { return 0; }\n')
-        entries = compilation_database('gcc -c -Iheaders -DNAME=\'"literal"\' -Werror -o sample.o sample.c', directory)
+        entries = compilation_database('gcc -c -Iheaders -DNAME=\'"literal"\' -Werror -fno-ipa-bit-cp -o sample.o sample.c', directory)
         assert entries[0]['arguments'][-1] == 'sample.c'
+        assert '-fno-ipa-bit-cp' not in entries[0]['arguments']
         assert '-DNAME="literal"' in entries[0]['arguments']
         for plan in ('', 'gcc -c -o empty.o', 'gcc -c a.c b.c'):
             try:

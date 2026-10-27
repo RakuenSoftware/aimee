@@ -54,9 +54,10 @@ Explain how aimee itself works.
 Subcommands:
 
 ```
-  <topic>          Explain a topic -- work queue, delegation, memory,
-                   git, build, conventions. The words are joined, so
-                   `aimee get-help work queue` is one topic.
+  <topic>          Explain a topic -- mcp tools, delegate, memory, code
+                   index, verification, build, git, pr workflow,
+                   conventions, diagnostics. The words are joined, so
+                   `aimee get-help pr workflow` is one topic.
 ```
 
 ### `aimee get_help`

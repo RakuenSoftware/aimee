@@ -2453,11 +2453,40 @@ static void test_model_generate_canonical_frame(void)
    puts("  PASS: model.generate exact framed IR, route and input bounds");
 }
 
+/* A command that cannot run without its first word answers a bare call with its
+ * own usage instead of sending a request the server would reject on whatever
+ * check comes first. Commands whose bare form is valid still go out. */
+static void test_git_bare_required_word_prints_usage(void)
+{
+   char *pr[] = {"pr"};
+   assert(marshal_git_cli(1, pr) == NULL);
+   char *sw[] = {"switch"};
+   assert(marshal_git_cli(1, sw) == NULL);
+
+   char *create[] = {"pr", "create"};
+   cJSON *req = marshal_git_cli(2, create);
+   assert(req);
+   const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "action")),
+                 "create") == 0);
+   cJSON_Delete(req);
+
+   char *status[] = {"status"};
+   req = marshal_git_cli(1, status);
+   assert(req);
+   cJSON_Delete(req);
+   char *tag[] = {"tag"};
+   req = marshal_git_cli(1, tag);
+   assert(req);
+   cJSON_Delete(req);
+}
+
 int main(void)
 {
    test_first_party_cli_request_custody();
    test_model_generate_canonical_frame();
    test_git_explicit_repo_alias();
+   test_git_bare_required_word_prints_usage();
    test_cli_v1_body_cap_matches_server();
    printf("test_cli_v1_delegate\n");
    test_remote_workspace_hidden_roots_are_rejected();
