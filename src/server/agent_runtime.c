@@ -223,11 +223,7 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
 {
    if (!ag || !out)
       return -1;
-   /* Own `out` from the first instruction, exactly like the executors: memset it so
-    * EVERY early-return path (at-limit, bad-precondition) leaves a clean result —
-    * out->response == NULL — and a caller that frees out->response after a non-zero
-    * return can never hit stale/garbage. (No caller passes a live out->response
-    * here; the executors also memset, so this is the established contract.) */
+   /* Every return leaves a fresh owned canonical result. */
    memset(out, 0, sizeof(*out));
    if (!request || aimee_ir_request_admit(request) ||
        (host_text_profile && !host_request_supported(request, use_tools)))
@@ -532,7 +528,6 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
       if (cfg->route_pinned)
       {
          agent_result_clear_response(out);
-         out->response = NULL;
          break;
       }
       /* At-limit or a real failure: either way skip this agent and try the next
@@ -551,9 +546,9 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
  * with a delegate"). Deliberately NOT the agentic delegate path: it selects a
  * single non-CLI (HTTP-provider) agent — preferring `agent_name` if given, else
  * the default, else the first enabled non-CLI agent — clones it, forces
- * write_capable off, and calls the plain-completion agent_execute() directly.
+ * write_capable off, and calls the plain canonical completion owner directly.
  * No provider-CLI, no exec role, no worktree, no tools: the model can only return
- * text. Returns 0 on success (out->response holds the text), -1 otherwise.
+ * canonical response. Returns 0 on success, -1 otherwise.
  * Provider-CLI agents are refused as drafters precisely because they are agentic. */
 int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
                    agent_result_t *out)
@@ -593,7 +588,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
    agent_apply_runtime_config(&local);
    local.write_capable = 0; /* belt-and-suspenders; not the primary safeguard */
    /* THE tool-safety guarantee: dispatch with use_tools=0, so the single executor
-    * runs the plain agent_execute() completion path — NO tool loop at all (tool
+    * runs the plain canonical completion path — NO tool loop at all (tool
     * execution lives only in agent_execute_with_tools_for_role, reached ONLY when
     * use_tools=1). So regardless of the agent's tools_enabled flag, a draft can
     * only return text: it cannot run a tool, read/write files, or touch a repo.
@@ -973,10 +968,8 @@ static void parse_response(const char *body, const agent_t *agent,
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             response.raw_stop_reason ? response.raw_stop_reason
                                      : aimee_stop_reason_name(response.stop_reason));
-   char *text = aimee_ir_response_text_alloc(&response);
    agent_result_clear_response(out);
-   out->response = text; /* Compatibility display may be empty for media-only IR. */
-   out->success = text && !aimee_ir_response_complete_valid(&response);
+   out->success = !aimee_ir_response_complete_valid(&response);
    if (!out->success)
       snprintf(out->error, sizeof out->error, "model did not return a complete canonical answer");
    if (out->cache_read_tokens > 0)
@@ -2169,17 +2162,4 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
    tl_force_no_tools = previous;
    tl_native_turn_limit = previous_limit;
    return rc;
-}
-
-int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_result_t *out)
-{
-   if (!out)
-      return -1;
-   if (!host_request_supported(request, 0))
-   {
-      memset(out, 0, sizeof *out);
-      snprintf(out->error, sizeof out->error, "unsupported canonical completion request");
-      return AGENT_RC_CONTEXT_REFUSED;
-   }
-   return agent_execute_plain_request(agent, request, out, 1);
 }

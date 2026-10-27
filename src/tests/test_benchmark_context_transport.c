@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* Real Go context and diagnostics behind the remaining benchmark host connection. */
 #include "aimee.h"
 #include "modules/benchmarks/agent_eval_internal.h"
@@ -51,7 +52,6 @@ static void test_diagnostics(void)
    snprintf(task.name, sizeof(task.name), "task");
    snprintf(task.prompt, sizeof(task.prompt), "fixture");
    snprintf(task.success_check_value, sizeof(task.success_check_value), "expected");
-   result.response = strdup("POISONED FLAT ANSWER");
    result.success = 1;
    FILE *invalid = tmpfile();
    int calls = dispatch_calls;
@@ -59,7 +59,7 @@ static void test_diagnostics(void)
    assert(!ftell(invalid) && dispatch_calls == calls);
    fclose(invalid);
    expected_answer = "answer\nquoted";
-   assert(!aimee_ir_response_from_text(&result.canonical_response, expected_answer, NULL));
+   assert(!fixture_ir_response_from_text(&result.canonical_response, expected_answer, NULL));
    for (int negative = 0; negative < 3; negative++)
    {
       result.canonical_response.stop_reason = negative == 0   ? AIMEE_STOP_MAX_TOKENS

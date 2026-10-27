@@ -299,7 +299,7 @@ static void test_actual_stream_progress(void)
 }
 static agent_t http_fixture_agent(const char *name, const char *endpoint, int timeout_ms)
 {
-   agent_t agent = {0};
+   agent_t agent = {.max_parallel = 1};
    snprintf(agent.name, sizeof agent.name, "%s", name);
    snprintf(agent.model, sizeof agent.model, "gpt-4o");
    snprintf(agent.provider, sizeof agent.provider, "openai");
@@ -330,8 +330,8 @@ static void test_plain_refusal_clears_phase(void)
       job_refuse_at_model = fallback + 1;
       job_model_phases = 0;
       agent_result_t result = {0};
-      assert(fixture_agent_execute_text(&agent, "system", "task", 128, 0, &result) ==
-             AGENT_RC_CONTEXT_REFUSED);
+      int plain_rc = fixture_agent_execute_text(&agent, "system", "task", 128, 0, &result);
+      assert(plain_rc == AGENT_RC_CONTEXT_REFUSED);
       assert(job_model_phases == fallback + 1 && job_store_count == 3 + fallback &&
              !job_store_tool[0]);
       job_refuse_at_model = 0;
@@ -509,7 +509,8 @@ static void test_active_delegation_dispatch(void)
    const char *body = known_zero;
    pid_t child = serve_peer(listener, &status, &body, 1);
    assert(!fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result));
-   assert(result.success && !strcmp(result.response, "Measured zero."));
+   assert(result.success);
+   assert_ir_text(&result.canonical_response, "Measured zero.");
    assert(!aimee_ir_response_complete_text_valid(&result.canonical_response));
    agent_result_clear_response(&result);
    join_peer(child, listener);

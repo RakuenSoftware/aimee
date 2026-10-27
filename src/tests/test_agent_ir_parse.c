@@ -1,3 +1,4 @@
+#include "support/ir_text_request.h"
 /* Native response entry retains complete owned IR and canonical checkpoints.
  * No native assistant-history reconstruction or fixed-call projection. */
 #include <assert.h>
@@ -140,7 +141,7 @@ int main(void)
       unknown.canonical_response.usage_unobserved = 1;
       agent_result_clear_response(&unknown);
       assert(unknown.usage_unobserved); /* Releasing content cannot make spend known. */
-      assert(!agent_result_from_host_text(&unknown, "next observed answer"));
+      assert(!fixture_agent_result_from_text(&unknown, "next observed answer"));
       agent_result_move_response(&carried, &unknown);
       assert(carried.usage_unobserved);
       agent_result_clear_response(&carried);
@@ -149,33 +150,31 @@ int main(void)
       original.turns = 7;
       assert(agent_result_adopt_response(&original, &response) == 0);
       assert(!response.n_content && !response.content);
-      assert(!strcmp(original.response, "beforeafter"));
+      assert_ir_text(&original.canonical_response, "beforeafter");
       assert(original.canonical_response.n_content == 4);
       assert(!strcmp(original.canonical_response.content[0].thinking_signature, "sig"));
       assert(!strcmp(aimee_ir_response_tool(&original.canonical_response, 0)->tool_id, id));
       assert(aimee_ir_response_clone(&original.canonical_response, &response) == 0);
       agent_result_move_response(&selected, &original);
-      assert(!original.response && !original.canonical_response.content && original.turns == 7);
+      assert(!original.canonical_response.content && original.turns == 7);
       assert(selected.canonical_response.usage_cache_read == 9);
       char *projected = agent_result_take_text(&selected);
-      /* Pending tools cannot become business-answer authority even if the
-       * compatibility display contains plausible text. */
+      /* Pending tools cannot become business-answer authority. */
       assert(!projected);
-      assert(!selected.response && !selected.canonical_response.content);
+      assert(!selected.canonical_response.content);
       free(projected);
       agent_result_clear_response(&original);
       agent_result_clear_response(&selected);
-      assert(!agent_result_from_host_text(&selected, "canonical answer"));
+      assert(!fixture_agent_result_from_text(&selected, "canonical answer"));
       selected.success = 1;
-      agent_result_replace_display_text(&selected, strdup("forged display verdict"));
       projected = agent_result_take_text(&selected);
       assert(projected && !strcmp(projected, "canonical answer"));
       free(projected);
-      assert(!agent_result_from_host_text(&selected, "valid provider terminal after host failure"));
+      assert(
+          !fixture_agent_result_from_text(&selected, "valid provider terminal after host failure"));
       selected.success = 0;
-      assert(agent_result_project_complete_text(&selected) < 0);
       assert(!agent_result_take_text(&selected));
-      assert(!selected.response && !selected.canonical_response.content);
+      assert(!selected.canonical_response.content);
       assert(aimee_ir_response_drop_tool(&response, 0) == 0);
       assert(response.n_content == 3 && response.content[0].type == AIMEE_BLK_THINKING);
       assert(!strcmp(response.content[2].text, "after") && response.raw == NULL);

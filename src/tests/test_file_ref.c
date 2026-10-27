@@ -1,4 +1,4 @@
-/* test_file_ref.c: unit tests for resolve_file_references() */
+/* test_file_ref.c: unit tests for resolve_file_reference_context() */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,14 +38,14 @@ static void write_file(const char *relpath, const char *content)
 
 /* --- tests --- */
 
-static void test_valid_reference_inlined(void)
+static void test_valid_reference_evidence(void)
 {
    write_file("foo.c", "int main(void) { return 0; }\n");
 
    char prompt[256];
    snprintf(prompt, sizeof(prompt), "Update the file @foo.c to add logging");
 
-   char *out = resolve_file_references(prompt, g_tmpdir);
+   char *out = resolve_file_reference_context(prompt, g_tmpdir);
    assert(out != NULL);
    assert(strstr(out, "--- @foo.c ---") != NULL);
    assert(strstr(out, "int main(void)") != NULL);
@@ -55,35 +55,34 @@ static void test_valid_reference_inlined(void)
    printf("  valid_reference_inlined: ok\n");
 }
 
-static void test_no_references_passthrough(void)
+static void test_no_references_no_evidence(void)
 {
-   char *out = resolve_file_references("just a plain prompt", g_tmpdir);
+   char *out = resolve_file_reference_context("just a plain prompt", g_tmpdir);
    assert(out != NULL);
-   assert(strcmp(out, "just a plain prompt") == 0);
+   assert(!out[0]);
    free(out);
 
    printf("  no_references_passthrough: ok\n");
 }
 
-static void test_nonexistent_file_literal(void)
+static void test_nonexistent_file_no_evidence(void)
 {
-   /* A @token that isn't a real in-project file is left LITERAL (not a marker),
-    * so diffs/code carried in a prompt are never corrupted. */
-   char *out = resolve_file_references("see @nonexistent.c for details", g_tmpdir);
+   /* Unresolved task text must not become fabricated file evidence. */
+   char *out = resolve_file_reference_context("see @nonexistent.c for details", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "@nonexistent.c") != NULL);
+   assert(!out[0]);
    assert(strstr(out, "[file not found") == NULL);
    free(out);
 
    printf("  nonexistent_file_literal: ok\n");
 }
 
-static void test_path_outside_project_literal(void)
+static void test_path_outside_project_no_evidence(void)
 {
    /* An absolute path outside the project is left literal and NEVER inlined. */
-   char *out = resolve_file_references("read @/etc/passwd please", g_tmpdir);
+   char *out = resolve_file_reference_context("read @/etc/passwd please", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "@/etc/passwd") != NULL);
+   assert(!out[0]);
    assert(strstr(out, "root:") == NULL); /* content must not leak */
    assert(strstr(out, "[file outside project") == NULL);
    free(out);
@@ -91,19 +90,19 @@ static void test_path_outside_project_literal(void)
    printf("  path_outside_project_literal: ok\n");
 }
 
-static void test_traversal_literal(void)
+static void test_traversal_no_evidence(void)
 {
    /* A path-traversal @token is left literal and never inlined. */
-   char *out = resolve_file_references("read @../../../etc/shadow", g_tmpdir);
+   char *out = resolve_file_reference_context("read @../../../etc/shadow", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "@../../../etc/shadow") != NULL);
+   assert(!out[0]);
    assert(strstr(out, "root:") == NULL);
    free(out);
 
    printf("  traversal_literal: ok\n");
 }
 
-static void test_diff_passthrough(void)
+static void test_diff_has_no_evidence(void)
 {
    /* The regression that made roundtables "sandbox-blind": a unified diff in the
     * prompt must pass through unmangled — @@ hunk headers, decorators and emails
@@ -113,12 +112,11 @@ static void test_diff_passthrough(void)
                       " @property\n"
                       "-old\n"
                       "+new  # ping a@b.com\n";
-   char *out = resolve_file_references(diff, g_tmpdir);
+   char *out = resolve_file_reference_context(diff, g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "@@ -1,3 +1,4 @@") != NULL); /* hunk header intact */
-   assert(strstr(out, "@property") != NULL);       /* decorator intact */
-   assert(strstr(out, "a@b.com") != NULL);         /* email intact */
-   assert(strstr(out, "[file") == NULL);           /* no markers injected */
+   assert(!out[0]); /* Task text stays outside the evidence projection. */
+
+   assert(strstr(out, "[file") == NULL); /* no markers injected */
    free(out);
 
    printf("  diff_passthrough: ok\n");
@@ -131,10 +129,9 @@ static void test_max_3_refs_respected(void)
    write_file("c.txt", "file C");
    write_file("d.txt", "file D");
 
-   /* 4 references to REAL files — first 3 resolve, 4th hits the budget. (The
-    * limit applies only to real files now; a non-file 4th token would just be
-    * left literal.) */
-   char *out = resolve_file_references("read @a.txt and @b.txt and @c.txt and @d.txt", g_tmpdir);
+   /* Only real files consume the evidence budget; the fourth is explicit. */
+   char *out =
+       resolve_file_reference_context("read @a.txt and @b.txt and @c.txt and @d.txt", g_tmpdir);
    assert(out != NULL);
    assert(strstr(out, "file A") != NULL);
    assert(strstr(out, "file B") != NULL);
@@ -157,7 +154,7 @@ static void test_large_file_truncated(void)
       fputc('x', f);
    fclose(f);
 
-   char *out = resolve_file_references("check @big.txt", g_tmpdir);
+   char *out = resolve_file_reference_context("check @big.txt", g_tmpdir);
    assert(out != NULL);
    assert(strstr(out, "[TRUNCATED]") != NULL);
    free(out);
@@ -165,12 +162,12 @@ static void test_large_file_truncated(void)
    printf("  large_file_truncated: ok\n");
 }
 
-static void test_at_without_path_literal(void)
+static void test_at_without_path_no_evidence(void)
 {
    /* Bare '@' with no path chars after it should pass through literally */
-   char *out = resolve_file_references("email me @ home", g_tmpdir);
+   char *out = resolve_file_reference_context("email me @ home", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "email me @ home") != NULL);
+   assert(!out[0]);
    free(out);
 
    printf("  at_without_path_literal: ok\n");
@@ -196,16 +193,16 @@ int main(void)
 
    setup_tmpdir();
 
-   test_valid_reference_inlined();
+   test_valid_reference_evidence();
    test_reference_evidence_excludes_original_task();
-   test_no_references_passthrough();
-   test_nonexistent_file_literal();
-   test_path_outside_project_literal();
-   test_traversal_literal();
-   test_diff_passthrough();
+   test_no_references_no_evidence();
+   test_nonexistent_file_no_evidence();
+   test_path_outside_project_no_evidence();
+   test_traversal_no_evidence();
+   test_diff_has_no_evidence();
    test_max_3_refs_respected();
    test_large_file_truncated();
-   test_at_without_path_literal();
+   test_at_without_path_no_evidence();
 
    cleanup_tmpdir();
 

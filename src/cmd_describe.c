@@ -333,7 +333,8 @@ int describe_one(const char *project_name, const char *project_path)
 
    free(prompt);
 
-   if (rc != 0 || agent_result_project_complete_text(&result))
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       fprintf(stderr, "describe: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
@@ -355,13 +356,15 @@ int describe_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "describe: cannot write %s: %s\n", path, strerror(errno));
+      free(authored);
       agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
 
-   fprintf(f, "%s\n", result.response);
+   fprintf(f, "%s\n", authored);
    fclose(f);
+   free(authored);
 
    fprintf(stderr, "describe: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);
@@ -495,7 +498,8 @@ int style_one(const char *project_name, const char *project_path)
 
    free(prompt);
 
-   if (rc != 0 || agent_result_project_complete_text(&result))
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       fprintf(stderr, "style: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
@@ -517,13 +521,15 @@ int style_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "style: cannot write %s: %s\n", path, strerror(errno));
+      free(authored);
       agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
 
-   fprintf(f, "%s\n", result.response);
+   fprintf(f, "%s\n", authored);
    fclose(f);
+   free(authored);
 
    fprintf(stderr, "style: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);

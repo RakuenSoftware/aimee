@@ -46,7 +46,9 @@
     "server-go/modules/roundtable/review.go",
     "server-go/modules/roundtable/reviewer.go",
     "server-go/modules/roundtable/roundtable.go",
-    "server-go/modules/roundtable/panelwire/response.go"
+    "server-go/modules/roundtable/panelwire/response.go",
+    "server-go/modules/roundtable/review_admission.go",
+    "server-go/modules/roundtable/panel/review_input.go"
   ],
   "go_tests": [
     "server-go/modules/roundtable/capacity_integration_test.go",

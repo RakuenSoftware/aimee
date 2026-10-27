@@ -35,9 +35,6 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
 /* Attach a bounded additional quiescent observer without replacing the primary
  * resource action (for example, native replay/cache custody). The same join,
  * transfer and failure rules apply. A resource cannot be transferred twice. */
-int server_session_capture_observe_terminal(server_session_capture_t *owner,
-                                            server_session_terminal_action_fn action,
-                                            void *resource);
 /* A quiescent verifier may prepare one typed receipt immediately before a
  * completed terminal is serialized. Preparation runs under the writer lock:
  * never re-enter capture APIs. NULL omits an unavailable receipt. The host

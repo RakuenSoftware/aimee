@@ -24,7 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CURATOR_SYNTH_OUTBUF    16384
 #define CURATOR_SYNTH_DEFAULT_K 8
 
 /* System prompt for the synthesize stage when routed through a configured
@@ -35,71 +34,6 @@
    "You are a knowledge-base curator. Given a topic and its source excerpts as "                   \
    "JSON, write a faithful synthesis grounded only in those sources. Respond with "                \
    "a single JSON object: {\"synthesis\": \"<text>\"}. Do not invent facts."
-
-int kb_curator_restore_fragment_record(int64_t fragment_doc_id, const char *base_artifact_id,
-                                       const char *restored_text, double confidence,
-                                       const char *prompt_version, char *artifact_id_out,
-                                       size_t artifact_id_len)
-{
-   if (fragment_doc_id <= 0 || !restored_text || !restored_text[0])
-      return -1;
-
-   char fragment_id[32];
-   snprintf(fragment_id, sizeof(fragment_id), "%lld", (long long)fragment_doc_id);
-
-   cJSON *payload = cJSON_CreateObject();
-   if (!payload)
-      return -1;
-   cJSON_AddStringToObject(payload, "text", restored_text);
-   cJSON_AddStringToObject(payload, "evidence_mode", "synthesised");
-   cJSON_AddStringToObject(payload, "restoration_prompt_version",
-                           prompt_version && prompt_version[0] ? prompt_version : "restore-v1");
-   cJSON_AddStringToObject(payload, "fragment_doc_id", fragment_id);
-   if (base_artifact_id && base_artifact_id[0])
-      cJSON_AddStringToObject(payload, "base_artifact_id", base_artifact_id);
-   cJSON_AddBoolToObject(payload, "unknown_sentinel_present",
-                         strstr(restored_text, "[unknown]") != NULL);
-   cJSON_AddStringToObject(payload, "guardrail",
-                           "preserve source nouns, numbers, and relationships; mark gaps "
-                           "[unknown]; never invent");
-   char *payload_json = cJSON_PrintUnformatted(payload);
-   cJSON_Delete(payload);
-
-   char restore_id[64];
-   kb_store_artifact_gen_id(restore_id, sizeof(restore_id));
-   int rc = kb_store_artifact_write(restore_id, "restoration", "committed", "doc", fragment_id,
-                                    "curator", confidence, payload_json ? payload_json : "{}");
-   free(payload_json);
-   if (rc != 0)
-      return -1;
-
-   if (kb_store_artifact_cite(restore_id, "doc", fragment_id) != 0)
-      return -1;
-   if (base_artifact_id && base_artifact_id[0])
-   {
-      if (kb_store_artifact_cite(restore_id, "artifact", base_artifact_id) != 0)
-         return -1;
-      if (kb_store_artifact_link(restore_id, base_artifact_id, "restored_from") != 0)
-         return -1;
-      if (kb_store_artifact_link(base_artifact_id, restore_id, "restores") != 0)
-         return -1;
-   }
-
-   char audit_id[64];
-   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
-   char before_json[128];
-   char after_json[256];
-   snprintf(before_json, sizeof(before_json), "{\"fragment_doc_id\":\"%s\"}", fragment_id);
-   snprintf(after_json, sizeof(after_json),
-            "{\"artifact_id\":\"%s\",\"evidence_mode\":\"synthesised\"}", restore_id);
-   if (kb_store_audit_event_write(audit_id, restore_id, "corpus.restore", fragment_id, "curator",
-                                  "doc", fragment_id, confidence, 0, before_json, after_json) != 0)
-      return -1;
-
-   if (artifact_id_out && artifact_id_len > 0)
-      snprintf(artifact_id_out, artifact_id_len, "%s", restore_id);
-   return 0;
-}
 
 /* Pick the highest-centrality un-synthesized topic entity. Writes id/payload/
  * scope into the caller buffers. Returns 1 if one was found, else 0. */
@@ -205,8 +139,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    void *conn = kb_store_conn();
    if (!conn)
       return 0;
-   /* Run when enabled AND we have somewhere to send the work: a configured
-    * Tier-B provider (§2) or the legacy sidecar command. */
+   /* Run only when enabled and the canonical curator provider is configured. */
    provider_def_owned_t synth_provider;
    int have_provider = kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
    if (!config_kb_curator_synthesize_enabled() || !have_provider)
@@ -238,7 +171,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
                                        cites, &n_sources);
    if (!request || n_sources == 0)
    {
-      /* Nothing to synthesize from — skip (don't burn the sidecar on no input). */
+      /* Nothing to synthesize from — skip model execution on empty input. */
       free(request);
       cJSON_Delete(cites);
       return 0;
@@ -269,15 +202,10 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
       aimee_log(LOG_WARN, "kb.curator.synth", "synthesize sidecar failed for '%s' (%s)", topic_name,
                 serr);
       cJSON_Delete(cites);
-      /* Stop this pass when the shared provider is unavailable. Treating this
-       * as an empty queue lets later LLM stages hit the same open circuit. Arm
-       * the process-wide gate here as well: this legacy sidecar path does not
-       * pass through kb_curator_llm_run(), which normally records the outage. */
+      /* The shared LLM owner records cooldown. Stop the pass rather than
+       * treating provider unavailability as an empty queue. */
       if (kb_curator_error_is_provider_unavailable(serr))
-      {
-         kb_curator_provider_backoff_note();
          return -1;
-      }
       return 0;
    }
 

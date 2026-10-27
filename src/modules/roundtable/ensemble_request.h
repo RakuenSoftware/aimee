@@ -8,4 +8,10 @@ int ensemble_synthesis_request(const aimee_request_t *task, const char *instruct
 int ensemble_continuation_request(const aimee_request_t *task, const char *persona,
                                   const char *context, int max_tokens, double temperature,
                                   aimee_request_t *out);
+/* Append a separately labelled canonical model observation; source stays borrowed. */
+int ensemble_request_add_response(aimee_request_t *request, const char *label,
+                                  const aimee_response_t *response);
+/* Replace owned carryover only after the complete typed continuation is built. */
+int ensemble_response_context(const aimee_request_t *task, const char *label,
+                              const aimee_response_t *response, aimee_request_t *out);
 #endif

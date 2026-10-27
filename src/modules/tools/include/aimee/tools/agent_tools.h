@@ -118,7 +118,6 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
  * registry. The cache is built lazily on the first call from
  * the canonical registry owner and is safe to call concurrently — first caller
  * wins; subsequent callers reuse the same pointer. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
 
 /* Write up to `max` built-in tool names into `out`, returning how many.
  * The names are borrowed from the process-lifetime schema cache. */

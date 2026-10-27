@@ -32,10 +32,10 @@ class NativeHostContracts(unittest.TestCase):
    bundle=Path(directory)/'bundle';exporter.export_runtime_bundle(bundle)
    go_grant=(bundle/'grants/server/delegates.grant').read_text()
    line=next(x for x in go_grant.splitlines() if x.startswith('serve='))
-   self.assertNotIn('6679',line.split('=')[1].split(','));self.assertIn('6680',line.split('=')[1].split(','))
+   self.assertNotIn('6679',line.split('=')[1].split(','));self.assertNotIn('6680',line.split('=')[1].split(','))
    grant=(bundle/'grants/server/delegates-host.grant').read_text()
    self.assertIn('principal_ref=76\n',grant);self.assertIn('request=6679\nserve=\n',grant)
-   self.assertIn('6680',(bundle/'grants/server/wfe.grant').read_text())
+   self.assertNotIn('6680',(bundle/'grants/server/wfe.grant').read_text())
    services=json.loads((bundle/'host-services.json').read_text())['services']
    self.assertEqual(services,[{'owner':'delegates','stage':23,'event_kind':6679,'hosted_by':'server-core','principal_class':0,'principal_ref':0,'placements':['server']}])
 

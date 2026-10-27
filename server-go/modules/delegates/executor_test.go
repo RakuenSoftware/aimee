@@ -51,14 +51,13 @@ func (e *fixedExecutor) Execute(_ context.Context, request delegatecontract.Invo
 	e.request = request
 	result := e.result
 	if result.Status == "done" {
-		result.Output = canonical.TextResponse(result.Response)
 		result.History = []canonical.Message{{Role: "assistant", Blocks: []canonical.Block{result.Output.Blocks[0].Block}}}
 	}
 	return result
 }
 
 func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
-	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "done", Response: "complete"}}
+	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "done", Output: canonical.TextResponse("complete")}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "implement", Persona: "engineer", Input: canonical.TaskRequest("fixture", "do it")})
 	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
 	if status != bus.ModuleStatusOK {
@@ -68,7 +67,7 @@ func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
 		t.Fatalf("role = %q", executor.request.Role)
 	}
 	var result delegatecontract.InvocationResult
-	if json.Unmarshal(reply, &result) != nil || result.Status != "done" || result.Response != "complete" {
+	if json.Unmarshal(reply, &result) != nil || result.Status != "done" || result.Output == nil || result.Output.DisplayText() != "complete" {
 		t.Fatalf("result = %s", reply)
 	}
 }
@@ -577,7 +576,7 @@ func TestRegistryExecutorFirstBootFindsNormalModelRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := executor.Execute(t.Context(), nativeInvocation())
-	if result.Status != "done" || calls != 1 || result.Response != "actual owner answer" {
+	if text, textErr := result.Output.SemanticText(); result.Status != "done" || calls != 1 || textErr != nil || text != "actual owner answer" {
 		t.Fatal("normal first-boot registration unavailable", result, calls)
 	}
 	request := nativeInvocation()

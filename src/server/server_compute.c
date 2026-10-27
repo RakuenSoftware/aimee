@@ -581,18 +581,12 @@ static void delegate_add_measured_cost_json(cJSON *resp, const char *deleg_id)
 }
 
 /* General transport completion keeps media; explicit handoff artifacts require text. */
-static int delegate_project_completed_result(agent_result_t *result, int handoff_json)
+static int delegate_completed_result_valid(const agent_result_t *result, int handoff_json)
 {
-   if (handoff_json)
-      return agent_result_project_complete_text(result);
-   if (!result || !result->success ||
-       aimee_ir_response_complete_valid(&result->canonical_response) != 0)
+   if (!result || !result->success)
       return -1;
-   char *display = aimee_ir_response_text_alloc(&result->canonical_response);
-   if (!display)
-      return -1;
-   agent_result_replace_display_text(result, display);
-   return 0;
+   return handoff_json ? aimee_ir_response_complete_text_valid(&result->canonical_response)
+                       : aimee_ir_response_complete_valid(&result->canonical_response);
 }
 
 static cJSON *delegate_build_result_response(
@@ -1737,22 +1731,29 @@ static void delegate_worker_run(void *arg)
       server_delegate_heartbeat_end();
    }
 
-   if (rc == 0 && delegate_project_completed_result(&result, handoff_json) != 0)
+   if (rc == 0 && delegate_completed_result_valid(&result, handoff_json) != 0)
    {
       rc = -1;
       snprintf(result.error, sizeof result.error, "%s",
                "delegate has no complete canonical outcome for the requested output contract");
    }
 
+   char *result_text = rc == 0 ? aimee_ir_response_text_alloc(&result.canonical_response) : NULL;
+   if (rc == 0 && !result_text)
+   {
+      rc = -1;
+      snprintf(result.error, sizeof result.error, "cannot read canonical delegate outcome");
+   }
+
    /* Post-run named-file drift check: verify named existing paths appear in response. */
-   if (named_path_count > 0 && rc == 0 && result.response && result.response[0])
+   if (named_path_count > 0 && rc == 0 && result_text && result_text[0])
    {
       const char *path_ptrs[DELEGATE_DRIFT_MAX_PATHS];
       for (int i = 0; i < named_path_count; i++)
          path_ptrs[i] = named_paths[i];
       char drift_err[512];
       int drift_rc =
-          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result.response,
+          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result_text,
                                           delegate_worktree_path[0] ? delegate_worktree_path : NULL,
                                           delegate_allows_writes, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
@@ -1786,7 +1787,7 @@ static void delegate_worker_run(void *arg)
    if (handoff_json && rc == 0)
    {
       handoff_checked = 1;
-      (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
+      (void)delegate_handoff_validate_text(result_text, NULL, 1, &handoff_validation);
       if (!handoff_validation.valid)
       {
          char *repair_prompt = delegate_handoff_repair_prompt("", handoff_validation.error);
@@ -1807,13 +1808,15 @@ static void delegate_worker_run(void *arg)
             aimee_request_free(&repair_request);
             free(repair_prompt);
             if (repair_rc == 0 && repaired.success &&
-                agent_result_project_complete_text(&repaired) == 0)
+                delegate_completed_result_valid(&repaired, 1) == 0)
             {
                agent_result_move_response(&result, &repaired);
                result.usage_unobserved = repaired.usage_unobserved;
                result.turns += repaired.turns;
                result.tool_calls += repaired.tool_calls;
-               (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
+               free(result_text);
+               result_text = aimee_ir_response_text_alloc(&result.canonical_response);
+               (void)delegate_handoff_validate_text(result_text, NULL, 1, &handoff_validation);
                handoff_validation.repair_attempted = 1;
             }
             agent_result_clear_response(&repaired);
@@ -1875,46 +1878,22 @@ static void delegate_worker_run(void *arg)
                    "delegate %s: applied %d change(s) from %s to parent worktree %s", deleg_id,
                    delegate_applied_changes, delegate_worktree_path, delegate_parent_root);
    }
-   char stale_paths[8][DB1_SESSION_PATH_LEN];
-   int n_stale = 0;
-   if (sid && sid[0])
-      n_stale = db1_session_stale_reads(sid, deleg_id, stale_paths, 8);
-   if (rc == 0 && result.response && liveness_is_degenerate_response(result.response))
+   if (rc == 0 && result_text && result_text[0] && liveness_is_degenerate_response(result_text))
    {
       rc = -1;
       result.success = 0;
       snprintf(result.error, sizeof(result.error),
                "delegate %s returned raw tool-call markup or another degenerate response", role);
       agent_result_clear_response(&result);
-      result.response = NULL;
    }
-   if (n_stale > 0 && result.response)
-   {
-      char note[2048];
-      int off = snprintf(note, sizeof(note),
-                         "\n\n[NOTE: subagent modified files the parent previously read — re-read"
-                         " before editing:");
-      for (int i = 0; i < n_stale && off < (int)sizeof(note) - 64; i++)
-         off += snprintf(note + off, sizeof(note) - off, "%s %s", i ? "," : "", stale_paths[i]);
-      snprintf(note + off, sizeof(note) - off, "]");
-
-      size_t rl = strlen(result.response);
-      size_t nl = strlen(note);
-      char *augmented = malloc(rl + nl + 1);
-      if (augmented)
-      {
-         memcpy(augmented, result.response, rl);
-         memcpy(augmented + rl, note, nl + 1);
-         agent_result_replace_display_text(&result, augmented);
-      }
-   }
-
    if (sid && sid[0])
    {
       double child_cost = db1_token_audit_cost_for_delegation(deleg_id);
       if (child_cost > 0.0)
          (void)db1_cost_fold_record(sid, deleg_id, child_cost, "subagent");
    }
+
+   free(result_text);
 
    cJSON *resp = delegate_build_result_response(deleg_id, rc, &result, &acfg, role, target_agent,
                                                 delegate_applied_changes, handoff_checked,
@@ -2429,9 +2408,17 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       delegate_ensemble_result_free(&result);
       return server_send_error(conn, "ensemble returned no complete canonical outcome", NULL);
    }
+   char *display = aimee_ir_response_text_alloc(result.canonical_response);
+   if (!display)
+   {
+      cJSON_Delete(canonical);
+      delegate_ensemble_result_free(&result);
+      return server_send_error(conn, "could not render ensemble outcome", NULL);
+   }
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "ir", canonical);
-   cJSON_AddStringToObject(resp, "response", result.response);
+   cJSON_AddStringToObject(resp, "response", display);
+   free(display);
    cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);

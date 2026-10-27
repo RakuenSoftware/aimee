@@ -39,7 +39,6 @@
 #include "platform_process.h"
 #include "platform_random.h"
 #include "shutdown_forensics.h"
-#include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
 #include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
@@ -373,12 +372,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * so caching beats TTL-only staleness. No-op unless enabled + an HTTP kb. */
    kb_cache_configure(-1);
    kb_client_ws_start();
-
-   /* Register the bundled context engine and set the active engine from config
-    * (empty = default compactor). */
-   context_engine_register_compactor();
-   if (config_context_engine()[0])
-      context_engine_set_active(config_context_engine());
 
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */

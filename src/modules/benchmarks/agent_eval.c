@@ -277,6 +277,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
    agent_eval_manifest_t manifest;
    int have_manifest = agent_eval_manifest_build(suite, all_tasks, task_count, result->agent_name,
                                                  seed, &manifest) == 0;
+   char *text = aimee_ir_response_text_alloc(&result->canonical_response);
    db1_eval_result_row_t row = {
        .suite = suite,
        .task_name = task->name,
@@ -290,7 +291,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
        .prompt_tokens = result->prompt_tokens,
        .completion_tokens = result->completion_tokens,
        .latency_ms = result->latency_ms,
-       .response = result->response,
+       .response = text,
        .error = result->error[0] ? result->error : NULL,
        .dataset_hash = have_manifest ? manifest.dataset_hash : "",
        .target_hash = have_manifest ? manifest.target_hash : "",
@@ -299,6 +300,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
        .seed = (int)seed,
    };
    (void)db1_eval_result_insert(&row);
+   free(text);
 }
 
 /* The Go owner retrieves and serializes the artifact; the host owns the file. */

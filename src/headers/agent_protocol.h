@@ -44,7 +44,4 @@ int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic,
 int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
                               aimee_response_t *out);
 
-/* Legacy output-only compatibility values are released here while their
- * remaining native emitters are retired. Execution never constructs them. */
-
 #endif /* DEC_AGENT_PROTOCOL_H */

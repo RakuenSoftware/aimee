@@ -206,7 +206,6 @@ type Invocation struct {
 type InvocationResult struct {
 	Version     int                    `json:"version"`
 	Status      string                 `json:"status"`
-	Response    string                 `json:"response,omitempty"`
 	Output      *canonical.Response    `json:"ir,omitempty"`
 	History     []canonical.Message    `json:"history,omitempty"`
 	Agent       string                 `json:"agent,omitempty"`

@@ -1999,8 +1999,7 @@ $(TESTPREFIX)/unit-test-turn-integrity: $(OBJDIR)/tests/test_turn_integrity.o \
 	                               $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/cli_launch.o \
-                            $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/cli_launch.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJDIR)/posix/cli_main.o
@@ -4237,14 +4236,6 @@ $(TESTPREFIX)/unit-test-delegate-permissions: $(OBJDIR)/tests/test_delegate_perm
                              $(OBJDIR)/log.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-# Core panel-provider boundary (#1845). Part of the roundtable-profiles CI gate's
-# "required core without roundtable" set; rule restored after the module
-# restructuring dropped it.
-$(TESTPREFIX)/unit-test-panel-provider: $(OBJDIR)/tests/test_panel_provider.o \
-                                       $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
-                                       $(OBJDIR)/modules/delegates/panel_provider.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # Trigger end-to-end: the REAL scan_proposals (textually included, real git
 # subprocesses + real DB1) files a work item from a committed pending proposal
 # and the real autonomy scheduler drives it to terminal (stub executors only).
@@ -6220,20 +6211,6 @@ $(TESTPREFIX)/unit-test-managed-server-identity: \
                      $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
                      $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
-                     $(OBJDIR)/server/context_engine.o \
-                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
-                     $(OBJDIR)/server/agent_request_shaping.o \
-                     $(OBJDIR)/modules/delegates/delegate_driver.o \
-                     $(OBJDIR)/modules/delegates/delegate_openai.o \
-                     $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                     $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                     $(OBJDIR)/server/agent_tools.o \
-                     $(OBJDIR)/modules/delegates/delegate_role.o \
-                     $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-client: $(OBJDIR)/tests/test_mcp_client.o \

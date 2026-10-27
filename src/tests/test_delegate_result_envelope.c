@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* Exercise the actual private envelope builder, without exporting a test API
  * or starting a delegate. Unused compute handlers are discarded at link time. */
 #include "../server/server_compute.c"
@@ -52,7 +53,6 @@ static cJSON *envelope(agent_result_t *result, int rc, const char *apply_error)
    free(before);
    free(after);
    cJSON_Delete(expected);
-   assert(!strcmp(result->response, "poisoned display alias"));
    char *wire = cJSON_PrintUnformatted(out);
    assert(wire && !strstr(wire, "poisoned display alias"));
    free(wire);
@@ -271,16 +271,16 @@ static void test_terminal_consumers(void)
 static void worker_projection(const aimee_response_t *ir, int success, int handoff, int admitted,
                               const char *display)
 {
-   agent_result_t result = {.success = success, .response = strdup("POISONED display")};
-   assert(result.response);
+   agent_result_t result = {.success = success};
    result.canonical_response = *ir;
    cJSON *snapshot = aimee_ir_response_json(ir);
    assert(snapshot);
    char *before = cJSON_PrintUnformatted(snapshot);
    cJSON_Delete(snapshot);
-   int rc = delegate_project_completed_result(&result, handoff);
+   int rc = delegate_completed_result_valid(&result, handoff);
    assert((rc == 0) == admitted);
-   assert(!strcmp(result.response, admitted ? display : "POISONED display"));
+   if (admitted)
+      assert_ir_text(&result.canonical_response, display);
    assert(result.success == success);
    snapshot = aimee_ir_response_json(&result.canonical_response);
    char *after = cJSON_PrintUnformatted(snapshot);
@@ -288,7 +288,6 @@ static void worker_projection(const aimee_response_t *ir, int success, int hando
    cJSON_Delete(snapshot);
    free(before);
    free(after);
-   free(result.response);
 }
 static void test_worker_projection(void)
 {
@@ -498,7 +497,7 @@ int main(void)
        {.type = AIMEE_BLK_DOCUMENT,
         .media_type = "application/pdf",
         .media_ref = "https://example.invalid/doc"}};
-   agent_result_t result = {.success = 1, .response = "poisoned display alias"};
+   agent_result_t result = {.success = 1};
    blocks[2].raw = cJSON_Parse("{\"opaque_vendor_extension\":{\"x\":3}}");
    assert(blocks[2].raw);
    result.canonical_response = (aimee_response_t){.role = "assistant",

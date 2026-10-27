@@ -99,12 +99,6 @@ extern "C"
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);
 
-   int provider_cli_split_command(const char *cli_cmd, char **argv, int max_args, char *errbuf,
-                                  size_t errbuf_len);
-   void provider_cli_free_tokens(char **tokens, int count);
-   int provider_cli_command_has_shell_operators(const char *cli_cmd);
-   int provider_cli_check_available(const char *cli_cmd, const char *cli_kind);
-
    extern const provider_cli_adapter_t codex_provider_cli_adapter;
    extern const provider_cli_adapter_t claude_provider_cli_adapter;
    extern const provider_cli_adapter_t mistral_provider_cli_adapter;

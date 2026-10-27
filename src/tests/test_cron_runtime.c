@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_cron_runtime.c: cron job runtime behavior with stubbed LLM/delivery. */
 #include <assert.h>
 #include <pthread.h>
@@ -190,8 +191,8 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
    (void)max_tokens;
    memset(out, 0, sizeof(*out));
    snprintf(g_agent_prompt, sizeof(g_agent_prompt), "%s", user_prompt ? user_prompt : "");
-   assert(aimee_ir_response_from_text(&out->canonical_response,
-                                      g_agent_response ? g_agent_response : "", "fixture") == 0);
+   assert(fixture_ir_response_from_text(&out->canonical_response,
+                                        g_agent_response ? g_agent_response : "", "fixture") == 0);
    out->canonical_response.raw = cJSON_Parse("{\"opaque\":\"retain-until-output-boundary\"}");
    assert(out->canonical_response.raw);
    if (g_large_sidecar)
@@ -217,7 +218,6 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
                                  AIMEE_CTX_SENS_CONFIDENTIAL, 1, "source-domain", "source-scope",
                                  42);
    }
-   out->response = strdup(g_agent_response ? g_agent_response : "");
    out->success = !g_agent_rc;
    if (g_agent_rc)
       snprintf(out->error, sizeof out->error, "fixture provider failure");
@@ -375,11 +375,11 @@ static void test_context_from_injects_prior_output(void)
    cJSON *resp = NULL;
    assert(cron_run_config_job(&job, &resp) == 0);
    cJSON_Delete(resp);
-   assert(!strcmp(g_agent_prompt,job.prompt));
-   assert(g_request.messages[0].n_blocks==2);
-   assert(strstr(g_request.messages[0].blocks[1].text,"pve unreachable"));
-   assert(g_request.messages[0].blocks[1].context.authority==AIMEE_CTX_AUTH_EVIDENCE);
-   assert(g_request.messages[0].blocks[1].context.origin==AIMEE_CTX_ORIGIN_MEMORY);
+   assert(!strcmp(g_agent_prompt, job.prompt));
+   assert(g_request.messages[0].n_blocks == 2);
+   assert(strstr(g_request.messages[0].blocks[1].text, "pve unreachable"));
+   assert(g_request.messages[0].blocks[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   assert(g_request.messages[0].blocks[1].context.origin == AIMEE_CTX_ORIGIN_MEMORY);
 }
 
 static void test_when_context_contains_skips_absent_substring(void)

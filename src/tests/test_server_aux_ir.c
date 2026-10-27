@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* Actual aux.test handler against an observing canonical aux dispatcher. */
 #include "server.h"
 #include "aux_router.h"
@@ -24,7 +25,7 @@ int aux_call(const char *task, const aimee_request_t *input, aimee_response_t *o
    assert(!strcmp(task, "route-label"));
    ++calls;
    assert(!aimee_ir_request_clone(input, &dispatched));
-   return aimee_ir_response_from_text(out, "canonical aux outcome", "fixture");
+   return fixture_ir_response_from_text(out, "canonical aux outcome", "fixture");
 }
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {

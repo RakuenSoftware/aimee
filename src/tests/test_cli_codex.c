@@ -35,7 +35,7 @@ static void test_execute_rejects_missing_inputs(void)
               &(provider_cli_cfg_t){
                   .agent = NULL, .cwd = NULL, .system_prompt = NULL, .user_prompt = "prompt"},
               &out) == -1);
-   assert(!out.success && !out.canonical_response.n_content && !out.response);
+   assert(!out.success && !out.canonical_response.n_content);
    assert(codex_provider_cli_adapter.execute(NULL, &out) == -1);
    provider_cli_cfg_t cfg = {.agent = &agent, .user_prompt = "prompt"};
    assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
@@ -640,7 +640,7 @@ static void test_canonical_history_adoption(void)
          agent_result_t out = {0};
          rc = owned_execute(&cfg, &out);
          if (!refuse)
-            assert(out.success && !out.response && !out.canonical_response.n_content);
+            assert(out.success && !out.canonical_response.n_content);
          else if (refuse == 3)
             assert(strstr(out.error, "native SDK configuration could not be verified"));
          else
@@ -908,7 +908,7 @@ static void test_dynamic_host_execution(void)
       if (invalid_frame)
          assert(strstr(out.error, "invalid-json-rpc-frame"));
       if (success)
-         assert(out.success && !out.response && !out.canonical_response.n_content);
+         assert(out.success && !out.canonical_response.n_content);
       agent_result_clear_response(&out);
 
       assert(success ? rc == 0 : rc != 0);
@@ -1136,7 +1136,7 @@ static void test_execute_refuses_missing_configuration(void)
               &(provider_cli_cfg_t){
                   .agent = NULL, .cwd = NULL, .system_prompt = "system", .user_prompt = "user"},
               &out) == -1);
-   assert(!out.success && !out.canonical_response.n_content && !out.response);
+   assert(!out.success && !out.canonical_response.n_content);
    assert(codex_provider_cli_adapter.execute(
               &(provider_cli_cfg_t){
                   .agent = NULL, .cwd = NULL, .system_prompt = "system", .user_prompt = "user"},

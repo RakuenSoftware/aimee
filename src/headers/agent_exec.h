@@ -25,7 +25,7 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
 
 /* Complete canonical conversation for the server-owned tool loop. No user
  * message is reconstructed from a text projection. The final response remains
- * typed and owned by the caller; ordinary result text is compatibility only. */
+ * typed and owned by the caller; display text is projected only at consumers. */
 int agent_request_with_tools_supported(const aimee_request_t *request);
 int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
                                      const char *role, const aimee_request_t *request,
@@ -33,8 +33,6 @@ int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t
 int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected,
                                  const aimee_request_t *request, aimee_response_t *response,
                                  agent_result_t *out);
-
-int agent_execute(const agent_t *agent, const aimee_request_t *request, agent_result_t *out);
 
 int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
               agent_result_t *out);
@@ -87,8 +85,8 @@ void agent_run_require_initial_tool_call(int on);
 
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
- * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,
- * no exec role. The model can only return text (out->response). 0 on success. */
+ * non-CLI) and runs the plain canonical completion path — no tools, no worktree,
+ * no exec role. Returns the complete canonical text response. 0 on success. */
 int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
                    agent_result_t *out);
 int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request,
@@ -158,7 +156,7 @@ static inline int agent_rc_is_local_refusal(int rc)
  * This is an EXTERNAL model-turn boundary — do NOT call it from a helper that
  * already runs inside another agent_dispatch_one for the same agent, or the inner
  * call re-acquires the same max_parallel slot (self-throttle). Such composite
- * helpers use the primitive agent_execute() directly. */
+ * helpers dispatch canonical tool-free requests directly. */
 int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
                        const aimee_request_t *request, int use_tools, agent_result_t *out);
 
@@ -297,7 +295,6 @@ int policy_prepare_exploration(const struct cJSON *offer, const char *session,
 
 /* Metrics, introspection, manifests, contract */
 void agent_write_metrics(void);
-void agent_introspect_env(void);
 void agent_write_manifest(const char *run_id, const agent_result_t *result, const char *role);
 char *agent_load_project_contract(const char *project_root);
 
@@ -333,21 +330,8 @@ typedef enum
    PROVIDER_ERR_UNKNOWN
 } provider_err_class_t;
 
-typedef struct
-{
-   int available;         /* 1=ok, 0=unreachable, -1=unknown */
-   int64_t last_check_ms; /* monotonic timestamp of last check */
-   int last_http_status;  /* last HTTP status code, or -1 for network error */
-   char error[256];       /* last error message */
-} provider_health_t;
-
 provider_err_class_t provider_classify_error(int http_status);
 const char *provider_error_message(provider_err_class_t cls);
-/* Key is the stored provider registration, or the agent name for legacy rows.
- * get returns a thread-local snapshot, valid until the next get on this thread. */
-void provider_health_update(const char *registration, int http_status);
-const provider_health_t *provider_health_get(const char *registration);
-
 /* HTTP */
 
 /* Upper bound on the TCP-connect phase, independent of the overall request

@@ -219,7 +219,6 @@ if(WIN32)
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/windows/cmd_infra.c
-        ${AIMEE_SRC_DIR}/windows/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/windows/cmd_hooks.c
     )
     if(WITH_UI)
@@ -274,7 +273,6 @@ elseif(APPLE)
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
-        ${AIMEE_SRC_DIR}/posix/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
@@ -329,7 +327,6 @@ else()
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
-        ${AIMEE_SRC_DIR}/posix/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
@@ -719,7 +716,6 @@ set(AGENT_SRCS
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/session_compact.c
-    ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c

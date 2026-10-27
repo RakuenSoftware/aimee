@@ -4493,7 +4493,7 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
       assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
                                               &result) != 0);
       assert(!strcmp(result.error, "request_budget_unavailable"));
-      assert(!response.n_content && !result.response);
+      assert(!response.n_content && !result.canonical_response.n_content);
       aimee_response_free(&response);
       for (int control = 0; control < 3; control++)
       {
@@ -4504,7 +4504,7 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
          assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
                                                  &result) != 0);
          assert(!strcmp(result.error, "request_budget_unavailable"));
-         assert(!response.n_content && !result.response);
+         assert(!response.n_content && !result.canonical_response.n_content);
          cJSON_Delete(request.prompt_cache_options);
          request.prompt_cache_key = request.prompt_cache_retention = NULL;
          request.prompt_cache_options = NULL;

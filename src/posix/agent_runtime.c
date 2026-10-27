@@ -107,18 +107,9 @@ static int delegate_append_tool_result(cJSON *messages, const char *id, const ch
    return 0;
 }
 
-static void finish_final_tool_violation(agent_result_t *out, const agent_t *agent,
-                                        const char *attempted_tool, const char *partial_text,
-                                        const char *last_tool_name, const char *last_tool_result,
-                                        int total_tool_calls)
+static void finish_final_tool_violation(agent_result_t *out, const char *attempted_tool)
 {
-   char diag[1800];
-   liveness_format_final_tool_call_diagnostic(agent ? agent->name : NULL, attempted_tool,
-                                              partial_text, last_tool_name, last_tool_result,
-                                              total_tool_calls, diag, sizeof(diag));
-
    agent_result_clear_response(out);
-   out->response = safe_strdup(diag);
    out->success = 0;
    out->abstained = 1;
    snprintf(out->abstain_reason, sizeof(out->abstain_reason),
@@ -1516,10 +1507,6 @@ native_provider_http:
          break;
       }
 
-      /* Update provider health cache */
-      provider_health_update(agent->registration[0] ? agent->registration : agent->name,
-                             http_status);
-
       /* --- Context overflow: truncate old messages and retry --- */
       if (http_status == 400 && response_body &&
           strstr(response_body, "exceeds the available context"))
@@ -1787,8 +1774,6 @@ native_provider_http:
                }
                snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
                         aimee_stop_reason_name(response.stop_reason));
-               out->response = response_text;
-               response_text = NULL;
                out->rescue_recoveries++;
                out->success = 1;
                if (canonical_out)
@@ -1806,8 +1791,7 @@ native_provider_http:
                delegate_response_release(&response, response_text, tool_arguments, call_count);
                continue;
             }
-            finish_final_tool_violation(out, agent, attempted_tool, response_text, last_tool_name,
-                                        last_tool_result, total_calls);
+            finish_final_tool_violation(out, attempted_tool);
             delegate_response_release(&response, response_text, tool_arguments, call_count);
             break;
          }
@@ -1849,8 +1833,7 @@ native_provider_http:
             delegate_response_release(&response, response_text, tool_arguments, call_count);
             continue;
          }
-         finish_final_tool_violation(out, agent, attempted_tool, response_text, last_tool_name,
-                                     last_tool_result, total_calls);
+         finish_final_tool_violation(out, attempted_tool);
          delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
       }
@@ -1907,11 +1890,8 @@ native_provider_http:
                }
                /* Empty or punctuation-only response — replace with explicit failure diagnostic.
                 */
-               char diag[512];
-               liveness_format_empty_diagnostic(agent->name, diag, sizeof(diag));
                free(response_text);
                response_text = NULL;
-               out->response = safe_strdup(diag);
                out->success = 0;
                snprintf(out->error, sizeof(out->error),
                         "delegate returned empty or degenerate response");
@@ -1927,8 +1907,6 @@ native_provider_http:
                }
                snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
                         aimee_stop_reason_name(response.stop_reason));
-               out->response = response_text;
-               response_text = NULL; /* transfer the text projection to the result API */
                out->success = 1;
             }
          }
@@ -2374,7 +2352,7 @@ native_provider_http:
 
 ir_capture_failed:
    /* If we exhausted turns without a final response, set a clear error */
-   if (!out->success && !out->response && turn >= max_t)
+   if (!out->success && !out->error[0] && turn >= max_t)
    {
       snprintf(out->error, sizeof(out->error), "max turns exhausted (%d/%d) without final response",
                turn, max_t);
@@ -2382,7 +2360,7 @@ ir_capture_failed:
 
    /* If the agent used tools but never produced final text, preserve enough
     * context for the parent/delegate status to be actionable. */
-   if (!out->success && !out->response && total_calls > 0)
+   if (!out->success && total_calls > 0)
    {
       if (!out->error[0])
       {
@@ -2394,18 +2372,6 @@ ir_capture_failed:
                      "delegate stopped without a final response after tool use");
       }
 
-      char partial[1024];
-      snprintf(partial, sizeof(partial),
-               "Delegate stopped before returning a final response.\n"
-               "Reason: %s\n"
-               "Turns: %d/%d\n"
-               "Tool calls: %d\n"
-               "Last tool: %s\n"
-               "Last tool result excerpt: %.500s",
-               out->error, turn, max_t, total_calls,
-               last_tool_name[0] ? last_tool_name : "(unknown)",
-               last_tool_result[0] ? last_tool_result : "(empty)");
-      out->response = safe_strdup(partial);
       out->success = 0;
       out->abstained = 1;
       snprintf(out->abstain_reason, sizeof(out->abstain_reason),
@@ -2422,10 +2388,10 @@ ir_capture_failed:
    out->successful_tool_calls = successful_tool_calls;
 
    /* Confidence estimation and abstention */
-   if (out->response)
-      out->confidence = agent_estimate_confidence(out->response);
-   else
-      out->confidence = 0;
+   char *confidence_text =
+       out->success && canonical_out ? aimee_ir_response_text_alloc(canonical_out) : NULL;
+   out->confidence = confidence_text ? agent_estimate_confidence(confidence_text) : 0;
+   free(confidence_text);
 
    if (out->confidence >= 0 && out->confidence < 50 && out->tool_calls > 0)
    {

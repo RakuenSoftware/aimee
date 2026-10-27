@@ -29,7 +29,7 @@ struct server_native_cli
    pthread_mutex_t lock;
    pthread_cond_t joined;
    atomic_int revoked;
-   unsigned refs, count, busy, depth;
+   unsigned refs, count, busy;
    char token[65], session[128], actor[160], cwd[4096], parent[96];
    char **environment;
    struct cli_call calls[CLI_CALLS];
@@ -77,7 +77,6 @@ server_native_cli_t *server_native_cli_open(const char *endpoint, const char *se
    snprintf(grant->actor, sizeof grant->actor, "%s", actor);
    snprintf(grant->cwd, sizeof grant->cwd, "%s", cwd);
    snprintf(grant->parent, sizeof grant->parent, "%s", parent_attempt);
-   grant->depth = depth;
    /* Prepared assignments only; inherited environment is overlaid after fork,
     * never read/copied while other host request threads can change it. */
    grant->environment = calloc(7, sizeof(char *));
@@ -136,10 +135,6 @@ int server_native_cli_cancelled(const server_native_cli_t *grant)
 const atomic_int *server_native_cli_cancel_flag(const server_native_cli_t *grant)
 {
    return &grant->revoked;
-}
-unsigned server_native_cli_depth(const server_native_cli_t *grant)
-{
-   return grant->depth;
 }
 void server_native_cli_close(server_native_cli_t *grant)
 {

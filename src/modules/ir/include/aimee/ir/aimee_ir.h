@@ -499,12 +499,6 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
                                        aimee_context_authority_t from,
                                        aimee_context_authority_t to);
 
-/* Build a canonical assistant response carrying a single TEXT block for a
- * genuinely text-only source. Native model/harness adapters retain their typed
- * blocks instead; terminal screens cannot supply structured model history. `model` may be
- * NULL/empty. stop_reason is END_TURN. Fills caller-provided `out` (stack-ok); free with
- * aimee_response_free. Returns 0 on success, -1 on allocation failure (out is left freed/zeroed).
- */
 /* Genuinely text-only request origin; structured callers retain their existing
  * IR instead. out is owned/zeroed, replaced atomically, and freed normally. */
 int aimee_ir_request_from_message(aimee_request_t *out, const char *system,
@@ -512,7 +506,6 @@ int aimee_ir_request_from_message(aimee_request_t *out, const char *system,
                                   double temperature);
 int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
                                int max_tokens, double temperature);
-int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
 
 /* ---- accessors used by the core stages / KB ----
  * Concatenate model-visible text of the LAST user-role message into `buf`
@@ -540,16 +533,10 @@ int aimee_ir_response_admit(aimee_response_t *response);
  * inexact/unrepresentable values return -1 before any integer conversion. */
 int aimee_ir_read_usage(const struct cJSON *usage, const char *name, long *out);
 
-/* ---- response-side accessors (delegate/core stages read these) ----
- *
- * The request side has had aimee_ir_last_user_text since slice 0; the response
- * side had nothing, which is why every consumer still reaches for
- * parsed_response_t. These are the shape-agnostic reads that replace its
- * `content` / `is_tool_call` / `calls[]` fields.
- *
- * All three iterate blocks and are deliberately type-strict: THINKING is NEVER
- * treated as answer text, and only TEXT blocks are concatenated. That structural
- * separation is what removes the need to regex reasoning out of the text at all. */
+/* ---- response-side accessors ----
+ * Read canonical typed blocks without changing their ownership. Answer text
+ * includes TEXT only; THINKING remains separate, and tool accessors select
+ * TOOL_USE blocks by their canonical type. */
 
 /* Concatenate the response's TEXT blocks into `buf` (truncating to n). THINKING
  * blocks are skipped: reasoning is not the answer. Returns chars written

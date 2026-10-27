@@ -1363,15 +1363,12 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
                   "native provider completed without an authored final answer");
       valid = 0;
    }
-   char *text = valid ? aimee_ir_response_text_alloc(&original) : NULL;
-   if (!text || native_terminal_transfer(execution))
+   if (!valid || native_terminal_transfer(execution))
    {
-      free(text);
       aimee_response_free(&original);
       return -1;
    }
    agent_result_clear_response(out);
-   out->response = text;
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             original.raw_stop_reason ? original.raw_stop_reason
                                      : aimee_stop_reason_name(original.stop_reason));
@@ -1412,7 +1409,6 @@ static void native_execution_diagnostic(native_execution_t *execution, agent_res
       return;
    }
    out->canonical_response = original;
-   out->response = aimee_ir_response_text_alloc(&original);
 }
 static int native_claude_init(const cJSON *frame, void *context)
 {

@@ -34,7 +34,7 @@ relocation boundary and has not been represented as migrated by this stage.
 ## Public contracts
 
 The broader provider-neutral response contract remains `aimee_response_t`. Its shape, allocation, free,
-and accessor symbols, including `aimee_ir_response_from_text`, are owned by `ir` at
+and accessor symbols are owned by `ir` at
 `src/modules/ir/include/aimee/ir/aimee_ir.h`. Response-composition consumes that canonical shape but does
 not own it. Finalization code outside the deduplication stage remains a tracked relocation boundary; it
 must move behind explicit stages before the old server glue can be deleted.
@@ -89,8 +89,8 @@ without leaking hidden reasoning, credentials, or private context.
 
 For a normal request, routing selects execution, memory supplies grounded context, skills shape behavior,
 the provider produces canonical deltas/blocks, and response-composition emits one coherent final answer
-or tool continuation. `aimee_ir_response_from_text` also normalizes flat CLI/TUI results so downstream
-consumers receive the same `aimee_response_t` contract.
+or tool continuation. Native provider adapters admit the owned `aimee_response_t` consumed by
+response composition.
 
 ## Tests and failure behavior
 

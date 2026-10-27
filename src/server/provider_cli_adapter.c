@@ -22,14 +22,6 @@ __attribute__((weak)) int provider_cli_adapter_host_execute(const provider_cli_c
    return 1;
 }
 
-#define PROVIDER_CLI_MAX_ARGS 48
-
-void provider_cli_free_tokens(char **tokens, int count)
-{
-   for (int i = 0; i < count; i++)
-      free(tokens[i]);
-}
-
 static int provider_cli_resolve_native_env_key(const char *name, char *dst, size_t dst_len)
 {
    if (!name || !name[0] || !dst || dst_len == 0)
@@ -99,94 +91,6 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
    }
 
    return 0;
-}
-
-int provider_cli_split_command(const char *cli_cmd, char **argv, int max_args, char *errbuf,
-                               size_t errbuf_len)
-{
-   int count = shlex_split(cli_cmd, argv, max_args);
-   if (count <= 0)
-   {
-      snprintf(errbuf, errbuf_len, "empty provider CLI command");
-      return -1;
-   }
-   if (count >= max_args)
-   {
-      provider_cli_free_tokens(argv, count);
-      snprintf(errbuf, errbuf_len, "provider CLI command has too many arguments");
-      return -1;
-   }
-   for (int i = 0; i < count; i++)
-   {
-      if (util_token_is_shell_operator(argv[i]))
-      {
-         provider_cli_free_tokens(argv, count);
-         snprintf(errbuf, errbuf_len,
-                  "provider CLI command may not contain shell operators; configure an argv-style "
-                  "command instead");
-         return -1;
-      }
-   }
-   argv[count] = NULL;
-   return count;
-}
-
-int provider_cli_command_has_shell_operators(const char *cli_cmd)
-{
-   char *argv[PROVIDER_CLI_MAX_ARGS + 1] = {0};
-   char err[128];
-   int count = provider_cli_split_command(cli_cmd, argv, PROVIDER_CLI_MAX_ARGS, err, sizeof(err));
-   if (count < 0)
-      return 1;
-   provider_cli_free_tokens(argv, count);
-   return 0;
-}
-
-static int provider_cli_executable_on_path(const char *exe)
-{
-   if (!exe || !exe[0])
-      return 0;
-   if (strchr(exe, '/'))
-      return access(exe, X_OK) == 0;
-
-   const char *path = getenv("PATH");
-   if (!path || !path[0])
-      path = "/usr/local/bin:/usr/bin:/bin";
-   char *copy = safe_strdup(path);
-   if (!copy)
-      return 0;
-
-   int available = 0;
-   char *saveptr = NULL;
-   for (char *dir = strtok_r(copy, ":", &saveptr); dir; dir = strtok_r(NULL, ":", &saveptr))
-   {
-      char candidate[MAX_PATH_LEN];
-      snprintf(candidate, sizeof(candidate), "%s/%s", dir[0] ? dir : ".", exe);
-      if (access(candidate, X_OK) == 0)
-      {
-         available = 1;
-         break;
-      }
-   }
-   free(copy);
-   return available;
-}
-
-int provider_cli_check_available(const char *cli_cmd, const char *cli_kind)
-{
-   const char *cmd = (cli_cmd && cli_cmd[0]) ? cli_cmd : cli_kind;
-   if (!cmd || !cmd[0])
-      return 0;
-
-   char *argv[PROVIDER_CLI_MAX_ARGS + 1] = {0};
-   char err[128];
-   int count = provider_cli_split_command(cmd, argv, PROVIDER_CLI_MAX_ARGS, err, sizeof(err));
-   if (count < 0)
-      return 0;
-
-   int available = provider_cli_executable_on_path(argv[0]);
-   provider_cli_free_tokens(argv, count);
-   return available;
 }
 
 /* Retain configured ACP names/capabilities without an outgoing executor.

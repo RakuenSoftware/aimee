@@ -43,7 +43,6 @@ static void produce(agent_result_t *out)
    out->success = 1;
    if (mode == 4)
    {
-      out->response = strdup("CANONICAL_OK");
       return;
    }
    const char *text = mode == 5 ? "NO_MATCH" : "CANONICAL_OK";
@@ -71,15 +70,6 @@ static void produce(agent_result_t *out)
    aimee_response_t owned = {0};
    assert(!aimee_ir_response_clone(&view, &owned));
    assert(!agent_result_adopt_response(out, &owned));
-   agent_result_replace_display_text(
-       out, strdup(mode == 6 ? "DISPLAY_POISON" : "CANONICAL_OK {\"completion\":100}"));
-}
-int agent_execute(const agent_t *a, const aimee_request_t *request, agent_result_t *out)
-{
-   (void)a;
-   (void)request;
-   produce(out);
-   return 0;
 }
 int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
               agent_result_t *out)
@@ -166,11 +156,9 @@ static void test_liveness_uses_canonical_observation(void)
    reset(6);
    agent_result_t out = {0};
    produce(&out);
-   agent_result_replace_display_text(
-       &out, strdup("<tool_call><name>bash</name><arguments>{}</arguments></tool_call>"));
    agent_reject_degenerate_plain_response(&out, "fixture");
    assert(out.success);
-   assert(!strcmp(out.response, "CANONICAL_OK"));
+   assert(!strcmp(out.canonical_response.content[1].text, "CANONICAL_OK"));
    assert(out.canonical_response.n_content == 2);
    agent_result_clear_response(&out);
    reset(6);
@@ -178,7 +166,6 @@ static void test_liveness_uses_canonical_observation(void)
    free(out.canonical_response.content[1].text);
    out.canonical_response.content[1].text =
        strdup("<tool_call><name>bash</name><arguments>{}</arguments></tool_call>");
-   agent_result_replace_display_text(&out, strdup("ordinary display annotation"));
    agent_reject_degenerate_plain_response(&out, "fixture");
    assert(!out.success && out.canonical_response.n_content == 2);
    assert(strstr(out.canonical_response.content[1].text, "<tool_call>"));

@@ -1,3 +1,4 @@
+#include "support/ir_text_request.h"
 /* Exercise the actual result-cache owner with deterministic storage and source
  * receipts. Native IR admission, codec, ownership and liveness are real. */
 #include "agent_result_cache.h"
@@ -70,7 +71,7 @@ int main(void)
 
    agent_result_t original = {0}, reused = {0};
    /* This is test input to the typed cache, not a native adapter fallback. */
-   assert(!agent_result_from_host_text(&original, "A useful complete summary."));
+   assert(!fixture_agent_result_from_text(&original, "A useful complete summary."));
    original.success = 1;
    original.canonical_response.model = strdup("reported-model");
    original.canonical_response.usage_in = 40;
@@ -81,7 +82,7 @@ int main(void)
    assert(writes == 1 && stored);
    assert(agent_result_cache_read("summarize", key, &reused));
    assert(reused.success && reused.cache_hit && !reused.prompt_tokens && !reused.completion_tokens);
-   assert(!strcmp(reused.response, original.response));
+   assert_ir_text(&reused.canonical_response, "A useful complete summary.");
    assert(reused.canonical_response.content != original.canonical_response.content);
    assert(reused.canonical_response.usage_cache_read == 21);
    assert(cJSON_Compare(reused.canonical_response.raw, original.canonical_response.raw, 1));
@@ -97,7 +98,7 @@ int main(void)
    checks = 0;
    invalidate_at = 2;
    assert(!agent_result_cache_read("summarize", key, &reused));
-   assert(!reused.canonical_response.content && !reused.response);
+   assert(!reused.canonical_response.content);
    invalidate_at = 0;
    free(stored);
    stored = strdup("legacy flat response");
@@ -121,7 +122,7 @@ int main(void)
       stored = cJSON_PrintUnformatted(snapshot);
       cJSON_Delete(snapshot);
       assert(stored && !agent_result_cache_read("summarize", key, &reused));
-      assert(!reused.success && !reused.response && !reused.canonical_response.content);
+      assert(!reused.success && !reused.canonical_response.content);
    }
    original.canonical_response.stop_reason = AIMEE_STOP_END_TURN;
    original.canonical_response.content[0].type = AIMEE_BLK_THINKING;

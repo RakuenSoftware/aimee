@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_cmd_delegate.c: unit tests for CLI delegation chain depth guard */
 #include "support/delegate_role_seam_stub.h"
 #include <assert.h>
@@ -259,7 +260,7 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
    return NULL;
 }
 
-void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
+void model_capability_format_flags(unsigned flags, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
@@ -666,16 +667,14 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
 static void review_model_result(agent_result_t *result, const char *text)
 {
    result->success = 1;
-   assert(!aimee_ir_response_from_text(&result->canonical_response, text, NULL));
-   result->response = strdup("POISONED FLAT REVIEW MUST NOT CONTROL EVIDENCE");
-   assert(result->response);
+   assert(!fixture_ir_response_from_text(&result->canonical_response, text, NULL));
    g_review_expected_text = text;
 }
 static void require_review_projection(const aimee_response_t *source, int success, unsigned policy,
                                       int expected_rc, int calls)
 {
-   agent_result_t result = {.success = success, .response = strdup("POISONED display")};
-   assert(result.response && !aimee_ir_response_clone(source, &result.canonical_response));
+   agent_result_t result = {.success = success};
+   assert(!aimee_ir_response_clone(source, &result.canonical_response));
    aimee_response_t before = result.canonical_response;
    aimee_block_t blocks_before[3];
    assert(before.n_content <= 3);
@@ -686,8 +685,6 @@ static void require_review_projection(const aimee_response_t *source, int succes
    int before_calls = g_review_calls, rc = 0;
    delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &result, 0);
    assert(rc == expected_rc && g_review_calls == before_calls + calls);
-   if (!rc)
-      assert(!strstr(result.response, "POISONED"));
    assert(!memcmp(&before, &result.canonical_response, sizeof before));
    assert(!memcmp(blocks_before, before.content, before.n_content * sizeof *blocks_before));
    for (int i = 0; i < before.n_content; i++)
@@ -730,7 +727,7 @@ static void test_review_role_policy_precedes_text_projection(void)
    ir.stop_reason = AIMEE_STOP_CONTENT_FILTER;
    ir.raw_stop_reason = "refusal";
    require_review_projection(&ir, 1, 0, -1, 0);
-   agent_result_t missing = {.success = 1, .response = strdup("POISONED display")};
+   agent_result_t missing = {.success = 1};
    int before = g_review_calls, rc = 0;
    delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &missing, 0);
    assert(rc == -1 && g_review_calls == before);
@@ -751,7 +748,6 @@ static void test_review_role_policy_precedes_text_projection(void)
 static void test_review_evidence_requires_canonical_output(void)
 {
    agent_result_t result = {.success = 1};
-   result.response = strdup("No uncommitted diff exists.");
    int before = g_review_calls, rc = 0;
    delegate_apply_review_evidence_guard("review", "/unused", &rc, &result, 0);
    assert(rc == -1 && !strcmp(result.error, "delegate has no complete canonical outcome"));

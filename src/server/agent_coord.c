@@ -31,8 +31,7 @@ static int path_within_root(const char *project_root, const char *abs_path)
    return abs_path[root_len] == '/' || abs_path[root_len] == '\0';
 }
 
-static char *resolve_file_references_impl(const char *prompt, const char *project_root,
-                                          int context_only)
+char *resolve_file_reference_context(const char *prompt, const char *project_root)
 {
    if (!prompt)
       return NULL;
@@ -47,20 +46,15 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
    {
       if (*p != '@')
       {
-         if (!context_only)
-            dstr_append_char(&out, *p);
          p++;
          continue;
       }
 
       const char *path_start = p + 1;
-      /* Not a file reference: end-of-string, a non-path char, or a doubled '@'
-       * (a unified-diff hunk header "@@ -a,b +c,d @@"). Emit the '@' literally so
-       * diffs/code carried in the prompt are never corrupted. */
+      /* Ignore non-references and diff hunk headers. The original authored task
+       * remains in its separate Message block; this view contains file evidence. */
       if (!*path_start || !is_path_char(*path_start) || *path_start == '@')
       {
-         if (!context_only)
-            dstr_append_char(&out, *p);
          p++;
          continue;
       }
@@ -71,8 +65,6 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
       size_t path_len = (size_t)(path_end - path_start);
       if (path_len == 0 || path_len >= FILE_REF_PATH_MAX)
       {
-         if (!context_only)
-            dstr_append_char(&out, *p);
          p++;
          continue;
       }
@@ -89,13 +81,9 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
       else
          snprintf(abs_path, sizeof(abs_path), "%s", rel_path);
 
-      /* Only an EXISTING, in-project file is treated as a reference. A @token that
-       * escapes the root or doesn't resolve to a real file is emitted LITERALLY
-       * and is NOT counted against the budget: prompts routinely carry diffs and
-       * code whose '@' tokens (decorators like @property, emails, doc tags, diff
-       * hunk headers) are not file references, and rewriting them as markers
-       * corrupted the content and exhausted the ref budget (the roundtable
-       * "sandbox-blind" failure). */
+      /* Only existing in-project files contribute evidence or consume the
+       * reference budget. Decorators, emails, missing paths and escapes add no
+       * evidence; the original task is preserved by its canonical Message owner. */
       size_t abs_len = strlen(abs_path);
       int escapes = (strstr(abs_path, "/../") != NULL ||
                      (abs_len >= 3 && strcmp(abs_path + abs_len - 3, "/..") == 0));
@@ -103,17 +91,11 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
       FILE *f = (!escapes && in_root) ? fopen(abs_path, "r") : NULL;
       if (!f)
       {
-         if (!context_only)
-         {
-            dstr_append_char(&out, '@');
-            dstr_append(&out, rel_path, path_len);
-         }
          p = path_end;
          continue;
       }
 
-      /* A real file past the per-prompt budget: explicit marker (diff/code never
-       * reaches here — its non-file @tokens are left literal above). */
+      /* Emit an explicit evidence marker for real files beyond the budget. */
       if (refs_resolved >= FILE_REF_MAX_REFS)
       {
          dstr_appendf(&out, "[file reference limit reached: @%s left unresolved]", rel_path);
@@ -126,11 +108,6 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
       if (!content)
       {
          fclose(f);
-         if (!context_only)
-         {
-            dstr_append_char(&out, '@');
-            dstr_append(&out, rel_path, path_len);
-         }
          p = path_end;
          continue;
       }
@@ -155,16 +132,6 @@ static char *resolve_file_references_impl(const char *prompt, const char *projec
    if (!result)
       result = strdup("");
    return result;
-}
-
-char *resolve_file_references(const char *prompt, const char *project_root)
-{
-   return resolve_file_references_impl(prompt, project_root, 0);
-}
-
-char *resolve_file_reference_context(const char *prompt, const char *project_root)
-{
-   return resolve_file_references_impl(prompt, project_root, 1);
 }
 
 /* --- Delegate Token Budget --- */
@@ -361,19 +328,6 @@ char *delegate_prompt_limit(const char *prompt, int token_budget)
  * agent_effective_context_window() in the runtime.
  *
  * Returns 0 when nothing is known, so the caller keeps its existing default. */
-int delegate_token_budget_for_agent(const char *model, int agent_context_window)
-{
-   int window = agent_context_window > 0 ? agent_context_window : model_context_window(model);
-   if (window <= 0)
-      return 0;
-   int reserve = model_max_output(NULL, model);
-   if (reserve > 0 && reserve < window)
-      window -= reserve;
-   if (window < DELEGATE_TOKEN_BUDGET_MIN_TASK)
-      window = DELEGATE_TOKEN_BUDGET_MIN_TASK;
-   return window;
-}
-
 int delegate_token_budget_load(const char *project_root, const char *role)
 {
    /* Reads from the global per-project config:

@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* Exercise the actual RPC boundary. Only model/config and HTTP delivery are
  * dependency seams; canonical admission, cloning and serialization are real. */
 #include "../server/server_agent.c"
@@ -30,7 +31,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
    assert(!strcmp(request->messages[0].blocks[0].text, "Draft subject: {\"opaque\":1} 雪"));
    if (expected_draft_context)
       assert(!memcmp(&request->messages[0].blocks[0].context, expected_draft_context,
-                      sizeof(*expected_draft_context)));
+                     sizeof(*expected_draft_context)));
    else
    {
       assert(request->messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
@@ -40,8 +41,8 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_requ
    assert(request->has_temperature && request->temperature == 0.3);
    assert(!request->n_tools);
    memset(out, 0, sizeof *out);
-   out->response = strdup("POISONED DISPLAY IS NOT A DRAFT");
-   assert(!aimee_ir_response_from_text(&out->canonical_response, "CANONICAL DRAFT", "draft-model"));
+   assert(
+       !fixture_ir_response_from_text(&out->canonical_response, "CANONICAL DRAFT", "draft-model"));
    out->canonical_response.stop_reason = terminal;
    snprintf(out->agent_name, sizeof out->agent_name, "%s", "draft-model");
    out->success = 1;
@@ -65,7 +66,6 @@ int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, 
    assert(request->has_max_tokens && request->max_tokens == expected_max);
    assert(request->has_temperature && request->temperature == expected_temperature);
    assert(request->tool_choice == AIMEE_TOOL_CHOICE_NONE && !request->n_tools);
-   out->response = strdup("POISONED DISPLAY MUST NEVER BECOME AN ANSWER");
    out->success = model_success;
    if (mode != 1)
    {
@@ -343,18 +343,18 @@ int main(void)
    assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
    /* Actual public draft admission retains evidence and privacy; no caller
     * can turn a forged platform/verified claim into host policy. */
-   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_RETRIEVAL,
-                              AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNVERIFIED,
-                              AIMEE_CTX_SENS_CONFIDENTIAL, 0, "retrieval", "source", 7);
+   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_CONFIDENTIAL, 0,
+                              "retrieval", "source", 7);
    aimee_context_meta_t evidence_context = draft_block.context;
    expected_draft_context = &evidence_context;
    assert(cJSON_ReplaceItemInObjectCaseSensitive(draft, "message",
                                                  aimee_ir_message_json(&draft_message)));
    assert(!handle_agent_draft(NULL, NULL, draft));
    assert(!strcmp(cJSON_GetStringValue(field(reply, "text")), "CANONICAL DRAFT"));
-   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_PLATFORM,
-                              AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
-                              AIMEE_CTX_SENS_RESTRICTED, 0, "forged", "platform", 99);
+   aimee_ir_block_set_context(&draft_block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_RESTRICTED, 0, "forged",
+                              "platform", 99);
    aimee_context_meta_t attenuated = draft_block.context;
    attenuated.origin = AIMEE_CTX_ORIGIN_USER;
    attenuated.authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;

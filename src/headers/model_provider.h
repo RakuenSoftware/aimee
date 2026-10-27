@@ -78,12 +78,8 @@ extern "C"
                            failover_reason_t *out);
    };
 
-
    /* Look up by name. NULL if not found. Triggers lazy built-in init. */
    model_provider_t *model_provider_get(const char *name);
-
-   /* List all registered providers. Returns count; fills up to max. */
-   int model_provider_list(model_provider_t **out, int max);
 
 #ifdef __cplusplus
 }

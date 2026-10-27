@@ -329,21 +329,6 @@ int cli_index_scan_remote(int argc, char **argv);
  * when the remote index does not already contain this project/root pair. */
 int cli_index_ensure_remote(const char *root);
 
-/* Launch metadata parsed from server output */
-typedef struct
-{
-   char provider[64];
-   char model[128];
-   char session_id[64];
-   int builtin;
-   int autonomous;
-   char worktree_cwd[4096];
-   size_t context_len; /* bytes of session context before __LAUNCH__ marker */
-} launch_meta_t;
-
-/* Parse __LAUNCH__ metadata from server output.
- * Returns 1 if launch metadata was found and parsed, 0 otherwise. */
-int parse_launch_meta(const char *output, launch_meta_t *meta);
 /* Bind one session id and worktree, then exec the client in place. */
 int client_launch_exec(int argc, char **argv);
 

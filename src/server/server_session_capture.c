@@ -167,12 +167,6 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
    pthread_mutex_unlock(&owner->lock);
    return refused ? -1 : 0;
 }
-int server_session_capture_observe_terminal(server_session_capture_t *owner,
-                                            server_session_terminal_action_fn action,
-                                            void *resource)
-{
-   return server_session_capture_observe_verification(owner, NULL, action, resource);
-}
 int server_session_capture_observe_verification(server_session_capture_t *owner,
                                                 server_session_verification_prepare_fn prepare,
                                                 server_session_terminal_action_fn action,

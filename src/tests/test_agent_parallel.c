@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 #include "cJSON.h"
 /* test_agent_parallel.c: the real agent_run_parallel deadline-preemption path —
  * a slow worker must be cancelled and joined at the deadline, not detached.
@@ -123,7 +124,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
       sleep_ms(100);
       atomic_fetch_sub(&g_wave_active, 1);
    }
-   out->response = strdup("ok");
+   assert(!fixture_ir_response_from_text(&out->canonical_response, "ok", NULL));
    out->success = 1;
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", name ? name : "");
    return 0;
@@ -150,7 +151,7 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
       atomic_store(&g_saw_required_tool_call, 1);
    if (run_cmd_get_cwd() && strcmp(run_cmd_get_cwd(), "/tmp/review-worktree") == 0)
       atomic_store(&g_saw_expected_cwd, 1);
-   out->response = strdup("ok+tools");
+   assert(!fixture_ir_response_from_text(&out->canonical_response, "ok+tools", NULL));
    out->success = 1;
    out->tool_calls = 1;
    out->successful_tool_calls = 1;
@@ -172,7 +173,7 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    (void)max_tokens;
    (void)enforce_writes;
    memset(out, 0, sizeof(*out));
-   out->response = strdup("ok+tools");
+   assert(!fixture_ir_response_from_text(&out->canonical_response, "ok+tools", NULL));
    out->success = 1;
    return 0;
 }
@@ -191,7 +192,7 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
    (void)max_tokens;
    (void)temperature;
    memset(out, 0, sizeof(*out));
-   out->response = strdup("ok");
+   assert(!fixture_ir_response_from_text(&out->canonical_response, "ok", NULL));
    out->success = 1;
    return 0;
 }
@@ -240,10 +241,10 @@ static void test_deadline_cancels_and_joins_slow_worker(void)
     * the slow worker's full 3000ms simulated call. */
    assert(elapsed < 2000);
    assert(succ == 2);
-   assert(out[0].success == 1 && out[0].response);
-   assert(out[2].success == 1 && out[2].response);
+   assert(out[0].success == 1 && out[0].canonical_response.content);
+   assert(out[2].success == 1 && out[2].canonical_response.content);
    assert(out[1].success == 0); /* slow worker cancelled -> failed slot */
-   assert(out[1].response == NULL);
+   assert(out[1].canonical_response.content == NULL);
    assert(strcmp(out[1].error, "cancelled") == 0);
    agent_result_clear_response(&out[0]);
    agent_result_clear_response(&out[2]);
@@ -384,7 +385,7 @@ static void test_use_tools_routes_to_tools_runner(void)
    agent_result_t out1 = {0};
    memset(&out1, 0, sizeof(out1));
    assert(fixture_run_parallel(&cfg, &named, 1, &out1, 0) == 1);
-   assert(strcmp(out1.response, "ok+tools") == 0);
+   assert_ir_text(&out1.canonical_response, "ok+tools");
    assert(atomic_load(&g_saw_required_tool_call) == 1);
    assert(g_require_initial_tool_call == 0); /* policy cannot bleed into the next task */
    agent_result_clear_response(&out1);
@@ -397,7 +398,7 @@ static void test_use_tools_routes_to_tools_runner(void)
    agent_result_t out2 = {0};
    memset(&out2, 0, sizeof(out2));
    assert(fixture_run_parallel(&cfg, &byrole, 1, &out2, 0) == 1);
-   assert(strcmp(out2.response, "ok+tools") == 0);
+   assert_ir_text(&out2.canonical_response, "ok+tools");
    agent_result_clear_response(&out2);
 
    /* the default is unchanged: no use_tools -> the plain completion */
@@ -408,7 +409,7 @@ static void test_use_tools_routes_to_tools_runner(void)
    agent_result_t out3 = {0};
    memset(&out3, 0, sizeof(out3));
    assert(fixture_run_parallel(&cfg, &plain, 1, &out3, 0) == 1);
-   assert(strcmp(out3.response, "ok") == 0);
+   assert_ir_text(&out3.canonical_response, "ok");
    agent_result_clear_response(&out3);
 
    /* and through the threaded fan-out, not just the fast path */
@@ -426,7 +427,7 @@ static void test_use_tools_routes_to_tools_runner(void)
    assert(fixture_run_parallel(&cfg, many, 2, outn, 0) == 2);
    for (int i = 0; i < 2; i++)
    {
-      assert(strcmp(outn[i].response, "ok+tools") == 0);
+      assert_ir_text(&outn[i].canonical_response, "ok+tools");
       agent_result_clear_response(&outn[i]);
    }
    printf("  test_use_tools_routes_to_tools_runner: ok\n");

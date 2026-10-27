@@ -120,23 +120,6 @@ if(NOT WIN32)
   set_tests_properties(test_git_oauth_gh PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
-add_executable(test_context_engine test_context_engine.c)
-target_include_directories(test_context_engine PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_context_engine)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_context_engine PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_context_engine PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-endif()
-add_test(NAME test_context_engine COMMAND test_context_engine)
-set_tests_properties(test_context_engine PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
 
 # Event-bus wire codec (feature tree slice 1). Self-contained: bus_wire.c has no

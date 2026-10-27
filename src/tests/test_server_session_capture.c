@@ -524,9 +524,12 @@ static void test_terminal_observers_preserve_primary_resource(void)
           .owner = owner, .expected_success = mode == 0, .expected_rows = mode < 2 ? 1 : 0};
       terminal_resource_t observer = primary;
       assert(!server_session_capture_after_terminal(owner, terminal_resource, &primary));
-      assert(!server_session_capture_observe_terminal(owner, terminal_resource, &observer));
-      assert(server_session_capture_observe_terminal(owner, terminal_resource, &primary) < 0);
-      assert(server_session_capture_observe_terminal(owner, terminal_resource, &observer) < 0);
+      assert(
+          !server_session_capture_observe_verification(owner, NULL, terminal_resource, &observer));
+      assert(server_session_capture_observe_verification(owner, NULL, terminal_resource, &primary) <
+             0);
+      assert(server_session_capture_observe_verification(owner, NULL, terminal_resource,
+                                                         &observer) < 0);
       if (mode < 3)
       {
          reject_append = mode == 2;
@@ -545,7 +548,8 @@ static void test_terminal_observers_preserve_primary_resource(void)
    assert(refused);
    terminal_resource_t observer = {.owner = refused, .expected_success = 0, .expected_rows = 1};
    assert(!server_session_capture_after_terminal(refused, terminal_resource_refuses, refused));
-   assert(!server_session_capture_observe_terminal(refused, terminal_resource, &observer));
+   assert(
+       !server_session_capture_observe_verification(refused, NULL, terminal_resource, &observer));
    aimee_session_event_t completed = {.kind = AIMEE_SESSION_EXECUTION,
                                       .execution_status = "completed"};
    assert(!server_session_capture_sink(&completed, refused));
@@ -562,7 +566,8 @@ static void test_terminal_observers_preserve_primary_resource(void)
    {
       observers[i] =
           (terminal_resource_t){.owner = owner, .expected_success = 0, .expected_rows = 0};
-      int rc = server_session_capture_observe_terminal(owner, terminal_resource, &observers[i]);
+      int rc = server_session_capture_observe_verification(owner, NULL, terminal_resource,
+                                                           &observers[i]);
       if (rc)
          break;
       admitted++;
@@ -705,7 +710,8 @@ static void test_external_operator_cancel(void)
       terminal_resource_t primary = {.owner = owner, .expected_success = 0, .expected_rows = 0};
       terminal_resource_t observer = primary;
       assert(!server_session_capture_after_terminal(owner, terminal_resource, &primary));
-      assert(!server_session_capture_observe_terminal(owner, terminal_resource, &observer));
+      assert(
+          !server_session_capture_observe_verification(owner, NULL, terminal_resource, &observer));
       char sequence[32];
       assert(server_session_capture_cancel_owned("bob", "private-child", "external", sequence,
                                                  external_cancel_commit) == 1);

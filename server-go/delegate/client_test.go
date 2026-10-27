@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -46,7 +45,7 @@ func (c *groupRoutingCaller) Call(_ context.Context, _, stage uint32, _ uint64,
 	}
 	c.invokedModels = append(c.invokedModels, invocation.Model)
 	return json.Marshal(testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done",
-		Agent: invocation.Model, Response: "ok"}))
+		Agent: invocation.Model, Output: canonical.TextResponse("ok")}))
 }
 
 func (c *recordingCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
@@ -65,7 +64,7 @@ func (c *recordingCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
 }
 
 func TestBusWireOmitsCallerLifecycleState(t *testing.T) {
-	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
+	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Output: canonical.TextResponse("ok")})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
 		Delegate: "codex", Input: canonical.TaskRequest("security", "review this"), Workdir: "/repo", Tools: true,
@@ -119,7 +118,7 @@ func TestCostLimitFailsBeforeDispatch(t *testing.T) {
 }
 
 func TestDelegateResultPreservesCallerLocalParticipant(t *testing.T) {
-	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
+	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Output: canonical.TextResponse("ok")})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
 		Input: canonical.TaskRequest("security", "review this"), Participant: "seat-security"})
@@ -328,7 +327,7 @@ func TestFailedCanonicalResponseDiagnosticIsNotDiscarded(t *testing.T) {
 	missingText := ""
 	output.Blocks = append(output.Blocks, canonical.ResponseBlock{Block: canonical.Block{Type: "thinking", Text: &missingText, EncryptedContent: &encrypted}, Raw: json.RawMessage(`{"opaque":true}`)})
 	output.Raw = json.RawMessage(`{"provider_metadata":{"retained":true}}`)
-	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed", Error: "native execution failed", Response: "forged success", Output: output, CostKnown: true, CostUSD: 0.25}}
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed", Error: "native execution failed", Output: output, CostKnown: true, CostUSD: 0.25}}
 	client, _ := NewClient(caller, time.Second)
 	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "draft", Persona: "engineer", Input: canonical.TaskRequest("engineer", "plan")})
 	var execution *DelegateExecutionError
@@ -338,15 +337,9 @@ func TestFailedCanonicalResponseDiagnosticIsNotDiscarded(t *testing.T) {
 	if result.Output != nil {
 		t.Fatal("failed model response was exposed as a successful result")
 	}
-	// Reflection lets this loss regression run against the old error shape too;
-	// old source must fail at the actual discarded diagnostic, not compilation.
-	field := reflect.ValueOf(execution).Elem().FieldByName("Output")
-	if !field.IsValid() || field.IsNil() {
+	diagnostic := execution.Output
+	if diagnostic == nil {
 		t.Fatal("admitted canonical failed response was discarded")
-	}
-	diagnostic, ok := field.Interface().(*canonical.Response)
-	if !ok {
-		t.Fatal("diagnostic is not a typed canonical response")
 	}
 	before, _ := json.Marshal(output)
 	after, _ := json.Marshal(diagnostic)
@@ -366,7 +359,7 @@ func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
 			rawStop := "max_tokens"
 			output.RawStopReason = &rawStop
 			output.Raw = json.RawMessage(`{"stop_reason":"max_tokens"}`)
-			response := InvocationResult{Version: WireVersion, Status: "failed", Error: ErrDelegateOutputLimit.Error(), Response: "max_tokens", Output: output, CostKnown: true, CostUSD: 0.25}
+			response := InvocationResult{Version: WireVersion, Status: "failed", Error: ErrDelegateOutputLimit.Error(), Output: output, CostKnown: true, CostUSD: 0.25}
 			caller := &recordingCaller{}
 			wantLimit, wantOutput := kind == "max" || kind == "max-after-turn-cap", true
 			switch kind {
@@ -435,7 +428,7 @@ func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
 }
 
 func TestDelegateForwardsFullCanonicalInput(t *testing.T) {
-	call := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
+	call := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Output: canonical.TextResponse("ok")})}
 	client, err := NewClient(call, time.Second)
 	if err != nil {
 		t.Fatal(err)

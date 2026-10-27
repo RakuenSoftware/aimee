@@ -1,10 +1,8 @@
 /* test_curator_code_unit.c: unit tests for deep-curator Phase 2 code-unit
  * extraction:
- *   1. kb_curator_queue_code_unit — gate-off returns 0 without DB access
- *   2. kb_curator_queue_code_units_for_project — gate-off returns 0
- *   3. null argument guard
- *   4. kb_curator_extract_code_unit_one — empty queue returns 0
- *   5. ON CONFLICT DO NOTHING deduplication via raw shim SQL */
+ *   1. bulk code-unit enqueue gate and database semantics
+ *   2. kb_curator_extract_code_unit_one empty queue and failure paths
+ *   3. ON CONFLICT deduplication, grounding, scoping and transaction safety */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,8 +109,6 @@ static void test_force_curator_gate_off(void)
 /* Forward declarations (headers live in src/, not src/headers/). The opts struct
  * and kb_curator_extract_code_unit_one come from kb_curator_extract.h (included
  * above). */
-int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
-                               int line);
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
 int kb_store_artifact_count(const char *kind, const char *state);
 
@@ -150,27 +146,11 @@ static int grounding_module_provider(aimee_kb_synthesis_claim_kind_t claim_kind,
 
 /* ── gate-off tests (no DB needed) ─────────────────────────────────────── */
 
-static void test_queue_code_unit_gate_off(void)
-{
-   /* With gate off (default config), function must return 0 immediately. */
-   int rc = kb_curator_queue_code_unit("proj", "src/foo.c", "foo_func", 10);
-   assert(rc == 0);
-   printf("  PASS: test_queue_code_unit_gate_off\n");
-}
-
 static void test_queue_code_units_for_project_gate_off(void)
 {
    int rc = kb_curator_queue_code_units_for_project("proj", "/repo");
    assert(rc == 0);
    printf("  PASS: test_queue_code_units_for_project_gate_off\n");
-}
-
-static void test_queue_null_args(void)
-{
-   assert(kb_curator_queue_code_unit(NULL, "src/foo.c", "foo", 1) == 0);
-   assert(kb_curator_queue_code_unit("proj", NULL, "foo", 1) == 0);
-   assert(kb_curator_queue_code_unit("proj", "src/foo.c", NULL, 1) == 0);
-   printf("  PASS: test_queue_null_args\n");
 }
 
 /* ── DB-backed tests ────────────────────────────────────────────────────── */
@@ -735,9 +715,7 @@ int main(void)
     * reclaim's throttle is a process-wide static that a successful earlier
     * reclaim would arm, silently skipping this one. */
    test_reclaim_stale_running_code_unit();
-   test_queue_code_unit_gate_off();
    test_queue_code_units_for_project_gate_off();
-   test_queue_null_args();
    test_extract_code_unit_one_empty_queue();
    test_provider_outage_requeues_code_unit();
    test_queue_dedup_via_conflict();

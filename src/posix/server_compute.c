@@ -868,8 +868,13 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const aimee_message_t 
    }
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
-   if (!cctx->ir_native_owned && result.response && result.response[0])
-      stream_event(cctx, "text", "content", result.response);
+   if (!cctx->ir_native_owned)
+   {
+      char *display = aimee_ir_response_text_alloc(&result.canonical_response);
+      if (display && display[0])
+         stream_event(cctx, "text", "content", display);
+      free(display);
+   }
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
    agent_result_clear_response(&result);
@@ -1001,8 +1006,10 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
 
    if (session_id[0])
       stream_event(cctx, "session", "id", session_id);
-   if (result.response && result.response[0])
-      stream_event(cctx, "text", "content", result.response);
+   char *display = aimee_ir_response_text_alloc(&result.canonical_response);
+   if (display && display[0])
+      stream_event(cctx, "text", "content", display);
+   free(display);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
    agent_result_clear_response(&result);

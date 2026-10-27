@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_anthropic_http.c: pure tests for file-local Anthropic HTTP ingress
  * helpers. This intentionally includes anthropic_http.c so production helpers
  * can remain private while buffer/parsing behavior stays unit-tested. */
@@ -447,7 +448,7 @@ static void cap_emit(void *ctx, const char *event, const char *data_json)
 static void test_unknown_usage_has_no_anthropic_success_projection(void)
 {
    aimee_response_t response = {0};
-   assert(!aimee_ir_response_from_text(&response, "Canonical answer", "fixture"));
+   assert(!fixture_ir_response_from_text(&response, "Canonical answer", "fixture"));
    response.usage_unobserved = 1;
    emit_capture_t cap = {0};
    assert(messages_emit_response(&response, "unknown", "fixture", cap_emit, &cap) < 0);

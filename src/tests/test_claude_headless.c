@@ -190,7 +190,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
       binary_script(path, (const unsigned char *)cases[i].bytes, cases[i].length, i % 2);
       agent_result_t out = {0};
       assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-      assert(!out.success && !out.response && !events && binds == 1);
+      assert(!out.success && !out.canonical_response.n_content && !events && binds == 1);
       assert(!strcmp(out.error, "invalid Claude JSON frame"));
       assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
    }
@@ -208,7 +208,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    binary_script(path, payload, prefix + extra, 0);
    agent_result_t out = {0};
    assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-   assert(!out.success && !out.response && events == 0 && binds == 1);
+   assert(!out.success && !out.canonical_response.n_content && events == 0 && binds == 1);
    assert(!strcmp(out.error, "invalid Claude JSON frame"));
    /* Exact valid EOF framing remains accepted, with arbitrary read fragmentation. */
    events = binds = 0;
@@ -216,7 +216,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    assert(prefix && payload[prefix - 1] == '\n');
    binary_script(path, payload, prefix - 1, 1);
    assert(!claude_headless_run(cfg, bind_session, &binds, &out) && out.success);
-   assert(events == 0 && binds == 1 && !out.response && !out.canonical_response.n_content);
+   assert(events == 0 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    free(payload);
 }
@@ -246,7 +246,7 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       agent_result_t out = {0};
       assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
       assert(!strcmp(out.error, messages[category]));
-      assert(!events && !out.response && !out.canonical_response.n_content);
+      assert(!events && !out.canonical_response.n_content);
       agent_result_clear_response(&out);
 
       /* A diagnostic from a refused native session cannot label this execution. */
@@ -283,7 +283,7 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       script(path, script_body);
       events = 0;
       assert(!claude_headless_run(cfg, NULL, NULL, &out) && out.success);
-      assert(!out.error[0] && !out.response && !out.canonical_response.n_content && events == 0);
+      assert(!out.error[0] && !out.canonical_response.n_content && events == 0);
       agent_result_clear_response(&out);
    }
 }
@@ -303,7 +303,7 @@ static void legacy_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
    binds = events = 0;
    assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
    assert(!strcmp(out.error, "Claude structured turn failed"));
-   assert(binds == 1 && !events && !out.response && !out.canonical_response.n_content);
+   assert(binds == 1 && !events && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
    assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
@@ -328,7 +328,8 @@ static void legacy_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
       binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
       events = binds = 0;
       assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
-      assert(!strcmp(out.error, errors[i]) && binds == 1 && !events && !out.response);
+      assert(!strcmp(out.error, errors[i]) && binds == 1 && !events &&
+             !out.canonical_response.n_content);
       agent_result_clear_response(&out);
    }
 
@@ -339,7 +340,7 @@ static void legacy_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
    binary_script(path, (const unsigned char *)foreign, strlen(foreign), 0);
    events = binds = 0;
    assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-   assert(binds == 2 && !events && !out.response && !out.canonical_response.n_content);
+   assert(binds == 2 && !events && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
 }
 static void interactive_script(const char *path)
@@ -494,7 +495,7 @@ static void native_readiness(const char *path, const provider_cli_cfg_t *cfg)
          assert(!rc && out.success && init_calls == 1 && !profile_logs);
       else
          assert(rc < 0 && !out.success && !init_calls);
-      assert(!events && !out.response);
+      assert(!events && !out.canonical_response.n_content);
       if (mode == 12)
          assert(profile_logs == 1 &&
                 !strcmp(out.error, "Claude native launch profile was refused (tool count)"));
@@ -588,7 +589,7 @@ static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
    profile_logs = init_calls = events = 0;
    agent_result_t out = {0};
    assert(claude_headless_run(&owned, NULL, NULL, &out) < 0 && !out.success);
-   assert(profile_logs == 1 && !init_calls && !events && !out.response);
+   assert(profile_logs == 1 && !init_calls && !events && !out.canonical_response.n_content);
    assert(strstr(profile_metadata, "aimee_status=unknown") &&
           !strstr(profile_metadata, "PRIVATE_STATUS_DIAGNOSTIC") &&
           !strstr(profile_metadata, "PRIVATE_MCP_ERROR_TEXT"));
@@ -618,13 +619,12 @@ int main(void)
    script(path, success_frames);
    int spawned = spawn_calls;
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) == AGENT_RC_CONTEXT_REFUSED);
-   assert(spawn_calls == spawned && !out.success && !out.response &&
-          !out.canonical_response.n_content);
+   assert(spawn_calls == spawned && !out.success && !out.canonical_response.n_content);
    assert(strstr(out.error, "canonical Claude execution owner unavailable"));
    cfg.claude_host = &host;
    aimee_ir_session_set_sink(capture, NULL);
    assert(!claude_headless_run(&cfg, bind_session, &binds, &out) && out.success);
-   assert(events == 0 && binds == 1 && !out.response && !out.canonical_response.n_content);
+   assert(events == 0 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
    reject_bind = 1;
@@ -654,7 +654,7 @@ int main(void)
    cfg.control_channel = 1;
    interactive_script(path);
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
-   assert(events == 2 && binds == 1 && !out.response && !out.canonical_response.n_content);
+   assert(events == 2 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    server_control_scope_close(scope);
    scope = server_control_scope_open("aimee-one", "test-turn", "alice");
@@ -682,7 +682,7 @@ int main(void)
    script(path,
           "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"unobserved\"}'\n");
    assert(!claude_headless_run(&cfg, NULL, NULL, &out) && out.success);
-   assert(!out.response && !out.canonical_response.n_content);
+   assert(!out.canonical_response.n_content);
    strict_frames(path, &cfg);
    profile_refusals(path, &cfg);
    native_readiness(path, &cfg);

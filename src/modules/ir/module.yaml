@@ -20,7 +20,6 @@
   "public_headers": [
     "src/modules/ir/include/aimee/ir/aimee_ir.h",
     "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
-    "src/modules/ir/include/aimee/ir/panel_result.h",
     "src/modules/ir/include/aimee/ir/module_plan.h",
     "src/modules/ir/include/aimee/ir/session_event.h"
   ],

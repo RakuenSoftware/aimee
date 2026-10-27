@@ -800,7 +800,6 @@ void aimee_ir_block_attenuate_public(aimee_block_t *block, int system)
    }
 }
 
-
 static int system_evidence(const aimee_block_t *block)
 {
    return block->context.authority == AIMEE_CTX_AUTH_EVIDENCE;
@@ -817,7 +816,8 @@ int aimee_ir_request_needs_model_projection(const aimee_request_t *request)
    if (!request)
       return 0;
    for (int i = 0; i < request->n_system; ++i)
-      if (!aimee_ir_block_model_visible(&request->system[i]) || system_evidence(&request->system[i]))
+      if (!aimee_ir_block_model_visible(&request->system[i]) ||
+          system_evidence(&request->system[i]))
          return 1;
    for (int i = 0; i < request->n_messages; ++i)
       for (int j = 0; j < request->messages[i].n_blocks; ++j)
@@ -1516,36 +1516,6 @@ int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const c
    aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = (char *)(user ? user : "")};
    aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
    return aimee_ir_request_from_message(out, system, &message, max_tokens, temperature);
-}
-
-int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof *out);
-   aimee_block_t *blk = calloc(1, sizeof *blk);
-   out->role = strdup("assistant");
-   out->raw_stop_reason = strdup("end_turn");
-   if (!blk || !out->role || !out->raw_stop_reason)
-   {
-      free(blk);
-      aimee_response_free(out);
-      return -1;
-   }
-   blk->type = AIMEE_BLK_TEXT;
-   blk->text = strdup(text ? text : "");
-   if (!blk->text)
-   {
-      free(blk);
-      aimee_response_free(out);
-      return -1;
-   }
-   out->content = blk; /* owned single-element array; freed by aimee_response_free */
-   out->n_content = 1;
-   out->stop_reason = AIMEE_STOP_END_TURN;
-   if (model && model[0])
-      out->model = strdup(model); /* best-effort; NULL is fine */
-   return 0;
 }
 
 size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)

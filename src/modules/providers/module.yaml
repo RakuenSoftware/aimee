@@ -42,7 +42,8 @@
     "server-go/modules/providers/model_services_tls.go",
     "server-go/modules/providers/competence.go",
     "server-go/modules/providers/probe_ir.go",
-    "server-go/modules/providers/testdata/nativefixture/main.go"
+    "server-go/modules/providers/testdata/nativefixture/main.go",
+    "server-go/modules/providers/connection_transport.go"
   ],
   "go_tests": [
     "server-go/modules/providers/codex_catalog_test.go",

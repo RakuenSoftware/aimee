@@ -33,8 +33,6 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 IR_SHARED_TYPE = {
     # Delegate queue admission decodes the shared canonical model task Message.
     ("src/modules/delegates/delegate_launch.c", "aimee/ir/session_event.h"),
-    # Panel model execution accepts a canonical Request without a provider DTO.
-    ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "aimee/ir/aimee_ir.h"),
     # Roadmap model builders/hooks exchange canonical requests and responses;
     # the resulting roadmap/verdict remains its own domain artifact.
     ("src/modules/roadmap/roadmap_decompose.h", "aimee/ir/aimee_ir.h"),
@@ -157,7 +155,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/delegates/delegate_run_phases.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "sandbox/sandbox_learned.h"),
-    ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "roundtable/roundtable_types.h"),
     ("src/modules/git/git_ssh_agent.c", "webuser/webuser_runtime.h"),
     ("src/modules/git/git_verify_ops.c", "guardrails/guardrails.h"),
     ("src/modules/git/mcp_git_pr.c", "guardrails/guardrails.h"),

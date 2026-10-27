@@ -24,14 +24,18 @@ void agent_reject_degenerate_plain_response(agent_result_t *out, const char *age
       snprintf(out->error, sizeof out->error, "cannot project canonical answer display");
       return;
    }
-   agent_result_replace_display_text(out, display);
    for (int i = 0; i < out->canonical_response.n_content; i++)
       if (out->canonical_response.content[i].type == AIMEE_BLK_IMAGE ||
           out->canonical_response.content[i].type == AIMEE_BLK_DOCUMENT)
+      {
+         free(display);
          return; /* Empty text does not make an authored media answer degenerate. */
+      }
    int unexecuted_tool_plan = out->tool_calls == 0 && out->turns == 0 &&
-                              liveness_is_unexecuted_tool_plan_response(out->response);
-   if (!liveness_is_degenerate_response(out->response) && !unexecuted_tool_plan)
+                              liveness_is_unexecuted_tool_plan_response(display);
+   int degenerate = liveness_is_degenerate_response(display);
+   free(display);
+   if (!degenerate && !unexecuted_tool_plan)
       return;
 
    out->success = 0;

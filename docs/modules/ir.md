@@ -2,9 +2,9 @@
 
 ## Purpose and non-goals
 
-IR is required core and defines Aimee's provider-neutral request, response, block, tool-call, delta,
-usage, stop-reason, and panel-result shapes. `aimee_request_t`, `aimee_response_t`, and
-`aimee_panel_result_t` let core stages operate once
+IR is required core and defines Aimee's provider-neutral message model: request, response, block,
+tool-call, delta, usage and stop-reason shapes. `aimee_request_t` and `aimee_response_t`
+let core stages operate once
 instead of repeating logic for every wire protocol. IR does not choose a provider, authorize tools,
 route work, or define a provider's external JSON contract. Provider formats convert
 at the model adapters; internal model processing uses the shared IR. Ordinary
@@ -24,25 +24,16 @@ not claim that every exported helper is a live production API.
 The canonical implementations are `src/modules/ir/aimee_ir.c` and
 `src/modules/ir/aimee_ir_metrics.c`. Their matching public contracts are
 `src/modules/ir/include/aimee/ir/aimee_ir.h`,
-`src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`, and
-`src/modules/ir/include/aimee/ir/panel_result.h`. Consumers use the canonical include namespace
+`src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`. Consumers use the canonical include namespace
 `aimee/ir`; the former flat `src/headers` and `src/server` paths are retired.
 
-The deferred flat `src/headers/aimee_ir_{rescue,serve,stream}.h` contracts include the canonical
-IR headers for compatibility. New code should include `aimee/ir/aimee_ir.h` or
-`aimee/ir/aimee_ir_metrics.h` directly when it uses those contracts rather than relying on that transitive
-re-export.
+`src/headers/aimee_ir_serve.h` declares the server's host-stage application seams. It is not a
+provider parser or a compatibility model representation. Rescue belongs to delegates, streaming wire
+conversion belongs to translation, and canonical Message/Response assembly belongs to IR.
 
-These contracts own the provider-neutral message model, its allocation and accessors, IR-local metrics,
-and bounded panel findings, evidence, answered questions, coverage gaps, and result status. IR does not
-own panel seats, turns, convergence, deadlines, cancellation callbacks, provider selection, activation,
-or result destruction; those are provider behavior rather than messages.
-The optional `roundtable` provider produces this panel result today, while core serializers, evidence
-replay, and workflows consume it without depending on roundtable's private execution headers.
-The legacy-named rescue, serve, and stream files remain outside this ownership set because
-they mix canonical operations with translation or comparison behavior. A later behavior-separation slice
-must split those responsibilities before assigning them to IR or translation. IR does not own provider
-ingress parsing, provider-specific body construction, response composition outside the typed result, or
+IR owns the provider-neutral model fields, allocation, accessors, session codecs and IR-local metrics. Panel findings, evidence, coverage and status are ordinary domain layouts in
+`aimee/core/types/panel_result.h`; roundtable produces them and serializers/workflows consume them.
+IR does not own panel execution, provider selection, native ingress/body construction or
 `shadow_mirror.c` lifecycle behavior.
 
 ### Canonical session contract
@@ -218,14 +209,15 @@ and canonical data never supplies authorization merely because it parsed success
 
 An ingress adapter parses its external request into `aimee_request_t`; memory, routing, policy, and tools
 then inspect or mutate typed fields; translation builds the selected provider request; returned deltas or
-responses are normalized and serialized to the client protocol. Flat CLI/TUI text enters the same journey
-through `aimee_ir_response_from_text` rather than a parallel answer type.
+responses are normalized and serialized to the client protocol. Provider responses enter through their
+native boundary parser and retain canonical admission.
 
 ## Tests and failure behavior
 
-The descriptor owns `src/tests/test_aimee_ir.c`, `src/tests/test_aimee_ir_metrics.c`, and
-`src/tests/test_panel_ir_contract.c` as its direct contracts. The panel contract test pins bounds, enum
-values, zero initialization, fixed-array copying, and artifact-pointer semantics.
+The descriptor owns `src/tests/test_aimee_ir.c`, `src/tests/test_aimee_ir_metrics.c`,
+`src/tests/test_ir_module_plan.c`, `src/tests/test_ir_session_event.c`, and
+`src/tests/test_ir_request_codec.c` as its direct contracts. Provider-neutral panel domain layouts belong
+to `aimee/core/types/panel_result.h`.
 Cross-protocol, ingress, backend, and parity tests exercise adjacent translation and gateway boundaries
 without becoming IR-owned. Allocation or malformed-structure failure must be
 explicit and leave outputs freed/zeroed; unsupported block loss must never be silent.
@@ -245,13 +237,9 @@ compatibility contracts. Future moves at the
 translation or response-composition boundaries must preserve these installed headers, symbols, fixtures,
 and parity baselines.
 
-The `aimee_ir_build_provider_body` compatibility seam keeps its existing signature, ownership semantics,
-and call sites until provider-body conversion moves into the target translation module. That separate
-slice must preserve wire-parity baselines. The legacy rescue, serve, shadow, and stream files remain in
-their current locations here; their callers, headers, and observable behavior are frozen until a
-behavior-separation slice assigns each responsibility to IR or translation. Symbol removal, signature
-changes, or behavior changes in those deferred files require an explicit compatibility record and consumer
-migration.
+Provider-body conversion is owned by translation's shared wire adapters. The former
+`aimee_ir_build_provider_body` seam and flat response-construction convenience APIs are retired.
+Native protocol corpora and actual legacy-data import adapters remain supported boundaries.
 
 ## Extension and removal
 
@@ -261,10 +249,9 @@ the core type. Duplicate legacy representations should be removed after caller i
 tests prove replacement. Removal of the canonical `ir` contract would break every supported execution
 journey and is disallowed.
 
-The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) found both production sources
-in the shipping server build with non-test consumers. It also records three narrower test-support or
-currently test-only API cleanup candidates. Removing or privatizing them requires a separate
-compatibility-focused slice rather than being hidden in an ownership-metadata change.
+The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) is a historical ownership
+record. Current ownership and API reachability are determined by the module descriptor and serving
+callers rather than its former migration checklist.
 
 The generic module-plan executor accepts host-only plans through named command
 discovery. It snapshots roles, tool names and last-user text, then validates every

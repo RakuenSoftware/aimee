@@ -31,8 +31,6 @@ char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wi
                                         aimee_responses_profile_t profile, int *control_losses);
 int aimee_backend_request_control_losses(const aimee_request_t *source, aimee_wire_t wire,
                                          const struct cJSON *rendered);
-int responses_backend_control_losses(const aimee_request_t *request,
-                                     aimee_responses_profile_t profile);
 struct cJSON *responses_backend_build_profile(const aimee_request_t *request,
                                               aimee_responses_profile_t profile);
 
@@ -135,7 +133,7 @@ int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *
 
 /* Build the authenticated Codex transport from IR. Use the profile API for
  * generic Responses controls. This low-level renderer reports no losses itself;
- * execution owners must enforce responses_backend_control_losses before HTTP.
+ * execution owners use aimee_backend_render_wire_profile to enforce/report losses.
  * System -> instructions; messages/tools retain their native item structure. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
 /* Canonical history -> stable Codex thread/inject_items output boundary.

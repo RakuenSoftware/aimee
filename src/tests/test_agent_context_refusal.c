@@ -868,7 +868,7 @@ static int capture_control_projection(const aimee_session_event_t *event, void *
 }
 
 static void check_control_projection(agent_config_t *cfg, aimee_request_t *source,
-                                      int expected_controls)
+                                     int expected_controls)
 {
    control_projection_t observation = {.expected = expected_controls};
    cJSON *before = aimee_ir_request_json(source);
@@ -895,14 +895,15 @@ static void check_control_projection(agent_config_t *cfg, aimee_request_t *sourc
                      : agent_generate(cfg, cfg->agents[0].name, source, &result);
       if (rc || !result.success || provider_calls != 1 || observation.events != 1)
          fprintf(stderr, "control provider=%s tools=%d rc=%d calls=%d events=%d error=%s\n",
-                 cfg->agents[0].provider, tools, rc, provider_calls, observation.events, result.error);
+                 cfg->agents[0].provider, tools, rc, provider_calls, observation.events,
+                 result.error);
       assert(!rc && result.success && provider_calls == 1 && observation.events == 1);
       agent_result_clear_response(&result);
    }
    provider_calls = observation.events = 0;
    observation.reject = 1;
    assert(agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", source,
-                                           &result) < 0);
+                                            &result) < 0);
    assert(!provider_calls && observation.events == 1 && aimee_ir_session_capture_failed());
    agent_result_clear_response(&result);
    observation.reject = 0;
@@ -1175,7 +1176,7 @@ int main(void)
    assert(platform_unsetenv("AIMEE_CONFIG_PATH") == 0);
    assert(platform_setenv("AIMEE_CONTEXT_NO_KB", "1") == 0);
    assert(config_set_memory_recall_enabled(1) == 0);
-   agent_t agent = {0};
+   agent_t agent = {.max_parallel = 1};
    agent_network_t network = {0};
    snprintf(agent.name, sizeof(agent.name), "context-refusal-fixture");
    snprintf(agent.model, sizeof(agent.model), "fixture-model");
@@ -1296,7 +1297,7 @@ int main(void)
    rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && !result.error[0]);
    assert(recalls == 1 && provider_calls == 1);
-   assert(result.response && strstr(result.response, "Fixture completed."));
+   assert_ir_text(&result.canonical_response, "Fixture completed.");
    agent_result_clear_response(&result);
    for (int fallback = 0; fallback <= 1; fallback++)
    {

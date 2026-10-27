@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_roadmap_decompose.c — unit tests for the roadmap decompose module
  * (src/headers/roadmap_decompose.h, src/roadmap_decompose.c).
  *
@@ -134,7 +135,7 @@ static int stub_good(const aimee_request_t *request, aimee_response_t *out, void
 {
    assert(!aimee_ir_request_admit(request) && request->n_messages == 1);
    (void)ud;
-   return aimee_ir_response_from_text(out, GOOD_DECOMP, "test/model");
+   return fixture_ir_response_from_text(out, GOOD_DECOMP, "test/model");
 }
 
 /* Returns invalid JSON on first call, then the good decomp. */
@@ -151,9 +152,9 @@ static int stub_bad_then_good(const aimee_request_t *request, aimee_response_t *
    }
    if (*call == 1)
    {
-      return aimee_ir_response_from_text(out, "{\"bad\":\"missing units\"}", "test/model");
+      return fixture_ir_response_from_text(out, "{\"bad\":\"missing units\"}", "test/model");
    }
-   return aimee_ir_response_from_text(out, GOOD_DECOMP, "test/model");
+   return fixture_ir_response_from_text(out, GOOD_DECOMP, "test/model");
 }
 
 /* Always fails. */

@@ -11,15 +11,8 @@ from pathlib import Path
 
 ROUND_TABLE_TYPES = "roundtable_types.h"
 ENSEMBLE_HEADER = "delegate_ensemble.h"
-# Exact migration debt on testing. The panel provider/roster API currently carries
-# the panel value type from the optional owner, while these composition call sites
-# still invoke the optional implementation directly. Keep this list closed until
-# the provider ABI is linked into shipping binaries; no new consumer may join it.
-TEMPORARY_TYPE_CONSUMERS = {
-    "src/modules/delegates/include/aimee/delegates/panel_provider.h",
-    # panel_roster.h left with panel_roster.c: neither reached a shipped binary
-    # (`./aimee` has no such command path) and nothing live referenced them.
-}
+# Required consumers use the core-owned panel data layout.
+TEMPORARY_TYPE_CONSUMERS: set[str] = set()
 TEMPORARY_ENSEMBLE_CONSUMERS = {
     "src/headers/evidence_replay.h",
     "src/headers/server_compute_internal.h",

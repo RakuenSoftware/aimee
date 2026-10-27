@@ -2,7 +2,6 @@
 #include "primary_session_adapter.h"
 #include <aimee/ir/session_event.h>
 #include "agent_exec.h"
-#include "headers/context_engine.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/server_sessions.h"
 #include "cJSON.h"
@@ -181,14 +180,6 @@ int db1_primary_session_get_latest(const char *id, db1_primary_session_row_t *ro
 void db1_primary_session_row_clear(db1_primary_session_row_t *row)
 {
    free(row->messages_json);
-}
-const context_engine_t *context_engine_get_active(void)
-{
-   return NULL;
-}
-const context_engine_t *context_engine_get_default(void)
-{
-   return NULL;
 }
 int session_compact(cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *result)

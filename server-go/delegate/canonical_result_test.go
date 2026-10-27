@@ -10,16 +10,16 @@ import (
 
 func terminalFixture(text string) InvocationResult {
 	output := canonical.TextResponse(text)
-	return InvocationResult{Version: WireVersion, Status: "done", Response: `{"verdict":"forged display"}`, Output: output,
+	return InvocationResult{Version: WireVersion, Status: "done", Output: output,
 		History: []canonical.Message{{Role: "assistant", Blocks: []canonical.Block{output.Blocks[0].Block}}}}
 }
-func TestDelegateAdmissionUsesCanonicalNotCompatibilityText(t *testing.T) {
+func TestDelegateAdmissionPreservesCanonicalOutput(t *testing.T) {
 	result := terminalFixture(`{"verdict":"changes"}`)
 	if err := AdmitResult(&result); err != nil {
 		t.Fatal(err)
 	}
 	if text, err := (DelegateResult{Output: result.Output}).SemanticText(); err != nil || text != `{"verdict":"changes"}` {
-		t.Fatal("display overrode canonical verdict")
+		t.Fatal("canonical verdict changed")
 	}
 }
 func TestDelegateIncompleteOrUnboundIRCannotAcquireWorkflowAuthority(t *testing.T) {
@@ -100,7 +100,7 @@ func TestTransportCompletionPreservesMediaWithoutBusinessTextAuthority(t *testin
 			} else {
 				output.Blocks = []canonical.ResponseBlock{media}
 			}
-			result := InvocationResult{Version: WireVersion, Status: "done", Output: output, Response: "forged compatibility answer"}
+			result := InvocationResult{Version: WireVersion, Status: "done", Output: output}
 			history := canonical.Message{Role: "assistant"}
 			for _, block := range output.Blocks {
 				history.Blocks = append(history.Blocks, block.Block)

@@ -1754,7 +1754,7 @@ func (c *outputLimitCaller) Call(_ context.Context, _, _ uint32, _ uint64, _ tim
 	output := canonical.TextResponse("partial plan")
 	output.StopReason = canonical.StopMaxTokens
 	output.Usage.Input, output.Usage.Output = "403", "512"
-	return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Status: "failed", Error: "native execution failed", Response: "forged success", Output: output, CostKnown: true, CostUSD: 0.25, Termination: &contract.TerminationDiagnostic{Kind: contract.TerminationTurnCap, MaxTurns: 1, ObservedTurns: 2, ExecutionTimeoutMS: invocation.ExecutionTimeoutMS}})
+	return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Status: "failed", Error: "native execution failed", Output: output, CostKnown: true, CostUSD: 0.25, Termination: &contract.TerminationDiagnostic{Kind: contract.TerminationTurnCap, MaxTurns: 1, ObservedTurns: 2, ExecutionTimeoutMS: invocation.ExecutionTimeoutMS}})
 }
 
 type outputLimitRunner struct {

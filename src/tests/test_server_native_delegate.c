@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 #include "server_native_delegate.h"
 #include "server_native_history.h"
 #include "agent_exec.h"
@@ -137,7 +138,7 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
    assert(!strcmp(role, "review") && tools == seen_tools && cancel_scope);
    assert(config->tool_loop_timeout_ms_cap > 0 && config->tool_loop_timeout_ms_cap <= 60000);
    strcpy(result->canonical_session_id, "actual-child");
-   assert(!aimee_ir_response_from_text(response, "actual result", NULL));
+   assert(!fixture_ir_response_from_text(response, "actual result", NULL));
    response->usage_in = 7;
    response->usage_out = 2;
    response->stop_reason = terminal == 1 || terminal == 3 ? AIMEE_STOP_END_TURN
@@ -162,7 +163,6 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
       response->refusal->category = strdup("unknown-provider-code");
    }
    result->success = terminal == 1 || terminal == 3;
-   result->response = strdup("POISONED DISPLAY MUST NOT BECOME HISTORY");
    return terminal == 1 || terminal == 3 ? 0 : -1;
 }
 int server_native_history_load(const char *session, const char *principal, const char *turn,

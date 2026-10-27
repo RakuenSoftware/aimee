@@ -111,14 +111,6 @@ cJSON *aimee_codex_history_items(const aimee_request_t *history)
    return items;
 }
 
-int responses_backend_control_losses(const aimee_request_t *ir, aimee_responses_profile_t profile)
-{
-   cJSON *body = responses_backend_build_profile(ir, profile);
-   int losses = body ? aimee_backend_request_control_losses(ir, AIMEE_WIRE_RESPONSES, body) : -1;
-   cJSON_Delete(body);
-   return losses;
-}
-
 cJSON *responses_backend_build(const aimee_request_t *ir)
 {
    return responses_backend_build_profile(ir, AIMEE_RESPONSES_CODEX);

@@ -212,7 +212,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    if (relaxed)
    {
       char sc[128];
-      model_capability_flags_string(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
+      model_capability_format_flags(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
       aimee_log(LOG_WARN, "delegate.route",
                 "no model satisfies inferred modality caps (%s) for role '%s'; routing on hard "
                 "caps only",
@@ -234,7 +234,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    if (kept == 0)
    {
       char caps[128];
-      model_capability_flags_string(required_caps, caps, sizeof(caps));
+      model_capability_format_flags(required_caps, caps, sizeof(caps));
       if (caps[0] == '\0')
          snprintf(caps, sizeof(caps), "-");
       if (errbuf && errbuf_sz > 0)

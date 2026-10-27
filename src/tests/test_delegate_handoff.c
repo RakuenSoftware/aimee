@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_delegate_handoff.c: structured delegate handoff validation tests */
 #include <assert.h>
 #include <stdio.h>
@@ -52,7 +53,7 @@ static void test_canonical_context_preserves_task(void)
    assert(strstr(repair.messages[0].blocks[4].text, "\"delegate_root\":\"/isolated/root\""));
    assert(repair.messages[0].blocks[4].context.authority == AIMEE_CTX_AUTH_POLICY);
    aimee_response_t response = {0};
-   assert(aimee_ir_response_from_text(&response, "invalid model JSON", "model") == 0);
+   assert(fixture_ir_response_from_text(&response, "invalid model JSON", "model") == 0);
    response.content[0].raw = cJSON_Parse("{\"native_unknown\":123}");
    assert(delegate_request_add_response(&repair, &response) == 0);
    assert(delegate_request_add_context(&repair, "Repair serialization only",

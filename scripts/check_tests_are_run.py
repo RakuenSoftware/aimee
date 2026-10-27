@@ -108,7 +108,6 @@ INFRASTRUCTURE = {
     "unit-test-server-management-listener-live": "needs a live listener",
     "unit-test-server-ready": "drives a server process directly",
     "unit-test-memory-audit-hook": "driven by the memory-audit job",
-    "unit-test-panel-provider": "driven by the panel-provider job",
 }
 
 # Built only under a sanitizer configuration, where the suite adds them itself.

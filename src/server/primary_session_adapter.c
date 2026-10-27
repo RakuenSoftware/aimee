@@ -9,7 +9,6 @@
 #include <openssl/rand.h>
 #include "config.h"
 #include "db1_client/db1.h"
-#include "headers/context_engine.h"
 #include "log.h"
 #include "model_registry.h"
 #include "provider_cli_adapter.h"
@@ -28,27 +27,6 @@
 extern int server_clean_retry_begin(const primary_session_request_t *, cJSON **, char **, char[65],
                                     char *, size_t) __attribute__((weak));
 extern int server_clean_retry_finish(int, const agent_result_t *) __attribute__((weak));
-
-/* Route compaction through the active context engine.
- * Falls back to session_compact() when the active engine is the compactor. */
-static int primary_compact(cJSON *messages, session_compact_result_t *result)
-{
-   const context_engine_t *eng = context_engine_get_active();
-   const context_engine_t *def = context_engine_get_default();
-   if (eng && eng != def && eng->compress)
-   {
-      int rc = eng->compress((context_engine_t *)eng, messages, NULL);
-      if (result && rc == 0)
-      {
-         result->compacted = 1;
-         result->messages_before = cJSON_GetArraySize(messages);
-         result->messages_after = cJSON_GetArraySize(messages);
-         result->messages_removed = 0;
-      }
-      return rc;
-   }
-   return session_compact(messages, NULL, result);
-}
 
 typedef struct primary_session_state
 {
@@ -455,7 +433,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
          if (session_compact_pressure(estimated, 0, ctx_window, NULL) == SESSION_PRESSURE_COMPACT)
          {
             session_compact_result_t sc_result;
-            if (primary_compact(initial_messages, &sc_result) == 0 && sc_result.compacted)
+            if (session_compact(initial_messages, NULL, &sc_result) == 0 && sc_result.compacted)
                aimee_log(LOG_INFO, "primary_session",
                          "pre-turn compact: %d→%d messages (%d removed)", sc_result.messages_before,
                          sc_result.messages_after, sc_result.messages_removed);
@@ -675,7 +653,7 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
    }
 
    session_compact_result_t local_result;
-   int rc = primary_compact(messages, &local_result);
+   int rc = session_compact(messages, NULL, &local_result);
    if (result)
       *result = local_result;
 

@@ -238,8 +238,6 @@ static int skill_server_trial_run(void *opaque, const aimee_request_t *request,
    }
    *response_out = result.canonical_response;
    memset(&result.canonical_response, 0, sizeof result.canonical_response);
-   free(result.response);
-   result.response = NULL;
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = result.prompt_tokens;
    usage_out->completion_tokens = result.completion_tokens;

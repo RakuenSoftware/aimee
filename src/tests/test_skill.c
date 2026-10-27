@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_skill.c: unit tests for skill.c */
 #include <assert.h>
 #include <stdio.h>
@@ -1120,7 +1121,7 @@ static int executable_eval_runner(void *opaque, const aimee_request_t *request,
    assert(request->n_system == 1 && request->system[0].type == AIMEE_BLK_TEXT);
    int treatment = strstr(request->system[0].text, "### ACTIVE SKILL:") != NULL;
    runner->order[runner->calls++] = treatment;
-   int rc = aimee_ir_response_from_text(
+   int rc = fixture_ir_response_from_text(
        response_out,
        runner->no_effect || treatment ? "I reviewed first." : "I changed it without review.",
        "test/model");

@@ -18,7 +18,11 @@ static const char binding[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 static char home[4096], directory[4096];
 static server_native_cache_lease_t *open_lease(const char *turn, char error[512])
 {
-   return server_native_cache_lease_open(home, "codex", "session", binding, "actor", turn, error);
+   server_native_cache_lease_t *lease = server_native_cache_lease_acquire_unpublished(
+       home, "codex", "session", binding, "actor", turn, NULL, error);
+   if (lease)
+      assert(!server_native_cache_lease_update(lease, server_native_cache_lease_manifest(lease)));
+   return lease;
 }
 static void path(char out[8192], const char *name)
 {
@@ -34,14 +38,14 @@ static void sdk_identity(void)
    const char other_binding[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
    char error[512], first[65], repeated[65], other[65], file[8192], extra[8192], parent[8192],
        moved[8192];
-   server_native_cache_lease_t *lease = server_native_cache_lease_open(
-       home, "claude", "identity-session", binding, "actor", "A1", error);
+   server_native_cache_lease_t *lease = server_native_cache_lease_acquire_unpublished(
+       home, "claude", "identity-session", binding, "actor", "A1", NULL, error);
    assert(lease && !server_native_cache_sdk_identity(lease, first));
    assert(strlen(first) == 64 && strspn(first, "0123456789abcdef") == 64);
    assert(!server_native_cache_sdk_identity(lease, repeated) && !strcmp(first, repeated));
    assert(!server_native_cache_lease_close(lease, 1));
-   lease = server_native_cache_lease_open(home, "claude", "identity-session", binding, "actor",
-                                          "A2", error);
+   lease = server_native_cache_lease_acquire_unpublished(home, "claude", "identity-session",
+                                                         binding, "actor", "A2", NULL, error);
    assert(lease && !server_native_cache_sdk_identity(lease, repeated) && !strcmp(first, repeated));
    assert(snprintf(parent, sizeof parent, "%s/browser-claude/identity-session/%s", home, binding) <
           (int)sizeof parent);
@@ -73,8 +77,8 @@ static void sdk_identity(void)
    assert(server_native_cache_sdk_identity(lease, repeated) < 0);
    assert(!rmdir(parent) && !rename(moved, parent));
    assert(!server_native_cache_lease_close(lease, 1));
-   lease = server_native_cache_lease_open(home, "claude", "identity-session", other_binding,
-                                          "actor", "B", error);
+   lease = server_native_cache_lease_acquire_unpublished(home, "claude", "identity-session",
+                                                         other_binding, "actor", "B", NULL, error);
    assert(lease && !server_native_cache_sdk_identity(lease, other) && strcmp(first, other));
    assert(!server_native_cache_lease_close(lease, 1));
    const char *bindings[] = {binding, other_binding};
@@ -100,8 +104,8 @@ static void private_workspace(void)
    const char other_binding[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
    const char epoch[] = "11111111111111111111111111111111";
    char error[512], a[8192], b[8192], fresh[8192], saved[8192];
-   server_native_cache_lease_t *lease = server_native_cache_lease_open(
-       home, "claude", "workspace-session", binding, "actor", "A1", error);
+   server_native_cache_lease_t *lease = server_native_cache_lease_acquire_unpublished(
+       home, "claude", "workspace-session", binding, "actor", "A1", NULL, error);
    assert(lease);
    int first = server_native_cache_workspace_open(lease, "0", a, sizeof a);
    assert(first >= 0 && server_native_cache_workspace_valid(lease, "0", first, a));
@@ -109,15 +113,15 @@ static void private_workspace(void)
    assert(!fstat(first, &original));
    close(first);
    assert(!server_native_cache_lease_close(lease, 1));
-   lease = server_native_cache_lease_open(home, "claude", "workspace-session", other_binding,
-                                          "actor", "B", error);
+   lease = server_native_cache_lease_acquire_unpublished(home, "claude", "workspace-session",
+                                                         other_binding, "actor", "B", NULL, error);
    assert(lease);
    int other = server_native_cache_workspace_open(lease, "0", b, sizeof b);
    assert(other >= 0 && strcmp(a, b));
    close(other);
    assert(!server_native_cache_lease_close(lease, 1));
-   lease = server_native_cache_lease_open(home, "claude", "workspace-session", binding, "actor",
-                                          "A2", error);
+   lease = server_native_cache_lease_acquire_unpublished(home, "claude", "workspace-session",
+                                                         binding, "actor", "A2", NULL, error);
    assert(lease);
    first = server_native_cache_workspace_open(lease, "0", b, sizeof b);
    assert(first >= 0 && !strcmp(a, b) && !fstat(first, &returned) &&
@@ -232,15 +236,16 @@ int main(void)
    assert(!server_native_cache_lease_update(lease, updated));
    assert(!server_native_cache_lease_close(lease, 0));
    cJSON *prior = NULL;
-   lease = server_native_cache_lease_acquire(home, "codex", "session", binding, "actor", "next",
-                                             &prior, error);
+   lease = server_native_cache_lease_acquire_unpublished(home, "codex", "session", binding, "actor",
+                                                         "next", &prior, error);
    assert(lease && prior && cJSON_Compare(updated, prior, 1));
    assert(!strcmp(first_owner, server_native_cache_lease_owner(lease)));
    cJSON_ReplaceItemInObjectCaseSensitive(updated, "actor", cJSON_CreateString("foreign"));
    assert(server_native_cache_lease_update(lease, updated));
    cJSON_Delete(updated);
    cJSON_Delete(prior);
-   assert(!server_native_cache_lease_rotate(lease, "after-reconcile", error));
+   assert(!server_native_cache_lease_rotate_unpublished(lease, "after-reconcile", error));
+   assert(!server_native_cache_lease_update(lease, server_native_cache_lease_manifest(lease)));
    assert(strcmp(first_owner, server_native_cache_lease_owner(lease)));
    assert(!cJSON_GetObjectItemCaseSensitive(server_native_cache_lease_manifest(lease),
                                             "containment_json"));

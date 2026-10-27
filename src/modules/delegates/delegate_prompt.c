@@ -1048,14 +1048,6 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
                "delegate has no complete canonical outcome");
       return;
    }
-   char *display = aimee_ir_response_text_alloc(&result->canonical_response);
-   if (!display)
-   {
-      *rc = -1;
-      snprintf(result->error, sizeof result->error, "%s", "delegate display projection failed");
-      return;
-   }
-   agent_result_replace_display_text(result, display);
    unsigned policy = 0;
    char policy_error[512] = "";
    if (delegate_review_evidence_judge(role, "", AIMEE_DELEGATES_REVIEW_POLICY_ONLY, &policy,
@@ -1069,7 +1061,7 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
    }
    if (!(policy & AIMEE_DELEGATES_REVIEW_GUARDED))
       return;
-   if (agent_result_project_complete_text(result) != 0)
+   if (aimee_ir_response_complete_text_valid(&result->canonical_response) != 0)
    {
       *rc = -1;
       snprintf(result->error, sizeof result->error, "%s",
@@ -1078,6 +1070,13 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
    }
    if (!repo_root || !repo_root[0])
       return;
+   char *text = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!text)
+   {
+      *rc = -1;
+      snprintf(result->error, sizeof result->error, "%s", "delegate text projection failed");
+      return;
+   }
 
    /* Which roles are guarded, which of them have their citations checked against
     * the checkout, and what counts as claiming there was nothing to review, are
@@ -1092,11 +1091,10 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
 
    unsigned verdict = 0;
    char message[512] = "";
-   if (delegate_review_evidence_judge(role, result->response, flags, &verdict, message,
-                                      sizeof(message)) != 0)
-      return;
+   if (delegate_review_evidence_judge(role, text, flags, &verdict, message, sizeof(message)) != 0)
+      goto done;
    if (!(verdict & AIMEE_DELEGATES_REVIEW_GUARDED))
-      return;
+      goto done;
 
    /* The snippet check reads the checkout, so it stays here. It runs FIRST: a
     * citation that does not match the file is the more specific complaint, and
@@ -1104,12 +1102,11 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
    if (verdict & AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS)
    {
       char drift_err[512];
-      if (delegate_check_review_evidence_drift(result->response, repo_root, drift_err,
-                                               sizeof(drift_err)) > 0)
+      if (delegate_check_review_evidence_drift(text, repo_root, drift_err, sizeof(drift_err)) > 0)
       {
          *rc = -1;
          snprintf(result->error, sizeof(result->error), "%s", drift_err);
-         return;
+         goto done;
       }
    }
 
@@ -1118,6 +1115,8 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
       *rc = -1;
       snprintf(result->error, sizeof(result->error), "%s", message);
    }
+done:
+   free(text);
 }
 
 /* Build a ## Context block by searching the code index for terms in the delegate

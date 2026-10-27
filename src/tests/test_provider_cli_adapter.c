@@ -134,20 +134,11 @@ static void test_native_auth_cmd_uses_bearer_token_command(void)
    assert(native_agent.api_key[0] == '\0');
 }
 
-static void test_missing_and_invalid_cli_fail_cleanly(void)
-{
-   assert(provider_cli_command_has_shell_operators("/bin/cat ; /bin/true") == 1);
-   assert(provider_cli_check_available("/bin/cat ; /bin/true", "codex") == 0);
-   assert(provider_cli_check_available("/bin/cat", "codex") == 1);
-   assert(provider_cli_check_available("/no/such/provider-cli", "codex") == 0);
-}
-
 int main(void)
 {
    test_registry_and_caps();
    test_mistral_native_http_configuration();
    test_native_auth_cmd_uses_bearer_token_command();
-   test_missing_and_invalid_cli_fail_cleanly();
    printf("provider CLI adapter tests passed\n");
    return 0;
 }

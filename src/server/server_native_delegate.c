@@ -200,7 +200,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    const request_context_t *context = request_context_get();
    int complete = rc == 0 && result.success && !aimee_ir_response_complete_valid(&response);
    /* History comes from the actual durable child capture. No reconstruction
-    * from result.response or a manufactured assistant message is permitted. */
+    * from a display projection or a manufactured assistant message is permitted. */
    if (!result.canonical_session_id[0] || !context || !context->vault_principal[0] ||
        server_native_history_load(result.canonical_session_id, context->vault_principal, NULL, 0,
                                   &history, &receipts))

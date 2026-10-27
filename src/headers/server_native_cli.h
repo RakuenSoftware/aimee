@@ -19,7 +19,6 @@ int server_native_cli_retain(server_native_cli_t *grant);
 void server_native_cli_release(server_native_cli_t *grant);
 int server_native_cli_cancelled(const server_native_cli_t *grant);
 const atomic_int *server_native_cli_cancel_flag(const server_native_cli_t *grant);
-unsigned server_native_cli_depth(const server_native_cli_t *grant);
 /* Marks revoked and waits for admitted callbacks to finish before erasing its
  * credential/environment. The owner must first remove it from lookup. */
 void server_native_cli_close(server_native_cli_t *grant);

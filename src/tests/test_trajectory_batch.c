@@ -76,17 +76,17 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
    assert(active_toolset[0] && strcmp(active_toolset, "outer-toolset"));
    memset(out, 0, sizeof(*out));
    out->success = 1;
-   if (user_prompt && strstr(user_prompt, "secret"))
-      out->response = strdup("api_key = sk-testtrajectorysecret");
-   else
-      out->response = strdup(user_prompt && strstr(user_prompt, "second") ? "second done" : "done");
+   const char *answer_text = user_prompt && strstr(user_prompt, "secret")
+                                 ? "api_key = sk-testtrajectorysecret"
+                             : user_prompt && strstr(user_prompt, "second") ? "second done"
+                                                                            : "done";
    snprintf(out->agent_name, sizeof(out->agent_name), "unit-agent");
    snprintf(out->canonical_session_id, sizeof out->canonical_session_id,
             "trajectory-fixture-%ld-%d", (long)getpid(), ++serial);
    const char *owner = agent_get_request_vault_principal();
    assert(!db1_server_session_create(out->canonical_session_id, "delegate", owner));
    aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = (char *)user_prompt};
-   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = out->response};
+   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = (char *)answer_text};
    aimee_message_t user = {.role = "user", .blocks = &input, .n_blocks = 1};
    aimee_message_t model = {.role = "assistant", .blocks = &answer, .n_blocks = 1};
    aimee_block_t opaque[] = {answer,
@@ -115,7 +115,6 @@ int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *requ
    free(wire);
    cJSON_Delete(history);
    cJSON_Delete(opaque[1].tool_input);
-   agent_result_replace_display_text(out, strdup("display must not determine task grading"));
    out->turns = 1;
    return 0;
 }

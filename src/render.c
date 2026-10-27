@@ -272,7 +272,9 @@ cJSON *agent_result_to_json(const agent_result_t *result)
 {
    cJSON *obj = cJSON_CreateObject();
    cJSON_AddStringToObject(obj, "status", result->success ? "success" : "error");
-   cJSON_AddStringToObject(obj, "response", result->response ? result->response : "");
+   char *text = aimee_ir_response_text_alloc(&result->canonical_response);
+   cJSON_AddStringToObject(obj, "response", text ? text : "");
+   free(text);
    cJSON_AddBoolToObject(obj, "cache_hit", result->cache_hit);
    cJSON_AddNumberToObject(obj, "turns", result->turns);
    cJSON_AddNumberToObject(obj, "tool_calls", result->tool_calls);

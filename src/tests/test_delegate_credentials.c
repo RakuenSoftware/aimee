@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_delegate_credentials.c: per-provider credential lease pool. */
 
 #include <assert.h>
@@ -491,7 +492,7 @@ static int context_attempt(agent_result_t *result)
    if (usage_retry_mode)
    {
       aimee_response_t observed = {0};
-      assert(!aimee_ir_response_from_text(&observed, "controlled answer", "fixture-model"));
+      assert(!fixture_ir_response_from_text(&observed, "controlled answer", "fixture-model"));
       observed.raw = cJSON_Parse("{\"provider_usage\":{\"input\":0,\"output\":0,\"reasoning\":0}}");
       assert(observed.raw && !agent_result_adopt_response(result, &observed));
       result->turns = context_attempts == 1 ? 2 : 3;

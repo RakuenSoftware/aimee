@@ -1905,12 +1905,6 @@ static const aimee_request_t *schema_cache(void)
    pthread_mutex_unlock(&g_schema_cache_mu);
    return catalog;
 }
-cJSON *agent_tool_get_schema_cached(const char *name)
-{
-   const aimee_request_t *catalog = name && name[0] ? schema_cache() : NULL;
-   const aimee_tool_t *tool = catalog ? aimee_ir_find_function(catalog, NULL, name) : NULL;
-   return tool ? tool->schema : NULL;
-}
 int agent_tool_known_names(const char **out, int max)
 {
    const aimee_request_t *catalog = out && max > 0 ? schema_cache() : NULL;

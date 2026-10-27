@@ -252,7 +252,8 @@
     "server-go/modules/memory/spatial_facts.go",
     "server-go/modules/memory/execution_grade_context.go",
     "server-go/modules/memory/execution_grade_release.go",
-    "server-go/modules/memory/source_release_fork.go"
+    "server-go/modules/memory/source_release_fork.go",
+    "server-go/modules/memory/cmd/aimee-memory-eval/qa_request.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",

@@ -32,7 +32,7 @@ int main(void)
 {
    aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "original partial answer"};
    agent_result_t result = {.success = 0,
-                            .response = "stale display is not public output",
+
                             .prompt_tokens = 31,
                             .completion_tokens = 13,
                             .cache_read_tokens = 5,
@@ -85,7 +85,7 @@ int main(void)
    assert(cJSON_GetObjectItemCaseSensitive(usage, "input_tokens")->valueint == 31);
    assert(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens")->valueint == 13);
    char *wire = cJSON_PrintUnformatted(object);
-   assert(wire && strstr(wire, text.text) && !strstr(wire, result.response));
+   assert(wire && strstr(wire, text.text) && !strstr(wire, "stale display is not public output"));
    assert(!cJSON_HasObjectItem(object, "error"));
    free(wire);
    cJSON_Delete(object);
