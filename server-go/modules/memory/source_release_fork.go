@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Forks transfer retained source provenance to one distinct host request. A
@@ -57,14 +57,14 @@ func sourceForkArgs(args commandArgs, request, ticket, operation string) command
 	next["operation"], _ = json.Marshal(operation)
 	return next
 }
-func forkResponse(encoded []byte, status bus.ModuleStatus, fields map[string]any) ([]byte, bus.ModuleStatus) {
-	if status != bus.ModuleStatusOK {
+func forkResponse(encoded []byte, status ring.ModuleStatus, fields map[string]any) ([]byte, ring.ModuleStatus) {
+	if status != ring.ModuleStatusOK {
 		return encoded, status
 	}
-	body, err := bus.DecodeCommandResult(encoded)
+	body, err := ring.DecodeCommandResult(encoded)
 	var result map[string]any
 	if err != nil || json.Unmarshal(body, &result) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if result["status"] != "ok" {
 		return encoded, status
@@ -74,7 +74,7 @@ func forkResponse(encoded []byte, status bus.ModuleStatus, fields map[string]any
 	}
 	return commandResult(result)
 }
-func handleSourceReleaseFork(s *sourceReleaseState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleSourceReleaseFork(s *sourceReleaseState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expire(time.Now())
@@ -121,9 +121,9 @@ func handleSourceReleaseFork(s *sourceReleaseState, args commandArgs) ([]byte, b
 		s.bytes += bytes
 		s.healthBytes += len(candidate.healthMetadata)
 		encoded, status := s.handleSourceReleaseLocked(sourceForkArgs(args, newID, token, "source-release-plan"), candidate)
-		body, decodeErr := bus.DecodeCommandResult(encoded)
+		body, decodeErr := ring.DecodeCommandResult(encoded)
 		var result map[string]any
-		if decodeErr != nil || json.Unmarshal(body, &result) != nil || status != bus.ModuleStatusOK || result["status"] != "ok" {
+		if decodeErr != nil || json.Unmarshal(body, &result) != nil || status != ring.ModuleStatusOK || result["status"] != "ok" {
 			s.dropFork(token)
 			return encoded, status
 		}
@@ -135,9 +135,9 @@ func handleSourceReleaseFork(s *sourceReleaseState, args commandArgs) ([]byte, b
 		return commandResult(commandError("unavailable", "source release fork challenge unavailable"))
 	}
 	encoded, status := s.handleSourceReleaseLocked(sourceForkArgs(args, newID, token, "source-release-result"), fork.entry)
-	body, err := bus.DecodeCommandResult(encoded)
+	body, err := ring.DecodeCommandResult(encoded)
 	var result map[string]any
-	if err != nil || json.Unmarshal(body, &result) != nil || status != bus.ModuleStatusOK || result["status"] != "ok" || result["admitted"] != true {
+	if err != nil || json.Unmarshal(body, &result) != nil || status != ring.ModuleStatusOK || result["status"] != "ok" || result["admitted"] != true {
 		s.dropFork(token)
 		return encoded, status
 	}

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var taskCostStages = []string{"indexing_embedding", "retrieval_reranking", "context_transformation", "generation", "tools", "retries", "verification"}
@@ -210,52 +210,52 @@ func ReportTaskCost(req TaskCostRequest) (TaskCostReport, error) {
 	return out, nil
 }
 
-func handleTaskCost(raw []byte) ([]byte, bus.ModuleStatus) {
+func handleTaskCost(raw []byte) ([]byte, ring.ModuleStatus) {
 	if len(raw) > 2<<20 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	compact, result := JSONCompact(raw)
 	if result == JSONNotShorter {
 		compact = raw
 	} else if result != JSONOK {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var kind map[string]json.RawMessage
 	if json.Unmarshal(compact, &kind) != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if _, paired := kind["corpus"]; paired {
 		var req TaskCostPairRequest
 		d := json.NewDecoder(bytes.NewReader(compact))
 		d.DisallowUnknownFields()
 		if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		out, err := PairTaskCosts(req)
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		body, err := json.Marshal(out)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return body, bus.ModuleStatusOK
+		return body, ring.ModuleStatusOK
 	}
 	var req TaskCostRequest
 	decoder := json.NewDecoder(bytes.NewReader(compact))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&req) != nil || decoder.Decode(new(any)) != io.EOF {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	out, err := ReportTaskCost(req)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(out)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }
 
 // Price units in the economizer owner, retaining the declared rate snapshot.

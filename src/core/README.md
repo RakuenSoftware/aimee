@@ -1,6 +1,6 @@
 # Aimee core C libraries
 
-This directory is an extraction-ready C package with shared data contracts and three
+This directory is an extraction-ready C package with shared data contracts and two
 separate libraries:
 
 - `aimee-core-codec` provides portable byte codecs. Base64 callers explicitly choose
@@ -13,11 +13,10 @@ separate libraries:
 - `aimee-core-connection` is portable inter-process/inter-machine communication.
   Thin client, server, and KB consume the same endpoint, bearer-token, socket,
   deadline/cancellation, HTTP/1, and TLS/mTLS code.
-- `aimee-core-event-bus` is the POSIX, local-container shared-memory bus. Server
-  and KB each host an independent instance; modules attach through a local
-  `SOCK_SEQPACKET` handshake and then use only their shared-memory mappings.
-  External module repositories link the smaller
-  `aimee-core-event-bus-client` archive, which contains no host or routing code.
+
+The local shared-memory ring that server and KB host is not part of this package:
+it is the ouroboros ring (github.com/RakuenSoftware/ouroboros-ring), pinned in
+`dependencies/ouroboros-ring.lock.json`.
 
 Build this package independently with:
 
@@ -27,7 +26,4 @@ cmake --build build/aimee-core
 ```
 
 Public headers are namespaced under `aimee/core/connection`,
-`aimee/core/event_bus`, `aimee/core/codec`, and `aimee/core/types`. The event-bus client depends only on
-the public attach,
-wire, region, and ring contracts. Its archive does not implement the host-only
-region lifecycle, admission, routing, arena allocator, or capture APIs.
+`aimee/core/codec`, and `aimee/core/types`.

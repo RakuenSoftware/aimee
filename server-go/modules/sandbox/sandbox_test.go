@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Every case below is ported from src/tests/test_sandbox_learned.c so the Go
@@ -192,13 +192,13 @@ func TestStoreCapsAtLearnMax(t *testing.T) {
 
 // --- stage handlers ---
 
-func invoke(t *testing.T, store *Store, stage uint32, payload any) ([]byte, bus.ModuleStatus) {
+func invoke(t *testing.T, store *Store, stage uint32, payload any) ([]byte, ring.ModuleStatus) {
 	t.Helper()
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(store)(bus.ModuleInvocation{StageID: stage}, encoded)
+	return NewHandler(store)(ring.ModuleInvocation{StageID: stage}, encoded)
 }
 
 func TestObserveStageParsesAndRecords(t *testing.T) {
@@ -206,7 +206,7 @@ func TestObserveStageParsesAndRecords(t *testing.T) {
 	body, status := invoke(t, store, StageObserve, ObserveRequest{
 		GitRoot: "/proj", Command: "apt-get install -y gcc make",
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	var response ObserveResponse
@@ -232,7 +232,7 @@ func TestLoadStageReturnsTheRecordedSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, status := invoke(t, store, StageLoad, LoadRequest{GitRoot: "/proj"})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	var response LoadResponse
@@ -246,19 +246,19 @@ func TestLoadStageReturnsTheRecordedSet(t *testing.T) {
 
 func TestStagesRejectBadRequests(t *testing.T) {
 	store, _ := NewStore(t.TempDir())
-	if _, status := invoke(t, store, StageObserve, ObserveRequest{Command: "apt install gcc"}); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invoke(t, store, StageObserve, ObserveRequest{Command: "apt install gcc"}); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("missing git root must be rejected, got %v", status)
 	}
-	if _, status := invoke(t, store, StageLoad, LoadRequest{}); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invoke(t, store, StageLoad, LoadRequest{}); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("missing git root must be rejected, got %v", status)
 	}
-	if _, status := NewHandler(store)(bus.ModuleInvocation{StageID: 99}, []byte(`{}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := NewHandler(store)(ring.ModuleInvocation{StageID: 99}, []byte(`{}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown stage must be rejected, got %v", status)
 	}
-	if _, status := NewHandler(store)(bus.ModuleInvocation{StageID: StageObserve}, []byte("not json")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := NewHandler(store)(ring.ModuleInvocation{StageID: StageObserve}, []byte("not json")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("undecodable request must be rejected, got %v", status)
 	}
-	if _, status := NewHandler(nil)(bus.ModuleInvocation{StageID: StageLoad}, []byte(`{"git_root":"/p"}`)); status != bus.ModuleStatusInternal {
+	if _, status := NewHandler(nil)(ring.ModuleInvocation{StageID: StageLoad}, []byte(`{"git_root":"/p"}`)); status != ring.ModuleStatusInternal {
 		t.Fatalf("nil store must be internal, got %v", status)
 	}
 }

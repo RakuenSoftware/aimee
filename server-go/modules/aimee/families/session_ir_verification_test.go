@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // These are schema/store fixtures, not claims that a worker actually executed.
@@ -38,8 +38,8 @@ func TestSessionIRVerifiedAppendIsHostOnlyAndOrdinaryAppendCannotForgeProofs(t *
 		t.Fatal(err)
 	}
 	db := &sessDB{}
-	_, wireStatus := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-	if wireStatus != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, wireStatus := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+	if wireStatus != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("caller-authored proof reached host operation", wireStatus, db.executed)
 	}
 	ordinary := &irAppendFixture{sessDB: &sessDB{}, inserted: 1}

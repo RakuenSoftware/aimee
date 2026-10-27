@@ -33,8 +33,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -159,30 +159,30 @@ func (s pgStore) save(ctx context.Context, key, blob string) error {
 
 // newHandler builds the stage around a store, so the wire behaviour can be
 // tested against an in-memory one.
-func newHandler(s blobStore) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func newHandler(s blobStore) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != StageState {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if s == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		decoded, ok := decodeRequest(frame)
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		// A refusal the module can state in-band is reported in-band. Only a
 		// malformed FRAME is a bus-level invalid request: a bad key is a
 		// well-formed question with an answer.
 		if !validKey(decoded.key) {
-			return reply(statusInvalid, ""), bus.ModuleStatusOK
+			return reply(statusInvalid, ""), ring.ModuleStatusOK
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		timeout := invocation.Remaining(queryTimeout)
 		if timeout <= 0 {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -191,14 +191,14 @@ func newHandler(s blobStore) bus.ModuleHandler {
 		case opStateLoad:
 			state, found, err := s.load(ctx, decoded.key)
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			if err != nil {
 				log.Printf("aimee: load failed: %v", err)
-				return reply(statusFailed, ""), bus.ModuleStatusOK
+				return reply(statusFailed, ""), ring.ModuleStatusOK
 			}
 			if !found {
-				return reply(statusMissing, ""), bus.ModuleStatusOK
+				return reply(statusMissing, ""), ring.ModuleStatusOK
 			}
 			// The C refused a row too big for the caller's buffer rather than
 			// returning a truncated prefix, because truncated JSON does not
@@ -206,31 +206,31 @@ func newHandler(s blobStore) bus.ModuleHandler {
 			// lose the conversation's page table. Same answer here, for the
 			// same reason -- the cap is now the wire's rather than a buffer's.
 			if len(state) >= StateMax {
-				return reply(statusTooLong, ""), bus.ModuleStatusOK
+				return reply(statusTooLong, ""), ring.ModuleStatusOK
 			}
-			return reply(statusOK, state), bus.ModuleStatusOK
+			return reply(statusOK, state), ring.ModuleStatusOK
 
 		case opStateSave:
 			if len(decoded.payload) >= StateMax {
-				return reply(statusTooLong, ""), bus.ModuleStatusOK
+				return reply(statusTooLong, ""), ring.ModuleStatusOK
 			}
 			if err := s.save(ctx, decoded.key, decoded.payload); err != nil {
 				log.Printf("aimee: save failed: %v", err)
-				return reply(statusFailed, ""), bus.ModuleStatusOK
+				return reply(statusFailed, ""), ring.ModuleStatusOK
 			}
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
-			return reply(statusOK, ""), bus.ModuleStatusOK
+			return reply(statusOK, ""), ring.ModuleStatusOK
 
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }
 
 // Handle is the production entry point for kind 11777, stage 1.
-func Handle(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 	// Kept for the tests that drive the wire directly. The served handler is
 	// built by Binds with the store it was given.
 	return newHandler(pgStore{})(invocation, frame)

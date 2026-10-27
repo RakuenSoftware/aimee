@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -36,11 +36,11 @@ func TestTypedFactCompatibilityGate(t *testing.T) {
 
 func TestCSSConventionsHostBoundary(t *testing.T) {
 	for _, op := range []string{"css-conventions", "css-convention-sync"} {
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"`+op+`","project":"css-replay"}`))
-		if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"`+op+`","project":"css-replay"}`))
+		if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
-		if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(status)
 		}
 	}
@@ -66,18 +66,18 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	bound := *backend
 	bound.settings = func() (map[string]any, error) { return map[string]any{"css_style_graph_enabled": enabled}, nil }
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &bound))
-	call := func(op string, want bus.ModuleStatus) map[string]json.RawMessage {
+	call := func(op string, want ring.ModuleStatus) map[string]json.RawMessage {
 		t.Helper()
 		// A host-supplied actor never upgrades the derivation's system authority.
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"`+op+`","project":"css-replay","actor":{"rank":40,"role":"operator"}}`))
-		raw, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"`+op+`","project":"css-replay","actor":{"rank":40,"role":"operator"}}`))
+		raw, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
 		if status != want {
 			t.Fatalf("%s: status=%v wanted=%v reply=%s", op, status, want, raw)
 		}
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil
 		}
-		raw, decodeErr := bus.DecodeCommandResult(raw)
+		raw, decodeErr := ring.DecodeCommandResult(raw)
 		if decodeErr != nil {
 			t.Fatal(decodeErr)
 		}
@@ -93,16 +93,16 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		}
 		return out
 	}
-	if got := string(call("css-convention-sync", bus.ModuleStatusOK)["asserted"]); got != "0" {
+	if got := string(call("css-convention-sync", ring.ModuleStatusOK)["asserted"]); got != "0" {
 		t.Fatal(got)
 	}
 	enabled = true
 	for i := 0; i < 2; i++ {
-		if got := string(call("css-convention-sync", bus.ModuleStatusOK)["asserted"]); got != "2" {
+		if got := string(call("css-convention-sync", ring.ModuleStatusOK)["asserted"]); got != "2" {
 			t.Fatal(got)
 		}
 	}
-	out := call("css-conventions", bus.ModuleStatusOK)
+	out := call("css-conventions", ring.ModuleStatusOK)
 	var items []cssConvention
 	if err := json.Unmarshal(out["results"], &items); err != nil {
 		t.Fatal(err)
@@ -119,15 +119,15 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	}
 	// A new generation with no current CSS cannot reuse the previous checkout.
 	exec(`RESET ROLE; UPDATE projects SET current_generation=2 WHERE name='css-replay'; SET LOCAL ROLE aimee_store_runtime`)
-	if got := string(call("css-convention-sync", bus.ModuleStatusOK)["asserted"]); got != "0" {
+	if got := string(call("css-convention-sync", ring.ModuleStatusOK)["asserted"]); got != "0" {
 		t.Fatal(got)
 	}
 	exec(`RESET ROLE; UPDATE projects SET current_generation=1 WHERE name='css-replay'; UPDATE css_rules SET selector='.flat' WHERE file_id IN(SELECT f.id FROM files f JOIN projects p ON p.id=f.project_id WHERE p.name='css-replay'); DELETE FROM css_declarations WHERE rule_id IN(SELECT c.id FROM css_rules c JOIN files f ON f.id=c.file_id JOIN projects p ON p.id=f.project_id WHERE p.name='css-replay')`)
 	// Fail the second assertion after the first and its sealed graph commit.
 	exec(`CREATE FUNCTION pg_temp.css_fail_second() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.source='css-replay' AND NEW.relation='token_strategy' THEN RAISE EXCEPTION 'CSS late failure'; END IF; RETURN NEW; END $$;
  CREATE TRIGGER css_fail_second BEFORE INSERT ON entity_edges FOR EACH ROW EXECUTE FUNCTION pg_temp.css_fail_second(); SET LOCAL ROLE aimee_store_runtime`)
-	call("css-convention-sync", bus.ModuleStatusInternal)
-	out = call("css-conventions", bus.ModuleStatusOK)
+	call("css-convention-sync", ring.ModuleStatusInternal)
+	out = call("css-conventions", ring.ModuleStatusOK)
 	if err := json.Unmarshal(out["results"], &items); err != nil || len(items) != 2 || items[0].Value != "BEM" || items[1].Value != "css-custom-properties" {
 		t.Fatal(items, err)
 	}
@@ -135,8 +135,8 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal(assertions, err)
 	}
 	exec(`RESET ROLE; DROP TRIGGER css_fail_second ON entity_edges; SET LOCAL ROLE aimee_store_runtime`)
-	call("css-convention-sync", bus.ModuleStatusOK)
-	out = call("css-conventions", bus.ModuleStatusOK)
+	call("css-convention-sync", ring.ModuleStatusOK)
+	out = call("css-conventions", ring.ModuleStatusOK)
 	if err := json.Unmarshal(out["results"], &items); err != nil || len(items) != 2 || items[0].Value != "flat-utility" || items[1].Value != "literal-values" {
 		t.Fatal(items, err)
 	}
@@ -152,8 +152,8 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if _, err := direct.assertFact(ctx, in); err != nil {
 		t.Fatal(err)
 	}
-	call("css-convention-sync", bus.ModuleStatusOK)
-	out = call("css-conventions", bus.ModuleStatusOK)
+	call("css-convention-sync", ring.ModuleStatusOK)
+	out = call("css-conventions", ring.ModuleStatusOK)
 	if err := json.Unmarshal(out["results"], &items); err != nil || len(items) != 2 || items[0].Value != in.Object || items[0].Confidence != 90 {
 		t.Fatal(items, err)
 	}
@@ -169,16 +169,16 @@ func exerciseCSSConventionsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
  INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance) SELECT id,'memory','memory:'||$1::bigint::text,'supports' FROM edges`, hidden)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance) SELECT id,'typed_fact_source','visible-source','supports' FROM entity_edges WHERE commit_id='css-hidden-fixture'`)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
-	out = call("css-conventions", bus.ModuleStatusOK)
+	out = call("css-conventions", ring.ModuleStatusOK)
 	if err := json.Unmarshal(out["results"], &items); err != nil || len(items) != 2 || strings.Contains(string(out["results"]), "hidden") {
 		t.Fatal(items, err)
 	}
 	// Missing configuration and failed SQL remain failures, never healthy empties.
 	bound.settings = func() (map[string]any, error) { return nil, errors.New("config offline") }
-	call("css-convention-sync", bus.ModuleStatusInternal)
+	call("css-convention-sync", ring.ModuleStatusInternal)
 	bound.settings = func() (map[string]any, error) { return map[string]any{"css_style_graph_enabled": true}, nil }
 	exec(`RESET ROLE; REVOKE SELECT(property) ON css_declarations FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	call("css-convention-sync", bus.ModuleStatusInternal)
+	call("css-convention-sync", ring.ModuleStatusInternal)
 	exec(`RESET ROLE; REVOKE SELECT ON entity_edges FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	call("css-conventions", bus.ModuleStatusInternal)
+	call("css-conventions", ring.ModuleStatusInternal)
 }

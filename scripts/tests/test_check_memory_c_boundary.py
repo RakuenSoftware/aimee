@@ -80,9 +80,9 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_keeps_bus_and_host_transport_in_c(self) -> None:
         root = self.fixture()
-        path = root / "src/core/event_bus/bus_host.c"
-        path.parent.mkdir(parents=True)
-        path.write_text("int bus_host(void) { return 0; }\n")
+        path = root / "src/modules/audit/obs_bus.c"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("int obs_bus_host(void) { return 0; }\n")
         path = root / next(iter(EXTERNAL_CONNECTION_C))
         path.write_text("void *host_call(void) { return aimee_module_json_call(5895, 7); }\n")
         validate(root)

@@ -1,5 +1,9 @@
 # Event bus
 
+> The transport described here is the **ouroboros ring**, which now has its own repository and
+> contract ([RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring)). This
+> page describes what aimee carries on it and how aimee hosts it.
+
 The event bus is the new spine inside `aimee-server` and `aimee-kb`. It replaces scattered
 in-process side channels with one typed, ordered, bounded transport.
 
@@ -327,11 +331,13 @@ Keep the contract small:
 - add C/Go vectors when the wire contract changes;
 - test shutdown, queue exhaustion, malformed frames, client reap, and capture replay.
 
-Use `bus_client_publish` for ordinary inline events. Use the arena for a trusted co-located event
+Use `ouro_client_publish` for ordinary inline events. Use the arena for a trusted co-located event
 publisher that needs a lease. Use the module request API for module calls; it selects ordered inline
 fragmentation when a request or reply exceeds the inline budget.
 
-Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client and
-module process runtime are under `server-go/bus/`. Both runtimes implement the same AMOD envelope,
-fragmentation, deadline, cancellation, heartbeat, and host-epoch behavior. The source headers hold
-the wire and arena invariants.
+The ring itself lives in
+[RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring), pinned in
+`dependencies/ouroboros-ring.lock.json`. The public C client is `<ouroboros/client.h>`; the pure-Go
+client and module process runtime are the `github.com/RakuenSoftware/ouroboros-ring/go/ring`
+package. Both implement the same AMOD envelope, fragmentation, deadline, cancellation, heartbeat,
+and host-epoch behavior, held to the ring's contract (`spec/`) and frozen vectors (`vectors/`).

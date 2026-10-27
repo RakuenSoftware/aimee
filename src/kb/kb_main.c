@@ -1,6 +1,7 @@
 #include "json_fluent.h"
 #include "module_commands.h"
-#include <aimee/core/event_bus/bus_runtime.h>
+#include <ouroboros/runtime.h>
+#include <aimee/audit/instance_identity.h>
 #include "aimee.h"
 #include "aimee_home.h"
 #include "agent_exec.h"
@@ -1505,8 +1506,8 @@ int main(int argc, char **argv)
     * bus. Bring up that bus before the first accessor, then wait only during
     * startup for the supervisor (already running in the entrypoint) to attach. */
    audit_log_open();
-   if (bus_instance_ensure_identity(kb_default_config_dir(), BUS_INSTANCE_KB,
-                                    getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
+   if (aimee_instance_ensure_identity(kb_default_config_dir(), AIMEE_INSTANCE_KB,
+                                      getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
    {
       fputs("aimee-kb: first-boot identity is unavailable or conflicts with kb\n", stderr);
       return 1;

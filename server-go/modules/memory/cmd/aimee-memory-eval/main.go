@@ -18,9 +18,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const maxEvaluationLine = 1 << 20
@@ -32,11 +32,11 @@ type evaluationRequest struct {
 }
 
 type evaluationReply struct {
-	Status bus.ModuleStatus `json:"status"`
-	Body   json.RawMessage  `json:"body"`
+	Status ring.ModuleStatus `json:"status"`
+	Body   json.RawMessage   `json:"body"`
 }
 
-func serve(ctx context.Context, input io.Reader, output io.Writer, handler bus.ModuleHandler) error {
+func serve(ctx context.Context, input io.Reader, output io.Writer, handler ring.ModuleHandler) error {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), maxEvaluationLine)
 	encoder := json.NewEncoder(output)
@@ -65,7 +65,7 @@ func serve(ctx context.Context, input io.Reader, output io.Writer, handler bus.M
 		case "command":
 			stage = memory.StageCommand
 			var err error
-			body, err = bus.EncodeCommand(request.Command, body)
+			body, err = ring.EncodeCommand(request.Command, body)
 			if err != nil {
 				return err
 			}
@@ -75,10 +75,10 @@ func serve(ctx context.Context, input io.Reader, output io.Writer, handler bus.M
 		if request.Stage != "command" && request.Command != "" {
 			return errors.New("evaluation request: command requires command stage")
 		}
-		body, status := handler(bus.ModuleInvocation{StageID: stage}, body)
+		body, status := handler(ring.ModuleInvocation{StageID: stage}, body)
 		if stage == memory.StageCommand && len(body) > 0 {
 			var err error
-			body, err = bus.DecodeCommandResult(body)
+			body, err = ring.DecodeCommandResult(body)
 			if err != nil {
 				return err
 			}

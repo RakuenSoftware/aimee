@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -352,12 +352,12 @@ func TestSharedMemoryChangeJournal(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	read := func(scope string, cursor *MemoryChangeCursor, limit int) MemoryChangePage {
 		t.Helper()
-		body, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+		body, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 			Operation: "change-feed", Scope: Scope{Type: ScopeProject, Value: scope},
 			Changes: &MemoryChangesRequest{SchemaVersion: 1, After: cursor, Limit: limit},
 		}))
 		var response DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(body, &response) != nil || response.Changes == nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(body, &response) != nil || response.Changes == nil {
 			t.Fatalf("scoped feed status=%v body=%s", status, body)
 		}
 		return *response.Changes

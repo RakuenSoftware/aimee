@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Creation has no existing record version. Bind every admitted store input and
@@ -31,7 +31,7 @@ func creationDigest(r DataRequest, authority int) (string, error) {
 	return retryHash(raw), nil
 }
 
-func commandCreationKey(args commandArgs, caller *bus.CommandContext) (string, map[string]any) {
+func commandCreationKey(args commandArgs, caller *ring.CommandContext) (string, map[string]any) {
 	raw, exists := args["idempotency_key"]
 	if !exists {
 		return "", nil
@@ -49,7 +49,7 @@ func commandCreationKey(args commandArgs, caller *bus.CommandContext) (string, m
 // The caller owns the transaction: canonical write, extraction, WORM intent and
 // receipt either commit together or all roll back. Admission can instead produce
 // a linked review proposal, whose reference occupies the same retry namespace.
-func (s *postgresDataStore) storeKBIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext, correlation string) (Record, *MemoryMutationReceipt, error) {
+func (s *postgresDataStore) storeKBIdempotent(ctx context.Context, r DataRequest, caller *ring.CommandContext, correlation string) (Record, *MemoryMutationReceipt, error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || r.Operation != "insert-epistemic" || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || r.ExpectedVersion != nil {
 		return Record{}, nil, errors.New("memory: invalid shared idempotent store")
 	}

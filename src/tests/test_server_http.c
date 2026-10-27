@@ -431,8 +431,8 @@ static int primary_store_fixture;
 static int cancel_store_calls, cancel_store_status;
 static int attach_store_fixture, attach_store_calls, attach_store_creates;
 static char attach_store_actor[160], attach_store_owner[160];
-static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
-                                                     void *body, uint32_t cap, uint32_t *length)
+static ouro_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
+                                                    void *body, uint32_t cap, uint32_t *length)
 {
    uint32_t op = aimee_db1_get_u32(wire), count = aimee_db1_get_u32(wire + 4), at = 8;
    char fields[3][160] = {{0}};
@@ -448,7 +448,7 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
    }
    attach_store_calls++;
    if (attach_store_fixture == 2)
-      return AIMEE_MODULE_CALL_TRANSPORT;
+      return OURO_MODULE_CALL_TRANSPORT;
    uint32_t status = AIMEE_DB1_STATUS_OK, values = 0;
    if (op == AIMEE_DB1_OP_SERVER_SESSION_CREATE)
    {
@@ -460,13 +460,13 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
       if (attach_store_fixture == 4)
          status = AIMEE_DB1_STATUS_INVALID; /* Same-actor concurrent INSERT. */
       if (attach_store_fixture == 5)
-         return AIMEE_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
+         return OURO_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
    }
    else
    {
       assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
       if (attach_store_fixture == 6 && attach_store_owner[0])
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       if (!attach_store_owner[0])
          status = AIMEE_DB1_STATUS_MISSING;
       else
@@ -486,7 +486,7 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
       memcpy(out + *length + 4, cells[i], n);
       *length += 4 + n;
    }
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static int primary_fixture_get(const char *actor, const char *sid, char *out, size_t cap)
@@ -570,9 +570,9 @@ int primary_session_history_open(const char *session, const char *actor)
    history_open_calls++;
    return history_open_fixture == 3 ? -1 : 0;
 }
-static aimee_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
-                                                           uint32_t request_len, void *body,
-                                                           uint32_t capacity, uint32_t *length)
+static ouro_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
+                                                          uint32_t request_len, void *body,
+                                                          uint32_t capacity, uint32_t *length)
 {
    uint32_t count = aimee_db1_get_u32(wire + 4), at = 8;
    char fields[4][128] = {{0}};
@@ -588,7 +588,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
    }
    if (op == AIMEE_DB1_OP_SERVER_SESSION_GET && ++history_open_gets == 1 &&
        history_open_fixture == 4)
-      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+      return OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    const char *values[10] = {
        "legacy", "primary", history_open_fixture == 2 ? "webuser:other" : "webuser:alice",
        "",       "",        "",
@@ -600,7 +600,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
    {
       assert(count == 4 && history_open_calls == 1 && !strcmp(fields[3], "webuser:alice"));
       if (history_open_pages++)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       values[0] =
           "[{\"version\":1,\"session_id\":\"legacy\",\"sequence\":\"1\",\"event_id\":\"import-"
           "base\","
@@ -630,7 +630,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
       memcpy(response + *length + 4, values[i], bytes);
       *length += 4 + bytes;
    }
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 /* The bus is not started in a unit test, so the module surface is stubbed to
@@ -642,11 +642,11 @@ int obs_bus_module_available(uint32_t event_kind)
           event_kind == AIMEE_DB1_EVENT_SESSIONS;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8 &&
        aimee_db1_get_u32(request_body) == AIMEE_DB1_OP_SESSION_IR_CANCEL)
@@ -665,7 +665,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       assert(at == request_len);
       cancel_store_calls++;
       if (cancel_store_status < 0)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       uint8_t *out = response_body;
       aimee_db1_put_u32(out, cancel_store_status ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_OK);
       aimee_db1_put_u32(out + 4, cancel_store_status ? 0 : 1);
@@ -677,7 +677,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
          memcpy(out + 12, "71", 2);
          *response_len = 14;
       }
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
       return attach_store_reply(request_body, request_len, response_body, response_capacity,
@@ -692,7 +692,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       if ((op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET &&
            op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET) ||
           count > 3)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       char fields[3][128] = {{0}};
       for (uint32_t i = 0; i < count; ++i)
       {
@@ -719,14 +719,14 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
          memcpy(response + 12, selected, strlen(selected));
          *response_len = 12 + (uint32_t)strlen(selected);
       }
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    (void)stage_id;
    (void)trace_id;
    (void)deadline_ns;
    (void)cancelled;
    (void)cancel_context;
-   return AIMEE_MODULE_CALL_TRANSPORT;
+   return OURO_MODULE_CALL_TRANSPORT;
 }
 
 /* The private workflow proxy is gone: the control plane is reached over the

@@ -5,29 +5,29 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Composition is local to the Server placement. The host transports an already
 // scoped KB envelope; personal rows never travel back to the shared owner.
-func handleRecallComposition(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRecallComposition(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || options.placement != PlacementServer {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	shared, ok := args.stringValue("shared_json")
 	if !ok || len(shared) == 0 || len(shared) > maxDataBody/2 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{Operation: "compose-recall", SharedRecall: json.RawMessage(shared)}
 	request.SessionStart = args.boolean("session_start")
 	request.LimitTokens = recallTokenLimit(args.integer("limit_tokens", 0), request.SessionStart)
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	raw, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInvalidRequest || status == bus.ModuleStatusCancelled {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInvalidRequest || status == ring.ModuleStatusCancelled {
 			return nil, status
 		}
 		refusal, _ := json.Marshal(commandError("unavailable", "memory recall composition unavailable"))
@@ -35,7 +35,7 @@ func handleRecallComposition(options handlerOptions, invocation bus.ModuleInvoca
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))

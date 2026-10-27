@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -121,9 +121,9 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	call := func(want ...string) {
 		t.Helper()
 		raw, _ := json.Marshal(request)
-		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, raw)
+		reply, status := handler(ring.ModuleInvocation{StageID: StageData}, raw)
 		var got DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(reply, &got) != nil || len(got.Records) != len(want) {
+		if status != ring.ModuleStatusOK || json.Unmarshal(reply, &got) != nil || len(got.Records) != len(want) {
 			t.Fatal(request, string(reply), status, want)
 		}
 		for i, key := range want {
@@ -160,7 +160,7 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	request.Project = "unit-recall-local"
 	exec(`RESET ROLE; REVOKE SELECT ON memory_units FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	raw, _ := json.Marshal(request)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, raw); status != bus.ModuleStatusInternal {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, raw); status != ring.ModuleStatusInternal {
 		t.Fatal("unit query refusal hidden", status)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -61,8 +61,8 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	reindex := func(args string) {
 		t.Helper()
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", args)
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(r, status)
 		}
 	}
@@ -116,8 +116,8 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	handler = NewHandler(executor, WithDataStore(PlacementKB, backend))
 	repair := func(point int64) map[string]any {
 		t.Helper()
-		r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "repair", fmt.Sprintf(`{"memory_id":%d,"embedding_command":"http://embedder","scope_context":true,"project":"units-visible"}`, point))
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "repair", fmt.Sprintf(`{"memory_id":%d,"embedding_command":"http://embedder","scope_context":true,"project":"units-visible"}`, point))
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(r, status)
 		}
 		return r
@@ -214,8 +214,8 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		t.Fatal("hidden unit embedded", r, executor.calls)
 	}
 	executor.reply = string(raw)
-	r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "repair", `{"failed_only":true,"embedding_command":"http://embedder","scope_context":true,"project":"units-visible"}`)
-	if status != bus.ModuleStatusOK || r["repaired"] != float64(1) {
+	r, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "repair", `{"failed_only":true,"embedding_command":"http://embedder","scope_context":true,"project":"units-visible"}`)
+	if status != ring.ModuleStatusOK || r["repaired"] != float64(1) {
 		t.Fatal("failed unit was not retried", r, status)
 	}
 	// A changed chunk retires its old point and queue entry, while unchanged
@@ -229,12 +229,12 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		t.Fatal("stale unit data survived", count, err)
 	}
 	// Rebuilding the vector collection must queue derived units as well as parents.
-	r, status = invokeContextCommand(t, handler, 0, bus.CommandContext{}, "rebuild", `{"version":"unit-rebuild","scope_context":true,"project":"units-visible"}`)
-	if status != bus.ModuleStatusOK || r["kind"] != "invalid_argument" {
+	r, status = invokeContextCommand(t, handler, 0, ring.CommandContext{}, "rebuild", `{"version":"unit-rebuild","scope_context":true,"project":"units-visible"}`)
+	if status != ring.ModuleStatusOK || r["kind"] != "invalid_argument" {
 		t.Fatal("scoped collection reset accepted", r, status)
 	}
-	r, status = invokeContextCommand(t, handler, 0, bus.CommandContext{}, "rebuild", `{"version":"unit-rebuild"}`)
-	if status != bus.ModuleStatusOK || r["status"] != "ok" {
+	r, status = invokeContextCommand(t, handler, 0, ring.CommandContext{}, "rebuild", `{"version":"unit-rebuild"}`)
+	if status != ring.ModuleStatusOK || r["status"] != "ok" {
 		t.Fatal(r, status)
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_units u JOIN memories m ON m.id=u.memory_id WHERE m.lifecycle_state='active'

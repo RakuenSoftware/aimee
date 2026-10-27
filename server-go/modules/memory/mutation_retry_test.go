@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -39,9 +39,9 @@ func TestIdempotencyContractValidation(t *testing.T) {
 	}
 }
 
-func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:retry-fixture", UserAuthority: true, TransportIdentity: "cert:retry-fixture"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:retry-fixture", UserAuthority: true, TransportIdentity: "cert:retry-fixture"}
 	invoke := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, e := json.Marshal(args)
@@ -49,7 +49,7 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal(e)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status, out)
 		}
 		return out
@@ -259,7 +259,7 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 			}
 			owner, first, second := connect(), connect(), connect()
 			scope := Scope{Type: ScopeProject, Value: fmt.Sprintf("retry-concurrent-%d", time.Now().UnixNano())}
-			caller := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:" + scope.Value, TransportIdentity: "cert:concurrent"}
+			caller := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:" + scope.Value, TransportIdentity: "cert:concurrent"}
 			defer func() {
 				cancel()
 				cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
@@ -434,9 +434,9 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 	}
 }
 
-func exerciseUpdateRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseUpdateRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:update-retry", UserAuthority: true, TransportIdentity: "cert:fixture"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:update-retry", UserAuthority: true, TransportIdentity: "cert:fixture"}
 	invoke := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, e := json.Marshal(args)
@@ -444,7 +444,7 @@ func exerciseUpdateRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, han
 			t.Fatal(e)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status, out)
 		}
 		return out

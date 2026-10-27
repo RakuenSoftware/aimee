@@ -4,18 +4,18 @@ import (
 	"context"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // A deadlock aborts the PostgreSQL transaction. A deletion can then start from
 // its original scope and authority in a fresh transaction, including admission
 // and audit, rather than reporting a healthy memory owner as unavailable.
 // Caller-owned transactions and other failures retain their existing contract.
-func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func handleData(options handlerOptions, invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	request, err := decodeDataRequest(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	backend, ok := options.data.(*postgresDataStore)
 	retry := ok && options.placement == PlacementKB &&
@@ -37,7 +37,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	for attempt := 0; ; attempt++ {
 		var failure error
 		result, status := handleDataAttempt(options, invocation, request, &failure)
-		if status != bus.ModuleStatusInternal || memoryFailureClass(failure) != "sqlstate_40P01" || attempt == 2 {
+		if status != ring.ModuleStatusInternal || memoryFailureClass(failure) != "sqlstate_40P01" || attempt == 2 {
 			return result, status
 		}
 		// handleDataAttempt has rolled back and discarded its audit batch before
@@ -46,7 +46,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		case <-timer.C:
 		}
 	}

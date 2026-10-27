@@ -8,12 +8,12 @@ import (
 	"time"
 
 	contract "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-type sharedLifecycleCaller struct{ handler bus.ModuleHandler }
+type sharedLifecycleCaller struct{ handler ring.ModuleHandler }
 
 func (c sharedLifecycleCaller) Call(ctx context.Context, kind, stage uint32, _ uint64, _ time.Duration, request []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
@@ -22,8 +22,8 @@ func (c sharedLifecycleCaller) Call(ctx context.Context, kind, stage uint32, _ u
 	if kind != families.Lifecycle.Event || stage != families.Lifecycle.Stage {
 		return nil, fmt.Errorf("unexpected lifecycle route")
 	}
-	body, status := c.handler(bus.ModuleInvocation{StageID: stage}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := c.handler(ring.ModuleInvocation{StageID: stage}, request)
+	if status != ring.ModuleStatusOK {
 		return nil, fmt.Errorf("lifecycle transport status %d", status)
 	}
 	return body, nil

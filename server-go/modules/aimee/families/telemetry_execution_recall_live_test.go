@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	memory "github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strings"
@@ -21,8 +21,8 @@ func TestExecutionGradeRecallRequiresHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, status := Telemetry.Handler(db)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 9}, frame)
-	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Telemetry.Handler(db)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 9}, frame)
+	if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("foreign module read history", status)
 	}
 	for _, fields := range [][]string{{"", "project"}, {"operator", ""}, {"operator", strings.Repeat("p", 257)}} {
@@ -116,11 +116,11 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 	memoryHandler := memory.NewHandler(nil, memory.WithDataStore(memory.PlacementServer, nil))
 	runtimeCall := func(args map[string]any) map[string]any {
 		body, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", body)
-		rendered, status := memoryHandler(bus.ModuleInvocation{StageID: memory.StageCommand}, frame)
-		payload, err := bus.DecodeCommandResult(rendered)
+		frame, _ := ring.EncodeCommand("runtime", body)
+		rendered, status := memoryHandler(ring.ModuleInvocation{StageID: memory.StageCommand}, frame)
+		payload, err := ring.DecodeCommandResult(rendered)
 		var result map[string]any
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(payload, &result) != nil {
+		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(payload, &result) != nil {
 			t.Fatal("runtime contract", status, err, string(rendered))
 		}
 		return result

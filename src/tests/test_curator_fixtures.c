@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include "cJSON.h"
 #include "kb_curator_grounding.h"
 
@@ -36,11 +36,11 @@ typedef struct
    int n_code_reject;
 } fx_stats_t;
 
-extern aimee_module_status_t aimee_kb_synthesis_module_handler(const aimee_module_invocation_t *,
-                                                               const uint8_t *, uint32_t, uint8_t *,
-                                                               uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_kb_synthesis_module_handler(const ouro_module_invocation_t *,
+                                                              const uint8_t *, uint32_t, uint8_t *,
+                                                              uint32_t, uint32_t *, void *);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -54,12 +54,12 @@ static int grounding_module_provider(aimee_kb_synthesis_claim_kind_t claim_kind,
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN];
    uint8_t response[AIMEE_KB_SYNTHESIS_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
    if (aimee_kb_synthesis_request_encode(claim_kind, claims, claim_count, callees, callee_count,
                                          request, sizeof(request)) != 0 ||
        aimee_kb_synthesis_module_handler(&invocation, request, sizeof(request), response,
                                          sizeof(response), &response_len,
-                                         NULL) != AIMEE_MODULE_STATUS_OK)
+                                         NULL) != OURO_MODULE_STATUS_OK)
       return -1;
    return aimee_kb_synthesis_response_decode(response, response_len, decision);
 }

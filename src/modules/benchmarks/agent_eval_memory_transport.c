@@ -7,7 +7,7 @@
 #include "headers/module_json_call.h"
 
 #include "headers/memory_stage_contract.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include "cJSON.h"
 
@@ -19,9 +19,9 @@
 
 static cJSON *memory_data_call(cJSON *request)
 {
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    return aimee_module_json_call(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
-                                 AIMEE_MODULE_MESSAGE_MAX_BODY, MEMORY_DATA_TIMEOUT_MS, &result);
+                                 OURO_MODULE_MESSAGE_MAX_BODY, MEMORY_DATA_TIMEOUT_MS, &result);
 }
 
 static int copy_string(char *out, size_t cap, const cJSON *object, const char *name)

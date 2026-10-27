@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type ingressEntry struct {
@@ -470,12 +470,12 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	return result, nil
 }
 
-func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	raw, err := json.Marshal(args)
 	var request ingressAssemblyRequest
 	_, limitsPresent := args["context_limits"]
 	if err != nil || json.Unmarshal(raw, &request) != nil || (limitsPresent && request.ContextLimits == nil) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	result, err := ingressAssemble(request)
 	if err != nil {
@@ -483,7 +483,7 @@ func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, bus.M
 		if errors.As(err, &refusal) {
 			return commandResult(commandError(refusal.kind, refusal.message))
 		}
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if raw := args["_health_context"]; len(raw) > 0 {
 		var capture healthQueryContext

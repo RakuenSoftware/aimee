@@ -489,37 +489,6 @@ jobs:
       - name: Reject reachable Go vulnerabilities
         run: make -C src go-vulncheck GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
 
-  # The Rust reference bus client: the third independent client of the single
-  # C host. Its own job because it needs a toolchain no other job installs, and
-  # folded into the `unit-tests` aggregate below so it gates.
-  rust-bus-tests:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # Pinned in rust/rust-toolchain.toml so coverage cannot change with a
-      # runner image bump. rustup is preinstalled on the image; the toolchain
-      # it installs is the pinned one, not the image's.
-      - name: Install the pinned Rust toolchain
-        working-directory: rust
-        run: |
-          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
-          test -n "$channel"
-          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
-          cargo --version
-      - name: Fetch crates
-        working-directory: rust
-        run: |
-          for attempt in 1 2 3 4 5; do
-            cargo fetch --locked && break
-            test "$attempt" -lt 5 || exit 1
-            sleep $((attempt * 5))
-          done
-      - name: Rust bus client conformance
-        run: make -C src rust-bus-tests
-
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -1193,7 +1162,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, rust-bus-tests, memory-backends, frontend-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -1207,7 +1176,6 @@ jobs:
           POSTGRES_REPLAY_RESULT: ${{ needs.postgres-knowledge-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
-          RUST_BUS_RESULT: ${{ needs.rust-bus-tests.result }}
           MEMORY_BACKENDS_RESULT: ${{ needs.memory-backends.result }}
           FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
@@ -1244,10 +1212,6 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
-          [ "$RUST_BUS_RESULT" = success ] || {
-            echo "Rust bus client result: $RUST_BUS_RESULT" >&2
-            exit 1
-          }
           [ "$FRONTEND_RESULT" = success ] || {
             echo "Frontend unit/browser result: $FRONTEND_RESULT" >&2
             exit 1
@@ -1256,7 +1220,7 @@ jobs:
             echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, the Rust bus client, frontend unit/browser tests, and the real-provider LSP baseline passed."
+          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.

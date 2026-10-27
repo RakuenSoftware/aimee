@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,18 +30,18 @@ func TestServedViewProtectedPacking(t *testing.T) {
 func TestServedViewPublicValidation(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, raw := range []string{`{"view":"bogus","task":"x"}`, `{"view":"briefing","task":""}`, `{"view":"historical_context","task":"x"}`, `{"view":"current_state","task":"x","valid_at":"2025-01-01T00:00:00Z"}`, `{"view":"briefing","task":"x","limit":1.2}`, `{"view":"briefing","task":"x","context_limits":{"schema_version":1,"max_context_tokens":5}}`} {
-		frame, _ := bus.EncodeCommand("serve", []byte(raw))
-		reply, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("serve", []byte(raw))
+		reply, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
-		body, _ := bus.DecodeCommandResult(reply)
+		body, _ := ring.DecodeCommandResult(reply)
 		if !strings.Contains(string(body), `"status":"error"`) {
 			t.Fatal(string(body))
 		}
 	}
-	frame, _ := bus.EncodeCommand("serve", []byte(`{"view":"briefing","task":"x"}`))
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 123}, frame); status != bus.ModuleStatusInvalidRequest {
+	frame, _ := ring.EncodeCommand("serve", []byte(`{"view":"briefing","task":"x"}`))
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 123}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("plugin forged owner", status)
 	}
 }

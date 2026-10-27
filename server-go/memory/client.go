@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var (
@@ -52,7 +52,7 @@ func (c *Client) call(ctx context.Context, event, stage uint32, trace uint64, re
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(request) > int(bus.ModuleMessageMaxBody) {
+	if len(request) > int(ring.ModuleMessageMaxBody) {
 		return nil, ErrClientRequest
 	}
 	deadline := c.deadline
@@ -68,7 +68,7 @@ func (c *Client) call(ctx context.Context, event, stage uint32, trace uint64, re
 	if err != nil {
 		return nil, err
 	}
-	if len(response) > int(bus.ModuleMessageMaxBody) {
+	if len(response) > int(ring.ModuleMessageMaxBody) {
 		return nil, ErrClientResponse
 	}
 	return response, nil
@@ -125,7 +125,7 @@ func (c *Client) CheckFact(ctx context.Context, trace uint64, head NodeKind, rel
 }
 
 func clientText(magic uint32, text string) ([]byte, error) {
-	if len(text) > int(bus.ModuleMessageMaxBody)-12 {
+	if len(text) > int(ring.ModuleMessageMaxBody)-12 {
 		return nil, ErrClientRequest
 	}
 	request := clientHeader(magic, 12)
@@ -174,7 +174,7 @@ func (c *Client) ScanTurn(ctx context.Context, trace uint64, text string) (TurnS
 }
 
 func (c *Client) Sensitivities(ctx context.Context, trace uint64, relations []string) ([]RelSensitivity, error) {
-	if len(relations) == 0 || len(relations) > (int(bus.ModuleMessageMaxBody)-SensRequestHeaderLen)/2 {
+	if len(relations) == 0 || len(relations) > (int(ring.ModuleMessageMaxBody)-SensRequestHeaderLen)/2 {
 		return nil, ErrClientRequest
 	}
 	size := SensRequestHeaderLen
@@ -183,7 +183,7 @@ func (c *Client) Sensitivities(ctx context.Context, trace uint64, relations []st
 			return nil, ErrClientRequest
 		}
 		size += 2 + len(relation)
-		if size > int(bus.ModuleMessageMaxBody) {
+		if size > int(ring.ModuleMessageMaxBody) {
 			return nil, ErrClientRequest
 		}
 	}
@@ -215,7 +215,7 @@ func (c *Client) Sensitivities(ctx context.Context, trace uint64, relations []st
 }
 
 func (c *Client) Extract(ctx context.Context, trace uint64, text string, max uint32) ([]Triple, error) {
-	if max == 0 || len(text) > int(bus.ModuleMessageMaxBody)-ExtractRequestHeaderLen {
+	if max == 0 || len(text) > int(ring.ModuleMessageMaxBody)-ExtractRequestHeaderLen {
 		return nil, ErrClientRequest
 	}
 	request := clientHeader(ExtractRequestMagic, ExtractRequestHeaderLen)
@@ -349,7 +349,7 @@ func (c *Client) Embed(ctx context.Context, trace uint64, request EmbedRequest) 
 // DataJSON preserves exact integer tokens and unknown versioned payload fields.
 // The fixed authority validates operation-specific fields and all authorization.
 func (c *Client) DataJSON(ctx context.Context, trace uint64, request []byte) (json.RawMessage, error) {
-	if len(request) == 0 || len(request) > int(bus.ModuleMessageMaxBody) {
+	if len(request) == 0 || len(request) > int(ring.ModuleMessageMaxBody) {
 		return nil, ErrClientRequest
 	}
 	var envelope struct {
@@ -381,7 +381,7 @@ func (c *Client) DataJSON(ctx context.Context, trace uint64, request []byte) (js
 // surface response, including degraded evidence, typed argument and not-found errors. Transport
 // failures remain errors and are never retried here.
 func (c *Client) Command(ctx context.Context, trace uint64, verb string, args json.RawMessage) (json.RawMessage, error) {
-	frame, err := bus.EncodeCommand(verb, args)
+	frame, err := ring.EncodeCommand(verb, args)
 	if err != nil {
 		return nil, ErrClientRequest
 	}
@@ -389,7 +389,7 @@ func (c *Client) Command(ctx context.Context, trace uint64, verb string, args js
 	if err != nil {
 		return nil, err
 	}
-	body, err := bus.DecodeCommandResult(reply)
+	body, err := ring.DecodeCommandResult(reply)
 	if err != nil {
 		return nil, ErrClientResponse
 	}

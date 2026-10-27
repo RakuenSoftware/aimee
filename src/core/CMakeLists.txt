@@ -7,7 +7,6 @@ include(CMakePackageConfigHelpers)
 option(AIMEE_CORE_WITH_OPENSSL "Build the OpenSSL connection backend" ON)
 option(AIMEE_CORE_WITH_NATIVE_TLS "Build the platform native TLS client API" ON)
 set(AIMEE_CORE_CONFIG_NEEDS_OPENSSL OFF)
-set(AIMEE_CORE_EVENT_BUS_ENABLED OFF)
 if(UNIX AND NOT APPLE AND AIMEE_CORE_WITH_NATIVE_TLS AND NOT AIMEE_CORE_WITH_OPENSSL)
     message(FATAL_ERROR "Native TLS on this platform requires AIMEE_CORE_WITH_OPENSSL")
 endif()
@@ -72,54 +71,6 @@ elseif(AIMEE_CORE_WITH_OPENSSL)
     target_link_libraries(aimee-core-connection PUBLIC OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(AIMEE_CORE_EVENT_BUS_ENABLED ON)
-    find_package(Threads REQUIRED)
-    add_library(aimee-core-event-bus-client STATIC
-        event_bus/bus_attach.c
-        event_bus/bus_client.c
-        event_bus/bus_endpoint.c
-        event_bus/module_client.c
-        event_bus/module_protocol.c
-        event_bus/module_runtime.c
-        event_bus/bus_region.c
-        event_bus/bus_ring.c
-        event_bus/bus_wire.c
-    )
-    target_compile_features(aimee-core-event-bus-client PUBLIC c_std_11)
-target_link_libraries(aimee-core-event-bus-client PUBLIC aimee-core-types)
-    target_include_directories(aimee-core-event-bus-client PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/event_bus/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    target_link_libraries(aimee-core-event-bus-client PUBLIC Threads::Threads)
-
-    add_library(aimee-core-event-bus STATIC
-        event_bus/bus_attach.c
-        event_bus/bus_arena.c
-        event_bus/bus_capture.c
-        event_bus/bus_client.c
-        event_bus/bus_endpoint.c
-        event_bus/bus_host.c
-        event_bus/module_client.c
-        event_bus/module_protocol.c
-        event_bus/module_runtime.c
-        event_bus/bus_region.c
-        event_bus/bus_region_host.c
-        event_bus/bus_ring.c
-        event_bus/bus_route.c
-        event_bus/bus_runtime.c
-        event_bus/bus_wire.c
-    )
-    target_compile_features(aimee-core-event-bus PUBLIC c_std_11)
-target_link_libraries(aimee-core-event-bus PUBLIC aimee-core-types)
-    target_include_directories(aimee-core-event-bus PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/event_bus/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    target_link_libraries(aimee-core-event-bus PUBLIC Threads::Threads)
-    install(TARGETS aimee-core-event-bus aimee-core-event-bus-client EXPORT aimee-core-targets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-    install(DIRECTORY event_bus/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-endif()
 
 install(TARGETS aimee-core-connection EXPORT aimee-core-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

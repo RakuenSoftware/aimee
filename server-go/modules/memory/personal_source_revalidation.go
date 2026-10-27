@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Private references are checked only against the process's own private store.
@@ -46,9 +46,9 @@ func (s *postgresDataStore) revalidatePersonalSources(ctx context.Context, reque
 	return err == nil && count == len(request.Sources), err
 }
 
-func handlePersonalSourceRevalidation(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handlePersonalSourceRevalidation(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || options.placement != PlacementServer {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	request := DataRequest{Operation: "personal-source-revalidate"}
 	if json.Unmarshal(args["revalidation"], &request.Revalidation) != nil || !request.Revalidation.valid() {
@@ -56,12 +56,12 @@ func handlePersonalSourceRevalidation(options handlerOptions, invocation bus.Mod
 	}
 	raw, _ := json.Marshal(request)
 	result, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "private source owner unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(result, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

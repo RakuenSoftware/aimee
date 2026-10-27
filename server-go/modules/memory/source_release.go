@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const sourceReleaseTTL = 15 * time.Minute
@@ -306,7 +306,7 @@ func (s *sourceReleaseState) drop(token, binding string, ancestors bool) {
 	}
 }
 
-func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, ring.ModuleStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expire(time.Now())
@@ -315,7 +315,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 
 // Caller holds the owner mutex. Private fork candidates use the identical
 // challenge/result validation without becoming public source handles.
-func (s *sourceReleaseState) handleSourceReleaseLocked(args commandArgs, candidate *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
+func (s *sourceReleaseState) handleSourceReleaseLocked(args commandArgs, candidate *sourceReleaseEntry) ([]byte, ring.ModuleStatus) {
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
 	if candidate != nil {

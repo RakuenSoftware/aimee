@@ -35,8 +35,8 @@
 #include "transport.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 
@@ -379,14 +379,14 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
    }
    db1_request_encode(request, op, fields, count);
    uint64_t deadline = aimee_module_call_deadline_ns(sessions_call_timeout_ms(op));
-   aimee_module_call_result_t rc;
+   ouro_module_call_result_t rc;
    for (;;)
    {
       rc = obs_bus_module_call(AIMEE_DB1_EVENT_SESSIONS, AIMEE_DB1_STAGE_SESSIONS, 0, deadline,
                               request, (uint32_t)request_len, response, capacity, &length,
                               NULL, NULL);
-      if (rc != AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
-          length > AIMEE_MODULE_MESSAGE_MAX_BODY)
+      if (rc != OURO_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
+          length > OURO_MODULE_MESSAGE_MAX_BODY)
          break;
       uint8_t *grown = realloc(response, length);
       if (!grown)
@@ -398,7 +398,7 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
    int status = -1;
    char **cells = NULL;
    uint32_t n = 0;
-   if (rc != AIMEE_MODULE_CALL_OK || length < 8 || length > capacity)
+   if (rc != OURO_MODULE_CALL_OK || length < 8 || length > capacity)
       goto done;
    status = (int)aimee_db1_get_u32(response);
    n = aimee_db1_get_u32(response + 4);

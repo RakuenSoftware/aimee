@@ -2,12 +2,13 @@
 #include "cJSON.h"
 #include <sys/socket.h>
 
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_endpoint.h>
-#include <aimee/core/event_bus/bus_host.h>
-#include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/client.h>
+#include <aimee/audit/instance_identity.h>
+#include <ouroboros/endpoint.h>
+#include <ouroboros/host.h>
+#include <ouroboros/runtime.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/benchmarks/module_api.h>
 #include <aimee/sandbox/module_api.h>
 #include <aimee/control-web/module_api.h>
@@ -64,37 +65,37 @@
 
 typedef struct
 {
-   aimee_module_process_config_t config;
+   ouro_module_process_config_t config;
    int result;
 } process_thread_t;
 
 typedef struct
 {
-   bus_host_t *host;
+   ouro_host_t *host;
    pthread_mutex_t *lock;
    atomic_int stop;
 } pump_thread_t;
 
-static void pump(bus_host_t *host, pthread_mutex_t *lock);
+static void pump(ouro_host_t *host, pthread_mutex_t *lock);
 
-static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
-                                    const uint8_t *request, uint32_t request_len, uint8_t *response,
-                                    uint32_t response_capacity, uint32_t *response_len,
-                                    void *user_data)
+static ouro_module_status_t handle(const ouro_module_invocation_t *invocation,
+                                   const uint8_t *request, uint32_t request_len, uint8_t *response,
+                                   uint32_t response_capacity, uint32_t *response_len,
+                                   void *user_data)
 {
    (void)user_data;
    if (request_len == 6 && memcmp(request, "cancel", 6) == 0)
    {
       const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
-      while (!aimee_module_invocation_cancelled(invocation))
+      while (!ouro_module_invocation_cancelled(invocation))
          nanosleep(&pause, NULL);
-      return AIMEE_MODULE_STATUS_OK; /* core converts this to CANCELLED */
+      return OURO_MODULE_STATUS_OK; /* core converts this to CANCELLED */
    }
    if (request_len > response_capacity)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    memcpy(response, request, request_len);
    *response_len = request_len;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
 /* The private owner must finish its storage-owned erasure replay before it
@@ -102,10 +103,10 @@ static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
  * operation; all other storage work remains unavailable. Real non-owner SQL
  * behavior is covered by the PostgreSQL replay suite, not this wire fixture. */
 static atomic_int startup_replays;
-static aimee_module_status_t startup_store(const aimee_module_invocation_t *invocation,
-                                           const uint8_t *request, uint32_t request_len,
-                                           uint8_t *response, uint32_t response_capacity,
-                                           uint32_t *response_len, void *user_data)
+static ouro_module_status_t startup_store(const ouro_module_invocation_t *invocation,
+                                          const uint8_t *request, uint32_t request_len,
+                                          uint8_t *response, uint32_t response_capacity,
+                                          uint32_t *response_len, void *user_data)
 {
    (void)invocation;
    (void)user_data;
@@ -114,7 +115,7 @@ static aimee_module_status_t startup_store(const aimee_module_invocation_t *invo
    expected[16] = sizeof(sql) - 1;
    memcpy(expected + 20, sql, sizeof(sql) - 1);
    if (request_len != sizeof(expected) || memcmp(request, expected, sizeof(expected)) != 0)
-      return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      return OURO_MODULE_STATUS_CAPABILITY_ABSENT;
    assert(response_capacity >= 29);
    memset(response, 0, 29);
    response[12] = 1; /* one column */
@@ -122,16 +123,16 @@ static aimee_module_status_t startup_store(const aimee_module_invocation_t *invo
    response[20] = 2; /* int64 zero */
    *response_len = 29;
    atomic_fetch_add(&startup_replays, 1);
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
 /* Config is independently served at startup. The fixture supplies the public
  * snapshot contract, never a native config parser or secret-bearing values. */
 static atomic_int startup_snapshots;
-static aimee_module_status_t startup_config(const aimee_module_invocation_t *invocation,
-                                            const uint8_t *request, uint32_t request_len,
-                                            uint8_t *response, uint32_t capacity,
-                                            uint32_t *response_len, void *user_data)
+static ouro_module_status_t startup_config(const ouro_module_invocation_t *invocation,
+                                           const uint8_t *request, uint32_t request_len,
+                                           uint8_t *response, uint32_t capacity,
+                                           uint32_t *response_len, void *user_data)
 {
    (void)invocation;
    (void)user_data;
@@ -142,13 +143,13 @@ static aimee_module_status_t startup_config(const aimee_module_invocation_t *inv
    memcpy(response, snapshot, sizeof(snapshot) - 1);
    *response_len = sizeof(snapshot) - 1;
    atomic_fetch_add(&startup_snapshots, 1);
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
-   thread->result = aimee_module_process_run(&thread->config);
+   thread->result = ouro_module_process_run(&thread->config);
    return NULL;
 }
 
@@ -177,14 +178,14 @@ static void *cancel_soon(void *context)
    return NULL;
 }
 
-static void pump(bus_host_t *host, pthread_mutex_t *lock)
+static void pump(ouro_host_t *host, pthread_mutex_t *lock)
 {
    pthread_mutex_lock(lock);
-   (void)bus_host_pump(host);
+   (void)ouro_host_pump(host);
    pthread_mutex_unlock(lock);
 }
 
-static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t count, pid_t child,
+static void wait_for_clients(ouro_host_t *host, pthread_mutex_t *lock, uint32_t count, pid_t child,
                              uint32_t event_kind)
 {
    const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
@@ -192,7 +193,7 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    {
       pthread_mutex_lock(lock);
       uint32_t admitted = host->admitted;
-      int serving = bus_host_kind_has_server(host, event_kind);
+      int serving = ouro_host_kind_has_server(host, event_kind);
       pthread_mutex_unlock(lock);
       if (admitted >= count && serving)
          return;
@@ -236,9 +237,9 @@ static void run_memory_probe(const char *executable, const char *socket_path)
 /* Keep the host and its callers alive while the independent memory process is
  * killed. Its two connections and the finished probe must leave the bus before
  * a replacement can be admitted under the same grants. */
-static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
-                                      pthread_mutex_t *lock, bus_client_t *caller,
-                                      bus_client_t *embedding_host)
+static void wait_for_memory_departure(ouro_runtime_t *runtime, ouro_host_t *host,
+                                      pthread_mutex_t *lock, ouro_client_t *caller,
+                                      ouro_client_t *embedding_host)
 {
    const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
    for (int i = 0; i < 10000; ++i)
@@ -246,11 +247,11 @@ static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
       struct timespec now;
       assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
       uint64_t now_ns = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
-      bus_client_heartbeat(caller, now_ns);
-      bus_client_heartbeat(embedding_host, now_ns);
+      ouro_client_heartbeat(caller, now_ns);
+      ouro_client_heartbeat(embedding_host, now_ns);
       pthread_mutex_lock(lock);
       /* Production hosts call maintenance separately from dispatch pumping. */
-      (void)bus_runtime_maintain(runtime, now_ns);
+      (void)ouro_runtime_maintain(runtime, now_ns);
       uint32_t admitted = host->admitted;
       pthread_mutex_unlock(lock);
       if (admitted == 4)
@@ -260,7 +261,7 @@ static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
    assert(!"memory process connections survived termination");
 }
 
-static void memory_discovery_unavailable(aimee_module_client_t *client)
+static void memory_discovery_unavailable(ouro_module_client_t *client)
 {
    const uint8_t request[] = {'D', 'C', 'M', 'D', 2, 0, 0, 0};
    uint8_t response[1024];
@@ -269,9 +270,9 @@ static void memory_discovery_unavailable(aimee_module_client_t *client)
    struct timespec now;
    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
    uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
-   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 255u, 255u, 9901, deadline, request,
-                                   sizeof(request), response, sizeof(response), &response_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(ouro_module_client_call(client, 4096u + 7u * 256u + 255u, 255u, 9901, deadline, request,
+                                  sizeof(request), response, sizeof(response), &response_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    assert(response_len == 0);
 }
 
@@ -418,7 +419,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    }
    else if (strcmp(name, "server") == 0 || strcmp(name, "kb") == 0)
    {
-      *principal_ref = strcmp(name, "server") == 0 ? BUS_SERVER_ROLE_REF : BUS_KB_ROLE_REF;
+      *principal_ref = strcmp(name, "server") == 0 ? AIMEE_SERVER_ROLE_REF : AIMEE_KB_ROLE_REF;
       *kind = 4096u + *principal_ref * 256u + 1u;
    }
    else if (strcmp(name, "aimee") == 0)
@@ -441,7 +442,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    return 0;
 }
 
-static void smoke_production_module(aimee_module_client_t *client, const char *name, uint32_t kind)
+static void smoke_production_module(ouro_module_client_t *client, const char *name, uint32_t kind)
 {
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
    uint8_t response[1024] = {0};
@@ -449,9 +450,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    if (strcmp(name, "server") == 0 || strcmp(name, "kb") == 0)
    {
       const char identity_request[] = "{\"operation\":\"identity\"}";
-      assert(aimee_module_client_call(client, kind, 1, 2110, 0, identity_request,
-                                      sizeof(identity_request) - 1, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2110, 0, identity_request,
+                                     sizeof(identity_request) - 1, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len < sizeof(response));
       response[response_len] = 0;
       char expected[64];
@@ -464,9 +465,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       uint32_t mask = 0;
       assert(aimee_learning_request_encode("correction", request, sizeof(request)) == 0);
       request_len = AIMEE_LEARNING_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2001, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2001, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_learning_response_decode(response, response_len, &mask) == 0);
       assert(mask == (AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE |
                       AIMEE_LEARNING_SINK_RULE));
@@ -477,19 +478,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_routing_request_encode(AIMEE_ROUTING_SELECT_BALANCED, 3, request,
                                           sizeof(request)) == 0);
       request_len = AIMEE_ROUTING_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2002, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2002, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_routing_response_decode(response, response_len, 3, &selected) == 0);
       assert(selected == 0);
       static const char plan[] =
           "{\"version\":1,\"input_tokens\":1000,\"output_tokens\":100,\"candidates\":["
           "{\"name\":\"paid\",\"prices\":{\"input\":1,\"output\":2}},"
           "{\"name\":\"free\",\"tier\":9,\"overrides\":{\"input\":0,\"output\":0}}]}";
-      assert(aimee_module_client_call(client, AIMEE_ROUTING_EVENT_PLAN, AIMEE_ROUTING_STAGE_PLAN,
-                                      2102, 0, (const uint8_t *)plan, sizeof(plan) - 1, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_ROUTING_EVENT_PLAN, AIMEE_ROUTING_STAGE_PLAN,
+                                     2102, 0, (const uint8_t *)plan, sizeof(plan) - 1, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len == strlen("{\"selected\":1}"));
       assert(memcmp(response, "{\"selected\":1}", response_len) == 0);
    }
@@ -499,9 +500,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
                                             sizeof(request)) == 0);
       request_len = AIMEE_DELEGATES_MESSAGE_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                             role, sizeof(role)) == 0);
       assert(strcmp(role, "code") == 0);
@@ -521,10 +522,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
           prose, (size_t)prose_length, known, 1, 0, AIMEE_DELEGATES_RESCUE_MODE_PARSE,
           rescue_request, sizeof rescue_request);
       assert(rescue_length && rescue_request[4] == 2);
-      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
-                                      AIMEE_DELEGATES_STAGE_RESCUE, 3119, 0, rescue_request,
-                                      (uint32_t)rescue_length, response, sizeof response,
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                     AIMEE_DELEGATES_STAGE_RESCUE, 3119, 0, rescue_request,
+                                     (uint32_t)rescue_length, response, sizeof response,
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len && response_len < sizeof response);
       response[response_len] = 0;
       cJSON *rescued = cJSON_Parse((const char *)response);
@@ -539,19 +540,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(strstr((const char *)response, "9007199254740993"));
       cJSON_Delete(rescued);
       rescue_request[4] = 1;
-      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
-                                      AIMEE_DELEGATES_STAGE_RESCUE, 3120, 0, rescue_request,
-                                      (uint32_t)rescue_length, response, sizeof response,
-                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                     AIMEE_DELEGATES_STAGE_RESCUE, 3120, 0, rescue_request,
+                                     (uint32_t)rescue_length, response, sizeof response,
+                                     &response_len, NULL, NULL) != OURO_MODULE_CALL_OK);
    }
    else if (strcmp(name, "tools") == 0)
    {
       aimee_tool_class_t classification = AIMEE_TOOL_CLASS_UNKNOWN;
       assert(aimee_tools_request_encode("bash", request, sizeof(request)) == 0);
       request_len = AIMEE_TOOLS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2004, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2004, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_tools_response_decode(response, response_len, &classification) == 0);
       assert(classification == AIMEE_TOOL_CLASS_EXEC);
       for (size_t i = 0; i < sizeof(aimee_tool_catalog) / sizeof(aimee_tool_catalog[0]); ++i)
@@ -560,9 +561,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
          request_len =
              (uint32_t)aimee_tools_metadata_request_encode(entry->name, request, sizeof request);
          assert(request_len > 0);
-         assert(aimee_module_client_call(client, kind, 1, 21000 + i, 0, request, request_len,
-                                         response, sizeof response, &response_len, NULL,
-                                         NULL) == AIMEE_MODULE_CALL_OK);
+         assert(ouro_module_client_call(client, kind, 1, 21000 + i, 0, request, request_len,
+                                        response, sizeof response, &response_len, NULL,
+                                        NULL) == OURO_MODULE_CALL_OK);
          aimee_tool_metadata_t actual;
          assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == 0);
          assert(actual.classification == entry->metadata.classification);
@@ -572,9 +573,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       request_len = (uint32_t)aimee_tools_metadata_request_encode("unregistered_tool", request,
                                                                   sizeof request);
       assert(request_len > 0);
-      assert(aimee_module_client_call(client, kind, 1, 22000, 0, request, request_len, response,
-                                      sizeof response, &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 22000, 0, request, request_len, response,
+                                     sizeof response, &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       aimee_tool_metadata_t unknown;
       assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == -1);
       assert(!unknown.categories);
@@ -585,9 +586,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       request_len =
           (uint32_t)aimee_tools_metadata_request_encode(long_name, request, sizeof request);
       assert(request_len > AIMEE_TOOLS_REQUEST_LEN);
-      assert(aimee_module_client_call(client, kind, 1, 22001, 0, request, request_len, response,
-                                      sizeof response, &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 22001, 0, request, request_len, response,
+                                     sizeof response, &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == 0);
       assert(unknown.classification == AIMEE_TOOL_CLASS_REMOTE);
    }
@@ -598,9 +599,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_workspace_request_encode(reference, strlen(reference), request,
                                             sizeof(request)) == 0);
       request_len = AIMEE_WORKSPACE_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2005, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2005, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_workspace_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "git") == 0)
@@ -608,26 +609,26 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       aimee_git_classification_t classification = {0};
       assert(aimee_git_request_encode("push", request, sizeof(request)) == 0);
       request_len = AIMEE_GIT_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2006, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2006, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_git_response_decode(response, response_len, &classification) == 0);
       assert(classification.operation == AIMEE_GIT_OP_PUSH && classification.needs_credentials);
 
       int allowed = 0;
       assert(aimee_git_ref_request_encode("feature/topic-1", request, sizeof(request)) == 0);
-      assert(aimee_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
-                                      AIMEE_GIT_STAGE_REF_VALIDATE, 2016, 0, request,
-                                      AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
+                                     AIMEE_GIT_STAGE_REF_VALIDATE, 2016, 0, request,
+                                     AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
       assert(aimee_git_ref_request_encode(
                  "aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0", request,
                  sizeof(request)) == 0);
-      assert(aimee_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
-                                      AIMEE_GIT_STAGE_REF_VALIDATE, 2017, 0, request,
-                                      AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
+                                     AIMEE_GIT_STAGE_REF_VALIDATE, 2017, 0, request,
+                                     AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "skills") == 0)
@@ -635,9 +636,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       int fire = 0;
       assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
       request_len = AIMEE_SKILLS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2007, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2007, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
 
       const char *content = "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
@@ -647,10 +648,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
       assert(aimee_skills_trigger_request_encode(content, "Bash", "sleep 5", request,
                                                  sizeof(request)) == 0);
-      assert(aimee_module_client_call(client, AIMEE_SKILLS_EVENT_TRIGGER,
-                                      AIMEE_SKILLS_STAGE_TRIGGER, 2017, 0, request,
-                                      (uint32_t)encoded_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SKILLS_EVENT_TRIGGER, AIMEE_SKILLS_STAGE_TRIGGER,
+                                     2017, 0, request, (uint32_t)encoded_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
    }
    else if (strcmp(name, "response-composition") == 0)
@@ -670,9 +671,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
       assert(aimee_response_request_encode(&input, request, sizeof(request)) == 0);
       request_len = (uint32_t)encoded_len;
-      assert(aimee_module_client_call(client, kind, 1, 2008, 0, request, request_len, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, 1, 2008, 0, request, request_len, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_response_response_decode(response, response_len, key, sizeof(key)) == 0);
       assert(strcmp(key, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
    }
@@ -686,18 +687,18 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       aimee_governance_decision_t decision;
       request_len = (uint32_t)strlen(policy);
       memcpy(request, policy, request_len);
-      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
+                                     request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
       uint8_t retired[632] = {0};
       aimee_governance_put_u32(retired, 0x51564f47u);
       aimee_governance_put_u32(retired + 4, 1);
-      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2010, 0,
-                                      retired, sizeof(retired), response, sizeof(response),
-                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2010, 0,
+                                     retired, sizeof(retired), response, sizeof(response),
+                                     &response_len, NULL, NULL) != OURO_MODULE_CALL_OK);
    }
    else if (strcmp(name, "roundtable") == 0)
    {
@@ -706,9 +707,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking", request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_ROUNDTABLE_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2011, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2011, 0,
+                                     request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
                                               sizeof(severity)) == 0);
       assert(action == AIMEE_ROUNDTABLE_VERIFY_KEEP && strcmp(severity, "blocking") == 0);
@@ -720,9 +721,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_kb_synthesis_request_encode(AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0, callees, 3,
                                                request, sizeof(request)) == 0);
       request_len = AIMEE_KB_SYNTHESIS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_KB_SYNTHESIS_STAGE_GROUNDING, 2012, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_KB_SYNTHESIS_STAGE_GROUNDING, 2012, 0,
+                                     request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_kb_synthesis_response_decode(response, response_len, &decision) == 0);
       assert(decision.contradicts && strcmp(decision.reason, "PQexec") == 0);
    }
@@ -736,9 +737,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
          uint32_t status = 0;
          assert(aimee_runtime_web_request_encode(kinds[i], request, sizeof(request)) == 0);
          request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
-         assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013 + i,
-                                         0, request, request_len, response, sizeof(response),
-                                         &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+         assert(ouro_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013 + i, 0,
+                                        request, request_len, response, sizeof(response),
+                                        &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
          assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
          assert(status == statuses[i]);
       }
@@ -750,9 +751,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                               "/v1/servers/s1/health", request,
                                               sizeof(request)) == 0);
       request_len = AIMEE_CONTROL_WEB_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_CONTROL_WEB_STAGE_AUTHORIZE, 2014, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_CONTROL_WEB_STAGE_AUTHORIZE, 2014, 0,
+                                     request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "sandbox") == 0)
@@ -765,9 +766,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       request_len = (uint32_t)strlen(probe);
       assert(request_len <= sizeof(request));
       memcpy(request, probe, request_len);
-      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
-                                      2016, 0, request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                     2016, 0, request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "packages") != NULL);
@@ -782,10 +783,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       request_len = (uint32_t)strlen(learn);
       assert(request_len <= sizeof(request));
       memcpy(request, learn, request_len);
-      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_OBSERVE,
-                                      AIMEE_SANDBOX_STAGE_OBSERVE, 2017, 0, request, request_len,
-                                      response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SANDBOX_EVENT_OBSERVE,
+                                     AIMEE_SANDBOX_STAGE_OBSERVE, 2017, 0, request, request_len,
+                                     response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       /* Not just "it answered": it parsed one package and persisted it. */
@@ -797,9 +798,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
        * own input. */
       request_len = (uint32_t)strlen(probe);
       memcpy(request, probe, request_len);
-      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
-                                      2018, 0, request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                     2018, 0, request, request_len, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "tree") != NULL);
@@ -810,10 +811,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       const char *proxy = "{\"line\":\"CONNECT registry.npmjs.org:443 HTTP/1.1\"}";
       request_len = (uint32_t)strlen(proxy);
       memcpy(request, proxy, request_len);
-      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_REQUEST,
-                                      AIMEE_SANDBOX_STAGE_PROXY_REQUEST, 2022, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_REQUEST,
+                                     AIMEE_SANDBOX_STAGE_PROXY_REQUEST, 2022, 0, request,
+                                     request_len, response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"kind\":2") != NULL);
@@ -822,10 +823,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       const char *address = "{\"ip\":\"169.254.169.254\"}";
       request_len = (uint32_t)strlen(address);
       memcpy(request, address, request_len);
-      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_ADDRESS,
-                                      AIMEE_SANDBOX_STAGE_PROXY_ADDRESS, 2023, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_ADDRESS,
+                                     AIMEE_SANDBOX_STAGE_PROXY_ADDRESS, 2023, 0, request,
+                                     request_len, response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"blocked\":true") != NULL);
@@ -834,24 +835,24 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       static const uint8_t expected[] = {'J', 'C', 'M', 'P', 1, 0, 0, 0, 2, 0, 0, 0, '{', '}'};
       const char input[] = " { } ";
-      assert(aimee_module_client_call(client, kind, AIMEE_ECONOMIZER_STAGE_JSON_COMPACT, 2019, 0,
-                                      input, sizeof(input) - 1, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_ECONOMIZER_STAGE_JSON_COMPACT, 2019, 0,
+                                     input, sizeof(input) - 1, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len == sizeof(expected) && memcmp(response, expected, sizeof(expected)) == 0);
 
-      assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_TOOL_STATS,
-                                      AIMEE_ECONOMIZER_STAGE_TOOL_STATS, 2020, 0, NULL, 0, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_ECONOMIZER_EVENT_TOOL_STATS,
+                                     AIMEE_ECONOMIZER_STAGE_TOOL_STATS, 2020, 0, NULL, 0, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len == 72 && memcmp(response, "TSTA\1\0\0\0", 8) == 0);
 
       const char record_request[] = "{\"messages\":[{\"role\":\"assistant\",\"blocks\":[{\"type\":"
                                     "\"text\",\"text\":\"[done] changed "
                                     "src/server/session_compact.c\"}]}],\"start\":0,\"end\":1}";
-      assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
-                                      AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
-                                      sizeof(record_request) - 1, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
+                                     AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
+                                     sizeof(record_request) - 1, response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "src/server/session_compact.c") != NULL);
@@ -870,11 +871,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
          budget[8] = size;
          uint8_t commitment[SHA256_DIGEST_LENGTH];
          assert(SHA256(budget, 52 + sizeof(limits) - 1, commitment));
-         assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
-                                         AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2024 + size, 0,
-                                         budget, 52 + sizeof(limits) - 1, response,
-                                         sizeof(response), &response_len, NULL,
-                                         NULL) == AIMEE_MODULE_CALL_OK);
+         assert(ouro_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                        AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2024 + size, 0,
+                                        budget, 52 + sizeof(limits) - 1, response, sizeof(response),
+                                        &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
          assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
          assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
          assert(response[8] == 32 && response[9] == 0 && response[10] == 0 && response[11] == 0);
@@ -898,10 +898,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
             unsigned length = 56 + caller_len + sizeof(limits) - 1;
             uint8_t commitment[SHA256_DIGEST_LENGTH];
             assert(SHA256(budget, length, commitment));
-            assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
-                                            AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2030 + size, 0,
-                                            budget, length, response, sizeof(response),
-                                            &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+            assert(ouro_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                           AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2030 + size, 0,
+                                           budget, length, response, sizeof(response),
+                                           &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
             assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
             assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
             assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
@@ -918,10 +918,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
        * the contract being kept. What is proven either way is that the C caller
        * reaches the Go stage and gets its verdict back. */
       assert(aimee_postgres_health_request_encode(request, sizeof(request)) == 0);
-      aimee_module_call_result_t health = aimee_module_client_call(
+      ouro_module_call_result_t health = ouro_module_client_call(
           client, AIMEE_POSTGRES_EVENT_HEALTH, AIMEE_POSTGRES_STAGE_HEALTH, 2101, 0, request,
           AIMEE_POSTGRES_REQUEST_LEN, response, sizeof(response), &response_len, NULL, NULL);
-      if (health == AIMEE_MODULE_CALL_OK)
+      if (health == OURO_MODULE_CALL_OK)
          assert(response_len == AIMEE_POSTGRES_RESPONSE_LEN);
    }
    else if (strcmp(name, "execution-policy") == 0)
@@ -933,10 +933,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                  "\"arguments\":{\"command\":\"rm -rf /\"}}";
       assert(sizeof(body) - 1 <= sizeof(request));
       memcpy(request, body, sizeof(body) - 1);
-      assert(aimee_module_client_call(client, AIMEE_EXECUTION_POLICY_EVENT_TOOL,
-                                      AIMEE_EXECUTION_POLICY_STAGE_TOOL, 2102, 0, request,
-                                      (uint32_t)(sizeof(body) - 1), response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_EXECUTION_POLICY_EVENT_TOOL,
+                                     AIMEE_EXECUTION_POLICY_STAGE_TOOL, 2102, 0, request,
+                                     (uint32_t)(sizeof(body) - 1), response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"allowed\"") != NULL);
@@ -953,17 +953,17 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       aimee_providers_put_u32(record + 228, 4096);
       aimee_providers_put_u32(record + 236, AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW |
                                                 AIMEE_PROVIDERS_DECL_MAX_OUTPUT);
-      assert(aimee_module_client_call(
+      assert(ouro_module_client_call(
                  client, AIMEE_PROVIDERS_EVENT_VALIDATE, AIMEE_PROVIDERS_STAGE_VALIDATE, 2105, 0,
                  request, AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN, response, sizeof(response),
-                 &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                 &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_providers_get_u32(response + 8) == AIMEE_PROVIDERS_ERR_INVALID_DECLARATION);
 
       static const char body[] = "{\"operation\":\"provider.connections\",\"arguments\":{}}";
-      assert(aimee_module_client_call(client, AIMEE_PROVIDERS_EVENT_MANAGE,
-                                      AIMEE_PROVIDERS_STAGE_MANAGE, 2106, 0, body, sizeof(body) - 1,
-                                      response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_PROVIDERS_EVENT_MANAGE,
+                                     AIMEE_PROVIDERS_STAGE_MANAGE, 2106, 0, body, sizeof(body) - 1,
+                                     response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"providers\":[]") != NULL);
@@ -977,20 +977,20 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
           "\"method\":\"GET\",\"request_sha256\":\"invalid\"}";
       assert(sizeof(body) - 1 <= sizeof(request));
       memcpy(request, body, sizeof(body) - 1);
-      assert(aimee_module_client_call(client, AIMEE_EGRESS_EVENT_AUTHORIZE,
-                                      AIMEE_EGRESS_STAGE_AUTHORIZE, 2103, 0, request,
-                                      (uint32_t)(sizeof(body) - 1), response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_EGRESS_EVENT_AUTHORIZE,
+                                     AIMEE_EGRESS_STAGE_AUTHORIZE, 2103, 0, request,
+                                     (uint32_t)(sizeof(body) - 1), response, sizeof(response),
+                                     &response_len, NULL, NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"allowed\":false") != NULL);
       assert(strstr((const char *)response, "module-egress-v1") != NULL);
 
       response_len = 0;
-      assert(aimee_module_client_call(client, AIMEE_EGRESS_EVENT_CREDENTIAL_KEY,
-                                      AIMEE_EGRESS_STAGE_CREDENTIAL_KEY, 2104, 0, NULL, 0, response,
-                                      sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_EGRESS_EVENT_CREDENTIAL_KEY,
+                                     AIMEE_EGRESS_STAGE_CREDENTIAL_KEY, 2104, 0, NULL, 0, response,
+                                     sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"version\":1") != NULL);
@@ -1005,9 +1005,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2015, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2015, 0, request,
+                                     request_len, response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);
       assert(scores.mrr == 0.5 && scores.recall == 1.0);
       assert(scores.ndcg > 0.630929753571 && scores.ndcg < 0.630929753572);
@@ -1016,10 +1016,10 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       aimee_benchmarks_latency_summary_t summary;
       assert(aimee_benchmarks_latency_request_encode(latencies, 5, request, sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN;
-      assert(aimee_module_client_call(client, AIMEE_BENCHMARKS_EVENT_LATENCY,
-                                      AIMEE_BENCHMARKS_STAGE_LATENCY, 2016, 0, request, request_len,
-                                      response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(ouro_module_client_call(client, AIMEE_BENCHMARKS_EVENT_LATENCY,
+                                     AIMEE_BENCHMARKS_STAGE_LATENCY, 2016, 0, request, request_len,
+                                     response, sizeof(response), &response_len, NULL,
+                                     NULL) == OURO_MODULE_CALL_OK);
       assert(aimee_benchmarks_latency_response_decode(response, response_len, &summary) == 0);
       assert(summary.queries == 5 && summary.p50_ms == 5.0 && summary.p95_ms == 10.0 &&
              summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
@@ -1030,23 +1030,23 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
  * socket, matching the daemon's principal-zero in-process connection. */
 typedef struct
 {
-   bus_host_t *host;
+   ouro_host_t *host;
    int socket;
 } trusted_attach_t;
 static void *trusted_attach(void *arg)
 {
    trusted_attach_t *a = arg;
-   assert(bus_host_serve_attach(a->host, a->socket) == BUS_HOST_OK);
+   assert(ouro_host_serve_attach(a->host, a->socket) == OURO_HOST_OK);
    return NULL;
 }
-static void trusted_client(bus_host_t *host, bus_client_t *client)
+static void trusted_client(ouro_host_t *host, ouro_client_t *client)
 {
    int sockets[2];
    assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0);
    trusted_attach_t args = {host, sockets[1]};
    pthread_t thread;
    assert(pthread_create(&thread, NULL, trusted_attach, &args) == 0);
-   assert(bus_client_attach(sockets[0], client) == BUS_CLIENT_OK);
+   assert(ouro_client_attach(sockets[0], client) == OURO_CLIENT_OK);
    assert(pthread_join(thread, NULL) == 0);
    close(sockets[0]);
    close(sockets[1]);
@@ -1058,7 +1058,7 @@ static void command_word(uint8_t *p, uint32_t value)
    p[2] = value >> 16;
    p[3] = value >> 24;
 }
-static cJSON *host_plan(aimee_module_client_t *client, const char *args)
+static cJSON *host_plan(ouro_module_client_t *client, const char *args)
 {
    uint8_t request[2048] = {0}, reply[8192] = {0};
    size_t length = strlen(args);
@@ -1073,9 +1073,9 @@ static cJSON *host_plan(aimee_module_client_t *client, const char *args)
    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
    uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
    uint32_t reply_length = 0;
-   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 8u, 8u, 8801, deadline, request,
-                                   (uint32_t)(23 + length), reply, sizeof(reply), &reply_length,
-                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ouro_module_client_call(client, 4096u + 7u * 256u + 8u, 8u, 8801, deadline, request,
+                                  (uint32_t)(23 + length), reply, sizeof(reply), &reply_length,
+                                  NULL, NULL) == OURO_MODULE_CALL_OK);
    assert(reply_length > 12 && memcmp(reply, "CMPS", 4) == 0 && reply[4] == 1);
    cJSON *json = cJSON_ParseWithLength((const char *)reply + 12, reply_length - 12);
    assert(json && strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "status")),
@@ -1088,10 +1088,10 @@ static const char *json_string(const cJSON *object, const char *key)
    assert(value);
    return value;
 }
-static void smoke_host_gateway_plan(bus_client_t *host)
+static void smoke_host_gateway_plan(ouro_client_t *host)
 {
-   aimee_module_client_t client;
-   assert(aimee_module_client_init(&client, host) == 0);
+   ouro_module_client_t client;
+   assert(ouro_module_client_init(&client, host) == 0);
    cJSON *plan = host_plan(
        &client,
        "{\"operation\":\"gateway-plan\",\"phase\":\"context\","
@@ -1180,7 +1180,7 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    plan = host_plan(&client, "{\"operation\":\"ingress-metrics\"}");
    assert(cJSON_GetObjectItemCaseSensitive(plan, "recall_unavailable_total")->valueint == 1);
    cJSON_Delete(plan);
-   aimee_module_client_destroy(&client);
+   ouro_module_client_destroy(&client);
    puts("memory: authenticated host/Go process gateway plans and ingress policy passed");
 }
 
@@ -1228,11 +1228,11 @@ int main(int argc, char **argv)
    if (argc == 4)
       assert(realpath(argv[3], probe_executable) != NULL);
 
-   bus_instance_role_t role = argc >= 3 && strcmp(argv[2], "server") == 0 ? BUS_INSTANCE_SERVER
-                              : argc >= 3 && strcmp(argv[2], "kb") == 0   ? BUS_INSTANCE_KB
-                                                                          : BUS_INSTANCE_UNSET;
-   if (role != BUS_INSTANCE_UNSET)
-      assert(bus_instance_ensure_identity(directory, role, module_executable) == 0);
+   aimee_instance_role_t role = argc >= 3 && strcmp(argv[2], "server") == 0 ? AIMEE_INSTANCE_SERVER
+                                : argc >= 3 && strcmp(argv[2], "kb") == 0   ? AIMEE_INSTANCE_KB
+                                                                            : AIMEE_INSTANCE_UNSET;
+   if (role != AIMEE_INSTANCE_UNSET)
+      assert(aimee_instance_ensure_identity(directory, role, module_executable) == 0);
 
    uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
    memcpy(requested, served, serve_count * sizeof(*requested));
@@ -1242,104 +1242,105 @@ int main(int argc, char **argv)
    const uint32_t config_request[] = {4609u};
    const uint32_t action_publish[] = {3000u};
    const uint32_t provider_request[] = {12290u, 12295u, 4609u};
-   bus_runtime_grant_t grants[] = {{.principal_class = 1,
-                                    .principal_ref = module_ref,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = module_executable,
-                                    .serve = served,
-                                    .serve_count = serve_count},
-                                   {.principal_class = 1,
-                                    .principal_ref = CALLER_REF,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = executable,
-                                    .request = requested,
-                                    .request_count = serve_count + 1},
-                                   /* The migrated memory process owns its SQL
-                                    * and action observations through a second identity.
-                                    * The smoke calls below are deliberately
-                                    * store-free, but startup must still prove
-                                    * that the shipped process can attach the
-                                    * capability it will use in production. */
-                                   {.principal_class = 1,
-                                    .principal_ref = memory_process   ? 73
-                                                     : egress_process ? 75
-                                                                      : 74,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = module_executable,
-                                    .publish = memory_process ? action_publish : NULL,
-                                    .publish_count = memory_process ? 1 : 0,
-                                    .request = memory_process   ? memory_request
-                                               : egress_process ? config_request
-                                                                : provider_request,
-                                    .request_count = memory_process   ? 2
-                                                     : egress_process ? 1
-                                                                      : 3},
-                                   {.principal_class = 1,
-                                    .principal_ref = 2,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = executable,
-                                    .serve = config_request,
-                                    .serve_count = 1},
-                                   {.principal_class = 1,
-                                    .principal_ref = 200,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = probe_executable,
-                                    .request = requested,
-                                    .request_count = serve_count},
-                                   {.principal_class = 1,
-                                    .principal_ref = 28,
-                                    .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = executable,
-                                    .serve = postgres_request,
-                                    .serve_count = 1}};
-   bus_host_config_t host_config = {.max_slots = 8,
-                                    .slot_size = 512,
-                                    .inline_budget = 400,
-                                    .queue_capacity = 16,
-                                    .arena_size = 16384};
-   bus_host_t host;
-   assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
-   bus_client_t embedding_host;
+   ouro_runtime_grant_t grants[] = {{.principal_class = 1,
+                                     .principal_ref = module_ref,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = module_executable,
+                                     .serve = served,
+                                     .serve_count = serve_count},
+                                    {.principal_class = 1,
+                                     .principal_ref = CALLER_REF,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = executable,
+                                     .request = requested,
+                                     .request_count = serve_count + 1},
+                                    /* The migrated memory process owns its SQL
+                                     * and action observations through a second identity.
+                                     * The smoke calls below are deliberately
+                                     * store-free, but startup must still prove
+                                     * that the shipped process can attach the
+                                     * capability it will use in production. */
+                                    {.principal_class = 1,
+                                     .principal_ref = memory_process   ? 73
+                                                      : egress_process ? 75
+                                                                       : 74,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = module_executable,
+                                     .publish = memory_process ? action_publish : NULL,
+                                     .publish_count = memory_process ? 1 : 0,
+                                     .request = memory_process   ? memory_request
+                                                : egress_process ? config_request
+                                                                 : provider_request,
+                                     .request_count = memory_process   ? 2
+                                                      : egress_process ? 1
+                                                                       : 3},
+                                    {.principal_class = 1,
+                                     .principal_ref = 2,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = executable,
+                                     .serve = config_request,
+                                     .serve_count = 1},
+                                    {.principal_class = 1,
+                                     .principal_ref = 200,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = probe_executable,
+                                     .request = requested,
+                                     .request_count = serve_count},
+                                    {.principal_class = 1,
+                                     .principal_ref = 28,
+                                     .uid = OURO_RUNTIME_SELF_UID,
+                                     .executable = executable,
+                                     .serve = postgres_request,
+                                     .serve_count = 1}};
+   ouro_host_config_t host_config = {.max_slots = 8,
+                                     .slot_size = 512,
+                                     .inline_budget = 400,
+                                     .queue_capacity = 16,
+                                     .arena_size = 16384};
+   ouro_host_t host;
+   assert(ouro_host_create(&host, &host_config, NULL, NULL) == OURO_HOST_OK);
+   ouro_client_t embedding_host;
    if (memory_process)
       trusted_client(&host, &embedding_host);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
-   bus_runtime_config_t runtime_config = {.instance_role = role,
-                                          .socket_path = socket_path,
-                                          .socket_mode = 0600,
-                                          .backlog = 8,
-                                          .stale_after_ns = 5000000000ULL,
-                                          .grants = grants,
-                                          .grant_count = memory_process   ? 6
-                                                         : egress_process ? 4
-                                                         : argc == 4      ? 4
-                                                         : (memory_process || provider_process)
-                                                             ? 3
-                                                             : 2};
+   ouro_runtime_config_t runtime_config = {.socket_path = socket_path,
+                                           .socket_mode = 0600,
+                                           .backlog = 8,
+                                           .stale_after_ns = 5000000000ULL,
+                                           .grants = grants,
+                                           .grant_count = memory_process   ? 6
+                                                          : egress_process ? 4
+                                                          : argc == 4      ? 4
+                                                          : (memory_process || provider_process)
+                                                              ? 3
+                                                              : 2};
+   runtime_config.refused_role_refs =
+       aimee_instance_refused_role_refs(role, &runtime_config.refused_role_ref_count);
    /* An external caller, when one is named, joins the plain fixture under its
     * own grant: the served kind and EMPTY_KIND, and nothing else. */
    const char *external_caller_env = argc < 3 ? getenv("AIMEE_TEST_MODULE_CALLER") : NULL;
    char external_caller[PATH_MAX] = "";
    const uint32_t external_request[] = {TEST_KIND, EMPTY_KIND};
-   bus_runtime_grant_t external_grants[3];
+   ouro_runtime_grant_t external_grants[3];
    if (external_caller_env && *external_caller_env)
    {
       assert(realpath(external_caller_env, external_caller) != NULL);
       assert(runtime_config.grant_count == 2);
       external_grants[0] = grants[0];
       external_grants[1] = grants[1];
-      external_grants[2] = (bus_runtime_grant_t){.principal_class = 1,
-                                                 .principal_ref = EXTERNAL_CALLER_REF,
-                                                 .uid = BUS_RUNTIME_SELF_UID,
-                                                 .executable = external_caller,
-                                                 .request = external_request,
-                                                 .request_count = 2};
+      external_grants[2] = (ouro_runtime_grant_t){.principal_class = 1,
+                                                  .principal_ref = EXTERNAL_CALLER_REF,
+                                                  .uid = OURO_RUNTIME_SELF_UID,
+                                                  .executable = external_caller,
+                                                  .request = external_request,
+                                                  .request_count = 2};
       runtime_config.grants = external_grants;
       runtime_config.grant_count = 3;
    }
-   bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
+   ouro_runtime_t *runtime = ouro_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
-   static const aimee_module_stage_t stages[] = {{TEST_KIND, TEST_STAGE}};
+   static const ouro_module_stage_t stages[] = {{TEST_KIND, TEST_STAGE}};
    process_thread_t process = {.config = {.socket_path = socket_path,
                                           .module_name = "test-module",
                                           .principal_class = 1,
@@ -1352,7 +1353,7 @@ int main(int argc, char **argv)
    pthread_t pump_thread;
    assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
 
-   static const aimee_module_stage_t sql_stage[] = {
+   static const ouro_module_stage_t sql_stage[] = {
        {AIMEE_POSTGRES_EVENT_SQL, AIMEE_POSTGRES_STAGE_SQL}};
    process_thread_t startup = {.config = {.socket_path = socket_path,
                                           .module_name = "startup-store-fixture",
@@ -1369,7 +1370,7 @@ int main(int argc, char **argv)
       assert(started == 0);
    }
 
-   static const aimee_module_stage_t config_stage[] = {{4609u, 1u}};
+   static const ouro_module_stage_t config_stage[] = {{4609u, 1u}};
    process_thread_t configuration = {.config = {.socket_path = socket_path,
                                                 .module_name = "startup-config-fixture",
                                                 .principal_class = 1,
@@ -1398,18 +1399,18 @@ int main(int argc, char **argv)
    }
 
    int caller_fd = -1;
-   bus_client_t caller;
-   assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
-   assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
-   assert(bus_endpoint_close(&caller_fd) == 0);
+   ouro_client_t caller;
+   assert(ouro_endpoint_connect(socket_path, &caller_fd) == 0);
+   assert(ouro_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == OURO_CLIENT_OK);
+   assert(ouro_endpoint_close(&caller_fd) == 0);
    wait_for_clients(&host, &host_lock,
                     memory_process                         ? 6
                     : (provider_process || egress_process) ? 3
                                                            : 2,
                     module_pid, test_kind);
 
-   aimee_module_client_t module_client;
-   assert(aimee_module_client_init(&module_client, &caller) == 0);
+   ouro_module_client_t module_client;
+   assert(ouro_module_client_init(&module_client, &caller) == 0);
    if (memory_process)
       smoke_host_gateway_plan(&embedding_host);
 
@@ -1442,9 +1443,8 @@ int main(int argc, char **argv)
 
    char body[64];
    uint32_t body_len = 0;
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1001, 0, "real-result",
-                                   11, body, sizeof body, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1001, 0, "real-result", 11,
+                                  body, sizeof body, &body_len, NULL, NULL) == OURO_MODULE_CALL_OK);
    assert(body_len == 11 && memcmp(body, "real-result", 11) == 0);
 
    uint8_t *large_request = malloc(LARGE_BODY);
@@ -1452,47 +1452,47 @@ int main(int argc, char **argv)
    assert(large_request != NULL && large_response != NULL);
    for (uint32_t i = 0; i < LARGE_BODY; ++i)
       large_request[i] = (uint8_t)((i * 131U + 17U) & 0xffU);
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1007, 0, large_request,
-                                   LARGE_BODY, large_response, LARGE_BODY, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1007, 0, large_request,
+                                  LARGE_BODY, large_response, LARGE_BODY, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_OK);
    assert(body_len == LARGE_BODY && memcmp(large_request, large_response, LARGE_BODY) == 0);
 
    /* A too-small destination still drains every response fragment and reports
     * the complete response length, leaving the next correlation usable. */
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1008, 0, large_request,
-                                   LARGE_BODY, body, sizeof body, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1008, 0, large_request,
+                                  LARGE_BODY, body, sizeof body, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == LARGE_BODY);
    free(large_response);
    free(large_request);
 
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4, body,
-                                   sizeof body, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4, body,
+                                  sizeof body, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_DEADLINE_EXCEEDED);
    assert(body_len == 0);
 
    atomic_int cancel;
    atomic_init(&cancel, 0);
    pthread_t cancel_thread;
    assert(pthread_create(&cancel_thread, NULL, cancel_soon, &cancel) == 0);
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1003, 0, "cancel", 6,
-                                   body, sizeof body, &body_len, cancellation_flag,
-                                   &cancel) == AIMEE_MODULE_CALL_CANCELLED);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1003, 0, "cancel", 6, body,
+                                  sizeof body, &body_len, cancellation_flag,
+                                  &cancel) == OURO_MODULE_CALL_CANCELLED);
    assert(pthread_join(cancel_thread, NULL) == 0 && body_len == 0);
 
    /* The cancelled handler's terminal reply may arrive after call() returned.
     * A subsequent call must drain that stale correlation and still complete. */
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1004, 0, "after", 5, body,
-                                   sizeof body, &body_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1004, 0, "after", 5, body,
+                                  sizeof body, &body_len, NULL, NULL) == OURO_MODULE_CALL_OK);
    assert(body_len == 5 && memcmp(body, "after", 5) == 0);
 
-   assert(aimee_module_client_call(&module_client, EMPTY_KIND, 2, 1005, 0, NULL, 0, body,
-                                   sizeof body, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(ouro_module_client_call(&module_client, EMPTY_KIND, 2, 1005, 0, NULL, 0, body,
+                                  sizeof body, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
 
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1006, 0, "toolarge", 8,
-                                   body, 3, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
+   assert(ouro_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1006, 0, "toolarge", 8,
+                                  body, 3, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == 8);
 
    /* A kind outside the caller's grant is refused by the host at once, as
@@ -1501,9 +1501,9 @@ int main(int argc, char **argv)
    assert(clock_gettime(CLOCK_MONOTONIC, &denied_now) == 0);
    uint64_t denied_deadline =
        (uint64_t)denied_now.tv_sec * 1000000000ULL + (uint64_t)denied_now.tv_nsec + 20000000000ULL;
-   assert(aimee_module_client_call(&module_client, DENIED_KIND, 3, 1009, denied_deadline, "x", 1,
-                                   body, sizeof body, &body_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_DENIED);
+   assert(ouro_module_client_call(&module_client, DENIED_KIND, 3, 1009, denied_deadline, "x", 1,
+                                  body, sizeof body, &body_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_CAPABILITY_DENIED);
    assert(body_len == 0);
 
    if (*external_caller)
@@ -1523,7 +1523,7 @@ int main(int argc, char **argv)
    }
 
 finish:
-   aimee_module_client_destroy(&module_client);
+   ouro_module_client_destroy(&module_client);
    if (module_pid > 0)
    {
       assert(kill(module_pid, SIGTERM) == 0);
@@ -1534,29 +1534,29 @@ finish:
    }
    else
    {
-      aimee_module_process_stop();
+      ouro_module_process_stop();
       assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
    }
    if (memory_process)
    {
       const char *placement = getenv("AIMEE_MODULE_PLACEMENT");
       assert(atomic_load(&startup_replays) == (strcmp(placement, "server") == 0 ? 2 : 0));
-      aimee_module_process_stop();
+      ouro_module_process_stop();
       assert(pthread_join(startup_thread, NULL) == 0 && startup.result == 0);
    }
    if (config_process)
    {
       assert(atomic_load(&startup_snapshots) >= (memory_process ? 2 : 1));
-      aimee_module_process_stop();
+      ouro_module_process_stop();
       assert(pthread_join(configuration_thread, NULL) == 0 && configuration.result == 0);
    }
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);
-   bus_client_detach(&caller);
+   ouro_client_detach(&caller);
    if (memory_process)
-      bus_client_detach(&embedding_host);
-   bus_runtime_stop(&runtime);
-   bus_host_destroy(&host);
+      ouro_client_detach(&embedding_host);
+   ouro_runtime_stop(&runtime);
+   ouro_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    /* The sandbox leg drives a stage that persists, so this run leaves a store
     * behind in the throwaway home. Remove exactly that file and keep the rmdir
@@ -1567,7 +1567,7 @@ finish:
    (void)unlink(learned_store); /* absent for every other module: not an error */
    assert(snprintf(learned_store, sizeof learned_store, "%s/.providers.lock", directory) > 0);
    (void)unlink(learned_store);
-   if (role != BUS_INSTANCE_UNSET)
+   if (role != AIMEE_INSTANCE_UNSET)
    {
       snprintf(learned_store, sizeof(learned_store), "%s/instance-identity.json", directory);
       assert(unlink(learned_store) == 0);

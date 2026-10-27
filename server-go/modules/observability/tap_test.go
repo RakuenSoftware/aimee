@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestTapObserverExportsMetadataWithoutPayload(t *testing.T) {
@@ -25,10 +25,10 @@ func TestTapObserverExportsMetadataWithoutPayload(t *testing.T) {
 	}
 
 	payload := []byte("super-secret-payload")
-	tap.Observe(ctx, bus.Event{Frame: bus.Frame{
-		HdrFlags: bus.FInline | bus.FNotification, WireVersion: bus.WireVersion,
-		EventKind: bus.KindModuleBase, Seq: 41, PayloadLen: uint32(len(payload)), SrcHandle: 7,
-		PayloadRef: bus.HdrLen,
+	tap.Observe(ctx, ring.Event{Frame: ring.Frame{
+		HdrFlags: ring.FInline | ring.FNotification, WireVersion: ring.WireVersion,
+		EventKind: ring.KindModuleBase, Seq: 41, PayloadLen: uint32(len(payload)), SrcHandle: 7,
+		PayloadRef: ring.HdrLen,
 	}, Payload: payload})
 
 	recorder := httptest.NewRecorder()
@@ -70,9 +70,9 @@ func TestTapObserverCountsInvalidFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tap.Observe(context.Background(), bus.Event{Frame: bus.Frame{
-		HdrFlags: bus.FNotification, WireVersion: bus.WireVersion,
-		EventKind: bus.KindOverflow, Seq: 42, PayloadLen: 10,
+	tap.Observe(context.Background(), ring.Event{Frame: ring.Frame{
+		HdrFlags: ring.FNotification, WireVersion: ring.WireVersion,
+		EventKind: ring.KindOverflow, Seq: 42, PayloadLen: 10,
 	}})
 	recorder := httptest.NewRecorder()
 	runtime.MetricsHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))

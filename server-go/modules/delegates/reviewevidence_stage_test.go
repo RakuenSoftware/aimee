@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func reviewRequest(role, response string, flags uint32) []byte {
@@ -28,8 +28,8 @@ func decodeReviewVerdict(t *testing.T, b []byte) (uint32, string) {
 
 func TestReviewEvidenceStageRoundTrip(t *testing.T) {
 	request := reviewRequest("validate", "No uncommitted diff exists.", reviewFlagWorktreeDirty)
-	response, status := handleReviewEvidence(bus.ModuleInvocation{}, request)
-	if status != bus.ModuleStatusOK {
+	response, status := handleReviewEvidence(ring.ModuleInvocation{}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	verdict, message := decodeReviewVerdict(t, response)
@@ -45,9 +45,9 @@ func TestReviewEvidenceStageRoundTrip(t *testing.T) {
 // A role that is guarded but not snippet-checked, with no contradiction: the
 // caller gets "guarded, nothing to do", which is different from "not guarded".
 func TestReviewEvidenceStageDistinguishesGuardedFromChecked(t *testing.T) {
-	response, status := handleReviewEvidence(bus.ModuleInvocation{},
+	response, status := handleReviewEvidence(ring.ModuleInvocation{},
 		reviewRequest("diagnose", "a quote from an old log", 0))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	verdict, message := decodeReviewVerdict(t, response)
@@ -93,7 +93,7 @@ func TestReviewEvidenceStageRejectsMalformedRequests(t *testing.T) {
 		"short header":  good[:12],
 		"empty":         nil,
 	} {
-		if _, status := handleReviewEvidence(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := handleReviewEvidence(ring.ModuleInvocation{}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: want InvalidRequest, got %v", name, status)
 		}
 	}
@@ -101,7 +101,7 @@ func TestReviewEvidenceStageRejectsMalformedRequests(t *testing.T) {
 
 func TestReviewEvidenceStageHonoursCancellation(t *testing.T) {
 	request := reviewRequest("review", "a report", 0)
-	if _, status := handleReviewEvidence(bus.ModuleInvocation{DeadlineNS: 1}, request); status != bus.ModuleStatusCancelled {
+	if _, status := handleReviewEvidence(ring.ModuleInvocation{DeadlineNS: 1}, request); status != ring.ModuleStatusCancelled {
 		t.Errorf("want Cancelled, got %v", status)
 	}
 }

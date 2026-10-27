@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 )
 
@@ -63,13 +63,13 @@ func TestDeletionDeadlockRetry(t *testing.T) {
 		failures      []error
 		commitFailure bool
 		attempts      int
-		status        bus.ModuleStatus
+		status        ring.ModuleStatus
 	}{
-		{name: "statement deadlock", failures: []error{deadlock}, attempts: 2, status: bus.ModuleStatusOK},
-		{name: "commit deadlock", failures: []error{deadlock}, commitFailure: true, attempts: 2, status: bus.ModuleStatusOK},
-		{name: "exhausted", failures: []error{deadlock, deadlock, deadlock}, attempts: 3, status: bus.ModuleStatusInternal},
-		{name: "other SQL failure", failures: []error{&store.StoreError{SQLState: "23503"}}, attempts: 1, status: bus.ModuleStatusInternal},
-		{name: "success", attempts: 1, status: bus.ModuleStatusOK},
+		{name: "statement deadlock", failures: []error{deadlock}, attempts: 2, status: ring.ModuleStatusOK},
+		{name: "commit deadlock", failures: []error{deadlock}, commitFailure: true, attempts: 2, status: ring.ModuleStatusOK},
+		{name: "exhausted", failures: []error{deadlock, deadlock, deadlock}, attempts: 3, status: ring.ModuleStatusInternal},
+		{name: "other SQL failure", failures: []error{&store.StoreError{SQLState: "23503"}}, attempts: 1, status: ring.ModuleStatusInternal},
+		{name: "success", attempts: 1, status: ring.ModuleStatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := &deletionRetryDB{failures: test.failures, commitFailure: test.commitFailure}
@@ -85,7 +85,7 @@ func TestDeletionDeadlockRetry(t *testing.T) {
 				return nil
 			}}
 			body, _ := json.Marshal(DataRequest{Operation: "delete-as", ID: 7, Authority: AuthorityUser, Scope: Scope{Type: ScopeProject, Value: "retry"}})
-			raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend}, bus.ModuleInvocation{}, body)
+			raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend}, ring.ModuleInvocation{}, body)
 			if status != test.status || len(db.transactions) != test.attempts {
 				t.Fatalf("status=%v attempts=%d", status, len(db.transactions))
 			}
@@ -95,7 +95,7 @@ func TestDeletionDeadlockRetry(t *testing.T) {
 				}
 			}
 			want := 0
-			if status == bus.ModuleStatusOK {
+			if status == ring.ModuleStatusOK {
 				var response DataResponse
 				if json.Unmarshal(raw, &response) != nil || !response.Deleted {
 					t.Fatal(string(raw))
@@ -111,8 +111,8 @@ func TestDeletionDeadlockRetry(t *testing.T) {
 func TestDeletionDeadlockDoesNotRetryCallerTransaction(t *testing.T) {
 	tx := &deletionRetryTx{failure: &store.StoreError{SQLState: "40P01"}}
 	body, _ := json.Marshal(DataRequest{Operation: "delete-as", ID: 7, Authority: AuthorityUser, Scope: Scope{Type: ScopeProject, Value: "retry"}})
-	_, status := handleData(handlerOptions{placement: PlacementKB, data: &postgresDataStore{placement: PlacementKB, db: tx}}, bus.ModuleInvocation{}, body)
-	if status != bus.ModuleStatusInternal || tx.done {
+	_, status := handleData(handlerOptions{placement: PlacementKB, data: &postgresDataStore{placement: PlacementKB, db: tx}}, ring.ModuleInvocation{}, body)
+	if status != ring.ModuleStatusInternal || tx.done {
 		t.Fatal("caller transaction ownership changed", status, tx.done)
 	}
 }
@@ -122,8 +122,8 @@ func TestDeletionDeadlockHonorsCancelledRequest(t *testing.T) {
 	cancel()
 	db := &deletionRetryDB{failures: []error{&store.StoreError{SQLState: "40P01"}}}
 	body, _ := json.Marshal(DataRequest{Operation: "delete-as", ID: 7, Authority: AuthorityUser, Scope: Scope{Type: ScopeProject, Value: "retry"}})
-	_, status := handleData(handlerOptions{dataContext: ctx, placement: PlacementKB, data: &postgresDataStore{placement: PlacementKB, db: db}}, bus.ModuleInvocation{}, body)
-	if status != bus.ModuleStatusCancelled || len(db.transactions) != 1 || !db.transactions[0].done {
+	_, status := handleData(handlerOptions{dataContext: ctx, placement: PlacementKB, data: &postgresDataStore{placement: PlacementKB, db: db}}, ring.ModuleInvocation{}, body)
+	if status != ring.ModuleStatusCancelled || len(db.transactions) != 1 || !db.transactions[0].done {
 		t.Fatal("cancelled request retried or retained its transaction", status, len(db.transactions))
 	}
 }

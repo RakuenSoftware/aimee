@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 void audit_log_open(void);
@@ -55,10 +55,10 @@ static void *call_many(void *arg)
    {
       char response[16];
       uint32_t response_len = 0;
-      aimee_module_call_result_t result =
+      ouro_module_call_result_t result =
           obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 1, now_ns() + 5000000000ULL, "probe", 5,
                               response, sizeof response, &response_len, NULL, NULL);
-      assert(result == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      assert(result == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    }
    return NULL;
 }
@@ -98,11 +98,11 @@ static void test_expired_deadline_does_not_block(void)
    char response[16];
    uint32_t response_len = 0;
    uint64_t start = now_ns();
-   aimee_module_call_result_t result =
+   ouro_module_call_result_t result =
        obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 1, now_ns() - 1, "probe", 5, response,
                            sizeof response, &response_len, NULL, NULL);
    uint64_t elapsed = now_ns() - start;
-   assert(result == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(result == OURO_MODULE_CALL_DEADLINE_EXCEEDED);
    /* "Returned promptly" is the claim; a second is orders of magnitude more
     * than any bookkeeping here needs and still catches a blocking wait. */
    assert(elapsed < 1000000000ULL);
@@ -128,7 +128,7 @@ static int durable_module_sink(const char *role, const char *principal, const ch
    uint32_t length = 0;
    assert(obs_bus_module_call(11267, 3, 1, now_ns() + 1000000000ULL, "probe", 5, reply,
                               sizeof reply, &length, NULL,
-                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    if (strcmp(action, "test.provider.audit") == 0)
       atomic_fetch_add(&durable_writes, 1);
    return 0;

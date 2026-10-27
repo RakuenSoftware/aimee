@@ -1,5 +1,5 @@
 #include <aimee/control-web/module_api.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
 #include <string.h>
 
@@ -102,30 +102,29 @@ static int proxy_route_allowed(aimee_control_web_target_t target, const char *me
                                const char *path)
 {
    if (target == AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN)
-      return acl_allows(CONSOLE_ADMIN_ACL,
-                        sizeof(CONSOLE_ADMIN_ACL) / sizeof(CONSOLE_ADMIN_ACL[0]), method, path, 1);
+      return acl_allows(CONSOLE_ADMIN_ACL, sizeof(CONSOLE_ADMIN_ACL) / sizeof(CONSOLE_ADMIN_ACL[0]),
+                        method, path, 1);
    return acl_allows(FLEET_ACL, sizeof(FLEET_ACL) / sizeof(FLEET_ACL[0]), method, path, 0);
 }
 
-aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data)
+ouro_module_status_t aimee_module_handler(const ouro_module_invocation_t *invocation,
+                                          const uint8_t *request_body, uint32_t request_len,
+                                          uint8_t *response_body, uint32_t response_capacity,
+                                          uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    aimee_control_web_target_t target;
    char method[AIMEE_CONTROL_WEB_METHOD_MAX + 1u];
    char path[AIMEE_CONTROL_WEB_PATH_MAX + 1u];
-   if (!invocation || !response_len ||
-       invocation->stage_id != AIMEE_CONTROL_WEB_STAGE_AUTHORIZE ||
+   if (!invocation || !response_len || invocation->stage_id != AIMEE_CONTROL_WEB_STAGE_AUTHORIZE ||
        response_capacity < AIMEE_CONTROL_WEB_RESPONSE_LEN ||
        aimee_control_web_request_decode(request_body, request_len, &target, method, path) != 0)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
    if (aimee_control_web_response_encode(proxy_route_allowed(target, method, path), response_body,
                                          response_capacity) != 0)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    *response_len = AIMEE_CONTROL_WEB_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }

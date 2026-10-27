@@ -32,8 +32,8 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -500,12 +500,12 @@ func withDSNParams(dsn string, params map[string]string) string {
 func attach(f *fixture) (*wire.Client, error) {
 	ctx := context.Background()
 	busSock := filepath.Join(f.home, ".config", "aimee", "server-module-bus.sock")
-	attached, err := bus.ConnectClient(ctx, busSock, busPrincipalClass,
+	attached, err := ring.ConnectClient(ctx, busSock, busPrincipalClass,
 		wfeBusPrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, attached)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, attached)
 	if err != nil {
 		return nil, err
 	}

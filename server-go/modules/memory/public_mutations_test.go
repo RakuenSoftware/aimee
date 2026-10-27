@@ -6,21 +6,21 @@ import (
 	"os"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
-func invokeContextCommand(t *testing.T, handler bus.ModuleHandler, peer uint32, caller bus.CommandContext, verb, args string) (map[string]any, bus.ModuleStatus) {
+func invokeContextCommand(t *testing.T, handler ring.ModuleHandler, peer uint32, caller ring.CommandContext, verb, args string) (map[string]any, ring.ModuleStatus) {
 	t.Helper()
-	frame, err := bus.EncodeCommandWithContext(verb, json.RawMessage(args), caller)
+	frame, err := ring.EncodeCommandWithContext(verb, json.RawMessage(args), caller)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: peer}, frame)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: peer}, frame)
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
-	result, err := bus.DecodeCommandResult(body)
+	result, err := ring.DecodeCommandResult(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,9 +33,9 @@ func invokeContextCommand(t *testing.T, handler bus.ModuleHandler, peer uint32, 
 
 func TestMutationPublicContextBoundary(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true}
 	for _, peer := range []uint32{1, 23, 70, 200} {
-		if r, status := invokeContextCommand(t, handler, peer, caller, "restore", `{"id":1}`); status != bus.ModuleStatusInvalidRequest {
+		if r, status := invokeContextCommand(t, handler, peer, caller, "restore", `{"id":1}`); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("peer=%d status=%d result=%v", peer, status, r)
 		}
 	}
@@ -91,14 +91,14 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 	installProposalFixture(t, ctx, tx)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	client := clientForHandler(t, handler)
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", TransportIdentity: "cert:server", UserAuthority: true}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:alice", TransportIdentity: "cert:server", UserAuthority: true}
 	run := func(verb, args string, authenticated bool) map[string]any {
 		t.Helper()
 		if !authenticated {
 			return runPublicCommand(t, client, verb, args)
 		}
 		r, status := invokeContextCommand(t, handler, 0, caller, verb, args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		return r
@@ -144,7 +144,7 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 	}
 	other := caller
 	other.Principal = "user:bob"
-	if r, status := invokeContextCommand(t, handler, 0, other, "restore", `{"id":5,"actor":"user:alice"}`); status != bus.ModuleStatusOK || r["kind"] != "not_found" {
+	if r, status := invokeContextCommand(t, handler, 0, other, "restore", `{"id":5,"actor":"user:alice"}`); status != ring.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal(r, status)
 	}
 	if r := run("restore", `{"id":5,"actor":"forged"}`, true); r["status"] != "ok" || r["id"] != float64(5) || r["restored"] != true {
@@ -179,14 +179,14 @@ SET LOCAL ROLE memory_mutation_test;`)
 
 // The former console/native rejection fixture now exercises the enforcing Go
 // owner with the packaged role, scopes, durable tombstones and replayed writes.
-func exerciseRejectionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseRejectionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "scope:console-admin:review", TransportIdentity: "verified-console", UserAuthority: true}
+	caller := ring.CommandContext{Authenticated: true, Principal: "scope:console-admin:review", TransportIdentity: "verified-console", UserAuthority: true}
 	call := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(args)
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(out, status)
 		}
 		return out

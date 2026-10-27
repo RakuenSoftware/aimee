@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestBriefingText(t *testing.T) {
@@ -53,7 +53,7 @@ func TestMemoryJSONOutput(t *testing.T) {
 	}
 }
 
-func exerciseBriefingViewsReplay(t *testing.T, handler bus.ModuleHandler, b briefingBundle) {
+func exerciseBriefingViewsReplay(t *testing.T, handler ring.ModuleHandler, b briefingBundle) {
 	t.Helper()
 	client := clientForHandler(t, handler)
 	run := func(args string) string {

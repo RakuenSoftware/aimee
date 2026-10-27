@@ -536,7 +536,7 @@ class CProcessBuildTests(unittest.TestCase):
                 "sources": self.descriptor()["sources"],
             }])
             main = (bundle / "src/aimee-module-kb.c").read_text(encoding="utf-8")
-            self.assertIn("extern aimee_module_status_t aimee_module_handler", main)
+            self.assertIn("extern ouro_module_status_t aimee_module_handler", main)
             self.assertNotIn("kb_store_init", main)
             self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))

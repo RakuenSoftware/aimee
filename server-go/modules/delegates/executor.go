@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"golang.org/x/sys/unix"
 )
 
@@ -55,7 +55,7 @@ func (b *compatibleBool) UnmarshalJSON(data []byte) error {
 // NewDefaultHandler is the independently exported delegates process entry
 // point. The shared multicall binary performs the same construction explicitly
 // so it can report registry errors in its process log.
-func NewDefaultHandler() bus.ModuleHandler {
+func NewDefaultHandler() ring.ModuleHandler {
 	executor, err := NewRegistryExecutor(os.Getenv("AIMEE_HOME"))
 	if err != nil {
 		return NewHandler(nil)

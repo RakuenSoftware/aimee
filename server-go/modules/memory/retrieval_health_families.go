@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Reuse the canonical scoped MR-04 owner in its repeatable-read transaction.
@@ -84,7 +84,7 @@ func healthRecordFamilies(record healthRecord) []string {
 	return nil
 }
 
-func prepareHealthFamilyCapture(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, operation string) {
+func prepareHealthFamilyCapture(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, operation string) {
 	delete(args, "_health_records")
 	if operation != "native-source-release" || os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" || options.placement != PlacementServer || invocation.PrincipalRef != 0 {
 		return
@@ -143,7 +143,7 @@ func prepareHealthFamilyCapture(options handlerOptions, invocation bus.ModuleInv
 		request, _ := json.Marshal(DataRequest{Operation: "evidence", ID: id, Scope: Scope{Type: ScopeUser, Value: "_user"}, Project: args.stringOr("project", ""), Workspace: args.stringOr("workspace", "")})
 		raw, status := handleData(options, invocation, request)
 		var response DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(raw, &response) == nil {
+		if status == ring.ModuleStatusOK && json.Unmarshal(raw, &response) == nil {
 			row.Families = healthFamiliesFromEvidence(response.Payload, source)
 			if len(row.Families) == 1 {
 				row.Family = row.Families[0]
@@ -155,7 +155,7 @@ func prepareHealthFamilyCapture(options handlerOptions, invocation bus.ModuleInv
 
 // This runs after the required recall transaction completed, in separate bounded
 // owner reads. Telemetry timeout/rollback cannot abort the serving transaction.
-func captureSharedRecallFamilies(options handlerOptions, invocation bus.ModuleInvocation, request DataRequest, payload json.RawMessage) []healthRecord {
+func captureSharedRecallFamilies(options handlerOptions, invocation ring.ModuleInvocation, request DataRequest, payload json.RawMessage) []healthRecord {
 	if options.placement != PlacementKB || os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" {
 		return nil
 	}
@@ -197,7 +197,7 @@ func captureSharedRecallFamilies(options handlerOptions, invocation bus.ModuleIn
 			wire, _ := json.Marshal(evidence)
 			raw, status := handleData(options, invocation, wire)
 			var response DataResponse
-			if status == bus.ModuleStatusOK && json.Unmarshal(raw, &response) == nil {
+			if status == ring.ModuleStatusOK && json.Unmarshal(raw, &response) == nil {
 				record.Families = healthFamiliesFromEvidence(response.Payload, source)
 			}
 			if len(record.Families) > 0 {

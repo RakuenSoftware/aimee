@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/delegate"
 	delegatemodule "github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // moduleStageBridge crosses the same JSON stage contract as the process bus.
@@ -20,7 +20,7 @@ import (
 // the subsequent limiter contention a real admission race rather than ten
 // panels that happen to execute serially.
 type moduleStageBridge struct {
-	handler   bus.ModuleHandler
+	handler   ring.ModuleHandler
 	planCount int
 	planned   int
 	plansDone chan struct{}
@@ -34,12 +34,12 @@ func (b *moduleStageBridge) releasePlans() {
 
 func (b *moduleStageBridge) Call(ctx context.Context, _ uint32, stage uint32, _ uint64,
 	_ time.Duration, request []byte) ([]byte, error) {
-	reply, status := b.handler(bus.ModuleInvocation{StageID: stage}, request)
-	if status != bus.ModuleStatusOK {
+	reply, status := b.handler(ring.ModuleInvocation{StageID: stage}, request)
+	if status != ring.ModuleStatusOK {
 		if stage == delegate.StageGroupPlan {
 			b.releasePlans()
 		}
-		return nil, &bus.ModuleCallStatusError{Status: status}
+		return nil, &ring.ModuleCallStatusError{Status: status}
 	}
 	if stage == delegate.StageGroupPlan {
 		b.mu.Lock()

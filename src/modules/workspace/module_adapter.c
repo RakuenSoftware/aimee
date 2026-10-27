@@ -1,4 +1,4 @@
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/workspace/module_api.h>
 
 #include <string.h>
@@ -15,8 +15,8 @@ static int name_valid(const uint8_t *name, size_t len)
    for (size_t i = 0; i < len; ++i)
    {
       unsigned char c = name[i];
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-'))
          return 0;
    }
    return 1;
@@ -42,10 +42,10 @@ static int ref_valid(const uint8_t *ref, size_t len)
                        : name_valid(ref, slash) && name_valid(ref + slash + 1, len - slash - 1);
 }
 
-aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data)
+ouro_module_status_t aimee_module_handler(const ouro_module_invocation_t *invocation,
+                                          const uint8_t *request_body, uint32_t request_len,
+                                          uint8_t *response_body, uint32_t response_capacity,
+                                          uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    if (!invocation || !response_len || invocation->stage_id != AIMEE_WORKSPACE_STAGE_ACCESS ||
@@ -55,13 +55,12 @@ aimee_module_status_t aimee_module_handler(
        request_body[4] != AIMEE_WORKSPACE_WIRE_VERSION || request_body[5] != 0 ||
        aimee_workspace_get_u16(request_body + 6) == 0 ||
        aimee_workspace_get_u16(request_body + 6) > AIMEE_WORKSPACE_REF_MAX)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
    aimee_workspace_put_u32(response_body, AIMEE_WORKSPACE_RESPONSE_MAGIC);
-   aimee_workspace_put_u32(
-       response_body + 4,
-       ref_valid(request_body + 8, aimee_workspace_get_u16(request_body + 6)));
+   aimee_workspace_put_u32(response_body + 4,
+                           ref_valid(request_body + 8, aimee_workspace_get_u16(request_body + 6)));
    *response_len = AIMEE_WORKSPACE_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }

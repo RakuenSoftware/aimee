@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Which built sandbox images may be deleted.
@@ -26,15 +26,15 @@ const (
 )
 
 // handleImageGC returns one verdict per image, in the order they were sent.
-func handleImageGC(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleImageGC(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < imageGCReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != imageGCRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
 	if count > imageGCMaxImages {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	keepMin := int(int32(binary.LittleEndian.Uint32(request[12:16])))
 	now := int64(binary.LittleEndian.Uint64(request[16:24]))
@@ -47,7 +47,7 @@ func handleImageGC(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 		tagLen := c.u32()
 		createdLen := c.u32()
 		if tagLen > imageGCStringMax || createdLen > imageGCStringMax {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		images = append(images, SandboxImage{
 			Tag:       c.str(tagLen),
@@ -56,10 +56,10 @@ func handleImageGC(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 		})
 	}
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	verdicts := JudgeSandboxImages(images, now, keepMin, maxAge)
@@ -80,5 +80,5 @@ func handleImageGC(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 		response = append(response, hdr[:]...)
 		response = append(response, v.Reason...)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

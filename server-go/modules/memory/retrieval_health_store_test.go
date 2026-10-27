@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"strings"
 	"sync"
@@ -175,10 +175,10 @@ func TestHealthPostgresConcurrentOwnerAndRestart(t *testing.T) {
 	appendRow(plan["prepared_detail"].(string))
 	appendRow(plan["admitted_detail"].(string))
 	call := func(owner *postgresDataStore, args commandArgs) map[string]any {
-		raw, status := handleRetrievalHealth(handlerOptions{placement: PlacementServer, data: owner}, bus.ModuleInvocation{}, args)
-		body, err := bus.DecodeCommandResult(raw)
+		raw, status := handleRetrievalHealth(handlerOptions{placement: PlacementServer, data: owner}, ring.ModuleInvocation{}, args)
+		body, err := ring.DecodeCommandResult(raw)
 		var result map[string]any
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(body, &result) != nil || result["status"] != "ok" {
+		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(body, &result) != nil || result["status"] != "ok" {
 			t.Fatalf("health command: %s (%v, %v)", body, status, err)
 		}
 		return result
@@ -216,12 +216,12 @@ func TestHealthPostgresConcurrentOwnerAndRestart(t *testing.T) {
 	captureOptions := handlerOptions{placement: PlacementServer, data: captureOwner}
 	var firstCapture *healthQueryContext
 	for i := 0; i < 5 && firstCapture == nil; i++ {
-		firstCapture = captureHealthQuery(captureOptions, bus.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
+		firstCapture = captureHealthQuery(captureOptions, ring.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
 	}
 	captureOptions.data = owner()
 	var secondCapture *healthQueryContext
 	for i := 0; i < 5 && secondCapture == nil; i++ {
-		secondCapture = captureHealthQuery(captureOptions, bus.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
+		secondCapture = captureHealthQuery(captureOptions, ring.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
 	}
 	if firstCapture == nil || secondCapture == nil || firstCapture.Fingerprint != secondCapture.Fingerprint {
 		t.Fatal("query fingerprint did not survive owner restart")

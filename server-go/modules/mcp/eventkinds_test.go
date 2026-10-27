@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// bus_host_serve_kind() (core/event_bus/bus_route.c:109) binds one event kind to
+// ouro_host_serve_kind() (ouroboros-ring c/src/route.c) binds one event kind to
 // exactly ONE serving slot and refuses a second module that tries to serve it.
 // Instances therefore cannot share package-level kinds. Their kinds are derived
 // from the principal ref by the canonical rule, 4096 + ref*256 + stage, which is

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -124,7 +124,7 @@ func TestPreviewProjectionIntegrityAndRetention(t *testing.T) {
 	}
 }
 
-func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend *postgresDataStore, handler bus.ModuleHandler) {
+func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend *postgresDataStore, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -214,8 +214,8 @@ func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	}
 	request.Sources = newProjection.Retained
 	check(true)
-	result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "diagnose_scoped", fmt.Sprintf(`{"query":"preview-version","scope_context":true,"project":%q,"format":"ingress","limit":5}`, project))
-	if status != bus.ModuleStatusOK || result["status"] != "ok" {
+	result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "diagnose_scoped", fmt.Sprintf(`{"query":"preview-version","scope_context":true,"project":%q,"format":"ingress","limit":5}`, project))
+	if status != ring.ModuleStatusOK || result["status"] != "ok" {
 		t.Fatal(status, result)
 	}
 	encoded, _ := json.Marshal(result)

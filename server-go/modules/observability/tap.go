@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -46,14 +46,14 @@ func NewTapObserver(telemetry Telemetry) (*TapObserver, error) {
 // Observe records one accepted event. Labels are bounded protocol vocabulary;
 // sequence and handles are log attributes only, avoiding unbounded metric
 // cardinality. The payload slice is used only to verify its declared length.
-func (t *TapObserver) Observe(ctx context.Context, event bus.Event) {
+func (t *TapObserver) Observe(ctx context.Context, event ring.Event) {
 	frame := event.Frame
 	kind := fmt.Sprintf("%d", frame.EventKind)
 	pattern := framePattern(frame.HdrFlags)
 	placement := framePlacement(frame.HdrFlags)
 	status := "accepted"
-	if frame.Validate() != bus.OK ||
-		(frame.HdrFlags&bus.FInline != 0 && uint32(len(event.Payload)) != frame.PayloadLen) {
+	if frame.Validate() != ring.OK ||
+		(frame.HdrFlags&ring.FInline != 0 && uint32(len(event.Payload)) != frame.PayloadLen) {
 		status = "invalid"
 	}
 	attrs := []attribute.KeyValue{
@@ -65,8 +65,8 @@ func (t *TapObserver) Observe(ctx context.Context, event bus.Event) {
 	t.events.Add(ctx, 1, metric.WithAttributes(attrs...))
 	t.bytes.Add(ctx, int64(frame.PayloadLen), metric.WithAttributes(attrs...))
 
-	exception := status == "invalid" || frame.EventKind == bus.KindOverflow ||
-		frame.EventKind == bus.KindProducerReaped
+	exception := status == "invalid" || frame.EventKind == ring.KindOverflow ||
+		frame.EventKind == ring.KindProducerReaped
 	if exception {
 		t.exceptions.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("event.kind", kind),
@@ -89,13 +89,13 @@ func (t *TapObserver) Observe(ctx context.Context, event bus.Event) {
 
 func framePattern(flags uint16) string {
 	switch {
-	case flags&bus.FNotification != 0:
+	case flags&ring.FNotification != 0:
 		return "notification"
-	case flags&bus.FRequest != 0:
+	case flags&ring.FRequest != 0:
 		return "request"
-	case flags&bus.FReply != 0:
+	case flags&ring.FReply != 0:
 		return "reply"
-	case flags&bus.FCancel != 0:
+	case flags&ring.FCancel != 0:
 		return "cancel"
 	default:
 		return "invalid"
@@ -104,9 +104,9 @@ func framePattern(flags uint16) string {
 
 func framePlacement(flags uint16) string {
 	switch {
-	case flags&bus.FInline != 0:
+	case flags&ring.FInline != 0:
 		return "inline"
-	case flags&bus.FArena != 0:
+	case flags&ring.FArena != 0:
 		return "arena"
 	default:
 		return "none"

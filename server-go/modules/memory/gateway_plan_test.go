@@ -6,8 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyView {
@@ -21,7 +21,7 @@ func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyVi
 	return view
 }
 
-func gatewayPlanForTest(t *testing.T, h bus.ModuleHandler, args map[string]any) []gatewayStep {
+func gatewayPlanForTest(t *testing.T, h ring.ModuleHandler, args map[string]any) []gatewayStep {
 	t.Helper()
 	if roles, exists := args["roles"]; exists {
 		names, _ := args["tools"].([]string)
@@ -111,8 +111,8 @@ func TestGatewayPlanEnforcedGateAndValidation(t *testing.T) {
 		`{"operation":"gateway-plan","phase":"text","provided_query":null}`,
 		`{"operation":"gateway-plan","phase":"text","last_user_text":false}`,
 	} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(raw))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
@@ -166,8 +166,8 @@ func TestGatewayPlanUsesOnlyHostProvidedResourceFacts(t *testing.T) {
 		})
 	}
 	for _, raw := range []string{`null`, `true`, `"guidance"`, `[null]`, `[""]`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"text","provided_resources":`+raw+`}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"text","provided_resources":`+raw+`}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
