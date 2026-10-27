@@ -60,7 +60,18 @@ int main(void)
       r->item_count = 1;
       cJSON *before = aimee_ir_request_json(&task);
       assert(!roundtable_chair_build_request(r, &task, &request));
-      assert(request.n_messages == 3 && request.messages[2].n_blocks == 2);
+      assert(request.n_messages == 4);
+      for (int i = 0; i < task.n_messages; ++i)
+      {
+         cJSON *source = aimee_ir_message_json(&task.messages[i]);
+         cJSON *copy = aimee_ir_message_json(&request.messages[i]);
+         assert(source && copy && cJSON_Compare(source, copy, 1));
+         cJSON_Delete(source);
+         cJSON_Delete(copy);
+      }
+      assert(request.messages[2].n_blocks == 1);
+      assert(!strcmp(request.messages[3].role, "user"));
+      assert(request.messages[3].n_blocks == 1 && !request.messages[3].compaction_boundary);
       assert(request.messages[2].compaction_boundary && request.n_system == 1);
       assert(!strcmp(request.messages[2].blocks[0].text, block.text));
       assert(!memcmp(&request.messages[2].blocks[0].context, &block.context, sizeof block.context));
@@ -69,10 +80,11 @@ int main(void)
       assert(!strstr(request.system[0].text, "buffer overrun"));
       assert(request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
       assert(request.system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM);
-      aimee_block_t *findings = &request.messages[2].blocks[1];
+      aimee_block_t *findings = &request.messages[3].blocks[0];
       assert(strstr(findings->text, r->items[0].summary));
-      assert(findings->context.origin == AIMEE_CTX_ORIGIN_MODEL);
+      assert(findings->context.origin == AIMEE_CTX_ORIGIN_PLATFORM);
       assert(findings->context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(findings->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
       assert(request.max_tokens == 321 && request.temperature == 0.7 && request.top_p == 0.8);
       assert(!strcmp(request.model, "pinned-model"));
       cJSON *after = aimee_ir_request_json(&task);
