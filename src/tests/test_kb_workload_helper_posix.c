@@ -22,6 +22,20 @@ static const char *trusted_fixture(const char *variable, const char *a, const ch
    return fixture && fixture[0] ? fixture : find_native(a, b);
 }
 
+/* The calls below check what the helper does, not how fast: a loaded,
+ * sanitized CI runner forking from an ASan process has overrun 1000ms. */
+#define BUDGET_MS KB_WORKLOAD_HELPER_TIMEOUT_MAX_MS
+
+/* Assert a result, naming the one actually returned: a bare assert hides it. */
+static void expect(kb_workload_helper_result_t got, kb_workload_helper_result_t want, int line)
+{
+   if (got != want)
+      fprintf(stderr, "line %d: kb_workload_helper_invoke returned %d, want %d\n", line, (int)got,
+              (int)want);
+   assert(got == want);
+}
+#define EXPECT(want, ...) expect(kb_workload_helper_invoke(__VA_ARGS__), want, __LINE__)
+
 int main(void)
 {
 #if !defined(__linux__)
@@ -47,8 +61,8 @@ int main(void)
    unsigned char response[128];
    memset(response, 0xa5, sizeof(response));
    size_t response_len = 99;
-   assert(kb_workload_helper_invoke(fd, request, sizeof(request) - 1, response, sizeof(response),
-                                    &response_len, 1000) == KB_WORKLOAD_HELPER_OK);
+   EXPECT(KB_WORKLOAD_HELPER_OK, fd, request, sizeof(request) - 1, response, sizeof(response),
+          &response_len, BUDGET_MS);
    assert(response_len == sizeof(request) - 1 && !memcmp(response, request, response_len));
 
    sigset_t sigpipe_set, old_mask, pending;
@@ -57,8 +71,8 @@ int main(void)
    assert(pthread_sigmask(SIG_BLOCK, &sigpipe_set, &old_mask) == 0);
    assert(raise(SIGPIPE) == 0);
    response_len = 99;
-   assert(kb_workload_helper_invoke(fd, request, sizeof(request) - 1, response, sizeof(response),
-                                    &response_len, 1000) == KB_WORKLOAD_HELPER_OK);
+   EXPECT(KB_WORKLOAD_HELPER_OK, fd, request, sizeof(request) - 1, response, sizeof(response),
+          &response_len, BUDGET_MS);
    assert(sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1);
    int received_signal = 0;
    assert(sigwait(&sigpipe_set, &received_signal) == 0 && received_signal == SIGPIPE);
@@ -69,8 +83,7 @@ int main(void)
    assert(kb_workload_helper_open(env, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
-   assert(kb_workload_helper_invoke(fd, NULL, 0, response, sizeof(response), &response_len, 1000) ==
-          KB_WORKLOAD_HELPER_OK);
+   EXPECT(KB_WORKLOAD_HELPER_OK, fd, NULL, 0, response, sizeof(response), &response_len, BUDGET_MS);
    assert(response_len == 0); /* explicit empty envp */
    close(fd);
 
@@ -78,8 +91,7 @@ int main(void)
    assert(kb_workload_helper_open(yes, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
-   assert(kb_workload_helper_invoke(fd, NULL, 0, response, 8, &response_len, 1000) ==
-          KB_WORKLOAD_HELPER_UNAVAILABLE);
+   EXPECT(KB_WORKLOAD_HELPER_UNAVAILABLE, fd, NULL, 0, response, 8, &response_len, BUDGET_MS);
    assert(response_len == 0);
    for (size_t i = 0; i < 8; ++i)
       assert(response[i] == 0);
@@ -98,7 +110,7 @@ int main(void)
       response_len = 99;
       kb_workload_helper_result_t closed_result =
           kb_workload_helper_invoke(fd, closed_request, sizeof(closed_request), response,
-                                    sizeof(response), &response_len, 1000);
+                                    sizeof(response), &response_len, BUDGET_MS);
       assert(closed_result == KB_WORKLOAD_HELPER_OK ||
              closed_result == KB_WORKLOAD_HELPER_UNAVAILABLE);
       observed_closed_pipe = closed_result == KB_WORKLOAD_HELPER_UNAVAILABLE;
