@@ -34,6 +34,15 @@ Confirmed unbuilt tests with no build or script driver were retired. Script-back
 bus-plugin tests were retained. Active regression fixture setup was consolidated
 without dropping the provider/control cases.
 
+The follow-up caller audit also retired the old terminal editor/input-history
+and in-memory conversation-thread implementations, unused native-history shadows,
+codec convenience APIs and shadow test substitutes, and obsolete rollout counters.
+These had no production consumers; persisted histories were not deleted. A stale
+resource-scope requirement that refused active delegates was removed while actual
+cancellation, admission and capture checks remain. The legacy primary-session
+reader's Go/C column ordering was corrected and checked against the shared reply
+contract. Required one-time legacy import and external SDK/provider adapters remain.
+
 ## Validation and limits
 
 The final source has a successful server build and focused C normal/sanitizer,

@@ -685,7 +685,7 @@ func primarySessionGetLatest(ctx context.Context, q store.Queryer, f []string) (
 	if err != nil {
 		return 0, nil, err
 	}
-	cells := []string{session, agent, provider, messages, created, updated}
+	cells := []string{session, agent, provider, created, updated, messages}
 	return store.StatusOK, cells, nil
 }
 

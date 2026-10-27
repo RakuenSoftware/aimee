@@ -41,8 +41,6 @@ int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic,
                                         int *n_rescued,
                                         const struct aimee_anthropic_replay *request,
                                         aimee_response_t *out);
-int agent_ir_decode_json_response(const struct cJSON *root, int anthropic, int rescue_mode,
-                                  int *n_rescued, aimee_response_t *out);
 int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
                               aimee_response_t *out);
 

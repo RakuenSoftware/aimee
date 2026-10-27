@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,7 +211,7 @@ func (s *scriptedSeats) One(_ context.Context, run panel.Run, request panel.Seat
 				`"verdict":"approve","findings":[]}`,
 			run.ID, request.ArtifactHash, request.ArtifactStage)
 	}
-	return panel.SeatResult{Response: response, Participant: "opaque-seat-token"}
+	return panel.SeatResult{Output: canonical.TextResponse(response), Participant: "opaque-seat-token"}
 }
 
 func (s *scriptedSeats) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {
@@ -349,10 +350,10 @@ func (r *recordingRun) One(_ context.Context, run panel.Run, request panel.SeatR
 	r.mu.Lock()
 	r.seen = run
 	r.mu.Unlock()
-	return panel.SeatResult{Response: fmt.Sprintf(
+	return panel.SeatResult{Output: canonical.TextResponse(fmt.Sprintf(
 		`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,`+
 			`"original_request_alignment":{"status":"aligned","summary":"ok"},`+
-			`"verdict":"approve","findings":[]}`, run.ID, request.ArtifactHash, request.ArtifactStage)}
+			`"verdict":"approve","findings":[]}`, run.ID, request.ArtifactHash, request.ArtifactStage))}
 }
 
 func (r *recordingRun) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {

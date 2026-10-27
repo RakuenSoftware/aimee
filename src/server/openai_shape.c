@@ -248,46 +248,6 @@ int openai_format_models_list(const char *const *ids, int n, const char *owner, 
    return (len < 0 || len >= cap) ? -1 : len;
 }
 
-/* ── openai_format_chat_chunk_finish ─────────────────────────────────────── */
-
-int openai_format_chat_chunk_finish(const char *id, const char *model, long created,
-                                    const char *reason, char *resp, int cap)
-{
-   if (!resp || cap <= 0)
-      return -1;
-
-   cJSON *root = cJSON_CreateObject();
-   if (!root)
-      return -1;
-
-   cJSON_AddStringToObject(root, "id", id ? id : "");
-   cJSON_AddStringToObject(root, "object", "chat.completion.chunk");
-   cJSON_AddNumberToObject(root, "created", (double)created);
-   cJSON_AddStringToObject(root, "model", model ? model : "");
-
-   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
-   cJSON *choice = cJSON_CreateObject();
-   if (!choices || !choice)
-   {
-      cJSON_Delete(choice);
-      cJSON_Delete(root);
-      return -1;
-   }
-   cJSON_AddNumberToObject(choice, "index", 0.0);
-   cJSON_AddItemToArray(choices, choice);
-   cJSON_AddItemToObject(choice, "delta", cJSON_CreateObject());
-   cJSON_AddStringToObject(choice, "finish_reason", reason ? reason : "stop");
-
-   char *s = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!s)
-      return -1;
-
-   int len = snprintf(resp, (size_t)cap, "%s", s);
-   free(s);
-   return (len < 0 || len >= cap) ? -1 : len;
-}
-
 /* ── openai_format_chat_chunk (streaming SSE delta) ──────────────────────── */
 
 int openai_format_chat_chunk(const char *id, const char *model, long created, int role,

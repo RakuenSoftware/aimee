@@ -12,7 +12,6 @@
 #undef http_retry_post_context
 #undef http_retry_post
 #include "wire_fence.h"
-#include "agent_dispatch_scope.h"
 #include "agent_config.h"
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/module_api.h>
@@ -448,76 +447,46 @@ static void test_actual_retry_observer_and_no_send(void)
    }
    puts("provider attempts: actual retries counted; preflight/guard/cancel no-send stays zero");
 }
-/* Resource lifecycle callbacks are explicitly synthetic here. Actual guarded
- * dispatch, admission, routing and HTTP work remain production. This proves
- * ordering/selected-attempt coverage, not a real container or source grant. */
-typedef struct
-{
-   int active, begins, ends, poisoned, fail_end, setup_delay_ms;
-   char selected[2][MAX_AGENT_NAME];
-} fixture_dispatch_lifetime_t;
-static int fixture_dispatch_begin(const agent_t *selected, void *context, char *error,
-                                  size_t capacity)
-{
-   fixture_dispatch_lifetime_t *state = context;
-   assert(!state->active);
-   if (state->poisoned)
-   {
-      snprintf(error, capacity, "fixture resource refused after uncertain retirement");
-      return -1;
-   }
-   assert(state->begins < 2);
-   snprintf(state->selected[state->begins], sizeof state->selected[0], "%s", selected->name);
-   state->begins++;
-   if (state->setup_delay_ms)
-      usleep((useconds_t)state->setup_delay_ms * 1000);
-   state->active = 1;
-   return 0;
-}
-static int fixture_dispatch_end(void *context, char *error, size_t capacity)
-{
-   fixture_dispatch_lifetime_t *state = context;
-   assert(state->active);
-   state->active = 0;
-   state->ends++;
-   if (state->fail_end)
-   {
-      state->poisoned = 1;
-      snprintf(error, capacity, "fixture resource retirement unconfirmed");
-      return -1;
-   }
-   return 0;
-}
 static const char *fixture_active_delegation;
 const char *delegation_active_id(void)
 {
    return fixture_active_delegation;
 }
-static void test_dispatch_resource_refusal(void)
+static int fixture_delegation_state;
+int __real_db1_delegation_spawn_is_stopped(const char *id);
+int __real_db1_delegation_spawn_stop_reason(const char *id, char *out, size_t cap);
+int __wrap_db1_delegation_spawn_is_stopped(const char *id)
+{
+   if (id && !strcmp(id, "owned-test-delegation"))
+      return fixture_delegation_state;
+   return __real_db1_delegation_spawn_is_stopped(id);
+}
+int __wrap_db1_delegation_spawn_stop_reason(const char *id, char *out, size_t cap)
+{
+   if (id && !strcmp(id, "owned-test-delegation"))
+   {
+      if (out && cap)
+         snprintf(out, cap, "%s", fixture_delegation_state ? "cancelled" : "");
+      return fixture_delegation_state;
+   }
+   return __real_db1_delegation_spawn_stop_reason(id, out, cap);
+}
+static void test_active_delegation_dispatch(void)
 {
    char url[128];
    int listener = listening_peer(url);
-   agent_t agent = http_fixture_agent("resource-lifetime", url, 10000);
+   agent_t agent = http_fixture_agent("active-delegation", url, 10000);
    agent.max_parallel = 1;
    agent_result_t result = {0};
    fixture_active_delegation = "owned-test-delegation";
-   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
-          AGENT_RC_CONTEXT_REFUSED);
-   fixture_active_delegation = NULL;
-   assert(!result.success && !result.response);
-   struct pollfd pending = {.fd = listener, .events = POLLIN};
-   assert(poll(&pending, 1, 0) == 0);
-   fixture_dispatch_lifetime_t state = {.fail_end = 1};
-   agent_dispatch_scope_t scope = {
-       .begin = fixture_dispatch_begin, .end = fixture_dispatch_end, .context = &state};
-   const agent_dispatch_scope_t *previous = agent_dispatch_scope_bind(&scope);
    atomic_int cancelled = 1;
    atomic_int *previous_cancel = agent_get_request_cancel();
    agent_set_request_cancel(&cancelled);
    assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    agent_set_request_cancel(previous_cancel);
-   assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
+   struct pollfd pending = {.fd = listener, .events = POLLIN};
+   assert(poll(&pending, 1, 0) == 0);
    request_context_snapshot_t previous_owner;
    request_context_snapshot(&previous_owner);
    request_context_t refused = {.context_refused = 1};
@@ -525,35 +494,26 @@ static void test_dispatch_resource_refusal(void)
    assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
    request_context_restore(&previous_owner);
-   assert(state.begins == 0 && state.ends == 0 && poll(&pending, 1, 0) == 0);
-   state.fail_end = 0;
-   state.setup_delay_ms = 30;
-   agent.tool_loop_timeout_ms_cap = 1;
+   assert(poll(&pending, 1, 0) == 0);
+   fixture_delegation_state = 1;
    assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
           AGENT_RC_CONTEXT_REFUSED);
-   assert(state.begins == 1 && state.ends == 1 && !state.active);
-   assert(agent.tool_loop_timeout_ms_cap == 1); /* Runtime copy only; no caller mutation. */
    assert(poll(&pending, 1, 0) == 0);
-   agent.tool_loop_timeout_ms_cap = 0;
-   state = (fixture_dispatch_lifetime_t){.fail_end = 1};
+   fixture_active_delegation = "unavailable-test-delegation";
+   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
+          AGENT_RC_CONTEXT_REFUSED);
+   assert(poll(&pending, 1, 0) == 0);
+   fixture_active_delegation = "owned-test-delegation";
+   fixture_delegation_state = 0;
    int status = 200;
    const char *body = known_zero;
    pid_t child = serve_peer(listener, &status, &body, 1);
-   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
-          AGENT_RC_CAPTURE_FAILED);
-   assert(!result.success && state.begins == 1 && state.ends == 1 && !state.active);
+   assert(!fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result));
+   assert(result.success && !strcmp(result.response, "Measured zero."));
+   assert(!aimee_ir_response_complete_text_valid(&result.canonical_response));
    agent_result_clear_response(&result);
    join_peer(child, listener);
-   listener = listening_peer(url);
-   strcpy(agent.endpoint, url);
-   assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==
-          AGENT_RC_CONTEXT_REFUSED);
-   assert(!result.success && state.begins == 1 && state.ends == 1);
-   pending = (struct pollfd){.fd = listener, .events = POLLIN};
-   assert(poll(&pending, 1, 0) == 0);
-   close(listener);
-   agent_dispatch_scope_bind(previous);
-   assert(agent_dispatch_scope_current() == previous);
+   fixture_active_delegation = NULL;
 }
 
 int main(int argc, char **argv)
@@ -587,7 +547,7 @@ int main(int argc, char **argv)
    test_actual_stream_progress();
    test_cached_result_no_transport();
    test_plain_refusal_clears_phase();
-   test_dispatch_resource_refusal();
+   test_active_delegation_dispatch();
    test_actual_executor_observations(only_mode);
    test_actual_retry_observer_and_no_send();
    return 0;

@@ -31,6 +31,16 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Inspect the actual capture owner rather than a runtime-owned history copy. */
+static cJSON *capture_history(server_session_capture_t *capture)
+{
+   server_session_capture_t *previous = server_session_capture_bind(capture);
+   cJSON *history = NULL;
+   assert(!server_session_capture_history(capture, &history));
+   assert(server_session_capture_bind(previous) == capture);
+   return history;
+}
+
 /* Canonical catalog shared by transport-boundary cases. Every runtime below
  * uses the production bound constructor; no unowned transport mode exists. */
 static const server_native_tool_binding_t read_binding = {
@@ -1650,11 +1660,12 @@ static void test_retained_capture(const agent_t *selected, const request_context
           selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
       assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
       assert(server_session_capture_bind(NULL) == capture);
-      const cJSON *source = server_native_runtime_source_history(runtime);
+      cJSON *source = capture_history(capture);
       assert(cJSON_IsArray(source) && cJSON_GetArraySize(source) == 1);
       char *initial = cJSON_PrintUnformatted(source);
       assert(initial && strstr(initial, "canonical source prompt"));
       free(initial);
+      cJSON_Delete(source);
       atomic_store(&expected_capture, capture);
       atomic_store(&owned_profile_probe, 1);
       atomic_store(&snapshot_generation, 1);
@@ -2867,14 +2878,13 @@ static void test_owned_native_context(const agent_t *selected, const request_con
           selected, owner, "session-a", &profile, &read_binding, 1, NULL);
       assert(fresh);
       assert(!strcmp(server_native_runtime_binding(fresh), server_native_runtime_binding(runtime)));
-      const cJSON *before = server_native_runtime_source_history(runtime);
-      const cJSON *after = server_native_runtime_source_history(fresh);
+      cJSON *before = capture_history(capture);
       assert(cJSON_IsArray(before) && cJSON_GetArraySize(before) == 1);
       char *source_wire = cJSON_PrintUnformatted(before);
       assert(source_wire && strstr(source_wire, "canonical source prompt") &&
              !strstr(source_wire, "stale initial profile history"));
       free(source_wire);
-      assert(after && cJSON_Compare(before, after, 1));
+      cJSON_Delete(before);
       assert(!server_native_runtime_cache_scope(fresh, &execution, next_epoch));
       assert(strcmp(next_epoch, baseline));
       assert(!server_native_runtime_cache_scope(fresh, &execution, repeated));

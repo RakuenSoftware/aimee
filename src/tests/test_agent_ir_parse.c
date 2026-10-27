@@ -63,7 +63,8 @@ static void test_partial_wire_never_invokes_recovery_owner(void)
             aimee_response_t response = {0};
             int rescued = -1;
             recovery_owner_calls = 0;
-            assert(!agent_ir_decode_json_response(root, anthropic, 1, &rescued, &response));
+            assert(!agent_ir_decode_json_response_bound(root, anthropic, 1, &rescued, NULL,
+                                                        &response));
             cJSON_Delete(root);
             assert(rescued == 0 && recovery_owner_calls == 0 &&
                    !aimee_ir_response_has_tool_use(&response));
@@ -101,7 +102,7 @@ int main(void)
       cJSON *call = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "content"), 2);
       cJSON_ReplaceItemInObject(call, "id", cJSON_CreateString(id));
       aimee_response_t response = {0};
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &response) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &response) == 0);
       cJSON_Delete(root);
       assert(response.n_content == 4);
       assert(response.content[0].type == AIMEE_BLK_THINKING);
@@ -214,7 +215,7 @@ int main(void)
                       "\"content\":\"not an executed tool\"}]}";
       cJSON *root = cJSON_Parse(body);
       aimee_response_t response = {0};
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &response) == -1);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &response) == -1);
       assert(!response.content && response.n_content == 0);
       cJSON_Delete(root);
    }
@@ -229,7 +230,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       aimee_response_t p;
-      int rc = agent_ir_decode_json_response(root, 1 /*anthropic*/, -1, NULL, &p);
+      int rc = agent_ir_decode_json_response_bound(root, 1 /*anthropic*/, -1, NULL, NULL, &p);
       assert(rc == 0);
       assert(aimee_ir_response_has_tool_use(&p) == 1);
       assert(aimee_ir_response_tool_count(&p) == 1 &&
@@ -266,7 +267,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       aimee_response_t p;
-      int rc = agent_ir_decode_json_response(root, 0 /*openai*/, -1, NULL, &p);
+      int rc = agent_ir_decode_json_response_bound(root, 0 /*openai*/, -1, NULL, NULL, &p);
       assert(rc == 0);
       assert(aimee_ir_response_has_tool_use(&p) == 1 && aimee_ir_response_tool_count(&p) == 1);
       assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "grep") == 0);
@@ -285,7 +286,7 @@ int main(void)
                          "{\"type\":\"text\",\"text\":\"done\"}]}";
       cJSON *root = cJSON_Parse(resp);
       aimee_response_t p;
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p) == 0);
       assert(!aimee_ir_response_has_tool_use(&p));
       assert_ir_text(&p, "done");
       aimee_response_free(&p);
@@ -297,7 +298,7 @@ int main(void)
    {
       cJSON *root = cJSON_CreateArray(); /* not an object; backend parse fails */
       aimee_response_t p;
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &p) == -1);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p) == -1);
       cJSON_Delete(root);
       printf("  PASS: unparseable response fails admission\n");
    }
@@ -313,7 +314,7 @@ int main(void)
       aimee_response_t p;
       int nr = -1;
       /* rescue_mode 0 = rescue dialect calls */
-      assert(agent_ir_decode_json_response(root, 0, 0, &nr, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 0, 0, &nr, NULL, &p) == 0);
       assert(nr == 1);                                 /* one call rescued */
       assert(aimee_ir_response_has_tool_use(&p) == 1); /* now a tool call */
       assert(aimee_ir_response_tool_count(&p) == 1 &&
@@ -347,7 +348,7 @@ int main(void)
       }
       aimee_response_t response = {0};
       int rescued = -1;
-      assert(agent_ir_decode_json_response(root, 1, 0, &rescued, &response) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, 0, &rescued, NULL, &response) == 0);
       cJSON_Delete(root);
       assert(rescued == 0 && !aimee_ir_response_tool_count(&response));
       assert(response.stop_reason == AIMEE_STOP_CONTENT_FILTER);
@@ -369,7 +370,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       aimee_response_t p;
       int nr = -1;
-      assert(agent_ir_decode_json_response(root, 0, -1 /*no rescue*/, &nr, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 0, -1 /*no rescue*/, &nr, NULL, &p) == 0);
       assert(nr == 0 && aimee_ir_response_has_tool_use(&p) == 0);
       aimee_response_free(&p);
       cJSON_Delete(root);
@@ -389,7 +390,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       aimee_response_t p;
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p) == 0);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 1);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
       /* the tap observes; it must not disturb what the turn loop consumes */
@@ -408,7 +409,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       aimee_response_t p;
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p) == 0);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
       aimee_response_free(&p);
@@ -426,7 +427,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       aimee_response_t p;
-      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p) == 0);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
       assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 1);
       aimee_response_free(&p);

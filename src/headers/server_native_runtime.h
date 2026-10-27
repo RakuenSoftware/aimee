@@ -85,10 +85,6 @@ int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t 
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);
-/* Immutable initial canonical source, including the running host turn. Borrowed
- * until close; NULL for a runtime without a capture owner. Native files are not
- * consulted. Later observations do not change this initial snapshot. */
-const struct cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime);
 /* A cache scope includes the captured host authority and these independently
  * attested launch/resource identities. Digests must describe the actual SDK
  * build, effective launch settings (including sandbox, built-ins and hooks),

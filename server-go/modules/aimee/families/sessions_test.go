@@ -76,6 +76,7 @@ type sessDB struct {
 	// ownership probe; those have their own fields so a test can set them
 	// independently.
 	row          []any
+	primaryRow   []any
 	receiptRow   []any
 	rows         [][]any
 	personaState *int
@@ -116,6 +117,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case sql == primaryGetLatestSQL && d.primaryRow != nil:
+		return sessRow{db: d, sql: sql, values: d.primaryRow}
 	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
 		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
 	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):

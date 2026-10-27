@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,20 +245,20 @@ func TestIntegrateFeatureBaseConflictAbortsCleanly(t *testing.T) {
 type partialNoCommitAgents struct{}
 
 func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return testCanonicalDelegate(DelegateResult{
-		Response: "named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented",
-		Partial:  true,
-	}), nil
+	return DelegateResult{
+		Output:  canonical.TextResponse("named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented"),
+		Partial: true,
+	}, nil
 }
 
 type documentedNoopAgents struct{}
 
 func (documentedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return testCanonicalDelegate(DelegateResult{
-		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
-			"result treated as incomplete\n\nNo changes made. Documentation is already complete.",
+	return DelegateResult{
+		Output: canonical.TextResponse("Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nNo changes made. Documentation is already complete."),
 		Partial: true,
-	}), nil
+	}, nil
 }
 
 func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -267,11 +268,11 @@ func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []Delegate
 type implementationSatisfiedNoopAgents struct{}
 
 func (implementationSatisfiedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return testCanonicalDelegate(DelegateResult{
-		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
-			"result treated as incomplete\n\nTask already complete on the current branch. No changes made.",
+	return DelegateResult{
+		Output: canonical.TextResponse("Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nTask already complete on the current branch. No changes made."),
 		Partial: true,
-	}), nil
+	}, nil
 }
 
 func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -281,7 +282,7 @@ func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, reques
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
-		out[i] = testCanonicalGroup(DelegateGroupResult{Response: "partial"})
+		out[i] = DelegateGroupResult{Output: canonical.TextResponse("partial")}
 	}
 	return out
 }

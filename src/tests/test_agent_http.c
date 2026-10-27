@@ -558,7 +558,7 @@ static void test_parse_response_openai_rejects_invalid_tool_arguments(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   assert(agent_ir_decode_json_response(root, 0, -1, NULL, &out) != 0);
+   assert(agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out) != 0);
    assert(aimee_ir_response_has_tool_use(&out) == 0 && aimee_ir_response_tool_count(&out) == 0);
    assert(out.n_content == 0 && out.content == NULL);
 
@@ -576,7 +576,7 @@ static void test_parse_response_captures_provider_model(void)
    cJSON *root = cJSON_Parse(oai);
    assert(root != NULL);
    aimee_response_t p;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &p);
    assert(strcmp(p.model, "gpt-4o-2024-11-20") == 0);
    aimee_response_free(&p);
    cJSON_Delete(root);
@@ -585,7 +585,7 @@ static void test_parse_response_captures_provider_model(void)
                      "\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
    root = cJSON_Parse(ant);
    assert(root != NULL);
-   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p);
    assert(strcmp(p.model, "claude-3-5-sonnet-20241022") == 0);
    aimee_response_free(&p);
    cJSON_Delete(root);
@@ -607,7 +607,7 @@ static void test_parse_response_keeps_text_with_tool_use(void)
    assert(root != NULL);
    aimee_response_t p;
    memset(&p, 0, sizeof(p));
-   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p);
    assert(aimee_ir_response_has_tool_use(&p) == 1);
    assert(aimee_ir_response_tool_count(&p) == 1 &&
           strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "grep") == 0);
@@ -637,7 +637,7 @@ static void test_parse_response_openai_mistral_content_array(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "CMAKE_DEP: schema_data_header");
@@ -663,7 +663,7 @@ static void test_parse_response_openai_stray_think_close(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "Final answer");
@@ -690,7 +690,7 @@ static void test_parse_response_openai_strips_thinking_block(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "LOCAL254_OK");
@@ -719,7 +719,7 @@ static void test_parse_response_openai_strips_thinking_process_scaffold(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "Bundle is insufficient.");
@@ -747,7 +747,7 @@ static void test_parse_response_openai_strips_self_correction_scaffold(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "local delegate ok");
@@ -774,7 +774,7 @@ static void test_parse_response_openai_discards_private_scaffold_without_final(v
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    /* No visible final text; the private scaffold remains separate. */

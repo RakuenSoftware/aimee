@@ -85,7 +85,7 @@ should be re-tested, and likely trimmed, as models improve).
 
 | Subsystem | Files (representative) | Part | Class |
 |-----------|------------------------|------|-------|
-| Turn execution / ingress translation | [`conversation.c`](../../../src/conversation.c), [`proxy_bootstrap.c`](../../../src/proxy_bootstrap.c), [`server`](../../../src/server) | loop | durable (wire-format bridge) |
+| Turn execution / ingress translation | [`conversation.c` (retired)](https://github.com/RakuenSoftware/aimee/blob/8e788e8729c41d9693fda2ad36cf3a70d5b5eb17/src/conversation.c), [`proxy_bootstrap.c`](../../../src/proxy_bootstrap.c), [`server`](../../../src/server) | loop | durable (wire-format bridge) |
 | Retry / recovery loop detection | [`trace_analysis.c`](../../../src/trace_analysis.c) | loop | durable (observability) |
 | MCP tool surface | [`mcp_tools.c`](../../../src/modules/protocols/mcp/mcp_tools.c), [`toolset.c`](../../../src/toolset.c) | tool | durable (the bridge itself) |
 | Per-tool prompt augmentation | [`src/tool_prompts/`](../../../src/tool_prompts), [`gen_tool_prompts.py`](../../../src/gen_tool_prompts.py) | tool | **delete-pressure** |

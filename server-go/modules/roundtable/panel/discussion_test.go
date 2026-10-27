@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,7 @@ func (a *discussionTestAgents) One(_ context.Context, _ Run, request SeatRequest
 	a.requests = append(a.requests, request)
 	a.mu.Unlock()
 	response, err := a.respond(request)
-	return testCanonicalSeat(SeatResult{Response: response, Err: err})
+	return SeatResult{Output: canonical.TextResponse(response), Err: err}
 }
 
 // Seats run concurrently in production, so the double does too: a data race
@@ -54,10 +55,10 @@ func (a *discussionTestAgents) Group(ctx context.Context, run Run, requests []Se
 			defer wg.Done()
 			result := a.One(ctx, run, requests[i])
 			if result.Err == nil {
-				result.Response = withTestIdentity(result.Response, run, requests[i])
+				result.Output = canonical.TextResponse(withTestIdentity(result.Output.DisplayText(), run, requests[i]))
 				result.Participant = fmt.Sprintf("test-participant:%d", i)
 			}
-			out[i] = testCanonicalSeat(result)
+			out[i] = result
 		}(i)
 	}
 	wg.Wait()

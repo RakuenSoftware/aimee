@@ -5,7 +5,6 @@
 #include "ingress_preinject.h"
 #include "server.h"
 #include "agent_admission.h"
-#include "agent_dispatch_scope.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
 #include "aimee_sha256.h"
@@ -209,18 +208,6 @@ static _Thread_local const char *result_cache_role;
  * Slot safety: there is no non-local exit between acquire and release — the
  * executors (agent_execute / agent_execute_with_tools_for_role) return normally
  * (C has no exceptions), so the release always runs and a slot is never leaked. */
-static _Thread_local const agent_dispatch_scope_t *dispatch_scope;
-const agent_dispatch_scope_t *agent_dispatch_scope_bind(const agent_dispatch_scope_t *scope)
-{
-   const agent_dispatch_scope_t *previous = dispatch_scope;
-   dispatch_scope = scope;
-   return previous;
-}
-const agent_dispatch_scope_t *agent_dispatch_scope_current(void)
-{
-   return dispatch_scope;
-}
-
 static int agent_execute_plain_request(const agent_t *agent, const aimee_request_t *request,
                                        agent_result_t *out, int host_text_profile);
 
@@ -306,85 +293,46 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    server_session_log_t *log_scope = NULL;
    /* Internal attempts have no reply subscriber. An existing headed primary
     * capture is preserved by begin_selected rather than restricted in place. */
-   const agent_dispatch_scope_t *resources = agent_dispatch_scope_current();
-   int resource_bound = 0, capture = -1, rc;
-   agent_t bounded;
-   long long setup_start = util_now_ms();
-   const request_context_t *resource_owner = request_context_get();
-   if ((resources && (agent_request_cancelled() || admission_cancel_poll(admit_deleg) ||
-                      (resource_owner && resource_owner->context_refused))) ||
-       (!resources && admit_deleg && admit_deleg[0]) ||
-       (resources && (!resources->begin || !resources->end ||
-                      resources->begin(ag, resources->context, out->error, sizeof out->error))))
+   int capture = -1, rc;
+   const request_context_t *owner = request_context_get();
+   if (agent_request_cancelled() || admission_cancel_poll(admit_deleg) ||
+       (owner && owner->context_refused))
    {
       rc = AGENT_RC_CONTEXT_REFUSED;
-      if (!out->error[0])
-         snprintf(out->error, sizeof out->error,
-                  "mandatory delegate execution resource unavailable");
+      snprintf(out->error, sizeof out->error, "delegate request cancelled or refused");
    }
    else
    {
-      resource_bound = resources != NULL;
-      int setup_expired = 0;
-      if (resources && ag->tool_loop_timeout_ms_cap > 0)
+      capture =
+          server_session_log_begin_selected(role, host_text_profile ? &request->messages[0] : NULL,
+                                            ag->name, ag->provider, ag->model, 0, &log_scope);
+      if (capture < 0)
       {
-         long long remaining = ag->tool_loop_timeout_ms_cap - (util_now_ms() - setup_start);
-         setup_expired = remaining <= 0;
-         if (!setup_expired)
-         {
-            bounded = *ag;
-            bounded.tool_loop_timeout_ms_cap = (int)remaining;
-            if (bounded.timeout_ms <= 0 || bounded.timeout_ms > remaining)
-               bounded.timeout_ms = (int)remaining;
-            ag = &bounded;
-         }
+         rc = AGENT_RC_CAPTURE_FAILED;
+         snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
       }
-      if (setup_expired)
-      {
-         rc = AGENT_RC_CONTEXT_REFUSED;
-         snprintf(out->error, sizeof out->error, "delegate deadline expired during resource setup");
-      }
+      else if (use_tools)
+         rc = host_text_profile
+                  ? agent_execute_with_tools_for_role(ag, net, role, request, out)
+                  : agent_execute_request_with_tools(ag, net, role, request, response, out);
       else
       {
-         capture = server_session_log_begin_selected(
-             role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider,
-             ag->model, 0, &log_scope);
-         if (capture < 0)
-         {
+         aimee_session_event_t event = {
+             .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &request->messages[0]};
+         if (!host_text_profile && aimee_ir_session_emit(&event))
             rc = AGENT_RC_CAPTURE_FAILED;
-            snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
-         }
-         else if (use_tools)
-            rc = host_text_profile
-                     ? agent_execute_with_tools_for_role(ag, net, role, request, out)
-                     : agent_execute_request_with_tools(ag, net, role, request, response, out);
          else
          {
-            aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
-                                           .message_id = "user",
-                                           .message = &request->messages[0]};
-            if (!host_text_profile && aimee_ir_session_emit(&event))
-               rc = AGENT_RC_CAPTURE_FAILED;
-            else
-            {
-               const char *previous_cache_role = result_cache_role;
-               result_cache_role = host_text_profile && role && role[0] &&
-                                           !agent_get_request_session()[0] &&
-                                           delegate_role_result_cache_enabled(role)
-                                       ? role
-                                       : NULL;
-               rc = agent_execute_plain_request(ag, request, out, host_text_profile);
-               result_cache_role = previous_cache_role;
-            }
+            const char *previous_cache_role = result_cache_role;
+            result_cache_role = host_text_profile && role && role[0] &&
+                                        !agent_get_request_session()[0] &&
+                                        delegate_role_result_cache_enabled(role)
+                                    ? role
+                                    : NULL;
+            rc = agent_execute_plain_request(ag, request, out, host_text_profile);
+            result_cache_role = previous_cache_role;
          }
       }
-   }
-   /* The executor has joined its callbacks. Quiescence precedes any published
-    * terminal, retry or parent-worktree application. */
-   if (resource_bound && resources->end(resources->context, out->error, sizeof out->error))
-   {
-      rc = AGENT_RC_CAPTURE_FAILED;
-      out->success = 0;
    }
    if (log_scope && capture == 0)
    {

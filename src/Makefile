@@ -281,7 +281,7 @@ ifeq ($(OS),Windows_NT)
         shared/platform_net.c \
         windows/secret_store.c windows/util.c posix/pam_auth.c
     PLATFORM_EXTRA_SRCS = \
-        windows/history.c windows/server_main.c \
+        windows/server_main.c \
         windows/cli_client.c windows/cli_main.c \
         windows/events.c windows/cmd_infra.c \
         windows/cmd_describe.c \
@@ -296,7 +296,7 @@ else ifeq ($(UNAME_S),Darwin)
         mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
         mac/secret_store.c posix/util.c posix/pam_auth.c
     PLATFORM_EXTRA_SRCS = \
-        posix/history.c posix/server_main.c \
+        posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
         posix/cmd_describe.c \
@@ -311,7 +311,7 @@ else
         linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
         linux/secret_store.c posix/util.c posix/pam_auth.c
     PLATFORM_EXTRA_SRCS = \
-        posix/history.c posix/server_main.c \
+        posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
         posix/cmd_describe.c \
@@ -466,7 +466,7 @@ DATA_SRCS = code_match.c rel_types.c \
             index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c modules/learning/learning_eval_synthesis.c eval_synthesis.c approach_store.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_delegate.c \
             modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_session_lookup.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/routing/agent_config.c modules/vault/agent_credentials.c modules/routing/agent_registry.c modules/routing/routing.c agent_tier_lint.c cmd_describe.c \
-            history.c role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c conversation.c \
+            role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c \
             trajectory_export.c trajectory_batch.c \
             wiki_render.c \
             kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c \

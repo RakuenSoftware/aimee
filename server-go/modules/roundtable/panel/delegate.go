@@ -75,7 +75,6 @@ type SeatRequest struct {
 // SeatResult is what a seat returned, or why it did not.
 type SeatResult struct {
 	Participant string
-	Response    string // display projection only
 	Output      *canonical.Response
 	CostUSD     float64
 	// CostUnknown means no measurement was recorded, so CostUSD is a lower bound

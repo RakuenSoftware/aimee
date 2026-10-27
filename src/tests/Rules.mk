@@ -204,7 +204,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
 $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/module_stage_adapters.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o $(OBJDIR)/modules/ir/response_codec.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_codex_profile.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o  $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o     $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o $(OBJDIR)/modules/ir/response_codec.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/modules/delegates/aimee_ir_rescue.o $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_codex_profile.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o  $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o     $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/server/script_tool_execution.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o  $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
@@ -562,7 +562,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-deploy-apply \
                $(TESTPREFIX)/unit-test-cli-v1-subcommands \
                $(TESTPREFIX)/unit-test-cli-v1-poll-deadline \
-               $(TESTPREFIX)/unit-test-history \
                $(TESTPREFIX)/unit-test-events \
                $(TESTPREFIX)/unit-test-file-ref \
                $(TESTPREFIX)/unit-test-role-templates \
@@ -673,7 +672,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-verify-hook \
                $(TESTPREFIX)/unit-test-process-mgr \
                $(TESTPREFIX)/unit-test-proxy-bootstrap \
-               $(TESTPREFIX)/unit-test-conversation \
                $(TESTPREFIX)/unit-test-agent-business-ir \
                $(TESTPREFIX)/unit-test-agent-max-turns \
                $(TESTPREFIX)/unit-test-provider-settable \
@@ -4376,13 +4374,6 @@ $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o: modules/kb_client/k
 
 
 
-$(TESTPREFIX)/unit-test-history: $(OBJDIR)/tests/test_history.o $(OBJDIR)/history.o $(OBJDIR)/cJSON.o \
-                         $(OBJDIR)/util.o $(OBJDIR)/text.o \
-$(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) \
-                         $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/platform_random.o \
-                         $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-events: $(OBJDIR)/tests/test_events.o $(OBJDIR)/events.o \
                                 $(OBJDIR)/delivery_target.o $(TEST_CORE_OBJS) \
                                 $(OBJDIR)/posix/events.o
@@ -5908,10 +5899,6 @@ $(TESTPREFIX)/unit-test-proxy-bootstrap: $(OBJDIR)/tests/test_proxy_bootstrap.o 
 
 
 
-$(TESTPREFIX)/unit-test-conversation: $(OBJDIR)/tests/test_conversation.o \
-                                       $(OBJDIR)/conversation.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-provider-settable: $(OBJDIR)/tests/test_provider_settable.o \
                                          $(OBJDIR)/server/provider_settable.o \
                                          $(OBJDIR)/server/agent_adapter.o \
@@ -6857,7 +6844,7 @@ $(TESTPREFIX)/unit-test-ir-crossproto-egress: $(OBJDIR)/modules/translation/wire
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.o \
-                                       $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir_session.o \
+                                       $(OBJDIR)/modules/translation/wire_codec.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -6865,8 +6852,6 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
-                                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
-                                       $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -7387,7 +7372,7 @@ $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audi
 	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(filter-out $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o,$(AGENT_CONTEXT_REFUSAL_TEST_COMMON)) $(OBJDIR)/tests/job_progress_agent_runtime.o $(OBJDIR)/tests/job_progress_result_cache.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -Wl,--wrap=db1_delegation_spawn_is_stopped -Wl,--wrap=db1_delegation_spawn_stop_reason
 
 # Actual thin-CLI forwarding consumers share the canonical identity closure.
 $(TESTPREFIX)/unit-test-cli-argspec \

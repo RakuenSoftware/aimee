@@ -17,7 +17,6 @@ int server_session_log_begin_selected(const char *role, const aimee_message_t *m
 /* Restores the calling task's sink; capture failure remains sticky. */
 int server_session_log_finish(server_session_log_t *scope, int success, const char *error);
 int server_session_log_active(void);
-int server_session_log_history_load(cJSON **out);
 int server_session_log_history_save(const cJSON *messages);
 /* Copies the current private execution identity; 1 means no log-only owner. */
 int server_session_log_identity(char *session, size_t capacity, char *principal,

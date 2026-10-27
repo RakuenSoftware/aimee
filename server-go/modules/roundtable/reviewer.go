@@ -179,15 +179,14 @@ func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.Delegat
 }
 
 func seatResult(participant string, output *canonical.Response, cost float64, costUnknown bool, err error) panel.SeatResult {
-	response := ""
 	if err == nil {
 		if output == nil {
 			err = errors.New("delegate has no canonical response")
 		} else {
-			response, err = output.SemanticText()
+			_, err = output.SemanticText()
 		}
 	}
-	out := panel.SeatResult{Participant: participant, Response: response, Output: output,
+	out := panel.SeatResult{Participant: participant, Output: output,
 		CostUSD: cost, CostUnknown: costUnknown, Err: err}
 	if err == nil {
 		return out

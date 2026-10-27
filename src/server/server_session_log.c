@@ -1,4 +1,3 @@
-#include "server_native_history.h"
 #include "server_session_log.h"
 #include "server_session_capture.h"
 #include "server_session_control.h"
@@ -242,26 +241,6 @@ fail:
 int server_session_log_active(void)
 {
    return current != NULL;
-}
-int server_session_log_history_load(cJSON **out)
-{
-   if (!out)
-      return -1;
-   *out = NULL;
-   if (!current)
-      return 1;
-   char *json = NULL;
-   int rc = db1_session_ir_history_load(current->session, "primary", current->principal,
-                                        current->turn, &json);
-   if (rc == 0)
-   {
-      cJSON *receipts = NULL;
-      rc = server_native_history_load(current->session, current->principal, current->turn, 0, out,
-                                      &receipts);
-      cJSON_Delete(receipts);
-   }
-   free(json);
-   return rc;
 }
 int server_session_log_history_save(const cJSON *messages)
 {

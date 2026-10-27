@@ -45,15 +45,14 @@ func (p panelDelegates) request(run roundtablecfg.Run, seat roundtablecfg.SeatRe
 // result classifies and redacts here rather than in the panel, so the panel
 // never grows a second copy of this taxonomy to keep in step with these errors.
 func panelSeatResult(participant string, output *canonical.Response, cost float64, costUnknown bool, err error) roundtablecfg.SeatResult {
-	response := ""
 	if err == nil {
 		if output == nil {
 			err = errors.New("delegate has no canonical response")
 		} else {
-			response, err = output.SemanticText()
+			_, err = output.SemanticText()
 		}
 	}
-	out := roundtablecfg.SeatResult{Participant: participant, Response: response, Output: output,
+	out := roundtablecfg.SeatResult{Participant: participant, Output: output,
 		CostUSD: cost, CostUnknown: costUnknown, Err: err}
 	if err == nil {
 		return out

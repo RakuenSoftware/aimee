@@ -386,10 +386,6 @@
           "sha256": "b5608c9f71b2d09ad309f663bfd7d6cfa7f926ec7c4ec1294f5bfb291f05283e"
         },
         {
-          "path": "src/headers/agent_dispatch_scope.h",
-          "sha256": "98ffabadbed8a1bb744c257b49426033a4e43c3defa650683e7b90d3d479dccb"
-        },
-        {
           "path": "src/headers/agent_exec.h",
           "sha256": "c7c7027a2f5fad4605f6d596237ecd842480fd985eb9a265dbe17c3ff91d29d9"
         },
@@ -399,7 +395,7 @@
         },
         {
           "path": "src/headers/agent_protocol.h",
-          "sha256": "2d48177fac81a179f5c6997da3e7b86f4d275512be87768fae67ea702861e956"
+          "sha256": "1de20b5864acfb9bbeda16ff740afd36cd84774ebeddd325285af8035655d6aa"
         },
         {
           "path": "src/headers/agent_request_build.h",
@@ -766,10 +762,6 @@
           "sha256": "db46aef297439cdf97c4026b510ea1bc3b31e8482c576d1c64d34d5dc7d910f7"
         },
         {
-          "path": "src/headers/conversation.h",
-          "sha256": "451d74429b7e02734b02098f215a6c7f8f05819a611ee080956b486f2aa007f2"
-        },
-        {
           "path": "src/headers/conversation_context.h",
           "sha256": "b1cc55e4e7a5b8f3978ab2033273dc7f7700b2f288ac7a659625b87ac44d22f0"
         },
@@ -876,14 +868,6 @@
         {
           "path": "src/headers/hardware_probe.h",
           "sha256": "be7f94aa5c0ba0b8c863b2f2b68a52826df9a400170f48efe9f230651c5231db"
-        },
-        {
-          "path": "src/headers/history.h",
-          "sha256": "f314e21edefe0e7e9de3c752c4d5cc9141e01bce45c79c80b47e48e4bf3231fc"
-        },
-        {
-          "path": "src/headers/history_impl.h",
-          "sha256": "107829f3aa2e7d63c61b67bd0e32bf5f2e8394d48649aa608defc4846187c352"
         },
         {
           "path": "src/headers/hook_session_token.h",
@@ -1307,7 +1291,7 @@
         },
         {
           "path": "src/headers/openai_shape.h",
-          "sha256": "66184881815a32685200b699a6fa3d77fe647996425e66b8a1f6c8c7c81df1be"
+          "sha256": "8676a2c67e15a8616b7693e6a7b9014bd30547f022c251a0a9f1886a03658f84"
         },
         {
           "path": "src/headers/osv_check.h",
@@ -1619,7 +1603,7 @@
         },
         {
           "path": "src/headers/server_native_runtime.h",
-          "sha256": "6ef0877808fe029c60e880ea2489cd90d3c8ba66750f41f026127bed10d5dbc9"
+          "sha256": "9efaf2591b09b20560355386e389b06151064567c50fca25f4540c4bea04d474"
         },
         {
           "path": "src/headers/server_native_sdk_profile.h",
@@ -1659,7 +1643,7 @@
         },
         {
           "path": "src/headers/server_session_log.h",
-          "sha256": "18f94342c8adfd4b36e591ffe4456521454eaf2e273a1e75b12ddd621be68b09"
+          "sha256": "5705e7e6eefcd3f8633c009633a6728265726a2aa5cdb15191b72cb22c91f0fb"
         },
         {
           "path": "src/headers/server_session_question.h",
@@ -1983,7 +1967,7 @@
         },
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
-          "sha256": "9d3cf1b7816e9d4c7a129e33a5fb6a18ca441cffcd54fe8f1cc952612d5a5569"
+          "sha256": "8115ad23b401e081e3820e1a229dadd22a4d07fc663f7f4460a7e833f857112c"
         },
         {
           "path": "src/modules/ir/include/aimee/ir/module_plan.h",
@@ -2127,11 +2111,11 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_frontend.h",
-          "sha256": "72770e09bd6d859161c69cf749886ead36f555ad442583f84e8086e7cadc8d49"
+          "sha256": "aa9650d8a310efb34a4671cde9dbbf8d8518b5f4f314976ada7edf4fdf8aeeee"
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
-          "sha256": "ebd5ce6907b44819cb11f6fa23d3c776207a0b0efe5016b8084c6970d8f7aa4f"
+          "sha256": "68fb98510d758f5da169e8987e2274e30cd84f5af02813b79ce0e865fd6f025a"
         },
         {
           "path": "src/modules/translation/include/aimee/translation/codec_stdio.h",
@@ -2168,7 +2152,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "08f30881cec30afb985c62d5b5c2fbc07ebdca73212c7070dee0ed801b1e4e1b",
+      "sha256": "18ee0d80a7e7e433f6c5d0886f29be9788fee825b7c0bc536f807bb018622ca3",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

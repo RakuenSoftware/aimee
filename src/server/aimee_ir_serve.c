@@ -14,7 +14,6 @@
 #include "server_http.h"          /* session_persona_get */
 #include "server_http_identity.h" /* inbound session identity */
 #include "request_context.h"
-#include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee.h" /* size macros for agent_types.h */
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/core/turn_integrity.h>

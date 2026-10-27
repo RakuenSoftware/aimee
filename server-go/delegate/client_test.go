@@ -335,7 +335,7 @@ func TestFailedCanonicalResponseDiagnosticIsNotDiscarded(t *testing.T) {
 	if !errors.As(err, &execution) || !execution.Dispatched || !execution.CostKnown || execution.CostUSD != 0.25 {
 		t.Fatalf("failed execution accounting lost: %v", err)
 	}
-	if result.Output != nil || result.Response != "" {
+	if result.Output != nil {
 		t.Fatal("failed model response was exposed as a successful result")
 	}
 	// Reflection lets this loss regression run against the old error shape too;
@@ -424,7 +424,7 @@ func TestOutputLimitClassificationRequiresAdmittedCanonicalStop(t *testing.T) {
 					t.Fatal("admitted failed response or billing metadata changed")
 				}
 			}
-			if result.Output != nil || result.Response != "" {
+			if result.Output != nil {
 				t.Fatal("failed envelope acquired success-shaped result")
 			}
 			if _, err = result.SemanticText(); err == nil {

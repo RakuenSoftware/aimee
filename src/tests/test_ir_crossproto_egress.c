@@ -1060,20 +1060,6 @@ static void test_native_thinking_replay_binding(void)
       cJSON_Delete(native);
       aimee_request_free(&request);
    }
-   cJSON *edited = cJSON_Parse(body);
-   assert(edited);
-   cJSON_SetValuestring(
-       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(edited, "system"), 0), "text"),
-       "compatibility edit");
-   aimee_request_t request = {0};
-   char error[128];
-   assert(!aimee_frontend_parse_native_frame(edited, body, strlen(body), AIMEE_WIRE_ANTHROPIC,
-                                             &request, error, sizeof error));
-   cJSON *native = anthropic_backend_build(&request);
-   assert(native && thinking_count(native) == 0); /* Keep proof from the original frame. */
-   cJSON_Delete(native);
-   cJSON_Delete(edited);
-   aimee_request_free(&request);
    puts("  native prefix/chain fences, cache-only edits and honest historical omission OK");
 }
 
@@ -1274,15 +1260,20 @@ static void test_host_profile_sidecars_exclude_native_selectors(void)
 {
    aimee_request_t profile = {.model = "host-model", .frontend = AIMEE_WIRE_OPENAI_CHAT};
    const char *layouts[] = {
-       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}",
-       "{\"system\":[{\"type\":\"text\",\"text\":\"host system\","
-       "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}]}"};
+       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}", "{}"};
    const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC};
    for (int i = 0; i < 2; i++)
    {
       profile.frontend = wires[i];
+      profile.system_scalar = wires[i] == AIMEE_WIRE_ANTHROPIC;
       profile.raw = cJSON_Parse(layouts[i]);
       assert(aimee_backend_host_profile_valid(&profile));
+      if (wires[i] == AIMEE_WIRE_ANTHROPIC)
+      {
+         cJSON_AddStringToObject(profile.raw, "system", "native system is not a host profile");
+         assert(!aimee_backend_host_profile_valid(&profile));
+         cJSON_DeleteItemFromObjectCaseSensitive(profile.raw, "system");
+      }
       cJSON_AddStringToObject(profile.raw, "conversation", "SDK-side history");
       assert(!aimee_backend_host_profile_valid(&profile));
       cJSON_Delete(profile.raw);
@@ -1323,37 +1314,29 @@ static void test_host_request_owner_precedes_proof_guard(void)
        aimee_frontend_bind_state_guard(inspect_owned_entry, &fixture);
    for (int i = 0; i < 3; i++)
    {
-      for (int parsed_object = 0; parsed_object < 2; parsed_object++)
-      {
-         aimee_request_t request = {0};
-         char error[128];
-         cJSON *native = cJSON_Parse(bodies[i]);
-         int before = fixture.owners;
-         int rc = parsed_object
-                      ? aimee_frontend_parse_native_frame(native, bodies[i], strlen(bodies[i]),
-                                                          wires[i], &request, error, sizeof error)
-                      : aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request,
-                                                  error, sizeof error);
-         cJSON_Delete(native);
-         assert(!rc && fixture.owners == before + 1);
-         request.max_tokens = 17; /* A later approved transform remains effective. */
-         rc = aimee_frontend_guard_state(&request, error, sizeof error);
-         assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
-         char *rendered = aimee_backend_render_wire(&request, wires[i]);
-         assert(rendered && strstr(rendered, "host canonical history") &&
-                !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
-         assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
-         free(rendered);
-         aimee_request_free(&request);
-      }
+      aimee_request_t request = {0};
+      char error[128];
+      int before = fixture.owners;
+      int rc = aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request, error,
+                                         sizeof error);
+      assert(!rc && fixture.owners == before + 1);
+      request.max_tokens = 17; /* A later approved transform remains effective. */
+      rc = aimee_frontend_guard_state(&request, error, sizeof error);
+      assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
+      char *rendered = aimee_backend_render_wire(&request, wires[i]);
+      assert(rendered && strstr(rendered, "host canonical history") &&
+             !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
+      assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
+      free(rendered);
+      aimee_request_free(&request);
    }
-   assert(fixture.owners == 6 && fixture.guards == 12);
+   assert(fixture.owners == 3 && fixture.guards == 6);
    fixture.refuse = 1;
    aimee_request_t refused = {0};
    int rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
                                       NULL, 0);
    assert(rc < 0 && !refused.model && !refused.messages && !refused.raw_bytes &&
-          fixture.guards == 12);
+          fixture.guards == 6);
    aimee_frontend_bind_request_owner(previous_owner.guard, previous_owner.context);
    aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
    rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,

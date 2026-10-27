@@ -210,7 +210,6 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/windows/history.c
         ${AIMEE_SRC_DIR}/windows/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -253,7 +252,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -309,7 +307,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -360,7 +357,6 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/windows/platform_random.c
-        ${AIMEE_SRC_DIR}/windows/history.c
         ${AIMEE_SRC_DIR}/windows/cli_client.c
         ${AIMEE_SRC_DIR}/windows/cli_main.c
         ${AIMEE_SRC_DIR}/windows/util.c
@@ -386,7 +382,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/mac/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
         ${AIMEE_SRC_DIR}/posix/util.c
@@ -408,7 +403,6 @@ else()
         ${AIMEE_SRC_DIR}/linux/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
         ${AIMEE_SRC_DIR}/posix/util.c
@@ -645,11 +639,9 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
-    ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
     ${AIMEE_SRC_DIR}/modules/skills/skill.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_rollback.c
-    ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c
     ${AIMEE_SRC_DIR}/trajectory_batch.c
     ${AIMEE_SRC_DIR}/wiki_render.c
@@ -1390,7 +1382,6 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/codex_auth.c
     ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/dstr.c
-    ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_iface.c

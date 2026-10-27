@@ -17,14 +17,14 @@ type recordingPlaneAgents struct {
 
 func (a *recordingPlaneAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.requests = append(a.requests, request)
-	return testCanonicalDelegate(DelegateResult{Response: "ok", Participant: "p"}), a.err
+	return DelegateResult{Output: canonical.TextResponse("ok"), Participant: "p"}, a.err
 }
 
 func (a *recordingPlaneAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	a.requests = append(a.requests, requests...)
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range out {
-		out[i] = testCanonicalGroup(DelegateGroupResult{Response: "ok", Participant: "p", Err: a.err})
+		out[i] = DelegateGroupResult{Output: canonical.TextResponse("ok"), Participant: "p", Err: a.err}
 	}
 	return out
 }

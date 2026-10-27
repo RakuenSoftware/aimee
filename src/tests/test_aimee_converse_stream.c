@@ -38,7 +38,8 @@ int main(void)
       assert(n == 1);
       assert(d[0].type == AIMEE_DELTA_TURN_START && d[0].usage_unobserved);
       anthropic_stream_state_t client = {0};
-      assert(!anthropic_delta_render(d, &client, "message", "model") && !client.started);
+      assert(anthropic_delta_emit(d, &client, "message", "model", NULL, NULL) < 0 &&
+             !client.started);
       cJSON_Delete(pl);
    }
 

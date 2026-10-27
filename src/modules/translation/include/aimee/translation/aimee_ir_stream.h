@@ -98,7 +98,7 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const struct cJSON
  * The cell the backend matrix was missing: Anthropic appeared here only as a
  * FRONTEND renderer, so an Anthropic-speaking provider had no way onto the neutral
  * delta model and its stream could only be relayed verbatim. This is the streaming
- * counterpart of anthropic_backend_parse, and the mirror of anthropic_delta_render.
+ * counterpart of anthropic_backend_parse, and the mirror of anthropic_delta_emit.
  *
  * `event_type` is the SSE `event:` name (e.g. "content_block_delta"); payload is the
  * parsed `data:` JSON. Unlike the Converse parser, EVERY event yields at most ONE
@@ -163,22 +163,9 @@ typedef struct
    int started; /* message_start emitted */
 } anthropic_stream_state_t;
 
-/* Render one IR delta as Anthropic SSE event text (malloc'd `event: ...\ndata:
- * ...\n\n`, caller frees), or NULL if the delta yields no output. msg_id + model
- * are used on the first (TURN_START) event. */
-char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
-                             const char *msg_id, const char *model);
-
-/* Split (ctx, event, data_json) SSE sink -- signature-compatible with the
- * server's server_http_sse_event_emit, so the live relay's emit is passed
- * directly. */
-
-/* Like anthropic_delta_render, but emits each Anthropic SSE event via `emit`
- * (event name + data JSON, unframed) instead of returning a framed string --
- * matches the live SSE relay's split emit sink. TURN_STOP emits two events
- * (message_delta + message_stop). Returns the number of events emitted. This is
- * the replacement for the legacy incremental translator (anthropic_stream_feed_
- * openai) on the live relay path. */
+/* Emit each native Anthropic SSE event through the caller's split event/data
+ * sink. TURN_STOP emits message_delta and message_stop. Returns the event count,
+ * or -1 when the canonical delta has no truthful representation on this wire. */
 int anthropic_delta_emit(const aimee_delta_t *d, anthropic_stream_state_t *st, const char *msg_id,
                          const char *model, aimee_sse_emit_fn emit, void *ctx);
 

@@ -18,7 +18,7 @@ func TestDelegateAdmissionUsesCanonicalNotCompatibilityText(t *testing.T) {
 	if err := AdmitResult(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Response != `{"verdict":"changes"}` {
+	if text, err := (DelegateResult{Output: result.Output}).SemanticText(); err != nil || text != `{"verdict":"changes"}` {
 		t.Fatal("display overrode canonical verdict")
 	}
 }
@@ -118,7 +118,7 @@ func TestTransportCompletionPreservesMediaWithoutBusinessTextAuthority(t *testin
 			if received.Output == nil || string(received.Output.Blocks[len(received.Output.Blocks)-1].Raw) != string(media.Raw) {
 				t.Fatal("typed media or opaque sidecar lost")
 			}
-			if kind != "mixed" && received.Response != "" {
+			if kind != "mixed" && received.Output.DisplayText() != "" {
 				t.Fatal("media-only output fabricated display text")
 			}
 			if _, err := received.SemanticText(); err == nil {

@@ -55,7 +55,6 @@ struct server_native_runtime
    cli_proxy_t *listener;
    server_native_replay_t *replay;
    server_native_tool_source_t *tool_source;
-   cJSON *source_history;
    cJSON *native_owner;
    cJSON *interruption_receipts;
    aimee_request_t request_profile;
@@ -1673,8 +1672,10 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
    if (server_session_capture_retain_current(session_id, owner->vault_principal, &runtime->capture))
       goto failed;
    stage = "canonical_running_history";
-   if (runtime->capture &&
-       server_session_capture_history(runtime->capture, &runtime->source_history))
+   cJSON *history = NULL;
+   int history_status = server_session_capture_history(runtime->capture, &history);
+   cJSON_Delete(history);
+   if (history_status)
       goto failed;
    stage = "profile_admission";
    if (!runtime->capture || !profile->model || strcmp(profile->model, selected->model) ||
@@ -2148,11 +2149,6 @@ int server_native_runtime_claim_reference(server_native_runtime_t *runtime, cons
                   : -1;
 }
 
-const cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime)
-{
-   return runtime ? runtime->source_history : NULL;
-}
-
 void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime)
 {
    if (runtime)
@@ -2228,7 +2224,6 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    aimee_response_free(&runtime->last_response);
    server_native_replay_close(runtime->replay);
    server_native_tool_source_close(runtime->tool_source);
-   cJSON_Delete(runtime->source_history);
    cJSON_Delete(runtime->native_owner);
    cJSON_Delete(runtime->interruption_receipts);
    aimee_request_free(&runtime->request_profile);

@@ -79,8 +79,8 @@ static void test_native_stage_replay(void)
       aimee_request_t request = {0};
       char error[128];
       ir_seam_test_native_preinject(enabled);
-      assert(!aimee_frontend_parse_native_frame(native, frame, strlen(frame), AIMEE_WIRE_ANTHROPIC,
-                                                &request, error, sizeof error));
+      assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                        sizeof error));
       aimee_ir_apply_native_request_stages(&request);
       assert(ir_seam_test_plan_calls("context") == enabled);
       assert(ir_seam_test_plan_calls("tools") == enabled);

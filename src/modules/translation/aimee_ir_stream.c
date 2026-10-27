@@ -761,28 +761,10 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    return 0;
 }
 
-/* wrap a cJSON `data` object as an SSE frame "event: <ev>\ndata: <json>\n\n"
- * (consumes data). */
-static char *sse_frame(const char *ev, cJSON *data)
-{
-   char *json = cJSON_PrintUnformatted(data);
-   cJSON_Delete(data);
-   if (!json)
-      return NULL;
-   size_t need =
-       strlen("event: ") + strlen(ev) + strlen("\ndata: ") + strlen(json) + strlen("\n\n") + 1;
-   char *buf = malloc(need);
-   if (buf)
-      snprintf(buf, need, "event: %s\ndata: %s\n\n", ev, json);
-   free(json);
-   return buf;
-}
-
 /* Build the Anthropic SSE event object(s) for one IR delta into ev[]/js[] (up to
  * 2 -- TURN_STOP is message_delta + message_stop). Returns the count (0 = no
  * output). The caller owns the returned cJSON (frees / serializes them). st is
- * updated (TURN_START sets st->started). Shared by anthropic_delta_render (frames)
- * and anthropic_delta_emit (callback) so the two never drift. */
+ * updated (TURN_START sets st->started). The live emitter owns serialization. */
 static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *st,
                               const char *msg_id, const char *model, const char *ev[2],
                               cJSON *js[2])
@@ -967,33 +949,6 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
    default:
       return 0;
    }
-}
-
-char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
-                             const char *msg_id, const char *model)
-{
-   const char *ev[2] = {NULL, NULL};
-   cJSON *js[2] = {NULL, NULL};
-   int n = delta_build_events(d, st, msg_id, model, ev, js);
-   if (n <= 0)
-      return NULL;
-   char *first = sse_frame(ev[0], js[0]); /* sse_frame takes ownership of js[i] */
-   if (n == 1)
-      return first;
-   char *second = sse_frame(ev[1], js[1]);
-   if (!first || !second)
-   {
-      free(first);
-      free(second);
-      return NULL;
-   }
-   size_t need = strlen(first) + strlen(second) + 1;
-   char *both = malloc(need);
-   if (both)
-      snprintf(both, need, "%s%s", first, second);
-   free(first);
-   free(second);
-   return both;
 }
 
 int anthropic_delta_emit(const aimee_delta_t *d, anthropic_stream_state_t *st, const char *msg_id,

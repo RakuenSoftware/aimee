@@ -8,6 +8,23 @@
 #include <aimee/translation/aimee_ir_stream.h>
 #include "cJSON.h"
 
+/* Observe the same split event/data sink used by the live Anthropic edge. */
+static char g_emit_acc[4096];
+typedef struct
+{
+   char *data;
+   size_t capacity;
+} emit_buffer_t;
+static void emit_collect(void *context, const char *event, const char *data_json)
+{
+   emit_buffer_t fallback = {g_emit_acc, sizeof g_emit_acc};
+   emit_buffer_t *out = context ? context : &fallback;
+   size_t used = strlen(out->data);
+   int count = snprintf(out->data + used, out->capacity - used, "event: %s\ndata: %s\n\n", event,
+                        data_json);
+   assert(count >= 0 && (size_t)count < out->capacity - used);
+}
+
 /* accumulate the Anthropic SSE rendered from one OpenAI chunk */
 static void feed(const char *chunk_json, openai_stream_state_t *ost, anthropic_stream_state_t *ast,
                  char *acc, size_t accn)
@@ -16,37 +33,9 @@ static void feed(const char *chunk_json, openai_stream_state_t *ost, anthropic_s
    assert(chunk);
    aimee_delta_t deltas[16];
    int n = openai_chunk_to_deltas(chunk, ost, deltas, 16);
+   emit_buffer_t collected = {acc, accn};
    for (int i = 0; i < n; i++)
-   {
-      char *sse = anthropic_delta_render(&deltas[i], ast, "msg_1", "claude-3-5-sonnet");
-      if (sse)
-      {
-         strncat(acc, sse, accn - strlen(acc) - 1);
-         free(sse);
-      }
-   }
-   cJSON_Delete(chunk);
-}
-
-/* Collector for the callback-emit path: reframe (event,data) back to SSE so the
- * SAME assertions apply -- proving anthropic_delta_emit == anthropic_delta_render. */
-static char g_emit_acc[4096];
-static void emit_collect(void *ctx, const char *event, const char *data_json)
-{
-   (void)ctx;
-   char frame[1024];
-   snprintf(frame, sizeof frame, "event: %s\ndata: %s\n\n", event, data_json);
-   strncat(g_emit_acc, frame, sizeof g_emit_acc - strlen(g_emit_acc) - 1);
-}
-static void feed_emit(const char *chunk_json, openai_stream_state_t *ost,
-                      anthropic_stream_state_t *ast)
-{
-   cJSON *chunk = cJSON_Parse(chunk_json);
-   assert(chunk);
-   aimee_delta_t deltas[16];
-   int n = openai_chunk_to_deltas(chunk, ost, deltas, 16);
-   for (int i = 0; i < n; i++)
-      anthropic_delta_emit(&deltas[i], ast, "msg_1", "claude-3-5-sonnet", emit_collect, NULL);
+      anthropic_delta_emit(&deltas[i], ast, "msg_1", "claude-3-5-sonnet", emit_collect, &collected);
    cJSON_Delete(chunk);
 }
 
@@ -138,7 +127,6 @@ static void test_unobserved_stream_usage(void)
       cJSON_Delete(frame);
    }
    anthropic_stream_state_t client = {0};
-   assert(!anthropic_delta_render(delta, &client, "id", "model"));
    assert(anthropic_delta_emit(delta, &client, "id", "model", NULL, NULL) < 0);
 }
 
@@ -158,13 +146,10 @@ int main(void)
       assert(openai_chunk_to_deltas(chunk, &source, opening, 4) == 1);
       assert(opening[0].usage_unobserved == !observed);
       anthropic_stream_state_t frontend = {0};
-      char *frame = anthropic_delta_render(opening, &frontend, "id", "model");
-      assert((frame != NULL) == observed && frontend.started == observed);
-      free(frame);
       g_emit_acc[0] = 0;
       assert((anthropic_delta_emit(opening, &frontend, "id", "model", emit_collect, NULL) > 0) ==
              observed);
-      assert((g_emit_acc[0] != 0) == observed);
+      assert((g_emit_acc[0] != 0) == observed && frontend.started == observed);
       cJSON_Delete(chunk);
    }
    printf("ir-stream: ");
@@ -204,27 +189,6 @@ int main(void)
    assert(strstr(acc, "event: message_stop"));
    /* Only a complete canonical response can supply the deferred opening usage. */
    assert(!ast.started);
-
-   /* The callback-emit path (anthropic_delta_emit, the live-relay sink) must
-    * produce byte-identical framed SSE to anthropic_delta_render (shared builder). */
-   openai_stream_state_t ost2;
-   openai_stream_state_init(&ost2);
-   anthropic_stream_state_t ast2 = {0};
-   g_emit_acc[0] = '\0';
-   feed_emit("{\"choices\":[{\"delta\":{"
-             "\"role\":\"assistant\",\"content\":\"Hel\"}}]}",
-             &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}", &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
-             "\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}]}}]}",
-             &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
-             "\"function\":{\"arguments\":\"{\\\"p\\\":1}\"}}]}}]}",
-             &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
-             "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4}}",
-             &ost2, &ast2);
-   assert(strcmp(acc, g_emit_acc) == 0); /* emit == render, event-for-event */
 
    /* --- OpenAI-chat reasoning -> THINKING deltas ------------------------------ */
    {
@@ -414,12 +378,14 @@ int main(void)
       assert(d[0].stop_reason == (refused ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_UNKNOWN));
       assert(!strcmp(d[0].raw_stop_reason, reason));
       anthropic_stream_state_t rendered = {0};
-      char *wire = anthropic_delta_render(&d[0], &rendered, "msg_refusal", "claude");
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d[0], &rendered, "msg_refusal", "claude", emit_collect, NULL) >
+             0);
+      const char *wire = g_emit_acc;
       assert(wire);
       char expected[80];
       snprintf(expected, sizeof expected, "\"stop_reason\":\"%s\"", reason);
       assert(strstr(wire, expected));
-      free(wire);
       A_DONE();
    }
 
@@ -460,11 +426,13 @@ int main(void)
          assert(!strcmp(d[0].refusal->explanation, hints == 1 ? "Declined <untrusted> text." : ""));
       }
       anthropic_stream_state_t rendered = {0};
-      char *wire = anthropic_delta_render(&d[0], &rendered, "msg_refusal", "claude");
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d[0], &rendered, "msg_refusal", "claude", emit_collect, NULL) >
+             0);
+      const char *wire = g_emit_acc;
       assert(wire && strstr(wire, "\"stop_reason\":\"refusal\"") &&
              strstr(wire, "\"stop_details\":{\"type\":\"refusal\""));
       assert(!strstr(wire, "PRIVATE_HINT") && !strstr(wire, "fallback_credit_token"));
-      free(wire);
       A_DONE();
    }
 
@@ -530,16 +498,17 @@ int main(void)
    {
       aimee_delta_t d = {.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_CONTENT_FILTER};
       anthropic_stream_state_t st = {0};
-      char *wire = anthropic_delta_render(&d, &st, "msg_refusal", "claude");
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", emit_collect, NULL) > 0);
+      const char *wire = g_emit_acc;
       assert(wire && strstr(wire, "\"stop_reason\":\"refusal\""));
-      free(wire);
       aimee_refusal_details_t details = {.category = "future_category"};
       d.refusal = &details;
       d.stop_reason = AIMEE_STOP_END_TURN;
-      assert(!anthropic_delta_render(&d, &st, "msg_refusal", "claude"));
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", NULL, NULL) < 0);
       d.type = AIMEE_DELTA_TURN_START;
       d.stop_reason = AIMEE_STOP_CONTENT_FILTER;
-      assert(!anthropic_delta_render(&d, &st, "msg_refusal", "claude"));
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", NULL, NULL) < 0);
       g_emit_acc[0] = 0;
       assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", emit_collect, NULL) < 0);
       assert(!g_emit_acc[0]);
@@ -666,7 +635,6 @@ int main(void)
                              .kind = AIMEE_BLK_THINKING,
                              .thinking_id = "rs_1",
                              .thinking_encrypted_content = "cipher"};
-      assert(!anthropic_delta_render(&delta, &state, "m", "model"));
       assert(anthropic_delta_emit(&delta, &state, "m", "model", NULL, NULL) < 0);
    }
 

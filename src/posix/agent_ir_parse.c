@@ -57,12 +57,6 @@ int agent_ir_decode_json_response_bound(const cJSON *root, int anthropic, int re
    return ir_admit_decoded_response(rc, out, rescue_mode, n_rescued);
 }
 
-int agent_ir_decode_json_response(const cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
-                                  aimee_response_t *out)
-{
-   return agent_ir_decode_json_response_bound(root, anthropic, rescue_mode, n_rescued, NULL, out);
-}
-
 /* Cap matching the relay tap's: reasoning is only ever MATCHED against, never
  * replayed, so a bound costs recall of late thought where an unbounded copy would
  * scale with the model's chain of thought. */

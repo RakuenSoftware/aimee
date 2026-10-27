@@ -13,13 +13,6 @@ extern "C"
     * never copy a raw HTML/proxy response or unrelated response fields. */
    void openai_upstream_error_message(int status, const char *body, char *out, size_t cap);
 
-   /* Build the terminal chat.completion.chunk with an empty delta and an
-    * explicit finish_reason ("stop", "tool_calls", …). openai_format_chat_chunk's
-    * finish frame always says "stop"; a tool-call turn must not. Returns bytes
-    * written (excluding NUL), or -1 if it does not fit. */
-   int openai_format_chat_chunk_finish(const char *id, const char *model, long created,
-                                       const char *reason, char *resp, int cap);
-
    /* Initial Responses SSE envelope; successful output is rendered from IR. */
    int openai_format_responses_created(const char *id, const char *model, long created, char *resp,
                                        int cap);

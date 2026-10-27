@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,7 +146,7 @@ func (typedLimitAgents) Delegate(context.Context, DelegateRequest) (DelegateResu
 func (typedLimitAgents) DelegateGroup(_ context.Context, _ []DelegateRequest) []DelegateGroupResult {
 	return []DelegateGroupResult{
 		{Participant: "limited-seat", Err: testTurnCapExecutionError()},
-		{Participant: "healthy-seat", Response: "ok"},
+		{Participant: "healthy-seat", Output: canonical.TextResponse("ok")},
 		{Participant: "failed-seat", Err: errors.New("independent failure")},
 	}
 }
@@ -167,7 +168,7 @@ func (typedDeadlineAgents) Delegate(context.Context, DelegateRequest) (DelegateR
 func (typedDeadlineAgents) DelegateGroup(_ context.Context, _ []DelegateRequest) []DelegateGroupResult {
 	return []DelegateGroupResult{
 		{Participant: "deadline-seat", Err: testExecutionDeadlineError()},
-		{Participant: "healthy-seat", Response: "ok"},
+		{Participant: "healthy-seat", Output: canonical.TextResponse("ok")},
 	}
 }
 
@@ -203,7 +204,7 @@ func TestDelegateGroupLimitDiagnostic(t *testing.T) {
 		}
 	}
 	if results[0].Participant != "limited-seat" || results[1].Participant != "healthy-seat" ||
-		results[1].Err != nil || results[1].Response != "ok" ||
+		results[1].Err != nil || results[1].Output.DisplayText() != "ok" ||
 		results[2].Participant != "failed-seat" || results[2].Err == nil {
 		t.Fatalf("mixed group outcomes changed: %+v", results)
 	}
@@ -232,7 +233,7 @@ func TestDelegateGroupLimitDiagnostic(t *testing.T) {
 	}
 	if deadlineResults[0].Participant != "deadline-seat" ||
 		deadlineResults[1].Participant != "healthy-seat" || deadlineResults[1].Err != nil ||
-		deadlineResults[1].Response != "ok" {
+		deadlineResults[1].Output.DisplayText() != "ok" {
 		t.Fatalf("deadline mixed group outcomes changed: %+v", deadlineResults)
 	}
 }
@@ -548,7 +549,7 @@ func (a *concurrentPanelAgents) Delegate(ctx context.Context, request DelegateRe
 	}
 	select {
 	case <-a.release:
-		return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+		return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 	case <-ctx.Done():
 		return DelegateResult{}, ctx.Err()
 	}
@@ -563,11 +564,10 @@ func testDelegateGroup(ctx context.Context, requests []DelegateRequest, run func
 			defer wg.Done()
 			result, err := run(ctx, requests[i])
 			if err == nil && requests[i].Role == roundtableDelegateRole {
-				result.Response = withTestRoundtableIdentity(result.Response, requests[i])
+				result.Output = canonical.TextResponse(withTestRoundtableIdentity(result.Output.DisplayText(), requests[i]))
 			}
-			result = testCanonicalDelegate(result)
 			out[i].Output, out[i].History = result.Output, result.History
-			out[i].Response, out[i].CostUSD, out[i].Err = result.Response, result.CostUSD, err
+			out[i].CostUSD, out[i].Err = result.CostUSD, err
 			if out[i].Err == nil {
 				out[i].Participant = fmt.Sprintf("test-participant:%d", i)
 			}
@@ -603,7 +603,7 @@ func (a *temporaryFailureAgents) Delegate(_ context.Context, request DelegateReq
 	if request.Delegate == "kimi" {
 		return DelegateResult{}, errors.New("subscription temporarily exhausted")
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 type recordingAgents struct {
@@ -616,7 +616,7 @@ type recordingAgents struct {
 type fixedResponseAgents struct{ response string }
 
 func (a fixedResponseAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
-	return testCanonicalDelegate(DelegateResult{Response: a.response}), nil
+	return DelegateResult{Output: canonical.TextResponse(a.response)}, nil
 }
 
 type scriptedReviewAgents struct {
@@ -642,13 +642,13 @@ func (a *repairingReviewAgents) DelegateGroup(_ context.Context, requests []Dele
 		a.invalid = `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request\nwithout drift"},"verdict":"approve","findings":[]}`
 		return []DelegateGroupResult{{
 			Participant: "opaque-seat-token",
-			Response:    a.invalid,
+			Output:      canonical.TextResponse(a.invalid),
 			CostUSD:     1.25,
 		}}
 	}
 	return []DelegateGroupResult{{
 		Participant: "opaque-seat-token",
-		Response:    withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, requests[0]),
+		Output:      canonical.TextResponse(withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, requests[0])),
 		CostUSD:     0.25,
 	}}
 }
@@ -674,21 +674,21 @@ func chairmanApprovalFor(request DelegateRequest) string {
 
 func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if strings.Contains(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
-		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
+		return DelegateResult{Output: canonical.TextResponse(`{"positions":[]}`)}, nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
 		<-ctx.Done()
 		return DelegateResult{}, ctx.Err()
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if strings.Contains(fixtureInputText(request.Input), "ROUNDTABLE DISCUSSION CYCLE") {
-		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
+		return DelegateResult{Output: canonical.TextResponse(`{"positions":[]}`)}, nil
 	}
 	if request.Persona == "chairman" {
-		return testCanonicalDelegate(DelegateResult{Response: chairmanApprovalFor(request)}), nil
+		return DelegateResult{Output: canonical.TextResponse(chairmanApprovalFor(request))}, nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
 		select {
@@ -697,7 +697,7 @@ func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateReque
 			return DelegateResult{}, ctx.Err()
 		}
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 func (deadlineDiscussionAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -706,16 +706,16 @@ func (deadlineDiscussionAgents) Delegate(ctx context.Context, request DelegateRe
 			<-ctx.Done()
 			return DelegateResult{}, ctx.Err()
 		}
-		return testCanonicalDelegate(DelegateResult{Response: `{"positions":[]}`}), nil
+		return DelegateResult{Output: canonical.TextResponse(`{"positions":[]}`)}, nil
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 func (chairmanFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	if request.Persona == "chairman" {
 		return DelegateResult{}, errors.New("chairman unavailable")
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 func (chairmanDeadlineAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -723,7 +723,7 @@ func (chairmanDeadlineAgents) Delegate(ctx context.Context, request DelegateRequ
 		<-ctx.Done()
 		return DelegateResult{}, ctx.Err()
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
 }
 
 func (a firstPanelSeatUnavailableAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -734,7 +734,7 @@ func (a firstPanelSeatUnavailableAgents) Delegate(_ context.Context, request Del
 	if response == "" {
 		response = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
 	}
-	return testCanonicalDelegate(DelegateResult{Response: response}), nil
+	return DelegateResult{Output: canonical.TextResponse(response)}, nil
 }
 
 func (a *scriptedReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
@@ -742,7 +742,7 @@ func (a *scriptedReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (D
 	defer a.mu.Unlock()
 	response := a.responses[0]
 	a.responses = a.responses[1:]
-	return testCanonicalDelegate(DelegateResult{Response: response}), nil
+	return DelegateResult{Output: canonical.TextResponse(response)}, nil
 }
 
 func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -755,12 +755,12 @@ func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (
 		if response == "" {
 			response = `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
 		}
-		return testCanonicalDelegate(DelegateResult{Response: response}), nil
+		return DelegateResult{Output: canonical.TextResponse(response)}, nil
 	}
 	if requestIndex < len(a.draftResponses) {
-		return testCanonicalDelegate(DelegateResult{Response: a.draftResponses[requestIndex]}), nil
+		return DelegateResult{Output: canonical.TextResponse(a.draftResponses[requestIndex])}, nil
 	}
-	return testCanonicalDelegate(DelegateResult{Response: strings.Repeat("complete plan λ\n", 200_000) + "PLAN_END"}), nil
+	return DelegateResult{Output: canonical.TextResponse(strings.Repeat("complete plan λ\n", 200_000) + "PLAN_END")}, nil
 }
 
 func (a *recordingAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -1086,7 +1086,7 @@ func (a *budgetExhaustionAgents) Delegate(_ context.Context, request DelegateReq
 	if request.Persona == "chairman" {
 		a.chairmanCalls++
 	}
-	return testCanonicalDelegate(DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, CostUSD: request.MaxCostUSD}), nil
+	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`), CostUSD: request.MaxCostUSD}, nil
 }
 
 func (a *budgetExhaustionAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -1733,7 +1733,7 @@ func (a *contradictingSeatAgents) DelegateGroup(_ context.Context, requests []De
 			a.attempts++
 			body = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[{"id":"contradiction","severity":"blocking","summary":"approve carrying a finding"}]}`
 		}
-		out[i] = testCanonicalGroup(DelegateGroupResult{Participant: "seat-" + request.Persona, Response: withTestRoundtableIdentity(body, request)})
+		out[i] = DelegateGroupResult{Participant: "seat-" + request.Persona, Output: canonical.TextResponse(withTestRoundtableIdentity(body, request))}
 	}
 	return out
 }
@@ -1820,14 +1820,14 @@ func (a *proseChairmanAgents) Delegate(_ context.Context, request DelegateReques
 		call := a.chairmanCalls
 		a.mu.Unlock()
 		if call == 1 {
-			return testCanonicalDelegate(DelegateResult{Response: "Certainly! Here is my assessment of the plan:\n\nThe plan looks reasonable overall."}), nil
+			return DelegateResult{Output: canonical.TextResponse("Certainly! Here is my assessment of the plan:\n\nThe plan looks reasonable overall.")}, nil
 		}
 		if a.replyAfterRepair == "repeat-prose" {
-			return testCanonicalDelegate(DelegateResult{Response: "Still prose, still no JSON object anywhere."}), nil
+			return DelegateResult{Output: canonical.TextResponse("Still prose, still no JSON object anywhere.")}, nil
 		}
-		return testCanonicalDelegate(DelegateResult{Response: chairmanApprovalFor(request)}), nil
+		return DelegateResult{Output: canonical.TextResponse(chairmanApprovalFor(request))}, nil
 	}
-	return testCanonicalDelegate(DelegateResult{Response: withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, request)}), nil
+	return DelegateResult{Output: canonical.TextResponse(withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, request))}, nil
 }
 
 func (a *proseChairmanAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {

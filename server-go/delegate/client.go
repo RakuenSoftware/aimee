@@ -58,10 +58,8 @@ type DelegateRequest struct {
 }
 
 type DelegateResult struct {
-	Output  *canonical.Response
-	History []canonical.Message
-	// Response is display compatibility only, derived from admitted Output.
-	Response    string
+	Output      *canonical.Response
+	History     []canonical.Message
 	Agent       string
 	Participant string
 	CostUSD     float64
@@ -77,14 +75,13 @@ type DelegateGroupResult struct {
 	Output      *canonical.Response
 	History     []canonical.Message
 	Participant string
-	Response    string
 	CostUSD     float64
 	CostUnknown bool
 	Err         error
 }
 
-// SemanticText is the explicit application-artifact boundary. The display
-// compatibility field is never consulted, including when IR is absent.
+// SemanticText is the explicit application-artifact boundary. Only the
+// admitted canonical output can supply application text.
 func (r DelegateResult) SemanticText() (string, error) {
 	if r.Output == nil {
 		return "", errors.New("delegate returned no canonical response")
@@ -154,11 +151,6 @@ func AdmitResult(result *InvocationResult) error {
 		if !result.Output.Complete() {
 			return errors.New("delegate output is not a complete canonical model response")
 		}
-		result.Response = result.Output.DisplayText()
-	} else if result.Output != nil {
-		result.Response = result.Output.DisplayText()
-	} else {
-		result.Response = ""
 	}
 	return nil
 }
@@ -426,7 +418,7 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		participant = result.Agent
 	}
 	return DelegateResult{Output: result.Output, History: result.History,
-		Response: result.Response, Agent: result.Agent, Participant: participant,
+		Agent: result.Agent, Participant: participant,
 		CostUSD: result.CostUSD, CostUnknown: !result.CostKnown}, nil
 }
 
@@ -482,7 +474,7 @@ func (c *BusClient) DelegateGroup(ctx context.Context, requests []DelegateReques
 		go func(i int) {
 			result, err := c.Delegate(ctx, planned[i])
 			out[i] = DelegateGroupResult{Participant: result.Participant, Output: result.Output,
-				History: result.History, Response: result.Response,
+				History: result.History,
 				CostUSD: result.CostUSD, CostUnknown: result.CostUnknown, Err: err}
 			done <- i
 		}(i)
