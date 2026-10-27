@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 303 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 302 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -625,7 +625,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (read via the agent's `api_key_env`). |
 | `GEMINI_API_KEY` | Google Gemini API key (read via the agent's `api_key_env`). |
-| `GEMINI_API_KEY_AUTH_MECHANISM` | Selects the Gemini key auth mechanism. |
 | `GOOGLE_API_KEY` | Google API key fallback for Gemini (via `api_key_env`). |
 | `OPENAI_API_KEY` | OpenAI API key (default for OpenAI-family agents). |
 
@@ -646,7 +645,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 
 | Variable | Description |
 |----------|-------------|
-| `DOCKER_HOST` | Docker daemon endpoint. Owned delegate execution requires a local Unix socket and pins it for the container lease. |
 | `HTTPS_PROXY` | HTTPS proxy for outbound provider/API calls. |
 | `NO_PROXY` | Hosts excluded from proxying. |
 

@@ -207,7 +207,7 @@ static void test_unsupported_and_opaque(void)
    const char *private_body = "{\"prompt\":\"private source text\"}";
    aimee_request_t private_request = {0};
    assert(!aimee_frontend_parse_text_completion(private_body, strlen(private_body),
-                                               &private_request, NULL, 0));
+                                                &private_request, NULL, 0));
    aimee_ir_block_set_context(&private_request.messages[0].blocks[0], AIMEE_CTX_ORIGIN_USER,
                               AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNTRUSTED,
                               AIMEE_CTX_SENS_RESTRICTED, 0, "private-source", "test", 1);

@@ -520,7 +520,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             # and role membership first; search must still restore its own base.
             for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
                 if ("canonical-git-role-membership:" in block.get("review", "") or
-                        "canonical-native-project-dispatch:" in block.get("review", "")):
+                        "canonical-native-project-dispatch:" in block.get("review", "") or
+                        "retired-delegate-reply:" in block.get("review", "")):
                     self.assertEqual(original.count(block["release_text"]), 1)
                     original = original.replace(block["release_text"], block["frozen_text"], 1)
             for block in blocks:
@@ -554,6 +555,23 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     with self.subTest(path=path, delta=release[:70], drift=label):
                         self.assertNotEqual(current, drift)
                         self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_pins_retired_delegate_reply(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path in ("src/modules/protocols/mcp/mcp_tools.c",
+                     "src/tests/test_mcp_client_registry.c"):
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            for row in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if "retired-delegate-reply:" not in row.get("review", ""):
+                    continue
+                release = row["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, row["frozen_text"], 1)):
+                    self.assertNotEqual(current, drift)
+                    self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
     def test_release_validator_rejects_native_project_dispatch_drift(self) -> None:
         validator = load_release_validator()

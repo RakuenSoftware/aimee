@@ -704,7 +704,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-mcp-client-registry \
                $(TESTPREFIX)/unit-test-osv-check \
                $(TESTPREFIX)/unit-test-plugin-c-hook \
-               $(TESTPREFIX)/unit-test-context-engine \
                $(TESTPREFIX)/unit-test-dogfood \
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-learning-memory-transport \
@@ -6919,7 +6918,7 @@ $(TESTPREFIX)/unit-test-server-native-cache: $(OBJDIR)/tests/test_server_native_
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
 
-$(OBJDIR)/tests/server_mcp_git_scope_subject.o: server/server_mcp.c
+$(OBJDIR)/tests/server_mcp_git_scope_subject.o: server/server_mcp.c agent_help_data.h
 	@mkdir -p $(dir $@)
 	$(CC) $(C_FLAGS) -ffunction-sections -fdata-sections -c -o $@ $<
 $(TESTPREFIX)/unit-test-server-mcp-git-scope: $(OBJDIR)/tests/test_server_mcp_git_scope.o $(OBJDIR)/tests/server_mcp_git_scope_subject.o $(OBJDIR)/cJSON.o

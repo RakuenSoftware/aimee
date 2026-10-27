@@ -549,10 +549,10 @@ text = 'ordinary \"quoted\" data'
         declarations = (
             'typedef int (*skill_trial_runner_fn)(void *ctx, const char *system, const char *prompt);',
             'typedef int (*roadmap_model_fn)(const char *prompt, char **output, void *ctx);',
-            'int delegate_ensemble_run(config_t *cfg, panel_t *panel, const char *prompt, result_t *out);',
-            'int delegate_roundtable_run(config_t *cfg, panel_t *panel, const char *task, result_t *out);',
+            'int delegate_ensemble_run(aimee_config_view_t *cfg, panel_t *panel, const char *prompt, result_t *out);',
+            'int delegate_roundtable_run(aimee_config_view_t *cfg, panel_t *panel, const char *task, result_t *out);',
             'char *aux_call(const char *name, const char *prompt, int max_tokens);',
-            'int aimee_panel_run(config_t *cfg, panel_t *panel, const char *task, result_t *out);',
+            'int aimee_panel_run(aimee_config_view_t *cfg, panel_t *panel, const char *task, result_t *out);',
         )
         for declaration in declarations:
             path = self.source("src/new_module/model.h", declaration)

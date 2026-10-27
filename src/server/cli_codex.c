@@ -278,7 +278,9 @@ static void cli_codex_exit_status_desc(const cli_codex_t *c, char *out, size_t o
 /* Spawn `codex app-server`. Returns 0 on success. */
 static int cli_codex_spawn(cli_codex_t *c)
 {
-   if (c->host_launch && c->host_launch->spawn_guard &&
+   if (!c->host_launch)
+      return -1;
+   if (c->host_launch->spawn_guard &&
        (!c->host_launch->spawn_guard->child || !c->host_launch->spawn_guard->parent))
       return -1;
    int in_pipe[2] = {-1, -1};
@@ -323,7 +325,7 @@ static int cli_codex_spawn(cli_codex_t *c)
        * codex node wrapper AND the inner codex binary it execs. Without
        * this, signaling the wrapper PID alone leaves the inner binary
        * reparented to PID 1, leaking processes on every stalled abort. */
-      if (setsid() < 0 && c->host_launch)
+      if (setsid() < 0)
          _exit(126);
       if (dup2(in_pipe[0], STDIN_FILENO) < 0 || dup2(out_pipe[1], STDOUT_FILENO) < 0 ||
           dup2(err_pipe[1], STDERR_FILENO) < 0)
@@ -334,7 +336,6 @@ static int cli_codex_spawn(cli_codex_t *c)
       close(out_pipe[1]);
       close(err_pipe[0]);
       close(err_pipe[1]);
-      if (c->host_launch)
       {
          const cli_codex_host_launch_t *host = c->host_launch;
          if (host->executable_fd < 0 || host->cwd_fd < 0 || !host->environment || fchdir(cwd))
@@ -362,7 +363,7 @@ static int cli_codex_spawn(cli_codex_t *c)
       }
    }
    /* Parent: the optional owner attaches this exact child before SDK exec. */
-   if (c->host_launch && c->host_launch->spawn_guard &&
+   if (c->host_launch->spawn_guard &&
        c->host_launch->spawn_guard->parent(c->host_launch->spawn_guard->context, pid))
    {
       (void)kill(pid, SIGKILL);

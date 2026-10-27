@@ -25,6 +25,19 @@ def response(text):
     return [ir_message("assistant", text)]
 
 
+async def domain_request_fixture(client, method, path, body=None, **kwargs):
+    """Exercise domain handlers without requiring an installed C SDK.
+
+    The actual C transport has its own test_model_client fixture suite.
+    """
+    async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=str(client.socket))) as session:
+        async with session.request(method, "http://localhost" + path, json=body,
+                                   allow_redirects=False) as reply:
+            if reply.status != 200:
+                raise RuntimeError("Aimee domain request refused")
+            return await reply.json()
+
+
 KLINGON_TEST_CONTEXT = "You are Aimee. Speak exclusively in Klingon. No English translations."
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -49,6 +62,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.thin_patch = patch("bridge.ThinClient.chat", self.chat)
         self.thin_patch.start()
         self.addCleanup(self.thin_patch.stop)
+        domain_patch = patch("bridge.ThinClient.request", domain_request_fixture)
+        domain_patch.start()
+        self.addCleanup(domain_patch.stop)
         self.config = Config(self.webhook, self.root / "bot.token", GUILD, CHANNEL,
                              system_context="You are Aimee. Answer directly using approved memory.",
                              aimee_library=os.environ.get("AIMEE_TEST_CLIENT_LIBRARY", Config.aimee_library))

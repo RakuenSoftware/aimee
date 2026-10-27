@@ -213,7 +213,8 @@ def main():
         print("standalone learning: four real canonical task outcomes persisted locally without KB or fabricated grades")
 
         reports = [record["event"]["payload"] for record in live if record["event"]["kind"] == "projection"]
-        assert any(report == {"model": "ir-model-a", "boundary": "request", "omitted_reasoning_blocks": 1,
+        # Projection labels identify the registered agent; provider bodies above use ir-model-a.
+        assert any(report == {"model": "ir-live-a", "boundary": "request", "omitted_reasoning_blocks": 1,
                               "omitted_opaque_state_blocks": 1} for report in reports), reports
 
         # Export exercises transport-attested ownership through the actual HTTP

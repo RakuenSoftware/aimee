@@ -124,19 +124,20 @@ int agent_prepare_plain_request_hooks(const aimee_request_t *request, aimee_requ
       return 0;
    if (aimee_ir_request_clone(request, out))
       return -1;
-   aimee_message_t *message = out->n_messages ? &out->messages[out->n_messages - 1] : NULL;
-   if (!message || strcmp(message->role, "user") || message->n_blocks == AIMEE_IR_MAX_BLOCKS)
+   if (!out->n_messages || strcmp(out->messages[out->n_messages - 1].role, "user") ||
+       out->messages[out->n_messages - 1].n_blocks == AIMEE_IR_MAX_BLOCKS)
    {
       aimee_message_t *messages =
           realloc(out->messages, (size_t)(out->n_messages + 1) * sizeof *messages);
       if (!messages)
          goto fail;
       out->messages = messages;
-      message = &messages[out->n_messages++];
+      aimee_message_t *message = &messages[out->n_messages++];
       *message = (aimee_message_t){.role = strdup("user")};
       if (!message->role)
          goto fail;
    }
+   aimee_message_t *message = &out->messages[out->n_messages - 1];
    aimee_block_t *blocks =
        realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
    if (!blocks)

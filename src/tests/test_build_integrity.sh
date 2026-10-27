@@ -382,7 +382,7 @@ pass "memmem tests declare GNU extensions before system headers"
 # Debian Bookworm's supported SQLite predates the string_agg alias. KB_STORE reads
 # that run in both PostgreSQL and the SQLite test shim must not hide backend-
 # specific aggregate syntax in this shared artifact listing path.
-if ! grep -q '\bstring_agg[[:space:]]*(' kb_store/artifacts.c; then
+if [ -f modules/kb/c/artifacts.c ] && ! grep -q '\bstring_agg[[:space:]]*(' modules/kb/c/artifacts.c; then
     pass "artifact proposal listing is portable across PostgreSQL and Bookworm SQLite"
 else
     fail "artifact proposal listing depends on SQLite-unsupported string_agg"

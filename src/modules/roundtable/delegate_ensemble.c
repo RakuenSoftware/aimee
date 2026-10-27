@@ -1,9 +1,4 @@
-/* delegate_ensemble.c: Mixture-of-Agents ensemble implementation.
- *
- * Fans the same prompt to N diverse reference models in parallel, then runs
- * a synthesis pass that produces one reconciled answer. Diverse models
- * contribute independently before the aggregator reconciles their results.
- */
+/* Canonical model participants and synthesis for ensemble/roundtable execution. */
 #include "delegate_ensemble_internal.h"
 #include "aimee.h"
 #include "delegate_ensemble.h"
@@ -390,8 +385,8 @@ static int positional_change_0_100(const char *prev, const char *next)
 
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
-   char (*a)[64] = calloc(512, sizeof(*a));
-   char (*b)[64] = calloc(512, sizeof(*b));
+   char(*a)[64] = calloc(512, sizeof(*a));
+   char(*b)[64] = calloc(512, sizeof(*b));
    if (!a || !b)
    {
       free(a);
@@ -1093,18 +1088,8 @@ static const char *const PANEL_DEFAULT_PERSONAS[] = {
 #define PANEL_DEFAULT_PERSONA_COUNT                                                                \
    ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
 
-/* Persona name for panelist `model_index`. An explicit per-slot override
- * (ensemble.reference_personas[model_index]) binds first in ANY mode. Otherwise
- * the default depends on mode: DRAFT authors every panelist as the configured
- * default persona (config.default_persona, itself defaulting to `engineer`),
- * while REVIEW round-robins the diverse critique lineup keyed on the stable model
- * index. The returned pointer is a borrowed string literal or config field; do
- * not free it. */
-/* The resolution table itself, split out from the config read so it stays a pure
- * function: `configured_slot` is this slot's configured persona (NULL or "" when
- * unset or out of range) and `default_persona` the configured default. Keeping
- * these as parameters is what lets test_delegate_ensemble walk the whole table
- * without writing a config file per assertion. */
+/* Explicit slot wins; draft uses the default, review cycles critique personas.
+ * The returned config field or literal is borrowed. */
 const char *panel_persona_for_slot(roundtable_mode_t mode, int model_index,
                                    const char *configured_slot, const char *default_persona)
 {
@@ -1127,12 +1112,7 @@ const char *panel_persona_name(roundtable_mode_t mode, int model_index)
    return panel_persona_for_slot(mode, model_index, slot, config_default_persona());
 }
 
-/* Compose the system prompt for panelist `model_index` (draft: engineer; review:
- * the diverse lineup — see panel_persona_name). Returns a heap string the caller
- * must free, or NULL (no persona name, or compose failed — both fall back to a
- * NULL-system-prompt run, never dropping a panelist). persona_compose_delegate_prompt
- * resolves project->user->built-in and itself falls back to a usable persona, so
- * an unknown custom name is non-fatal. */
+/* Compose the selected persona; failure leaves the panelist's system unset. */
 static char *panel_persona_prompt(roundtable_mode_t mode, int model_index)
 {
    const char *name = panel_persona_name(mode, model_index);

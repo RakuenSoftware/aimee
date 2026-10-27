@@ -1166,6 +1166,138 @@ static void test_owned_canonical_request_preparation(void)
    puts("owned canonical host context/catalog survives source release and failed replacement OK");
 }
 
+static void test_native_seeded_host_profile(void)
+{
+   const char *wire =
+       "{\"model\":\"public-alias\",\"instructions\":\"source instructions\","
+       "\"max_output_tokens\":128,\"temperature\":0.25,\"top_p\":0.8,"
+       "\"parallel_tool_calls\":false,\"metadata\":{\"request\":\"original\"},"
+       "\"service_tier\":\"auto\",\"prompt_cache_key\":\"original-key\","
+       "\"reasoning\":{\"effort\":\"low\",\"summary\":\"auto\"},"
+       "\"text\":{\"format\":{\"type\":\"json_object\"}},\"input\":["
+       "{\"type\":\"reasoning\",\"id\":\"reason-original\",\"encrypted_content\":\"opaque-cipher\"}"
+       ","
+       "{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"seed task\"},"
+       "{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,aW1hZ2U=\"}]}]}";
+   aimee_request_t seed = {0}, before = {0}, owned = {0};
+   char error[256];
+   assert(!aimee_frontend_parse_wire(wire, strlen(wire), AIMEE_WIRE_RESPONSES, &seed, error,
+                                     sizeof error));
+   aimee_ir_classify_context(&seed);
+   assert(seed.raw && seed.raw_bytes && seed.raw_length == strlen(wire));
+   assert(!aimee_ir_request_clone(&seed, &before));
+   cJSON *messages = cJSON_CreateArray();
+   for (int i = 0; i < seed.n_messages; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(seed.messages + i)));
+   agent_t agent = {0};
+   snprintf(agent.provider, sizeof agent.provider, "chatgpt");
+   snprintf(agent.model, sizeof agent.model, "host-selected-model");
+   aimee_message_t context = fixture_context("host policy");
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, &context, 0, -1,
+                                           AIMEE_WIRE_RESPONSES, 0, &owned));
+   assert(owned.mutated && !owned.raw_bytes && !owned.raw_length &&
+          aimee_backend_host_profile_valid(&owned));
+   assert(!strcmp(owned.model, agent.model));
+   assert(owned.has_max_tokens && owned.max_tokens == 128 && owned.has_temperature &&
+          owned.temperature == 0.25 && owned.has_top_p && owned.top_p == 0.8);
+   assert(owned.has_parallel_tool_calls && !owned.parallel_tool_calls);
+   assert(owned.output_format.kind == AIMEE_OUTPUT_JSON_OBJECT && owned.reasoning_effort &&
+          !strcmp(owned.reasoning_summary, "auto"));
+   assert(cJSON_Compare(owned.metadata, seed.metadata, 1));
+   assert(!strcmp(owned.service_tier, seed.service_tier) &&
+          !strcmp(owned.prompt_cache_key, seed.prompt_cache_key));
+   assert(owned.n_system == seed.n_system + 1 && owned.n_messages == seed.n_messages);
+   for (int i = 0; i < seed.n_system; ++i)
+   {
+      cJSON *source = aimee_ir_block_json(seed.system + i);
+      cJSON *copy = aimee_ir_block_json(owned.system + i);
+      assert(cJSON_Compare(source, copy, 1));
+      cJSON_Delete(source);
+      cJSON_Delete(copy);
+   }
+   int image = 0, opaque = 0;
+   for (int i = 0; i < seed.n_messages; ++i)
+      for (int j = 0; j < seed.messages[i].n_blocks; ++j)
+      {
+         image += seed.messages[i].blocks[j].type == AIMEE_BLK_IMAGE;
+         opaque += seed.messages[i].blocks[j].type == AIMEE_BLK_THINKING &&
+                   seed.messages[i].blocks[j].thinking_encrypted_content != NULL;
+      }
+   assert(image == 1 && opaque == 1);
+   for (int i = 0; i < seed.n_messages; ++i)
+   {
+      cJSON *source = aimee_ir_message_json(seed.messages + i);
+      cJSON *copy = aimee_ir_message_json(owned.messages + i);
+      assert(cJSON_Compare(source, copy, 1));
+      cJSON_Delete(source);
+      cJSON_Delete(copy);
+   }
+   assert(aimee_ir_request_wire_equal(&seed, &before) && cJSON_Compare(seed.raw, before.raw, 1));
+   assert(seed.raw_length == before.raw_length &&
+          !memcmp(seed.raw_bytes, before.raw_bytes, seed.raw_length));
+   /* Normalizing framing must not waive a typed control the selected wire
+    * cannot express: the existing strict translation loss gate still refuses. */
+   owned.has_top_k = 1;
+   owned.top_k = 17;
+   int losses = 0;
+   char *body = aimee_backend_render_wire_profile(&owned, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_API,
+                                                  &losses);
+   assert(body && losses > 0);
+   free(body);
+   assert(
+       !aimee_backend_render_wire_profile(&owned, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_API, NULL));
+   aimee_message_free(&context);
+   cJSON_Delete(messages);
+   aimee_request_free(&seed);
+   aimee_request_free(&before);
+   aimee_request_free(&owned);
+   puts("native host profile normalizes ingress framing, preserving full typed seed and source OK");
+}
+
+static void test_seeded_host_extensions(void)
+{
+   const char *wire =
+       "{\"model\":\"selected\",\"messages\":[{\"role\":\"user\",\"content\":\"task\"}],"
+       "\"min_p\":0.2,\"repeat_penalty\":1.1,\"chat_template_kwargs\":{\"enable_thinking\":false},"
+       "\"route\":\"fallback\",\"models\":[\"other\"],\"reasoning_split\":true}";
+   aimee_request_t seed = {0}, owned = {0};
+   char error[256];
+   assert(!aimee_frontend_parse_wire(wire, strlen(wire), AIMEE_WIRE_OPENAI_CHAT, &seed, error,
+                                     sizeof error));
+   cJSON *source = cJSON_Duplicate(seed.raw, 1), *messages = cJSON_CreateArray();
+   for (int i = 0; i < seed.n_messages; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(seed.messages + i)));
+   agent_t agent = {0};
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   snprintf(agent.model, sizeof agent.model, "selected");
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &owned));
+   assert(aimee_backend_host_profile_valid(&owned) && !owned.raw_bytes && !owned.raw_length);
+   const char *keys[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                         "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof keys / sizeof *keys; ++i)
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(source, keys[i]),
+                           cJSON_GetObjectItemCaseSensitive(owned.raw, keys[i]), 1));
+   assert(!cJSON_HasObjectItem(owned.raw, "messages"));
+   /* A caller extension cannot overwrite an already selected host policy. */
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(owned.raw, "min_p", cJSON_CreateNumber(0.9)));
+   assert(aimee_backend_preserve_host_extensions(&seed, &owned, AIMEE_WIRE_OPENAI_CHAT) < 0);
+   assert(cJSON_GetObjectItemCaseSensitive(owned.raw, "min_p")->valuedouble == 0.9);
+   aimee_request_free(&owned);
+   snprintf(agent.model, sizeof agent.model, "different");
+   assert(agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                          AIMEE_WIRE_OPENAI_CHAT, 0, &owned) < 0);
+   assert(!owned.model && !owned.raw);
+   assert(cJSON_Compare(seed.raw, source, 1) && seed.raw_length == strlen(wire) &&
+          !memcmp(seed.raw_bytes, wire, strlen(wire)));
+   cJSON_Delete(source);
+   cJSON_Delete(messages);
+   aimee_request_free(&seed);
+   aimee_request_free(&owned);
+   puts(
+       "seeded host extensions retain supported semantics, refuse conflicts and model switches OK");
+}
+
 static void test_canonical_request_profiles(void)
 {
    const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
@@ -1430,6 +1562,8 @@ int main(int argc, char **argv)
    test_canonical_responses_profile();
    test_canonical_request_profiles();
    test_owned_canonical_request_preparation();
+   test_native_seeded_host_profile();
+   test_seeded_host_extensions();
    test_missing_response_output();
    printf("test_agent_http: ");
 

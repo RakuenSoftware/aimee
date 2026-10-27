@@ -39,10 +39,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#define PROPOSALS_DEFAULT_DIR     "docs/proposals/pending"
-#define PROPOSALS_MAX_ENTRIES     512
-#define PROPOSALS_GIT_MAX_OUT     (256 * 1024)
-#define PROPOSALS_GIT_TIMEOUT_MS  15000
+#define PROPOSALS_DEFAULT_DIR    "docs/proposals/pending"
+#define PROPOSALS_MAX_ENTRIES    512
+#define PROPOSALS_GIT_MAX_OUT    (256 * 1024)
+#define PROPOSALS_GIT_TIMEOUT_MS 15000
 
 /* ------------------------------------------------------------------ */
 /* Cron expression parser                                              */

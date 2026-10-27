@@ -46,8 +46,48 @@ static const char *CORPUS[] = {
     NULL,
 };
 
+/* Exercise the public renderer's privacy-projection branch, including canonical
+ * requests that have never entered a provider frontend or owned native frame. */
+static void test_canonical_projection_without_host_extensions(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "VISIBLE TASK"},
+                             {.type = AIMEE_BLK_TEXT, .text = "PRIVATE HIDDEN SOURCE"}};
+   for (int i = 0; i < 2; i++)
+      aimee_ir_block_set_context(&blocks[i], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED,
+                                 i ? AIMEE_CTX_SENS_RESTRICTED : AIMEE_CTX_SENS_INTERNAL, !i, NULL,
+                                 NULL, 0);
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   aimee_request_t source = {.model = "fixture-model",
+                             .messages = &message,
+                             .n_messages = 1,
+                             .max_tokens = 64,
+                             .has_max_tokens = 1};
+   assert(source.frontend == AIMEE_WIRE_UNKNOWN && !source.raw);
+   assert(aimee_ir_request_needs_model_projection(&source));
+   unsigned char before[sizeof source], before_message[sizeof message];
+   memcpy(before, &source, sizeof source);
+   memcpy(before_message, &message, sizeof message);
+   aimee_block_t before_blocks[2];
+   memcpy(before_blocks, blocks, sizeof blocks);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   for (size_t i = 0; i < sizeof wires / sizeof *wires; i++)
+   {
+      char *body = aimee_backend_render_wire(&source, wires[i]);
+      assert(body && "canonical no-extension privacy projection must render");
+      assert(strstr(body, "VISIBLE TASK") && !strstr(body, "PRIVATE HIDDEN SOURCE"));
+      free(body);
+      assert(!memcmp(before, &source, sizeof source));
+      assert(!memcmp(before_message, &message, sizeof message));
+      assert(!memcmp(before_blocks, blocks, sizeof blocks));
+   }
+   puts("canonical UNKNOWN frontend privacy projection renders without host extensions OK");
+}
+
 int main(void)
 {
+   test_canonical_projection_without_host_extensions();
    printf("canonical codec corpus:\n");
 
    int n = 0;

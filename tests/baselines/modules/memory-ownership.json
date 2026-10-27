@@ -2644,7 +2644,7 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "4b6b5d4e01050c94ab87664750d565413a02262fd56f6df44bd0332ae5bde16a",
+      "sha256": "a4105482012aa683587dc628bff5918f3f89b346470128a7dd283a6132a314e8",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
         "api/openapi-server-v1.yaml": "b6df0ef1906247e17dddcb97be8fd63baecbc04753ea187524162b0b0889a656"

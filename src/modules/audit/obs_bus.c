@@ -1518,7 +1518,6 @@ static const struct
     {6677u, "delegates.delegate-named-file-drift"},
     {6678u, "delegates.delegate-group-plan"},
     {6679u, "delegates.native-host-execute"},
-    {6680u, "delegates.trigger-source-scope"},
     {6913u, "tools.tool-dispatch"},
     {7169u, "workspace.workspace-access"},
     {7170u, "workspace.workspace-runner"},
@@ -1634,11 +1633,11 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
     * only body capture for these auth-bearing protocols, in both directions;
     * structural WORM identity/length/status receipts below remain mandatory.
     * Canonical model execution history has its separate admitted owner. */
-   int sensitive_transport =
-       frame->event_kind == 6657u || frame->event_kind == 6679u || frame->event_kind == 6680u ||
-       frame->event_kind == 9218u || frame->event_kind == 9474u || frame->event_kind == 11792u ||
-       frame->event_kind == 11266u || frame->event_kind == 7428u || frame->event_kind == 12547u ||
-       (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
+   int sensitive_transport = frame->event_kind == 6657u || frame->event_kind == 6679u ||
+                             frame->event_kind == 9218u || frame->event_kind == 9474u ||
+                             frame->event_kind == 11792u || frame->event_kind == 11266u ||
+                             frame->event_kind == 7428u || frame->event_kind == 12547u ||
+                             (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
        !g.capture.broken)

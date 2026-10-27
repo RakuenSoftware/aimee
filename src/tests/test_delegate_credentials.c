@@ -641,18 +641,20 @@ static void test_rotation_preserves_canonical_usage_knowledge(void)
          assert(!rc && result.success && context_attempts == 2 && !strcmp(leased, "backup"));
          assert(!fixture_no_tools);
          assert(result.turns == 5 && result.tool_calls == 8);
-         assert(result.successful_tool_calls == 3 && result.rescue_recoveries == 10);
-         assert(result.latency_ms == 28 && !result.cache_hit);
-         assert(result.usage_unobserved == (mode != 6));
-         assert(result.canonical_response.usage_unobserved == (mode != 6));
+         assert(result.successful_tool_calls == 2 && result.rescue_recoveries == 6);
+         assert(result.latency_ms == 28 && result.cache_hit);
+         /* Earlier failures retain numeric attempt totals, not authority over
+          * the final canonical response's observed usage or tool diagnostics. */
+         assert(!result.usage_unobserved);
+         assert(!result.canonical_response.usage_unobserved);
          assert(!result.canonical_response.usage_in && !result.canonical_response.usage_out &&
                 !result.canonical_response.usage_cache_read &&
                 !result.canonical_response.usage_cache_write &&
                 !result.canonical_response.usage_reasoning);
          assert(result.prompt_tokens == (mode == 3 ? 3 : 0));
          assert(result.completion_tokens == (mode == 3 ? 5 : 0));
-         assert(result.cache_read_tokens == (mode == 4 ? 7 : 0));
-         assert(result.cache_write_tokens == (mode == 4 ? 11 : 0));
+         assert(!result.cache_read_tokens);
+         assert(!result.cache_write_tokens);
          const cJSON *raw =
              cJSON_GetObjectItemCaseSensitive(result.canonical_response.raw, "provider_usage");
          assert(cJSON_IsObject(raw) &&
@@ -662,7 +664,8 @@ static void test_rotation_preserves_canonical_usage_knowledge(void)
          delegate_credentials_release("", agent.name, leased);
       }
    usage_retry_mode = 0;
-   puts("  PASS: actual credential rotation preserves unknown/mixed usage and diagnostic counts");
+   puts("  PASS: actual credential rotation preserves final canonical usage and baseline attempt "
+        "totals");
    aimee_request_free(&request);
 }
 int main(void)

@@ -2019,7 +2019,8 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
    if (original_request)
       prompt = original_request;
    if (artifact_text && (!prompt || !prompt[0]))
-      prompt = "Review the supplied artifact for correctness, completeness, security, and test quality.";
+      prompt =
+          "Review the supplied artifact for correctness, completeness, security, and test quality.";
    char *preload = marshal_build_preload_context(&opts);
    if ((prompt && prompt[0]) || (preload && preload[0]))
       if (cli_ir_add_request(req, prompt, NULL, preload, NULL, 0))

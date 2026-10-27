@@ -536,8 +536,8 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
           strstr(test_ir_evidence(request)->valuestring, path));
    assert(!test_ir_task(evidence_only) &&
           strstr(test_ir_evidence(evidence_only)->valuestring, marker));
-   assert(!strcmp(cJSON_GetObjectItem(no_evidence, "artifact")->valuestring,
-                  "plain authored task"));
+   assert(
+       !strcmp(cJSON_GetObjectItem(no_evidence, "artifact")->valuestring, "plain authored task"));
    assert(strstr(test_ir_task(no_evidence)->valuestring, "Review the supplied artifact") &&
           !test_ir_evidence(no_evidence));
    cJSON_Delete(request);

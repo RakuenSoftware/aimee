@@ -214,15 +214,19 @@ int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t 
        prepare_host_profile(agent, catalog, simple_policy ? host_context->blocks[0].text : NULL,
                             max_tokens, temperature, wire, is_delegate, &profile) ||
        (seed && aimee_ir_request_clone(seed, &ir));
-   if (rc)
+   if (rc || (seed && aimee_backend_preserve_host_extensions(seed, &profile, wire)))
       goto fail;
-   if (ir.frontend == AIMEE_WIRE_UNKNOWN)
-      ir.frontend = profile.frontend;
-   if (!ir.raw && ir.frontend == profile.frontend)
-   {
-      ir.raw = profile.raw;
-      profile.raw = NULL;
-   }
+   /* The seed's outer provider frame is immutable ingress evidence, not a
+    * host execution profile. Keep every typed control/block (including its
+    * opaque replay state), but carry only host-owned layout extensions here.
+    * The caller's original request and native replay bytes remain untouched. */
+   cJSON_Delete(ir.raw);
+   ir.raw = profile.raw;
+   profile.raw = NULL;
+   free(ir.raw_bytes);
+   ir.raw_bytes = NULL;
+   ir.raw_length = 0;
+   ir.frontend = profile.frontend;
    free(ir.model);
    ir.model = profile.model;
    profile.model = NULL;

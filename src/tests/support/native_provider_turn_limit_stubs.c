@@ -21,9 +21,17 @@ const char *run_cmd_get_cwd(void)
 }
 int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   assert(cfg && cfg->agent && !cfg->role && !cfg->canonical_request && !cfg->no_tools);
+   assert(cfg && cfg->agent && !cfg->role && !cfg->no_tools);
    assert(!strcmp(cfg->cwd, "/fixture/owned-workspace"));
-   assert(!strcmp(cfg->system_prompt, "system") && !strcmp(cfg->user_prompt, "task"));
+   assert(!cfg->system_prompt && !cfg->user_prompt);
+   assert(cfg->canonical_request || native_limit_test_host_unavailable);
+   if (cfg->canonical_request)
+   {
+      assert(cfg->canonical_request->n_messages == 1);
+      const aimee_message_t *message = cfg->canonical_request->messages;
+      assert(!strcmp(message->role, "user") && message->n_blocks == 1);
+      assert(message->blocks[0].type == AIMEE_BLK_TEXT && !strcmp(message->blocks[0].text, "task"));
+   }
    native_limit_test_calls++;
    native_limit_test_observed = cfg->native_turn_limit;
    out->success = 0;

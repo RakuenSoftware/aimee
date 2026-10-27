@@ -196,6 +196,8 @@
     "server-go/modules/aimee/families/schema_client_devices.sql",
     "server-go/modules/aimee/families/schema_convergence_blocker_sets.sql",
     "server-go/modules/aimee/families/schema_conversation.sql",
+    "server-go/modules/aimee/families/schema_coord_message_ir.sql",
+    "server-go/modules/aimee/families/schema_cron_output_ir.sql",
     "server-go/modules/aimee/families/schema_delegation.sql",
     "server-go/modules/aimee/families/schema_economizer.sql",
     "server-go/modules/aimee/families/schema_ensemble.sql",

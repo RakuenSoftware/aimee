@@ -48,7 +48,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "d8c53b912147caafc85508310d06fb24ba0c93691055fc93c3f83ca36be69d80"
+      "source_sha256": "4afea5970c2fc1e09cf8b6ec6dc37b1ece9b603cd5ec4cd2fd89194513b4994c"
     },
     {
       "id": "translation",
@@ -59,7 +59,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "009a3aa5c4ad04dee84322e71778ad5b19b43a4750410f7f43989f8569fe6402"
+      "source_sha256": "21539c7bb04d738a8f0938c16ce8f80303f735fca3aa5c129fc48bcdfce0d56f"
     },
     {
       "id": "protocols",
@@ -152,7 +152,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "1c000ec9f68dd85394345db126f1cef5715a3bf438e890835046ad515d9dd592",
+      "source_sha256": "abbb41b2ccae7002e6484b9e40e2bc0a2f1a4f5120583d26afe2800ea082d4fa",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -307,7 +307,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "5a10cd1bcb1c52d13bcfb9eff1517c35abefe59e1f1c5b04e3241f2bebce9316"
+      "source_sha256": "1ebb2269e8e9700a22366ebfb895678b404745a77adecccf4de0a0fa9c185d22"
     },
     {
       "id": "sandbox",
@@ -336,7 +336,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "ca87af15564687227764e2f3371bf4ce21bb72d845950167ad210d85638f01cd",
+      "source_sha256": "c70551ce5f6b931dad169a860fb62f6674db3f439fff88ffc924ca9bdf74cf3f",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 30,
@@ -501,7 +501,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "e4cc258f6ce4c220fe2676cefe921e404fc2bd147dddf0d645dce7d2fedf121b",
+      "source_sha256": "d9843a9f75e25712e2edab25c2462defcbd6137286b9c9b61035e1ea26d023af",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,

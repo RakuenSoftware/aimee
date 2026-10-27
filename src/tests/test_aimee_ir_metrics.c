@@ -26,14 +26,15 @@ int main(void)
    assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
 
    /* out-of-range guards + unknown-wire clamp (no crash) */
-   aimee_ir_metric_inc(AIMEE_IR_M__COUNT, AIMEE_WIRE_ANTHROPIC); /* ignored */
+   aimee_ir_metric_inc(AIMEE_IR_M__COUNT, AIMEE_WIRE_ANTHROPIC);            /* ignored */
    aimee_ir_metric_inc(AIMEE_IR_M_REASONING_INCOMPLETE, (aimee_wire_t)999); /* clamped */
    assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 1);
 
    /* names are stable + distinct */
-   assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REASONING_OBSERVED), "ir_reasoning_observed") == 0);
-   assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REASONING_INCOMPLETE), "ir_reasoning_incomplete") ==
+   assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REASONING_OBSERVED), "ir_reasoning_observed") ==
           0);
+   assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REASONING_INCOMPLETE),
+                 "ir_reasoning_incomplete") == 0);
    assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_RESCUE_RECOVERIES), "ir_rescue_recoveries") == 0);
 
    /* reset clears everything */

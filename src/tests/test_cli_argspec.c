@@ -2269,6 +2269,36 @@ static void test_refuses_what_it_cannot_build(void)
        "{\"bool_flags\":\"json\"}",     /* bools not array */
        "{\"fields\":[{\"json\":\"x\",\"from\":\"positional\",\"index\":-1}]}",
        "{\"fields\":[{\"json\":\"x\",\"from\":\"positional\",\"index\":9999}]}",
+       "{\"fields\":[{\"json\":\"wrong\",\"from\":\"positional\",\"index\":0,\"type\":\"canonical_"
+       "request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"flag\",\"flag\":\"prompt\",\"type\":"
+       "\"canonical_request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":-1}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":16}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":0.5}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":\"1\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":-1}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":3}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":\"0\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0.5,\"type\":"
+       "\"canonical_request\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"default\":7}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"prefix\":\"foreign\"}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"from_end\":true}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"temperature\":null}]}",
+       "{\"fields\":[{\"json\":\"request\",\"from\":\"positional\",\"index\":0,\"type\":"
+       "\"canonical_request\",\"max_tokens_index\":null}]}",
        "[]",
        "\"none\"",
        NULL,

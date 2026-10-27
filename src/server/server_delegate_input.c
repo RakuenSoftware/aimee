@@ -128,7 +128,6 @@ size_t server_delegate_input_task_size(const aimee_request_t *request)
    return 0;
 }
 
-
 void server_delegate_input_attenuate(aimee_request_t *request)
 {
    for (int i = 0; i < request->n_system; ++i)
@@ -136,10 +135,10 @@ void server_delegate_input_attenuate(aimee_request_t *request)
    for (int i = 0; i < request->n_messages; ++i)
       for (int j = 0; j < request->messages[i].n_blocks; ++j)
          aimee_ir_block_attenuate_public(&request->messages[i].blocks[j],
-                         !strcmp(request->messages[i].role, "system") ||
-                                 !strcmp(request->messages[i].role, "developer")
-                             ? 2
-                             : 0);
+                                         !strcmp(request->messages[i].role, "system") ||
+                                                 !strcmp(request->messages[i].role, "developer")
+                                             ? 2
+                                             : 0);
    /* Native sidecars cannot resurrect pre-attenuation authority. */
    request->mutated = 1;
 }

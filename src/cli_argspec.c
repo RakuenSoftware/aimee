@@ -7,6 +7,7 @@
  * server would answer it as though the operator had asked for that.
  */
 #include "cli_argspec.h"
+#include "cli_ir.h"
 
 #include "cli_v1_routes_internal.h"
 #include "cli_client.h" /* cli_v1_manifest_argspec */
@@ -116,11 +117,12 @@
 #define EMPTY_EMIT "emit"
 
 /* How a value becomes JSON. Absent means "string". */
-#define TYPE_STRING      "string"
-#define TYPE_NUMBER      "number"
-#define TYPE_NUMBER_LAX  "number_lenient"
-#define TYPE_BOOL        "bool"
-#define TYPE_TRUE_IF_SET "true_if_set"
+#define TYPE_MODEL_REQUEST "canonical_request"
+#define TYPE_STRING        "string"
+#define TYPE_NUMBER        "number"
+#define TYPE_NUMBER_LAX    "number_lenient"
+#define TYPE_BOOL          "bool"
+#define TYPE_TRUE_IF_SET   "true_if_set"
 /* A bool that is the NEGATION of a flag's presence: `compress` is true unless
  * --no-compress was given. Always emitted, like TYPE_BOOL.
  *
@@ -222,13 +224,13 @@ static int known_type(const char *type)
 {
    /* Absent is legal and means string: the commonest field should not have to
     * say so in every row. */
-   return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
-          !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_NUMBER_LAX_I64) ||
-          !strcmp(type, TYPE_NUMBER_LAX_REAL) || !strcmp(type, TYPE_NUMBER_LAX_ULONG) ||
-          !strcmp(type, TYPE_BOOL) || !strcmp(type, TYPE_BOOL_INVERTED) ||
-          !strcmp(type, TYPE_CONST_IF_SET) || !strcmp(type, TYPE_CONST_BOOL) ||
-          !strcmp(type, TYPE_CONST) || !strcmp(type, TYPE_TRISTATE_FLAG) ||
-          !strcmp(type, TYPE_TRUE_IF_SET);
+   return !type || !strcmp(type, TYPE_MODEL_REQUEST) || !strcmp(type, TYPE_STRING) ||
+          !strcmp(type, TYPE_NUMBER) || !strcmp(type, TYPE_NUMBER_LAX) ||
+          !strcmp(type, TYPE_NUMBER_LAX_I64) || !strcmp(type, TYPE_NUMBER_LAX_REAL) ||
+          !strcmp(type, TYPE_NUMBER_LAX_ULONG) || !strcmp(type, TYPE_BOOL) ||
+          !strcmp(type, TYPE_BOOL_INVERTED) || !strcmp(type, TYPE_CONST_IF_SET) ||
+          !strcmp(type, TYPE_CONST_BOOL) || !strcmp(type, TYPE_CONST) ||
+          !strcmp(type, TYPE_TRISTATE_FLAG) || !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
 int cli_argspec_supported(const cJSON *spec)
@@ -260,6 +262,34 @@ int cli_argspec_supported(const cJSON *spec)
          return 0;
       const char *type = field_str(f, "type");
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(f, "value");
+      if (type && !strcmp(type, TYPE_MODEL_REQUEST))
+      {
+         static const char *const keys[] = {
+             "json",        "type",      "from",      "index",
+             "empty",       "count_min", "count_max", "max_tokens_index",
+             "temperature", NULL};
+         for (const cJSON *property = f->child; property; property = property->next)
+         {
+            int known = 0;
+            for (int i = 0; keys[i]; i++)
+               known |= property->string && !strcmp(property->string, keys[i]);
+            if (!known)
+               return 0;
+         }
+         const cJSON *index = cJSON_GetObjectItemCaseSensitive(f, "index");
+         const cJSON *tokens = cJSON_GetObjectItemCaseSensitive(f, "max_tokens_index");
+         const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(f, "temperature");
+         if (strcmp(json_name, "request") || strcmp(from, SRC_POSITIONAL) ||
+             !cJSON_IsNumber(index) || index->valuedouble < 0 || index->valuedouble >= V1_MAX_POS ||
+             index->valuedouble != (int)index->valuedouble ||
+             (tokens && (!cJSON_IsNumber(tokens) || tokens->valuedouble < 0 ||
+                         tokens->valuedouble >= V1_MAX_POS ||
+                         tokens->valuedouble != (int)tokens->valuedouble)) ||
+             (temperature && (!cJSON_IsNumber(temperature) || temperature->valuedouble < 0 ||
+                              temperature->valuedouble > 2)))
+            return 0;
+      }
+
       if (!strcmp(from, SRC_CONST) &&
           (!type || (strcmp(type, TYPE_CONST) && strcmp(type, TYPE_CONST_BOOL))))
          return 0;
@@ -744,6 +774,21 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    if (!value || (!value[0] && !emit_empty))
       return required ? -1 : 0;
 
+   if (type && !strcmp(type, TYPE_MODEL_REQUEST))
+   {
+      const cJSON *index = cJSON_GetObjectItemCaseSensitive(field, "max_tokens_index");
+      int tokens = index && opts->pos_count > (int)index->valuedouble
+                       ? atoi(opts->positional[(int)index->valuedouble])
+                       : 0;
+      if (cli_ir_add_request(req, value, NULL, NULL, NULL, tokens))
+         return -1;
+      const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(field, "temperature");
+      return temperature &&
+                     !cJSON_AddNumberToObject(cJSON_GetObjectItemCaseSensitive(req, "request"),
+                                              "temperature", temperature->valuedouble)
+                 ? -1
+                 : 0;
+   }
    if (!type || !strcmp(type, TYPE_STRING))
    {
       /* `prefix` prepends a constant the SERVER supplies: the user_capture

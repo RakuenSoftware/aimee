@@ -974,8 +974,10 @@ static int native_probe_host_tool(const aimee_block_t *call, aimee_block_t *resu
 static char probe_launch_digest[65];
 static int native_probe_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
 {
-   (void)replay;
-   assert(context == probe_launch_digest && !probe_launch_digest[0] && strlen(digest) == 64);
+   const adapter_fixture_request_t *request = context;
+   assert(request && !probe_launch_digest[0] && strlen(digest) == 64);
+   replay->history = request->history;
+   replay->resume_id = request->thread_id;
    snprintf(probe_launch_digest, sizeof probe_launch_digest, "%s", digest);
    return 0;
 }
@@ -1078,7 +1080,7 @@ static int native_history_probe(const char *resume, const char *history_file, in
                                     .environment = environment,
                                     .expected_config = expected,
                                     .ready = native_probe_ready,
-                                    .context = probe_launch_digest};
+                                    .context = &req};
       assert(launch.executable_fd >= 0 && launch.cwd_fd >= 0 && launch.gateway_url);
       struct stat binary_status;
       assert(!fstat(launch.executable_fd, &binary_status) && binary_status.st_size > 0);

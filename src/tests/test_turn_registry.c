@@ -177,11 +177,20 @@ static void test_steer_set_take(void)
 }
 
 static char interrupt_error[128];
-int handle_chat_interrupt(server_ctx_t *,server_conn_t *,cJSON *);
-int server_send_error(server_conn_t *conn,const char *message,const char *request_id)
-{ (void)conn;(void)request_id;snprintf(interrupt_error,sizeof interrupt_error,"%s",message);return -1; }
-int server_send_response(server_conn_t *conn,cJSON *response)
-{ (void)conn;assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response,"interrupted")));return 0; }
+int handle_chat_interrupt(server_ctx_t *, server_conn_t *, cJSON *);
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   (void)conn;
+   (void)request_id;
+   snprintf(interrupt_error, sizeof interrupt_error, "%s", message);
+   return -1;
+}
+int server_send_response(server_conn_t *conn, cJSON *response)
+{
+   (void)conn;
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "interrupted")));
+   return 0;
+}
 static void test_interrupt_privileged_webuser_stays_owner_bound(void)
 {
    cJSON *request =
@@ -215,7 +224,8 @@ static void test_interrupt_privileged_webuser_stays_owner_bound(void)
    cJSON_Delete(queued);
    turn_registry_clear(turn);
    cJSON_Delete(request);
-   request=cJSON_CreateObject();assert(request);
+   request = cJSON_CreateObject();
+   assert(request);
    assert(cJSON_AddStringToObject(request, "aimee_session_id", "interrupt-owner"));
    const char *legacy = "literal text \"quoted\"\n雪 {\"role\":malformed}";
    assert(cJSON_AddStringToObject(request, "message", legacy));
@@ -226,7 +236,7 @@ static void test_interrupt_privileged_webuser_stays_owner_bound(void)
    assert(!turn_entry_cancelled(turn));
    assert(!chat_steer_take("interrupt-owner", &queued));
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "message")));
-   assert(cJSON_ReplaceItemInObjectCaseSensitive(request,"message",cJSON_CreateString(legacy)));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(request, "message", cJSON_CreateString(legacy)));
    snprintf(conn.vault_principal, sizeof conn.vault_principal, "webuser:alice");
    assert(!handle_chat_interrupt(NULL, &conn, request));
    assert(turn_entry_cancelled(turn));

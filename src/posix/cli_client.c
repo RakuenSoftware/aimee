@@ -255,7 +255,6 @@ int cli_connect(cli_conn_t *conn, const char *socket_path)
  * aimee-server; the cli_connect/cli_request primitives above survive solely for
  * the aimee-kb NDJSON sidecar socket (modules/kb_client/kb_client.c). */
 
-
 cJSON *cli_request(cli_conn_t *conn, cJSON *request, int timeout_ms)
 {
    if (!conn || conn->fd < 0 || !request)

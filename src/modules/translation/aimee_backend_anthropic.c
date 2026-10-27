@@ -711,8 +711,8 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
 static int last_native_user(const aimee_request_t *request)
 {
    for (int i = request->n_messages - 1; i >= 0; i--)
-      if (request->messages[i].role &&
-          (!strcmp(request->messages[i].role, "user") || !strcmp(request->messages[i].role, "tool")))
+      if (request->messages[i].role && (!strcmp(request->messages[i].role, "user") ||
+                                        !strcmp(request->messages[i].role, "tool")))
          return i;
    return -1;
 }

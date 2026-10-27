@@ -328,3 +328,9 @@ ca19c574dcb98708bf0588bce846f674ea05366b:tests/baselines/modules/memory-ownershi
 # The exact historical value matches its committed api/openapi-server-v1.yaml;
 # it is a generated-file input digest, not an API credential.
 10d0a87ac7974bc551e1652a30a7f248f787769a:tests/baselines/modules/memory-ownership.json:generic-api-key:2744
+
+# Verified historical generated OpenAPI input SHA-256 metadata, not credentials.
+# Each value equals SHA-256 of that commit's tracked api/openapi-server-v1.yaml.
+6afbaf919b3beba54290ffd184fc681abed45e60:tests/baselines/modules/memory-ownership.json:generic-api-key:2747
+9c4b4b9526f4662609c6c6a025fa32c6835510df:tests/baselines/modules/memory-ownership.json:generic-api-key:2747
+a9cdd64b1b645435d660303bd8f50d3c6e97f2ff:tests/baselines/modules/memory-ownership.json:generic-api-key:2747

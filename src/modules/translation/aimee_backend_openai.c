@@ -209,6 +209,65 @@ static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
    return 0;
 }
 
+/* Reuse the same closed extension owner for normalized host profiles. Native
+ * outer frames are never copied wholesale, and host policy values cannot be
+ * overwritten by a caller's model-specific extension. Only declared IR controls
+ * and these existing semantic extensions enter host execution; domain fields
+ * and outer native framing remain on the unchanged source request. */
+int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
+                                           aimee_request_t *projected, aimee_wire_t wire)
+{
+   if (!source || !projected || source == projected)
+      return -1;
+   if (!source->raw || source->frontend != AIMEE_WIRE_OPENAI_CHAT)
+      return 0;
+   cJSON *extensions = cJSON_CreateObject();
+   cJSON *raw = NULL;
+   aimee_request_t original = *source;
+   original.model =
+       (char *)cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source->raw, "model"));
+   if (!extensions || openai_profile_extensions(&original, extensions))
+      goto fail;
+   if (!extensions->child)
+   {
+      cJSON_Delete(extensions);
+      return 0;
+   }
+   if (!aimee_backend_host_profile_valid(projected) || wire != AIMEE_WIRE_OPENAI_CHAT ||
+       projected->frontend != wire || !source->model || !original.model ||
+       strcmp(source->model, original.model) || !projected->model ||
+       strcmp(source->model, projected->model))
+      goto fail;
+   raw = projected->raw ? cJSON_Duplicate(projected->raw, 1) : cJSON_CreateObject();
+   if (!raw || (!cJSON_HasObjectItem(raw, "model") &&
+                !cJSON_AddStringToObject(raw, "model", projected->model)))
+      goto fail;
+   for (const cJSON *entry = extensions->child; entry; entry = entry->next)
+   {
+      const cJSON *existing = cJSON_GetObjectItemCaseSensitive(raw, entry->string);
+      if (existing)
+      {
+         if (!cJSON_Compare(existing, entry, 1))
+            goto fail;
+         continue;
+      }
+      cJSON *copy = cJSON_Duplicate(entry, 1);
+      if (!copy || !cJSON_AddItemToObject(raw, entry->string, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   cJSON_Delete(projected->raw);
+   projected->raw = raw;
+   cJSON_Delete(extensions);
+   return 0;
+fail:
+   cJSON_Delete(extensions);
+   cJSON_Delete(raw);
+   return -1;
+}
+
 int openai_family_add_prompt_cache(cJSON *out, const aimee_request_t *request)
 {
    if (!out || !request)

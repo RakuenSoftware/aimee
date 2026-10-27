@@ -16,6 +16,9 @@ int main(void)
    } cases[] = {{0, 3, 3}, {2, 3, 2},  {7, 3, 3},  {4, 0, 4},
                 {0, 0, 0}, {-1, 5, 5}, {0, -1, 0}, {-1, -1, 0}};
    const provider_cli_adapter_t adapter = {.display_name = "fixture"};
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "task"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
    {
       agent_t selected = {.max_turns = cases[i].configured};
@@ -23,8 +26,8 @@ int main(void)
       native_limit_test_observed = -999;
       native_limit_test_calls = 0;
       agent_result_t result = {0};
-      assert(agent_execute_provider_session(&adapter, &selected, NULL, NULL, "system", "task", NULL,
-                                            NULL, &result) == AGENT_RC_CONTEXT_REFUSED);
+      assert(agent_execute_provider_session(&adapter, &selected, NULL, NULL, &request, NULL,
+                                            &result) == AGENT_RC_CONTEXT_REFUSED);
       assert(native_limit_test_calls == 1);
       assert(native_limit_test_observed == cases[i].expected);
       assert(!result.success && !result.canonical_response.n_content);
@@ -36,8 +39,8 @@ int main(void)
    agent_t selected = {.max_turns = 3};
    agent_result_t unavailable = {0};
    native_limit_test_host_unavailable = 1;
-   assert(agent_execute_provider_session(&adapter, &selected, NULL, NULL, "system", "task", NULL,
-                                         NULL, &unavailable) == AGENT_RC_CONTEXT_REFUSED);
+   assert(agent_execute_provider_session(&adapter, &selected, NULL, NULL, NULL, NULL,
+                                         &unavailable) == AGENT_RC_CONTEXT_REFUSED);
    assert(!unavailable.success && !unavailable.canonical_response.n_content);
    assert(strstr(unavailable.error, "execution owner unavailable"));
    puts("native adapter preserves configured/TLS minimum turn caps: ok");

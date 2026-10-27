@@ -202,7 +202,7 @@ static int cron_capture_script(const char *script, const char *workdir, char **o
 
 /* The nullable output_ir column is the persistence discriminator. Legacy
  * output is literal data regardless of its bytes; no content-based guessing. */
-#define CRON_IR_STORE_CAP   (1024u * 1024u)
+#define CRON_IR_STORE_CAP (1024u * 1024u)
 
 static char *cron_snapshot_json(const char *kind, cJSON *value)
 {

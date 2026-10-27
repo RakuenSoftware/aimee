@@ -182,7 +182,6 @@ int roadmap_milestone_build_request(const char *roadmap_id, const char *mileston
       }
    }
 
-
    cJSON_Delete(payload);
 
    aimee_block_t policy = {

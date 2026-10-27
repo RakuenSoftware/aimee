@@ -62,6 +62,7 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertTrue((module / "server-go/ir/request.go").is_file())
             self.assertTrue((module / "server-go/ir/response.go").is_file())
             self.assertTrue((module / "server-go/modules/providers/probe_ir.go").is_file())
+            self.assertTrue((module / "server-go/modules/translation/client.go").is_file())
             self.assertNotIn("RunProbeWorker", (module / "runtime/main.go").read_text())
             self.assertFalse((module / "server-go/modules/providers/probe_worker_linux.go").exists())
             build = subprocess.run(["go", "build", "-o", str(module / "providers"), "./runtime"],
