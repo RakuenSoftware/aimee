@@ -28,6 +28,8 @@ KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
 KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
 KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
 RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
+THINCLIENT_LIBRARY = ../libaimee-client.so
+THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
 DELEGATE_EGRESS = ../aimee-delegate-egress$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 # Binaries a rename left behind. `all` removes these first so a renamed artifact
@@ -1066,6 +1068,13 @@ script-tests:
 	    _ "$$logs" {}) || { echo "script-tests: FAILED"; exit 1; }
 	@echo "script-tests: ok ($(words $(SCRIPT_TESTS_RUN)) tests, $(words $(SCRIPT_TESTS_SKIP)) run by another job)"
 
+# CGo consumers use the same SDK as the browser product, including from a clean
+# CI checkout. Keep existing caller-supplied dependency and loader paths.
+go-unit-tests go-vulncheck: $(THINCLIENT_PC)
+go-unit-tests go-vulncheck: export PKG_CONFIG_PATH := $(abspath $(dir $(THINCLIENT_PC))):$(PKG_CONFIG_PATH)
+go-unit-tests go-vulncheck: export LD_LIBRARY_PATH := $(abspath $(dir $(THINCLIENT_LIBRARY))):$(LD_LIBRARY_PATH)
+go-unit-tests go-vulncheck: export CGO_ENABLED := 1
+
 go-unit-tests:
 	@test -n "$(GO)" || { echo "go-unit-tests: ERROR go is required"; exit 1; }
 	@test -n "$(strip $(GO_MODULE_DIRS))" || { echo "go-unit-tests: ERROR no Go modules found"; exit 1; }
@@ -1523,8 +1532,6 @@ $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
 # The SDK compiles the same client and connection owners as the CLI, with only
 # its CLI-global convenience entrypoint excluded. No alternate HTTP implementation.
-THINCLIENT_LIBRARY = ../libaimee-client.so
-THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
 THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
 $(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
 	@mkdir -p $(dir $@)

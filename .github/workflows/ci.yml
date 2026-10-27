@@ -445,8 +445,9 @@ jobs:
           cache-dependency-path: server-go/go.sum
       # runtime-web needs PAM through an indirect cgo dependency. The workflow
       # facade regression also compiles the actual C identity/control adapter,
-      # whose identity header includes OpenSSL. Declare both header dependencies;
-      # gcc and make are preinstalled on this runner.
+      # whose identity header includes OpenSSL. The shared thinclient CGo binding
+      # also uses pkg-config. Declare these dependencies; gcc and make are
+      # preinstalled on this runner.
       - name: Install dependencies
         run: |
           # Same apt hardening as the sibling jobs: runner images preinstall
@@ -454,7 +455,7 @@ jobs:
           # `apt-get update` hard, though nothing we install comes from them.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q libpam0g-dev libssl-dev
+          timeout 240 sudo apt-get install -y -q libpam0g-dev libssl-dev pkg-config
       - name: Go unit tests
         run: |
           # Populate all module caches with bounded retries before tests fan out.
