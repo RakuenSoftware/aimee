@@ -52,6 +52,30 @@ def tree_digest(root: Path) -> str:
     return hashlib.sha256("".join(entries).encode()).hexdigest()
 
 
+def extract(blob: bytes, into: Path) -> None:
+    # Not extractall(filter="data"): build images ship Pythons older than the
+    # tarfile filters. The ring tree is plain files and directories, so anything
+    # else -- a link, a device, a path that climbs out -- is refused, not skipped.
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as archive:
+        for member in archive:
+            parts = Path(member.name).parts
+            if not parts or member.name.startswith("/") or ".." in parts:
+                raise SystemExit(f"ouroboros-ring archive has an unsafe path: {member.name!r}")
+            target = into.joinpath(*parts)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source = archive.extractfile(member)
+                assert source is not None
+                with source, open(target, "wb") as out:
+                    shutil.copyfileobj(source, out)
+                os.chmod(target, 0o755 if member.mode & 0o111 else 0o644)
+            else:
+                raise SystemExit(
+                    f"ouroboros-ring archive has a non-regular entry: {member.name!r}")
+
+
 def fetch(dest: Path) -> None:
     pin = lock()
     stamp = dest / ".ouroboros-ring-commit"
@@ -66,8 +90,7 @@ def fetch(dest: Path) -> None:
         raise SystemExit(f"cannot fetch ouroboros-ring {pin['commit']} from {url}: {exc}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
-        with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as archive:
-            archive.extractall(tmp, filter="data")
+        extract(blob, Path(tmp))
         tops = list(Path(tmp).iterdir())
         if len(tops) != 1 or not tops[0].is_dir():
             raise SystemExit("ouroboros-ring archive does not have one top-level directory")
