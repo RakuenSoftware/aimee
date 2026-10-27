@@ -476,7 +476,7 @@ func TestAgentModelLiveRegisteredCLI(t *testing.T) {
 		{"IR_QA_TOOL", canonical.StopToolUse},
 	} {
 		t.Run(test.prompt, func(t *testing.T) {
-			reply, err := agentModel(executable)(context.Background(), qaFixtureRequest("Use only the supplied evidence.", test.prompt, 256))
+			reply, err := agentModel(executable)(context.Background(), answerEvaluationRequest(test.prompt, "fixture memory evidence"))
 			if reply.Output == nil || !reply.Output.Valid() || reply.Output.StopReason != test.stop || reply.Output.Usage.Input != "10" || reply.Output.Usage.Output != "2" {
 				t.Fatalf("actual CLI canonical observation lost: reply=%+v error=%v", reply, err)
 			}
@@ -525,19 +525,19 @@ func qaFixtureViews(input *canonical.Request) (system, prompt string, tokens int
 func assertQATaskOrigins(t *testing.T, input *canonical.Request) {
 	t.Helper()
 	if !input.Valid() || len(input.System) != 1 || input.System[0].Context == nil {
-		t.Fatal("QA producer omitted canonical policy")
+		t.Fatal("QA producer omitted canonical task")
 	}
 	policy := input.System[0].Context
-	if policy.Origin != 1 || policy.Authority != 3 || policy.Trust != 4 {
-		t.Fatal("fixed grading policy lost its host origin", policy)
+	if policy.Origin != 3 || policy.Authority != 2 || policy.Trust != 2 {
+		t.Fatal("grading instructions claimed authority beyond the caller", policy)
 	}
 	system, _, _ := qaFixtureViews(input)
 	blocks := input.Messages[0].Blocks
-	want := [][3]int{{2, 2, 2}, {6, 1, 2}, {1, 2, 4}}
+	want := [][3]int{{3, 2, 2}, {6, 1, 2}, {3, 2, 2}}
 	if system == judgeSystem {
-		want = [][3]int{{2, 1, 2}, {2, 1, 2}, {7, 1, 2}, {1, 2, 4}}
+		want = [][3]int{{3, 1, 2}, {3, 1, 2}, {7, 1, 2}, {3, 2, 2}}
 		if len(blocks) > 1 && strings.Contains(*blocks[1].Text, "Unanswerable from supplied history") {
-			want[1] = [3]int{1, 2, 4}
+			want[1] = [3]int{3, 2, 2}
 		}
 	}
 	if len(blocks) != len(want) {

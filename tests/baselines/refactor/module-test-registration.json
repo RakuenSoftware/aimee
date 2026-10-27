@@ -118,12 +118,6 @@
     {
       "ctest": false,
       "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_panel_provider.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
       "module": "economizer",
       "test": "src/tests/test_economizer_module_client.c"
     },

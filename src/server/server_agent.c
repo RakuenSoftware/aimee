@@ -35,9 +35,12 @@ static int generation_text(const aimee_block_t *block)
 {
    return block->type == AIMEE_BLK_TEXT && block->text && block->text[0] &&
           block->context.model_visible &&
-          (block->context.origin == AIMEE_CTX_ORIGIN_USER ||
-           block->context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL) &&
-          block->context.authority <= AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
+          ((block->context.origin == AIMEE_CTX_ORIGIN_USER &&
+            block->context.authority <= AIMEE_CTX_AUTH_TASK_INSTRUCTION) ||
+           ((block->context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL ||
+             block->context.origin == AIMEE_CTX_ORIGIN_MEMORY ||
+             block->context.origin == AIMEE_CTX_ORIGIN_MODEL) &&
+            block->context.authority <= AIMEE_CTX_AUTH_EVIDENCE)) &&
           block->context.trust <= AIMEE_CTX_TRUST_UNVERIFIED &&
           !block->context.revision_domain[0] && !block->context.revision_scope[0] &&
           !block->context.revision_epoch;
@@ -64,15 +67,16 @@ int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int supported =
        !input.model && input.frontend == AIMEE_WIRE_UNKNOWN && input.n_system == 1 &&
        generation_text(&input.system[0]) && input.n_messages == 1 && input.messages[0].role &&
-       !strcmp(input.messages[0].role, "user") && input.messages[0].n_blocks == 1 &&
-       generation_text(&input.messages[0].blocks[0]) && !input.n_tools &&
-       input.tool_choice == AIMEE_TOOL_CHOICE_NONE && !input.tool_choice_name &&
+       !strcmp(input.messages[0].role, "user") && input.messages[0].n_blocks > 0 &&
+       !input.n_tools && input.tool_choice == AIMEE_TOOL_CHOICE_NONE && !input.tool_choice_name &&
        !input.has_parallel_tool_calls && !input.stream && !input.n_stop && input.has_max_tokens &&
        input.max_tokens > 0 && input.has_temperature && !input.has_top_p && !input.has_top_k &&
        !input.metadata && !input.service_tier && !input.prompt_cache_key &&
        !input.prompt_cache_retention && !input.prompt_cache_options && !input.thinking &&
        !input.reasoning_summary && !input.reasoning_effort && !input.output_format.kind &&
        input.cache_policy == AIMEE_CACHE_DEFAULT && !input.raw && !input.raw_bytes;
+   for (int i = 0; supported && i < input.messages[0].n_blocks; ++i)
+      supported = generation_text(&input.messages[0].blocks[i]);
    if (!supported)
    {
       aimee_request_free(&input);

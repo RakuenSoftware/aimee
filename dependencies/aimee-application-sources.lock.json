@@ -59,7 +59,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "21539c7bb04d738a8f0938c16ce8f80303f735fca3aa5c129fc48bcdfce0d56f"
+      "source_sha256": "0e4bdb91051c03feb1fbdc33c84009fa23a5597cf2c7b6e9161880547e87790d"
     },
     {
       "id": "protocols",
@@ -70,7 +70,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "71730e68d82a0a895be08caea8c8f0aa8529c46ac13192ddc5369c02f24680f3"
+      "source_sha256": "5c322660cdd4b65b96be208d060b6ca88f81df838484d401e605f0752a2bc735"
     },
     {
       "id": "gateway",
@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "a042c45c6281c228972efd380732f8fbe846cdbde1831823921587fa424af5c1",
+      "source_sha256": "dca5c04bc09f122e6a0a311ae24a7c668364e397947b99563c9209b81443829f",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -336,7 +336,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "c70551ce5f6b931dad169a860fb62f6674db3f439fff88ffc924ca9bdf74cf3f",
+      "source_sha256": "ce8b973de05bdac12cbe46bff8a705fb41a79da285d8e87c43f7c582441ac833",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 30,
@@ -397,7 +397,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "753c167f6522edcb312090369e7918ce18713395bbdb52dfc6409513c6ab795c",
+      "source_sha256": "5fc78a1e5b59d7b2e54a7bc395f158a12759303e64b2a4b9b839880d989c8ae9",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 33,
@@ -448,7 +448,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "5cf0cfacbba47e2080aa2f19034dd0c84dd36a9897813f9fa01754e500cf8351",
+      "source_sha256": "0b6366da836a3e0280bc61b06f56461acc9c8cc8e4d144e20eeeb75a2800873a",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 28,
@@ -501,7 +501,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "d9843a9f75e25712e2edab25c2462defcbd6137286b9c9b61035e1ea26d023af",
+      "source_sha256": "5562480e574e3dd5da864cbfcd001945c01e9eff88de9a63e38e146218831fa7",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,

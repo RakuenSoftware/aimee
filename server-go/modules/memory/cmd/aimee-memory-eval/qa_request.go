@@ -8,10 +8,11 @@ func qaBlock(text string, origin, authority, trust int) canonical.Block {
 }
 
 // These constructors own new evaluation tasks. The transport receives only IR;
-// context, gold answers and candidate artifacts never become grading policy.
+// The evaluator is a caller of the completion owner, so its instructions claim
+// caller authority; memory and candidate artifacts retain evidence authority.
 func qaRequest(system string, tokens int, temperature float64, blocks ...canonical.Block) *canonical.Request {
 	return &canonical.Request{Version: 1, SourceWire: "unspecified", CachePolicy: "native",
-		System:   []canonical.Block{qaBlock(system, 1, 3, 4)},
+		System:   []canonical.Block{qaBlock(system, 3, 2, 2)},
 		Messages: []canonical.Message{{Role: "user", Blocks: blocks}},
 		Tools:    []canonical.Tool{}, Stops: []string{}, ToolChoice: canonical.ToolChoice{Mode: "none"},
 		MaxTokens: &tokens, Temperature: &temperature}
@@ -19,24 +20,24 @@ func qaRequest(system string, tokens int, temperature float64, blocks ...canonic
 
 func answerEvaluationRequest(question, memory string) *canonical.Request {
 	return qaRequest(answerSystem, 256, .3,
-		qaBlock("Question: "+question, 2, 2, 2),
+		qaBlock("Question: "+question, 3, 2, 2),
 		qaBlock("\n\nRetrieved memory context:\n"+memory, 6, 1, 2),
-		qaBlock("\nFinal answer:", 1, 2, 4))
+		qaBlock("\nFinal answer:", 3, 2, 2))
 }
 
 // Candidate is a declared QA artifact projected from a complete canonical answer,
 // not a replacement for any live conversation or model response.
 func judgeEvaluationRequest(question, gold, candidate string, answerable *bool) *canonical.Request {
-	blocks := []canonical.Block{qaBlock("Question: "+question, 2, 1, 2)}
+	blocks := []canonical.Block{qaBlock("Question: "+question, 3, 1, 2)}
 	footer := "\n\nReturn JSON only."
 	if answerable != nil && !*answerable {
-		blocks = append(blocks, qaBlock("\nUnanswerable from supplied history. Score 1 only for explicit abstention without asserting an answer.", 1, 2, 4))
+		blocks = append(blocks, qaBlock("\nUnanswerable from supplied history. Score 1 only for explicit abstention without asserting an answer.", 3, 2, 2))
 		footer = "\nReturn JSON only."
 	} else {
-		blocks = append(blocks, qaBlock("\nGold answer: "+gold, 2, 1, 2))
+		blocks = append(blocks, qaBlock("\nGold answer: "+gold, 3, 1, 2))
 	}
 	blocks = append(blocks, qaBlock("\nCandidate answer: "+candidate, 7, 1, 2),
-		qaBlock(footer, 1, 2, 4))
+		qaBlock(footer, 3, 2, 2))
 	return qaRequest(judgeSystem, 64, 0, blocks...)
 }
 

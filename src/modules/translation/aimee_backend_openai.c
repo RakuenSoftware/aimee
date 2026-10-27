@@ -234,9 +234,9 @@ int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
       return 0;
    }
    if (!aimee_backend_host_profile_valid(projected) || wire != AIMEE_WIRE_OPENAI_CHAT ||
-       projected->frontend != wire || !source->model || !original.model ||
-       strcmp(source->model, original.model) || !projected->model ||
-       strcmp(source->model, projected->model))
+       projected->frontend != wire || !original.model || !projected->model ||
+       strcmp(original.model, projected->model) ||
+       (source->model && strcmp(source->model, original.model)))
       goto fail;
    raw = projected->raw ? cJSON_Duplicate(projected->raw, 1) : cJSON_CreateObject();
    if (!raw || (!cJSON_HasObjectItem(raw, "model") &&

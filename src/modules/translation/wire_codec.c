@@ -197,7 +197,10 @@ char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wi
       aimee_request_t projected = {0};
       if (aimee_ir_request_project_model(request, &projected))
          return NULL;
-      if (aimee_backend_preserve_host_extensions(request, &projected, wire))
+      /* Privacy projection may retain only an already closed host layout;
+       * native ingress frames are normalized by their selected host owner. */
+      if (aimee_backend_host_profile_valid(request) &&
+          aimee_backend_preserve_host_extensions(request, &projected, wire))
       {
          aimee_request_free(&projected);
          return NULL;

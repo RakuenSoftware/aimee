@@ -64,7 +64,10 @@
     "server-go/modules/roundtable/panel/store_test.go",
     "server-go/modules/roundtable/review_test.go",
     "server-go/modules/roundtable/reviewer_test.go",
-    "server-go/modules/roundtable/roundtable_test.go"
+    "server-go/modules/roundtable/roundtable_test.go",
+    "server-go/modules/roundtable/ir_fixture_test.go",
+    "server-go/modules/roundtable/panel/review_input_test.go",
+    "server-go/modules/roundtable/review_admission_ir_test.go"
   ],
   "public_headers": [
     "src/modules/roundtable/include/aimee/roundtable/module_api.h",

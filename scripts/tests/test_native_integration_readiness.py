@@ -70,6 +70,17 @@ class NativeIntegrationReadiness(unittest.TestCase):
                 other.observe("codex", "chatgpt", "primary", [bash, {**read,"description":"drift"}], established)
             with self.assertRaises(AssertionError):
                 module.NativeCatalogObservations().observe("codex", "chatgpt", "primary", [bash,read], opening)
+        # In-process HTTP children retain their role-scoped catalog from the
+        # first call. They do not pass through the native ingress shell stage.
+        child = module.NativeCatalogObservations()
+        child_open = {"messages":[{"role":"user", "content":"task"}]}
+        child_next = {"messages":[{"role":"assistant", "content":"prior"}]}
+        self.assertEqual(child.observe("http-child", "openai", "diagnose", [bash,read], child_open)["tools"], [bash,read])
+        child.observe("http-child", "openai", "diagnose", [bash,read], child_next)
+        with self.assertRaises(AssertionError):
+            child.observe("http-child", "openai", "diagnose", [read], child_open)
+        with self.assertRaisesRegex(AssertionError, "opening catalog exposes native shell"):
+            module.NativeCatalogObservations().observe("claude", "anthropic", "primary", [bash,read], child_open)
         phase = module.NativeCatalogObservations.history_phase
         self.assertEqual(phase("chatgpt", {"input":[{"type":"function_call_output", "output":"assistant"}]})[0], "opening")
         self.assertEqual(phase("chatgpt", {"input":[{"type":"reasoning", "summary":[]}]})[0], "established")

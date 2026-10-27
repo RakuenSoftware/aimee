@@ -189,17 +189,19 @@ static void test_registration_is_idempotent_and_bad_advert_is_skipped(void)
    printf("  PASS: registration_is_idempotent_and_bad_advert_is_skipped\n");
 }
 
-/* Golden bytes captured from the admitted pre-cutover owner at 6e59415b9:
- * builtins only, git unavailable, no MCP/plugin/KB advertisements. This pins
- * each exposure mask, ordered definitions and every schema/description byte. */
+/* Builtins only, git unavailable, no MCP/plugin/KB advertisements. These full
+ * byte vectors match the pre-cutover owner at 6e59415b9 except the intentional
+ * read_file offset help clarification in f3f9fc79e. Reverting that one text
+ * exactly reproduces all three original hashes. Exposure masks, ordering and
+ * every current schema/description byte remain pinned. */
 static void test_pre_cutover_catalog_vectors(void)
 {
    const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES,
                                  AIMEE_WIRE_ANTHROPIC};
    const int counts[] = {31, 30, 31};
-   const char *hashes[] = {"170635e60a128d3a4bb843c0b71195cb37649d0058611f2b226e87c1216f666e",
-                           "b5d46bf887ed46897678367c0327529f4c9c86f4e6cf49338a0611c7085dd9e1",
-                           "6ef67c6a1c123c5493a32d87b661933ccab4eeeec32119db1ccdd7102f133500"};
+   const char *hashes[] = {"c5ecba846a7b28e425302300fcfe33ce35c024b6a8b2cd45953046c6fc5bd272",
+                           "3c19de6316ca1a1b10f7eb59157cbd770f67f656e566bd7848ba6c5e54eb4118",
+                           "de947731eb73ee5093b5c14b85cbcbed80ad69aa719a7f1fcc7608419d851814"};
    for (int i = 0; i < 3; ++i)
    {
       cJSON *array = fixture_catalog_wire(wires[i]);
@@ -211,7 +213,7 @@ static void test_pre_cutover_catalog_vectors(void)
       free(json);
       cJSON_Delete(array);
    }
-   puts("pre-cutover native catalogue bytes unchanged across three exposure profiles OK");
+   puts("native catalogue bytes pinned across three exposure profiles OK");
 }
 
 static void *catalog_oom(size_t size)

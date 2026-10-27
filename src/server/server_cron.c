@@ -469,16 +469,14 @@ static int cron_run_config_job_at_cwd(const cron_job_t *job, cJSON **out_resp)
                    ? -1
                    : cron_build_ir_request(job, skills_csv, &prior_ir, &prior_script, prior,
                                            script_output, &request);
-      if (!rc)
+      if (rc)
+         snprintf(error, sizeof(error),
+                  "cron canonical request refused (including the 1 MiB source bound)");
+      else
          rc = cron_run_llm_request(&request, &output_ir, &llm_output, error, sizeof error);
       aimee_request_free(&request);
       if (rc)
-      {
-         if (!error[0])
-            snprintf(error, sizeof(error),
-                     "cron canonical request refused (including the 1 MiB source bound)");
          status = "failed";
-      }
       else
       {
          output = llm_output ? llm_output : "";

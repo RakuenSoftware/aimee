@@ -1279,6 +1279,14 @@ static void test_seeded_host_extensions(void)
       assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(source, keys[i]),
                            cJSON_GetObjectItemCaseSensitive(owned.raw, keys[i]), 1));
    assert(!cJSON_HasObjectItem(owned.raw, "messages"));
+   /* An omitted model selector leaves registered selection authoritative; the
+    * extension's existing model marker must still match that selected model. */
+   char *selected_model = seed.model;
+   seed.model = NULL;
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &owned));
+   assert(!seed.model && !strcmp(owned.model, agent.model));
+   seed.model = selected_model;
    /* A caller extension cannot overwrite an already selected host policy. */
    assert(cJSON_ReplaceItemInObjectCaseSensitive(owned.raw, "min_p", cJSON_CreateNumber(0.9)));
    assert(aimee_backend_preserve_host_extensions(&seed, &owned, AIMEE_WIRE_OPENAI_CHAT) < 0);

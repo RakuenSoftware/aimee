@@ -223,7 +223,8 @@ static void scope_frame(uint32_t kind, uint64_t sequence, int reply, int more, c
 }
 static void test_scope_secrets_never_enter_capture(void)
 {
-   static const uint32_t kinds[] = {6657, 6679, 6680, 9218, 9474, 11792, 11266};
+   /* Live secret-bearing stages; the removed trigger-source stage is not a protocol. */
+   static const uint32_t kinds[] = {6657, 6679, 9218, 9474, 11792, 11266};
    static const char secret[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
    char body[128];
    snprintf(body, sizeof body, "{\"execution_scope\":\"%s\"}", secret);
@@ -263,7 +264,10 @@ static void test_scope_secrets_never_enter_capture(void)
    assert(!unlink(path));
    ouro_capture_report_t report = ouro_capture_read(g.capture.buf, g.capture.len, NULL, NULL);
    assert(report.status == OURO_CAPTURE_OPEN && report.records == 2);
-   assert(flush_pending_durable() == 12 && scope_receipts == 12);
+   /* Four live ledger protocols produce request/reply receipts (8); the two
+    * capture-only protocols suppress bodies without ledger receipts. The two
+    * ordinary memory frames add 2. The retired trigger-source stage adds none. */
+   assert(flush_pending_durable() == 10 && scope_receipts == 10);
    assert(!atomic_load(&g.dropped) && !atomic_load(&g.durable_pending_count));
    ouro_capture_free(&g.capture);
    puts("  auth-bearing fragmented request/reply bodies suppressed; structural WORM and ordinary "

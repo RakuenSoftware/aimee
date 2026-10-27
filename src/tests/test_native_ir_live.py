@@ -101,11 +101,14 @@ class NativeCatalogObservations:
             target.chmod(0o600)
         # Preserve actual offending declarations/history shape before strict failure.
         assert previous == encoded, ("native catalog changed within policy phase", key)
-        if phase == "opening":
+        # Internal HTTP delegates use their role-scoped Aimee catalog, not the
+        # external SDK/gateway bootstrap pipeline. Still record declarations and
+        # enforce exact stability within each observed phase for every owner.
+        if kind != "http-child" and phase == "opening":
             assert self.opening_tools(tools) == tools, ("opening catalog exposes native shell", key)
         opening = self.references.get((kind, wire, scope, "opening"))
         established = self.references.get((kind, wire, scope, "established"))
-        if opening is not None and established is not None:
+        if kind != "http-child" and opening is not None and established is not None:
             assert json.loads(opening) == self.opening_tools(json.loads(established)), (
                 "catalog differs beyond opening native-shell policy", key)
         return record

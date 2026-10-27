@@ -6,8 +6,8 @@
     "egress",
     "ir",
     "module-runtime",
-    "vault",
-    "translation"
+    "translation",
+    "vault"
   ],
   "runtime_toggle": {
     "supported": false
@@ -57,7 +57,8 @@
     "server-go/modules/providers/competence_test.go",
     "server-go/modules/providers/probe_ir_boundary_test.go",
     "server-go/modules/providers/probe_unavailable_test.go",
-    "server-go/modules/providers/probe_codec_test.go"
+    "server-go/modules/providers/probe_codec_test.go",
+    "server-go/modules/providers/connection_transport_test.go"
   ],
   "tests": [],
   "docs": [
