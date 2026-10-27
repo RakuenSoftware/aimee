@@ -101,7 +101,62 @@ static const char *workspace_remote_for_root(const char *root)
    return NULL;
 }
 
-static int git_registered_workspace_path(const char *path, char *out, size_t out_cap)
+/* External linked checkouts are admitted only through Git's reciprocal admin
+ * registration, never by remote URL or a caller-supplied .git pointer alone. */
+static int git_linked_workspace_common(const char *path, char *common, size_t cap, int root_only)
+{
+   /* All path values originate in Git/the runner and remain quoted data. The
+    * same fixed argv runs locally and remotely; no caller path enters shell code. */
+   const char *const argv[] = {
+       "/usr/bin/env",
+       "-i",
+       "PATH=/usr/bin:/bin",
+       "GIT_CONFIG_NOSYSTEM=1",
+       "GIT_CONFIG_SYSTEM=/dev/null",
+       "GIT_CONFIG_GLOBAL=/dev/null",
+       "GIT_OPTIONAL_LOCKS=0",
+       "GIT_TERMINAL_PROMPT=0",
+       "sh",
+       "-c",
+       "set -eu; cd -- \"$2\"; "
+       "a=$(git rev-parse --path-format=absolute --git-dir); a=$(realpath -- \"$a\"); "
+       "c=$(git rev-parse --path-format=absolute --git-common-dir); c=$(realpath -- \"$c\"); "
+       "r=$(git rev-parse --show-toplevel); r=$(realpath -- \"$r\"); "
+       "test \"$(dirname -- \"$a\")\" = \"$c/worktrees\"; "
+       "test -f \"$r/.git\" && test ! -L \"$r/.git\"; "
+       "test -f \"$a/gitdir\" && test ! -L \"$a/gitdir\"; "
+       "test \"$(realpath -- \"$(cat -- \"$a/gitdir\")\")\" = \"$r/.git\"; "
+       "test \"$1\" != root || test \"$(pwd -P)\" = \"$r\"; "
+       "printf '%s\\n' \"$c\"",
+       "git-worktree-check",
+       root_only ? "root" : "path",
+       path,
+       NULL};
+   char *output = NULL;
+   const workspace_provider_t *ws = workspace_provider_active();
+   int rc;
+   if (ws && ws->kind == WS_PROVIDER_DETACHED)
+   {
+      if (!ws->exec)
+         return 0;
+      rc = ws->exec(ws, argv, &output, MAX_PATH_LEN);
+   }
+   else
+      rc = safe_exec_capture_cwd_env_timeout(argv, path, environ, &output, MAX_PATH_LEN, 5000);
+   int valid = rc == 0 && output && output[0] == '/';
+   if (valid)
+   {
+      trim_trailing_newline(output);
+      valid = !strchr(output, '\n') && strlen(output) < cap;
+      if (valid)
+         snprintf(common, cap, "%s", output);
+   }
+   free(output);
+   return valid;
+}
+
+static int git_registered_workspace_path(const char *path, char *out, size_t out_cap, char *owner,
+                                         size_t owner_cap)
 {
    const workspace_provider_t *ws = workspace_provider_active();
 
@@ -155,7 +210,42 @@ static int git_registered_workspace_path(const char *path, char *out, size_t out
                          memcmp(canonical_path, canonical_root, root_len) == 0 &&
                          (canonical_path[root_len] == '\0' || canonical_path[root_len] == '/');
          }
+         if (authorized && owner && owner_cap)
+            snprintf(owner, owner_cap, "%s", configured);
          free(canonical_root);
+      }
+      if (!authorized)
+      {
+         char common[MAX_PATH_LEN];
+         if (git_linked_workspace_common(canonical_path, common, sizeof(common), 0))
+         {
+            for (int i = 0; i < config_workspace_count() && !authorized; i++)
+            {
+               char configured[MAX_PATH_LEN];
+               snprintf(configured, sizeof(configured), "%s", config_workspaces(i));
+               run_cmd_set_cwd(configured);
+               int root_rc = -1;
+               char *root = ws->exec_shell(ws, "pwd -P", &root_rc);
+               run_cmd_set_cwd(saved[0] ? saved : NULL);
+               if (root_rc == 0 && root)
+               {
+                  trim_trailing_newline(root);
+                  size_t n = strlen(root);
+                  authorized =
+                      n && !strncmp(common, root, n) && (common[n] == '/' || common[n] == '\0');
+                  if (!authorized)
+                  {
+                     char root_common[MAX_PATH_LEN];
+                     authorized =
+                         git_linked_workspace_common(root, root_common, sizeof(root_common), 1) &&
+                         !strcmp(root_common, common);
+                  }
+               }
+               free(root);
+               if (authorized && owner && owner_cap)
+                  snprintf(owner, owner_cap, "%s", configured);
+            }
+         }
       }
       free(canonical_path);
       if (!authorized || strlen(path) >= out_cap)
@@ -170,6 +260,7 @@ static int git_registered_workspace_path(const char *path, char *out, size_t out
        lstat(resolved, &st) != 0 || !S_ISDIR(st.st_mode))
       return 0;
 
+   char common[MAX_PATH_LEN] = "";
    size_t path_len = strlen(resolved);
    for (int i = 0; i < config_workspace_count(); i++)
    {
@@ -181,8 +272,37 @@ static int git_registered_workspace_path(const char *path, char *out, size_t out
       if (path_len >= root_len && memcmp(resolved, root, root_len) == 0 &&
           (resolved[root_len] == '\0' || resolved[root_len] == '/'))
       {
+         if (owner && owner_cap)
+            snprintf(owner, owner_cap, "%s", configured);
          snprintf(out, out_cap, "%s", resolved);
          return strlen(resolved) < out_cap;
+      }
+   }
+   if (git_linked_workspace_common(resolved, common, sizeof(common), 0))
+   {
+      for (int i = 0; i < config_workspace_count(); i++)
+      {
+         char root[MAX_PATH_LEN];
+         const char *configured = config_workspaces(i);
+         if (!configured || !realpath(configured, root))
+            continue;
+         size_t n = strlen(root);
+         char root_common[MAX_PATH_LEN], marker[MAX_PATH_LEN];
+         struct stat marker_stat;
+         int same_repository = !strncmp(common, root, n) && (common[n] == '/' || common[n] == '\0');
+         if (!same_repository &&
+             snprintf(marker, sizeof(marker), "%s/.git", root) < (int)sizeof(marker) &&
+             lstat(marker, &marker_stat) == 0 && S_ISREG(marker_stat.st_mode))
+            same_repository =
+                git_linked_workspace_common(root, root_common, sizeof(root_common), 1) &&
+                !strcmp(root_common, common);
+         if (same_repository)
+         {
+            if (owner && owner_cap)
+               snprintf(owner, owner_cap, "%s", configured);
+            snprintf(out, out_cap, "%s", resolved);
+            return strlen(resolved) < out_cap;
+         }
       }
    }
    out[0] = '\0';
@@ -195,7 +315,7 @@ int mcp_git_bind_clone_cwd(cJSON *args)
    if (!cwd || !cwd[0])
       return 0;
    char dir[MAX_PATH_LEN];
-   if (!git_registered_workspace_path(cwd, dir, sizeof(dir)))
+   if (!git_registered_workspace_path(cwd, dir, sizeof(dir), NULL, 0))
       return -1;
    run_cmd_set_cwd(dir);
    return 1;
@@ -212,7 +332,15 @@ static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return -1;
-   cJSON_AddStringToObject(request, "cwd", cwd ? cwd : "");
+   char admitted[MAX_PATH_LEN], registered_owner[MAX_PATH_LEN] = "";
+   if (cwd)
+      git_registered_workspace_path(cwd, admitted, sizeof(admitted), registered_owner,
+                                    sizeof(registered_owner));
+   /* Resolve credentials against the registered owner; execute in the caller's
+    * admitted checkout, not in this identity directory. Mirrors retain their
+    * existing module-owned resolution. */
+   cJSON_AddStringToObject(request, "cwd",
+                           registered_owner[0] ? registered_owner : (cwd ? cwd : ""));
    cJSON_AddNumberToObject(request, "provider_kind", provider_kind);
    /* The instance home, not a mirror path: resolving where a provider puts its
     * trees is the module's job, and reaching into the workspace module's headers
@@ -1141,8 +1269,8 @@ int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args
             snprintf(authorized, sizeof(authorized), "%s", resolved);
       }
       else
-         authorized_ok =
-             git_registered_workspace_path(jpath->valuestring, authorized, sizeof(authorized));
+         authorized_ok = git_registered_workspace_path(jpath->valuestring, authorized,
+                                                       sizeof(authorized), NULL, 0);
       if (!authorized_ok)
       {
          if (mismatch_err)
