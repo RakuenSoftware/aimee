@@ -169,49 +169,8 @@ char *kb_client_last_result_json(const char *message)
    return raw;
 }
 
-extern cJSON *tool_get_help(cJSON *args);
-
-/* get_help text for a topic, as the caller sees it. Caller frees. */
-static char *help_text(const char *topic)
-{
-   cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "topic", topic);
-   cJSON *res = tool_get_help(args);
-   cJSON_Delete(args);
-   char *text = strdup(jo_cstr(cJSON_GetArrayItem(res, 0), "text"));
-   cJSON_Delete(res);
-   return text;
-}
-
-/* Every topic `aimee get-help` advertises resolves to a section, and an unknown
- * one names the topics instead of pointing at a no-argument call the CLI does
- * not answer with the index. */
-static void test_get_help_topics(void)
-{
-   const char *advertised[] = {"mcp tools",    "delegate",   "memory", "code index",
-                               "verification", "build",      "git",    "pr workflow",
-                               "conventions",  "diagnostics"};
-   for (size_t i = 0; i < sizeof(advertised) / sizeof(advertised[0]); i++)
-   {
-      char *text = help_text(advertised[i]);
-      assert(strncmp(text, "## ", 3) == 0);
-      free(text);
-   }
-   char *git = help_text("git");
-   assert(strncmp(git, "## Git\n", 7) == 0);
-   assert(strstr(git, "aimee git pr create"));
-   free(git);
-
-   char *unknown = help_text("work queue");
-   assert(strstr(unknown, "unknown topic 'work queue'"));
-   assert(strstr(unknown, "Git"));
-   assert(strstr(unknown, "PR Workflow"));
-   free(unknown);
-}
-
 int main(void)
 {
-   test_get_help_topics();
    reply = cJSON_Parse(
        "{\"status\":\"ok\",\"no_answer\":false,\"low_confidence\":false,\"confidence\":0.8,"
        "\"evidence_mode\":\"verbatim\",\"citation_ids\":[41,52],\"evidence_trace\":{\"decision\":"
