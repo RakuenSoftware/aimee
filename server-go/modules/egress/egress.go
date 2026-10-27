@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -206,6 +208,13 @@ func (p policy) decide(invocation ring.ModuleInvocation, request Request) Decisi
 	if !callerPurposeAllowed(invocation.PrincipalRef, request, parsed) {
 		return deny("caller is not allowed for this purpose or destination")
 	}
+	return p.resolveTarget(invocation, request, parsed)
+}
+
+// The HTTP owner also uses the same public-address checks for a signed log URL
+// obtained from an already authorised GitHub job-log response.
+func (p policy) resolveTarget(invocation ring.ModuleInvocation, request Request, parsed *url.URL) Decision {
+	deny := func(reason string) Decision { return Decision{Reason: reason, PolicyRevision: PolicyRevision} }
 	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(decisionTimeout))
 	defer cancel()
 	addresses, err := p.resolver.LookupIPAddr(ctx, parsed.Hostname())
@@ -266,6 +275,9 @@ func forgeTargetAllowed(method, path string) bool {
 	if len(parts) == 3 {
 		return method == "GET"
 	}
+	if method == "GET" && forgeAttributionReadAllowed(parts) {
+		return true
+	}
 	if parts[3] != "pulls" {
 		return false
 	}
@@ -276,6 +288,35 @@ func forgeTargetAllowed(method, path string) bool {
 		return method == "GET" || method == "PATCH"
 	}
 	return len(parts) == 6 && parts[5] == "merge" && method == "PUT"
+}
+
+// Only the read-only evidence used by the shared attribution policy. This is
+// also checked against the credential's exact repository and merge operation.
+func forgeAttributionReadAllowed(parts []string) bool {
+	if len(parts) < 4 {
+		return false
+	}
+	positive := func(s string) bool { n, err := strconv.Atoi(s); return err == nil && n > 0 && strconv.Itoa(n) == s }
+	sha := func(s string) bool {
+		return regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`).MatchString(s) && strings.Trim(s, "0") != ""
+	}
+	switch parts[3] {
+	case "issues":
+		return len(parts) == 4 || len(parts) == 5 && positive(parts[4])
+	case "commits":
+		return len(parts) == 6 && sha(parts[4]) && (parts[5] == "pulls" || parts[5] == "check-runs")
+	case "compare":
+		if len(parts) != 5 {
+			return false
+		}
+		refs := strings.Split(parts[4], "...")
+		return len(refs) == 2 && sha(refs[0]) && sha(refs[1])
+	case "check-runs":
+		return (len(parts) == 5 || len(parts) == 6 && parts[5] == "annotations") && positive(parts[4])
+	case "actions":
+		return len(parts) >= 6 && positive(parts[5]) && (len(parts) == 6 && (parts[4] == "jobs" || parts[4] == "runs") || len(parts) == 7 && parts[4] == "jobs" && parts[6] == "logs")
+	}
+	return false
 }
 
 func validDigest(value string) bool {
