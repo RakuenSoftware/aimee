@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -285,6 +284,20 @@ func (p policy) executeHTTP(invocation ring.ModuleInvocation, request HTTPReques
 		return HTTPResponse{Error: "egress: " + err.Error()}
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusFound {
+		download, decision, allowed := p.forgeLogDownload(invocation, request, parsed, response.Header.Get("Location"))
+		if allowed {
+			response.Body.Close()
+			deadline, _ := ctx.Deadline()
+			download.TimeoutMS = time.Until(deadline).Milliseconds()
+			if download.TimeoutMS <= 0 {
+				return HTTPResponse{Error: "egress: log download deadline expired"}
+			}
+			// Empty credential/header custody is deliberate. A second redirect
+			// cannot satisfy the original credential-scope gate and is returned.
+			return p.executeHTTP(invocation, download, decision, nil)
+		}
+	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, request.MaxResponseBytes+1))
 	if err != nil {
 		return HTTPResponse{Status: response.StatusCode, Error: "egress: response read failed"}
@@ -322,23 +335,29 @@ func forgeCredentialTargetAllowed(operation, resource, method, path string) bool
 		if method != "GET" {
 			return false
 		}
-		positive := func(s string) bool { n, err := strconv.Atoi(s); return err == nil && n > 0 && strconv.Itoa(n) == s }
-		sha := func(s string) bool { return regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`).MatchString(s) }
-		if len(parts) == 4 && parts[3] == "issues" {
-			return true
-		}
-		if len(parts) == 5 && (parts[3] == "issues" || parts[3] == "pulls") {
-			return positive(parts[4])
-		}
-		if len(parts) == 6 && parts[3] == "commits" && (parts[5] == "pulls" || parts[5] == "check-runs") {
-			return sha(parts[4])
-		}
-		if len(parts) == 5 && parts[3] == "compare" {
-			refs := strings.Split(parts[4], "...")
-			return len(refs) == 2 && sha(refs[0]) && sha(refs[1])
-		}
-		return false
+		return len(parts) == 5 && parts[3] == "pulls" && positiveForgeID(parts[4]) || forgeAttributionReadAllowed(parts)
 	default:
 		return false
 	}
+}
+
+func positiveForgeID(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n > 0 && strconv.Itoa(n) == s
+}
+
+// No caller-supplied redirect authority: only this owner may derive one signed
+// download from an authenticated, exact-repository GitHub job-log response.
+func (p policy) forgeLogDownload(invocation ring.ModuleInvocation, original HTTPRequest, target *url.URL, location string) (HTTPRequest, Decision, bool) {
+	parts := strings.Split(strings.Trim(target.EscapedPath(), "/"), "/")
+	if invocation.Cancelled() || invocation.PrincipalRef != GitClientRef || original.Purpose != "forge" || original.Method != "GET" || original.CredentialScope != "pr_merge" || !original.CredentialPresent || original.Credential == nil || target.Scheme != "https" || target.Host != "api.github.com" || len(parts) != 7 || parts[3] != "actions" || parts[4] != "jobs" || parts[6] != "logs" || !positiveForgeID(parts[5]) || !forgeCredentialTargetAllowed(original.CredentialScope, original.CredentialResource, "GET", target.EscapedPath()) {
+		return HTTPRequest{}, Decision{}, false
+	}
+	destination, err := url.Parse(location)
+	if err != nil || destination.Scheme != "https" || destination.Hostname() == "" || destination.User != nil || destination.Fragment != "" || destination.Port() != "" && destination.Port() != "443" {
+		return HTTPRequest{}, Decision{}, false
+	}
+	request := HTTPRequest{Request: Request{TargetURL: destination.String(), Purpose: "forge", Method: "GET", RequestSHA256: RequestDigest("GET", destination.String(), nil, false)}, Headers: map[string]string{"Accept": "text/plain"}, MaxResponseBytes: original.MaxResponseBytes, TimeoutMS: original.TimeoutMS}
+	decision := p.resolveTarget(invocation, request.Request, destination)
+	return request, decision, decision.Allowed
 }
