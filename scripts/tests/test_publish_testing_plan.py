@@ -92,9 +92,9 @@ def main() -> None:
         "server leaf linked into KB",
     )
     failures += expect(
-        ["dependencies/ouroboros-ring.lock.json"],
+        ["dependencies/ouroboros-ring.json"],
         set(planner.SERVER | planner.KB),
-        "pinned ring shared by server and KB",
+        "ring release shared by server and KB",
     )
     failures += expect(
         ["server-go/modules/memory/public_records.go"],

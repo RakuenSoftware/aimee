@@ -473,37 +473,34 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # separate local shared-memory facility linked only by aimee-server and
 # aimee-kb; it never provides transport between machines.
 #
-# The ring is not in this repository. It is built from the commit of
-# github.com/RakuenSoftware/ouroboros-ring pinned in
-# dependencies/ouroboros-ring.lock.json, fetched and content-checked into
-# OURO_RING_DIR before anything compiles. OURO_RING_LOCAL=/path/to/checkout
-# builds against a local ring checkout instead (no fetch, no pin check), for
-# changing the ring and aimee together.
-ifneq ($(strip $(OURO_RING_LOCAL)),)
-OURO_RING_DIR := $(abspath $(OURO_RING_LOCAL))
+# The ring is not in this repository and aimee does not build it. aimee depends
+# on the ring's contract through the release range in
+# dependencies/ouroboros-ring.json and links an installed ring through its own
+# package (pkg-config ouroboros-ring). scripts/provide_ouroboros_ring.py names
+# that installation before anything compiles: OURO_RING_PREFIX=/path uses an
+# installed ring, OURO_RING_SOURCE=/path builds a ring checkout, and otherwise
+# the named release is fetched, content-checked and built with the ring's own
+# build, with this build's compiler and extra flags.
+# A dry run (-n, -q; also the -p database queries tools read the link graph
+# with) provides nothing and names the last-provided installation instead.
+# Only the first word of MAKEFLAGS carries single-letter flags, and only when it
+# is not itself a long option such as --no-print-directory.
+OURO_RING_MAKE_LETTERS := $(filter-out -%,$(firstword $(MAKEFLAGS)))
+OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(OURO_RING_MAKE_LETTERS))
+ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
+else ifneq ($(OURO_RING_DRY_RUN),)
+C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
+OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
 else
-OURO_RING_DIR := build/deps/ouroboros-ring
-ifeq ($(filter clean distclean,$(MAKECMDGOALS)),)
-OURO_RING_FETCH := $(shell python3 ../scripts/fetch_ouroboros_ring.py $(OURO_RING_DIR) >&2 && echo ok)
-ifneq ($(OURO_RING_FETCH),ok)
-$(error could not provide the pinned ouroboros ring in $(OURO_RING_DIR); see the message above)
+OURO_RING_PKGCONFIG := $(shell OURO_RING_CC='$(CC)' OURO_RING_CFLAGS='$(PIC_FLAGS) $(EXTRA_C_FLAGS)' \
+                         python3 ../scripts/provide_ouroboros_ring.py build/deps/ouroboros-ring)
+ifeq ($(strip $(OURO_RING_PKGCONFIG)),)
+$(error could not provide an ouroboros ring in the range dependencies/ouroboros-ring.json names; see the message above)
 endif
+OURO_RING_PC = PKG_CONFIG_PATH='$(OURO_RING_PKGCONFIG)' pkg-config
+C_FLAGS += $(shell $(OURO_RING_PC) --cflags ouroboros-ring)
+OURO_RING_LIB := $(shell $(OURO_RING_PC) --variable=libdir ouroboros-ring)/libouroboros-ring.a
 endif
-endif
-OURO_RING_NAMES := attach wire module_client module_protocol module_runtime ring region \
-                   region_host arena route runtime host client capture endpoint
-OURO_RING_SRCS := $(OURO_RING_NAMES:%=$(OURO_RING_DIR)/c/src/%.c)
-OURO_RING_OBJS := $(OURO_RING_NAMES:%=$(OBJDIR)/ouroboros-ring/%.o)
-OURO_RING_LIB := $(OBJDIR)/libouroboros-ring.a
-C_FLAGS += -I$(OURO_RING_DIR)/c/include
-
-$(OBJDIR)/ouroboros-ring/%.o: $(OURO_RING_DIR)/c/src/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(C_FLAGS) -I$(OURO_RING_DIR)/c/src -c -o $@ $<
-
-$(OURO_RING_LIB): $(OURO_RING_OBJS)
-	@mkdir -p $(dir $@)
-	$(AR) rcs $@ $^
 export AIMEE_CORE_REQUIRED_VERSION := $(strip $(shell sed -n '1p' core/VERSION))
 AIMEE_CORE_PREFIX ?=
 ifneq ($(strip $(AIMEE_CORE_PREFIX)),)
@@ -1081,9 +1078,9 @@ go-unit-tests:
 		 cd "$$module" && "$(GO)" test ./...); \
 	done
 	@cd .. && python3 -I scripts/check_go_module_runtime_bundle.py
-	@# The Go ring module and the C ring sources must be the same commit; the ring's
-	@# own cross-language conformance runs in its repository.
-	@cd .. && python3 -I scripts/fetch_ouroboros_ring.py --check-go-pin
+	@# The Go ring module must be a tagged release in the contract range, like the
+	@# C ring; the ring's own cross-language conformance runs in its repository.
+	@cd .. && python3 -I scripts/provide_ouroboros_ring.py --check-go
 	@echo "go-unit-tests: ok"
 
 go-vulncheck:

@@ -13,7 +13,7 @@ FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc401
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates libp11-kit-dev libssl-dev \
+        build-essential ca-certificates cmake libp11-kit-dev libssl-dev \
         libzstd-dev pkg-config python3 zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
@@ -26,15 +27,11 @@ MODULE_KEYS = {
     "id", "binary", "main", "sources", "include_roots", "pkg_config", "system_libraries",
 }
 MODULE_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "header_dependencies"}
-# The ouroboros ring's client side, from the pinned checkout
-# scripts/fetch_ouroboros_ring.py places in the build tree.
-OURO_RING_DIR = "src/build/deps/ouroboros-ring"
-OURO_RING_CLIENT_SOURCES = [
-    f"{OURO_RING_DIR}/c/src/{name}.c"
-    for name in ("attach", "client", "endpoint", "region", "ring", "wire",
-                 "module_protocol", "module_runtime")
-]
-OURO_RING_INCLUDE = f"{OURO_RING_DIR}/c/include"
+# A module process links the ring's client package (pkg-config
+# ouroboros-ring-client) from the installation scripts/provide_ouroboros_ring.py
+# names; aimee knows nothing of the ring's sources.
+OURO_RING_ROOT = "src/build/deps/ouroboros-ring"
+OURO_RING_CLIENT_PACKAGE = "ouroboros-ring-client"
 IMPORTED_TARGET_FLAGS = {
     "OpenSSL::Crypto": "-lcrypto",
     "OpenSSL::SSL": "-lssl",
@@ -217,15 +214,22 @@ def real_directory(root: Path, relative: str, label: str) -> Path:
     return resolved
 
 
-def pkg_config_flags(executable: str, packages: list[str]) -> tuple[list[str], list[str]]:
+def pkg_config_flags(executable: str, packages: list[str],
+                     search_path: str | None = None) -> tuple[list[str], list[str]]:
     if not packages:
         return [], []
+    environment = None
+    if search_path:
+        environment = os.environ.copy()
+        inherited = environment.get("PKG_CONFIG_PATH")
+        environment["PKG_CONFIG_PATH"] = (
+            f"{search_path}{os.pathsep}{inherited}" if inherited else search_path)
     results: list[list[str]] = []
     for mode in ("--cflags", "--libs"):
         try:
             completed = subprocess.run(
                 [executable, mode, *packages], check=True, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment,
             )
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = getattr(exc, "stderr", "") or str(exc)
@@ -265,7 +269,8 @@ def materialize_generated_headers(module: dict[str, object], root: Path,
 
 def compiler_command(module: dict[str, object], root: Path, bundle: Path, output: Path,
                      cc: str, pkg_config: str,
-                     generated_include: Path | None = None) -> list[str]:
+                     generated_include: Path | None = None,
+                     ring_pkgconfig: str | None = None) -> list[str]:
     identifier = module["id"]
     assert isinstance(identifier, str)
     sources = module["sources"]
@@ -280,9 +285,7 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     owned_sources = [real_file(root, item, f"{identifier}.sources") for item in sources]
     for dependency in module.get("header_dependencies", []):
         real_file(root, dependency, f"{identifier}.header_dependencies")
-    core_sources = [real_file(root, item, "ring source")
-                    for item in OURO_RING_CLIENT_SOURCES]
-    include_paths = [real_directory(root, OURO_RING_INCLUDE, "ring include")]
+    include_paths = []
     if module.get("generated_headers"):
         if generated_include is None:
             fail(f"{identifier}: generated header directory was not materialized")
@@ -292,7 +295,8 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
         real_directory(root, item, f"{identifier}.include_roots")
         for item in include_roots
     )
-    cflags, pkg_libraries = pkg_config_flags(pkg_config, packages)
+    cflags, pkg_libraries = pkg_config_flags(
+        pkg_config, [*packages, OURO_RING_CLIENT_PACKAGE], ring_pkgconfig)
     system_flags = [
         IMPORTED_TARGET_FLAGS.get(library, f"-l{library}") for library in libraries
     ]
@@ -314,7 +318,7 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
         "-ffunction-sections", "-fdata-sections",
         *(f"-I{path}" for path in include_paths), *(f"-D{item}" for item in definitions),
         *cflags, str(main),
-        *(str(path) for path in owned_sources), *(str(path) for path in core_sources),
+        *(str(path) for path in owned_sources),
         *pkg_libraries, *system_flags, "-Wl,--gc-sections", "-o", str(binary),
     ]
 
@@ -351,7 +355,7 @@ def placed_modules(bundle: Path, placement: str) -> set[str]:
 
 
 def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str,
-          placement: str | None = None) -> int:
+          placement: str | None = None, ring_pkgconfig: str | None = None) -> int:
     modules = load_builds(bundle)
     if placement is not None:
         placed = placed_modules(bundle, placement)
@@ -361,7 +365,7 @@ def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str,
         with tempfile.TemporaryDirectory(prefix=f"aimee-{module['id']}-generated-") as temporary:
             generated = materialize_generated_headers(module, root, Path(temporary))
             command = compiler_command(
-                module, root, bundle, output, cc, pkg_config, generated
+                module, root, bundle, output, cc, pkg_config, generated, ring_pkgconfig
             )
             try:
                 subprocess.run(command, check=True)
@@ -382,20 +386,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pkg-config", default="pkg-config")
     parser.add_argument("--placement",
                         help="build only the C processes this placement runs")
+    parser.add_argument("--ring-pkgconfig",
+                        help="pkg-config directory of an installed ring; by default "
+                             "scripts/provide_ouroboros_ring.py provides one")
     args = parser.parse_args(argv)
-    lock = args.root.resolve() / "dependencies/ouroboros-ring.lock.json"
-    if lock.is_file():
-        # Provide the pinned ring before compiling against it; a tree without the
-        # lock (a test fixture) supplies its own ring sources.
-        fetched = subprocess.run([sys.executable, str(ROOT / "scripts/fetch_ouroboros_ring.py"),
-                                  str(args.root.resolve() / OURO_RING_DIR)])
-        if fetched.returncode != 0:
-            print("build_c_module_runtime_bundle: error: the pinned ouroboros ring is unavailable",
-                  file=sys.stderr)
+    ring_pkgconfig = args.ring_pkgconfig
+    if not ring_pkgconfig:
+        environment = os.environ.copy()
+        environment["OURO_RING_CC"] = args.cc
+        provided = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/provide_ouroboros_ring.py"),
+             str(args.root.resolve() / OURO_RING_ROOT)],
+            text=True, stdout=subprocess.PIPE, env=environment)
+        if provided.returncode != 0 or not provided.stdout.strip():
+            print("build_c_module_runtime_bundle: error: no ouroboros ring in the contract "
+                  "range is available", file=sys.stderr)
             return 1
+        ring_pkgconfig = provided.stdout.strip()
     try:
         count = build(args.bundle.resolve(), args.output.resolve(), args.root.resolve(),
-                      args.cc, args.pkg_config, args.placement)
+                      args.cc, args.pkg_config, args.placement, ring_pkgconfig)
     except BuildError as exc:
         print(f"build_c_module_runtime_bundle: error: {exc}", file=sys.stderr)
         return 1

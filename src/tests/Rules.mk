@@ -95,10 +95,7 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 # link the bus as loose objects, so keep its two new implementation objects in
 # one fixture rather than duplicating them in every target below.
 OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/instance_identity.o \
-                    $(OBJDIR)/ouroboros-ring/runtime.o \
-                    $(OBJDIR)/ouroboros-ring/endpoint.o \
-                    $(OBJDIR)/ouroboros-ring/module_client.o \
-                    $(OBJDIR)/ouroboros-ring/module_protocol.o \
+                    $(OURO_RING_LIB) \
                     $(OBJDIR)/aimee_sha256.o
 TEST_WORM_OBJS = $(OBJDIR)/modules/audit/audit_worm.o \
                  $(OBJDIR)/modules/audit/audit_worm_chain.o \
@@ -133,10 +130,7 @@ unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-manage
 
 P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
     $(OBS_BUS_LINK_OBJS) $(OBJDIR)/modules/audit/audit_replay.o \
-    $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/attach.o $(OBJDIR)/ouroboros-ring/host.o \
-    $(OBJDIR)/ouroboros-ring/route.o $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-    $(OBJDIR)/ouroboros-ring/ring.o $(OBJDIR)/ouroboros-ring/arena.o \
-    $(OBJDIR)/ouroboros-ring/wire.o $(OBJDIR)/ouroboros-ring/capture.o \
+    $(OURO_RING_LIB) \
                            $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) \
                            $(SERVER_CMD_OBJS) $(CORE_OBJS) $(PLATFORM_OBJS) \
                            $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o
@@ -154,7 +148,7 @@ P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OB
 $(TESTPREFIX)/unit-test-server-management-listener-live: \
     $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) \
     $(OURO_RING_LIB) $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_SERVER)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(L_SERVER)
 
 # Common object sets for tests
 $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o \
@@ -215,10 +209,7 @@ $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentia
 # fixtures; shipping daemons consume only libouroboros-ring.a. guardrail_events.o /
 # aimee_home.o / log.o are already in TEST_DATA_OBJS.
 BUS_TEST_OBJS = $(OBS_BUS_LINK_OBJS) \
-                $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/attach.o $(OBJDIR)/ouroboros-ring/host.o \
-                $(OBJDIR)/ouroboros-ring/route.o $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                $(OBJDIR)/ouroboros-ring/ring.o $(OBJDIR)/ouroboros-ring/arena.o \
-                $(OBJDIR)/ouroboros-ring/wire.o $(OBJDIR)/ouroboros-ring/capture.o
+                $(OURO_RING_LIB)
 # The delegate loop builds requests and imports history through translation.
 # Carry its complete IR boundary in every fixture that links the runtime bundle.
 TEST_WORKSPACE_OBJS_EXTRA += $(BUS_TEST_OBJS) \
@@ -1638,12 +1629,12 @@ $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(TEST_WORM_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o \
                              $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o \
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # message_history_repair tests split out of test_agent.c (2000-line limit).
 # Mirrors unit-test-agent's link line so message_history_repair (agent_bridge.o,
@@ -1658,7 +1649,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # agents.json secret-serialization test split out of test_agent.c (2000-line
 # limit). Mirrors unit-test-agent's link line.
@@ -1678,7 +1669,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_st
                       $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(OBJDIR)/tests/test_script_rpc_admission.o: C_FLAGS += -Imodules/execution-policy/include
 
@@ -1760,7 +1751,7 @@ $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinjec
 $(TESTPREFIX)/unit-test-code-span: $(OBJDIR)/tests/test_code_span.o \
                      $(OBJDIR)/server/code_span.o $(OBJDIR)/kb/kb_doc_hash.o \
                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-code-match: $(OBJDIR)/tests/test_code_match.o $(OBJDIR)/code_match.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1878,7 +1869,7 @@ $(TESTPREFIX)/unit-test-gateway-mutate-wire: $(OBJDIR)/tests/test_gateway_mutate
                       $(OBJDIR)/server/token_tracker.o \
                      $(OBJDIR)/harness_memory_common.o \
                      $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lm -lpthread
 
 # Configurable tool-output cap: tests the header-inline clamp resolver
 # (agent_tool_output_cap_clamp). No extra objects — the clamp is pure.
@@ -1937,7 +1928,7 @@ $(TESTPREFIX)/unit-test-memory-lanes: $(OBJDIR)/tests/test_memory_lanes.o $(TEST
 $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
                           $(OBJDIR)/worktree_gc.o \
                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Mock-pattern demonstrator: exercises the same wm.h contract using the
 # in-memory implementation. Same test source, different backing.
@@ -2190,7 +2181,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(OURO_RING_LIB)
-	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(L_CORE) -lm -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
                                     $(OBJDIR)/server/web_search_breaker.o
@@ -2400,7 +2391,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(OURO_RING_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
                                            $(OBJDIR)/shared/auth_token_verify.o \
@@ -2444,7 +2435,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
                            $(OURO_RING_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/kb/kb_mgmt_token.o \
@@ -2502,7 +2493,7 @@ $(TESTPREFIX)/unit-test-server-write-tier-db1: \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
                            $(OURO_RING_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_status_authority.o \
@@ -2837,7 +2828,7 @@ $(TESTPREFIX)/unit-test-cmd-branch: $(OBJDIR)/tests/test_cmd_branch.o $(OBJDIR)/
                            $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                            $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OBJS) \
                          $(TEST_WORKSPACE_OBJS_EXTRA) \
@@ -2847,7 +2838,7 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
                          $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                          $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2896,7 +2887,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_re
                         \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 # Restored. Deleted with the C store as "store-coupled": its only matches for
 # /db1/ were an <sqlite3.h> include it never used, a db_schema.h include it never
@@ -2916,21 +2907,21 @@ $(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-select: $(OBJDIR)/tests/test_git_verify_select.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_contract.o \
                         $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
                                $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
@@ -2940,12 +2931,12 @@ $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/yaml.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS) $(OBJDIR)/interaction_event_names.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/module_runtime_fixture.o \
-                           $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                           $(OURO_RING_LIB) \
                            \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(OURO_RING_LIB) | $(OBJDIR)/aimee-memory-fixture
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-platform-process: $(OBJDIR)/tests/test_platform_process.o \
                                   $(OBJDIR)/posix/platform_process.o \
@@ -3015,17 +3006,9 @@ $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
                                   $(OBJDIR)/dstr.o \
                                   $(OBJDIR)/log.o \
                                   $(OBJDIR)/cJSON.o \
-                                  $(OBJDIR)/ouroboros-ring/client.o \
-                                  $(OBJDIR)/ouroboros-ring/attach.o \
-                                  $(OBJDIR)/ouroboros-ring/host.o \
-                                  $(OBJDIR)/ouroboros-ring/route.o \
-                                  $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                  $(OBJDIR)/ouroboros-ring/ring.o \
-                                  $(OBJDIR)/ouroboros-ring/arena.o \
-                                  $(OBJDIR)/ouroboros-ring/wire.o \
-                                  $(OBJDIR)/ouroboros-ring/capture.o \
+                                  $(OURO_RING_LIB) \
                                   $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 # The conformance run drives every component in process-contracts.json, so this
 # test names their event kinds -- including execution-policy's, whose include
@@ -3034,22 +3017,9 @@ $(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += \
                                                   -Imodules/execution-policy/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
                                         $(OBJDIR)/modules/audit/instance_identity.o \
-                                        $(OBJDIR)/ouroboros-ring/module_client.o \
-                                        $(OBJDIR)/ouroboros-ring/module_runtime.o \
-                                        $(OBJDIR)/ouroboros-ring/module_protocol.o \
-                                        $(OBJDIR)/ouroboros-ring/runtime.o \
-                                        $(OBJDIR)/ouroboros-ring/endpoint.o \
-                                        $(OBJDIR)/ouroboros-ring/client.o \
-                                        $(OBJDIR)/ouroboros-ring/attach.o \
-                                        $(OBJDIR)/ouroboros-ring/host.o \
-                                        $(OBJDIR)/ouroboros-ring/route.o \
-                                        $(OBJDIR)/ouroboros-ring/region.o \
-                                        $(OBJDIR)/ouroboros-ring/region_host.o \
-                                        $(OBJDIR)/ouroboros-ring/ring.o \
-                                        $(OBJDIR)/ouroboros-ring/arena.o \
-                                        $(OBJDIR)/ouroboros-ring/wire.o \
+                                        $(OURO_RING_LIB) \
                                         $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
+	$(TESTLINK_MIN) -o $@ $^ $(OURO_RING_LIB) $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
 $(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Imodules/sandbox/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
@@ -3168,15 +3138,8 @@ unit-tests-pg:
 # measurement; a test binary, never linked into a shipping target.
 $(OBJDIR)/tests/bus_bench.o: C_FLAGS += -O2
 $(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
-                        $(OBJDIR)/ouroboros-ring/client.o \
-                        $(OBJDIR)/ouroboros-ring/attach.o \
-                        $(OBJDIR)/ouroboros-ring/host.o \
-                        $(OBJDIR)/ouroboros-ring/route.o \
-                        $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                        $(OBJDIR)/ouroboros-ring/ring.o \
-                        $(OBJDIR)/ouroboros-ring/arena.o \
-                        $(OBJDIR)/ouroboros-ring/wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+                        $(OURO_RING_LIB)
+	$(TESTLINK_MIN) -o $@ $^ $(OURO_RING_LIB) $(EXTRA_L_FLAGS) -lpthread
 
 .PHONY: bus-bench
 bus-bench: $(TESTPREFIX)/bus-bench
@@ -3222,7 +3185,7 @@ $(TESTPREFIX)/unit-test-git-verify-state-bus: $(OBJDIR)/modules/ir/aimee_ir.o $(
                                            $(OBJDIR)/modules/git/git_verify_step.o \
                                            $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o \
                                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-git-verify-state-bus
 unit-test-git-verify-state-bus: $(TESTPREFIX)/unit-test-git-verify-state-bus $(OBJDIR)/aimee-module
@@ -3281,33 +3244,17 @@ $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_dur
                                               $(OBS_BUS_LINK_OBJS) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
-                                              $(OBJDIR)/ouroboros-ring/client.o \
-                                              $(OBJDIR)/ouroboros-ring/attach.o \
-                                              $(OBJDIR)/ouroboros-ring/host.o \
-                                              $(OBJDIR)/ouroboros-ring/route.o \
-                                              $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                              $(OBJDIR)/ouroboros-ring/ring.o \
-                                              $(OBJDIR)/ouroboros-ring/arena.o \
-                                              $(OBJDIR)/ouroboros-ring/wire.o \
-                                              $(OBJDIR)/ouroboros-ring/capture.o \
+                                              $(OURO_RING_LIB) \
                                               $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-obs-bus-module-concurrency: $(OBJDIR)/tests/test_obs_bus_module_concurrency.o \
                                               $(OBS_BUS_LINK_OBJS) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
-                                              $(OBJDIR)/ouroboros-ring/client.o \
-                                              $(OBJDIR)/ouroboros-ring/attach.o \
-                                              $(OBJDIR)/ouroboros-ring/host.o \
-                                              $(OBJDIR)/ouroboros-ring/route.o \
-                                              $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                              $(OBJDIR)/ouroboros-ring/ring.o \
-                                              $(OBJDIR)/ouroboros-ring/arena.o \
-                                              $(OBJDIR)/ouroboros-ring/wire.o \
-                                              $(OBJDIR)/ouroboros-ring/capture.o \
+                                              $(OURO_RING_LIB) \
                                               $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-audit-durability
 unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
@@ -3321,17 +3268,9 @@ $(TESTPREFIX)/unit-test-bus-audit-replay: $(OBJDIR)/tests/test_bus_audit_replay.
                                           $(OBS_BUS_LINK_OBJS) \
                                           $(OBJDIR)/modules/audit/audit_ledger.o \
                                           $(OBJDIR)/aimee_home.o \
-                                          $(OBJDIR)/ouroboros-ring/client.o \
-                                          $(OBJDIR)/ouroboros-ring/attach.o \
-                                          $(OBJDIR)/ouroboros-ring/host.o \
-                                          $(OBJDIR)/ouroboros-ring/route.o \
-                                          $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                          $(OBJDIR)/ouroboros-ring/ring.o \
-                                          $(OBJDIR)/ouroboros-ring/arena.o \
-                                          $(OBJDIR)/ouroboros-ring/wire.o \
-                                          $(OBJDIR)/ouroboros-ring/capture.o \
+                                          $(OURO_RING_LIB) \
                                           $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-audit-replay
 unit-test-bus-audit-replay: $(TESTPREFIX)/unit-test-bus-audit-replay
@@ -3343,17 +3282,9 @@ $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_rete
                                              $(OBS_BUS_LINK_OBJS) \
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/ouroboros-ring/client.o \
-                                             $(OBJDIR)/ouroboros-ring/attach.o \
-                                             $(OBJDIR)/ouroboros-ring/host.o \
-                                             $(OBJDIR)/ouroboros-ring/route.o \
-                                             $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                             $(OBJDIR)/ouroboros-ring/ring.o \
-                                             $(OBJDIR)/ouroboros-ring/arena.o \
-                                             $(OBJDIR)/ouroboros-ring/wire.o \
-                                             $(OBJDIR)/ouroboros-ring/capture.o \
+                                             $(OURO_RING_LIB) \
                                              $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-audit-retention
 unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
@@ -3372,18 +3303,9 @@ $(TESTPREFIX)/unit-test-bus-capture-gaps: $(OBJDIR)/tests/test_bus_capture_gaps.
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(TEST_WORM_OBJS) \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/ouroboros-ring/client.o \
-                                             $(OBJDIR)/ouroboros-ring/attach.o \
-                                             $(OBJDIR)/ouroboros-ring/host.o \
-                                             $(OBJDIR)/ouroboros-ring/route.o \
-                                             $(OBJDIR)/ouroboros-ring/region.o \
-                                             $(OBJDIR)/ouroboros-ring/region_host.o \
-                                             $(OBJDIR)/ouroboros-ring/ring.o \
-                                             $(OBJDIR)/ouroboros-ring/arena.o \
-                                             $(OBJDIR)/ouroboros-ring/wire.o \
-                                             $(OBJDIR)/ouroboros-ring/capture.o \
+                                             $(OURO_RING_LIB) \
                                              $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-capture-gaps
 unit-test-bus-capture-gaps: $(TESTPREFIX)/unit-test-bus-capture-gaps
@@ -3406,17 +3328,9 @@ $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_re
                                                $(OBJDIR)/modules/audit/audit_replay.o \
                                                $(OBJDIR)/modules/audit/audit_ledger.o \
                                                $(OBJDIR)/aimee_home.o \
-                                               $(OBJDIR)/ouroboros-ring/client.o \
-                                               $(OBJDIR)/ouroboros-ring/attach.o \
-                                               $(OBJDIR)/ouroboros-ring/host.o \
-                                               $(OBJDIR)/ouroboros-ring/route.o \
-                                               $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                               $(OBJDIR)/ouroboros-ring/ring.o \
-                                               $(OBJDIR)/ouroboros-ring/arena.o \
-                                               $(OBJDIR)/ouroboros-ring/wire.o \
-                                               $(OBJDIR)/ouroboros-ring/capture.o \
+                                               $(OURO_RING_LIB) \
                                                $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-audit-replay-tool
 unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
@@ -3439,17 +3353,9 @@ $(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o 
                                          $(OBJDIR)/modules/vault/vault_kek_cache.o \
                                          $(OBJDIR)/modules/vault/vault_server_key.o \
                                          $(OBJDIR)/aimee_home.o \
-                                         $(OBJDIR)/ouroboros-ring/client.o \
-                                         $(OBJDIR)/ouroboros-ring/attach.o \
-                                         $(OBJDIR)/ouroboros-ring/host.o \
-                                         $(OBJDIR)/ouroboros-ring/route.o \
-                                         $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                         $(OBJDIR)/ouroboros-ring/ring.o \
-                                         $(OBJDIR)/ouroboros-ring/arena.o \
-                                         $(OBJDIR)/ouroboros-ring/wire.o \
-                                         $(OBJDIR)/ouroboros-ring/capture.o \
+                                         $(OURO_RING_LIB) \
                                          $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-vault-audit
 unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
@@ -3470,17 +3376,9 @@ $(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audi
                                            $(OBJDIR)/modules/audit/audit_action.o \
                                            $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                            $(OBJDIR)/aimee_home.o \
-                                           $(OBJDIR)/ouroboros-ring/client.o \
-                                           $(OBJDIR)/ouroboros-ring/attach.o \
-                                           $(OBJDIR)/ouroboros-ring/host.o \
-                                           $(OBJDIR)/ouroboros-ring/route.o \
-                                           $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                           $(OBJDIR)/ouroboros-ring/ring.o \
-                                           $(OBJDIR)/ouroboros-ring/arena.o \
-                                           $(OBJDIR)/ouroboros-ring/wire.o \
-                                           $(OBJDIR)/ouroboros-ring/capture.o \
+                                           $(OURO_RING_LIB) \
                                            $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-sandbox-audit
 unit-test-bus-sandbox-audit: $(TESTPREFIX)/unit-test-bus-sandbox-audit
@@ -3498,17 +3396,9 @@ $(TESTPREFIX)/unit-test-bus-tool-completion: $(OBJDIR)/tests/test_bus_tool_compl
                                              $(OBJDIR)/modules/audit/audit_action.o \
                                              $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                              $(OBJDIR)/aimee_home.o \
-                                             $(OBJDIR)/ouroboros-ring/client.o \
-                                             $(OBJDIR)/ouroboros-ring/attach.o \
-                                             $(OBJDIR)/ouroboros-ring/host.o \
-                                             $(OBJDIR)/ouroboros-ring/route.o \
-                                             $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                             $(OBJDIR)/ouroboros-ring/ring.o \
-                                             $(OBJDIR)/ouroboros-ring/arena.o \
-                                             $(OBJDIR)/ouroboros-ring/wire.o \
-                                             $(OBJDIR)/ouroboros-ring/capture.o \
+                                             $(OURO_RING_LIB) \
                                              $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-tool-completion
 unit-test-bus-tool-completion: $(TESTPREFIX)/unit-test-bus-tool-completion
@@ -3525,17 +3415,9 @@ $(TESTPREFIX)/unit-test-bus-memory-audit: $(OBJDIR)/tests/test_bus_memory_audit.
                                           $(OBJDIR)/modules/audit/audit_action.o \
                                           $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                           $(OBJDIR)/aimee_home.o \
-                                          $(OBJDIR)/ouroboros-ring/client.o \
-                                          $(OBJDIR)/ouroboros-ring/attach.o \
-                                          $(OBJDIR)/ouroboros-ring/host.o \
-                                          $(OBJDIR)/ouroboros-ring/route.o \
-                                          $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                          $(OBJDIR)/ouroboros-ring/ring.o \
-                                          $(OBJDIR)/ouroboros-ring/arena.o \
-                                          $(OBJDIR)/ouroboros-ring/wire.o \
-                                          $(OBJDIR)/ouroboros-ring/capture.o \
+                                          $(OURO_RING_LIB) \
                                           $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-memory-audit
 unit-test-bus-memory-audit: $(TESTPREFIX)/unit-test-bus-memory-audit
@@ -3549,20 +3431,12 @@ $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_rac
                                            $(OBS_BUS_LINK_OBJS) \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/aimee_home.o \
-                                           $(OBJDIR)/ouroboros-ring/client.o \
-                                           $(OBJDIR)/ouroboros-ring/attach.o \
-                                           $(OBJDIR)/ouroboros-ring/host.o \
-                                           $(OBJDIR)/ouroboros-ring/route.o \
-                                           $(OBJDIR)/ouroboros-ring/region.o $(OBJDIR)/ouroboros-ring/region_host.o \
-                                           $(OBJDIR)/ouroboros-ring/ring.o \
-                                           $(OBJDIR)/ouroboros-ring/arena.o \
-                                           $(OBJDIR)/ouroboros-ring/wire.o \
-                                           $(OBJDIR)/ouroboros-ring/capture.o \
+                                           $(OURO_RING_LIB) \
                                       $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            \
                            $(OURO_RING_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) -lpthread $(PQ_LIB)
 
 .PHONY: unit-test-bus-shutdown-race
 unit-test-bus-shutdown-race: $(TESTPREFIX)/unit-test-bus-shutdown-race
@@ -3859,7 +3733,7 @@ $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
                             $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                             $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                            $(OBJDIR)/secrets.o $(DB1_CLIENT_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-diff: $(OBJDIR)/tests/test_diff.o $(OBJDIR)/diff.o $(OBJDIR)/dstr.o \
                       $(OBJDIR)/cJSON.o
@@ -3964,7 +3838,7 @@ $(TESTPREFIX)/unit-test-manuscript: $(OBJDIR)/tests/test_manuscript.o $(OBJDIR)/
 
 $(TESTPREFIX)/unit-test-notes: $(OBJDIR)/tests/test_notes.o \
                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/tests/test_cmd_delegate.o \
                       $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
@@ -4153,7 +4027,7 @@ $(TESTPREFIX)/unit-test-deploy-apply: $(OBJDIR)/tests/test_deploy_apply.o \
 
 $(TESTPREFIX)/unit-test-file-ref: $(OBJDIR)/tests/test_file_ref.o \
                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-role-templates: $(OBJDIR)/tests/test_role_templates.o \
                                $(OBJDIR)/role_templates.o $(TEST_CORE_OBJS) \
@@ -4195,7 +4069,7 @@ $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit: \
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(DB1_CLIENT_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-bus-guardrail-durability: tests/test_bus_guardrail_durability.sh \
                             $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit
@@ -4220,7 +4094,7 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(OBJDIR)/modules/delegates/delegate_role.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_compact_focused.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
@@ -4233,7 +4107,7 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(OBJDIR)/modules/delegates/delegate_role.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
@@ -4246,7 +4120,7 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(OBJDIR)/modules/delegates/delegate_role.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.o \
                                           $(OBJDIR)/server/rounds_to_resume.o \
@@ -4260,7 +4134,7 @@ $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(OBJDIR)/modules/delegates/delegate_role.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-token-tracker: $(OBJDIR)/tests/test_token_tracker.o \
                                $(OBJDIR)/server/token_tracker.o $(TEST_CORE_OBJS)
@@ -4355,20 +4229,20 @@ $(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJD
                               $(OBJDIR)/tests/support/store_module_fixture.o \
                               $(OBJDIR)/tests/support/db1_init_mock.o \
                               $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 unit-test-token-audit-load: $(TESTPREFIX)/unit-test-token-audit-load
 
 $(TESTPREFIX)/unit-test-tool-prompts: $(OBJDIR)/tests/test_tool_prompts.o \
                               $(OBJDIR)/server/agent_policy.o $(OBJDIR)/dstr.o \
                               $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_token_budget.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/server/agent_coord.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_context_shed.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
@@ -4639,7 +4513,7 @@ $(TESTPREFIX)/unit-test-toolset-thread-scope: \
                                        $(OBJDIR)/modules/delegates/delegate_role.o \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-toolset: \
                                        $(OBJDIR)/tests/test_toolset.o \
@@ -5463,10 +5337,10 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR
                            \
                            $(TEST_CORE_OBJS) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                           $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                           $(OURO_RING_LIB) \
                            $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                           $(BUS_MEM_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-openai-shape: $(OBJDIR)/tests/test_openai_shape.o $(OBJDIR)/modules/governance/gw_stage_completion.o \
                            $(OBJDIR)/server/openai_shape.o \
@@ -5533,7 +5407,7 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
                                  $(OBJDIR)/server/agent_tools.o \
                                  $(OBJDIR)/modules/delegates/delegate_role.o \
                                  $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -5549,7 +5423,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(OBJDIR)/modules/delegates/delegate_role.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o \
                                 $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
@@ -5579,7 +5453,7 @@ $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_contex
                                 $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
     $(OBJDIR)/modules/translation/aimee_frontend_responses.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Links the real dispatch TU against the shared test object sets — no stubs needed
 # (TEST_DATA_OBJS + TEST_WORKSPACE_OBJS_EXTRA already cover every td_* handler's
@@ -5599,7 +5473,7 @@ $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surface.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -5612,7 +5486,7 @@ $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surf
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(OBJDIR)/modules/delegates/delegate_role.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-middleware: $(OBJDIR)/tests/test_middleware.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -5694,7 +5568,7 @@ $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/
 
 $(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/tests/test_tool_validation.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-turn-narration: $(OBJDIR)/tests/test_turn_narration.o \
                                          $(OBJDIR)/turn_narration.o $(OBJDIR)/cJSON.o
@@ -5954,7 +5828,7 @@ $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/agent_tools.o \
                      $(OBJDIR)/modules/delegates/delegate_role.o \
                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-client: $(OBJDIR)/tests/test_mcp_client.o \
                      $(TEST_MCP_CLIENT_OBJS)
@@ -6020,16 +5894,16 @@ $(TESTPREFIX)/unit-test-session-brief: $(OBJDIR)/tests/test_session_brief.o \
 
 $(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolve.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                     $(OURO_RING_LIB) \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
                      $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/curiosity_resolve.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                     $(OURO_RING_LIB) \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
                      $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/modules/learning/learning_policy_arms.o \
@@ -6037,7 +5911,7 @@ $(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
                      $(OBJDIR)/modules/learning/learning_endogeneity.o \
                      $(OBJDIR)/approach_store.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attribution.o \
                      $(OBJDIR)/modules/learning/learning_attribution.o
@@ -6045,12 +5919,12 @@ $(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attr
 
 $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                     $(OURO_RING_LIB) \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
                      $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-learning-eval-synthesis: $(OBJDIR)/tests/test_learning_eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_eval_synthesis.o \
@@ -6060,7 +5934,7 @@ $(TESTPREFIX)/unit-test-learning-eval-synthesis: $(OBJDIR)/tests/test_learning_e
 
 $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/ouroboros-ring/module_client.o $(OBJDIR)/ouroboros-ring/module_protocol.o $(OBJDIR)/ouroboros-ring/client.o $(OBJDIR)/ouroboros-ring/route.o \
+                     $(OURO_RING_LIB) \
                      $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
                      $(OBS_BUS_LINK_OBJS) $(OURO_RING_LIB) \
                                           $(OBJDIR)/eval_synthesis.o \
@@ -6070,7 +5944,7 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
                      $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(OBJDIR)/approach_store.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-wiki-render: $(OBJDIR)/tests/test_wiki_render.o \
                      $(OBJDIR)/wiki_render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
@@ -6617,7 +6491,7 @@ $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Canonical Responses SSE golden fixtures and complete owned entry semantics
 # on identical codex SSE bytes. Links agent_bridge.o (legacy parser + SSE extractor) with
@@ -6695,7 +6569,7 @@ $(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(OBJDIR)/modules/delegates/delegate_role.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 .PHONY: compaction-retention-probe
 compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe

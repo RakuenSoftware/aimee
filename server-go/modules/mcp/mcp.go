@@ -33,7 +33,7 @@ import (
 
 // EVENT KINDS ARE PER-INSTANCE, NOT PER-PACKAGE.
 //
-// ouro_host_serve_kind() (ouroboros-ring c/src/route.c) binds one event kind to
+// ouro_host_serve_kind() (ouroboros-ring spec, routing) binds one event kind to
 // exactly ONE serving slot and REFUSES a second module that tries to serve the
 // same kind. So package-level EventInvoke/EventDeclareCommands constants would
 // mean the first MCP instance to attach wins and every other one is rejected --

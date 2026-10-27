@@ -2,9 +2,9 @@
 # Enforce the two shared-C-library link boundaries:
 #   - libaimee-core-connection.a -> thin client, server, and KB
 #   - libouroboros-ring.a        -> server and KB only
-# The ring (github.com/RakuenSoftware/ouroboros-ring, built from the commit in
-# dependencies/ouroboros-ring.lock.json) is local shared memory. It is never an
-# inter-machine transport.
+# The ring (github.com/RakuenSoftware/ouroboros-ring, an installed release in the
+# range dependencies/ouroboros-ring.json names) is local shared memory. It is
+# never an inter-machine transport.
 set -euo pipefail
 
 allow_unbuilt=0
@@ -61,7 +61,6 @@ require_target_libraries KB 1
 # those objects depend on -- that is the property that makes the rig worth
 # having.
 RING_LIB_OWNERS='(variable)
-$(OURO_RING_LIB)
 $(SERVER)
 $(KB)
 ../write-tier-enforce-live'
@@ -76,7 +75,7 @@ ring_lib_refs=$(awk '
 ' src/Makefile)
 
 # A scan that found nothing must not read as a boundary that holds. The archive
-# is defined in this Makefile and consumed by both daemons, so zero references
+# is named in this Makefile and consumed by both daemons, so zero references
 # means the scan broke, not that the graph is clean.
 if [[ -z "$ring_lib_refs" ]]; then
    printf 'FAIL: no $(OURO_RING_LIB) reference found in src/Makefile at all; this scan is not measuring anything\n' >&2
@@ -112,15 +111,12 @@ while IFS= read -r owner; do
    fi
 done <<<"$RING_LIB_OWNERS"
 
-# The ring's sources must enter shipping links only through its archive: the
-# source list, the object list and the one object rule that builds them.
+# aimee does not build the ring: it links the installed package. Any reference
+# to the ring's sources or objects means the build reached inside the ring again.
 while IFS= read -r hit; do
-   case "$hit" in
-   *'OURO_RING_SRCS := '*|*'OURO_RING_OBJS := '*|*'$(OBJDIR)/ouroboros-ring/%.o: $(OURO_RING_DIR)/c/src/%.c'*|*'-I$(OURO_RING_DIR)/c/src -c -o'*) continue ;;
-   esac
-   printf 'FAIL: direct ring source reference outside the ring archive: %s\n' "$hit" >&2
+   printf 'FAIL: src/Makefile reaches into the ring instead of linking its package: %s\n' "$hit" >&2
    fail=1
-done < <(grep -nE 'OURO_RING_DIR\)/c/src|OURO_RING_NAMES:%|ouroboros-ring/[a-z_]+\.o' src/Makefile | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+done < <(grep -nE 'ouroboros-ring[^ ]*/c/(src|include)|OURO_RING_[A-Z_]*\)/c/|OURO_RING_NAMES|OURO_RING_SRCS|ouroboros-ring/[a-z_]+\.o' src/Makefile | grep -vE '^[0-9]+:[[:space:]]*#' || true)
 
 # The CMake thin client must not consume the ring.
 if grep -nE 'target_link_libraries\(aimee[^)]*ouroboros' CMakeLists.txt >/dev/null; then
@@ -162,25 +158,20 @@ check_archive() {
 
 check_archive src/build/obj/libaimee-core-connection.a \
    '^(auth|control|endpoint|http1|socket|tls_openssl|native_tls_(identity|path|openssl|securetransport|schannel))\.o$' connection
-check_archive src/build/obj/libouroboros-ring.a \
-   '^(attach|wire|ring|region|region_host|arena|route|runtime|host|client|capture|endpoint|module_(client|protocol|runtime))\.o$' ring
 
-# The ring's module-side archive must remain a client. In particular it cannot
-# create memfds, admit peers, or route events. Checked against the pinned ring
-# when it has been fetched.
-ring_cmake=src/build/deps/ouroboros-ring/c/CMakeLists.txt
-if [[ -f "$ring_cmake" ]]; then
-   client_sources=$(sed -n '/^set(OURO_CLIENT_SOURCES/,/)/p' "$ring_cmake")
-   if [[ -z "$client_sources" ]]; then
-      printf 'FAIL: %s has no OURO_CLIENT_SOURCES list to check\n' "$ring_cmake" >&2
+# The ring's client package is what module processes link, so it must stay a
+# client: no host entry point (ouro_host_*, the contract's host API) may be
+# defined in it. Checked against the installation provided last, when there is one.
+ring_client=src/build/deps/ouroboros-ring/current/lib/libouroboros-ring-client.a
+if [[ -f "$ring_client" ]]; then
+   host_symbols=$(nm --defined-only "$ring_client" 2>/dev/null | awk '$2 ~ /^[TDBR]$/ && $3 ~ /^ouro_host_/ { print $3 }' || true)
+   if [[ -n "$host_symbols" ]]; then
+      printf 'FAIL: the ring client package defines host entry points:\n%s\n' "$host_symbols" >&2
       fail=1
    fi
-   for forbidden in region_host.c host.c route.c arena.c capture.c; do
-      if grep -Eq "src/$forbidden" <<<"$client_sources"; then
-         printf 'FAIL: ring client archive contains host implementation: %s\n' "$forbidden" >&2
-         fail=1
-      fi
-   done
+elif [[ "$allow_unbuilt" != 1 ]]; then
+   printf 'FAIL: no provided ring client package at %s\n' "$ring_client" >&2
+   fail=1
 fi
 
 if [[ "$fail" -ne 0 ]]; then

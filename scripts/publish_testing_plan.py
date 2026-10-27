@@ -313,9 +313,9 @@ def consumers(path: str) -> frozenset[str]:
     if path.startswith("deploy/container/"):
         return ALL
 
-    if path == "dependencies/ouroboros-ring.lock.json":
-        # The pinned ring's C sources are compiled into both daemons; its Go side
-        # changes through server-go/go.mod, classified above.
+    if path == "dependencies/ouroboros-ring.json":
+        # The ring release both daemons link is named here; its Go side changes
+        # through server-go/go.mod, classified above.
         return SERVER | KB
     if path.startswith("scripts/"):
         # Build/export scripts and runtime helpers are copied by the C images.  A

@@ -78,7 +78,7 @@ def main() -> int:
                 ring_pin = exporter.go_dependency_version("github.com/RakuenSoftware/ouroboros-ring/go")
                 go_mod = (repository / "go.mod").read_text(encoding="utf-8")
                 if f"github.com/RakuenSoftware/ouroboros-ring/go {ring_pin}" not in go_mod:
-                    return fail(f"{module_id}: isolated go.mod does not require the pinned ring")
+                    return fail(f"{module_id}: isolated go.mod does not require the ring release aimee requires")
                 shared_sources = exporter.go_process_shared_sources(module_id)
                 for relative in [*shared_sources, *descriptor.get("go_sources", []),
                                  *descriptor.get("go_assets", [])]:

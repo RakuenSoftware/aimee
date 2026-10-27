@@ -12,7 +12,7 @@
         "server-go/modules/memory/memory.go",
         "server-go/modules/memory/client_test.go",
         "server-go/modules/memory/runtime_role_test.go",
-        "scripts/fetch_ouroboros_ring.py"
+        "scripts/provide_ouroboros_ring.py"
       ],
       "cutover_dependency": "Completed: Go owner registered in both placements; the production and fixture callers use its declared stages."
     },
@@ -24,7 +24,7 @@
         "src/tests/test_server_memory_get.c",
         "src/tests/test_module_json_call.c",
         "src/tests/test_mcp_memory_answer.c",
-        "scripts/fetch_ouroboros_ring.py",
+        "scripts/provide_ouroboros_ring.py",
         "server-go/cmd/aimee-module/main_test.go",
         "src/tests/test_module_runtime.c"
       ],
@@ -96,7 +96,7 @@
       "reason": "C tests exercise external C owners. Native memory domain parity is tested in Go. Test-only stubs supply protocol replies, not a shipping fallback.",
       "evidence": [
         "scripts/check_tests_are_run.py",
-        "scripts/fetch_ouroboros_ring.py",
+        "scripts/provide_ouroboros_ring.py",
         "server-go/modules/memory/public_records_test.go"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
