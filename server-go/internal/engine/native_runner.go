@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panelwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1530,8 +1530,8 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		// resubmits the same rejection every few seconds until someone notices.
 		// The panel logs which part it refused; the status is all that crosses
 		// the wire.
-		var status *bus.ModuleCallStatusError
-		if errors.As(err, &status) && status.Status == bus.ModuleStatusInvalidRequest {
+		var status *ring.ModuleCallStatusError
+		if errors.As(err, &status) && status.Status == ring.ModuleStatusInvalidRequest {
 			return StepResult{Status: StepFailed, CostUSD: result.CostUSD,
 				CostUnknown: result.CostUnknown,
 				Detail:      "roundtable rejected the review request as invalid; see the module log for which part"}, nil

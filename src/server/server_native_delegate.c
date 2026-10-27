@@ -19,7 +19,7 @@
 #include <time.h>
 
 static obs_bus_module_service_t *service;
-static const aimee_module_stage_t stages[] = {
+static const ouro_module_stage_t stages[] = {
     {SERVER_NATIVE_DELEGATE_EVENT, SERVER_NATIVE_DELEGATE_STAGE}};
 int server_native_delegate_start(void)
 {
@@ -80,7 +80,7 @@ static int fields(const cJSON *j)
    }
    return 0;
 }
-static int remaining_ms(const aimee_module_invocation_t *invocation)
+static int remaining_ms(const ouro_module_invocation_t *invocation)
 {
    struct timespec now;
    if (!invocation->deadline_ns || clock_gettime(CLOCK_MONOTONIC, &now))
@@ -91,10 +91,10 @@ static int remaining_ms(const aimee_module_invocation_t *invocation)
    uint64_t ms = (invocation->deadline_ns - current) / 1000000u;
    return ms > INT_MAX ? INT_MAX : (int)ms;
 }
-static aimee_module_status_t
-native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const uint8_t *body,
-                            uint32_t length, uint8_t *output, uint32_t capacity,
-                            uint32_t *output_length, void *unused)
+static ouro_module_status_t native_delegate_handle_impl(const ouro_module_invocation_t *invocation,
+                                                        const uint8_t *body, uint32_t length,
+                                                        uint8_t *output, uint32_t capacity,
+                                                        uint32_t *output_length, void *unused)
 {
    (void)unused;
    if (output_length)
@@ -102,9 +102,9 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    if (!invocation || invocation->stage_id != SERVER_NATIVE_DELEGATE_STAGE ||
        invocation->source_principal_ref != SERVER_NATIVE_DELEGATE_PRINCIPAL ||
        !invocation->source_handle || !body || !output || !output_length)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
    cJSON *json = aimee_ir_json_parse_frame((const char *)body, length);
    aimee_request_t request = {0}, effective = {0};
    aimee_block_t policy = {0};
@@ -112,7 +112,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    agent_result_t result = {0};
    agent_config_t *config = NULL;
    cJSON *history = NULL, *receipts = NULL, *reply = NULL;
-   aimee_module_status_t status = AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   ouro_module_status_t status = OURO_MODULE_STATUS_INVALID_REQUEST;
    const cJSON *version = get(json, "version"), *tools = get(json, "tools");
    int turns = 0, timeout = 0;
    if (!cJSON_IsObject(json) || fields(json) || !cJSON_IsNumber(version) ||
@@ -130,7 +130,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    int remaining = remaining_ms(invocation);
    if (remaining <= 0)
    {
-      status = AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED;
+      status = OURO_MODULE_STATUS_DEADLINE_EXCEEDED;
       goto done;
    }
    if (timeout <= 0)
@@ -139,7 +139,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    agent_t selected = {0};
    if (!config)
    {
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
       goto done;
    }
    if (agent_load_config(config))
@@ -166,7 +166,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    remaining = remaining_ms(invocation);
    if (remaining <= 0)
    {
-      status = AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED;
+      status = OURO_MODULE_STATUS_DEADLINE_EXCEEDED;
       goto done;
    }
    if (remaining < timeout)
@@ -205,7 +205,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
        server_native_history_load(result.canonical_session_id, context->vault_principal, NULL, 0,
                                   &history, &receipts))
    {
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
       goto done;
    }
    reply = cJSON_CreateObject();
@@ -213,7 +213,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    if (!reply || !canonical || !cJSON_AddItemToObject(reply, "ir", canonical))
    {
       cJSON_Delete(canonical);
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
       goto done;
    }
    if (!cJSON_AddNumberToObject(reply, "version", 3) ||
@@ -224,7 +224,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
         !cJSON_AddStringToObject(reply, "error", "canonical native execution did not complete")) ||
        !cJSON_AddItemToObject(reply, "history", history))
    {
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
       goto done;
    }
    if (!strcmp(result.stop_reason, "turn_cap") && result.turns > 0 && selected.max_turns > 0)
@@ -240,7 +240,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
                                        : 0))
       {
          history = NULL;
-         status = AIMEE_MODULE_STATUS_INTERNAL;
+         status = OURO_MODULE_STATUS_INTERNAL;
          goto done;
       }
    }
@@ -248,7 +248,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    char *wire = cJSON_PrintUnformatted(reply);
    if (!wire)
    {
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
       goto done;
    }
    size_t bytes = strlen(wire);
@@ -256,10 +256,10 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    {
       memcpy(output, wire, bytes);
       *output_length = (uint32_t)bytes;
-      status = AIMEE_MODULE_STATUS_OK;
+      status = OURO_MODULE_STATUS_OK;
    }
    else
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      status = OURO_MODULE_STATUS_INTERNAL;
    cJSON_free(wire);
 done:
    aimee_block_free_contents(&policy);
@@ -284,15 +284,15 @@ int server_native_delegate_active(void)
 }
 
 /* Preserve the caller's context around one ordinary configured delegate. */
-aimee_module_status_t server_native_delegate_handle(const aimee_module_invocation_t *invocation,
-                                                    const uint8_t *body, uint32_t length,
-                                                    uint8_t *output, uint32_t capacity,
-                                                    uint32_t *output_length, void *context)
+ouro_module_status_t server_native_delegate_handle(const ouro_module_invocation_t *invocation,
+                                                   const uint8_t *body, uint32_t length,
+                                                   uint8_t *output, uint32_t capacity,
+                                                   uint32_t *output_length, void *context)
 {
    if (!invocation || invocation->stage_id != SERVER_NATIVE_DELEGATE_STAGE ||
        invocation->source_principal_ref != SERVER_NATIVE_DELEGATE_PRINCIPAL ||
        !invocation->source_handle)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
    request_context_snapshot_t previous_context;
    request_context_snapshot(&previous_context);
    agent_request_creds_t previous_credentials;
@@ -309,11 +309,11 @@ aimee_module_status_t server_native_delegate_handle(const aimee_module_invocatio
    request_context_set(&owner);
    int previous_active = active_delegate;
    active_delegate = 1;
-   agent_request_cancel_scope_t cancel = {.flag = aimee_module_invocation_cancel_flag(invocation),
+   agent_request_cancel_scope_t cancel = {.flag = ouro_module_invocation_cancel_flag(invocation),
                                           .parent = agent_request_cancel_scope_current()};
    const agent_request_cancel_scope_t *previous = agent_request_cancel_scope_bind(&cancel);
-   aimee_module_status_t status = native_delegate_handle_impl(invocation, body, length, output,
-                                                              capacity, output_length, context);
+   ouro_module_status_t status = native_delegate_handle_impl(invocation, body, length, output,
+                                                             capacity, output_length, context);
    agent_request_cancel_scope_bind(previous);
    active_delegate = previous_active;
    run_cmd_set_cwd(previous_cwd[0] ? previous_cwd : NULL);

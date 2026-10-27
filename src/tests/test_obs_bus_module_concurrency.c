@@ -29,7 +29,7 @@
 
 #include <aimee/audit/obs_bus.h>
 #include "log.h"
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 void audit_log_open(void);
@@ -60,10 +60,10 @@ static void *call_many(void *arg)
    {
       char response[16];
       uint32_t response_len = 0;
-      aimee_module_call_result_t result =
+      ouro_module_call_result_t result =
           obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 1, now_ns() + 5000000000ULL, "probe", 5,
                               response, sizeof response, &response_len, NULL, NULL);
-      assert(result == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      assert(result == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    }
    return NULL;
 }
@@ -103,11 +103,11 @@ static void test_expired_deadline_does_not_block(void)
    char response[16];
    uint32_t response_len = 0;
    uint64_t start = now_ns();
-   aimee_module_call_result_t result =
+   ouro_module_call_result_t result =
        obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 1, now_ns() - 1, "probe", 5, response,
                            sizeof response, &response_len, NULL, NULL);
    uint64_t elapsed = now_ns() - start;
-   assert(result == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(result == OURO_MODULE_CALL_DEADLINE_EXCEEDED);
    /* "Returned promptly" is the claim; a second is orders of magnitude more
     * than any bookkeeping here needs and still catches a blocking wait. */
    assert(elapsed < 1000000000ULL);
@@ -116,45 +116,45 @@ static void test_expired_deadline_does_not_block(void)
 /* Capture/privacy checks below inspect the production tap directly. */
 #include "../modules/audit/obs_bus.c"
 
-static aimee_module_status_t source_lookup_callback(const aimee_module_invocation_t *invocation,
-                                                    const uint8_t *request, uint32_t length,
-                                                    uint8_t *response, uint32_t capacity,
-                                                    uint32_t *response_length, void *context)
+static ouro_module_status_t source_lookup_callback(const ouro_module_invocation_t *invocation,
+                                                   const uint8_t *request, uint32_t length,
+                                                   uint8_t *response, uint32_t capacity,
+                                                   uint32_t *response_length, void *context)
 {
    (void)context;
-   assert(!aimee_module_invocation_cancelled(invocation));
+   assert(!ouro_module_invocation_cancelled(invocation));
    assert(length == 6 && !memcmp(request, "nested", 6) && capacity >= 6);
    memcpy(response, "source", 6);
    *response_length = 6;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
-static aimee_module_status_t embedded_callback(const aimee_module_invocation_t *invocation,
-                                               const uint8_t *request, uint32_t length,
-                                               uint8_t *response, uint32_t capacity,
-                                               uint32_t *response_length, void *context)
+static ouro_module_status_t embedded_callback(const ouro_module_invocation_t *invocation,
+                                              const uint8_t *request, uint32_t length,
+                                              uint8_t *response, uint32_t capacity,
+                                              uint32_t *response_length, void *context)
 {
    (void)context;
-   assert(!aimee_module_invocation_cancelled(invocation));
+   assert(!ouro_module_invocation_cancelled(invocation));
    char nested[16];
    uint32_t nested_length = 0;
    assert(obs_bus_module_call(ABSENT_KIND, ABSENT_STAGE, 9, now_ns() + 1000000000ULL, "nested", 6,
                               nested, sizeof nested, &nested_length, NULL,
-                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    /* A source resolver may call another independently owned bus stage while
     * this host worker remains admitted. The central pump must keep progressing. */
    assert(obs_bus_module_call(6680, 24, 10, now_ns() + 1000000000ULL, "nested", 6, nested,
-                              sizeof nested, &nested_length, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                              sizeof nested, &nested_length, NULL, NULL) == OURO_MODULE_CALL_OK);
    assert(nested_length == 6 && !memcmp(nested, "source", 6));
    assert(length <= capacity);
    memcpy(response, request, length);
    *response_length = length;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 static obs_bus_module_service_t *test_embedded_callback_service(void)
 {
-   static const aimee_module_stage_t stages[] = {{6679, 23}};
+   static const ouro_module_stage_t stages[] = {{6679, 23}};
    obs_bus_module_service_t *service = NULL, *duplicate = NULL, *source = NULL;
-   static const aimee_module_stage_t source_stages[] = {{6680, 24}};
+   static const ouro_module_stage_t source_stages[] = {{6680, 24}};
    assert(!obs_bus_module_service_start(source_stages, 1, source_lookup_callback, NULL, &source));
    assert(!obs_bus_module_service_start(stages, 1, embedded_callback, NULL, &service));
    assert(obs_bus_module_service_start(stages, 1, embedded_callback, NULL, &duplicate) < 0 &&
@@ -162,14 +162,14 @@ static obs_bus_module_service_t *test_embedded_callback_service(void)
    char response[16];
    uint32_t length = 0;
    assert(obs_bus_module_call(6679, 23, 7, now_ns() + 2000000000ULL, "typed", 5, response,
-                              sizeof response, &length, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                              sizeof response, &length, NULL, NULL) == OURO_MODULE_CALL_OK);
    assert(length == 5 && !memcmp(response, "typed", 5));
    obs_bus_module_service_stop(&service);
    obs_bus_module_service_stop(&source);
    assert(!service && !source);
    assert(obs_bus_module_call(6679, 23, 8, now_ns() + 1000000000ULL, "typed", 5, response,
                               sizeof response, &length, NULL,
-                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    assert(!obs_bus_module_service_start(stages, 1, embedded_callback, NULL, &service));
    return service; /* obs_bus_stop must safely retire it before its pump/owners. */
 }
@@ -201,24 +201,24 @@ static void scope_frame(uint32_t kind, uint64_t sequence, int reply, int more, c
                         size_t length, uint32_t correlation)
 {
    uint8_t payload[512];
-   aimee_module_message_t message = {.operation =
-                                         reply ? AIMEE_MODULE_OP_RESULT : AIMEE_MODULE_OP_INVOKE,
-                                     .status = AIMEE_MODULE_STATUS_OK,
-                                     .stage_id = 1,
-                                     .body_len = (uint32_t)length,
-                                     .trace_id = 9};
-   assert(aimee_module_message_encode(&message, payload, sizeof payload) ==
-          AIMEE_MODULE_MESSAGE_HEADER_LEN);
-   memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, body, length);
-   bus_frame_t frame = {.wire_version = BUS_WIRE_VERSION,
-                        .event_kind = kind,
-                        .seq = sequence,
-                        .hdr_flags = (reply ? BUS_F_REPLY : BUS_F_REQUEST) | BUS_F_INLINE |
-                                     (more ? BUS_F_MORE : 0),
-                        .principal_ref = 76,
-                        .correlation_id = correlation,
-                        .payload_ref = BUS_WIRE_HDR_LEN,
-                        .payload_len = (uint32_t)(AIMEE_MODULE_MESSAGE_HEADER_LEN + length)};
+   ouro_module_message_t message = {.operation =
+                                        reply ? OURO_MODULE_OP_RESULT : OURO_MODULE_OP_INVOKE,
+                                    .status = OURO_MODULE_STATUS_OK,
+                                    .stage_id = 1,
+                                    .body_len = (uint32_t)length,
+                                    .trace_id = 9};
+   assert(ouro_module_message_encode(&message, payload, sizeof payload) ==
+          OURO_MODULE_MESSAGE_HEADER_LEN);
+   memcpy(payload + OURO_MODULE_MESSAGE_HEADER_LEN, body, length);
+   ouro_frame_t frame = {.wire_version = OURO_WIRE_VERSION,
+                         .event_kind = kind,
+                         .seq = sequence,
+                         .hdr_flags = (reply ? OURO_F_REPLY : OURO_F_REQUEST) | OURO_F_INLINE |
+                                      (more ? OURO_F_MORE : 0),
+                         .principal_ref = 76,
+                         .correlation_id = correlation,
+                         .payload_ref = OURO_WIRE_HDR_LEN,
+                         .payload_len = (uint32_t)(OURO_MODULE_MESSAGE_HEADER_LEN + length)};
    governance_tap(NULL, &frame, payload, frame.payload_len);
 }
 static void test_scope_secrets_never_enter_capture(void)
@@ -227,7 +227,7 @@ static void test_scope_secrets_never_enter_capture(void)
    static const char secret[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
    char body[128];
    snprintf(body, sizeof body, "{\"execution_scope\":\"%s\"}", secret);
-   bus_capture_init(&g.capture, 1, 1, 1);
+   ouro_capture_init(&g.capture, 1, 1, 1);
    atomic_store(&g.capture_state, CAPTURE_OK);
    sinks.durable = scope_structural_sink;
    uint64_t sequence = 1;
@@ -261,26 +261,26 @@ static void test_scope_secrets_never_enter_capture(void)
    free(persisted);
    close(fd);
    assert(!unlink(path));
-   bus_capture_report_t report = bus_capture_read(g.capture.buf, g.capture.len, NULL, NULL);
-   assert(report.status == BUS_CAPTURE_OPEN && report.records == 2);
+   ouro_capture_report_t report = ouro_capture_read(g.capture.buf, g.capture.len, NULL, NULL);
+   assert(report.status == OURO_CAPTURE_OPEN && report.records == 2);
    assert(flush_pending_durable() == 12 && scope_receipts == 12);
    assert(!atomic_load(&g.dropped) && !atomic_load(&g.durable_pending_count));
-   bus_capture_free(&g.capture);
+   ouro_capture_free(&g.capture);
    puts("  auth-bearing fragmented request/reply bodies suppressed; structural WORM and ordinary "
         "capture retained: ok");
 }
 
-static aimee_module_status_t owned_service_echo(const aimee_module_invocation_t *invocation,
-                                                const uint8_t *body, uint32_t length,
-                                                uint8_t *output, uint32_t capacity,
-                                                uint32_t *out_len, void *context)
+static ouro_module_status_t owned_service_echo(const ouro_module_invocation_t *invocation,
+                                               const uint8_t *body, uint32_t length,
+                                               uint8_t *output, uint32_t capacity,
+                                               uint32_t *out_len, void *context)
 {
    (void)context;
    assert(invocation->source_principal_ref == 76);
    assert(length <= capacity);
    memcpy(output, body, length);
    *out_len = length;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 static int connect_owned_listener_fixture(const char *path, int *fd)
 {
@@ -313,7 +313,7 @@ static void test_owned_service_after_external_policy(void)
    audit_log_open();
    assert(!obs_bus_configure_module_runtime(socket, policy));
    assert(!obs_bus_start());
-   static const aimee_module_stage_t stages[] = {{6679, 23}};
+   static const ouro_module_stage_t stages[] = {{6679, 23}};
    obs_bus_module_service_t *service = NULL;
    assert(!obs_bus_module_service_start(stages, 1, owned_service_echo, NULL, &service));
    assert(service && g.host.slots[service->bus.reply.handle_id].principal_class == 0 &&
@@ -323,44 +323,70 @@ static void test_owned_service_after_external_policy(void)
    assert(!socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair));
    struct serve_arg argument = {.fd = pair[1], .owned = 1};
    pthread_t thread;
-   bus_admit_fn admission = g.host.admit;
-   bus_attach_status_t (*hook)(void *, struct bus_host *, uint32_t, const bus_attach_request_t *) =
-       g.host.attach_hook;
+   ouro_admit_fn admission = g.host.admit;
+   ouro_attach_status_t (*hook)(void *, struct ouro_host *, uint32_t,
+                                const ouro_attach_request_t *) = g.host.attach_hook;
    pthread_mutex_lock(&g.host_lock);
    assert(!pthread_create(&thread, NULL, serve_thread, &argument));
-   bus_client_t impersonator;
-   assert(bus_client_attach_as(pair[0], &impersonator, 1, 76) == BUS_CLIENT_DENIED);
+   ouro_client_t impersonator;
+   assert(ouro_client_attach_as(pair[0], &impersonator, 1, 76) == OURO_CLIENT_DENIED);
    assert(!pthread_join(thread, NULL));
    assert(g.host.admit == admission && g.host.attach_hook == hook);
    pthread_mutex_unlock(&g.host_lock);
    close(pair[0]);
    close(pair[1]);
    int fd = -1;
-   bus_client_t external;
+   ouro_client_t external;
    assert(!connect_owned_listener_fixture(socket, &fd));
-   assert(bus_client_attach_as(fd, &external, 0, 0) == BUS_CLIENT_DENIED);
+   assert(ouro_client_attach_as(fd, &external, 0, 0) == OURO_CLIENT_DENIED);
    close(fd);
    assert(!connect_owned_listener_fixture(socket, &fd));
-   assert(bus_client_attach_as(fd, &external, 1, 77) == BUS_CLIENT_DENIED);
+   assert(ouro_client_attach_as(fd, &external, 1, 77) == OURO_CLIENT_DENIED);
    close(fd);
    assert(!connect_owned_listener_fixture(socket, &fd));
-   assert(bus_client_attach_as(fd, &external, 1, 76) == BUS_CLIENT_OK);
+   assert(ouro_client_attach_as(fd, &external, 1, 76) == OURO_CLIENT_OK);
    close(fd);
-   aimee_module_client_t caller;
-   assert(!aimee_module_client_init(&caller, &external));
+   ouro_module_client_t caller;
+   assert(!ouro_module_client_init(&caller, &external));
    char output[32];
    uint32_t length = 0;
-   assert(aimee_module_client_call(&caller, 6679, 23, 1, now_ns() + 2000000000ULL, "owned", 5,
-                                   output, sizeof output, &length, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(ouro_module_client_call(&caller, 6679, 23, 1, now_ns() + 2000000000ULL, "owned", 5,
+                                  output, sizeof output, &length, NULL,
+                                  NULL) == OURO_MODULE_CALL_OK);
    assert(length == 5 && !memcmp(output, "owned", 5));
-   aimee_module_client_destroy(&caller);
-   bus_client_detach(&external);
+   ouro_module_client_destroy(&caller);
+   ouro_client_detach(&external);
    obs_bus_module_service_stop(&service);
    assert(!service);
    obs_bus_stop();
    puts("  configured external listener: private host service starts; external zero/forged "
         "principals denied; granted requester works: ok");
+}
+
+/* A production KB durability sink reaches PostgreSQL through this same bus.
+ * Calling it on the pump thread makes even a typed refusal time out. */
+static atomic_int durable_ready;
+static atomic_int durable_writes;
+static int durable_module_sink(const char *role, const char *principal, const char *action,
+                               const char *subject, const char *verdict, const char *detail,
+                               void *context)
+{
+   (void)role;
+   (void)principal;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+   (void)context;
+   if (!atomic_load(&durable_ready))
+      return -1;
+   char reply[16];
+   uint32_t length = 0;
+   assert(obs_bus_module_call(11267, 3, 1, now_ns() + 1000000000ULL, "probe", 5, reply,
+                              sizeof reply, &length, NULL,
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
+   if (strcmp(action, "test.provider.audit") == 0)
+      atomic_fetch_add(&durable_writes, 1);
+   return 0;
 }
 
 int main(void)
@@ -395,17 +421,25 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
+   assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
    {
       fprintf(stderr, "FAIL: obs_bus_start\n");
       return 1;
    }
 
+   obs_bus_emit_durable_event("test.provider.audit", "startup", "ok", "{}");
    obs_bus_module_service_t *service = test_embedded_callback_service();
    test_calls_overlap();
    test_expired_deadline_does_not_block();
 
+   atomic_store(&durable_ready, 1);
+   obs_bus_flush();
+   assert(atomic_load(&durable_writes) == 1);
+   for (int i = 0; i < 8; i++)
+      obs_bus_emit_durable_event("test.provider.audit", "shutdown", "ok", "{}");
    obs_bus_stop();
+   assert(atomic_load(&durable_writes) == 9);
    obs_bus_module_service_stop(&service);
    assert(!service);
    assert(obs_bus_dropped() == 0);

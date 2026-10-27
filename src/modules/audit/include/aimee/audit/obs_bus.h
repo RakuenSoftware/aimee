@@ -32,8 +32,8 @@
 #include <stddef.h> /* size_t */
 #include <stdint.h>
 
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_runtime.h>
 
 #include "db1_client/guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
 
@@ -123,18 +123,18 @@ extern "C"
     * response validation remain in aimee-core-c. The optional cancellation
     * callback is also combined with daemon shutdown, so stop cannot strand a
     * caller. */
-   aimee_module_call_result_t
+   ouro_module_call_result_t
    obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
                        uint64_t deadline_ns, const void *request_body, uint32_t request_len,
                        void *response_body, uint32_t response_capacity, uint32_t *response_len,
-                       aimee_module_cancelled_fn cancelled, void *cancel_context);
+                       ouro_module_cancelled_fn cancelled, void *cancel_context);
 
    /* In-process daemon-owned stage over the SAME bus/AMOD runtime. No HTTP,
     * signal handler or caller identity from JSON. Stage table/user_data remain
     * immutable until stop; stop cancels and joins workers while the bus lives. */
    typedef struct obs_bus_module_service obs_bus_module_service_t;
-   int obs_bus_module_service_start(const aimee_module_stage_t *stages, size_t count,
-                                    aimee_module_handler_fn handler, void *user_data,
+   int obs_bus_module_service_start(const ouro_module_stage_t *stages, size_t count,
+                                    ouro_module_handler_fn handler, void *user_data,
                                     obs_bus_module_service_t **out);
    void obs_bus_module_service_stop(obs_bus_module_service_t **service);
 
@@ -177,7 +177,7 @@ extern "C"
    /* Loss callback installed on the C host. Public so the host-to-ledger edge
     * can be tested with an independently constructed full/reaped bus. Ordinary
     * callers should use obs_bus_emit_durable_event instead. */
-   void obs_bus_record_loss(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+   void obs_bus_record_loss(void *ctx, const ouro_frame_t *frame, const uint8_t *payload,
                             uint32_t payload_len);
 
    /* Snapshot capture health without I/O. A false result always carries the

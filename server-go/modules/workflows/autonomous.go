@@ -21,7 +21,7 @@ package workflows
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // AutonomousFloor is the omitted-workflow floor: a full-spine enforced workflow.
@@ -76,17 +76,17 @@ func AutonomousClamp(routerID string, enforced bool) AutonomousRouteResponse {
 // Inventing "selectable" here would let an autonomous run pick a lane the policy
 // never approved; the C caller turns any refusal into the floor, which is the
 // safe direction.
-func handleAutonomousRoute(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleAutonomousRoute(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded AutonomousRouteRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	encoded, err := json.Marshal(AutonomousClamp(decoded.RouterID, decoded.Enforced))
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

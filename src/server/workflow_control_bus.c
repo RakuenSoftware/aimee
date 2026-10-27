@@ -22,14 +22,14 @@
 #include "headers/module_json_call.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 /* The proxy allowed a 16 MiB response; the module body limit is the same. */
-#define WORKFLOW_CONTROL_MAX_BODY AIMEE_MODULE_MESSAGE_MAX_BODY
+#define WORKFLOW_CONTROL_MAX_BODY OURO_MODULE_MESSAGE_MAX_BODY
 
 /* The private socket used a 30s I/O timeout. Keeping it means a hung control
  * plane still fails in the time operators already expect. */
@@ -106,20 +106,20 @@ int workflow_control_request(const char *method, const char *path, const char *q
       return control_error(resp, resp_cap, 413, "workflow request exceeds the module body limit");
    }
 
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_OK;
    cJSON *parsed = aimee_module_json_call_raw(
        AIMEE_WORKFLOWS_EVENT_CONTROL, AIMEE_WORKFLOWS_STAGE_CONTROL, wire, wire_len,
        WORKFLOW_CONTROL_MAX_BODY, WORKFLOW_CONTROL_TIMEOUT_MS, &result);
    free(wire);
 
-   if (result != AIMEE_MODULE_CALL_OK)
+   if (result != OURO_MODULE_CALL_OK)
    {
       /* Name the outcome. Every proxy failure rendered as one of a handful of
        * socket messages, so a control call that ran its full deadline looked
        * exactly like a plane that was never started. */
       char reason[160];
       snprintf(reason, sizeof(reason), "workflow control failed: %s",
-               aimee_module_call_result_name(result));
+               ouro_module_call_result_name(result));
       return control_error(resp, resp_cap, 502, reason);
    }
 

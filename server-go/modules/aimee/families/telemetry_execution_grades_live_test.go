@@ -11,8 +11,8 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,8 +22,8 @@ func TestExecutionGradePublisherRequiresHostPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, status := Telemetry.Handler(db)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
-	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Telemetry.Handler(db)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
+	if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("non-host grade publication reached storage", status, db.executed)
 	}
 }

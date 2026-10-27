@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -105,27 +105,27 @@ func runnerFor(id string) *rendezvous {
 	return runners[id]
 }
 
-func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRunner(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != runnerRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != runnerRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	op := request[5]
 	length := int(binary.LittleEndian.Uint16(request[6:8]))
 	if length == 0 || length > runnerPathMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if op != RunnerOpRegister && op != RunnerOpUnregister && op != RunnerOpResolve {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// A registered id is the rendezvous key the transport looks up, so it has to
 	// fit that key; a path being asked about does not.
 	if (op == RunnerOpRegister || op == RunnerOpUnregister) && length > runnerIDMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	value := string(request[8 : 8+length])
@@ -135,7 +135,7 @@ func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	switch op {
 	case RunnerOpRegister:
 		if !runnerRegister(value) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case RunnerOpUnregister:
 		runnerUnregister(value)
@@ -145,7 +145,7 @@ func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 			copy(response[8:], id)
 		}
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func asciiAlphanumeric(value byte) bool {
@@ -190,7 +190,7 @@ func refValid(ref []byte) bool {
 
 // Handle validates a bounded project or owner/project reference, or answers
 // which client is serving a tree.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StageRunner {
 		return handleRunner(invocation, request)
 	}
@@ -200,19 +200,19 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID != StageAccess || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	length := int(binary.LittleEndian.Uint16(request[6:8]))
 	if length == 0 || length > refMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	if refValid(request[8 : 8+length]) {
 		binary.LittleEndian.PutUint32(response[4:8], 1)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

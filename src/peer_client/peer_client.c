@@ -14,8 +14,8 @@
 #include "db1_module_api.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 
 #include "log.h"
 #include "module_json_call.h" /* aimee_module_call_deadline_ns */
@@ -57,7 +57,7 @@
 
 /* A name for each transport outcome, so a failure says WHICH failure.
  *
- * These are aimee_module_call_result_t values. Naming them matters more here
+ * These are ouro_module_call_result_t values. Naming them matters more here
  * than it looks: "the module did not answer" covers a module that is absent, a
  * grant that denied the call, a deadline that expired, and a reply too large to
  * receive -- four different things to do about it, and the first three are
@@ -66,27 +66,27 @@ static const char *call_result_name(int rc)
 {
    switch (rc)
    {
-   case AIMEE_MODULE_CALL_OK:
+   case OURO_MODULE_CALL_OK:
       return "ok";
-   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+   case OURO_MODULE_CALL_CAPABILITY_ABSENT:
       return "capability_absent";
-   case AIMEE_MODULE_CALL_CAPABILITY_DENIED:
+   case OURO_MODULE_CALL_CAPABILITY_DENIED:
       return "capability_denied";
-   case AIMEE_MODULE_CALL_CANCELLED:
+   case OURO_MODULE_CALL_CANCELLED:
       return "cancelled";
-   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+   case OURO_MODULE_CALL_DEADLINE_EXCEEDED:
       return "deadline_exceeded";
-   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+   case OURO_MODULE_CALL_INVALID_REQUEST:
       return "invalid_request";
-   case AIMEE_MODULE_CALL_INTERNAL:
+   case OURO_MODULE_CALL_INTERNAL:
       return "internal";
-   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+   case OURO_MODULE_CALL_RESPONSE_TOO_LARGE:
       return "response_too_large";
-   case AIMEE_MODULE_CALL_TRANSPORT:
+   case OURO_MODULE_CALL_TRANSPORT:
       return "transport";
-   case AIMEE_MODULE_CALL_PROTOCOL:
+   case OURO_MODULE_CALL_PROTOCOL:
       return "protocol";
-   case AIMEE_MODULE_CALL_INVALID_ARGUMENT:
+   case OURO_MODULE_CALL_INVALID_ARGUMENT:
       return "invalid_argument";
    default:
       return "unknown";
@@ -189,7 +189,7 @@ static int frame_size(const char *const *fields, uint32_t count, size_t *need_ou
       if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
-      if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
+      if (n > OURO_MODULE_MESSAGE_MAX_BODY - need - 4u)
          return -1;
       need += 4u + n;
    }
@@ -336,22 +336,22 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
 {
    uint32_t kind = PEER_EVENT_KIND(stage);
    if (transport)
-      *transport = AIMEE_MODULE_CALL_OK;
+      *transport = OURO_MODULE_CALL_OK;
    if (!obs_bus_module_available(kind))
    {
       /* Nothing serves this kind on the local bus. Distinct from a call that
          went out and failed, and the distinction is the whole reason the
          out-param exists: this one means the module is not there. */
       if (transport)
-         *transport = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
-      warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+         *transport = OURO_MODULE_CALL_CAPABILITY_ABSENT;
+      warn_unreachable(OURO_MODULE_CALL_CAPABILITY_ABSENT);
       return PEER_CLIENT_TRANSPORT;
    }
    size_t request_len = 0;
    if (frame_size(fields, count, &request_len) != 0)
    {
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         *transport = OURO_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
    uint8_t *request = malloc(request_len);
@@ -361,17 +361,17 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
       free(request);
       free(response);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INTERNAL;
+         *transport = OURO_MODULE_CALL_INTERNAL;
       return PEER_CLIENT_TRANSPORT;
    }
    encode(request, op, fields, count);
    uint32_t response_len = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(PEER_CALL_TIMEOUT_MS);
-   aimee_module_call_result_t rc =
+   ouro_module_call_result_t rc =
        obs_bus_module_call(kind, stage, 0, deadline, request, (uint32_t)request_len, response,
                            PEER_RESPONSE_MAX, &response_len, NULL, NULL);
    free(request);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       if (transport)
          *transport = (int)rc;
@@ -387,7 +387,7 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
          is a protocol disagreement rather than an unreachable module. Reported
          as such so it is not mistaken for the module being down. */
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (out->status != PEER_CLIENT_STATUS_OK)
@@ -479,13 +479,13 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
    if (transport)
-      *transport = AIMEE_MODULE_CALL_OK;
+      *transport = OURO_MODULE_CALL_OK;
    if (stamped)
       memset(stamped, 0, sizeof(*stamped));
    if (!from || !to || !text)
    {
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         *transport = OURO_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
    /* from, to, text, conversation_id, hop, expect_reply */
@@ -510,7 +510,7 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
                     (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    peer_client_message_t checked = {0};
@@ -520,7 +520,7 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       peer_client_message_free(result);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (!stamped)
@@ -598,13 +598,13 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
    if (transport)
-      *transport = AIMEE_MODULE_CALL_OK;
+      *transport = OURO_MODULE_CALL_OK;
    if (stamped)
       memset(stamped, 0, sizeof(*stamped));
    if (!from || !handle || !text)
    {
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         *transport = OURO_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
 
@@ -654,7 +654,7 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
                     (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    peer_client_message_t checked = {0};
@@ -664,7 +664,7 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
       peer_client_message_free(result);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (!stamped)
@@ -679,7 +679,7 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
    if (transport)
-      *transport = AIMEE_MODULE_CALL_OK;
+      *transport = OURO_MODULE_CALL_OK;
    if (waiting)
       *waiting = 0;
    if (dropped)
@@ -687,7 +687,7 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
    if (!session)
    {
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         *transport = OURO_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
    const char *fields[1] = {session};
@@ -703,7 +703,7 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
       warn_protocol("inbox_len reply is not two cells", r.count, 2u);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (waiting)
@@ -721,7 +721,7 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
    if (transport)
-      *transport = AIMEE_MODULE_CALL_OK;
+      *transport = OURO_MODULE_CALL_OK;
    if (out)
       *out = NULL;
    if (count)
@@ -731,7 +731,7 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    if (!session || !out || !count)
    {
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         *transport = OURO_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
    }
    if (max <= 0 || max > PEER_CLIENT_INBOX_TAKE_MAX)
@@ -756,7 +756,7 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
                     (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+         *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    size_t rows = (size_t)(r.count - 1) / PEER_CLIENT_MESSAGE_WIDTH;
@@ -772,7 +772,7 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    {
       reply_free(&r);
       if (transport)
-         *transport = AIMEE_MODULE_CALL_INTERNAL;
+         *transport = OURO_MODULE_CALL_INTERNAL;
       return PEER_CLIENT_TRANSPORT;
    }
    for (size_t i = 0; i < rows; ++i)
@@ -782,7 +782,7 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
          peer_client_messages_free(msgs, rows);
          reply_free(&r);
          if (transport)
-            *transport = AIMEE_MODULE_CALL_PROTOCOL;
+            *transport = OURO_MODULE_CALL_PROTOCOL;
          return PEER_CLIENT_TRANSPORT;
       }
    }

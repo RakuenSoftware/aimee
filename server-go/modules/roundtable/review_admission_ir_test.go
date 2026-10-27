@@ -2,9 +2,9 @@ package roundtable
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,8 +33,8 @@ func TestReviewHandlerAttenuatesPublicIRWithoutCapabilityBypass(t *testing.T) {
 		before, _ := json.Marshal(source)
 		stub := &stubReviewer{}
 		body, _ := json.Marshal(panel.ReviewRequest{Request: source, Artifact: "separate exact artifact", Brief: json.RawMessage(`{"goal":"separate brief"}`)})
-		_, status := NewReviewHandler(stub)(bus.ModuleInvocation{StageID: StageReview, PrincipalClass: principal}, body)
-		if status != bus.ModuleStatusOK || stub.calls != 1 {
+		_, status := NewReviewHandler(stub)(ring.ModuleInvocation{StageID: StageReview, PrincipalClass: principal}, body)
+		if status != ring.ModuleStatusOK || stub.calls != 1 {
 			t.Fatalf("status=%v calls=%d", status, stub.calls)
 		}
 		input := stub.got.Request
@@ -68,8 +68,8 @@ func TestActualReviewHandlerRetainsCanonicalHistoryBriefAndArtifact(t *testing.T
 	source.System[0].Context = &canonical.Context{Origin: 2, Authority: 3, Trust: 2, ModelVisible: true}
 	source.Messages[0].Blocks[0].Context = &canonical.Context{Origin: 3, Authority: 2, Trust: 2, ModelVisible: true}
 	body, _ := json.Marshal(panel.ReviewRequest{Request: source, Artifact: "EXACT_IMMUTABLE_ARTIFACT_FOR_REVIEW", Brief: json.RawMessage(`{"goal":"BRIEF_MARKER"}`), Roundtable: "default"})
-	_, status := NewReviewHandler(reviewer)(bus.ModuleInvocation{StageID: StageReview}, body)
-	if status != bus.ModuleStatusOK {
+	_, status := NewReviewHandler(reviewer)(ring.ModuleInvocation{StageID: StageReview}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status=%v", status)
 	}
 	if len(seats.requests) == 0 {
@@ -130,8 +130,8 @@ func TestReviewHandlerRejectsConflictingOrInvalidCanonicalRequest(t *testing.T) 
 	}
 	for _, body := range cases {
 		stub := &stubReviewer{}
-		_, status := NewReviewHandler(stub)(bus.ModuleInvocation{StageID: StageReview, PrincipalClass: ^uint32(0)}, body)
-		if status != bus.ModuleStatusInvalidRequest || stub.calls != 0 {
+		_, status := NewReviewHandler(stub)(ring.ModuleInvocation{StageID: StageReview, PrincipalClass: ^uint32(0)}, body)
+		if status != ring.ModuleStatusInvalidRequest || stub.calls != 0 {
 			t.Fatal("invalid canonical admission reached reviewer")
 		}
 	}
@@ -175,8 +175,8 @@ func TestReviewAdmissionPreservesExistingSystemEvidenceRevisionCustody(t *testin
 		before, _ := json.Marshal(source)
 		body, _ := json.Marshal(panel.ReviewRequest{Request: source, Artifact: "separate domain artifact"})
 		stub := &stubReviewer{}
-		_, status := NewReviewHandler(stub)(bus.ModuleInvocation{StageID: StageReview, PrincipalClass: ^uint32(0)}, body)
-		if status != bus.ModuleStatusOK || stub.got.Request == nil {
+		_, status := NewReviewHandler(stub)(ring.ModuleInvocation{StageID: StageReview, PrincipalClass: ^uint32(0)}, body)
+		if status != ring.ModuleStatusOK || stub.got.Request == nil {
 			t.Fatal("canonical evidence admission refused")
 		}
 		actual := stub.got.Request.System[0]

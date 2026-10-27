@@ -1,6 +1,7 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include <aimee/translation/codec_stdio.h>
-#include <aimee/core/event_bus/bus_runtime.h>
+#include <ouroboros/runtime.h>
+#include <aimee/audit/instance_identity.h>
 #include "aimee.h"
 #include "server_code_index.h"
 #include <aimee/tools/agent_tools.h>
@@ -216,8 +217,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    }
    if (server_obs_bus_configure() != 0)
       LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
-   if (bus_instance_ensure_identity(config_default_dir(), BUS_INSTANCE_SERVER,
-                                    getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
+   if (aimee_instance_ensure_identity(config_default_dir(), AIMEE_INSTANCE_SERVER,
+                                      getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
    {
       fprintf(stderr, "aimee: first-boot identity is unavailable or conflicts with server\n");
       return 1;

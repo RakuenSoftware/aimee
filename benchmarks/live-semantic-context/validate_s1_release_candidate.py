@@ -134,7 +134,19 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
                     "$(OBJDIR)/" + old, "$(OBJDIR)/" + replacement if replacement else "")
                 candidate[file] = candidate[file].replace(old, replacement)
     frozen_plan = build_plan(*candidate)
-    return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
+    # Oct 27: the ring moved to github.com/RakuenSoftware/ouroboros-ring and is
+    # fetched into build/deps. Its include path replaced core/event_bus/include
+    # in C_FLAGS, and thin-client objects (platform, dstr) no longer carry it at
+    # all because CLIENT_C_FLAGS is fixed before the ring include is added. The
+    # probe's 42 sources include no ring header directly. Drop exactly those two
+    # include flags;
+    # every other flag, input and command must still match.
+    def without_ring_include(plan: list[str]) -> list[str]:
+        return [" ".join(token for token in line.split()
+                         if token not in ("-Icore/event_bus/include",
+                                          "-Ibuild/deps/ouroboros-ring/c/include"))
+                for line in plan]
+    return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.
@@ -369,7 +381,12 @@ def main() -> int:
         args.output.write_text(rendered)
     else:
         sys.stdout.write(rendered)
-    return 1 if args.assert_release_candidate and result["release_candidate_errors"] else 0
+    if args.assert_release_candidate and result["release_candidate_errors"]:
+        # The report may be written to a file CI never prints; say why here.
+        for error in result["release_candidate_errors"]:
+            print(f"validate_s1_release_candidate: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
     "ref": "v0.3.0",
     "version": "0.3.0",
     "commit": "0edba59505d2ce2ce73327833825ca65157ac0bd",
-    "source_sha256": "4c6ec9f236cbeb2cb1ee5fcd17ba72a3490c87e6bc75c903992c96b0c0ce821f"
+    "source_sha256": "306291852e7c5a026b169034884b5c3606d65f5a5c8ec0f80444764678daea23"
   },
   "modules": [
     {
@@ -27,9 +27,9 @@
       "id": "config",
       "classification": "required",
       "repository": "https://github.com/RakuenSoftware/aimee-module-config.git",
-      "ref": "v0.2.1-0.20261023182358-01e83ef1aee9",
-      "version": "v0.2.1-0.20261023182358-01e83ef1aee9",
-      "commit": "01e83ef1aee9",
+      "ref": "v0.2.1-0.20261027125832-800bd8fca157",
+      "version": "v0.2.1-0.20261027125832-800bd8fca157",
+      "commit": "800bd8fca157",
       "execution": "process",
       "placements": [
         "server",

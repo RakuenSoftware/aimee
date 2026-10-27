@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -56,9 +56,9 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql", "schema_personal_memory_proposals.sql"} {
 		exec(read(name))
 	}
-	user := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
-	model := &bus.CommandContext{Authenticated: true, Principal: "fixture:agent", TransportIdentity: "fixture:mcp"}
-	call := func(caller *bus.CommandContext, req DataRequest) DataResponse {
+	user := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
+	model := &ring.CommandContext{Authenticated: true, Principal: "fixture:agent", TransportIdentity: "fixture:mcp"}
+	call := func(caller *ring.CommandContext, req DataRequest) DataResponse {
 		t.Helper()
 		tx, err := conn.Begin(ctx)
 		if err != nil {
@@ -72,9 +72,9 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &out) != nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &out) != nil {
 			t.Fatalf("operation %s status %v", req.Operation, status)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -90,7 +90,7 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 		return out.Records[0]
 	}
 	confidence := 1.0
-	put := func(caller *bus.CommandContext, key, kind, tier, content string) Record {
+	put := func(caller *ring.CommandContext, key, kind, tier, content string) Record {
 		t.Helper()
 		return one(call(caller, DataRequest{Operation: "store", Authority: AuthorityUser, Key: key, Kind: kind, Tier: tier, Content: content, Confidence: &confidence}))
 	}
@@ -99,7 +99,7 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 	if human.Authorship.Category != "user_stated" || human.Authorship.Principal != user.Principal || human.Confidence != 1 || agent.Authorship.Category != "agent_message" || agent.Authorship.Principal != model.Principal || agent.Confidence != .8 {
 		t.Fatal("incorrect verified provenance", human.Authorship, agent.Authorship)
 	}
-	for _, caller := range []*bus.CommandContext{nil, {Authenticated: false, UserAuthority: true, Principal: "forged"}, {Authenticated: true, UserAuthority: true}, {Authenticated: true, Principal: "model"}} {
+	for _, caller := range []*ring.CommandContext{nil, {Authenticated: false, UserAuthority: true, Principal: "forged"}, {Authenticated: true, UserAuthority: true}, {Authenticated: true, Principal: "model"}} {
 		record := put(caller, fmt.Sprintf("forged-%p", caller), "fact", "L5", "untrusted assertion")
 		if record.Authorship.Category != "agent_message" || record.Confidence != .5 {
 			t.Fatal("body or incomplete context elevated authority", record)
@@ -154,7 +154,7 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 	}
 	for _, kind := range []string{"episode", "experience", "instruction", "policy"} {
 		record := put(user, kind, kind, "L2", "protected assertion")
-		for _, caller := range []*bus.CommandContext{user, model} {
+		for _, caller := range []*ring.CommandContext{user, model} {
 			out := call(caller, DataRequest{Operation: "supersede", Authority: AuthorityUser, ID: record.ID, Content: "rewrite protected assertion", Confidence: &confidence})
 			if out.Code == nil {
 				t.Fatal("protected kind rewritten", kind, out)

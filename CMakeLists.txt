@@ -75,8 +75,33 @@ set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
 
     "${AIMEE_SRC_DIR}/core/types/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
-set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
-    "${AIMEE_SRC_DIR}/core/event_bus/include")
+
+# The ouroboros ring is not in this repository; see src/Makefile. Its headers
+# come from the commit pinned in dependencies/ouroboros-ring.lock.json, fetched
+# and content-checked at configure time, or from a local ring checkout named by
+# OURO_RING_LOCAL. Nothing here links the ring: the CMake targets need only its
+# headers, and the server and KB that host it are built by src/Makefile. The
+# thin client never touches the ring, so a thin-client build (the only build on
+# Windows and macOS) neither fetches nor sees it.
+set(AIMEE_OURO_RING_INCLUDE_DIR "")
+if(NOT AIMEE_THIN_CLIENT)
+    set(OURO_RING_LOCAL "$ENV{OURO_RING_LOCAL}" CACHE PATH
+        "Local ouroboros-ring checkout to build against instead of the pinned commit")
+    if(OURO_RING_LOCAL)
+        get_filename_component(OURO_RING_DIR "${OURO_RING_LOCAL}" ABSOLUTE)
+    else()
+        set(OURO_RING_DIR "${CMAKE_BINARY_DIR}/deps/ouroboros-ring")
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -I
+                    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_ouroboros_ring.py" "${OURO_RING_DIR}"
+            RESULT_VARIABLE OURO_RING_FETCH_RESULT)
+        if(NOT OURO_RING_FETCH_RESULT EQUAL 0)
+            message(FATAL_ERROR "could not provide the pinned ouroboros ring in ${OURO_RING_DIR}; see the message above")
+        endif()
+    endif()
+    set(AIMEE_OURO_RING_INCLUDE_DIR "${OURO_RING_DIR}/c/include")
+endif()
 
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
@@ -91,7 +116,7 @@ include_directories(
     ${AIMEE_DELEGATES_INCLUDE_DIR}
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
     ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
-    ${AIMEE_CORE_EVENT_BUS_INCLUDE_DIR}
+    ${AIMEE_OURO_RING_INCLUDE_DIR}
     "${AIMEE_SRC_DIR}/modules/learning/include"
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
@@ -1327,9 +1352,6 @@ if(AIMEE_USE_INSTALLED_CORE)
         message(FATAL_ERROR "The pinned installed aimee-core package has native TLS disabled")
     endif()
     add_library(aimee-core-connection ALIAS aimee::aimee-core-connection)
-    if(TARGET aimee::aimee-core-event-bus)
-        add_library(aimee-core-event-bus ALIAS aimee::aimee-core-event-bus)
-    endif()
 else()
 add_library(aimee-core-connection STATIC
     ${AIMEE_SRC_DIR}/core/connection/auth.c
@@ -1345,29 +1367,6 @@ if(WIN32)
     target_link_libraries(aimee-core-connection PUBLIC ws2_32)
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_library(aimee-core-event-bus STATIC
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_attach.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_arena.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_capture.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_client.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_endpoint.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_host.c
-        ${AIMEE_SRC_DIR}/core/event_bus/module_client.c
-        ${AIMEE_SRC_DIR}/core/event_bus/module_protocol.c
-        ${AIMEE_SRC_DIR}/core/event_bus/module_runtime.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_region.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_region_host.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_ring.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_route.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_runtime.c
-        ${AIMEE_SRC_DIR}/core/event_bus/bus_wire.c
-    )
-    target_include_directories(aimee-core-event-bus PUBLIC
-        ${AIMEE_SRC_DIR}/core/event_bus/include)
-    target_compile_options(aimee-core-event-bus PRIVATE ${AIMEE_COMMON_WARNINGS})
-    target_link_libraries(aimee-core-event-bus PUBLIC Threads::Threads)
-endif()
 endif()
 
 add_executable(aimee

@@ -2323,7 +2323,17 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    if (git_tool && strncmp(git_tool, "git_", 4) == 0 && git_runner_start && git_runner_stop &&
        cli_v1_remote_endpoint_is_network())
    {
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+      cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+#if defined(AIMEE_POSIX)
+      if (strcmp(git_tool, "git_clone") == 0 && cJSON_IsObject(args) &&
+          cli_workspace_git_clone_prepare(args) != 0)
+      {
+         cJSON_Delete(req);
+         free(bearer);
+         free(remote);
+         return 1;
+      }
+#endif
       const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
           args, strcmp(git_tool, "git_clone") == 0 ? "cwd" : "path"));
       if (!target || !target[0])

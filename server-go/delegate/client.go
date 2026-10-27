@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -268,7 +268,7 @@ type GroupPlanResult struct {
 }
 
 // StageCaller is the delegate bus-call seam. The production implementation is
-// bus.ConcurrentModuleCaller; exposing the narrow contract also lets integration
+// ring.ConcurrentModuleCaller; exposing the narrow contract also lets integration
 // tests cross the real module handler without opening a daemon socket.
 type StageCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
@@ -280,7 +280,7 @@ type BusClient struct {
 	trace    atomic.Uint64
 }
 
-func NewBusClient(caller *bus.ConcurrentModuleCaller, deadline time.Duration) (*BusClient, error) {
+func NewBusClient(caller *ring.ConcurrentModuleCaller, deadline time.Duration) (*BusClient, error) {
 	return NewClient(caller, deadline)
 }
 
@@ -358,14 +358,14 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 	reply, err := c.caller.Call(ctx, EventKind, StageInvoke, c.trace.Add(1), deadline, body)
 	if err != nil {
 		err = classifyDelegateError(err)
-		if errors.Is(err, bus.ErrModuleCallCapabilityAbsent) ||
-			errors.Is(err, bus.ErrModuleCallRejected) ||
-			errors.Is(err, bus.ErrModuleCallNotDispatched) {
+		if errors.Is(err, ring.ErrModuleCallCapabilityAbsent) ||
+			errors.Is(err, ring.ErrModuleCallRejected) ||
+			errors.Is(err, ring.ErrModuleCallNotDispatched) {
 			return DelegateResult{}, err
 		}
 		// Once handed to the bus, loss of the reply cannot prove the provider did
 		// not run. Preserve that uncertainty at the caller's billing boundary.
-		if errors.Is(err, bus.ErrModuleCallDeadline) {
+		if errors.Is(err, ring.ErrModuleCallDeadline) {
 			err = errors.Join(err, context.DeadlineExceeded)
 		}
 		return DelegateResult{}, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false}

@@ -20,96 +20,96 @@
 #ifndef AIMEE_DB1_STAGES_H
 #define AIMEE_DB1_STAGES_H 1
 
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
 #include <stdint.h>
 
-aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body, uint32_t request_len,
                                            uint8_t *response_body,
                                            uint32_t response_capacity,
                                            uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, uint32_t request_len,
                                           uint8_t *response_body,
                                           uint32_t response_capacity,
                                           uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, uint32_t request_len,
                                         uint8_t *response_body,
                                         uint32_t response_capacity,
                                         uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_delegation(const uint8_t *request_body, uint32_t request_len,
                                         uint8_t *response_body,
                                         uint32_t response_capacity,
                                         uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_sessions(const uint8_t *request_body, uint32_t request_len,
                                       uint8_t *response_body,
                                       uint32_t response_capacity,
                                       uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_runtime(const uint8_t *request_body, uint32_t request_len,
                                      uint8_t *response_body,
                                      uint32_t response_capacity,
                                      uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uint32_t request_len,
                                        uint8_t *response_body,
                                        uint32_t response_capacity,
                                        uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_guardrail_state(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_guardrail_state(const uint8_t *request_body, uint32_t request_len,
                                              uint8_t *response_body,
                                              uint32_t response_capacity,
                                              uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_ensemble(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_ensemble(const uint8_t *request_body, uint32_t request_len,
                                       uint8_t *response_body,
                                       uint32_t response_capacity,
                                       uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_workflow(const uint8_t *request_body, uint32_t request_len,
                                       uint8_t *response_body,
                                       uint32_t response_capacity,
                                       uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_roundtable(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_roundtable(const uint8_t *request_body, uint32_t request_len,
                                         uint8_t *response_body,
                                         uint32_t response_capacity,
                                         uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_identity(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_identity(const uint8_t *request_body, uint32_t request_len,
                                       uint8_t *response_body,
                                       uint32_t response_capacity,
                                       uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_checkpoints(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_checkpoints(const uint8_t *request_body, uint32_t request_len,
                                          uint8_t *response_body,
                                          uint32_t response_capacity,
                                          uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_jti_replay(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_jti_replay(const uint8_t *request_body, uint32_t request_len,
                                         uint8_t *response_body,
                                         uint32_t response_capacity,
                                         uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_lifecycle(const uint8_t *request_body, uint32_t request_len,
                                        uint8_t *response_body,
                                        uint32_t response_capacity,
                                        uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_mgmt_jwks(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_mgmt_jwks(const uint8_t *request_body, uint32_t request_len,
                                        uint8_t *response_body,
                                        uint32_t response_capacity,
                                        uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_mgmt_nonce(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_mgmt_nonce(const uint8_t *request_body, uint32_t request_len,
                                         uint8_t *response_body,
                                         uint32_t response_capacity,
                                         uint32_t *response_len);
 
-aimee_module_status_t aimee_db1_stage_pki(const uint8_t *request_body, uint32_t request_len,
+ouro_module_status_t aimee_db1_stage_pki(const uint8_t *request_body, uint32_t request_len,
                                  uint8_t *response_body,
                                  uint32_t response_capacity,
                                  uint32_t *response_len);

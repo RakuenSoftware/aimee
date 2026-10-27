@@ -12,14 +12,14 @@
 #include <aimee/delegates/delegate_role.h>
 #include "model_registry.h"
 #include "log.h"
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/delegates/module_api.h>
 
-extern aimee_module_status_t aimee_delegates_module_handler(const aimee_module_invocation_t *,
-                                                            const uint8_t *, uint32_t, uint8_t *,
-                                                            uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_delegates_module_handler(const ouro_module_invocation_t *,
+                                                           const uint8_t *, uint32_t, uint8_t *,
+                                                           uint32_t, uint32_t *, void *);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -40,11 +40,11 @@ static int capabilities_via_module(const char *prompt, int tools_enabled, unsign
        aimee_delegates_cap_request_encode(prompt, prompt_len, tools_enabled, request, request_cap);
    uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
    int rc =
        request_len > 0 && aimee_delegates_module_handler(
                               &invocation, request, (uint32_t)request_len, response,
-                              sizeof(response), &response_len, NULL) == AIMEE_MODULE_STATUS_OK
+                              sizeof(response), &response_len, NULL) == OURO_MODULE_STATUS_OK
            ? aimee_delegates_cap_response_decode(response, response_len, required_caps, min_context)
            : -1;
    free(request);
@@ -1423,13 +1423,13 @@ static int chain_via_module(unsigned op, int has_depth, int has_parent, int pare
    uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
    uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
    return aimee_delegates_chain_request_encode(op, has_depth, has_parent, parent_known,
                                                parent_active, (int32_t)parent_depth,
                                                (int32_t)max_depth, request, sizeof(request)) == 0 &&
                   aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
                                                  sizeof(response), &response_len,
-                                                 NULL) == AIMEE_MODULE_STATUS_OK
+                                                 NULL) == OURO_MODULE_STATUS_OK
               ? aimee_delegates_chain_response_decode(response, response_len, flag, current_depth)
               : -1;
 }

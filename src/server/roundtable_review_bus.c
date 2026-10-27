@@ -26,15 +26,15 @@
 #include "headers/module_json_call.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/roundtable/module_api.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-/* Matches AIMEE_MODULE_MESSAGE_MAX_BODY and Go's MaxArtifactBytes. A review of a
+/* Matches OURO_MODULE_MESSAGE_MAX_BODY and Go's MaxArtifactBytes. A review of a
  * 16 MiB artifact is the largest thing this carries. */
-#define ROUNDTABLE_REVIEW_MAX_BODY AIMEE_MODULE_MESSAGE_MAX_BODY
+#define ROUNDTABLE_REVIEW_MAX_BODY OURO_MODULE_MESSAGE_MAX_BODY
 
 /* Build the review body. Identical JSON to what the HTTP route carried: the
  * transport changed, the contract did not. */
@@ -157,20 +157,20 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
    char *wire = build_review_body(request, resolved);
    if (!wire)
       return server_send_error(conn, "roundtable artifact is required", NULL);
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_OK;
    cJSON *parsed = aimee_module_json_call_raw(AIMEE_ROUNDTABLE_EVENT_REVIEW,
                                               AIMEE_ROUNDTABLE_STAGE_REVIEW, wire, strlen(wire),
                                               ROUNDTABLE_REVIEW_MAX_BODY, timeout_ms, &result);
    free(wire);
 
-   if (result != AIMEE_MODULE_CALL_OK)
+   if (result != OURO_MODULE_CALL_OK)
    {
       /* Name the outcome. Every failure used to render as "Go roundtable service
        * is unreachable", so a review that ran its full deadline looked exactly
        * like a service that was never started. */
       char reason[160];
       snprintf(reason, sizeof(reason), "roundtable review failed: %s",
-               aimee_module_call_result_name(result));
+               ouro_module_call_result_name(result));
       return server_send_error(conn, reason, NULL);
    }
    if (!parsed)

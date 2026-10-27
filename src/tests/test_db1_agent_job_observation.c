@@ -1,5 +1,5 @@
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "db1_client/db1_module_api.h"
 #include "db1_client/agent_jobs.h"
 #include <assert.h>
@@ -14,11 +14,11 @@ int obs_bus_module_available(uint32_t event)
    assert(event == AIMEE_DB1_EVENT_DELEGATION);
    return available;
 }
-aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
-                                               uint64_t deadline, const void *request,
-                                               uint32_t request_len, void *response,
-                                               uint32_t capacity, uint32_t *length,
-                                               aimee_module_cancelled_fn cancel, void *context)
+ouro_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, uint64_t trace,
+                                              uint64_t deadline, const void *request,
+                                              uint32_t request_len, void *response,
+                                              uint32_t capacity, uint32_t *length,
+                                              ouro_module_cancelled_fn cancel, void *context)
 {
    (void)trace;
    (void)cancel;
@@ -36,11 +36,11 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
       assert(deadline == first_deadline);
    calls++;
    if (mode == 1)
-      return AIMEE_MODULE_CALL_TRANSPORT;
+      return OURO_MODULE_CALL_TRANSPORT;
    if (mode == 5)
    {
-      *length = AIMEE_MODULE_MESSAGE_MAX_BODY + 1;
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      *length = OURO_MODULE_MESSAGE_MAX_BODY + 1;
+      return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
    }
    uint8_t *out = response;
    if (mode == 2 || mode == 7)
@@ -48,7 +48,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
       aimee_db1_put_u32(out, mode == 7 ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_MISSING);
       aimee_db1_put_u32(out + 4, 0);
       *length = 8;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    if (mode == 8)
    {
@@ -56,11 +56,11 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
       aimee_db1_put_u32(out + 4, 1);
       aimee_db1_put_u32(out + 8, 0);
       *length = 12;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    *length = 12 + sizeof(value) - 1;
    if (capacity < *length)
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
    aimee_db1_put_u32(out, mode == 6 ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_OK);
    aimee_db1_put_u32(out + 4, 1);
    aimee_db1_put_u32(out + 8, sizeof(value) - 1);
@@ -69,7 +69,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t event, uint32_t stage, u
       aimee_db1_put_u32(out + 8, sizeof(value));
    if (mode == 4)
       out[25] = 0;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 int main(void)
 {

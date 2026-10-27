@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type inspectedHealthReceipt struct {
@@ -187,19 +187,19 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 // rows. PrincipalRef rejects plugin/module callers; the HTTP/CLI adapter must
 // derive health_principal from authenticated request context and never forward
 // a principal, namespace or ledger supplied in a public request body.
-func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRetrievalHealth(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if options.placement != PlacementServer {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	principal := args.stringOr("health_principal", "")
 	if principal == "" || len(principal) > 128 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if caller := options.commandContext; caller != nil && (!caller.Authenticated || caller.Principal != principal) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" {
 		return commandResult(commandError("disabled", "optional retrieval health collection is disabled; required receipts are unchanged"))
@@ -218,11 +218,11 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	s, ok := options.data.(*postgresDataStore)
 	if !ok {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	budget := invocation.Remaining(5 * time.Second)
 	if budget <= 0 {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	parent := options.dataContext
 	if parent == nil {
@@ -234,10 +234,10 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 		// Reuse the receipt owner's strict ordering, binding, source commitment
 		// and dispatcher checks, rather than interpreting unverified row JSON.
 		encoded, status := inspectProviderReceipts(args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
-		raw, err := bus.DecodeCommandResult(encoded)
+		raw, err := ring.DecodeCommandResult(encoded)
 		var inspected struct {
 			Status   string                   `json:"status"`
 			Receipts []inspectedHealthReceipt `json:"receipts"`
@@ -254,7 +254,7 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 		}
 		for _, r := range inspected.Receipts {
 			if r.Prepared == nil || r.Prepared.Binding == nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			b := r.Prepared.Binding
 			_, err = s.updateHealthStore(ctx, principal, b.Project, b.Workspace, now, func(j *healthJournal) error {
@@ -275,11 +275,11 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 	if args.stringOr("from", "") != "" || args.stringOr("until", "") != "" {
 		from, err = time.Parse(time.RFC3339Nano, args.stringOr("from", ""))
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		until, err = time.Parse(time.RFC3339Nano, args.stringOr("until", ""))
 		if err != nil || !from.Before(until) || until.After(now) || until.Sub(from) > healthRetention {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	j, err := s.readHealthStore(ctx, principal, project, workspace)

@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -72,34 +72,34 @@ func commandError(kind, message string) map[string]any {
 	return map[string]any{"status": "error", "kind": kind, "message": message}
 }
 
-func commandResult(value any) ([]byte, bus.ModuleStatus) {
+func commandResult(value any) ([]byte, ring.ModuleStatus) {
 	body, err := json.Marshal(value)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	frame, err := bus.EncodeCommandResult(body)
+	frame, err := ring.EncodeCommandResult(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return frame, bus.ModuleStatusOK
+	return frame, ring.ModuleStatusOK
 }
 
 // The appliance's private commands use the same data owner as stage 7. Public
 // callers cannot submit data-stage operations or widen the owner's scope by
 // including project, workspace, authority, or scope fields in their arguments.
 // Shared-KB dispatch remains at the server boundary until its client is ported.
-func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
-	verb, body, caller, err := bus.DecodeCommandWithContext(frame)
+func handleCommand(options handlerOptions, invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
+	verb, body, caller, err := ring.DecodeCommandWithContext(frame)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if caller != nil && invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	options.commandContext = caller
 	var args commandArgs
 	if json.Unmarshal(body, &args) != nil || args == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if options.placement == PlacementKB && !validCommandScopeArgs(args) {
 		return commandResult(commandError("invalid_argument", "scope arguments require strings and boolean flags"))
@@ -122,22 +122,22 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 		return commandResult(commandError("unsupported_mode", "at_version requires an exact-ID versioned get"))
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if verb == "runtime" {
 		return handleRuntimeView(options, invocation, args)
 	}
 	if verb == "embed_text" {
 		if invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		encoded, status := handleEmbed(options.executor, options, invocation, body)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		var response map[string]any
 		if json.Unmarshal(encoded, &response) != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if response["truncated"] == true {
 			delete(response, "vector")
@@ -171,11 +171,11 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	return handleUserCommand(options, invocation, verb, args)
 }
 
-func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleUserCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementServer {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	if _, exists := args["store"]; exists && args.stringOr("store", "") != "user" {
@@ -290,22 +290,22 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 	case "stats":
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status == bus.ModuleStatusCancelled || status == bus.ModuleStatusDeadlineExceeded {
+	if status == ring.ModuleStatusCancelled || status == ring.ModuleStatusDeadlineExceeded {
 		return nil, status
 	}
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "user memory module unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -398,7 +398,7 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 
 // Recall accepts a bounded activation snapshot from the authenticated appliance.
 // Scope fields are decoded here rather than in the native KB request adapter.
-func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRecallCommand(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: "recall-bundle", Query: args.stringOr("task_hint", ""), Activation: args["activation"], IncludeAll: true}
 	if value, ok := args.number("limit_tokens"); ok {
 		request.LimitTokens = int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
@@ -408,18 +408,18 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 	scoped := commandScope(args, &request)
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusCapabilityAbsent || status == bus.ModuleStatusInternal {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusCapabilityAbsent || status == ring.ModuleStatusInternal {
 			return commandResult(commandError("unavailable", "memory recall unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const maxReleaseSources = 512
@@ -189,9 +189,9 @@ func buildSourceRevalidationSQL(structured bool) string {
  END)`
 }
 
-func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleSourceRevalidation(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	request := DataRequest{Operation: "source-revalidate"}
 	if json.Unmarshal(args["revalidation"], &request.Revalidation) != nil || !request.Revalidation.valid() {
@@ -206,12 +206,12 @@ func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvoc
 	}
 	raw, _ := json.Marshal(request)
 	result, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "source owner unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(result, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -261,7 +261,7 @@ func sourceGuardResponse(request *sourceRevalidation, eligible bool) map[string]
 
 // Read-scoped credentials cannot acquire a store-wide mutation barrier. This
 // authority comes from the verified host frame, never the request arguments.
-func sourceSendGuardAllowed(caller *bus.CommandContext) bool {
+func sourceSendGuardAllowed(caller *ring.CommandContext) bool {
 	return caller != nil && caller.Authenticated && caller.Principal != "" &&
 		((caller.ScopeKind == "service" && caller.ScopeID != "") ||
 			(caller.ScopeKind == "" && caller.ScopeID == "" && caller.UserAuthority))

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -56,8 +56,8 @@ func TestPersonalMutationRetry(t *testing.T) {
 	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries", "retirement_retries", "creation_retries"} {
 		exec(read("schema_personal_memory_" + name + ".sql"))
 	}
-	human := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
-	model := &bus.CommandContext{Authenticated: true, Principal: "fixture:model", TransportIdentity: "fixture:mcp"}
+	human := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
+	model := &ring.CommandContext{Authenticated: true, Principal: "fixture:model", TransportIdentity: "fixture:mcp"}
 	begin := func(c *pgx.Conn) pgx.Tx {
 		t.Helper()
 		tx, err := c.Begin(ctx)
@@ -69,25 +69,25 @@ func TestPersonalMutationRetry(t *testing.T) {
 		}
 		return tx
 	}
-	invoke := func(tx pgx.Tx, caller *bus.CommandContext, req DataRequest) (DataResponse, bus.ModuleStatus) {
+	invoke := func(tx pgx.Tx, caller *ring.CommandContext, req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		backend, err := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: caller}, ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
+		if status == ring.ModuleStatusOK && json.Unmarshal(raw, &out) != nil {
 			t.Fatal("bad response")
 		}
 		return out, status
 	}
-	call := func(caller *bus.CommandContext, req DataRequest) DataResponse {
+	call := func(caller *ring.CommandContext, req DataRequest) DataResponse {
 		t.Helper()
 		tx := begin(conn)
 		defer tx.Rollback(context.Background())
 		out, status := invoke(tx, caller, req)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s status %v", req.Operation, status)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -137,7 +137,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	tx := begin(conn)
 	_, status := invoke(tx, human, request)
 	_ = tx.Rollback(ctx)
-	if status != bus.ModuleStatusInternal {
+	if status != ring.ModuleStatusInternal {
 		t.Fatal("receipt failure admitted write", status)
 	}
 	if scalar(`SELECT generation FROM user_memory_collection_generation`) != before || scalar(`SELECT count(*) FROM user_memory_versions`) != 0 {
@@ -158,7 +158,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	defer second.Close(context.Background())
 	nextTx := begin(second)
 	replay, status := invoke(nextTx, human, request)
-	if status != bus.ModuleStatusOK || !receiptOf(replay).Replayed || receiptOf(replay).CommitID != receipt.CommitID {
+	if status != ring.ModuleStatusOK || !receiptOf(replay).Replayed || receiptOf(replay).CommitID != receipt.CommitID {
 		t.Fatal(replay, status)
 	}
 	if err := nextTx.Commit(ctx); err != nil {
@@ -246,7 +246,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	tx = begin(conn)
 	_, status = invoke(tx, model, proposed)
 	_ = tx.Rollback(ctx)
-	if status != bus.ModuleStatusInternal || scalar(`SELECT count(*) FROM user_memory_correction_proposals`) != 0 {
+	if status != ring.ModuleStatusInternal || scalar(`SELECT count(*) FROM user_memory_correction_proposals`) != 0 {
 		t.Fatal("receipt failure orphaned proposal", status)
 	}
 	exec(`ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT fixture_failure`)
@@ -265,12 +265,12 @@ func TestPersonalMutationRetry(t *testing.T) {
 	defer firstTx.Rollback(context.Background())
 	defer secondTx.Rollback(context.Background())
 	first, status = invoke(firstTx, human, race)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	type result struct {
 		out    DataResponse
-		status bus.ModuleStatus
+		status ring.ModuleStatus
 	}
 	done := make(chan result, 1)
 	go func() { out, status := invoke(secondTx, human, race); done <- result{out, status} }()
@@ -294,7 +294,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := <-done
-	if next.status != bus.ModuleStatusOK || !receiptOf(next.out).Replayed || receiptOf(next.out).CommitID != receiptOf(first).CommitID {
+	if next.status != ring.ModuleStatusOK || !receiptOf(next.out).Replayed || receiptOf(next.out).CommitID != receiptOf(first).CommitID {
 		t.Fatal("concurrent duplicate", next)
 	}
 	if err := secondTx.Commit(ctx); err != nil {
@@ -311,7 +311,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	}
 	lostTx := begin(disconnected)
 	lostOut, status := invoke(lostTx, human, race)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	if err := disconnected.Close(ctx); err != nil {
@@ -326,16 +326,16 @@ func TestPersonalMutationRetry(t *testing.T) {
 	tx = begin(conn)
 	backend, _ := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
 	handler := NewHandler(nil, WithDataStore(PlacementServer, backend))
-	if _, status := invokeContextCommand(t, handler, 41, *human, "runtime", string(args)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invokeContextCommand(t, handler, 41, *human, "runtime", string(args)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("peer forged caller", status)
 	}
 	// MCP model context cannot impersonate the user even with an identical key.
 	envelope, status := invokeContextCommand(t, handler, 0, *model, "runtime", string(args))
-	if status != bus.ModuleStatusOK || !strings.Contains(envelope["json"].(string), "expected_version_conflict") {
+	if status != ring.ModuleStatusOK || !strings.Contains(envelope["json"].(string), "expected_version_conflict") {
 		t.Fatal(envelope, status)
 	}
 	envelope, status = invokeContextCommand(t, handler, 0, *human, "runtime", string(args))
-	if status != bus.ModuleStatusOK || !strings.Contains(envelope["json"].(string), `"replayed":true`) || !strings.Contains(envelope["json"].(string), `"mutation_receipt"`) {
+	if status != ring.ModuleStatusOK || !strings.Contains(envelope["json"].(string), `"replayed":true`) || !strings.Contains(envelope["json"].(string), `"mutation_receipt"`) {
 		t.Fatal(envelope, status)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -367,7 +367,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	tx = begin(conn)
 	_, status = invoke(tx, human, retire)
 	_ = tx.Rollback(ctx)
-	if status != bus.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != before ||
+	if status != ring.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != before ||
 		len(call(nil, DataRequest{Operation: "get", ID: retiring.ID}).Records) != 1 {
 		t.Fatal("receipt failure did not roll back retirement", status)
 	}
@@ -384,7 +384,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	// same receipt without another transition or invalidation.
 	tx = begin(second)
 	replayed, status := invoke(tx, human, retire)
-	if status != bus.ModuleStatusOK || !replayed.Deleted || !receiptOf(replayed).Replayed ||
+	if status != ring.ModuleStatusOK || !replayed.Deleted || !receiptOf(replayed).Replayed ||
 		receiptOf(replayed).CommitID != retiredReceipt.CommitID || len(replayed.Records) != 0 {
 		t.Fatal("retirement replay changed the committed result", replayed, status)
 	}
@@ -409,13 +409,13 @@ func TestPersonalMutationRetry(t *testing.T) {
 	backend, _ = NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
 	handler = NewHandler(nil, WithDataStore(PlacementServer, backend))
 	envelope, status = invokeContextCommand(t, handler, 0, *human, "runtime", string(deleteArgs))
-	if status != bus.ModuleStatusOK || !strings.Contains(envelope["json"].(string), `"replayed":true`) ||
+	if status != ring.ModuleStatusOK || !strings.Contains(envelope["json"].(string), `"replayed":true`) ||
 		!strings.Contains(envelope["json"].(string), `"destroyed":false`) {
 		t.Fatal("runtime retirement replay lost receipt", envelope, status)
 	}
 	envelope, status = invokeContextCommand(t, handler, 0, *human, "delete", string(deleteArgs))
 	publicReceipt, ok := envelope["mutation_receipt"].(map[string]any)
-	if status != bus.ModuleStatusOK || !ok || publicReceipt["replayed"] != true || envelope["destroyed"] != false {
+	if status != ring.ModuleStatusOK || !ok || publicReceipt["replayed"] != true || envelope["destroyed"] != false {
 		t.Fatal("public retirement command lost receipt", envelope, status)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -451,7 +451,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	before = scalar(`SELECT generation FROM user_memory_collection_generation`)
 	firstTx, secondTx = begin(conn), begin(second)
 	first, status = invoke(firstTx, human, retire)
-	if status != bus.ModuleStatusOK || !first.Deleted {
+	if status != ring.ModuleStatusOK || !first.Deleted {
 		t.Fatal(first, status)
 	}
 	done = make(chan result, 1)
@@ -476,7 +476,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	next = <-done
-	if next.status != bus.ModuleStatusOK || !next.out.Deleted || !receiptOf(next.out).Replayed ||
+	if next.status != ring.ModuleStatusOK || !next.out.Deleted || !receiptOf(next.out).Replayed ||
 		receiptOf(next.out).CommitID != receiptOf(first).CommitID {
 		t.Fatal("concurrent retirement repeated", next)
 	}
@@ -488,7 +488,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	}
 
 	// Creation retries preserve admission for inserts, same-key updates and review.
-	for _, actor := range []*bus.CommandContext{human, model} {
+	for _, actor := range []*ring.CommandContext{human, model} {
 		authority := AuthorityModel
 		if actor.UserAuthority {
 			authority = AuthorityUser
@@ -499,7 +499,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 		failedTx := begin(conn)
 		_, failedStatus := invoke(failedTx, actor, storedRequest)
 		_ = failedTx.Rollback(ctx)
-		if failedStatus != bus.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != start {
+		if failedStatus != ring.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != start {
 			t.Fatal("creation receipt failure left a mutation", failedStatus)
 		}
 		exec(`ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT create_failure`)
@@ -542,7 +542,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 		runtimeArgs, _ := json.Marshal(map[string]any{"operation": "user-store", "key": storedRequest.Key, "kind": "fact", "tier": "L2", "content": storedRequest.Content, "idempotency_key": storedRequest.IdempotencyKey})
 		resultBytes, runtimeStatus := invokeContextCommand(t, runtimeHandler, 0, *actor, "runtime", string(runtimeArgs))
 		_ = runtimeTx.Rollback(ctx)
-		if runtimeStatus != bus.ModuleStatusOK || resultBytes["json"] == nil {
+		if runtimeStatus != ring.ModuleStatusOK || resultBytes["json"] == nil {
 			t.Fatal("runtime store forwarding", resultBytes, runtimeStatus)
 		}
 		var runtimeDoc map[string]any
@@ -576,12 +576,12 @@ func TestPersonalMutationRetry(t *testing.T) {
 		}
 		firstTx, secondTx := begin(a), begin(b)
 		first, status := invoke(firstTx, human, request)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		type creationResult struct {
 			out    DataResponse
-			status bus.ModuleStatus
+			status ring.ModuleStatus
 		}
 		done := make(chan creationResult, 1)
 		go func() { out, status := invoke(secondTx, human, request); done <- creationResult{out, status} }()
@@ -610,7 +610,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 			t.Fatal(e)
 		}
 		out := <-done
-		if out.status != bus.ModuleStatusOK || receiptOf(out.out).Replayed != commitFirst {
+		if out.status != ring.ModuleStatusOK || receiptOf(out.out).Replayed != commitFirst {
 			t.Fatal(out)
 		}
 		if (receiptOf(out.out).CommitID == receiptOf(first).CommitID) != commitFirst {

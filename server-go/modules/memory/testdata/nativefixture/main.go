@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type benchmarkStore struct{}
@@ -55,13 +55,13 @@ func main() {
 		if json.Unmarshal(payload, &public) == nil && public.Command != "" {
 			command, payload = public.Command, public.Args
 		}
-		frame, err := bus.EncodeCommand(command, payload)
+		frame, err := ring.EncodeCommand(command, payload)
 		if err != nil {
 			os.Exit(1)
 		}
-		encoded, status := handler(bus.ModuleInvocation{StageID: memory.StageCommand}, frame)
-		body, err := bus.DecodeCommandResult(encoded)
-		if status != bus.ModuleStatusOK || err != nil {
+		encoded, status := handler(ring.ModuleInvocation{StageID: memory.StageCommand}, frame)
+		body, err := ring.DecodeCommandResult(encoded)
+		if status != ring.ModuleStatusOK || err != nil {
 			body = []byte(`{"status":"error"}`)
 		}
 		if encoder.Encode(json.RawMessage(body)) != nil {

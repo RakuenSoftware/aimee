@@ -23,13 +23,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <aimee/core/event_bus/bus_capture.h>
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_host.h>
-#include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
-#include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/capture.h>
+#include <aimee/audit/instance_identity.h>
+#include <ouroboros/client.h>
+#include <ouroboros/host.h>
+#include <ouroboros/region.h> /* ouro_control_epoch */
+#include <ouroboros/runtime.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include <errno.h>
 #include "config.h" /* config_default_dir */
 #include "log.h"
@@ -92,7 +93,7 @@ typedef struct
    int active;
 } module_fragment_tracker_t;
 
-static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *payload,
                            uint32_t payload_len);
 
 /* PostgreSQL can be unavailable during KB startup. Retain audit rows for retry,
@@ -123,8 +124,8 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
 
 struct obs_bus_module_service
 {
-   bus_client_t bus;
-   aimee_module_process_config_t config;
+   ouro_client_t bus;
+   ouro_module_process_config_t config;
    pthread_t thread;
    atomic_int stop;
    int attached;
@@ -134,9 +135,9 @@ struct obs_bus_module_service
 
 static struct
 {
-   bus_host_t host;
-   bus_client_t producer;
-   bus_client_t consumer;
+   ouro_host_t host;
+   ouro_client_t producer;
+   ouro_client_t consumer;
    /* A module call is synchronous and holds its client for the whole
     * request/reply, so one shared client serializes every C->module call in the
     * process. That is fatal for a long stage: a roundtable review holds the
@@ -147,8 +148,8 @@ static struct
     * module client's "dedicated client" contract assumed all along. */
    struct
    {
-      bus_client_t bus;
-      aimee_module_client_t client;
+      ouro_client_t bus;
+      ouro_module_client_t client;
       int attached;
       int in_use;
    } module_clients[OBS_BUS_MODULE_CLIENTS];
@@ -159,8 +160,8 @@ static struct
    pthread_t thread;
    pthread_mutex_t pub_lock;  /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
-   bus_runtime_t *runtime;
-   bus_runtime_policy_t *runtime_policy;
+   ouro_runtime_t *runtime;
+   ouro_runtime_policy_t *runtime_policy;
    atomic_int emitting;        /* 1 while accepting emits */
    atomic_int stop;            /* 1 tells the consumer to final-drain */
    atomic_int consumer_exit;   /* 1 tells it to leave, once the writer is done */
@@ -176,9 +177,9 @@ static struct
    /* Record+replay: the reason the audit row is on the bus at all. The host's
     * capture tap records every event, in seq order, into this sink; the consumer
     * thread flushes it to a per-session capture file. Owned by the consumer thread
-    * (the tap fires inside bus_host_pump, which only the consumer calls), so no
+    * (the tap fires inside ouro_host_pump, which only the consumer calls), so no
     * lock guards it. */
-   bus_capture_t capture;
+   ouro_capture_t capture;
    int cap_fd; /* -1 when capture is off (no writable home / open failed) */
    uint64_t capture_bytes;
    uint64_t capture_limit;
@@ -234,7 +235,7 @@ static struct
    void *durable_ctx;
    obs_bus_sink_idle_fn sink_idle;
    void *sink_idle_ctx;
-   bus_instance_role_t instance_role;
+   aimee_instance_role_t instance_role;
    char module_socket[108];
    char module_policy_dir[4096];
    char capture_fault[24]; /* deterministic unit-test seam; empty in production */
@@ -480,7 +481,7 @@ static void discard_pending_durable(void)
 
 static uint32_t flush_pending_durable(void)
 {
-   uint64_t now = bus_runtime_monotonic_ns();
+   uint64_t now = ouro_runtime_monotonic_ns();
    if (atomic_load(&g.durable_pending_count) && now < g.durable_retry_after_ns)
       return 0;
    uint32_t n = 0;
@@ -650,8 +651,8 @@ static void guardrail_writer_finish(void)
 static uint32_t drain(void)
 {
    uint32_t n = 0;
-   bus_event_t ev;
-   while (bus_client_poll(&g.consumer, &ev) == BUS_CLIENT_OK)
+   ouro_event_t ev;
+   while (ouro_client_poll(&g.consumer, &ev) == OURO_CLIENT_OK)
    {
       atomic_fetch_add_explicit(&g.processed, 1, memory_order_relaxed); /* this event is handled */
       int wrote = 0;
@@ -869,7 +870,7 @@ static void capture_open(void)
       if (end && !*end && parsed > 0 && parsed <= g.capture_limit)
          g.capture_limit = parsed;
    }
-   bus_capture_init(&g.capture, 1, 1, bus_control_epoch(g.host.control));
+   ouro_capture_init(&g.capture, 1, 1, ouro_control_epoch(g.host.control));
 
    static unsigned session_seq = 0;
    snprintf(g.capture_session, sizeof g.capture_session, "%s%010lld-%d-%03u%s", AB_CAP_PREFIX,
@@ -911,15 +912,15 @@ static void capture_open(void)
 /* Loss evidence is independent of capture. bus_route calls this only for the
  * two rare loss controls, so a disabled capture does not put a callback on the
  * ordinary route path and cannot suppress the WORM row. */
-void obs_bus_record_loss(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+void obs_bus_record_loss(void *ctx, const ouro_frame_t *frame, const uint8_t *payload,
                          uint32_t payload_len)
 {
    (void)ctx;
    char subject[AB_DUR_SUBJECT];
    char detail[AB_DUR_DETAIL];
-   if (frame->event_kind == BUS_KIND_OVERFLOW && payload_len == sizeof(bus_overflow_t))
+   if (frame->event_kind == OURO_KIND_OVERFLOW && payload_len == sizeof(ouro_overflow_t))
    {
-      bus_overflow_t loss;
+      ouro_overflow_t loss;
       memcpy(&loss, payload, sizeof loss);
       snprintf(subject, sizeof subject, "seq:%llu", (unsigned long long)loss.shed_seq);
       snprintf(detail, sizeof detail,
@@ -929,10 +930,10 @@ void obs_bus_record_loss(void *ctx, const bus_frame_t *frame, const uint8_t *pay
                (unsigned long long)frame->seq, (long long)time(NULL));
       (void)persist_or_queue_durable("bus.overflow", subject, "dropped", detail);
    }
-   else if (frame->event_kind == BUS_KIND_PRODUCER_REAPED &&
-            payload_len == sizeof(bus_producer_reaped_t))
+   else if (frame->event_kind == OURO_KIND_PRODUCER_REAPED &&
+            payload_len == sizeof(ouro_producer_reaped_t))
    {
-      bus_producer_reaped_t loss;
+      ouro_producer_reaped_t loss;
       memcpy(&loss, payload, sizeof loss);
       snprintf(subject, sizeof subject, "seq:%llu", (unsigned long long)loss.lost_seq);
       snprintf(detail, sizeof detail,
@@ -955,20 +956,20 @@ static void *consumer_main(void *arg)
    long nap_ns = nap_min_ns;
    while (!atomic_load_explicit(&g.stop, memory_order_acquire))
    {
-      uint64_t now = bus_runtime_monotonic_ns();
-      bus_client_heartbeat(&g.producer, now);
-      bus_client_heartbeat(&g.consumer, now);
+      uint64_t now = ouro_runtime_monotonic_ns();
+      ouro_client_heartbeat(&g.producer, now);
+      ouro_client_heartbeat(&g.consumer, now);
       for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
          if (g.module_clients[i].attached)
-            bus_client_heartbeat(&g.module_clients[i].bus, now);
+            ouro_client_heartbeat(&g.module_clients[i].bus, now);
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
-         (void)bus_runtime_maintain(g.runtime, now);
+         (void)ouro_runtime_maintain(g.runtime, now);
       /* The tap records each routed event into g.capture. Keep this count separate
        * from drain(): a routed module request may target another client rather than
        * the observability consumer, but it is still activity that must reset the
        * idle backoff so a burst is pumped without delay. */
-      uint32_t routed = bus_host_pump(&g.host);
+      uint32_t routed = ouro_host_pump(&g.host);
       pthread_mutex_unlock(&g.host_lock);
       uint32_t n = drain();
       /* Flush the capture stream on the threshold (bound memory during a burst)
@@ -997,7 +998,7 @@ static void *consumer_main(void *arg)
    while (empty < 2)
    {
       pthread_mutex_lock(&g.host_lock);
-      bus_host_pump(&g.host);
+      ouro_host_pump(&g.host);
       pthread_mutex_unlock(&g.host_lock);
       empty = (drain() == 0) ? empty + 1 : 0;
    }
@@ -1024,8 +1025,8 @@ static void *consumer_main(void *arg)
    {
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
-         (void)bus_runtime_maintain(g.runtime, bus_runtime_monotonic_ns());
-      bus_host_pump(&g.host);
+         (void)ouro_runtime_maintain(g.runtime, ouro_runtime_monotonic_ns());
+      ouro_host_pump(&g.host);
       pthread_mutex_unlock(&g.host_lock);
       nanosleep(&settle, NULL);
    }
@@ -1043,9 +1044,9 @@ static void *serve_thread(void *p)
 {
    struct serve_arg *argument = p;
    if (argument->owned)
-      bus_host_serve_attach_owned(&g.host, argument->fd);
+      ouro_host_serve_attach_owned(&g.host, argument->fd);
    else
-      bus_host_serve_attach(&g.host, argument->fd);
+      ouro_host_serve_attach(&g.host, argument->fd);
    return NULL;
 }
 
@@ -1058,8 +1059,8 @@ static void module_clients_destroy(void)
    {
       if (!g.module_clients[i].attached)
          continue;
-      aimee_module_client_destroy(&g.module_clients[i].client);
-      bus_client_detach(&g.module_clients[i].bus);
+      ouro_module_client_destroy(&g.module_clients[i].client);
+      ouro_client_detach(&g.module_clients[i].bus);
       g.module_clients[i].attached = 0;
    }
 }
@@ -1115,7 +1116,7 @@ static void module_client_release(int index)
    pthread_mutex_unlock(&g.module_client_lock);
 }
 
-static int attach_mode(bus_client_t *c, int owned)
+static int attach_mode(ouro_client_t *c, int owned)
 {
    int sv[2];
    int socket_type = SOCK_SEQPACKET;
@@ -1147,14 +1148,14 @@ static int attach_mode(bus_client_t *c, int owned)
       close(sv[1]);
       return -1;
    }
-   bus_client_result_t rc = bus_client_attach(sv[0], c);
+   ouro_client_result_t rc = ouro_client_attach(sv[0], c);
    pthread_join(t, NULL);
    close(sv[0]);
    close(sv[1]);
-   return rc == BUS_CLIENT_OK ? 0 : -1;
+   return rc == OURO_CLIENT_OK ? 0 : -1;
 }
 
-static int attach(bus_client_t *client)
+static int attach(ouro_client_t *client)
 {
    return attach_mode(client, 0);
 }
@@ -1166,7 +1167,7 @@ static int service_stopped(void *context)
 static void *module_service_main(void *context)
 {
    obs_bus_module_service_t *service = context;
-   (void)aimee_module_service_run(&service->bus, &service->config, service_stopped, service);
+   (void)ouro_module_service_run(&service->bus, &service->config, service_stopped, service);
    return NULL;
 }
 /* start_lock held; bus pump/module owners MUST still be alive while joining. */
@@ -1183,15 +1184,15 @@ static void module_service_stop_locked(obs_bus_module_service_t *service)
       pthread_mutex_lock(&g.host_lock);
       /* Route already queued cancellation replies before retiring the serving
        * slot. A blocked caller still has its own AMOD deadline/failure fence. */
-      (void)bus_host_pump(&g.host);
-      (void)bus_host_release_slot(&g.host, service->bus.reply.handle_id);
+      (void)ouro_host_pump(&g.host);
+      (void)ouro_host_release_slot(&g.host, service->bus.reply.handle_id);
       pthread_mutex_unlock(&g.host_lock);
-      bus_client_detach(&service->bus);
+      ouro_client_detach(&service->bus);
       service->attached = 0;
    }
 }
-int obs_bus_module_service_start(const aimee_module_stage_t *stages, size_t count,
-                                 aimee_module_handler_fn handler, void *user_data,
+int obs_bus_module_service_start(const ouro_module_stage_t *stages, size_t count,
+                                 ouro_module_handler_fn handler, void *user_data,
                                  obs_bus_module_service_t **out)
 {
    if (!out || !stages || !count || !handler)
@@ -1203,7 +1204,7 @@ int obs_bus_module_service_start(const aimee_module_stage_t *stages, size_t coun
    obs_bus_module_service_t *service = calloc(1, sizeof *service);
    if (!service)
       return -1;
-   service->config = (aimee_module_process_config_t){
+   service->config = (ouro_module_process_config_t){
        .stages = stages, .stage_count = count, .handler = handler, .user_data = user_data};
    atomic_init(&service->stop, 0);
    pthread_mutex_lock(&start_lock);
@@ -1220,9 +1221,9 @@ int obs_bus_module_service_start(const aimee_module_stage_t *stages, size_t coun
    int registered = 1;
    pthread_mutex_lock(&g.host_lock);
    for (size_t i = 0; i < count; i++)
-      if (bus_host_kind_has_server(&g.host, stages[i].event_kind) ||
-          bus_host_serve_kind(&g.host, service->bus.reply.handle_id, stages[i].event_kind) !=
-              BUS_HOST_OK)
+      if (ouro_host_kind_has_server(&g.host, stages[i].event_kind) ||
+          ouro_host_serve_kind(&g.host, service->bus.reply.handle_id, stages[i].event_kind) !=
+              OURO_HOST_OK)
       {
          registered = 0;
          break;
@@ -1283,7 +1284,7 @@ static int start_locked(void)
       pthread_condattr_destroy(&attr);
    }
 
-   bus_host_config_t cfg;
+   ouro_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
    cfg.max_slots = 64;   /* three internal clients plus separately shipped modules */
    cfg.slot_size = 2048; /* an audit row (7 short strings + an int) fits inline */
@@ -1291,19 +1292,19 @@ static int start_locked(void)
    cfg.queue_capacity = 1024; /* absorb bursts between drain ticks */
    cfg.arena_size = 256 * 1024;
 
-   if (bus_host_create(&g.host, &cfg, NULL, NULL) != BUS_HOST_OK)
+   if (ouro_host_create(&g.host, &cfg, NULL, NULL) != OURO_HOST_OK)
    {
       aimee_log(LOG_ERROR, "obs_bus", "bus host create failed; audit rows will not be recorded");
       pthread_mutex_destroy(&g.host_lock);
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
-   bus_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
+   ouro_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
    int module_clients_ready = 1;
    for (int i = 0; i < OBS_BUS_MODULE_CLIENTS && module_clients_ready; ++i)
    {
       if (attach(&g.module_clients[i].bus) != 0 ||
-          aimee_module_client_init(&g.module_clients[i].client, &g.module_clients[i].bus) != 0)
+          ouro_module_client_init(&g.module_clients[i].client, &g.module_clients[i].bus) != 0)
          module_clients_ready = 0;
       else
          g.module_clients[i].attached = 1;
@@ -1312,17 +1313,17 @@ static int start_locked(void)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
       module_clients_destroy();
-      bus_client_detach(&g.consumer);
-      bus_client_detach(&g.producer);
-      bus_host_destroy(&g.host);
+      ouro_client_detach(&g.consumer);
+      ouro_client_detach(&g.producer);
+      ouro_host_destroy(&g.host);
       pthread_mutex_destroy(&g.host_lock);
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
-   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
+   ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
    if (sinks.guardrail)
-      bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
-   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_DURABILITY_EVENT);
+      ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
+   ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_DURABILITY_EVENT);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -1330,26 +1331,28 @@ static int start_locked(void)
    pthread_cond_init(&g.writer_ready, NULL);
    pthread_cond_init(&g.writer_drained, NULL);
    capture_open();
-   bus_host_set_tap(&g.host, governance_tap, NULL);
+   ouro_host_set_tap(&g.host, governance_tap, NULL);
 
    if (sinks.module_socket[0])
    {
-      if (bus_runtime_policy_load_dir(sinks.module_policy_dir, &g.runtime_policy) != 0)
+      if (ouro_runtime_policy_load_dir(sinks.module_policy_dir, &g.runtime_policy) != 0)
       {
          aimee_log(LOG_ERROR, "obs_bus", "module grant policy is invalid: %s",
                    sinks.module_policy_dir);
          goto start_fail;
       }
       size_t grant_count = 0;
-      const bus_runtime_grant_t *grants = bus_runtime_policy_grants(g.runtime_policy, &grant_count);
-      bus_runtime_config_t runtime_cfg = {.socket_path = sinks.module_socket,
-                                          .socket_mode = 0600,
-                                          .backlog = 32,
-                                          .stale_after_ns = 30ULL * 1000000000ULL,
-                                          .grants = grants,
-                                          .grant_count = grant_count,
-                                          .instance_role = sinks.instance_role};
-      g.runtime = bus_runtime_start(&g.host, &g.host_lock, &runtime_cfg);
+      const ouro_runtime_grant_t *grants =
+          ouro_runtime_policy_grants(g.runtime_policy, &grant_count);
+      ouro_runtime_config_t runtime_cfg = {.socket_path = sinks.module_socket,
+                                           .socket_mode = 0600,
+                                           .backlog = 32,
+                                           .stale_after_ns = 30ULL * 1000000000ULL,
+                                           .grants = grants,
+                                           .grant_count = grant_count};
+      runtime_cfg.refused_role_refs = aimee_instance_refused_role_refs(
+          sinks.instance_role, &runtime_cfg.refused_role_ref_count);
+      g.runtime = ouro_runtime_start(&g.host, &g.host_lock, &runtime_cfg);
       if (!g.runtime)
       {
          aimee_log(LOG_ERROR, "obs_bus", "module endpoint failed: %s", sinks.module_socket);
@@ -1384,18 +1387,18 @@ static int start_locked(void)
 
 start_fail:
    guardrail_writer_finish();
-   bus_runtime_stop(&g.runtime);
-   bus_runtime_policy_free(&g.runtime_policy);
+   ouro_runtime_stop(&g.runtime);
+   ouro_runtime_policy_free(&g.runtime_policy);
    if (g.cap_fd >= 0)
       close(g.cap_fd);
    pthread_cond_destroy(&g.writer_drained);
    pthread_cond_destroy(&g.writer_ready);
    pthread_mutex_destroy(&g.writer_lock);
-   bus_capture_free(&g.capture);
-   bus_client_detach(&g.producer);
-   bus_client_detach(&g.consumer);
+   ouro_capture_free(&g.capture);
+   ouro_client_detach(&g.producer);
+   ouro_client_detach(&g.consumer);
    module_clients_destroy();
-   bus_host_destroy(&g.host);
+   ouro_host_destroy(&g.host);
    discard_pending_durable();
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
@@ -1412,7 +1415,7 @@ int obs_bus_start(void)
 
 typedef struct
 {
-   aimee_module_cancelled_fn external;
+   ouro_module_cancelled_fn external;
    void *context;
 } module_cancel_context_t;
 
@@ -1435,31 +1438,31 @@ static int module_call_cancelled(void *context)
  *
  * It belongs in the shared bus rather than in either daemon's adapter: both call
  * through here, and a copy per adapter is a second place to forget. */
-static const char *module_call_result_str(aimee_module_call_result_t rc)
+static const char *module_call_result_str(ouro_module_call_result_t rc)
 {
    switch (rc)
    {
-   case AIMEE_MODULE_CALL_OK:
+   case OURO_MODULE_CALL_OK:
       return "ok";
-   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+   case OURO_MODULE_CALL_CAPABILITY_ABSENT:
       return "capability_absent";
-   case AIMEE_MODULE_CALL_CAPABILITY_DENIED:
+   case OURO_MODULE_CALL_CAPABILITY_DENIED:
       return "capability_denied";
-   case AIMEE_MODULE_CALL_CANCELLED:
+   case OURO_MODULE_CALL_CANCELLED:
       return "cancelled";
-   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+   case OURO_MODULE_CALL_DEADLINE_EXCEEDED:
       return "deadline_exceeded";
-   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+   case OURO_MODULE_CALL_INVALID_REQUEST:
       return "invalid_request";
-   case AIMEE_MODULE_CALL_INTERNAL:
+   case OURO_MODULE_CALL_INTERNAL:
       return "internal";
-   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+   case OURO_MODULE_CALL_RESPONSE_TOO_LARGE:
       return "response_too_large";
-   case AIMEE_MODULE_CALL_TRANSPORT:
+   case OURO_MODULE_CALL_TRANSPORT:
       return "transport";
-   case AIMEE_MODULE_CALL_PROTOCOL:
+   case OURO_MODULE_CALL_PROTOCOL:
       return "protocol";
-   case AIMEE_MODULE_CALL_INVALID_ARGUMENT:
+   case OURO_MODULE_CALL_INVALID_ARGUMENT:
       return "invalid_argument";
    }
    /* An out-of-range code is a bug, and a bug must not read as success. */
@@ -1467,7 +1470,7 @@ static const char *module_call_result_str(aimee_module_call_result_t rc)
 }
 
 static void obs_bus_log_module_call_failure(uint32_t event_kind, uint32_t stage_id,
-                                            aimee_module_call_result_t rc)
+                                            ouro_module_call_result_t rc)
 {
    aimee_log(LOG_WARN, "obs_bus", "module stage call failed: event=%u stage=%u result=%s",
              event_kind, stage_id, module_call_result_str(rc));
@@ -1614,7 +1617,7 @@ static const char *durable_event_name(uint32_t kind)
  * module-to-module authorization request cannot bypass the ledger merely by
  * avoiding the C convenience wrapper. Request bodies stay in the bounded
  * capture stream; the WORM row records only identity, shape and outcome. */
-static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *payload,
                            uint32_t payload_len)
 {
    (void)ctx;
@@ -1639,18 +1642,18 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
        !g.capture.broken)
-      bus_capture_tap(&g.capture, frame, payload, payload_len);
+      ouro_capture_tap(&g.capture, frame, payload, payload_len);
 
-   uint16_t pattern = frame->hdr_flags & (BUS_F_REQUEST | BUS_F_REPLY);
+   uint16_t pattern = frame->hdr_flags & (OURO_F_REQUEST | OURO_F_REPLY);
    const char *name = sinks.durable ? durable_event_name(frame->event_kind) : NULL;
-   if (!name || (pattern != BUS_F_REQUEST && pattern != BUS_F_REPLY))
+   if (!name || (pattern != OURO_F_REQUEST && pattern != OURO_F_REPLY))
       return;
 
-   aimee_module_message_t message;
-   if (aimee_module_message_decode(payload, payload_len, &message) != AIMEE_MODULE_MESSAGE_OK)
+   ouro_module_message_t message;
+   if (ouro_module_message_decode(payload, payload_len, &message) != OURO_MODULE_MESSAGE_OK)
       return;
-   if ((pattern == BUS_F_REQUEST && message.operation != AIMEE_MODULE_OP_INVOKE) ||
-       (pattern == BUS_F_REPLY && message.operation != AIMEE_MODULE_OP_RESULT))
+   if ((pattern == OURO_F_REQUEST && message.operation != OURO_MODULE_OP_INVOKE) ||
+       (pattern == OURO_F_REPLY && message.operation != OURO_MODULE_OP_RESULT))
       return;
 
    module_fragment_tracker_t *tracker = NULL;
@@ -1670,7 +1673,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
    }
 
    int first = tracker == NULL;
-   if (first && (frame->hdr_flags & BUS_F_MORE) != 0 && free_slot)
+   if (first && (frame->hdr_flags & OURO_F_MORE) != 0 && free_slot)
    {
       tracker = free_slot;
       *tracker = (module_fragment_tracker_t){.principal_ref = frame->principal_ref,
@@ -1689,7 +1692,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
       tracker->status = message.status;
    }
 
-   if (first && pattern == BUS_F_REQUEST)
+   if (first && pattern == OURO_F_REQUEST)
    {
       char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
       snprintf(subject, sizeof subject, "%s:%u", name, message.stage_id);
@@ -1702,9 +1705,9 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
          atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
    }
 
-   if ((frame->hdr_flags & BUS_F_MORE) == 0)
+   if ((frame->hdr_flags & OURO_F_MORE) == 0)
    {
-      if (pattern == BUS_F_REPLY)
+      if (pattern == OURO_F_REPLY)
       {
          uint64_t total = tracker ? tracker->body_len : message.body_len;
          uint16_t status = tracker ? tracker->status : message.status;
@@ -1718,7 +1721,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
                   frame->event_kind, stage, (unsigned long long)trace, frame->principal_ref, status,
                   (unsigned long long)total);
          if (persist_or_queue_durable("bus.module.reply", subject,
-                                      status == AIMEE_MODULE_STATUS_OK ? "ok" : "failed",
+                                      status == OURO_MODULE_STATUS_OK ? "ok" : "failed",
                                       detail) > 0)
             atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
       }
@@ -1727,11 +1730,11 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
    }
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (response_len)
       *response_len = 0;
@@ -1742,23 +1745,23 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       /* Logged like every other failure below: a caller that reports "no answer"
        * because the bus is shutting down looks exactly like one whose module
        * refused it. */
-      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_TRANSPORT);
-      return AIMEE_MODULE_CALL_TRANSPORT;
+      obs_bus_log_module_call_failure(event_kind, stage_id, OURO_MODULE_CALL_TRANSPORT);
+      return OURO_MODULE_CALL_TRANSPORT;
    }
    int slot = module_client_acquire(deadline_ns);
    if (slot < 0)
    {
       atomic_fetch_sub(&g.module_callers, 1);
-      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
-      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+      obs_bus_log_module_call_failure(event_kind, stage_id, OURO_MODULE_CALL_DEADLINE_EXCEEDED);
+      return OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   aimee_module_call_result_t result = aimee_module_client_call(
+   ouro_module_call_result_t result = ouro_module_client_call(
        &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
        request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
    module_client_release(slot);
    atomic_fetch_sub(&g.module_callers, 1);
-   if (result != AIMEE_MODULE_CALL_OK)
+   if (result != OURO_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;
 }
@@ -1799,7 +1802,7 @@ int obs_bus_module_available(uint32_t event_kind)
    if (atomic_load_explicit(&g.accepting_calls, memory_order_acquire))
    {
       pthread_mutex_lock(&g.host_lock);
-      available = bus_host_kind_has_server(&g.host, event_kind);
+      available = ouro_host_kind_has_server(&g.host, event_kind);
       pthread_mutex_unlock(&g.host_lock);
    }
    atomic_fetch_sub(&g.module_callers, 1);
@@ -1960,9 +1963,9 @@ int obs_bus_configure_daemon_module_runtime(const char *daemon_name, const char 
       if (g.started)
          rc = -1;
       else
-         sinks.instance_role = strcmp(daemon_name, "server") == 0 ? BUS_INSTANCE_SERVER
-                               : strcmp(daemon_name, "kb") == 0   ? BUS_INSTANCE_KB
-                                                                  : BUS_INSTANCE_UNSET;
+         sinks.instance_role = strcmp(daemon_name, "server") == 0 ? AIMEE_INSTANCE_SERVER
+                               : strcmp(daemon_name, "kb") == 0   ? AIMEE_INSTANCE_KB
+                                                                  : AIMEE_INSTANCE_UNSET;
       pthread_mutex_unlock(&start_lock);
    }
    return rc;
@@ -2019,7 +2022,7 @@ static void leave_emit(void)
  * arena fallback here because there is no payload that could need one; adding one
  * would be unreachable code. A future producer whose payload can genuinely exceed
  * the budget (e.g. MCP tool-call args/results — see the feature tree) uses
- * bus_client_publish_arena over the now-thread-safe arena instead; this module is
+ * ouro_client_publish_arena over the now-thread-safe arena instead; this module is
  * simply not that producer.
  *
  * Publish one already-serialized event of `kind` on the producer ring, under the
@@ -2033,18 +2036,18 @@ static void publish(uint32_t kind, const uint8_t *buf, uint32_t len)
 {
    const struct timespec backoff = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
    pthread_mutex_lock(&g.pub_lock);
-   bus_client_result_t rc = BUS_CLIENT_OK;
+   ouro_client_result_t rc = OURO_CLIENT_OK;
    int ok = 0;
    for (int attempt = 0; attempt < AB_PUB_MAX; attempt++)
    {
-      rc = bus_client_publish(&g.producer, kind, buf, len);
-      if (rc == BUS_CLIENT_OK)
+      rc = ouro_client_publish(&g.producer, kind, buf, len);
+      if (rc == OURO_CLIENT_OK)
       {
          ok = 1;
          atomic_fetch_add_explicit(&g.enqueued, 1, memory_order_relaxed);
          break;
       }
-      if (rc != BUS_CLIENT_WOULD_BLOCK)
+      if (rc != OURO_CLIENT_WOULD_BLOCK)
          break;
       nanosleep(&backoff, NULL);
    }
@@ -2215,14 +2218,14 @@ void obs_bus_stop(void)
    /* The drain is over: nothing else will call, so close the path and wait for
     * anything an external caller still has in flight.
     *
-    * bus_runtime_stop MOVED HERE TOO, and for the same reason as the line below
+    * ouro_runtime_stop MOVED HERE TOO, and for the same reason as the line below
     * it. It stops the listener that services attached peers, so a sink call made
     * during the final drain went out and its reply never came back --
     * DEADLINE_EXCEEDED, two seconds at a time, with the events dropped. The
     * comment it carried ("no new process may receive mappings once shutdown
     * begins") is still true here: nothing has been torn down, and the drain that
     * needed the listener has finished. */
-   bus_runtime_stop(&g.runtime);
+   ouro_runtime_stop(&g.runtime);
    atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
    atomic_store_explicit(&g.module_stop, 1, memory_order_release);
    while (atomic_load(&g.module_callers) > 0)
@@ -2233,12 +2236,12 @@ void obs_bus_stop(void)
       close(g.cap_fd);
       g.cap_fd = -1;
    }
-   bus_capture_free(&g.capture);
-   bus_client_detach(&g.producer);
-   bus_client_detach(&g.consumer);
+   ouro_capture_free(&g.capture);
+   ouro_client_detach(&g.producer);
+   ouro_client_detach(&g.consumer);
    module_clients_destroy();
-   bus_host_destroy(&g.host);
-   bus_runtime_policy_free(&g.runtime_policy);
+   ouro_host_destroy(&g.host);
+   ouro_runtime_policy_free(&g.runtime_policy);
    if (g.durable_head)
    {
       uint64_t pending = g.durable_pending_count;

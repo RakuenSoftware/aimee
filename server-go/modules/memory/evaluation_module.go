@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // EvaluationModule is the production module with caller-supplied test storage
@@ -20,7 +20,7 @@ type EvaluationModule struct {
 	ctx     context.Context
 	backend *postgresDataStore
 	db      store.DB
-	Handler bus.ModuleHandler
+	Handler ring.ModuleHandler
 }
 
 func NewEvaluationModule(ctx context.Context, db store.DB, executor egress.Executor) (*EvaluationModule, error) {
@@ -46,17 +46,17 @@ func (m *EvaluationModule) Call(stage uint32, verb string, request any, target a
 		return err
 	}
 	if stage == StageCommand {
-		raw, err = bus.EncodeCommand(verb, raw)
+		raw, err = ring.EncodeCommand(verb, raw)
 		if err != nil {
 			return err
 		}
 	}
-	raw, status := handler(bus.ModuleInvocation{StageID: stage}, raw)
-	if status != bus.ModuleStatusOK {
+	raw, status := handler(ring.ModuleInvocation{StageID: stage}, raw)
+	if status != ring.ModuleStatusOK {
 		return fmt.Errorf("evaluation %s: owner status %d", verb, status)
 	}
 	if stage == StageCommand {
-		raw, err = bus.DecodeCommandResult(raw)
+		raw, err = ring.DecodeCommandResult(raw)
 		if err != nil {
 			return err
 		}

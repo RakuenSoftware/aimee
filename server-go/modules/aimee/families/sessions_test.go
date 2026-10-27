@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a sessions-shaped fake ---------------------------------------------------
@@ -144,8 +144,8 @@ func sessCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	response, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)
@@ -186,8 +186,8 @@ func TestRetiredLegacySessionOperationsRefuseBeforeStorage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reply, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: principal}, frame)
-			if status != bus.ModuleStatusInvalidRequest || len(reply) != 0 || len(db.executed) != 0 {
+			reply, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: principal}, frame)
+			if status != ring.ModuleStatusInvalidRequest || len(reply) != 0 || len(db.executed) != 0 {
 				t.Fatalf("retired op %d principal %d reached storage or acquired a reply: status=%d reply=%x statements=%v", test.id, principal, status, reply, db.executed)
 			}
 		}

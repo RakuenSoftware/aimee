@@ -12,10 +12,10 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	memory "github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -45,8 +45,8 @@ func TestDelegateExperienceHostCustodyAndCanonicalSchema(t *testing.T) {
 	for _, operation := range []uint32{opDelegateExecutionExperienceRecord, opDelegateExecutionTerminalLookup} {
 		frame, _ := wire.EncodeFields(operation, []string{"operator", "{}"})
 		other := newDelDB()
-		_, wireStatus := Telemetry.Handler(other)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 8}, frame)
-		if wireStatus != bus.ModuleStatusInvalidRequest || len(other.executed) != 0 {
+		_, wireStatus := Telemetry.Handler(other)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 8}, frame)
+		if wireStatus != ring.ModuleStatusInvalidRequest || len(other.executed) != 0 {
 			t.Fatal("foreign module publisher/lookup", operation, wireStatus)
 		}
 	}
@@ -274,11 +274,11 @@ func TestDelegateExperiencePostgresNextRunReplayAndSourceFences(t *testing.T) {
 	runtime := func(args map[string]any) map[string]any {
 		t.Helper()
 		body, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", body)
-		response, status := handler(bus.ModuleInvocation{StageID: memory.StageCommand}, frame)
-		body, err := bus.DecodeCommandResult(response)
+		frame, _ := ring.EncodeCommand("runtime", body)
+		response, status := handler(ring.ModuleInvocation{StageID: memory.StageCommand}, frame)
+		body, err := ring.DecodeCommandResult(response)
 		var out map[string]any
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(body, &out) != nil {
+		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(body, &out) != nil {
 			t.Fatal(status, err, string(response))
 		}
 		return out

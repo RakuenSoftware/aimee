@@ -1,5 +1,5 @@
 #include <aimee/benchmarks/module_api.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
 #include <math.h>
 #include <stdlib.h>
@@ -58,20 +58,20 @@ static double benchmark_percentile(const double *sorted, uint32_t count, double 
    return sorted[index < count ? index : count - 1u];
 }
 
-static aimee_module_status_t benchmark_handle_latency(const aimee_module_invocation_t *invocation,
-                                                      const uint8_t *request_body,
-                                                      uint32_t request_len, uint8_t *response_body,
-                                                      uint32_t response_capacity,
-                                                      uint32_t *response_len)
+static ouro_module_status_t benchmark_handle_latency(const ouro_module_invocation_t *invocation,
+                                                     const uint8_t *request_body,
+                                                     uint32_t request_len, uint8_t *response_body,
+                                                     uint32_t response_capacity,
+                                                     uint32_t *response_len)
 {
    double latencies[AIMEE_BENCHMARKS_MAX_LATENCIES];
    uint32_t count = 0;
    if (response_capacity < AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN ||
        aimee_benchmarks_latency_request_decode(request_body, request_len, latencies,
                                                AIMEE_BENCHMARKS_MAX_LATENCIES, &count) != 0)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
 
    qsort(latencies, count, sizeof(latencies[0]), benchmark_compare_latency);
    aimee_benchmarks_latency_summary_t summary = {
@@ -83,19 +83,19 @@ static aimee_module_status_t benchmark_handle_latency(const aimee_module_invocat
        .queries = count,
    };
    if (aimee_benchmarks_latency_response_encode(&summary, response_body, response_capacity) != 0)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    *response_len = AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
-aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
-                                           const uint8_t *request_body, uint32_t request_len,
-                                           uint8_t *response_body, uint32_t response_capacity,
-                                           uint32_t *response_len, void *user_data)
+ouro_module_status_t aimee_module_handler(const ouro_module_invocation_t *invocation,
+                                          const uint8_t *request_body, uint32_t request_len,
+                                          uint8_t *response_body, uint32_t response_capacity,
+                                          uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    if (!invocation || !response_len)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
    if (invocation->stage_id == AIMEE_BENCHMARKS_STAGE_LATENCY)
       return benchmark_handle_latency(invocation, request_body, request_len, response_body,
                                       response_capacity, response_len);
@@ -108,14 +108,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        aimee_benchmarks_request_decode(request_body, request_len, retrieved,
                                        AIMEE_BENCHMARKS_MAX_RESULTS, &retrieved_count, relevant,
                                        AIMEE_BENCHMARKS_MAX_RESULTS, &relevant_count, &k) != 0)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
 
    aimee_benchmarks_ir_scores_t scores;
    benchmark_score(retrieved, retrieved_count, relevant, relevant_count, k, &scores);
    if (aimee_benchmarks_response_encode(&scores, response_body, response_capacity) != 0)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    *response_len = AIMEE_BENCHMARKS_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }

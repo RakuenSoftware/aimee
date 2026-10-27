@@ -15,7 +15,7 @@
  * than merely passing on the good one. */
 #include "peer_client.h"
 
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 
 #include <assert.h>
 #include <stdint.h>
@@ -26,7 +26,7 @@
 /* ── the scripted module ──────────────────────────────────────────────────── */
 
 static int g_available = 1;
-static aimee_module_call_result_t g_transport = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t g_transport = OURO_MODULE_CALL_OK;
 static uint8_t g_reply[64 * 1024];
 static uint32_t g_reply_len;
 /* What the client actually put on the wire, kept so a test can assert the
@@ -41,11 +41,11 @@ int obs_bus_module_available(uint32_t event_kind)
    return g_available;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)trace_id;
    (void)deadline_ns;
@@ -55,13 +55,13 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    g_seen_stage = stage_id;
    g_seen_len = request_len < sizeof(g_seen) ? request_len : (uint32_t)sizeof(g_seen);
    memcpy(g_seen, request_body, g_seen_len);
-   if (g_transport != AIMEE_MODULE_CALL_OK)
+   if (g_transport != OURO_MODULE_CALL_OK)
       return g_transport;
    if (g_reply_len > response_capacity)
-      return AIMEE_MODULE_CALL_INTERNAL;
+      return OURO_MODULE_CALL_INTERNAL;
    memcpy(response_body, g_reply, g_reply_len);
    *response_len = g_reply_len;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 /* ── frame building, for the replies the module is told to give ───────────── */
@@ -145,7 +145,7 @@ static void ok(int cond, const char *what)
 static void reset(void)
 {
    g_available = 1;
-   g_transport = AIMEE_MODULE_CALL_OK;
+   g_transport = OURO_MODULE_CALL_OK;
    g_reply_len = 0;
    g_seen_len = 0;
 }
@@ -482,21 +482,21 @@ static void test_transport_names(void)
    g_available = 0;
    transport = -1;
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_CAPABILITY_ABSENT,
+          transport == OURO_MODULE_CALL_CAPABILITY_ABSENT,
       "nothing serving the stage reports capability_absent, not a bare failure");
 
    reset();
-   g_transport = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   g_transport = OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    transport = -1;
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED,
+          transport == OURO_MODULE_CALL_DEADLINE_EXCEEDED,
       "a module that ran out of time reports deadline_exceeded");
 
    reset();
-   g_transport = AIMEE_MODULE_CALL_CAPABILITY_DENIED;
+   g_transport = OURO_MODULE_CALL_CAPABILITY_DENIED;
    transport = -1;
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_CAPABILITY_DENIED,
+          transport == OURO_MODULE_CALL_CAPABILITY_DENIED,
       "a grant that denied the call reports capability_denied, not 'unreachable'");
 
    /* A reply that arrived and could not be read is a PROTOCOL disagreement, and
@@ -506,7 +506,7 @@ static void test_transport_names(void)
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH - 1);
    transport = -1;
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_PROTOCOL,
+          transport == OURO_MODULE_CALL_PROTOCOL,
       "a reply of the wrong shape reports protocol, not an absent module");
 
    /* A DOMAIN refusal must leave the transport code alone: the call reached the
@@ -515,14 +515,14 @@ static void test_transport_names(void)
    reply_set(PEER_CLIENT_STATUS_DENIED, NULL, 0);
    transport = -1;
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_REFUSED &&
-          transport == AIMEE_MODULE_CALL_OK,
+          transport == OURO_MODULE_CALL_OK,
       "a refusal leaves the transport code OK: the call was judged, not lost");
 
    /* And the names are distinct. A table where two codes share a string is a
       table that cannot tell them apart in the one place a human reads it. */
-   const int codes[] = {AIMEE_MODULE_CALL_CAPABILITY_ABSENT, AIMEE_MODULE_CALL_CAPABILITY_DENIED,
-                        AIMEE_MODULE_CALL_DEADLINE_EXCEEDED, AIMEE_MODULE_CALL_INTERNAL,
-                        AIMEE_MODULE_CALL_PROTOCOL,          AIMEE_MODULE_CALL_TRANSPORT};
+   const int codes[] = {OURO_MODULE_CALL_CAPABILITY_ABSENT, OURO_MODULE_CALL_CAPABILITY_DENIED,
+                        OURO_MODULE_CALL_DEADLINE_EXCEEDED, OURO_MODULE_CALL_INTERNAL,
+                        OURO_MODULE_CALL_PROTOCOL,          OURO_MODULE_CALL_TRANSPORT};
    int distinct = 1;
    for (size_t i = 0; i < sizeof codes / sizeof codes[0]; i++)
       for (size_t j = i + 1; j < sizeof codes / sizeof codes[0]; j++)
@@ -659,13 +659,15 @@ static void test_discarded_rows_and_literal_text(void)
    row[7] = "invalid-hop";
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
-   ok(peer_client_send("a", "b", "t", NULL, 0, NULL, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_PROTOCOL,
+   ok(peer_client_send("a", "b", "t", NULL, 0, NULL, &status, &transport) ==
+              PEER_CLIENT_TRANSPORT &&
+          transport == OURO_MODULE_CALL_PROTOCOL,
       "discarded send output still validates row fields");
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
-   ok(peer_client_reply("b", "id|corr|conv|a|a|0", "t", NULL, &status, &transport) == PEER_CLIENT_TRANSPORT &&
-          transport == AIMEE_MODULE_CALL_PROTOCOL,
+   ok(peer_client_reply("b", "id|corr|conv|a|a|0", "t", NULL, &status, &transport) ==
+              PEER_CLIENT_TRANSPORT &&
+          transport == OURO_MODULE_CALL_PROTOCOL,
       "discarded reply output still validates row fields");
 }
 

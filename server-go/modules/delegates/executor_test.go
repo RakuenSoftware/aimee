@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type fixedExecutor struct {
@@ -59,8 +59,8 @@ func (e *fixedExecutor) Execute(_ context.Context, request delegatecontract.Invo
 func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
 	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "done", Output: canonical.TextResponse("complete")}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "implement", Persona: "engineer", Input: canonical.TaskRequest("fixture", "do it")})
-	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
-	if status != bus.ModuleStatusOK {
+	reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageInvoke}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	if executor.request.Role != "code" {
@@ -76,8 +76,8 @@ func TestExecutionStageAppliesProducerDeadline(t *testing.T) {
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "review",
 		Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 20})
 	started := time.Now()
-	reply, status := NewHandler(blockingExecutor{})(bus.ModuleInvocation{StageID: StageInvoke}, request)
-	if status != bus.ModuleStatusOK || time.Since(started) > time.Second {
+	reply, status := NewHandler(blockingExecutor{})(ring.ModuleInvocation{StageID: StageInvoke}, request)
+	if status != ring.ModuleStatusOK || time.Since(started) > time.Second {
 		t.Fatalf("status = %d elapsed = %s", status, time.Since(started))
 	}
 	var result delegatecontract.InvocationResult
@@ -96,7 +96,7 @@ func TestExecutionStageRejectsMalformedTermination(t *testing.T) {
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
 		Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect")})
-	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
+	if reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageInvoke}, request); status != ring.ModuleStatusInternal || reply != nil {
 		t.Fatalf("malformed termination crossed the wire: status=%d reply=%s", status, reply)
 	}
 }
@@ -110,7 +110,7 @@ func TestExecutionStageRejectsTerminationWithMismatchedExecutionCap(t *testing.T
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
 		Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 1000})
-	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
+	if reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageInvoke}, request); status != ring.ModuleStatusInternal || reply != nil {
 		t.Fatalf("termination with a mismatched execution cap crossed the wire: status=%d reply=%s", status, reply)
 	}
 }
@@ -122,8 +122,8 @@ func TestGroupPlanStageCanonicalizesAndReturnsAssignments(t *testing.T) {
 			{Role: "reviewer", Persona: "security"},
 			{Role: "review", Persona: "qa"},
 		}})
-	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageGroupPlan}, request)
-	if status != bus.ModuleStatusOK {
+	reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageGroupPlan}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	if len(executor.seats) != 2 || executor.seats[0].Role != "review" {
@@ -140,9 +140,9 @@ func TestGroupPlanStagePreservesTypedCapacityFailure(t *testing.T) {
 	executor := &planningExecutor{err: fmt.Errorf("%w: saturated", delegatecontract.ErrDelegateCapacity)}
 	request, _ := json.Marshal(delegatecontract.GroupPlan{Version: delegatecontract.WireVersion,
 		Seats: []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}}})
-	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageGroupPlan}, request)
+	reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageGroupPlan}, request)
 	var result delegatecontract.GroupPlanResult
-	if status != bus.ModuleStatusOK || json.Unmarshal(reply, &result) != nil ||
+	if status != ring.ModuleStatusOK || json.Unmarshal(reply, &result) != nil ||
 		!delegatecontract.IsCapacityBackpressure(errors.New(result.Error)) || len(result.Models) != 0 {
 		t.Fatalf("capacity failure did not cross the module boundary: status=%d reply=%q", status, reply)
 	}
@@ -152,8 +152,8 @@ func TestGroupPlanStageKeepsNonCapacityFailureAsTransportError(t *testing.T) {
 	executor := &planningExecutor{err: errors.New("registry unavailable")}
 	request, _ := json.Marshal(delegatecontract.GroupPlan{Version: delegatecontract.WireVersion,
 		Seats: []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}}})
-	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageGroupPlan}, request)
-	if status != bus.ModuleStatusInternal || len(reply) != 0 {
+	reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageGroupPlan}, request)
+	if status != ring.ModuleStatusInternal || len(reply) != 0 {
 		t.Fatalf("non-capacity planner failure became a domain reply: status=%d reply=%q", status, reply)
 	}
 }
@@ -490,8 +490,8 @@ func TestExecutionStagePreservesHostTurnCapWire(t *testing.T) {
 				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
 				Input: canonical.TaskRequest("fixture", "cross the wire"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
-			reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
-			if status != bus.ModuleStatusOK {
+			reply, status := NewHandler(executor)(ring.ModuleInvocation{StageID: StageInvoke}, request)
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("wire status = %d", status)
 			}
 			var result delegatecontract.InvocationResult

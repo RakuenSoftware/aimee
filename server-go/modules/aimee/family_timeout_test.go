@@ -2,7 +2,7 @@ package aimee
 
 import (
 	"context"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 	"time"
 )
@@ -27,13 +27,13 @@ func TestOperationBudgetPreservesOrdinaryAndExpiredDeadlines(t *testing.T) {
 			return StatusOK, nil, nil
 		}}}}
 		request := []byte{1, 0, 0, 0, 0, 0, 0, 0}
-		_, status := f.Handler(&fakeDB{})(bus.ModuleInvocation{StageID: 1}, request)
-		if status != bus.ModuleStatusOK || !called {
+		_, status := f.Handler(&fakeDB{})(ring.ModuleInvocation{StageID: 1}, request)
+		if status != ring.ModuleStatusOK || !called {
 			t.Fatal(status, called)
 		}
 		called = false
-		_, status = f.Handler(&fakeDB{})(bus.ModuleInvocation{StageID: 1, DeadlineNS: 1}, request)
-		if status != bus.ModuleStatusCancelled || called {
+		_, status = f.Handler(&fakeDB{})(ring.ModuleInvocation{StageID: 1, DeadlineNS: 1}, request)
+		if status != ring.ModuleStatusCancelled || called {
 			t.Fatal("expired caller deadline extended", status, called)
 		}
 	}

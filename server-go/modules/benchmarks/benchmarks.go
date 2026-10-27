@@ -7,8 +7,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/retrievalmetrics"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 	latencyResponseLen          = 56
 )
 
-func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleScore(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
@@ -42,17 +42,17 @@ func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 		binary.LittleEndian.Uint32(request[12:16]) > maxResults ||
 		binary.LittleEndian.Uint32(request[16:20]) > maxResults ||
 		binary.LittleEndian.Uint32(request[20:24]) != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	k := int(binary.LittleEndian.Uint32(request[8:12]))
 	retrievedCount := int(binary.LittleEndian.Uint32(request[12:16]))
 	relevantCount := int(binary.LittleEndian.Uint32(request[16:20]))
 	if !modulewire.ZeroPadding(request[requestRetrievedOff+retrievedCount*8:requestRelevantOff]) ||
 		!modulewire.ZeroPadding(request[requestRelevantOff+relevantCount*8:]) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	retrieved := make([]int64, retrievedCount)
@@ -72,7 +72,7 @@ func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 	binary.LittleEndian.PutUint64(response[8:16], math.Float64bits(mrr))
 	binary.LittleEndian.PutUint64(response[16:24], math.Float64bits(ndcg))
 	binary.LittleEndian.PutUint64(response[24:32], math.Float64bits(recall))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func nearestRank(sorted []float64, percentile float64) float64 {
@@ -80,29 +80,29 @@ func nearestRank(sorted []float64, percentile float64) float64 {
 	return sorted[index]
 }
 
-func handleLatency(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleLatency(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != latencyRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != latencyRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
 		binary.LittleEndian.Uint32(request[8:12]) == 0 ||
 		binary.LittleEndian.Uint32(request[8:12]) > maxLatencies ||
 		binary.LittleEndian.Uint32(request[12:16]) != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
 	if !modulewire.ZeroPadding(request[latencyValuesOff+count*8:]) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	latencies := make([]float64, count)
 	for index := range latencies {
 		offset := latencyValuesOff + index*8
 		latencies[index] = math.Float64frombits(binary.LittleEndian.Uint64(request[offset : offset+8]))
 		if math.IsNaN(latencies[index]) || math.IsInf(latencies[index], 0) || latencies[index] < 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	sort.Float64s(latencies)
@@ -121,17 +121,17 @@ func handleLatency(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 		offset := 16 + index*8
 		binary.LittleEndian.PutUint64(response[offset:offset+8], math.Float64bits(value))
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // Handle calculates deterministic benchmark summaries for bounded inputs.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	switch invocation.StageID {
 	case StageRun:
 		return handleScore(invocation, request)
 	case StageLatency:
 		return handleLatency(invocation, request)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 }

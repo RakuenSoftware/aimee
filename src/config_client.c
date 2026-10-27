@@ -22,24 +22,24 @@ static _Thread_local char g_config_client_error[160];
 __attribute__((weak)) cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id,
                                                           cJSON *request, size_t max_body,
                                                           int timeout_ms,
-                                                          aimee_module_call_result_t *result)
+                                                          ouro_module_call_result_t *result)
 {
    return aimee_module_json_call(event_kind, stage_id, request, max_body, timeout_ms, result);
 }
 
-static const char *config_client_result_name(aimee_module_call_result_t result)
+static const char *config_client_result_name(ouro_module_call_result_t result)
 {
    switch (result)
    {
-   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+   case OURO_MODULE_CALL_CAPABILITY_ABSENT:
       return "config module unavailable";
-   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+   case OURO_MODULE_CALL_DEADLINE_EXCEEDED:
       return "config module timeout";
-   case AIMEE_MODULE_CALL_CANCELLED:
+   case OURO_MODULE_CALL_CANCELLED:
       return "config module call cancelled";
-   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+   case OURO_MODULE_CALL_INVALID_REQUEST:
       return "config module rejected request";
-   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+   case OURO_MODULE_CALL_RESPONSE_TOO_LARGE:
       return "config module response too large";
    default:
       return "config module transport failure";
@@ -115,7 +115,7 @@ static int config_client_fetch_locked(void)
       config_client_error("cannot allocate config request");
       return -1;
    }
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response =
        config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
                                     CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
@@ -168,7 +168,7 @@ int config_client_changed(void)
       cJSON_Delete(request);
       return -1;
    }
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response =
        config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
                                     CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
@@ -327,7 +327,7 @@ int config_client_set_value(const char *key, cJSON *value)
       return -1;
    }
    cJSON_AddItemToObject(request, "value", value);
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response =
        config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
                                     CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
@@ -377,7 +377,7 @@ cJSON *config_client_operation_response(const char *operation, cJSON *value)
    }
    if (value)
       cJSON_AddItemToObject(request, "value", value);
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response =
        config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
                                     CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);

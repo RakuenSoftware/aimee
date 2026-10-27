@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Bus identity for this process, matching its generated grant. The contract
@@ -43,11 +43,11 @@ type busStageCaller interface {
 // NewBusReviewer attaches to the daemon's module bus as the WFE principal.
 func NewBusReviewer(ctx context.Context, socketPath string, principalClass, principalRef uint32,
 	timeout time.Duration) (*BusReviewer, error) {
-	client, err := bus.ConnectClient(ctx, socketPath, principalClass, principalRef)
+	client, err := ring.ConnectClient(ctx, socketPath, principalClass, principalRef)
 	if err != nil {
 		return nil, fmt.Errorf("attach to the module bus: %w", err)
 	}
-	caller, err := bus.NewModuleCaller(client)
+	caller, err := ring.NewModuleCaller(client)
 	if err != nil {
 		return nil, err
 	}

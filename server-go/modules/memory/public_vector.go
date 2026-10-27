@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleVectorCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	switch verb {
 	case "reindex":
@@ -18,7 +18,7 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return commandResult(commandError("invalid_argument", "embedder version exceeds bounds"))
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	commandScope(args, &request)
 	if verb == "rebuild" && !request.IncludeAll {
@@ -26,12 +26,12 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	body, _ := json.Marshal(request)
 	reply, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(reply, &response) != nil || response.Count == nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok", "rebuilt": *response.Count}
 	if verb == "rebuild" {
@@ -40,7 +40,7 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 	return commandResult(result)
 }
 
-func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRepairCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	var failedOnly, reset bool
 	_ = json.Unmarshal(args["failed_only"], &failedOnly)
 	_ = json.Unmarshal(args["reset_stuck"], &reset)
@@ -63,32 +63,32 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.Operation, request.Version = "vector-embed-prepare", strings.TrimSpace(args.stringOr("version", ""))
 	}
 	commandScope(args, &request)
-	call := func(request DataRequest) (DataResponse, bus.ModuleStatus) {
+	call := func(request DataRequest) (DataResponse, ring.ModuleStatus) {
 		body, _ := json.Marshal(request)
 		reply, status := handleData(options, invocation, body)
 		var response DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(reply, &response) != nil {
-			status = bus.ModuleStatusInternal
+		if status == ring.ModuleStatusOK && json.Unmarshal(reply, &response) != nil {
+			status = ring.ModuleStatusInternal
 		}
 		return response, status
 	}
 	prepared, status := call(request)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	if reset {
 		if prepared.Count == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "mode": "reset_stuck", "reset_stuck": *prepared.Count})
 	}
 	backend, ok := options.data.(*postgresDataStore)
 	if !ok {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	command, err := backend.embeddingCommand(args.stringOr("embedding_command", ""))
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	mode := "all"
 	if request.ID > 0 {
@@ -99,17 +99,17 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 	repaired, failed := 0, 0
 	for _, id := range prepared.IDs {
 		if invocation.Cancelled() || invocation.Remaining(embedHTTPTimeout()) <= 0 {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		recordRequest := request
 		recordRequest.Limit = 0
 		recordRequest.Operation, recordRequest.ID, recordRequest.Command, recordRequest.Dimension = "vector-repair-record", id, command, prepared.Dimension
 		result, status := call(recordRequest)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		if result.Embedding == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if result.Embedding.Embedded {
 			repaired++

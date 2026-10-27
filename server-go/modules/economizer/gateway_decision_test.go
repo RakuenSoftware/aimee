@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The gateway seam's apply/bypass verdict is decided in the module, so these
@@ -20,7 +20,7 @@ func TestReduceStageDecidesOnTheGatewaySeam(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if !resp.Mutated || resp.Reason != "reduced" {
@@ -42,7 +42,7 @@ func TestReduceStageLeavesTheDelegateSeamUndecided(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if resp.Bypass != "" {
@@ -59,7 +59,7 @@ func TestReduceStageBypassesWhenNothingWasApplied(t *testing.T) {
 		HistoryFold:  true,
 		MeasureOnly:  true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if resp.Mutated {
@@ -98,8 +98,8 @@ func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, status := NewHandler()(bus.ModuleInvocation{StageID: StageReduce}, body)
-	if status != bus.ModuleStatusOK {
+	out, status := NewHandler()(ring.ModuleInvocation{StageID: StageReduce}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var resp ReduceResponse

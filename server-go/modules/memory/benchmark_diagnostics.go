@@ -7,30 +7,30 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const benchmarkReportLimit = 1 << 20
 
 // All benchmark reads use the ordinary owner path, including visible-scope
 // fusion. A missing host context must never imply IncludeAll.
-func benchmarkRead(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, request DataRequest) (DataResponse, bus.ModuleStatus) {
+func benchmarkRead(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs, request DataRequest) (DataResponse, ring.ModuleStatus) {
 	request.Project, request.Workspace = args.stringOr("project", ""), args.stringOr("workspace", "")
 	request.IncludeAll = args.boolean("include_all")
 	if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
-		return DataResponse{}, bus.ModuleStatusInvalidRequest
+		return DataResponse{}, ring.ModuleStatusInvalidRequest
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
-		return DataResponse{}, bus.ModuleStatusInvalidRequest
+		return DataResponse{}, ring.ModuleStatusInvalidRequest
 	}
 	encoded, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return DataResponse{}, status
 	}
 	var response DataResponse
 	if json.Unmarshal(encoded, &response) != nil {
-		return DataResponse{}, bus.ModuleStatusInternal
+		return DataResponse{}, ring.ModuleStatusInternal
 	}
 	// Get is a visible-row lookup; unlike Search it does not impose an exact
 	// primary scope. A benchmark's explicit scope must also constrain expected
@@ -38,7 +38,7 @@ func benchmarkRead(options handlerOptions, invocation bus.ModuleInvocation, args
 	if request.Operation == "get" && (request.Scope.Type != "" || request.Scope.Value != "") {
 		exact, err := normalizeScope(options.placement, request.Scope)
 		if err != nil {
-			return DataResponse{}, bus.ModuleStatusInvalidRequest
+			return DataResponse{}, ring.ModuleStatusInvalidRequest
 		}
 		visible := response.Records[:0]
 		for _, record := range response.Records {
@@ -75,22 +75,22 @@ type benchmarkHardNegative struct {
 	Candidates  []benchmarkCandidate `json:"top_candidates"`
 }
 
-func handleBenchmarkHardNegative(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleBenchmarkHardNegative(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	var fields [6]string
 	for i, name := range []string{"suite", "task", "query", "expected", "got", "error"} {
 		var ok bool
 		fields[i], ok = args.stringValue(name)
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	artifact := benchmarkHardNegative{TS: time.Now().UTC().Format(time.RFC3339), Suite: fields[0], Task: fields[1], Query: fields[2], Expected: fields[3], Got: fields[4], Error: fields[5], Candidates: []benchmarkCandidate{}}
 	if artifact.Query != "" {
 		response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: artifact.Query, Limit: 5})
-		if status == bus.ModuleStatusInvalidRequest {
+		if status == ring.ModuleStatusInvalidRequest {
 			return nil, status
 		}
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			// Retrieval failure is part of the artifact, never an empty successful search.
 			artifact.MemoryError = "memory retrieval index unavailable"
 		} else {
@@ -101,7 +101,7 @@ func handleBenchmarkHardNegative(options handlerOptions, invocation bus.ModuleIn
 	}
 	line, err := json.Marshal(artifact)
 	if err != nil || len(line) > benchmarkReportLimit {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	// Transport a string: native JSON libraries must not round numeric IDs by
 	// decoding and re-serializing the artifact.
@@ -148,14 +148,14 @@ type benchmarkMiss struct {
 	Text   string `json:"text"`
 }
 
-func handleBenchmarkMiss(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleBenchmarkMiss(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, ok := args.stringValue("query")
 	expectedIDs, validIDs := benchmarkExpectedIDs(args, 128)
 	if !ok || !validIDs {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: query, Limit: 20})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	result := benchmarkMiss{Status: "ok", Bucket: "hit"}
@@ -179,7 +179,7 @@ func handleBenchmarkMiss(options handlerOptions, invocation bus.ModuleInvocation
 		// Get distinguishes a hidden/absent row from a failed read. Use the same
 		// diagnostic computation as Explain, without the public double-ID adapter.
 		record, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "get", ID: expectedIDs[0]})
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		if len(record.Records) == 1 {
@@ -207,7 +207,7 @@ func handleBenchmarkMiss(options handlerOptions, invocation bus.ModuleInvocation
 		}
 		result.Text = text.String()
 		if len(result.Text) > benchmarkReportLimit {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 	}
 	return commandResult(result)

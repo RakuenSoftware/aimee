@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // EVENT KINDS ARE PER-INSTANCE, NOT PER-PACKAGE.
 //
-// bus_host_serve_kind() (core/event_bus/bus_route.c:109) binds one event kind to
+// ouro_host_serve_kind() (ouroboros-ring c/src/route.c) binds one event kind to
 // exactly ONE serving slot and REFUSES a second module that tries to serve the
 // same kind. So package-level EventInvoke/EventDeclareCommands constants would
 // mean the first MCP instance to attach wins and every other one is rejected --
@@ -62,7 +62,7 @@ import (
 // with it. Two allocation authorities for one namespace is the defect; this has
 // one.
 //
-// The ceiling that actually binds is BUS_HOST_MAX_KINDS: 256 kinds interned per
+// The ceiling that actually binds is OURO_HOST_MAX_KINDS: 256 kinds interned per
 // host, shared with every other module, so at most ~128 instances can attach
 // anywhere. The ref band below is wider than that ceiling on purpose, so the
 // band is never the binding constraint.
@@ -197,15 +197,15 @@ func (m *Module) session() *Client {
 	return m.client
 }
 
-// Handle dispatches a stage call. It is the bus.ModuleHandler for this module.
-func (m *Module) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+// Handle dispatches a stage call. It is the ring.ModuleHandler for this module.
+func (m *Module) Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	switch invocation.StageID {
 	case StageDeclareCommands:
 		return m.handleDeclareCommands(invocation, request)
 	case StageInvoke:
 		return m.handleInvoke(invocation, request)
 	}
-	return nil, bus.ModuleStatusInvalidRequest
+	return nil, ring.ModuleStatusInvalidRequest
 }
 
 // handleDeclareCommands answers with the live plugin's tools projected onto
@@ -217,20 +217,20 @@ func (m *Module) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte
 // be read as "the module is broken" when the truth is "this plugin currently
 // offers nothing", and the registry would keep stale commands that answer
 // CapabilityAbsent instead of dropping them.
-func (m *Module) handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func (m *Module) handleDeclareCommands(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if !validDeclareRequest(request) {
 		// Refuse rather than answer a request we did not understand: a partial
 		// command surface is invisible, reading as "aimee cannot do that"
 		// rather than as an error.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	// Apply an admission verdict, if one rode along with this request.
 	if verdict, digest, ok := parseAdmission(request); ok {
-		if status := m.applyAdmission(invocation.TraceID, verdict, digest); status != bus.ModuleStatusOK {
+		if status := m.applyAdmission(invocation.TraceID, verdict, digest); status != ring.ModuleStatusOK {
 			return nil, status
 		}
 	}
@@ -245,9 +245,9 @@ func (m *Module) handleDeclareCommands(invocation bus.ModuleInvocation, request 
 		argv := append([]string(nil), m.pendingArgv...)
 		m.mu.RUnlock()
 		if pending {
-			return EncodePending(argv), bus.ModuleStatusOK
+			return EncodePending(argv), ring.ModuleStatusOK
 		}
-		return EncodeCommands(nil), bus.ModuleStatusOK
+		return EncodeCommands(nil), ring.ModuleStatusOK
 	}
 
 	// ASK the plugin, do not trust the cache.
@@ -270,7 +270,7 @@ func (m *Module) handleDeclareCommands(invocation bus.ModuleInvocation, request 
 		// handler's -- it is not implemented, so a plugin that comes back needs
 		// its module restarted.
 		m.Detach()
-		return EncodeCommands(nil), bus.ModuleStatusOK
+		return EncodeCommands(nil), ring.ModuleStatusOK
 	}
 
 	m.mu.RLock()
@@ -284,7 +284,7 @@ func (m *Module) handleDeclareCommands(invocation bus.ModuleInvocation, request 
 		log.Printf("mcp/%s: %d tool(s) not declared (name collision, unrepresentable name, or above the %s ceiling): %v",
 			m.group, len(skipped), ceiling, skipped)
 	}
-	return EncodeCommands(commands), bus.ModuleStatusOK
+	return EncodeCommands(commands), ring.ModuleStatusOK
 }
 
 // SetPending records the plugin this instance should run once admitted.
@@ -316,25 +316,25 @@ func (m *Module) Refused() bool {
 }
 
 // applyAdmission acts on a verdict from the daemon, exactly once.
-func (m *Module) applyAdmission(traceID uint64, verdict uint32, digest [32]byte) bus.ModuleStatus {
+func (m *Module) applyAdmission(traceID uint64, verdict uint32, digest [32]byte) ring.ModuleStatus {
 	m.mu.Lock()
 	if m.decided || len(m.pendingArgv) == 0 {
 		// Nothing outstanding. A repeat verdict is not an error -- the daemon
 		// refreshes on a timer and may still be carrying the last one.
 		m.mu.Unlock()
-		return bus.ModuleStatusOK
+		return ring.ModuleStatusOK
 	}
 	// The verdict is bound to the argv that was scanned. A mismatch means the
 	// two sides disagree about what is being admitted, and the only safe
 	// reading of that is "do not run it".
 	if ArgvDigest(m.pendingArgv) != digest {
 		m.mu.Unlock()
-		return bus.ModuleStatusInvalidRequest
+		return ring.ModuleStatusInvalidRequest
 	}
 	if verdict != AdmitAllow {
 		m.decided, m.refused = true, true
 		m.mu.Unlock()
-		return bus.ModuleStatusOK
+		return ring.ModuleStatusOK
 	}
 	argv := append([]string(nil), m.pendingArgv...)
 	cwd := m.pendingCwd
@@ -350,10 +350,10 @@ func (m *Module) applyAdmission(traceID uint64, verdict uint32, digest [32]byte)
 		// Admitted but unable to start. Not a refusal -- the gate said yes --
 		// so leave it decided and command-less rather than pretending it was
 		// blocked, which would misattribute the failure in the audit trail.
-		return bus.ModuleStatusOK
+		return ring.ModuleStatusOK
 	}
 	m.Attach(client)
-	return bus.ModuleStatusOK
+	return ring.ModuleStatusOK
 }
 
 // SSEPrefix marks a pending "argv" as a remote endpoint rather than a command.
@@ -414,30 +414,30 @@ func handshake(transport Transport) (*Client, error) {
 //
 // The body is the plugin's MCP result object, passed through unchanged: this
 // module translates addressing, not payloads.
-func (m *Module) handleInvoke(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func (m *Module) handleInvoke(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < invokeRequestHeader ||
 		binary.LittleEndian.Uint32(request[0:4]) != invokeRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	verbLen := int(binary.LittleEndian.Uint16(request[8:10]))
 	argsLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if verbLen == 0 || verbLen > verbMax || argsLen > argsMax ||
 		invokeRequestHeader+verbLen+argsLen != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	verb := string(request[invokeRequestHeader : invokeRequestHeader+verbLen])
 	args := request[invokeRequestHeader+verbLen:]
 	if argsLen > 0 && !json.Valid(args) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	client := m.session()
 	if client == nil || !client.Ready() {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 
 	// Resolve the registry verb back to the plugin's own tool name. The verb
@@ -445,22 +445,22 @@ func (m *Module) handleInvoke(invocation bus.ModuleInvocation, request []byte) (
 	// plugin only answers to its original one.
 	toolName, ok := m.resolveTool(client, verb)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	if invocation.Remaining(callTimeout) <= 0 {
-		return nil, bus.ModuleStatusDeadlineExceeded
+		return nil, ring.ModuleStatusDeadlineExceeded
 	}
 	result, err := client.CallTool(toolName, json.RawMessage(args))
 	if err != nil {
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		// The plugin IS attached -- it just failed this call, or the transport
 		// broke mid-call. That is Internal, not CapabilityAbsent: the latter
 		// says "this module cannot do that at all", which would invite the
 		// caller to stop trying rather than retry a transient failure.
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 
 	out := make([]byte, invokeResponseHeader+len(result))
@@ -468,7 +468,7 @@ func (m *Module) handleInvoke(invocation bus.ModuleInvocation, request []byte) (
 	binary.LittleEndian.PutUint32(out[4:8], wireVersion)
 	binary.LittleEndian.PutUint32(out[8:12], uint32(len(result)))
 	copy(out[invokeResponseHeader:], result)
-	return out, bus.ModuleStatusOK
+	return out, ring.ModuleStatusOK
 }
 
 // resolveTool maps a normalized registry verb back to the plugin's tool name.

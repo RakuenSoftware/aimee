@@ -3,9 +3,9 @@ package memory
 import (
 	"context"
 	"errors"
-	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 	"time"
 )
@@ -17,9 +17,9 @@ func TestMemoryStoreContractUsesExistingDataAPI(t *testing.T) {
 		if event != EventData || stage != StageData || trace != 73 {
 			t.Fatal("existing routing changed")
 		}
-		reply, status := handler(bus.ModuleInvocation{StageID: stage, TraceID: trace, PrincipalRef: 0}, raw)
-		if status != bus.ModuleStatusOK {
-			return nil, &bus.ModuleCallStatusError{Status: status}
+		reply, status := handler(ring.ModuleInvocation{StageID: stage, TraceID: trace, PrincipalRef: 0}, raw)
+		if status != ring.ModuleStatusOK {
+			return nil, &ring.ModuleCallStatusError{Status: status}
 		}
 		return reply, nil
 	}), time.Second)
@@ -103,8 +103,8 @@ func TestMemoryStoreContractCanonicalScopes(t *testing.T) {
 	} {
 		handler := NewHandler(nil, WithDataStore(item.placement, &recordingDataStore{}))
 		client, err := contract.NewClient(clientCallFunc(func(_ context.Context, event, stage uint32, trace uint64, _ time.Duration, raw []byte) ([]byte, error) {
-			reply, status := handler(bus.ModuleInvocation{StageID: stage}, raw)
-			if status != bus.ModuleStatusOK {
+			reply, status := handler(ring.ModuleInvocation{StageID: stage}, raw)
+			if status != ring.ModuleStatusOK {
 				t.Fatal(status)
 			}
 			return reply, nil

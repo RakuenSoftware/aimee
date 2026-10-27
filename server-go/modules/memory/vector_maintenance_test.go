@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -87,8 +87,8 @@ func exerciseVectorMaintenanceReplay(t *testing.T, ctx context.Context, tx pgx.T
 	}
 	unchanged()
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "rebuild", `{"version":"vector-fixture"}`)
-	if status != bus.ModuleStatusOK || result["status"] != "ok" || result["version"] != "vector-fixture" || result["failed"] != float64(0) {
+	result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "rebuild", `{"version":"vector-fixture"}`)
+	if status != ring.ModuleStatusOK || result["status"] != "ok" || result["version"] != "vector-fixture" || result["failed"] != float64(0) {
 		t.Fatal(result, status)
 	}
 	var remaining, active, pending int
@@ -107,12 +107,12 @@ func exerciseVectorMaintenanceReplay(t *testing.T, ctx context.Context, tx pgx.T
 	if _, err := tx.Exec(ctx, `RESET ROLE; INSERT INTO memory_active_embedder(id,version) VALUES(1,'active-fixture') ON CONFLICT(id) DO UPDATE SET version=EXCLUDED.version; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	result, status = invokeContextCommand(t, handler, 0, bus.CommandContext{}, "rebuild", `{}`)
-	if status != bus.ModuleStatusOK || result["version"] != "active-fixture" {
+	result, status = invokeContextCommand(t, handler, 0, ring.CommandContext{}, "rebuild", `{}`)
+	if status != ring.ModuleStatusOK || result["version"] != "active-fixture" {
 		t.Fatal("active version not resolved", result, status)
 	}
-	result, status = invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", `{"limit":1}`)
-	if status != bus.ModuleStatusOK || result["status"] != "ok" {
+	result, status = invokeContextCommand(t, handler, 0, ring.CommandContext{}, "reindex", `{"limit":1}`)
+	if status != ring.ModuleStatusOK || result["status"] != "ok" {
 		t.Fatal(result, status)
 	}
 	var stamp string

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Resources is the core's existing credential and execution storage boundary.
@@ -40,16 +40,16 @@ type Request struct {
 	credentials        *[]credentialChange
 }
 
-func (m *Manager) Handle(inv bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (m *Manager) Handle(inv ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	if inv.StageID != StageManage {
 		return Rules(inv, body)
 	}
 	if inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	var req Request
 	if json.Unmarshal(body, &req) != nil || req.Operation == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inv.Remaining(30*time.Second))
 	defer cancel()
@@ -59,9 +59,9 @@ func (m *Manager) Handle(inv bus.ModuleInvocation, body []byte) ([]byte, bus.Mod
 	}
 	b, err := json.Marshal(reply)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return b, bus.ModuleStatusOK
+	return b, ring.ModuleStatusOK
 }
 func (m *Manager) credential(ctx context.Context, req Request, name, key string) error {
 	if key == "" || strings.HasPrefix(key, "$") {

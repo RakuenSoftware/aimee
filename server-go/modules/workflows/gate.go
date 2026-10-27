@@ -12,7 +12,7 @@ package workflows
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type VerdictKind int
@@ -212,18 +212,18 @@ func decodeGateRequest(request []byte) (GateDecideRequest, bool) {
 // The ruling is fail-closed, so a request we cannot read is refused outright
 // rather than answered with a default: an invented "approve" here would be a
 // gate bypass, and an invented "changes" would silently loop a healthy run.
-func handleGateDecide(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleGateDecide(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	decoded, ok := decodeGateRequest(request)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	encoded, err := json.Marshal(GateDecide(decoded.Verdicts, decoded.Required,
 		decoded.Quorum, decoded.ArtifactHash))
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

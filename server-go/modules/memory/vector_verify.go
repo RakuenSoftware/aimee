@@ -7,25 +7,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const vectorSchemaVersion = "v4"
 
-func handleVerifyCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleVerifyCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: "vector-verify", Command: args.stringOr("embedding_command", "")}
 	_ = json.Unmarshal(args["detail"], &request.Detail)
 	_ = json.Unmarshal(args["timings"], &request.Timings)
 	commandScope(args, &request)
 	body, _ := json.Marshal(request)
 	reply, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(reply, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

@@ -11,8 +11,8 @@
 #include "transport.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 
@@ -954,14 +954,14 @@ int db1_agent_job_canonical_observation(int job_id, const char *authenticated_ac
    db1_request_encode(request, AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION, fields, 2);
    uint32_t capacity = 4096, length = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(30000);
-   aimee_module_call_result_t call;
+   ouro_module_call_result_t call;
    for (;;)
    {
       call = obs_bus_module_call(AIMEE_DB1_EVENT_DELEGATION, AIMEE_DB1_STAGE_DELEGATION, 0,
                                  deadline, request, (uint32_t)request_len, response, capacity,
                                  &length, NULL, NULL);
-      if (call != AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
-          length > AIMEE_MODULE_MESSAGE_MAX_BODY)
+      if (call != OURO_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
+          length > OURO_MODULE_MESSAGE_MAX_BODY)
          break;
       uint8_t *grown = realloc(response, length);
       if (!grown)
@@ -971,7 +971,7 @@ int db1_agent_job_canonical_observation(int job_id, const char *authenticated_ac
    }
    free(request);
    int result = -1;
-   if (call == AIMEE_MODULE_CALL_OK && length >= 8 && length <= capacity)
+   if (call == OURO_MODULE_CALL_OK && length >= 8 && length <= capacity)
    {
       uint32_t status = aimee_db1_get_u32(response), cells = aimee_db1_get_u32(response + 4);
       if (status == AIMEE_DB1_STATUS_MISSING && cells == 0 && length == 8)

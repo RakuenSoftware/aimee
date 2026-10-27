@@ -1,4 +1,4 @@
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/delegates/module_api.h>
 
 #include <ctype.h>
@@ -85,26 +85,26 @@ static void infer_capabilities(const char *prompt, int tools_enabled, uint32_t *
    *min_context_out = min_context;
 }
 
-static aimee_module_status_t handle_capabilities(const aimee_module_invocation_t *invocation,
-                                                 const uint8_t *request_body, uint32_t request_len,
-                                                 uint8_t *response_body, uint32_t response_capacity,
-                                                 uint32_t *response_len)
+static ouro_module_status_t handle_capabilities(const ouro_module_invocation_t *invocation,
+                                                const uint8_t *request_body, uint32_t request_len,
+                                                uint8_t *response_body, uint32_t response_capacity,
+                                                uint32_t *response_len)
 {
    if (request_len < AIMEE_DELEGATES_CAP_HEADER_LEN ||
        response_capacity < AIMEE_DELEGATES_CAP_RESPONSE_LEN ||
        aimee_delegates_get_u32(request_body) != AIMEE_DELEGATES_CAP_REQUEST_MAGIC ||
        request_body[4] != AIMEE_DELEGATES_WIRE_VERSION || request_body[5] > 1u)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
    uint32_t length = aimee_delegates_get_u32(request_body + 8);
    if (length > AIMEE_DELEGATES_CAP_PROMPT_MAX ||
        request_len != AIMEE_DELEGATES_CAP_HEADER_LEN + length)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
 
    char *prompt = malloc((size_t)length + 1);
    if (!prompt)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    memcpy(prompt, request_body + AIMEE_DELEGATES_CAP_HEADER_LEN, length);
    prompt[length] = '\0';
    uint32_t required = 0, min_context = 0;
@@ -116,32 +116,32 @@ static aimee_module_status_t handle_capabilities(const aimee_module_invocation_t
    aimee_delegates_put_u32(response_body + 4, required);
    aimee_delegates_put_u32(response_body + 8, min_context);
    *response_len = AIMEE_DELEGATES_CAP_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
 /* Chain depth. Stated in Go as well (server-go/modules/delegates/chain.go) and
  * pinned by test_process_module_handlers, because nothing in the build keeps
  * the two in step. */
-static aimee_module_status_t handle_chain(const aimee_module_invocation_t *invocation,
-                                          const uint8_t *request_body, uint32_t request_len,
-                                          uint8_t *response_body, uint32_t response_capacity,
-                                          uint32_t *response_len)
+static ouro_module_status_t handle_chain(const ouro_module_invocation_t *invocation,
+                                         const uint8_t *request_body, uint32_t request_len,
+                                         uint8_t *response_body, uint32_t response_capacity,
+                                         uint32_t *response_len)
 {
    if (request_len != AIMEE_DELEGATES_CHAIN_REQUEST_LEN ||
        response_capacity < AIMEE_DELEGATES_CHAIN_RESPONSE_LEN ||
        aimee_delegates_get_u32(request_body) != AIMEE_DELEGATES_CHAIN_REQUEST_MAGIC ||
        request_body[4] != AIMEE_DELEGATES_WIRE_VERSION)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
    unsigned op = request_body[5];
    if (op != AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR && op != AIMEE_DELEGATES_CHAIN_OP_CHECK_DEPTH)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
    /* A flag that is neither 0 nor 1 is not a boolean; refuse rather than coerce
     * it, since coercing would silently pick an answer. */
    for (unsigned i = 6; i < 10; ++i)
       if (request_body[i] > 1u)
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+         return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
 
    memset(response_body, 0, AIMEE_DELEGATES_CHAIN_RESPONSE_LEN);
    aimee_delegates_put_u32(response_body, AIMEE_DELEGATES_CHAIN_RESPONSE_MAGIC);
@@ -165,13 +165,13 @@ static aimee_module_status_t handle_chain(const aimee_module_invocation_t *invoc
       aimee_delegates_put_u32(response_body + 8, (uint32_t)current);
    }
    *response_len = AIMEE_DELEGATES_CHAIN_RESPONSE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }
 
-aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
-                                           const uint8_t *request_body, uint32_t request_len,
-                                           uint8_t *response_body, uint32_t response_capacity,
-                                           uint32_t *response_len, void *user_data)
+ouro_module_status_t aimee_module_handler(const ouro_module_invocation_t *invocation,
+                                          const uint8_t *request_body, uint32_t request_len,
+                                          uint8_t *response_body, uint32_t response_capacity,
+                                          uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    if (invocation && response_len && invocation->stage_id == AIMEE_DELEGATES_STAGE_CHAIN)
@@ -185,12 +185,12 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
        response_capacity < AIMEE_DELEGATES_MESSAGE_LEN ||
        aimee_delegates_message_decode(request_body, request_len, AIMEE_DELEGATES_REQUEST_MAGIC,
                                       role, sizeof(role)) != 0)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (aimee_module_invocation_cancelled(invocation))
-      return AIMEE_MODULE_STATUS_CANCELLED;
+      return OURO_MODULE_STATUS_INVALID_REQUEST;
+   if (ouro_module_invocation_cancelled(invocation))
+      return OURO_MODULE_STATUS_CANCELLED;
    if (aimee_delegates_message_encode(AIMEE_DELEGATES_RESPONSE_MAGIC, canonical(role),
                                       response_body, response_capacity) != 0)
-      return AIMEE_MODULE_STATUS_INTERNAL;
+      return OURO_MODULE_STATUS_INTERNAL;
    *response_len = AIMEE_DELEGATES_MESSAGE_LEN;
-   return AIMEE_MODULE_STATUS_OK;
+   return OURO_MODULE_STATUS_OK;
 }

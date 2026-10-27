@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type ontologyLabel struct {
@@ -36,7 +36,7 @@ func ontologyLabels(names map[int]string) []ontologyLabel {
 	return labels
 }
 
-func handleOntologyCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleOntologyCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	action := "list"
 	if _, exists := args["action"]; exists {
 		var ok bool
@@ -96,16 +96,16 @@ func handleOntologyCommand(options handlerOptions, invocation bus.ModuleInvocati
 		commandScope(args, &req)
 		encoded, _ := json.Marshal(req)
 		data, status := handleData(options, invocation, encoded)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return commandResult(commandError("unavailable", "memory ontology walk unavailable"))
 		}
 		var response DataResponse
 		if json.Unmarshal(data, &response) != nil || len(response.Payload) == 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		var entries []ontologyWalkEntry
 		if json.Unmarshal(response.Payload, &entries) != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		var text strings.Builder
 		for _, e := range entries {

@@ -48,7 +48,7 @@ func TestControlPlaneUsesOnlyAuthenticatedModuleIngress(t *testing.T) {
 			t.Fatalf("WFE control plane reintroduced forbidden HTTP/credential surface %q", forbidden)
 		}
 	}
-	if !strings.Contains(text, `err = bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{`) ||
+	if !strings.Contains(text, `err = ring.RunModuleProcess(rootCtx, ring.ModuleProcessConfig{`) ||
 		!strings.Contains(text, `Handler: workflows.NewHandlerContext(rootCtx, handler)`) ||
 		!strings.Contains(text, `signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)`) {
 		t.Fatal("workflow control must serve and drain on the signal-bound module lifecycle")

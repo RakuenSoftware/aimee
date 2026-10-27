@@ -1,6 +1,6 @@
 #include "db1_client/primary_sessions.h"
 #include "db1_client/db1_module_api.h"
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,11 +15,11 @@ int obs_bus_module_available(uint32_t kind)
    (void)kind;
    return !unavailable;
 }
-aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace,
-                                               uint64_t deadline, const void *request,
-                                               uint32_t request_len, void *response,
-                                               uint32_t capacity, uint32_t *length,
-                                               aimee_module_cancelled_fn cancelled, void *context)
+ouro_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace,
+                                              uint64_t deadline, const void *request,
+                                              uint32_t request_len, void *response,
+                                              uint32_t capacity, uint32_t *length,
+                                              ouro_module_cancelled_fn cancelled, void *context)
 {
    (void)kind;
    (void)stage;
@@ -67,7 +67,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
       total += 4 + strlen(load ? reply_text : cells[i]);
    *length = too_large ? 17u * 1024u * 1024u : (uint32_t)total;
    if (*length > capacity)
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      return OURO_MODULE_CALL_RESPONSE_TOO_LARGE;
    uint8_t *out = response;
    aimee_db1_put_u32(out, transcript ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_MISSING);
    aimee_db1_put_u32(out + 4, malformed ? 7 : (uint32_t)count);
@@ -81,7 +81,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
       memcpy(out + at, cell, size);
       at += size;
    }
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 int main(void)
 {

@@ -162,7 +162,7 @@ def analyse(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
     # Requiring both registration and the two synchronous durable writes keeps
     # a refactor from reverting to audit calls in only one convenience client.
     structural_markers = (
-        "bus_host_set_tap(&g.host, governance_tap",
+        "ouro_host_set_tap(&g.host, governance_tap",
         'persist_or_queue_durable("bus.module.request"',
         'persist_or_queue_durable("bus.module.reply"',
     )

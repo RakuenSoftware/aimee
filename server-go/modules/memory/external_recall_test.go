@@ -3,10 +3,10 @@ package memory
 import (
 	"context"
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -86,8 +86,8 @@ func exerciseExternalRecall(t *testing.T, engine string, live bool) {
 	put(personal, Scope{Type: ScopeUser, Value: "_user"}, "preference:response", "explain evidence", "preference")
 	invoke := func(s *externalDataStore, r DataRequest) DataResponse {
 		raw, _ := json.Marshal(r)
-		result, status := handleData(handlerOptions{placement: s.placement, data: s}, bus.ModuleInvocation{}, raw)
-		if status != bus.ModuleStatusOK {
+		result, status := handleData(handlerOptions{placement: s.placement, data: s}, ring.ModuleInvocation{}, raw)
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("%s status=%d", r.Operation, status)
 		}
 		var out DataResponse

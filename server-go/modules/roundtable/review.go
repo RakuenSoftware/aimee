@@ -6,8 +6,8 @@ import (
 	"errors"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The review stage carried over the event bus.
@@ -47,37 +47,37 @@ type Reviewer interface {
 // contract does not change with the transport -- only the transport does. A
 // 16 MiB artifact fits: ModuleMessageMaxBody and MaxArtifactBytes are both
 // 16 MiB, which is why this can move to the bus at all.
-func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewReviewHandler(reviewer Reviewer) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if reviewer == nil {
-			return []byte("roundtable reviewer is not configured"), bus.ModuleStatusInternal
+			return []byte("roundtable reviewer is not configured"), ring.ModuleStatusInternal
 		}
 		// Review and deliberate share a module and are told apart only by stage id,
 		// so a deliberate id arriving here is a protocol error, not a review.
 		if invocation.StageID != StageReview {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var decoded panel.ReviewRequest
 		if !canonical.ValidJSON(request) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if err := json.Unmarshal(request, &decoded); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(request, &fields); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if raw, present := fields["request"]; present {
 			input, err := canonical.DecodeRequest(raw)
 			if err != nil || decoded.OriginalRequest != "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			attenuateReviewRequest(input)
 			decoded.Request = input
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		// The runtime re-checks cancellation and the deadline before publishing,
 		// so a review that overruns is reported as such rather than replied to.
@@ -89,7 +89,7 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 			// workflow parks and resubmits the same rejected review indefinitely.
 			var invalid panel.ValidationError
 			if errors.As(err, &invalid) {
-				return []byte(invalid.Error()), bus.ModuleStatusInvalidRequest
+				return []byte(invalid.Error()), ring.ModuleStatusInvalidRequest
 			}
 			// A failed review must never be reported as an empty success: a caller
 			// reading an empty result as "approved, no findings" would ship
@@ -99,16 +99,16 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 			// over the wire, but the runtime logs it on the way past -- without
 			// that, every distinct failure here reaches the caller as the same
 			// bare status number and the operator has nothing to go on.
-			return []byte(err.Error()), bus.ModuleStatusInternal
+			return []byte(err.Error()), ring.ModuleStatusInternal
 		}
 		body, err := json.Marshal(result)
 		if err != nil {
-			return []byte("encode roundtable result: " + err.Error()), bus.ModuleStatusInternal
+			return []byte("encode roundtable result: " + err.Error()), ring.ModuleStatusInternal
 		}
-		if uint32(len(body)) > bus.ModuleMessageMaxBody {
-			return []byte("roundtable result exceeds the module message limit"), bus.ModuleStatusInternal
+		if uint32(len(body)) > ring.ModuleMessageMaxBody {
+			return []byte("roundtable result exceeds the module message limit"), ring.ModuleStatusInternal
 		}
-		return body, bus.ModuleStatusOK
+		return body, ring.ModuleStatusOK
 	}
 }
 
@@ -119,9 +119,9 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 // stage was never configured; it is rejected rather than silently answered,
 // because a review that did not happen must not look like one that found
 // nothing.
-func NewHandler(reviewer Reviewer) bus.ModuleHandler {
+func NewHandler(reviewer Reviewer) ring.ModuleHandler {
 	review := NewReviewHandler(reviewer)
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		switch invocation.StageID {
 		case StageDeliberate:
 			return Handle(invocation, request)
@@ -130,7 +130,7 @@ func NewHandler(reviewer Reviewer) bus.ModuleHandler {
 		case StageChunkPlan:
 			return handleChunkPlan(invocation, request)
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }

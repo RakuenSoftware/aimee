@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -131,18 +131,18 @@ type policy struct {
 	allowPrivateMCP    bool // tests only; production constructors leave this false
 }
 
-func NewHandler() bus.ModuleHandler {
+func NewHandler() ring.ModuleHandler {
 	return newHandler(net.DefaultResolver)
 }
 
-func newHandler(r resolver) bus.ModuleHandler {
+func newHandler(r resolver) ring.ModuleHandler {
 	return newHandlerWithCredentials(r, nil)
 }
 
-func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleHandler {
+func newHandlerWithCredentials(r resolver, vault credentialResolver) ring.ModuleHandler {
 	var once sync.Once
-	var initialized bus.ModuleHandler
-	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+	var initialized ring.ModuleHandler
+	return func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 		once.Do(func() {
 			broker, err := newCredentialBroker()
 			if err != nil {
@@ -150,9 +150,9 @@ func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleH
 			}
 			p := policy{resolver: r, credentials: broker, backendCredentials: vault}
 			s := newStreamService(p, vault)
-			initialized = func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+			initialized = func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 				if invocation.PrincipalClass != 1 {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				if invocation.StageID == StageHTTP {
 					return p.handleHTTP(invocation, body)
@@ -162,33 +162,33 @@ func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleH
 				}
 				if invocation.StageID == StageCredentialKey {
 					if len(body) != 0 || invocation.Cancelled() {
-						return nil, bus.ModuleStatusInvalidRequest
+						return nil, ring.ModuleStatusInvalidRequest
 					}
 					return broker.publicReply()
 				}
 				if invocation.StageID != StageAuthorize {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				var request Request
 				if json.Unmarshal(body, &request) != nil {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				decision := p.decide(invocation, request)
 				encoded, err := json.Marshal(decision)
-				if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-					return nil, bus.ModuleStatusInternal
+				if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+					return nil, ring.ModuleStatusInternal
 				}
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
 		})
 		if initialized == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return initialized(invocation, body)
 	}
 }
 
-func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decision {
+func (p policy) decide(invocation ring.ModuleInvocation, request Request) Decision {
 	deny := func(reason string) Decision {
 		return Decision{Reason: reason, PolicyRevision: PolicyRevision}
 	}

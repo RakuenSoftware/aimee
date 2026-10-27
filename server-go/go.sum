@@ -1,5 +1,7 @@
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261023182358-01e83ef1aee9 h1:UN1+/TqssE5La+xDX9JIStR8UGZ8BQcr84MiIDUvtlw=
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261023182358-01e83ef1aee9/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157 h1:/1GtRNeTWpNva+L/P4F67QrikYaPk86sqeQp/6dvgks=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157/go.mod h1:viX9M6fepRDBFpVrLwNsCuqttTwqwSWq4WsRJrIF/rw=
+github.com/RakuenSoftware/ouroboros-ring/go v0.0.0-20261027192221-c267df059748 h1:sCiaown0TOAKLD+AohyFMSun8KlIjCu3skbVyGHBC4g=
+github.com/RakuenSoftware/ouroboros-ring/go v0.0.0-20261027192221-c267df059748/go.mod h1:EE0tgkv3osUZRi8/Ul1KGOCazyM82MuimSNslkCaSm0=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
@@ -48,10 +50,10 @@ github.com/prometheus/otlptranslator v1.0.0/go.mod h1:vRYWnXvI6aWGpsdY/mOT/cbeVR
 github.com/prometheus/procfs v0.21.1 h1:GljZCt+zSTS+NZq88cyQ1LjZ+RCHp3uVuabBWA5+OJI=
 github.com/prometheus/procfs v0.21.1/go.mod h1:aB55Cww9pdSJVHk0hUf0inxWyyjPogFIjmHKYgMKmtY=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
-github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
-github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
+github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
+github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/bridges/otelslog v0.20.1 h1:5sHc4ToTFjfSZCtGAAM6jPunICAmJX73htv372T4ipc=

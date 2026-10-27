@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -80,14 +80,14 @@ func validRef(ref string) bool {
 }
 
 // Handle classifies Git operations and validates refs without repository I/O.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	return NewHandler(nil)(invocation, request)
 }
 
 // NewHandler binds the process's separately authenticated egress client. A nil
 // transport leaves network stages fail closed while pure git stages still work.
-func NewHandler(executor egress.Executor) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewHandler(executor egress.Executor) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		switch invocation.StageID {
 		case StageForgeRequest:
 			return handleForgeRequest(executor, invocation, request)
@@ -100,26 +100,26 @@ func NewHandler(executor egress.Executor) bus.ModuleHandler {
 			// payload is arbitrarily large and its shape is the forge's, not ours.
 			var decoded CIGradeRequest
 			if err := json.Unmarshal(request, &decoded); err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			encoded, err := json.Marshal(CIGradeResponse{
 				Verdict: GradeCI(decoded.CheckRuns, decoded.CombinedStatus),
 			})
-			if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-				return nil, bus.ModuleStatusInternal
+			if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+				return nil, ring.ModuleStatusInternal
 			}
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		case StageOperation:
 			if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 				request[4] != wireVersion || request[5] != 0 || request[7] != 0 ||
 				request[6] == 0 || request[6] > opMax {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			operation := operations[string(request[8:8+int(request[6])])]
 			response := make([]byte, responseLen)
@@ -128,31 +128,31 @@ func NewHandler(executor egress.Executor) bus.ModuleHandler {
 			if operation == OperationFetch || operation == OperationPull || operation == OperationPush {
 				binary.LittleEndian.PutUint32(response[8:12], 1)
 			}
-			return response, bus.ModuleStatusOK
+			return response, ring.ModuleStatusOK
 		case StageRefValidate:
 			if len(request) != refRequestLen || binary.LittleEndian.Uint32(request[0:4]) != refRequestMagic ||
 				request[4] != wireVersion || request[5] != 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			refLen := int(binary.LittleEndian.Uint16(request[6:8]))
 			if refLen == 0 || refLen > refMax {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			ref := request[8 : 8+refLen]
 			if bytes.IndexByte(ref, 0) >= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			response := make([]byte, refResponseLen)
 			binary.LittleEndian.PutUint32(response[0:4], refResponseMagic)
 			if validRef(string(ref)) {
 				binary.LittleEndian.PutUint32(response[4:8], 1)
 			}
-			return response, bus.ModuleStatusOK
+			return response, ring.ModuleStatusOK
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }

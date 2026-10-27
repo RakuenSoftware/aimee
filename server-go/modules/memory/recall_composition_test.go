@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -70,15 +70,15 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	backend, _ := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
 	handler := NewHandler(nil, WithDataStore(PlacementServer, backend))
 	exercisePrivateCommandEnvelopes(t, handler, tx, full)
-	call := func(input string, limit int) ([]byte, bus.ModuleStatus) {
+	call := func(input string, limit int) ([]byte, ring.ModuleStatus) {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": input, "limit_tokens": limit})
-		frame, _ := bus.EncodeCommand("runtime", args)
-		raw, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", args)
+		raw, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
-		body, err := bus.DecodeCommandResult(raw)
+		body, err := ring.DecodeCommandResult(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestRecallCompositionPostgres(t *testing.T) {
 		}
 	}
 	raw, status := call(string(sharedJSON), 8192)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	var envelope struct {
@@ -155,12 +155,12 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	for _, limit := range []int{128, 512} {
 		raw, status = call(string(sharedJSON), limit)
 		if limit == 128 {
-			if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) {
+			if status != ring.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) {
 				t.Fatal("collection proof must fit beside hard rules", string(raw))
 			}
 			continue
 		}
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &envelope) != nil || json.Unmarshal(envelope.Recall, &got) != nil {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &envelope) != nil || json.Unmarshal(envelope.Recall, &got) != nil {
 			t.Fatal(status, string(raw))
 		}
 		if got.ApproxTokens != (len(envelope.Recall)+3)/4 || got.BudgetExceeded != (got.ApproxTokens > limit) {
@@ -168,19 +168,19 @@ func TestRecallCompositionPostgres(t *testing.T) {
 		}
 	}
 	raw, status = call(string(sharedJSON), 64)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) || strings.Contains(string(raw), `"recall"`) {
+	if status != ring.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) || strings.Contains(string(raw), `"recall"`) {
 		t.Fatal("composition dropped required rule", status, string(raw))
 	}
 	// A failed shared read never turns into success using personal content.
 	for _, input := range []string{`{"status":"error","kind":"protected_context_overflow"}`, `{"status":"error","kind":"unavailable"}`, `{"status":"quarantined","recall":{}}`} {
 		raw, status = call(input, 8192)
-		if status != bus.ModuleStatusOK || string(raw) != input {
+		if status != ring.ModuleStatusOK || string(raw) != input {
 			t.Fatal("shared refusal lost", string(raw), status)
 		}
 	}
 	for _, input := range []string{`{`, `{"status":"ok","recall":{}}`, `{"status":"unknown"}`} {
 		raw, status = call(input, 8192)
-		if status == bus.ModuleStatusOK && !strings.Contains(string(raw), `"status":"error"`) {
+		if status == ring.ModuleStatusOK && !strings.Contains(string(raw), `"status":"error"`) {
 			t.Fatal("bad shared input admitted", string(raw))
 		}
 	}
@@ -188,7 +188,7 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	// plausible shared-only result or partial personal section.
 	exec(`SAVEPOINT composition_failure; ALTER TABLE user_memories RENAME TO unavailable_personal`)
 	raw, status = call(string(sharedJSON), 8192)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"unavailable"`) || strings.Contains(string(raw), `"recall"`) {
+	if status != ring.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"unavailable"`) || strings.Contains(string(raw), `"recall"`) {
 		t.Fatal("private failure hidden", string(raw), status)
 	}
 	personal = runHostRuntime(t, handler, `{"operation":"personal-recall","limit_tokens":8192}`)
@@ -198,38 +198,38 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	}
 	exec(`ROLLBACK TO SAVEPOINT composition_failure; RELEASE SAVEPOINT composition_failure`)
 	raw, status = call(string(sharedJSON), 8192)
-	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"store":"composed"`) {
+	if status != ring.ModuleStatusOK || !strings.Contains(string(raw), `"store":"composed"`) {
 		t.Fatal("composition did not recover", string(raw), status)
 	}
 	{
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"personal-recall"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"personal-recall"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("plugin personal recall", status)
 		}
 		kb := NewHandler(nil, WithDataStore(PlacementKB, nil))
-		if _, status := kb(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := kb(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal("KB personal recall", status)
 		}
 	}
 	// The host route cannot be invoked by plugins or by the KB placement.
 	args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": string(sharedJSON)})
-	frame, _ := bus.EncodeCommand("runtime", args)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+	frame, _ := ring.EncodeCommand("runtime", args)
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("plugin composition", status)
 	}
 	kb := NewHandler(nil, WithDataStore(PlacementKB, nil))
-	if _, status := kb(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+	if _, status := kb(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("KB composition", status)
 	}
 	data := dataRequest(t, DataRequest{Operation: "compose-recall", SharedRecall: sharedJSON})
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 73}, data); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData, PrincipalRef: 73}, data); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("plugin data composition", status)
 	}
 }
 
 // Exercise the private commands against the shipping schema and adjacent IDs
 // that collapse to the same double in a native JSON decode/re-encode.
-func exercisePrivateCommandEnvelopes(t *testing.T, handler bus.ModuleHandler, tx pgx.Tx, content string) {
+func exercisePrivateCommandEnvelopes(t *testing.T, handler ring.ModuleHandler, tx pgx.Tx, content string) {
 	t.Helper()
 	ctx := context.Background()
 	exec := func(sql string) {
@@ -240,8 +240,8 @@ func exercisePrivateCommandEnvelopes(t *testing.T, handler bus.ModuleHandler, tx
 	}
 	call := func(args string) string {
 		t.Helper()
-		outer, status := invokeContextCommand(t, handler, 0, bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}, "runtime", args)
-		if status != bus.ModuleStatusOK {
+		outer, status := invokeContextCommand(t, handler, 0, ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}, "runtime", args)
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status)
 		}
 		body, ok := outer["json"].(string)

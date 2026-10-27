@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -44,26 +44,26 @@ func exerciseExplicitRetractionReplay(t *testing.T, ctx context.Context, tx pgx.
 	work := seed("works_for", "Explicit Corp", "explicit-work")
 	born := seed("born_in", "Explicit City", "explicit-born")
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
-	verified := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: user.Principal, TransportIdentity: user.TransportIdentity}
-	call := func(relation, target, authority string, caller bus.CommandContext) map[string]any {
+	verified := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: user.Principal, TransportIdentity: user.TransportIdentity}
+	call := func(relation, target, authority string, caller ring.CommandContext) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"source": "explicit user", "relation": relation, "target": target, "authority": authority, "scope_context": true, "actor": "forged", "user_authority": true})
 		r, status := invokeContextCommand(t, handler, 0, caller, "retract", string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(r, status)
 		}
 		return r
 	}
 	for _, test := range []struct {
 		authority string
-		caller    bus.CommandContext
-	}{{"user", bus.CommandContext{}}, {"user", bus.CommandContext{Authenticated: true, Principal: "remote-owner", UserAuthority: false}}, {"model", verified}, {"operator", verified}} {
+		caller    ring.CommandContext
+	}{{"user", ring.CommandContext{}}, {"user", ring.CommandContext{Authenticated: true, Principal: "remote-owner", UserAuthority: false}}, {"model", verified}, {"operator", verified}} {
 		r := call("worksFor", "", test.authority, test.caller)
 		if r["status"] != "ok" || r["retracted"] != float64(0) || r["authority"] != "model" {
 			t.Fatal("authority elevated", r)
 		}
 	}
-	if r := call("born_in", "", "user", bus.CommandContext{}); r["reason"] != "immutable" {
+	if r := call("born_in", "", "user", ring.CommandContext{}); r["reason"] != "immutable" {
 		t.Fatal(r)
 	}
 	if r := call("born_in", "Explicit City", "user", verified); r["status"] != "ok" || r["retracted"] != float64(1) {
@@ -147,8 +147,8 @@ func TestPublicRetractionValidation(t *testing.T) {
 	if r := runPublicCommand(t, client, "retract", `{"source":"x","relation":"age"}`); r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
-	verified := bus.CommandContext{Authenticated: true, Principal: "forged", UserAuthority: true}
-	if r, status := invokeContextCommand(t, handler, 200, verified, "retract", `{"source":"x","relation":"age","authority":"user"}`); status != bus.ModuleStatusInvalidRequest {
+	verified := ring.CommandContext{Authenticated: true, Principal: "forged", UserAuthority: true}
+	if r, status := invokeContextCommand(t, handler, 200, verified, "retract", `{"source":"x","relation":"age","authority":"user"}`); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("peer forged context", r, status)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type commandStore struct {
@@ -194,23 +194,23 @@ func TestPublicCommandMissingAndOutage(t *testing.T) {
 }
 
 func TestCommandStageRejectsWrongPlacementAndMalformedFrames(t *testing.T) {
-	frame, _ := bus.EncodeCommand("delete", json.RawMessage(`{"id":42}`))
+	frame, _ := ring.EncodeCommand("delete", json.RawMessage(`{"id":42}`))
 	for _, placement := range []Placement{""} {
-		_, status := NewHandler(nil, WithDataStore(placement, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusCapabilityAbsent {
+		_, status := NewHandler(nil, WithDataStore(placement, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(status)
 		}
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementServer, nil))
 	for _, raw := range []string{`null`, `[]`, `42`} {
-		frame, _ := bus.EncodeCommand("get", json.RawMessage(raw))
-		_, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		if status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("get", json.RawMessage(raw))
+		_, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
-	_, status := handler(bus.ModuleInvocation{StageID: 999}, frame)
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := handler(ring.ModuleInvocation{StageID: 999}, frame)
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
 }

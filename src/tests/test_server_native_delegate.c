@@ -196,17 +196,17 @@ static cJSON *request(void)
        "request\"}]}],\"tools\":[],\"tool_choice\":{\"mode\":\"unset\"},\"stream\":false,\"stop_"
        "sequences\":[]}}");
 }
-static aimee_module_invocation_t invocation(void)
+static ouro_module_invocation_t invocation(void)
 {
    struct timespec now;
    assert(!clock_gettime(CLOCK_MONOTONIC, &now));
-   return (aimee_module_invocation_t){.stage_id = 23,
-                                      .deadline_ns = (uint64_t)now.tv_sec * 1000000000u +
-                                                     now.tv_nsec + 120000000000u,
-                                      .source_principal_ref = 76,
-                                      .source_handle = 123};
+   return (ouro_module_invocation_t){.stage_id = 23,
+                                     .deadline_ns = (uint64_t)now.tv_sec * 1000000000u +
+                                                    now.tv_nsec + 120000000000u,
+                                     .source_principal_ref = 76,
+                                     .source_handle = 123};
 }
-static cJSON *call(cJSON *request, aimee_module_invocation_t *inv, aimee_module_status_t expected)
+static cJSON *call(cJSON *request, ouro_module_invocation_t *inv, ouro_module_status_t expected)
 {
    aimee_request_free(&bound_request);
    assert(!aimee_ir_request_parse(cJSON_GetObjectItemCaseSensitive(request, "ir"), &bound_request));
@@ -218,7 +218,7 @@ static cJSON *call(cJSON *request, aimee_module_invocation_t *inv, aimee_module_
                                         sizeof out, &count, NULL) == expected);
    cJSON_free(body);
    cJSON_Delete(request);
-   if (expected != AIMEE_MODULE_STATUS_OK)
+   if (expected != OURO_MODULE_STATUS_OK)
    {
       assert(!count);
       return NULL;
@@ -228,8 +228,8 @@ static cJSON *call(cJSON *request, aimee_module_invocation_t *inv, aimee_module_
 }
 static void test_success_and_decline(void)
 {
-   aimee_module_invocation_t inv = invocation();
-   cJSON *reply = call(request(), &inv, AIMEE_MODULE_STATUS_OK);
+   ouro_module_invocation_t inv = invocation();
+   cJSON *reply = call(request(), &inv, OURO_MODULE_STATUS_OK);
    assert(reply &&
           !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "done"));
    assert(ran == 1 && loaded == 1 && !seen_tools && !cancel_scope &&
@@ -245,7 +245,7 @@ static void test_success_and_decline(void)
    aimee_response_free(&canonical);
    cJSON_Delete(reply);
    terminal = 0;
-   reply = call(request(), &inv, AIMEE_MODULE_STATUS_OK);
+   reply = call(request(), &inv, OURO_MODULE_STATUS_OK);
    assert(
        !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "failed"));
    assert(!aimee_ir_response_parse(cJSON_GetObjectItemCaseSensitive(reply, "ir"), &canonical));
@@ -254,7 +254,7 @@ static void test_success_and_decline(void)
    aimee_response_free(&canonical);
    cJSON_Delete(reply);
    terminal = 2;
-   reply = call(request(), &inv, AIMEE_MODULE_STATUS_OK);
+   reply = call(request(), &inv, OURO_MODULE_STATUS_OK);
    assert(
        !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "failed"));
    const cJSON *termination = cJSON_GetObjectItemCaseSensitive(reply, "termination");
@@ -265,7 +265,7 @@ static void test_success_and_decline(void)
           cJSON_GetObjectItemCaseSensitive(termination, "observed_turns")->valueint == 4);
    cJSON_Delete(reply);
    terminal = 3;
-   reply = call(request(), &inv, AIMEE_MODULE_STATUS_OK);
+   reply = call(request(), &inv, OURO_MODULE_STATUS_OK);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "done"));
    assert(!aimee_ir_response_parse(cJSON_GetObjectItemCaseSensitive(reply, "ir"), &canonical));
    assert(canonical.n_content == 1 && canonical.content[0].type == AIMEE_BLK_IMAGE);
@@ -278,39 +278,39 @@ static void test_fences(void)
    const int requested_caps[] = {100, 0};
    for (size_t i = 0; i < sizeof requested_caps / sizeof *requested_caps; i++)
    {
-      aimee_module_invocation_t capped_inv = invocation();
+      ouro_module_invocation_t capped_inv = invocation();
       cJSON *capped_request = request();
       cJSON_ReplaceItemInObjectCaseSensitive(capped_request, "max_turns",
                                              cJSON_CreateNumber(requested_caps[i]));
-      cJSON *capped_reply = call(capped_request, &capped_inv, AIMEE_MODULE_STATUS_OK);
+      cJSON *capped_reply = call(capped_request, &capped_inv, OURO_MODULE_STATUS_OK);
 
       cJSON_Delete(capped_reply);
    }
    int calls = ran;
-   aimee_module_invocation_t inv = invocation();
+   ouro_module_invocation_t inv = invocation();
    inv.source_principal_ref = 10;
-   call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(request(), &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    assert(ran == calls);
    inv = invocation();
    cJSON *j = request();
    cJSON_AddStringToObject(j, "actor", "forged");
-   call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(j, &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    assert(ran == calls);
    j = request();
    cJSON_AddItemToObject(cJSON_GetObjectItemCaseSensitive(j, "ir"), "metadata",
                          cJSON_CreateObject());
-   call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(j, &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    assert(ran == calls);
    j = request();
    cJSON_ReplaceItemInObjectCaseSensitive(j, "execution_timeout_ms", cJSON_CreateNumber(0));
-   call(j, &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(j, &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    assert(ran == calls);
    persona_known = 0;
-   call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(request(), &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    persona_known = 1;
    assert(ran == calls && !cancel_scope);
    allow = 0;
-   call(request(), &inv, AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   call(request(), &inv, OURO_MODULE_STATUS_INVALID_REQUEST);
    allow = 1;
    assert(ran == calls && !cancel_scope);
 }
@@ -343,8 +343,8 @@ static void test_original_system_blocks_preserved(void)
    cJSON *ir = aimee_ir_request_json(&source);
    assert(ir);
    cJSON_ReplaceItemInObjectCaseSensitive(j, "ir", ir);
-   aimee_module_invocation_t inv = invocation();
-   cJSON *reply = call(j, &inv, AIMEE_MODULE_STATUS_OK);
+   ouro_module_invocation_t inv = invocation();
+   cJSON *reply = call(j, &inv, OURO_MODULE_STATUS_OK);
    assert(reply);
    cJSON_Delete(reply);
    aimee_request_free(&source);

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Loaded batch embedders need more headroom than single-text inference.
@@ -52,7 +52,7 @@ func EmbedBatch(ctx context.Context, trace uint64, executor egress.Executor, req
 	response, err := executor.Do(ctx, trace, egress.HTTPRequest{Request: egress.Request{
 		TargetURL: endpoint, Purpose: "embedding", Method: "POST", RequestSHA256: egress.RequestDigest("POST", endpoint, body, false)},
 		Headers: map[string]string{"Content-Type": "application/json"}, Body: body,
-		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedHTTPTimeout().Milliseconds()})
+		MaxResponseBytes: int64(ring.ModuleMessageMaxBody) - 12, TimeoutMS: embedHTTPTimeout().Milliseconds()})
 	fail := func(message string) EmbedResponse { breaker.reportFailure(now); return EmbedResponse{Error: message} }
 	if err != nil {
 		return fail("embed: " + err.Error())

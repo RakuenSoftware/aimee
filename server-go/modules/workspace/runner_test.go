@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func runnerRequest(op byte, value string) []byte {
@@ -21,8 +21,8 @@ func runnerRequest(op byte, value string) []byte {
 // call runs one runner op and returns the id it resolved to ("" for none).
 func call(t *testing.T, op byte, value string) string {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRunner}, runnerRequest(op, value))
-	if status != bus.ModuleStatusOK || len(response) != runnerRespLen ||
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRunner}, runnerRequest(op, value))
+	if status != ring.ModuleStatusOK || len(response) != runnerRespLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != runnerResponseMagic {
 		t.Fatalf("op %d on %q: response = %x, status = %d", op, value, response, status)
 	}
@@ -114,9 +114,9 @@ func TestRunnerRegistrationIsIdempotentAndBounded(t *testing.T) {
 	for index := 0; index < runnerMax; index++ {
 		call(t, RunnerOpRegister, "/srv/"+strings.Repeat("a", index+1))
 	}
-	_, status := Handle(bus.ModuleInvocation{StageID: StageRunner},
+	_, status := Handle(ring.ModuleInvocation{StageID: StageRunner},
 		runnerRequest(RunnerOpRegister, "/srv/one-too-many"))
-	if status != bus.ModuleStatusInvalidRequest {
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("registering past the ceiling status = %d", status)
 	}
 }
@@ -125,28 +125,28 @@ func TestRunnerRejectsInvalidEnvelopeAndHonorsCancellationPrecedence(t *testing.
 	reset()
 	bad := runnerRequest(RunnerOpResolve, "/srv/repo")
 	binary.LittleEndian.PutUint32(bad[0:4], requestMagic) // the other stage's magic
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunner}, bad); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner}, bad); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-magic status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunner},
-		runnerRequest(9, "/srv/repo")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner},
+		runnerRequest(9, "/srv/repo")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown-op status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunner},
-		runnerRequest(RunnerOpResolve, "")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner},
+		runnerRequest(RunnerOpResolve, "")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("empty-path status = %d", status)
 	}
 
 	// An id has to fit the rendezvous key the transport looks it up by.
 	long := runnerRequest(RunnerOpRegister, strings.Repeat("a", runnerIDMax+1))
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunner}, long); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner}, long); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("oversized-id status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunner, DeadlineNS: 1},
-		runnerRequest(RunnerOpResolve, "/srv/repo")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner, DeadlineNS: 1},
+		runnerRequest(RunnerOpResolve, "/srv/repo")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired status = %d", status)
 	}
 }

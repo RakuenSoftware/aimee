@@ -195,6 +195,10 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
  * and -1 when the remote workspace registry could not be resolved. */
 void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void));
 int cli_workspace_git_runner_start(const char *target);
+/* Create a clone's destination, register it as a detached workspace when none
+ * covers it, and point the request's path/cwd at it. 0, or -1 with the reason
+ * printed. POSIX only. */
+int cli_workspace_git_clone_prepare(cJSON *args);
 void cli_workspace_git_runner_stop(void);
 
 /* Reverse-channel for interactive/bridge commands (mcp-serve, chat) against a

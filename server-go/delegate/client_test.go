@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type recordingCaller struct {
@@ -133,9 +133,9 @@ func TestDelegateResultPreservesCallerLocalParticipant(t *testing.T) {
 func TestDispatchBoundaryClassifiesBusAndReplyFailures(t *testing.T) {
 	request := DelegateRequest{Role: "review", Persona: "security", Input: canonical.TaskRequest("security", "review")}
 	for _, preDispatch := range []error{
-		bus.ErrModuleCallCapabilityAbsent,
-		bus.ErrModuleCallRejected,
-		errors.Join(bus.ErrModuleCallNotDispatched, errors.New("ring full")),
+		ring.ErrModuleCallCapabilityAbsent,
+		ring.ErrModuleCallRejected,
+		errors.Join(ring.ErrModuleCallNotDispatched, errors.New("ring full")),
 	} {
 		client := &BusClient{caller: &recordingCaller{err: preDispatch}, deadline: time.Second}
 		_, err := client.Delegate(t.Context(), request)

@@ -1214,6 +1214,19 @@ static void session_start_worktree_gc(const char *hook_input)
    cJSON_Delete(hi_json);
 }
 
+/* A harness client name: 1-32 of [a-z0-9_-], the shape every hook installer uses. */
+static int hook_client_name_ok(const char *client)
+{
+   size_t n = strlen(client);
+   if (n == 0 || n > 32)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      if (!((client[i] >= 'a' && client[i] <= 'z') || (client[i] >= '0' && client[i] <= '9') ||
+            client[i] == '-' || client[i] == '_'))
+         return 0;
+   return 1;
+}
+
 static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1232,7 +1245,12 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
 
    const char *hook_client =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
-   if (hook_client && !hmem_scope_for_client(hook_client))
+   /* A hook identity is bound to (session, client, principal), so any well-formed
+    * client name may hold one. Requiring a harness-memory scope here refused every
+    * client but claude: on CT100 all 9,531 codex hooks ran untrusted because each
+    * codex session_start came back 502 (Sep 23 - Oct 26). Memory interception keeps
+    * its own scope check. */
+   if (hook_client && !hook_client_name_ok(hook_client))
       return server_send_error(conn, "unknown harness_client", request_id);
    char hook_token[HOOK_SESSION_TOKEN_CAP] = "";
    time_t hook_token_expires = 0;

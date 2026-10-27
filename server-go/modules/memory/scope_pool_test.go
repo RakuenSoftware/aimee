@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -130,16 +130,16 @@ func TestMemoryScopeConcurrentPoolReuse(t *testing.T) {
 					id = 0
 				} // Rejected after request transaction setup.
 				request, _ := json.Marshal(DataRequest{Operation: "scope-collect", ID: id, Project: scope})
-				raw, status := handler(bus.ModuleInvocation{StageID: StageData}, request)
+				raw, status := handler(ring.ModuleInvocation{StageID: StageData}, request)
 				if iteration%4 == 3 {
-					if status != bus.ModuleStatusInvalidRequest {
+					if status != ring.ModuleStatusInvalidRequest {
 						failures <- fmt.Errorf("invalid request accepted: %v", status)
 						return
 					}
 					continue
 				}
 				var response DataResponse
-				if status != bus.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || len(response.Scopes) != want {
+				if status != ring.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || len(response.Scopes) != want {
 					failures <- fmt.Errorf("worker %d iteration %d scope %q: status %v scopes %v", worker, iteration, scope, status, response.Scopes)
 					return
 				}

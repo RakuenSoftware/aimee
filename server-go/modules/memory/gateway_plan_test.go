@@ -6,8 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyView {
@@ -21,7 +21,7 @@ func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyVi
 	return view
 }
 
-func gatewayPlanForTest(t *testing.T, h bus.ModuleHandler, args map[string]any) []gatewayStep {
+func gatewayPlanForTest(t *testing.T, h ring.ModuleHandler, args map[string]any) []gatewayStep {
 	t.Helper()
 	if roles, exists := args["roles"]; exists {
 		names, _ := args["tools"].([]string)
@@ -118,8 +118,8 @@ func TestGatewayPlanEnforcedGateAndValidation(t *testing.T) {
 		}
 		args["request"], _ = json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
 		encoded, _ := json.Marshal(args)
-		frame, _ := bus.EncodeCommand("runtime", encoded)
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", encoded)
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
@@ -174,8 +174,8 @@ func TestGatewayPlanUsesOnlyHostProvidedResourceFacts(t *testing.T) {
 	}
 	for _, raw := range []string{`null`, `true`, `"guidance"`, `[null]`, `[""]`} {
 		request, _ := json.Marshal(gatewayPolicyFixture([]string{"user"}, nil, "query"))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"context","request":`+string(request)+`,"provided_resources":`+raw+`}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"context","request":`+string(request)+`,"provided_resources":`+raw+`}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}

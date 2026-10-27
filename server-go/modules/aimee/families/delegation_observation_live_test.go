@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strings"
@@ -244,8 +244,8 @@ func TestAgentJobCanonicalObservationLiveOwnerBinding(t *testing.T) {
 func TestAgentJobCanonicalObservationPrivateAdmission(t *testing.T) {
 	frame, _ := wire.EncodeFields(opAgentJobCanonicalObservation, []string{"91", "owner"})
 	db := newSessDB()
-	_, status := Delegation.Handler(db)(bus.ModuleInvocation{StageID: StageDelegation, PrincipalRef: 7}, frame)
-	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Delegation.Handler(db)(ring.ModuleInvocation{StageID: StageDelegation, PrincipalRef: 7}, frame)
+	if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("non-host could observe another actor", status)
 	}
 	for _, fields := range [][]string{{"0", "owner"}, {"091", "owner"}, {"1", ""}, {"2147483648", "owner"}, {"1", "bad\x00actor"}} {

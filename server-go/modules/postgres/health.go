@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -161,26 +161,26 @@ func healthResponse(evidence healthEvidence) []byte {
 
 // newHandler builds the health stage around a bounded probe. Production uses
 // the package Handle entry point; tests inject the same evidence without a DB.
-func newHandler(probe func(context.Context) (healthEvidence, error)) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func newHandler(probe func(context.Context) (healthEvidence, error)) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != StageHealth || !requestValid(request) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if probe == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		timeout := invocation.Remaining(probeTimeout)
 		if timeout <= 0 {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		evidence, err := probe(ctx)
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		if err != nil {
 			// Why the health probe failed IS the health answer. Returning a bare
@@ -188,15 +188,15 @@ func newHandler(probe func(context.Context) (healthEvidence, error)) bus.ModuleH
 			// an unreachable database, a refused login and a probe timeout were
 			// one indistinguishable status.
 			log.Printf("postgres: health probe failed: %v", err)
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return healthResponse(evidence), bus.ModuleStatusOK
+		return healthResponse(evidence), ring.ModuleStatusOK
 	}
 }
 
 // Handle is the health stage's entry point. No SQL, DSN, or identity data
 // crosses the bus: the process reads its own environment secret.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	return productionHandler(invocation, request)
 }
 

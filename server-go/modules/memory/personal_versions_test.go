@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -92,28 +92,28 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		}
 		return tx
 	}
-	invoke := func(tx pgx.Tx, req DataRequest) (DataResponse, bus.ModuleStatus) {
+	invoke := func(tx pgx.Tx, req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		backend, err := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Authority = AuthorityUser
-		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}}, ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
-		if status == bus.ModuleStatusOK {
+		if status == ring.ModuleStatusOK {
 			if err := json.Unmarshal(raw, &out); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return out, status
 	}
-	call := func(req DataRequest) (DataResponse, bus.ModuleStatus) {
+	call := func(req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		tx := begin(conn)
 		defer tx.Rollback(context.Background())
 		out, status := invoke(tx, req)
-		if status == bus.ModuleStatusOK {
+		if status == ring.ModuleStatusOK {
 			if err := tx.Commit(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	get := func() Record {
 		t.Helper()
 		r, s := call(DataRequest{Operation: "get", ID: 42, IncludeVersion: true})
-		if s != bus.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].Version == nil {
+		if s != ring.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].Version == nil {
 			t.Fatal(s, r)
 		}
 		return r.Records[0]
@@ -163,22 +163,22 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		args := commandArgs{}
 		args["revalidation"], _ = json.Marshal(request)
 		options := handlerOptions{placement: PlacementServer, data: backend}
-		encoded, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{}, args)
-		raw, err := bus.DecodeCommandResult(encoded)
+		encoded, status := handlePersonalSourceRevalidation(options, ring.ModuleInvocation{}, args)
+		raw, err := ring.DecodeCommandResult(encoded)
 		var reply struct {
 			Status   string
 			Eligible bool
 			CheckID  string `json:"check_id"`
 			Digest   string `json:"sources_digest"`
 		}
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(raw, &reply) != nil || reply.Status != "ok" || reply.Eligible != want || reply.CheckID != request.CheckID || reply.Digest != releaseDigest(request.Sources) {
+		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(raw, &reply) != nil || reply.Status != "ok" || reply.Eligible != want || reply.CheckID != request.CheckID || reply.Digest != releaseDigest(request.Sources) {
 			t.Fatalf("private owner answer: %s %v %v", raw, status, err)
 		}
-		if _, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{PrincipalRef: 1}, args); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handlePersonalSourceRevalidation(options, ring.ModuleInvocation{PrincipalRef: 1}, args); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal("public caller reached private revalidation", status)
 		}
 		options.placement = PlacementKB
-		if _, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{}, args); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handlePersonalSourceRevalidation(options, ring.ModuleInvocation{}, args); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal("shared owner reached private revalidation", status)
 		}
 	}
@@ -202,7 +202,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	}
 	confidence := .7
 	stored, status := call(DataRequest{Operation: "store", Key: "private", Kind: "fact", Tier: "L2", Content: "corrected", Confidence: &confidence})
-	if status != bus.ModuleStatusOK || len(stored.Records) != 1 || stored.Records[0].ID != 42 {
+	if status != ring.ModuleStatusOK || len(stored.Records) != 1 || stored.Records[0].ID != 42 {
 		t.Fatal(status, stored)
 	}
 	current := get()
@@ -213,7 +213,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		t.Fatal(current)
 	}
 	prior, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version})
-	if status != bus.ModuleStatusOK || len(prior.Records) != 1 || prior.Records[0].Content != "original" || !prior.Records[0].Historical || *prior.Records[0].Version != *original.Version {
+	if status != ring.ModuleStatusOK || len(prior.Records) != 1 || prior.Records[0].Content != "original" || !prior.Records[0].Historical || *prior.Records[0].Version != *original.Version {
 		t.Fatal(status, prior)
 	}
 	if scalar(`SELECT count(*) FROM user_memory_versions WHERE record->>'source_session'='original-session' AND record->>'provenance_category'='unknown'`) != 1 {
@@ -222,23 +222,23 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	wrongOwner := *original.Version
 	wrongOwner.OwnerID = "00000000-0000-0000-0000-000000000001"
 	checkRelease(&wrongOwner, "native_preferences", false)
-	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: &wrongOwner}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
+	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: &wrongOwner}); status != ring.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("wrong owner history", status, out)
 	}
 	correction := DataRequest{Operation: "supersede", ID: 42, Content: "third", Confidence: &confidence, ExpectedVersion: original.Version}
-	if out, status := call(correction); status != bus.ModuleStatusOK || out.Code == nil || *out.Code != MutationVersionConflict {
+	if out, status := call(correction); status != ring.ModuleStatusOK || out.Code == nil || *out.Code != MutationVersionConflict {
 		t.Fatal("stale correction", status, out)
 	}
 	correction.ExpectedVersion = current.Version
 	changed, status := call(correction)
-	if status != bus.ModuleStatusOK || len(changed.Records) != 1 || changed.Records[0].Version.RecordRevision != "3" {
+	if status != ring.ModuleStatusOK || len(changed.Records) != 1 || changed.Records[0].Version.RecordRevision != "3" {
 		t.Fatal(status, changed)
 	}
 	current = get()
 	// Identical upserts and read accounting do not allocate history or positions.
 	generation := scalar(`SELECT generation FROM user_memory_collection_generation`)
 	exec(`UPDATE user_memories SET use_count=use_count+1,last_used_at=now(),updated_at=now() WHERE id=42`)
-	if _, status := call(DataRequest{Operation: "store", Key: "private", Kind: "fact", Tier: "L2", Content: "third", Confidence: &confidence}); status != bus.ModuleStatusOK {
+	if _, status := call(DataRequest{Operation: "store", Key: "private", Kind: "fact", Tier: "L2", Content: "third", Confidence: &confidence}); status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	if scalar(`SELECT count(*) FROM user_memory_versions`) != 2 || scalar(`SELECT generation FROM user_memory_collection_generation`) != generation {
@@ -248,7 +248,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	exec(`ALTER TABLE user_memory_versions ADD CONSTRAINT fixture_failure CHECK(record->>'content'<>'third')`)
 	correction.ExpectedVersion = current.Version
 	correction.Content = "must roll back"
-	if _, status := call(correction); status != bus.ModuleStatusInternal {
+	if _, status := call(correction); status != ring.ModuleStatusInternal {
 		t.Fatal("late history failure accepted", status)
 	}
 	if get().Content != "third" || scalar(`SELECT generation FROM user_memory_collection_generation`) != generation || scalar(`SELECT count(*) FROM user_memory_versions`) != 2 {
@@ -293,12 +293,12 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	defer first.Rollback(context.Background())
 	defer second.Rollback(context.Background())
 	winner, status := invoke(first, correction)
-	if status != bus.ModuleStatusOK || len(winner.Records) != 1 {
+	if status != ring.ModuleStatusOK || len(winner.Records) != 1 {
 		t.Fatal(status, winner)
 	}
 	type result struct {
 		out    DataResponse
-		status bus.ModuleStatus
+		status ring.ModuleStatus
 	}
 	done := make(chan result, 1)
 	go func() { out, status := invoke(second, correction); done <- result{out, status} }()
@@ -322,7 +322,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	loser := <-done
-	if loser.status != bus.ModuleStatusOK || loser.out.Code == nil || *loser.out.Code != MutationVersionConflict {
+	if loser.status != ring.ModuleStatusOK || loser.out.Code == nil || *loser.out.Code != MutationVersionConflict {
 		t.Fatal("competing stale writer accepted", loser)
 	}
 	if err := second.Commit(ctx); err != nil {
@@ -336,14 +336,14 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	beforeRevocation := get()
 	exec(`UPDATE user_memories SET lifecycle_state='rejected' WHERE id=42`)
 	checkRelease(beforeRevocation.Version, "native_preferences", false)
-	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
+	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != ring.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("revoked parent released history", status, out)
 	}
 	exec(`ALTER TABLE user_memories DISABLE TRIGGER user_memory_00_authority; UPDATE user_memories SET lifecycle_state='retired' WHERE id=42; ALTER TABLE user_memories ENABLE TRIGGER user_memory_00_authority`)
-	if out, status := call(DataRequest{Operation: "get", ID: 42}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
+	if out, status := call(DataRequest{Operation: "get", ID: 42}); status != ring.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("retired current read", status, out)
 	}
-	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != bus.ModuleStatusOK || len(out.Records) != 1 {
+	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != ring.ModuleStatusOK || len(out.Records) != 1 {
 		t.Fatal("retained revision missing", status, out)
 	}
 	exec(`DELETE FROM user_memories WHERE id=42`)
@@ -351,7 +351,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	if scalar(`SELECT count(*) FROM user_memory_versions`) != 0 {
 		t.Fatal("parent erasure retained private payload")
 	}
-	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
+	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != ring.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("erased version released", status, out)
 	}
 }

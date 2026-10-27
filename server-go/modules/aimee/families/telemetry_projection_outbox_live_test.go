@@ -11,10 +11,10 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	learning "github.com/JBailes/aimee/server-go/modules/learning"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,8 +26,8 @@ func TestLearningProjectionHostOnly(t *testing.T) {
 		}
 		frame, _ := wire.EncodeFields(operation, args)
 		db := newDelDB()
-		_, status := Telemetry.Handler(db)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
-		if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, status := Telemetry.Handler(db)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
+		if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal("untrusted recovery", status, db.executed)
 		}
 	}
@@ -353,15 +353,15 @@ func TestLearningProjectionPostgresWaitsForEveryOwnedGrade(t *testing.T) {
 		}
 		record := learning.ExecutionRecord{Version: 1, Session: "s", Turn: "proofs", Sequence: source.Sequence, EventID: source.Event, Actor: "alice", Event: json.RawMessage(body)}
 		args, _ := json.Marshal(learning.ExecutionTestGradeRequest{Record: record, Proof: proof})
-		command, err := bus.EncodeCommandWithContext("grade", args, bus.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:isolated-project-verification"})
+		command, err := ring.EncodeCommandWithContext("grade", args, ring.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:isolated-project-verification"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reply, moduleStatus := learning.Handle(bus.ModuleInvocation{StageID: learning.StageExecution}, command)
-		if moduleStatus != bus.ModuleStatusOK {
+		reply, moduleStatus := learning.Handle(ring.ModuleInvocation{StageID: learning.StageExecution}, command)
+		if moduleStatus != ring.ModuleStatusOK {
 			t.Fatal("Learning refused owned fixture", moduleStatus)
 		}
-		raw, err := bus.DecodeCommandResult(reply)
+		raw, err := ring.DecodeCommandResult(reply)
 		if err != nil {
 			t.Fatal(err)
 		}

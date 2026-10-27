@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Keep correction's persisted digest format stable. Lifecycle decisions also
@@ -26,7 +26,7 @@ func lifecycleDigest(r DataRequest, authority int) (string, error) {
 // The caller rolls back on every error, including receipt insertion failures.
 // Advisory locks serialize a caller's retry key; row locks serialize distinct
 // keys against other canonical mutations through audit and receipt persistence.
-func (s *postgresDataStore) lifecycleKBIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext, correlation string) (*MemoryMutationReceipt, error) {
+func (s *postgresDataStore) lifecycleKBIdempotent(ctx context.Context, r DataRequest, caller *ring.CommandContext, correlation string) (*MemoryMutationReceipt, error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB ||
 		(r.Operation != "reject" && r.Operation != "restore") || !verifiedRetryCaller(caller) ||
 		!validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) {

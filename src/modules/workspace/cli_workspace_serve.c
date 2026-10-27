@@ -27,6 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 /* Threading for the background reverse-channel: pthreads co-located, the CRT's
  * _beginthreadex on Windows (always present in MinGW, no winpthreads needed). */
@@ -260,6 +263,98 @@ static int workspace_root_contains(const char *root, const char *cwd)
       n--;
    return strncmp(root, cwd, n) == 0 && (cwd[n] == '\0' || cwd[n] == '/');
 }
+
+#if defined(AIMEE_POSIX)
+/* Where a clone lands, made ready for the detached runner.
+ *
+ * Git runs on a remote server only through a runner serving a registered detached
+ * workspace, and a clone's destination is by definition not one yet. With no
+ * runner the server ran the clone in its own filesystem at the client's path:
+ * `git clone ... ~/dev/ouroboros-ring` failed with "could not create leading
+ * directories ... Permission denied" (2026-10-27), and had the path existed on
+ * the server the checkout would have been invisible to the caller. So create the
+ * destination here, register it when no detached workspace already covers it,
+ * and clone into it as `path=.` with it as the cwd. Returns 0, or -1 with the
+ * reason printed. */
+int cli_workspace_git_clone_prepare(cJSON *args)
+{
+   const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "url"));
+   const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "path"));
+   if (!url || !url[0])
+      return 0; /* the server names the missing argument */
+
+   char name[256] = "";
+   if (!path || !path[0])
+   {
+      /* git's own default: the last URL component, without ".git". */
+      size_t n = strlen(url);
+      while (n > 1 && url[n - 1] == '/')
+         n--;
+      size_t start = n;
+      while (start > 0 && url[start - 1] != '/' && url[start - 1] != ':')
+         start--;
+      size_t len = n - start;
+      if (len > 4 && strncmp(url + start + len - 4, ".git", 4) == 0)
+         len -= 4;
+      if (len == 0 || len >= sizeof(name))
+      {
+         fprintf(stderr, "aimee: cannot tell a clone directory from '%s'; pass path=<dir>\n", url);
+         return -1;
+      }
+      memcpy(name, url + start, len);
+      name[len] = '\0';
+      path = name;
+   }
+
+   char dest[PATH_MAX];
+   char here[PATH_MAX];
+   if (path[0] != '/' && !getcwd(here, sizeof(here)))
+      return -1;
+   if ((size_t)snprintf(dest, sizeof(dest), "%s%s%s", path[0] == '/' ? "" : here,
+                        path[0] == '/' ? "" : "/", path) >= sizeof(dest))
+      return -1;
+   if (mkdir(dest, 0755) != 0 && errno != EEXIST)
+   {
+      fprintf(stderr, "aimee: cannot create clone directory %s: %s\n", dest, strerror(errno));
+      return -1;
+   }
+   char real[PATH_MAX];
+   if (!realpath(dest, real))
+      return -1;
+
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "path");
+   cJSON_AddStringToObject(args, "path", ".");
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "cwd");
+   cJSON_AddStringToObject(args, "cwd", real);
+
+   char *endpoint = cli_v1_client_endpoint();
+   char *bearer = endpoint ? cli_v1_client_bearer() : NULL;
+   int status = 0;
+   cJSON *list =
+       endpoint ? cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status)
+                : NULL;
+   free(endpoint);
+   free(bearer);
+   if (!list || status < 200 || status >= 300)
+   {
+      cJSON_Delete(list);
+      fprintf(stderr, "aimee: cannot list workspaces to place the clone (HTTP %d)\n", status);
+      return -1;
+   }
+   int covered = 0;
+   const cJSON *w = NULL;
+   cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(list, "workspaces"))
+   {
+      const char *prov = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(w, "provider"));
+      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(w, "path"));
+      size_t n = root ? strlen(root) : 0;
+      if (prov && strcmp(prov, "detached") == 0 && n > 0 && workspace_root_contains(root, real))
+         covered = 1;
+   }
+   cJSON_Delete(list);
+   return covered || cli_workspace_add_remote(real, 0, 0) == 0 ? 0 : -1;
+}
+#endif
 
 int cli_workspace_git_runner_start(const char *target)
 {

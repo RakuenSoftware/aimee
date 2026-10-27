@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // RecordBuildRequest is the session-compaction record seam. The caller already
@@ -116,22 +116,22 @@ func buildRecord(messages []ir.Message, start, end int) recordBuildResponse {
 	return resp
 }
 
-func handleRecordBuild(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRecordBuild(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var req RecordBuildRequest
 	if !ir.Decode(request, &req) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	messages, err := ir.DecodeMessages(req.Messages)
 	if err != nil || req.Start < 0 || req.End < req.Start || req.End > len(messages) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	resp := buildRecord(messages, req.Start, req.End)
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }

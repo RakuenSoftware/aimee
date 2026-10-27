@@ -32,6 +32,80 @@
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
       "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4"
+    },
+    "src/tests/test_context_assembly.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context",
+        "memory_delete",
+        "memory_insert",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "d05eba4db3568aee572e8e0c64b04823a50bd1d5b62b779d4ef236d09d7b1f1e"
+    },
+    "src/tests/test_memory_advanced.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "add_provenance",
+        "memory_directive_counts",
+        "memory_directive_create",
+        "memory_directive_get",
+        "memory_directive_list",
+        "memory_directive_mark_surfaced",
+        "memory_directive_match",
+        "memory_directive_metrics",
+        "memory_directive_resolve",
+        "memory_directive_suppress",
+        "memory_directive_sweep_expired",
+        "memory_insert",
+        "memory_lifecycle_counts",
+        "memory_lifecycle_sweep_expired",
+        "memory_list_conflicts",
+        "memory_maintenance_run",
+        "memory_mark_pending",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_get",
+        "memory_prospective_list",
+        "memory_prospective_mark_triggered",
+        "memory_prospective_match",
+        "memory_prospective_sweep_expired",
+        "memory_query_health",
+        "memory_record_conflict",
+        "memory_resolve_conflict",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "3b2bc0c6de11985aa452d30112429f830c237b8a3c908ca3617f6e923749044d"
+    },
+    "src/tests/test_pgvec_neardup.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "pgvec_memory_vector_collection_recreate"
+      ],
+      "sha256": "098bd0b7d5845b4164b4f30a7ad33789fa1ddcdd67eb14bf9b11c6658912b15b"
+    },
+    "src/tests/test_session_briefing.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_directive_create",
+        "memory_directive_resolve",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_list"
+      ],
+      "sha256": "73a13a4492983f3e130375381412a8d8af2dc8b6d4ece7a88c339e2fa58b7b23"
+    },
+    "src/tests/test_workspace_memory.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context_ws",
+        "memory_insert",
+        "memory_insert_ex",
+        "memory_link_create",
+        "memory_tag_global",
+        "memory_tag_project"
+      ],
+      "sha256": "59ad08a618e76d2bc5bde969d0b563fb17bb04228779c7782fce4f7a7eff1a48"
     }
   }
 }

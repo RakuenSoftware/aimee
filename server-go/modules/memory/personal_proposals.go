@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The caller already holds the canonical parent lock and host actor context.
@@ -75,7 +75,7 @@ func (s *postgresDataStore) listPersonalCorrectionProposals(ctx context.Context,
 	return out, rows.Err()
 }
 
-func (s *postgresDataStore) reviewPersonalCorrection(ctx context.Context, r correctionReviewRequest, caller *bus.CommandContext) (correctionProposal, error) {
+func (s *postgresDataStore) reviewPersonalCorrection(ctx context.Context, r correctionReviewRequest, caller *ring.CommandContext) (correctionProposal, error) {
 	if s.placement != PlacementServer || !r.valid() || !verifiedRetryCaller(caller) || !caller.UserAuthority {
 		return correctionProposal{}, errors.New("memory: authenticated user review required")
 	}

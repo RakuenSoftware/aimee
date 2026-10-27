@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/delegate"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const HostExecuteEvent uint32 = 6679
@@ -19,15 +19,15 @@ const HostExecutePrincipal uint32 = 76
 
 // NewProcessHandler attaches a request-only identity distinct from the serving
 // delegates principal. Both multicall and standalone exports use this path.
-func NewProcessHandler(ctx context.Context, socket string) (bus.ModuleHandler, error) {
+func NewProcessHandler(ctx context.Context, socket string) (ring.ModuleHandler, error) {
 	if ctx == nil || socket == "" {
 		return nil, errors.New("native host execution requires the owned module bus")
 	}
-	client, err := bus.ConnectClient(ctx, socket, 1, HostExecutePrincipal)
+	client, err := ring.ConnectClient(ctx, socket, 1, HostExecutePrincipal)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		return nil, err

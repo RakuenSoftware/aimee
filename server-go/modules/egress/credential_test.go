@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func sealCredentialForTest(t *testing.T, broker *credentialBroker, plaintext string,
@@ -68,18 +68,18 @@ func TestCredentialEnvelopeIsCallerScopeAndExpiryBound(t *testing.T) {
 	envelope := sealCredentialForTest(t, broker, "secret-bearer", now.Add(30*time.Second))
 	request := HTTPRequest{CredentialHandle: credentialHandleForge, CredentialScope: "pr_info",
 		CredentialResource: "acme/widgets", Credential: &envelope}
-	invocation := bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: GitClientRef}
+	invocation := ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: GitClientRef}
 	plaintext, err := broker.decrypt(now, invocation, request, credentialHostForge)
 	if err != nil || string(plaintext) != "secret-bearer" {
 		t.Fatalf("decrypt = %q, %v", plaintext, err)
 	}
 	clear(plaintext)
 
-	for name, mutate := range map[string]func(*HTTPRequest, *bus.ModuleInvocation){
-		"caller":     func(_ *HTTPRequest, invocation *bus.ModuleInvocation) { invocation.PrincipalRef++ },
-		"operation":  func(request *HTTPRequest, _ *bus.ModuleInvocation) { request.CredentialScope = "pr_edit" },
-		"repository": func(request *HTTPRequest, _ *bus.ModuleInvocation) { request.CredentialResource = "acme/other" },
-		"key": func(request *HTTPRequest, _ *bus.ModuleInvocation) {
+	for name, mutate := range map[string]func(*HTTPRequest, *ring.ModuleInvocation){
+		"caller":     func(_ *HTTPRequest, invocation *ring.ModuleInvocation) { invocation.PrincipalRef++ },
+		"operation":  func(request *HTTPRequest, _ *ring.ModuleInvocation) { request.CredentialScope = "pr_edit" },
+		"repository": func(request *HTTPRequest, _ *ring.ModuleInvocation) { request.CredentialResource = "acme/other" },
+		"key": func(request *HTTPRequest, _ *ring.ModuleInvocation) {
 			request.Credential.KeyID = strings.Repeat("0", 32)
 		},
 	} {
@@ -122,7 +122,7 @@ func TestDecryptsEnvelopeProducedByTheCCore(t *testing.T) {
 	request := HTTPRequest{CredentialHandle: "forge", CredentialScope: "pr_merge",
 		CredentialResource: "acme/widgets", Credential: &envelope}
 	plaintext, err := broker.decrypt(time.Unix(envelope.ExpiresAt-1, 0),
-		bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: GitClientRef}, request, "api.github.com")
+		ring.ModuleInvocation{PrincipalClass: 1, PrincipalRef: GitClientRef}, request, "api.github.com")
 	if err != nil || string(plaintext) != "test-token" {
 		t.Fatalf("C/Go credential envelope interop = %q, %v", plaintext, err)
 	}
@@ -131,8 +131,8 @@ func TestDecryptsEnvelopeProducedByTheCCore(t *testing.T) {
 
 func TestCredentialPublicKeyStageContainsNoPrivateMaterial(t *testing.T) {
 	handler := newHandler(fixedResolver{})
-	body, status := handler(bus.ModuleInvocation{PrincipalClass: 1, StageID: StageCredentialKey}, nil)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{PrincipalClass: 1, StageID: StageCredentialKey}, nil)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var reply struct {
@@ -144,7 +144,7 @@ func TestCredentialPublicKeyStageContainsNoPrivateMaterial(t *testing.T) {
 		len(reply.KeyID) != credentialKeyIDBytes*2 || len(reply.PublicKey) == 0 || strings.Contains(string(body), "private") {
 		t.Fatalf("public-key reply = %s", body)
 	}
-	if _, status := handler(bus.ModuleInvocation{PrincipalClass: 1, StageID: StageCredentialKey}, []byte(`{}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{PrincipalClass: 1, StageID: StageCredentialKey}, []byte(`{}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("non-empty key request status = %v", status)
 	}
 }
@@ -156,7 +156,7 @@ func TestHTTPExecutorAddsDecryptedBearerOnlyAtNetworkBoundary(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	response := (policy{}).executeHTTP(bus.ModuleInvocation{}, HTTPRequest{Request: Request{
+	response := (policy{}).executeHTTP(ring.ModuleInvocation{}, HTTPRequest{Request: Request{
 		TargetURL: server.URL, Method: http.MethodGet}, MaxResponseBytes: 16, TimeoutMS: 1000},
 		Decision{Target: server.URL, ResolvedIPs: []string{"127.0.0.1"}}, []byte("boundary-secret"))
 	if response.Error != "" || response.Status != http.StatusNoContent || seen != "Bearer boundary-secret" {

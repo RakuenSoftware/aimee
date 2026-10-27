@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Did a review look at what it reviewed?
@@ -33,11 +33,11 @@ const (
 	reviewRoleMax = 64
 )
 
-func handleReviewEvidence(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleReviewEvidence(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < reviewEvidenceHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != reviewEvidenceRequestMagic ||
 		request[4] != wireVersion || request[5] != 0 || request[6] != 0 || request[7] != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	flags := binary.LittleEndian.Uint32(request[8:12])
@@ -45,24 +45,24 @@ func handleReviewEvidence(invocation bus.ModuleInvocation, request []byte) ([]by
 		// An unknown flag means the caller believes it is sending a fact this
 		// module reads. Judging the evidence while ignoring part of it is worse
 		// than not judging it.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	roleLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if roleLen < 0 || roleLen > reviewRoleMax || reviewEvidenceHeaderLen+roleLen > len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	role := string(request[reviewEvidenceHeaderLen : reviewEvidenceHeaderLen+roleLen])
 	response := string(request[reviewEvidenceHeaderLen+roleLen:])
 
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	var v ReviewEvidenceVerdict
 	if flags&reviewFlagPolicyOnly != 0 {
 		if flags != reviewFlagPolicyOnly || response != "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		v = reviewEvidenceRolePolicy(role)
 	} else {
@@ -88,5 +88,5 @@ func handleReviewEvidence(invocation bus.ModuleInvocation, request []byte) ([]by
 	binary.LittleEndian.PutUint32(out[0:4], reviewEvidenceResponseMagic)
 	binary.LittleEndian.PutUint32(out[4:8], verdict)
 	copy(out[8:], v.Error)
-	return out, bus.ModuleStatusOK
+	return out, ring.ModuleStatusOK
 }

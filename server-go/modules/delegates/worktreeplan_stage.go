@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Asking the module what a delegate needs from the workspace.
@@ -40,36 +40,36 @@ const (
 // Whether this delegate writes, and which delegate it is, arrive as content.
 // The module looks neither up: both are the caller's facts, and a module that
 // remembered them would be tracking someone else's state.
-func handleWorktreePlan(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleWorktreePlan(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < worktreePlanReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != worktreePlanRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// The caller's COMPOSED answer, not the role. A write role whose prompt does
 	// not ask for writes needs no worktree of its own.
 	if request[5] > 1 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	writesAllowed := request[5] == 1
 
 	// The length lives in the fixed header; the body starts after it.
 	idLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	if idLen > worktreePlanDelegateIDMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	c := &economicsCursor{buf: request, at: worktreePlanReqHeaderLen}
 	delegateID := c.str(idLen)
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	plan, err := PlanWorktree(writesAllowed, delegateID)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	response := make([]byte, worktreePlanResponseLen)
@@ -77,5 +77,5 @@ func handleWorktreePlan(invocation bus.ModuleInvocation, request []byte) ([]byte
 	putBool(response[4:8], plan.Isolated)
 	putBool(response[8:12], plan.ReadOnlyMount)
 	putFixed(response[12:], plan.WorkName)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

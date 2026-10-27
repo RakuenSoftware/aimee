@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const pageRankCandidateCap = 128
@@ -207,23 +207,23 @@ func (s *postgresDataStore) pageRank(ctx context.Context, req DataRequest, exact
 	return result, nil
 }
 
-func handlePageRank(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handlePageRank(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	for _, key := range []string{"iterations", "weight", "relations"} {
 		if strings.TrimSpace(string(args[key])) == "null" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	request := defaultPageRankRequest()
 	raw, err := json.Marshal(args)
 	if err != nil || json.Unmarshal(raw, &request) != nil || !validPageRankRequest(&request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "pagerank", PageRank: &request})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	if len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(json.RawMessage(response.Payload))
 }

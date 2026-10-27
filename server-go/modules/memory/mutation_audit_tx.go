@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const mutationAuditBatchLimit = 4096
@@ -88,7 +88,7 @@ func (s *postgresDataStore) recordMutation(request DataRequest, response DataRes
 	if err != nil || s.auditAction == nil {
 		return
 	}
-	a, ok := mutationAudit(request, response, bus.ModuleStatusOK)
+	a, ok := mutationAudit(request, response, ring.ModuleStatusOK)
 	if !ok || a.Verdict != "ok" {
 		return
 	}
