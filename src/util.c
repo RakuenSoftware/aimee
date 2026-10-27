@@ -117,26 +117,107 @@ char *strip_llm_private_scaffold(const char *text)
    return out;
 }
 
-/* A line carries AI attribution if, after leading whitespace, it starts with a
- * "co-authored-by:" trailer, or it contains the markdown-link attribution
- * "generated with [claude"/"generated with [codex" anywhere. Case-insensitive.
- * Mirrors the anchored regex in .github/workflows/ci.yml (ai-attribution gate)
- * so Aimee never emits what CI rejects. `end` bounds the line (exclusive). */
-static int line_is_ai_attribution(const char *line, const char *end)
+/* Case-insensitive prefix match of `word` at p, bounded by end. Returns the
+ * position after it, or NULL. */
+static const char *attr_word(const char *p, const char *end, const char *word)
 {
-   const char *p = line;
+   size_t n = strlen(word);
+   if ((size_t)(end - p) < n || strncasecmp(p, word, n) != 0)
+      return NULL;
+   return p + n;
+}
+
+static const char *attr_spaces(const char *p, const char *end)
+{
    while (p < end && (*p == ' ' || *p == '\t'))
       p++;
-   if (end - p >= 15 && strncasecmp(p, "co-authored-by:", 15) == 0)
+   return p;
+}
+
+static int attr_ascii_alnum(char c)
+{
+   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+/* "<word> :" with optional spaces before the colon. */
+static int attr_trailer(const char *p, const char *end, const char *word)
+{
+   const char *q = attr_word(p, end, word);
+   if (!q)
+      return 0;
+   q = attr_spaces(q, end);
+   return q < end && *q == ':';
+}
+
+/* A line carries AI attribution if, after any run of non-alphanumeric bytes
+ * (whitespace, quote and markdown markers, or an emoji such as the standard
+ * "🤖 Generated with [Claude Code](...)" footer), it starts with a
+ * "co-authored-by:" trailer, an assistant "<name>-session:" trailer, or a
+ * "generated with|by <assistant>" footer; or if it contains an assistant session
+ * link or "generated with [claude|codex" anywhere. Case-insensitive.
+ *
+ * This is the emitting side of the no-coauthor-trailers gate
+ * (server-go/modules/git/attribution): it must strip at least what that gate
+ * refuses, so Aimee never emits what CI rejects. `end` bounds the line
+ * (exclusive). */
+static int line_is_ai_attribution(const char *line, const char *end)
+{
+   static const char *const assistants[] = {"github copilot", "claude", "codex", "chatgpt",
+                                            "copilot"};
+   const char *p = line;
+   while (p < end && !attr_ascii_alnum(*p))
+      p++;
+   if (attr_trailer(p, end, "co-authored-by"))
       return 1;
-   for (const char *q = line; end - q >= 16 + 5; q++)
+   for (size_t i = 1; i < sizeof(assistants) / sizeof(assistants[0]); i++)
    {
-      if (strncasecmp(q, "generated with [", 16) != 0)
-         continue;
-      const char *r = q + 16;
-      if ((end - r >= 6 && strncasecmp(r, "claude", 6) == 0) ||
-          (end - r >= 5 && strncasecmp(r, "codex", 5) == 0))
+      const char *q = attr_word(p, end, assistants[i]);
+      if (q && attr_trailer(q, end, "-session"))
          return 1;
+   }
+   const char *g = attr_word(p, end, "generated");
+   if (g && g < end && (*g == ' ' || *g == '\t'))
+   {
+      g = attr_spaces(g, end);
+      const char *h = attr_word(g, end, "with");
+      if (!h)
+         h = attr_word(g, end, "by");
+      if (h && h < end && (*h == ' ' || *h == '\t'))
+      {
+         h = attr_spaces(h, end);
+         if (h < end && *h == '[')
+            h++;
+         for (size_t i = 0; i < sizeof(assistants) / sizeof(assistants[0]); i++)
+         {
+            const char *a = attr_word(h, end, assistants[i]);
+            if (a && (a == end || !attr_ascii_alnum(*a)))
+               return 1;
+         }
+      }
+   }
+   for (const char *q = line; q < end; q++)
+   {
+      const char *r = attr_word(q, end, "generated with [");
+      if (r && (attr_word(r, end, "claude") || attr_word(r, end, "codex")))
+         return 1;
+      /* A session link anywhere: http(s)://<non-space>/[code/]session[_/-] */
+      const char *u = attr_word(q, end, "http://");
+      if (!u)
+         u = attr_word(q, end, "https://");
+      if (!u)
+         continue;
+      const char *stop = u;
+      while (stop < end && *stop != ' ' && *stop != '\t' && *stop != '\r')
+         stop++;
+      for (const char *s = u; s < stop; s++)
+      {
+         if (*s != '/')
+            continue;
+         const char *t = attr_word(s + 1, stop, "code/");
+         t = attr_word(t ? t : s + 1, stop, "session");
+         if (t && t < stop && (*t == '_' || *t == '/' || *t == '-'))
+            return 1;
+      }
    }
    return 0;
 }
