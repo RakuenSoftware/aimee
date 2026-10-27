@@ -28,9 +28,10 @@ jobs:
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i * 4))
           done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          # Retry a hung mirror; packages fetched before a timeout stay cached.
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
-            libp11-kit-dev libpq-dev
+            libp11-kit-dev libpq-dev; do i=$((i+1)); [ "$i" -ge 3 ] && exit 1; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Build benchmark
         run: make -C src -j"$(nproc)" tests/bench-perf
       - name: Run full benchmark and check committed baseline
