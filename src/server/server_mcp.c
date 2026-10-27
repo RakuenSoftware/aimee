@@ -252,11 +252,37 @@ cJSON *tool_get_help(cJSON *args)
 
    if (!section_start)
    {
-      char errmsg[256];
-      snprintf(errmsg, sizeof(errmsg),
-               "unknown topic '%s'. Call get_help() with no args for topic list.", topic);
+      /* Name the topics here: the CLI's `aimee get-help` with no topic prints its
+       * own usage rather than this index, so "call it with no args" leads nowhere. */
+      size_t cap = 256 + strlen(topic) + agent_help_data_len;
+      char *errmsg = malloc(cap);
+      if (!errmsg)
+      {
+         free(doc);
+         return text_content("error: out of memory");
+      }
+      int n = snprintf(errmsg, cap, "unknown topic '%s'. Topics:", topic);
+      size_t pos = (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+      const char *sep = " ";
+      for (const char *q = (const char *)agent_help_data;
+           q < (const char *)agent_help_data + agent_help_data_len;)
+      {
+         const char *end = memchr(q, '\n', (const char *)agent_help_data + agent_help_data_len - q);
+         size_t linelen = end ? (size_t)(end - q)
+                              : (size_t)((const char *)agent_help_data + agent_help_data_len - q);
+         if (linelen > 3 && q[0] == '#' && q[1] == '#' && q[2] == ' ')
+         {
+            n = snprintf(errmsg + pos, cap - pos, "%s%.*s", sep, (int)(linelen - 3), q + 3);
+            if (n > 0 && (size_t)n < cap - pos)
+               pos += (size_t)n;
+            sep = ", ";
+         }
+         q = end ? end + 1 : q + linelen;
+      }
       free(doc);
-      return text_content(errmsg);
+      cJSON *content = text_content(errmsg);
+      free(errmsg);
+      return content;
    }
 
    cJSON *result = text_content(section_start);

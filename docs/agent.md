@@ -194,13 +194,43 @@ Binaries land at repo root (`../aimee`, `../aimee-runtime-web`, `../aimee-server
 
 ---
 
+## Git
+
+`aimee git <command> [primary] [key=value ...]` runs Git and GitHub operations on
+aimee-server, so it works where `gh` has no login. It acts on the checkout given by
+`path=` (default: the current directory), which must be a workspace registered
+with the session.
+
+```
+aimee git status
+aimee git commit "fix: short description"
+aimee git push
+aimee git sync                         # fetch + rebase onto the base branch
+aimee git pr create base=testing       # title and body written from the commits
+aimee git pr checks number=123 wait=true
+aimee git pr merge number=123
+```
+
+`aimee git pr` actions: create, view, list, edit, checks, watch, failures,
+merge_status, update_branch, ready, merge. Keys: `number=N`, `title=`, `body=`,
+`base=BRANCH`, `merge_method=merge|squash|rebase`, `expected_head_sha=SHA`,
+`wait=true`, `path=DIR`. `failures` prints the failing jobs' log tails.
+
+`pr create` opens the PR for the checkout's current branch; there is no `head=`
+key, so switch that checkout to the branch first. Run a command that needs its
+first word (`pr`, `branch`, `commit`, `clone`, `switch`) with no arguments to see
+its actions and keys.
+
+---
+
 ## PR Workflow
 
 ```
 git checkout -b feat/my-feature testing
 # implement
 git commit -m "feat: short description"
-gh pr create --base testing --title "feat: short description" --body "..."
+aimee git push
+aimee git pr create base=testing title="feat: short description"
 ```
 
 Feature PRs target `testing`. After CI passes, merge them into `testing`.
