@@ -686,6 +686,7 @@ set(DATA_SRCS
 )
 
 set(AGENT_SRCS
+    ${AIMEE_SRC_DIR}/server/request_context.c
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
     ${AIMEE_SRC_DIR}/server/agent_request_build.c
     ${AIMEE_SRC_DIR}/server/server_model_execution.c
@@ -1013,6 +1014,7 @@ set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/request_context.c
     ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
     ${AIMEE_SRC_DIR}/server/server_native_history.c

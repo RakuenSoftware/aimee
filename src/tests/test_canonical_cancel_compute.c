@@ -67,10 +67,6 @@ void compute_ctx_bind_request_context(const compute_ctx_t *c)
 void compute_ctx_clear_request_context(void)
 {
 }
-void request_context_snapshot_clear(request_context_snapshot_t *s)
-{
-   memset(s, 0, sizeof *s);
-}
 const workspace_turn_mirror_lease_t *
 workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *p)
 {

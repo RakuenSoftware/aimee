@@ -7029,6 +7029,7 @@ $(TESTPREFIX)/unit-test-native-provider-turn-limit: $(OBJDIR)/tests/test_native_
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lm
 
 $(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/tests/test_canonical_cancel_compute.o $(OBJDIR)/json_fluent.o \
+    $(OBJDIR)/server/request_context.o \
     $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_chat_ir.o \
     $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_learning_outcome.o \
     $(OBJDIR)/server/turn_registry.o $(OBJDIR)/core/turn_integrity/turn_integrity.o \
