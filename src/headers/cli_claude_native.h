@@ -25,9 +25,21 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
 /* Static allowlisted reason only; never returns SDK-supplied values. NULL means valid. */
 const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host,
                                             const struct cJSON *frame);
+typedef enum
+{
+   CLI_CLAUDE_MCP_UNKNOWN,
+   CLI_CLAUDE_MCP_PENDING,
+   CLI_CLAUDE_MCP_FAILED,
+   CLI_CLAUDE_MCP_NEEDS_AUTH,
+   CLI_CLAUDE_MCP_DISABLED,
+   CLI_CLAUDE_MCP_CONNECTED
+} cli_claude_mcp_status_t;
+/* Static allowlist only; never returns an SDK-provided string. */
+const char *cli_claude_mcp_status_name(cli_claude_mcp_status_t status);
 typedef struct
 {
    int expected_tools, reported_tools, mcp_servers, aimee_connected, plugins;
+   cli_claude_mcp_status_t aimee_status;
    char missing_owned_sha256[65], unexpected_reported_sha256[65];
 } cli_claude_profile_summary_t;
 /* Nonmutating bounded diagnostics; names are returned only as SHA-256 commitments. */

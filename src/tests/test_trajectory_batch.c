@@ -61,9 +61,13 @@ const char *agent_get_request_vault_principal(void)
    return "trajectory-fixture-owner";
 }
 
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = request->n_messages ? request->messages[0].blocks[0].text : NULL;
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -72,17 +76,17 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    assert(active_toolset[0] && strcmp(active_toolset, "outer-toolset"));
    memset(out, 0, sizeof(*out));
    out->success = 1;
-   if (user_prompt && strstr(user_prompt, "secret"))
-      out->response = strdup("api_key = sk-testtrajectorysecret");
-   else
-      out->response = strdup(user_prompt && strstr(user_prompt, "second") ? "second done" : "done");
+   const char *answer_text = user_prompt && strstr(user_prompt, "secret")
+                                 ? "api_key = sk-testtrajectorysecret"
+                             : user_prompt && strstr(user_prompt, "second") ? "second done"
+                                                                            : "done";
    snprintf(out->agent_name, sizeof(out->agent_name), "unit-agent");
    snprintf(out->canonical_session_id, sizeof out->canonical_session_id,
             "trajectory-fixture-%ld-%d", (long)getpid(), ++serial);
    const char *owner = agent_get_request_vault_principal();
    assert(!db1_server_session_create(out->canonical_session_id, "delegate", owner));
    aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = (char *)user_prompt};
-   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = out->response};
+   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = (char *)answer_text};
    aimee_message_t user = {.role = "user", .blocks = &input, .n_blocks = 1};
    aimee_message_t model = {.role = "assistant", .blocks = &answer, .n_blocks = 1};
    aimee_block_t opaque[] = {answer,
@@ -99,6 +103,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
       model.blocks = opaque;
       model.n_blocks = 2;
    }
+   aimee_response_t response = {
+       .role = "assistant", .content = &answer, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   assert(!aimee_ir_response_clone(&response, &out->canonical_response));
    cJSON *history = cJSON_CreateArray();
    assert(history && cJSON_AddItemToArray(history, aimee_ir_message_json(&user)) &&
           cJSON_AddItemToArray(history, aimee_ir_message_json(&model)));
@@ -158,6 +165,9 @@ static void test_batch_writes_one_trajectory_per_task(void)
    cJSON *written = cJSON_GetObjectItem(root, "written");
    assert(cJSON_IsArray(written));
    assert(cJSON_GetArraySize(written) == 2);
+   for (int i = 0; i < 2; i++)
+      assert(cJSON_IsTrue(
+          cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(written, i), "success")));
    cJSON *counts = cJSON_GetObjectItem(root, "toolsets");
    assert(cJSON_GetObjectItem(counts, "readonly")->valueint == 1);
    assert(cJSON_GetObjectItem(counts, "current_code")->valueint == 1);

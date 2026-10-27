@@ -81,10 +81,8 @@ PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 
 # Overridable so this runs against a build tree as well as an install.
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
-WFE=${AIMEE_WFE_BIN:-/usr/local/bin/aimee-wfe}
-GRANT_DIR=${AIMEE_GRANT_DIR:-/opt/payload/grants}
-WORKFLOW_SRC=${AIMEE_WORKFLOW_DIR:-/opt/workflows}
+
+. "$(dirname "$0")/workflow-fixture-runtime.sh"
 
 for _need in "$MODULE" "$WFE"; do
    if [ ! -x "$_need" ]; then
@@ -106,40 +104,15 @@ export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 # The definitions a deploy ships. Without them the engine starts on an empty
 # registry and every submit fails to resolve its workflow, which reads like a
 # broken intake and is not one.
-cp "$WORKFLOW_SRC"/*.yaml "$AIMEE_HOME/workflows/" 2>/dev/null
+cp "$WORKFLOWS"/*.yaml "$AIMEE_HOME/workflows/" 2>/dev/null
 
-# All three grants. The engine needs TWO for the same executable: a serving
-# identity for the control kinds it answers (workflows, ref 20) and a separate
-# outbound identity for the store kinds it calls (wfe, ref 64). A module's
-# serving grant requests nothing, so one grant cannot do both.
-for g in db1 wfe workflows; do
-   if [ ! -r "$GRANT_DIR/$g.grant" ]; then
-      echo "ABORT: no $g grant at $GRANT_DIR/$g.grant."
-      exit 1
-   fi
-   # Each grant must name the binary THIS tree runs, not the installed
-   # path baked into the generated bundle.
-   case "$g" in
-   db1) _exe="$MODULE" ;;
-   wfe | workflows) _exe="${WFE:-${AIMEE_WFE_BIN:-}}" ;;
-   *) _exe="" ;;
-   esac
-   if [ -n "$_exe" ]; then
-      sed "s|^executable=.*|executable=$_exe|" "$GRANT_DIR/$g.grant" \
-         >"$AIMEE_HOME/modules.d/server/$g.grant"
-   else
-      install -m0644 "$GRANT_DIR/$g.grant" \
-         "$AIMEE_HOME/modules.d/server/$g.grant"
-   fi
-done
+workflow_fixture_install_policy || exit 1
 
 SERVER_PID=""
 MODULE_PID=""
 WFE_PID=""
 cleanup() {
-   for p in $WFE_PID $MODULE_PID $SERVER_PID; do
-      kill "$p" 2>/dev/null
-   done
+   workflow_fixture_stop_runtime "${WFE_PID:-}" "${MODULE_PID:-}" "${SERVER_PID:-}"
 }
 trap cleanup EXIT
 
@@ -156,8 +129,9 @@ api() {
 }
 body() { cat "$BODY_FILE" 2>/dev/null; }
 
-aimee-server --foreground >"$HOME/daemon.log" 2>&1 &
+"$SERVER" --foreground >"$HOME/daemon.log" 2>&1 &
 SERVER_PID=$!
+workflow_fixture_start_config || exit 1
 i=0
 while [ $i -lt 300 ]; do
    [ -S "$HTTP_SOCK" ] && break
@@ -166,13 +140,14 @@ while [ $i -lt 300 ]; do
    i=$((i + 1))
 done
 require_store_url
+workflow_fixture_start_postgres || exit 1
 AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MODULE_PID=$!
 sleep 1
 
 # THE POINT OF THIS SCRIPT: the flag alone, with the variable cleared.
 unset AIMEE_MODULE_BUS_SOCKET
-"$WFE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+"$WFE" --home "$AIMEE_HOME" \
    --module-bus-socket "$BUS_SOCK" >"$HOME/wfe.log" 2>&1 &
 WFE_PID=$!
 
@@ -181,7 +156,7 @@ WFE_PID=$!
 ATTACHED=no
 i=0
 while [ $i -lt 150 ]; do
-   if [ "$(api GET /v1/workflow/defs)" = "200" ]; then
+   if workflow_fixture_stage_ready build; then
       ATTACHED=yes
       break
    fi
@@ -208,17 +183,39 @@ ck_eq "a submit with no repo is refused" 400 \
    "$(api POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
 
 echo
+REPO="$HOME/repo"
+mkdir -p "$REPO"
+git -C "$REPO" init -q -b main &&
+   git -C "$REPO" -c user.email=fixture@example.invalid -c user.name=Fixture \
+      -c commit.gpgsign=false commit --allow-empty -qm fixture || exit 1
+if workflow_fixture_register_workspace "$REPO"; then
+   ck_eq "the real fixture workspace is registered by its C owner" yes yes
+else
+   ck_eq "the real fixture workspace is registered by its C owner" yes no
+   exit 1
+fi
+workflow_submit() {
+   _body=$(python3 - "$REPO" "$1" <<'PYSUBMIT'
+import json, sys
+print(json.dumps(dict(proposal_md=sys.argv[2], workflow="build", repo=sys.argv[1])))
+PYSUBMIT
+   ) || return 1
+   api POST /v1/dev/submit "$_body"
+}
+
 echo "=============================================================="
 echo " 3. a run is admitted, and owns what it was given"
 echo "=============================================================="
-CODE=$(api POST /v1/dev/submit \
-   '{"proposal_md":"# ct one\n\nthe first thing","workflow":"build","repo":"ct/repo"}')
+CODE=$(workflow_submit '# ct one
+
+the first thing')
 B1=$(body)
 ck_eq "a submit is admitted" 200 "$CODE"
 ck_has "and names the run it started" "$B1" "work_item_id"
 WI1=$(printf '%s' "$B1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
-CODE=$(api POST /v1/dev/submit \
-   '{"proposal_md":"# ct two\n\nthe second thing","workflow":"build","repo":"ct/repo"}')
+CODE=$(workflow_submit '# ct two
+
+the second thing')
 WI2=$(body | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 ck_eq "a second submit is admitted" 200 "$CODE"
 ck "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
@@ -244,8 +241,7 @@ CAP_CODE=""
 CAP_BODY=""
 i=1
 while [ $i -le 8 ]; do
-   CAP_CODE=$(api POST /v1/dev/submit \
-      "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"ct/repo\"}")
+   CAP_CODE=$(workflow_submit "# cap probe $i")
    CAP_BODY=$(body)
    [ "$CAP_CODE" != "200" ] && break
    i=$((i + 1))
@@ -295,8 +291,7 @@ echo " 7. operator controls reach the store"
 echo "=============================================================="
 ck_eq "the run can be stopped" 200 "$(api POST "/v1/workflow/items/$WI1/stop" '{}')"
 ck_eq "stopping frees the admission slot it held" 200 \
-   "$(api POST /v1/dev/submit \
-      '{"proposal_md":"# after a slot freed","workflow":"build","repo":"ct/repo"}')"
+   "$(workflow_submit '# after a slot freed')"
 ck_eq "a run can be deleted" 200 "$(api DELETE "/v1/workflow/items/$WI2")"
 ck_eq "and it is gone from the read side" 404 "$(api GET "/v1/workflow/items/$WI2")"
 
@@ -314,8 +309,8 @@ DAEMON_FDS=$(ls -l "/proc/$SERVER_PID/fd" 2>/dev/null | grep -c 'aimee\.db')
 ck_eq "the daemon holds no aimee.db descriptor" 0 "$DAEMON_FDS"
 # grep -c prints 0 AND exits 1 when nothing matches, so take the count and
 # swallow the status rather than appending a second number with || echo.
-MODULE_CONNS=$(ss -tnp 2>/dev/null | grep -c "pid=$MODULE_PID,") || true
-ck "the module is the one holding it" test "${MODULE_CONNS:-0}" -ge 1
+MODULE_CONNS=$(ss -tnp 2>/dev/null | grep -c "pid=$WFF_POSTGRES_PID,") || true
+ck "the PostgreSQL owner is the one holding it" test "${MODULE_CONNS:-0}" -ge 1
 
 echo
 echo "      --- engine log, anything that looks wrong ---"

@@ -15,24 +15,17 @@ void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate);
 void policy_unknown_effect_clear(void);
 /* Execution */
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
-int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
-                             const char *system_prompt, const char *user_prompt, int max_tokens,
-                             double temperature, agent_result_t *out);
-
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
-                                      const char *role, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature,
+                                      const char *role, const aimee_request_t *request,
                                       agent_result_t *out);
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const char *user_prompt,
-                                     int max_tokens, double temperature,
-                                     struct cJSON *initial_messages,
+                                     const aimee_request_t *request, struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out);
 
 /* Complete canonical conversation for the server-owned tool loop. No user
  * message is reconstructed from a text projection. The final response remains
- * typed and owned by the caller; ordinary result text is compatibility only. */
+ * typed and owned by the caller; display text is projected only at consumers. */
 int agent_request_with_tools_supported(const aimee_request_t *request);
 int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
                                      const char *role, const aimee_request_t *request,
@@ -41,13 +34,18 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
                                  const aimee_request_t *request, aimee_response_t *response,
                                  agent_result_t *out);
 
-int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                  int max_tokens, double temperature, agent_result_t *out);
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out);
 
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out);
+/* Source-bound native delegate entry. Keeps selected role and explicit host
+ * no-tools policy; the admitted request is never flattened into a CLI prompt. */
+int agent_run_native_request_for_role(agent_config_t *config, const agent_t *selected,
+                                      const char *role, int tools, const aimee_request_t *request,
+                                      aimee_response_t *response, agent_result_t *out);
+int agent_native_request_tools_disabled(void);
+int agent_native_request_turn_limit(void);
 
-/* Per-thread override of agent_run/agent_run_ex tool-mode inference. agent_run_ex
+/* Per-thread override of agent_run tool-mode inference. agent_run
  * normally derives use_tools from the routed agent's config (tools_enabled +
  * exec-role); a delegate that decided tools-OFF (CLI --no-tools -> force_tools=0)
  * calls agent_run, so that inference would re-enable tools and ignore the
@@ -61,20 +59,12 @@ void agent_run_force_no_tools(int on);
  * a busy one. Default off = block+queue (correct for a pinned single-agent turn). */
 void agent_dispatch_set_fail_fast(int on);
 
-/* Like agent_run, but with an explicit sampling temperature. agent_run is the
- * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
- * byte-unchanged; the parallel fan-out path uses this to honour a per-task
- * temperature (agent_task_t.temperature), which agent_run dropped. */
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out);
-
 /* Run one task on a specifically named configured agent (clones the agent_t
  * before mutation; a missing/disabled agent is a failed participant, no silent
  * fallback). Defined in agent_runtime.c beside the static helpers it uses,
  * called from agent_parallel.c's fan-out. */
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out);
+                    const aimee_request_t *request, agent_result_t *out);
 
 /* agent_run_named, but WITH tools. Exists for review panelists: they must route by
  * NAME (each lens is bound to a seat model) yet still reach aimee, and the two
@@ -87,8 +77,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
  * i.e. the diff plus aimee's own code + memory tooling, and no filesystem or write
  * tools. write_capable is pinned 0 regardless of the agent's config. */
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out);
+                               const aimee_request_t *request, agent_result_t *out);
 
 /* Thread-local invocation policy used by parallel task workers. It affects only
  * the next in-thread named tool run and must be cleared by the caller. */
@@ -96,28 +85,28 @@ void agent_run_require_initial_tool_call(int on);
 
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
- * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,
- * no exec role. The model can only return text (out->response). 0 on success. */
-int agent_generate(agent_config_t *cfg, const char *agent_name, const char *system_prompt,
-                   const char *user_prompt, int max_tokens, double temperature,
+ * non-CLI) and runs the plain canonical completion path — no tools, no worktree,
+ * no exec role. Returns the complete canonical text response. 0 on success. */
+int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
                    agent_result_t *out);
+int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request,
+                           agent_result_t *out);
 
 /* Like agent_run but forces tool execution regardless of agent config */
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
-                         const char *user_prompt, int max_tokens, agent_result_t *out);
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out);
 
 /* Variant for delegates whose prompt explicitly says no edits should be made.
  * When enforce_writes is 0, write-role delegates still get tools but the
  * no-write watchdog is disabled for this run. */
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out);
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out);
 
 /* Fan out `task_count` tasks across worker threads and join.
- * deadline_ms > 0 bounds the wait: a worker still running at the deadline is
- * abandoned (detached) and its slot in `out` left as a failed (zeroed) result,
- * so one hung model can never wedge the whole fan-out. deadline_ms <= 0 keeps the
- * historical unbounded join. Returns the number of successful results. */
+ * deadline_ms > 0 cancels unfinished workers at the deadline and joins them.
+ * Task requests remain owned by the producer until every worker has joined.
+ * deadline_ms <= 0 keeps the unbounded join. Returns the number of successful results. */
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
                        agent_result_t *out, int deadline_ms);
 
@@ -131,8 +120,8 @@ int agent_rc_should_try_another(int rc, const char *error);
  * Returns 0 when no request cap exists and -1 after an existing cap expires. */
 int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg);
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
-                                 const char *system_prompt, const char *user_prompt, int max_tokens,
-                                 int enforce_writes, agent_result_t *out, int rc);
+                                 const aimee_request_t *request, int enforce_writes,
+                                 agent_result_t *out, int rc);
 
 /* AGENT_RC_AT_LIMIT: agent_dispatch_one refused because the agent is already at
  * its max_parallel ceiling — a saturation signal DISTINCT from a run failure, so
@@ -167,10 +156,9 @@ static inline int agent_rc_is_local_refusal(int rc)
  * This is an EXTERNAL model-turn boundary — do NOT call it from a helper that
  * already runs inside another agent_dispatch_one for the same agent, or the inner
  * call re-acquires the same max_parallel slot (self-throttle). Such composite
- * helpers use the primitive agent_execute() directly. */
+ * helpers dispatch canonical tool-free requests directly. */
 int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
-                       const char *system_prompt, const char *user_prompt, int max_tokens,
-                       double temperature, int use_tools, agent_result_t *out);
+                       const aimee_request_t *request, int use_tools, agent_result_t *out);
 
 /* Logging */
 void agent_log_call(const agent_result_t *result, const char *role);
@@ -232,8 +220,6 @@ const char *task_type_name(task_type_t type);
 
 /* Context assembly */
 size_t agent_exec_context_budget_chars(const agent_t *agent);
-char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
-                               const char *custom_prompt);
 /* Opening instruction for a task type. A review must be told to answer; an
  * execution agent must be told to act. Pure so the choice is testable. */
 /* The task a delegate is actually running. A declared role wins over guessing
@@ -243,20 +229,13 @@ task_type_t agent_task_type_for_role(const char *role);
 
 const char *agent_exec_instructions(task_type_t task_type);
 
-char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
+/* Owned canonical context origin, ordered source blocks. Policy and evidence
+ * authority are recorded at generation; consumers must preserve that split.
+ * Failure leaves out unchanged and retains the owner diagnostic. */
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
                                         const char *role, const char *custom_prompt,
-                                        int skip_kb_context);
-
-/* Returns NULL on refusal and copies the owner diagnostic into error.
- * Callers must stop dispatch; neither the original prompt nor stale context
- * is an admissible replacement. The caller owns the returned text. */
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom_prompt,
-                                       int skip_kb_context, char *error, size_t error_len);
-
-char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
-                                  const char *custom_prompt, int skip_kb_context);
-void agent_print_context(const agent_config_t *cfg);
+                                        int skip_kb_context, aimee_message_t *out, char *error,
+                                        size_t error_len);
 
 /* Ephemeral SSH */
 int agent_ssh_setup(const agent_network_t *network, char *key_path_out, size_t key_path_len,
@@ -271,7 +250,6 @@ void agent_ssh_cleanup(const agent_network_t *network, const char *key_path,
 int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out,
                      size_t err_len);
 const char *tool_suggest(const char *name);
-char *agent_collect_tool_prompts(void);
 void agent_trace_log(int plan_id, int turn, const char *direction, const char *content,
                      const char *tool_name, const char *tool_args, const char *tool_result,
                      const char *context_hash);
@@ -296,6 +274,11 @@ int policy_bind_session_exploration(const char *session);
 char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
                               char *result);
 int policy_load(void);
+typedef struct policy_action_scope policy_action_scope_t;
+/* Lexically suspend the current final-action owner for synchronous nested
+ * producer work. Pending JSON is moved, not copied or authorized anew. */
+int policy_action_scope_push(policy_action_scope_t **out);
+int policy_action_scope_pop(policy_action_scope_t *scope);
 void policy_action_attempt(const char *attempt);
 int policy_action_inherit(const char *session);
 int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
@@ -312,7 +295,6 @@ int policy_prepare_exploration(const struct cJSON *offer, const char *session,
 
 /* Metrics, introspection, manifests, contract */
 void agent_write_metrics(void);
-void agent_introspect_env(void);
 void agent_write_manifest(const char *run_id, const agent_result_t *result, const char *role);
 char *agent_load_project_contract(const char *project_root);
 
@@ -336,58 +318,6 @@ static inline size_t agent_tool_output_cap_clamp(int configured)
  * model-visible tool-result truncation site. */
 size_t agent_tool_output_cap(void);
 
-/* Self-correcting delegate loop
- *
- * Wraps agent_run in a quality-checking loop. After each iteration the agent
- * is asked to self-assess task completion (0-100). Execution continues until
- * the completion score meets the threshold, the optional verify command passes,
- * or the iteration cap is reached.
- *
- * This is separate from --retry (transient failure retry). The loop addresses
- * quality: "task not fully done", whereas retry addresses reliability: "API
- * error, try again". */
-
-#define AGENT_LOOP_MAX_ITER_DEFAULT  5    /* maximum iterations before giving up */
-#define AGENT_LOOP_THRESHOLD_DEFAULT 95   /* stop when completion >= this */
-#define AGENT_LOOP_CONTEXT_MAX       8192 /* max bytes of accumulated context */
-
-typedef struct
-{
-   int max_iterations;       /* cap on total iterations */
-   int completion_threshold; /* 0-100: stop when self-assessed >= this */
-   char verify_cmd[1024];    /* optional shell command; failure → continue loop */
-   /* runtime (zeroed on init) */
-   int current_iteration;
-   int last_completion;       /* last parsed completion score */
-   char *accumulated_context; /* heap: summary of prior iterations (NULL if none) */
-} agent_loop_t;
-
-/* Initialise loop with explicit parameters. Sets runtime fields to zero. */
-void agent_loop_init(agent_loop_t *loop, int max_iter, int threshold, const char *verify_cmd);
-
-/* Free heap resources. Safe to call on a zero-initialised struct. */
-void agent_loop_free(agent_loop_t *loop);
-
-/* Parse a completion score and optional gaps from a delegate response.
- * Scans for the last occurrence of {"completion": N, "gaps": [...]} in text.
- * Returns the completion score (0-100) on success, or -1 if not found.
- * If gaps_out is non-NULL and gaps_len > 0, fills it with the "gaps" array
- * as a comma-separated string. */
-int agent_loop_parse_completion(const char *response, char *gaps_out, size_t gaps_len);
-
-/* Run a self-correcting agent loop.
- * Executes agent_run repeatedly, augmenting the prompt with self-assessment
- * instructions and feeding prior-iteration context into each continuation.
- * Stops when:
- *   (a) self-assessed completion >= loop->completion_threshold AND
- *       verify_cmd passes (or is empty), OR
- *   (b) loop->max_iterations is exhausted.
- * out->response is set to the final iteration's response (caller must free).
- * Returns 0 when the task is considered complete, -1 on hard failure. */
-int agent_loop_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-                   const char *original_prompt, int max_tokens, agent_loop_t *loop,
-                   agent_result_t *out);
-
 /* Provider health */
 typedef enum
 {
@@ -400,21 +330,8 @@ typedef enum
    PROVIDER_ERR_UNKNOWN
 } provider_err_class_t;
 
-typedef struct
-{
-   int available;         /* 1=ok, 0=unreachable, -1=unknown */
-   int64_t last_check_ms; /* monotonic timestamp of last check */
-   int last_http_status;  /* last HTTP status code, or -1 for network error */
-   char error[256];       /* last error message */
-} provider_health_t;
-
 provider_err_class_t provider_classify_error(int http_status);
 const char *provider_error_message(provider_err_class_t cls);
-/* Key is the stored provider registration, or the agent name for legacy rows.
- * get returns a thread-local snapshot, valid until the next get on this thread. */
-void provider_health_update(const char *registration, int http_status);
-const provider_health_t *provider_health_get(const char *registration);
-
 /* HTTP */
 
 /* Upper bound on the TCP-connect phase, independent of the overall request
@@ -478,6 +395,13 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
+/* Binary-safe content-type POST. Both wire boundaries are explicit lengths;
+ * the owned response also has a trailing NUL for compatibility, outside its
+ * reported length. On failure the response is NULL and its length is zero. */
+int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
+                                       const char *content_type, const void *body, size_t body_len,
+                                       char **response_buf, size_t *response_len, int timeout_ms,
+                                       const char *extra_headers);
 int agent_http_delete(const char *url, const char *auth_header, int timeout_ms);
 
 /* Retry-After (seconds) parsed from the most recent buffered HTTP response on

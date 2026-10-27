@@ -9,7 +9,7 @@
     "build:console": "tsc -b && vite build --config vite.console.config.ts",
     "check": "tsc -b",
     "test": "vitest run",
-    "test:browser": "node ../scripts/test-setup-browser.cjs",
+    "test:browser": "node --test ../tests/e2e/native-recall-contract.test.cjs ../tests/e2e/native-recall-history.test.cjs && node ../scripts/test-setup-browser.cjs",
     "test:browser:webchat": "node ../scripts/test-webchat-browser.cjs"
   },
   "dependencies": {

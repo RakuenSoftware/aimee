@@ -2,8 +2,9 @@ package families
 
 import (
 	"context"
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"testing"
+
+	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
 type conversationResumeRow struct{ reason string }
@@ -32,12 +33,13 @@ func (d *conversationResumeDB) Begin(context.Context) (store.Tx, error) {
 	return &conversationResumeTx{&scriptedTx{&d.scriptedDB}, d.reason}, nil
 }
 
-func TestConversationRunnerWaitsCanRetryWithoutReleasingHumanGates(t *testing.T) {
-	for _, reason := range []string{"conversation_input", "binding_pending", "human_gate", "children_pending", ""} {
+func TestOperatorResumeRechecksRunnersWithoutReleasingHumanGates(t *testing.T) {
+	for _, reason := range []string{"conversation_input", "binding_pending", "cost_limit_unsupported", "delegate_output_limit", "human_gate", "children_pending", ""} {
 		t.Run(reason, func(t *testing.T) {
 			db := &conversationResumeDB{reason: reason}
 			status, _, err := wfeResume(context.Background(), db, []string{"wi_conversation"})
-			allowed := reason == "conversation_input" || reason == "binding_pending"
+			allowed := reason == "conversation_input" || reason == "binding_pending" ||
+				reason == "cost_limit_unsupported" || reason == "delegate_output_limit"
 			if err != nil {
 				t.Fatal(err)
 			}

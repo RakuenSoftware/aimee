@@ -13,24 +13,26 @@
 #define DEC_ROADMAP_DECOMPOSE_H 1
 
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-   /* Model hook: given a fully-formed prompt, produce the model's raw text
-    * reply heap-allocated in *out_text (caller frees). Return 0 on success,
-    * -1 on error. Kept injectable so the decompose orchestration is
-    * unit-testable without a live model. */
-   typedef int (*roadmap_model_fn)(const char *prompt, char **out_text, void *ud);
+   /* Model hook: canonical input and owned canonical output. Return 0 on
+    * success, -1 on error. The domain validator derives its JSON text view
+    * only after complete output has been admitted. */
+   typedef int (*roadmap_model_fn)(const aimee_request_t *request, aimee_response_t *response,
+                                   void *ud);
 
-   /* Build the decomposition prompt for a goal. prior_err (may be NULL/empty)
+   /* Build the owned canonical decomposition request for a goal. prior_err (may be NULL/empty)
     * is the validation failure from the previous attempt, fed back so the
-    * model can correct. Returns a heap string in *out (caller frees), 0 on
+    * model can correct. Free out with aimee_request_free. Returns 0 on
     * success / -1 on error. */
-   int roadmap_decompose_build_prompt(const char *goal, const char *planning_depth,
-                                      const char *token_profile, const char *prior_err, char **out);
+   int roadmap_decompose_build_request(const char *goal, const char *planning_depth,
+                                       const char *token_profile, const char *prior_err,
+                                       aimee_request_t *out);
 
    /* Extract the first balanced top-level JSON object ({...}) from arbitrary
     * model text, tolerating prose and ```json fences before/after. Brace

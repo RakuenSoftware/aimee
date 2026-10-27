@@ -6,7 +6,7 @@
 
 void mcp_add_gateway_tools(cJSON *tools)
 {
-   /* send_message: send text to a delivery target without waiting for a reply */
+   /* Preserve the callable name while reporting unavailable delivery truthfully. */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
@@ -25,13 +25,13 @@ void mcp_add_gateway_tools(cJSON *tools)
           tools,
           mcp_tool_new(
               "send_message",
-              "Send a text message to a delivery target (telegram:<chat_id>, ntfy:<topic>, "
-              "webhook:<url>, or origin) without waiting for a reply. Use to deliver findings "
-              "to an unattended operator.",
+              "Gateway delivery is currently unavailable. This tool returns an explicit tool "
+              "error without sending to telegram:<chat_id>, ntfy:<topic>, webhook:<url>, or "
+              "origin.",
               s));
    }
 
-   /* ask_user: present a question to the operator on the originating channel */
+   /* ask_user: format a question for the requesting client to present. */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
@@ -51,12 +51,13 @@ void mcp_add_gateway_tools(cJSON *tools)
       cJSON_AddItemToArray(req, cJSON_CreateString("question"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new(
-                     "ask_user",
-                     "Present a question to the operator on the originating messaging channel. "
-                     "Formats up to 4 numbered choices; an implicit 'Other (type your answer)' is "
-                     "always appended. The agent's turn ends after delivery; the operator's next "
-                     "message on that channel is the answer.",
-                     s));
+          tools,
+          mcp_tool_new(
+              "ask_user",
+              "Format a question for the requesting client to display or present to its user. "
+              "Formats up to 4 numbered choices with an implicit 'Other (type your answer)'. "
+              "With no choices, formats an open-ended question. This tool does not contact "
+              "a messaging channel or end the agent's turn.",
+              s));
    }
 }

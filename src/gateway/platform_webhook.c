@@ -11,6 +11,7 @@
  */
 #include "platform_webhook.h"
 #include "gateway_ctx.h"
+#include "gateway_ir.h"
 #include "aimee.h"
 #include "agent_exec.h"
 #include "log.h"
@@ -252,10 +253,17 @@ static void *accept_loop(void *arg)
 
       snprintf(src.chat_type, sizeof(src.chat_type), "webhook");
 
+      /* Admit while vendor JSON still owns text, then retain only canonical
+       * storage across its destruction. JSON-looking message text stays text. */
+      aimee_message_t admitted = {0};
+      int inbound = text && text[0] && !deliver_only &&
+                    !gateway_message_import_external(text, NULL, 0, &admitted);
       cJSON_Delete(root);
-
-      if (text && text[0] && !deliver_only)
-         gateway_handle_message(ws->ctx, &src, text, NULL, 0);
+      if (inbound)
+      {
+         gateway_handle_message_ir(ws->ctx, &src, &admitted);
+         aimee_message_free(&admitted);
+      }
 
       send_response(client_fd, 200, "ok");
       free(buf);

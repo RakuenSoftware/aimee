@@ -27,6 +27,7 @@ func TestGitOauthDeviceStartProxy(t *testing.T) {
 		strings.NewReader(`{"provider":"gitlab","host":"gitlab.com"}`)), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitOauthDeviceStart(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("device/start: code=%d body=%q", rr.Code, rr.Body.String())
@@ -86,6 +87,7 @@ func TestGitOauthDeviceConfigProxy(t *testing.T) {
 		"/api/git/oauth/device/config?provider=gitea&host=gitea.example.com", nil), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitOauthDeviceConfig(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || getProvider != "gitea" || getHost != "gitea.example.com" {
 		t.Fatalf("config GET: code=%d provider=%q host=%q", rr.Code, getProvider, getHost)
 	}
@@ -98,6 +100,7 @@ func TestGitOauthDeviceConfigProxy(t *testing.T) {
 		strings.NewReader(`{"provider":"gitea","host":"gitea.example.com","client_id":"cid-2"}`)), "alice")
 	rr = httptest.NewRecorder()
 	s.handleGitOauthDeviceConfig(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(postBody, `"client_id":"cid-2"`) {
 		t.Fatalf("config POST: code=%d body=%q", rr.Code, postBody)
 	}

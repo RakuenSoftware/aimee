@@ -1,3 +1,5 @@
+#include "support/ir_tool_fixture.h"
+#include "support/typed_catalog_fixture.h"
 /* test_mcp_native_dispatch.c: dispatch_tool_call routing for MCP-derived tools.
  *
  * The other half of the registry merge. test_mcp_native_surface pins the ADVERT
@@ -83,7 +85,7 @@ static void test_registered_tool_dispatches_to_the_provider(void)
    agent_tools_set_mcp_provider(fake_call, fake_advert);
    agent_tools_register_mcp_tool(FAKE_TOOL);
 
-   char *out = dispatch_tool_call(FAKE_TOOL, "{\"symbol\":\"toolset_tool_known\"}", 5000);
+   char *out = fixture_dispatch_tool(FAKE_TOOL, "{\"symbol\":\"toolset_tool_known\"}", 5000);
    assert(out != NULL);
    assert(g_call_count == 1);
    assert(strcmp(g_last_tool, FAKE_TOOL) == 0);
@@ -107,21 +109,27 @@ static void test_admitted_arguments_ignore_stale_schema_cache(void)
    int resolved = agent_tools_execution_definition(FAKE_TOOL, &admitted);
    assert(!resolved && admitted.schema);
    int is_error = 1;
-   char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   cJSON *ir_arguments = cJSON_Parse("{\"value\":\"7\"}");
+   cJSON *original_arguments = cJSON_Duplicate(ir_arguments, 1);
+   assert(ir_arguments && original_arguments);
+   char *out = dispatch_tool_call_ir_ctx_status(&admitted, ir_arguments, 5000, &is_error);
    assert(out && !is_error && g_value_is_string);
+   assert(cJSON_Compare(ir_arguments, original_arguments, 1));
+   cJSON_Delete(ir_arguments);
+   cJSON_Delete(original_arguments);
    free(out);
    int calls = g_call_count;
    cJSON_ReplaceItemInObjectCaseSensitive(
        cJSON_GetObjectItemCaseSensitive(admitted.schema, "properties"), "value",
        cJSON_Parse("{\"type\":\"integer\"}"));
-   out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   out = fixture_dispatch_ir_text(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
    assert(out && is_error && g_call_count == calls);
    free(out);
-   out = dispatch_tool_call_ir_ctx_status(&admitted, "{} trailing", 5000, &is_error);
+   out = fixture_dispatch_ir_text(&admitted, "{} trailing", 5000, &is_error);
    assert(out && is_error && g_call_count == calls);
    free(out);
    admitted.kind = AIMEE_TOOL_HOSTED;
-   out = dispatch_tool_call_ir_ctx_status(&admitted, "{}", 5000, &is_error);
+   out = fixture_dispatch_ir_text(&admitted, "{}", 5000, &is_error);
    assert(out && is_error && g_call_count == calls);
    free(out);
    aimee_tool_free(&admitted);
@@ -136,7 +144,7 @@ static void test_admitted_arguments_ignore_stale_schema_cache(void)
 static void test_unregistered_name_still_reports_unknown(void)
 {
    agent_tools_set_mcp_provider(fake_call, fake_advert);
-   char *out = dispatch_tool_call("definitely_not_a_tool", "{}", 5000);
+   char *out = fixture_dispatch_tool("definitely_not_a_tool", "{}", 5000);
    assert(out != NULL);
    assert(strstr(out, "unknown tool") != NULL);
    free(out);
@@ -150,7 +158,7 @@ static void test_no_provider_is_an_error_not_a_crash(void)
 {
    agent_tools_set_mcp_provider(NULL, NULL);
    /* still "registered" from an earlier test — the provider is what is missing */
-   char *out = dispatch_tool_call(FAKE_TOOL, "{\"symbol\":\"x\"}", 5000);
+   char *out = fixture_dispatch_tool(FAKE_TOOL, "{\"symbol\":\"x\"}", 5000);
    assert(out != NULL);
    assert(strstr(out, "error") != NULL);
    free(out);
@@ -173,7 +181,7 @@ static const char *kb_integration_url(void)
 }
 
 /* Advertise: a kb-hosted plugin's tool DEF federates into the server's LLM tool
- * array (build_tools_array), so an agent turn can see and call it. */
+ * array (fixture_chat_tools), so an agent turn can see and call it. */
 static void test_kb_federated_tool_is_advertised(void)
 {
    if (!kb_integration_url())
@@ -181,7 +189,7 @@ static void test_kb_federated_tool_is_advertised(void)
       printf("  SKIP: kb_federated_tool_is_advertised (set AIMEE_KB_API_URL)\n");
       return;
    }
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools != NULL);
    int found = 0;
    cJSON *t = NULL;
@@ -197,7 +205,7 @@ static void test_kb_federated_tool_is_advertised(void)
    }
    cJSON_Delete(tools);
    assert(found); /* the kb-federated tool reached the LLM-facing tools/list */
-   printf("  PASS: kb_federated_tool_is_advertised (echo:echo in build_tools_array)\n");
+   printf("  PASS: kb_federated_tool_is_advertised (echo:echo in fixture_chat_tools)\n");
 }
 
 /* Dispatch: a namespaced call this server does NOT host locally routes to the kb
@@ -210,7 +218,7 @@ static void test_kb_federated_tool_dispatches_to_kb(void)
       return;
    }
    agent_tools_set_effect_authorized(1);
-   char *out = dispatch_tool_call("echo:echo", "{\"text\":\"kb-routed\"}", 8000);
+   char *out = fixture_dispatch_tool("echo:echo", "{\"text\":\"kb-routed\"}", 8000);
    assert(out != NULL);
    assert(strstr(out, "echo: kb-routed") != NULL); /* plugin echoed, routed server->kb */
    free(out);
@@ -277,8 +285,8 @@ static void test_diagnose_verifier_catalog_and_dispatch_agree(void)
    agent_tools_knowledge_write_set(0);
    agent_tools_shell_set(1);
    agent_tools_set_dispatch_role("diagnose");
-   cJSON *tools = build_tools_array();
-   agent_tools_filter_for_role(tools, "diagnose");
+   cJSON *tools = fixture_chat_tools();
+   fixture_filter_tools(tools, "diagnose");
    assert(has_chat_tool(tools, "git_verify"));
    const char *denied[] = {"git_commit",   "git_push",    "git_pr",
                            "git_branch",   "find_symbol", "search_memory",
@@ -294,12 +302,12 @@ static void test_diagnose_verifier_catalog_and_dispatch_agree(void)
    cJSON *args = cJSON_Parse("{\"action\":\"run\"}");
    assert(agent_tools_permission_check(admitted.name, args) == AGENT_TOOL_PERMISSION_ALLOWED);
    int before = g_call_count, is_error = 1;
-   char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
+   char *out = fixture_dispatch_ir_text(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
    assert(out && !is_error && g_call_count == before + 1 && !strcmp(g_last_tool, "git_verify"));
    free(out);
    agent_tools_shell_set(0);
    assert(agent_tools_permission_check(admitted.name, args) == AGENT_TOOL_PERMISSION_SHELL);
-   out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
+   out = fixture_dispatch_ir_text(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
    assert(out && is_error && g_call_count == before + 1);
    free(out);
    cJSON_Delete(args);

@@ -1,6 +1,180 @@
 /* Actual HTTP ingress request assembly cannot bypass canonical admission. */
 #include "../server/openai_chat.c"
 #include <assert.h>
+#include <stdatomic.h>
+static atomic_int shadow_deliveries;
+static char shadow_body[2048];
+int agent_http_post(const char *url, const char *auth, const char *body, char **response,
+                    int timeout, const char *headers)
+{
+   (void)url;
+   (void)auth;
+   (void)timeout;
+   assert(headers && strstr(headers, "X-Aimee-Shadow"));
+   snprintf(shadow_body, sizeof shadow_body, "%s", body);
+   *response = NULL;
+   atomic_fetch_add_explicit(&shadow_deliveries, 1, memory_order_release);
+   return 200;
+}
+int agent_request_max_tokens(const agent_t *agent, int requested)
+{
+   (void)agent;
+   return requested > 0 ? requested : 64;
+}
+int gateway_policy_apply_ir(aimee_request_t *request)
+{
+   (void)request;
+   return 0;
+}
+void router_advise_ir(const aimee_request_t *request)
+{
+   (void)request;
+}
+char *gw_ir_request_tool_system_prompt(const aimee_request_t *request, const char *base)
+{
+   (void)request;
+   (void)base;
+   return strdup("LOCAL_ONLY_POLICY");
+}
+char *gw_ir_request_completion_system_prompt(const aimee_request_t *request, const char *base)
+{
+   (void)request;
+   (void)base;
+   return NULL;
+}
+static int avoided_audits;
+static double avoided_cost;
+const request_context_t *request_context_get(void)
+{
+   return NULL;
+}
+const char *session_id(void)
+{
+   return "cache-usage-test";
+}
+int db1_token_audit_insert(const db1_token_audit_row_t *row)
+{
+   avoided_audits++;
+   avoided_cost = row->estimated_cost_usd;
+   return 0;
+}
+
+static int actual_audits;
+static char actual_usage_kind[24];
+int agent_ingress_accounting_enabled(void)
+{
+   return 1;
+}
+void agent_ingress_record_cost(const char *name, const char *served, const char *requested,
+                               const char *stop, int input, int output, int cache_write,
+                               int cache_read, const char *source, const char *kind)
+{
+   assert(!strcmp(name, "usage-agent") && !strcmp(source, "openai-ingress"));
+   assert(!input && !output && !cache_write && !cache_read);
+   snprintf(actual_usage_kind, sizeof actual_usage_kind, "%s", kind ? kind : "realized");
+   actual_audits++;
+}
+static void test_actual_ingress_usage_accounting(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "usage-agent");
+   for (int unknown = 0; unknown <= 1; unknown++)
+   {
+      aimee_response_t response = {.usage_unobserved = unknown};
+      actual_audits = 0;
+      openai_account_response(&agent, "fixture", &response);
+      assert(actual_audits == 1);
+      assert(!strcmp(actual_usage_kind, unknown ? "unobserved" : "realized"));
+   }
+}
+
+static void test_cached_unknown_usage(void)
+{
+   for (int unknown = 0; unknown <= 1; unknown++)
+   {
+      aimee_response_t response = {.role = strdup("assistant"),
+                                   .stop_reason = AIMEE_STOP_END_TURN,
+                                   .usage_unobserved = unknown,
+                                   .n_content = 1};
+      response.content = calloc(1, sizeof *response.content);
+      response.content[0] =
+          (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("cached answer")};
+      openai_ir_cache_t cache = {.created = 123};
+      snprintf(cache.client_id, sizeof cache.client_id, "chatcmpl-usage");
+      char *encoded = openai_ir_cache_encode(&response, &cache);
+      aimee_response_t restored = {0};
+      assert(encoded && !openai_ir_cache_decode(encoded, &restored, &cache));
+      assert(restored.usage_unobserved == unknown);
+      assert(!restored.usage_in && !restored.usage_out);
+      assert(!strcmp(restored.content[0].text, "cached answer"));
+      aimee_response_free(&restored);
+      /* Old cache rows cannot establish whether numeric zero was observed. */
+      cJSON *wire = cJSON_Parse(encoded);
+      assert(wire);
+      cJSON_DeleteItemFromObjectCaseSensitive(wire, "usage_unobserved");
+      char *ambiguous = cJSON_PrintUnformatted(wire);
+      assert(ambiguous && openai_ir_cache_decode(ambiguous, &restored, &cache) < 0);
+      assert(!restored.content);
+      free(ambiguous);
+      cJSON *invalid[] = {cJSON_CreateNull(), cJSON_CreateNumber(0), cJSON_CreateString("false")};
+      for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(wire, "usage_unobserved");
+         assert(cJSON_AddItemToObject(wire, "usage_unobserved", invalid[i]));
+         ambiguous = cJSON_PrintUnformatted(wire);
+         assert(ambiguous && openai_ir_cache_decode(ambiguous, &restored, &cache) < 0);
+         assert(!restored.content);
+         free(ambiguous);
+      }
+      cJSON_Delete(wire);
+      free(encoded);
+      aimee_response_free(&response);
+   }
+   avoided_audits = 0;
+   record_avoided_turn("unknown", NAN);
+   assert(!avoided_audits);
+   record_avoided_turn("observed-zero", 0.0);
+   assert(avoided_audits == 1 && avoided_cost == 0.0);
+}
+
+static void test_actual_admission_preparation_mirror(void)
+{
+   shadow_mirror_reset();
+   shadow_mirror_set_armed(1);
+   assert(!shadow_mirror_subscribe("https://shadow.invalid", "dummy"));
+   const char *bad[] = {"{}", "{\"model\":\"a\",\"model\":\"b\",\"messages\":[]}",
+                        "{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"tool_choice\":{"
+                        "\"type\":\"unknown\"}}"};
+   for (size_t i = 0; i < sizeof bad / sizeof *bad; i++)
+   {
+      shadow_mirror_begin_request("/v1/chat/completions", 0);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(openai_admit_completion(bad[i], 1, &request, error, sizeof error));
+      shadow_mirror_dispatch_admitted(&request);
+      shadow_mirror_end_request();
+      aimee_request_free(&request);
+   }
+   assert(!atomic_load(&shadow_deliveries));
+   const char *body =
+       "{\"model\":\"incoming-alias\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   shadow_mirror_begin_request("/v1/chat/completions", 0);
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!openai_admit_completion(body, 1, &request, error, sizeof error));
+   agent_t selected = {0};
+   snprintf(selected.model, sizeof selected.model, "%s", "local-model");
+   assert(!openai_prepare_ir_request(&request, &selected, 64, .3, 0));
+   for (int i = 0; i < 200 && !atomic_load_explicit(&shadow_deliveries, memory_order_acquire); i++)
+      usleep(10000);
+   assert(atomic_load(&shadow_deliveries) == 1);
+   assert(!strcmp(shadow_body, body));
+   assert(request.n_system && strstr(request.system[0].text, "LOCAL_ONLY_POLICY"));
+   shadow_mirror_dispatch_admitted(&request);
+   shadow_mirror_end_request();
+   aimee_request_free(&request);
+   shadow_mirror_reset();
+}
 void ir_seam_test_memory(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
 /* This fixture has no stored previous-response checkpoint. Owned profiles
@@ -215,12 +389,25 @@ static void test_tool_free_admission_and_text_entry(void)
        "{\"model\":\"named-agent\",\"prompt\":\"raw prompt\",\"max_tokens\":77,"
        "\"temperature\":0.2,\"top_p\":0.9,\"top_k\":7,\"stream\":true,\"stop\":[\"STOP\",\"END\"]}";
    assert(!openai_admit_completion(text, 0, &request, error, sizeof error));
-   assert(!request.raw && !request.raw_bytes && request.n_messages == 1 && request.n_system == 0);
+   assert(request.raw && !request.raw_bytes && request.frontend == AIMEE_WIRE_UNKNOWN &&
+          request.n_messages == 1 && request.n_system == 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request.raw, "prompt")), "raw prompt"));
+   aimee_request_t clone = {0}, decoded = {0};
+   assert(!aimee_ir_request_clone(&request, &clone));
+   assert(clone.raw != request.raw && cJSON_Compare(clone.raw, request.raw, 1));
+   cJSON *envelope = aimee_ir_request_json(&request);
+   assert(envelope && !aimee_ir_request_parse(envelope, &decoded));
+   /* Public canonical envelopes intentionally omit whole-wire private
+    * sidecars; every modeled legacy control still survives unchanged. */
+   assert(!decoded.raw && !decoded.raw_bytes && aimee_ir_request_wire_equal(&decoded, &request));
+   cJSON_Delete(envelope);
+   aimee_request_free(&decoded);
+   aimee_request_free(&clone);
    assert(!strcmp(request.messages[0].blocks[0].text, "raw prompt"));
    assert(request.stream && request.max_tokens == 77 && request.temperature == 0.2 &&
           request.top_p == 0.9 && request.top_k == 7);
    assert(request.n_stop == 2 && !strcmp(request.stop_sequences[1], "END"));
-   char *native = openai_build_ir_body(&request, AIMEE_WIRE_ANTHROPIC);
+   char *native = agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_ANTHROPIC);
    assert(native && strstr(native, "raw prompt") && strstr(native, "stop_sequences"));
    free(native);
    aimee_request_free(&request);
@@ -296,6 +483,25 @@ static void test_canonical_response_cache_round_trip(void)
    free(bad);
    cJSON_Delete(invalid);
    free(encoded);
+   response.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   free(response.raw_stop_reason);
+   response.raw_stop_reason = strdup("refusal");
+   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+   response.refusal = aimee_refusal_details_clone(&details);
+   assert(response.refusal);
+   encoded = openai_ir_cache_encode(&response, &first);
+   assert(encoded && !openai_ir_cache_decode(encoded, &restored, &replay));
+   assert(restored.refusal && !strcmp(restored.refusal->category, "future_category") &&
+          !restored.refusal->explanation);
+   aimee_response_free(&restored);
+   cJSON *refused = cJSON_Parse(encoded);
+   cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(refused, "refusal"),
+                           "fallback_credit_token", "never retained");
+   char *malformed = cJSON_PrintUnformatted(refused);
+   assert(openai_ir_cache_decode(malformed, &restored, &replay) < 0 && !restored.refusal);
+   free(malformed);
+   cJSON_Delete(refused);
+   free(encoded);
    aimee_response_free(&response);
 }
 
@@ -358,9 +564,9 @@ static void test_restored_history_rechecks_native_provenance(void)
        "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"thinking\",\"text\":\"summary\","
        "\"thinking_id\":\"rs_previous_account\",\"encrypted_content\":\"previous-opaque\"}]},{"
        "\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"next\"}]}]");
-   assert(history && !openai_ir_history_replace(&request, history));
+   assert(history && !aimee_ir_request_history_replace(&request, history));
    cJSON_Delete(history);
-   char *wire = openai_build_ir_body(&request, AIMEE_WIRE_RESPONSES);
+   char *wire = agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_RESPONSES);
    assert(wire && !strstr(wire, "rs_previous_account") && !strstr(wire, "previous-opaque"));
    assert(replay_guard_calls == 2);
    free(wire);
@@ -368,8 +574,8 @@ static void test_restored_history_rechecks_native_provenance(void)
    assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
                                      sizeof error));
    aimee_frontend_bind_state_guard(discard_unproved_replay, &request);
-   assert(!openai_build_ir_body(&request, AIMEE_WIRE_RESPONSES) && !request.messages &&
-          !request.model);
+   assert(!agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_RESPONSES) &&
+          !request.messages && !request.model);
    aimee_request_free(&request);
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }
@@ -377,7 +583,10 @@ static void test_restored_history_rechecks_native_provenance(void)
 static int cache_projection_capture(const aimee_session_event_t *event, void *context)
 {
    int *state = context;
-   assert(event->kind == AIMEE_SESSION_PROJECTION && event->projection_cache_controls == 3 &&
+   assert(event->kind == AIMEE_SESSION_PROJECTION &&
+          ((event->projection_cache_controls == 3 && !event->projection_request_controls) ||
+           (!event->projection_cache_controls && (event->projection_request_controls == 1 ||
+                                                  event->projection_request_controls == 3))) &&
           event->projection_reasoning == 0 && event->projection_opaque == 0);
    state[0]++;
    return state[1];
@@ -400,26 +609,110 @@ static void test_cache_configuration_at_actual_ingress(void)
                                  AIMEE_WIRE_ANTHROPIC};
    for (int i = 0; i < 3; i++)
    {
-      char *native = openai_build_ir_body(&request, wires[i]);
+      char *native = agent_render_gateway_request_ir(NULL, &request, wires[i]);
       cJSON *out = native ? cJSON_Parse(native) : NULL;
       assert(out);
       if (i < 2)
          assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(out, "prompt_cache_key")),
                         "owner-scope"));
       else
-         assert(!cJSON_GetObjectItem(out, "prompt_cache_key") && state[0] == 1);
+         assert(!cJSON_GetObjectItem(out, "prompt_cache_key") && state[0] == 3);
       cJSON_Delete(out);
       free(native);
    }
    state[1] = -1;
-   assert(!openai_build_ir_body(&request, AIMEE_WIRE_ANTHROPIC));
-   assert(state[0] == 2 && aimee_ir_session_capture_failed());
+   assert(!agent_render_gateway_request_ir(NULL, &request, AIMEE_WIRE_ANTHROPIC));
+   assert(state[0] == 4 && aimee_ir_session_capture_failed());
    aimee_ir_session_restore_sink(previous, previous_context, failed);
    aimee_request_free(&request);
 }
 
+static int responses_control_projection_capture(const aimee_session_event_t *event, void *context)
+{
+   int *state = context;
+   assert(event->kind == AIMEE_SESSION_PROJECTION && event->projection_request_controls == 4);
+   state[0]++;
+   return state[1];
+}
+
+static void test_actual_responses_control_profile(void)
+{
+   const char *frame = "{ \"model\":\"boundary-model\",\"input\":\"Keep this task exact.\","
+                       "\"stream\":true,\"store\":false,\"max_output_tokens\":123,"
+                       "\"temperature\":0.4,\"top_p\":0.8,\"metadata\":{\"source\":\"exact\"},"
+                       "\"service_tier\":\"auto\" }\n";
+   aimee_request_t source = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_RESPONSES, &source, error,
+                                     sizeof error));
+   cJSON *before = aimee_ir_request_json(&source);
+   agent_t agent = {0};
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   char *wire = agent_render_gateway_request_ir(&agent, &source, AIMEE_WIRE_RESPONSES);
+   assert(wire && !strcmp(wire, frame));
+   free(wire);
+   snprintf(agent.provider, sizeof agent.provider, "chatgpt");
+   int state[2] = {0};
+   aimee_ir_session_set_sink(responses_control_projection_capture, state);
+   wire = agent_render_gateway_request_ir(&agent, &source, AIMEE_WIRE_RESPONSES);
+   assert(wire && state[0] == 1 && !strstr(wire, "max_output_tokens") &&
+          !strstr(wire, "temperature") && !strstr(wire, "top_p") && !strstr(wire, "metadata") &&
+          strstr(wire, "service_tier"));
+   free(wire);
+   state[1] = 1;
+   assert(!agent_render_gateway_request_ir(&agent, &source, AIMEE_WIRE_RESPONSES));
+   assert(state[0] == 2 && aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_begin_task();
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(before && after && cJSON_Compare(before, after, 1));
+   assert(!strcmp(source.raw_bytes, frame));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   aimee_request_free(&source);
+}
+
+static void test_cross_wire_control_projection(void)
+{
+   const char *frame = "{\"model\":\"cross-wire-controls\",\"input\":\"Preserve the "
+                       "task.\",\"max_output_tokens\":128,"
+                       "\"temperature\":0.3,\"reasoning\":{\"summary\":\"auto\"}}";
+   aimee_request_t source = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_RESPONSES, &source, error,
+                                     sizeof error));
+   cJSON *before = aimee_ir_request_json(&source);
+   const aimee_wire_t targets[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC};
+   for (int i = 0; i < 2; i++)
+   {
+      assert(!aimee_backend_render_wire(&source, targets[i]));
+      int state[2] = {0};
+      aimee_ir_session_set_sink(cache_projection_capture, state);
+      char *wire = agent_render_gateway_request_ir(NULL, &source, targets[i]);
+      assert(wire && state[0] == 1 && strstr(wire, "Preserve the task.") &&
+             strstr(wire, "max_tokens") && !strstr(wire, "summary"));
+      free(wire);
+      state[1] = 1;
+      assert(!agent_render_gateway_request_ir(NULL, &source, targets[i]) && state[0] == 2 &&
+             aimee_ir_session_capture_failed());
+      aimee_ir_session_set_sink(NULL, NULL);
+      aimee_ir_session_begin_task();
+   }
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(before && after && cJSON_Compare(before, after, 1));
+   assert(!strcmp(source.raw_bytes, frame));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   aimee_request_free(&source);
+}
+
 int main(void)
 {
+   test_cross_wire_control_projection();
+   test_actual_responses_control_profile();
+   test_actual_ingress_usage_accounting();
+   test_cached_unknown_usage();
+   test_actual_admission_preparation_mirror();
    test_cache_configuration_at_actual_ingress();
    test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();
@@ -446,7 +739,7 @@ int main(void)
          int before = ir_seam_test_plan_calls("context");
          if (!preserve)
             aimee_ir_apply_gateway_request_stages(&canonical);
-         char *native = openai_build_ir_body(&canonical, wires[i]);
+         char *native = agent_render_gateway_request_ir(NULL, &canonical, wires[i]);
          assert(native);
          cJSON *request = cJSON_Parse(native);
          assert(request && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "model")),
@@ -457,7 +750,7 @@ int main(void)
          free(native);
          free(canonical.messages[0].role);
          canonical.messages[0].role = strdup("forged-role");
-         assert(!openai_build_ir_body(&canonical, wires[i]));
+         assert(!agent_render_gateway_request_ir(NULL, &canonical, wires[i]));
          aimee_request_free(&canonical);
       }
    puts("OpenAI ingress canonical admission and independent host-edit policy passed");

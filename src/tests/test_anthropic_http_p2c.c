@@ -206,19 +206,6 @@ int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, 
    return 0;
 }
 
-cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  int max_tokens, double temperature)
-{
-   cJSON *out = cJSON_CreateObject();
-   (void)agent;
-   (void)messages;
-   (void)tools;
-   (void)max_tokens;
-   (void)temperature;
-   cJSON_AddStringToObject(out, "model", "openai-test");
-   return out;
-}
-
 /* Stub: the ingress passes the incoming request's max_tokens through this
  * resolver; an explicit value wins, otherwise a model-derived ceiling applies. */
 int agent_request_max_tokens(const agent_t *agent, int requested)
@@ -518,7 +505,8 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    g_driver = &driver;
    /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
    g_response_body = "event: response.completed\ndata: "
-                     "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
+                     "{\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":0,"
+                     "\"output_tokens\":0},\"status\":\"completed\","
                      "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
                      "\"type\":\"output_text\",\"text\":\"PONG\"}]}]}}\n\n";
 

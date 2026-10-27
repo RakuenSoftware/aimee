@@ -12,13 +12,6 @@ int anthropic_http_capture_native_request_path(const char *path)
    return 0;
 }
 static void request(const server_native_runtime_t *, const char *, const char *, char[1024]);
-static void test_unowned_beta_path(const server_native_runtime_t *runtime)
-{
-   char response[1024];
-   int previous = native_beta_captures;
-   request(runtime, "/v1/messages?beta=true", server_native_runtime_token(runtime), response);
-   assert(strstr(response, "404") && native_beta_captures == previous);
-}
 static void test_beta_contract_binding(const agent_t *selected, const request_context_t *owner)
 {
    char lineage[65], legacy[65], current[65], bytes[4096];
@@ -54,8 +47,8 @@ static void test_beta_contract_binding(const agent_t *selected, const request_co
    for (int kind = 0; kind < 3; kind++)
    {
       profile.frontend = kind == 2 ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_ANTHROPIC;
-      server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, NULL, 0, NULL);
       assert(runtime);
       assert(!strcmp(server_native_runtime_binding(runtime), kind == 2 ? legacy : current));
       server_native_runtime_close(runtime);

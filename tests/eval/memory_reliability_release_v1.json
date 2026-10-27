@@ -1123,9 +1123,9 @@
           "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
         },
         {
-          "id": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelUsesExistingCLIWithoutShell",
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelUsesRegisteredCanonicalCLIWithoutShell",
           "package": "./modules/memory/cmd/aimee-memory-eval",
-          "test": "TestAgentModelUsesExistingCLIWithoutShell",
+          "test": "TestAgentModelUsesRegisteredCanonicalCLIWithoutShell",
           "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
         },
         {
@@ -1156,7 +1156,7 @@
     "benchmarks/tests/test_result_schema.py": "a49dcc685060690f413f22a12e7ed6f3b720d20b0956c00a3982aec27a113eef",
     "scripts/check_memory_reliability_release.py": "7ea2d569093a502126c6381e7eea563292b081f26936685da4403e55aadcbf51",
     "scripts/tests/test_memory_reliability_release.py": "87d274cd97df617bfe0ecd396ad4a3f36bd18659d801b7a07cdc0e54af794cf9",
-    "server-go/cmd/aimee-module/main_test.go": "68436f9adb2a670b2be302f0017d94154ef8f3b8274c0217eef36c87b272a314",
+    "server-go/cmd/aimee-module/main_test.go": "8e7cfcd3f6ba47be3ecba72c96b85566bac3d0a44ec5a01e1020e72c80b834c5",
     "server-go/modules/aimee/families/clean_retry_test.go": "bbc709f2ae3016d6aced248cdc6602403ad7220e8cbd10fa4ccfdc6493d005cd",
     "server-go/modules/aimee/families/governed_actions_test.go": "e3cd262c9e6b18bd3ce972f56b7dd0f89dc86e6d1e4a5da92e0adeaf802e46d1",
     "server-go/modules/aimee/families/runtime_caches_test.go": "e0539e0b54f1c03729e2d072d2c78c7efc6fd426fcda4fcbb58bc9b8bb13ea7f",
@@ -1168,7 +1168,7 @@
     "server-go/modules/memory/candidate_fusion_test.go": "a4687d48f54cd2b05d9b0daf3003011f11d7afa8f6a884f4e0f3de086c0be5e5",
     "server-go/modules/memory/client_test.go": "b317fc6ed0da6c28055a99646edfef24c5d34c94a893dd0ee3fe15965afe4247",
     "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go": "c1f0328ef246f56e9833ff92fcb64b2c62374c9d0b3a6ac27839a8097c0b48ee",
-    "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go": "bffbf1976659eb8e732fecc58bdbd8b2da8e03f0fcd340960c7074cfd0a72b46",
+    "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go": "3f6a8a9b717ac2f3ce799c6664d7c502b63d98f583b6cf9d33b9dcc41e0f9523",
     "server-go/modules/memory/collection_source_test.go": "feae68626a4bac301aae5cd5060dca1f5e4780fef3d57a42969548e7b5875289",
     "server-go/modules/memory/embedding_identity_test.go": "8ab8f0060e28d0f4f1ce85f885bc29fa96ccb4800d6da336bb726c4e1ea9a227",
     "server-go/modules/memory/erasure_lineage_test.go": "b956afa92d23f42a016ba9364ac500dbe3fca93e6e3b0c487a8bd4975af88725",
@@ -1305,6 +1305,24 @@
       },
       "reason": "Adds only schema_session_ir_events.sql to the two existing actual-PostgreSQL fixture setup lists because governed-action admission now checks the exact canonical turn and operator cancellation fence. Existing test cases and assertions, groups, required outcomes, denominators, thresholds and release predicates are retained.",
       "evidence": "Both original governed-action and clean-retry cases pass against actual PostgreSQL under the race detector with the new canonical schema. This records fixture-source review, not independent production-promotion approval."
+    },
+    "canonical_native_and_qa_3069": {
+      "previous_sha256": {
+        "server-go/cmd/aimee-module/main_test.go": "68436f9adb2a670b2be302f0017d94154ef8f3b8274c0217eef36c87b272a314",
+        "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go": "bffbf1976659eb8e732fecc58bdbd8b2da8e03f0fcd340960c7074cfd0a72b46"
+      },
+      "reviewed_sha256": {
+        "server-go/cmd/aimee-module/main_test.go": "8e7cfcd3f6ba47be3ecba72c96b85566bac3d0a44ec5a01e1020e72c80b834c5",
+        "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go": "3f6a8a9b717ac2f3ce799c6664d7c502b63d98f583b6cf9d33b9dcc41e0f9523"
+      },
+      "case_renames": [
+        {
+          "previous": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelUsesExistingCLIWithoutShell",
+          "current": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelUsesRegisteredCanonicalCLIWithoutShell"
+        }
+      ],
+      "reason": "The module registration fixture recognizes only C-owned delegates event6679 hosted_by=server-core and asserts the Go process cannot advertise it; deleting only that reviewed field/branch exactly restores the previous frozen main_test.go digest from82e5aed28. The QA CLI fixture moves scalar model request/results to canonical IR while retaining literal shell metacharacter and cancelled-context refusals, adding complete stdin/control/source and canonical response/usage assertions. Its single renamed required case now names the actual retained and strengthened test. QA producer expectations reflect public caller attenuation, not invented platform authority; the actual CLI live case uses the production three-block answer request.",
+      "evidence": "Normal/race QA tests and canonical C boundary fixtures passed. All other required test names remain present;12groups/173requiredcases, frozen Python metric cases, promotion thresholds and denominators are unchanged. This is fixture source review only; complete actual-PostgreSQL recorded events and the release checker remain required."
     }
   }
 }

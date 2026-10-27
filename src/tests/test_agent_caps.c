@@ -2069,9 +2069,4 @@ void test_cost_selection_filters_before_learning(void)
    assert(agent_route_last_was_module_fault());
    agent_set_route_cost_provider(NULL);
    agent_reset_route_selection_authority();
-   /* Legacy transport diagnostics use registration keys too. */
-   provider_health_update("routing-account-east", 401);
-   provider_health_update("routing-account-west", 200);
-   assert(provider_health_get("routing-account-east")->available == 0);
-   assert(provider_health_get("routing-account-west")->available == 1);
 }

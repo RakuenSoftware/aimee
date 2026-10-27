@@ -7,7 +7,7 @@
  * made it LOOK scoped. It was not: a concurrent delegate's setenv decided what
  * another delegate resolved.
  *
- * That is not a cosmetic race. agent_tools_filter_for_role is the thing that stops
+ * That is not a cosmetic race. agent_tools_catalog_filter is the thing that stops
  * a reviewer holding a coder's tools, and it resolves through this value. Get it
  * wrong under concurrency and the boundary silently is not one.
  *

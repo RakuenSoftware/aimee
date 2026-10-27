@@ -1,4 +1,5 @@
 #include "server_native_runtime.h"
+#include "server_native_delegate.h"
 #include "server_native_sdk_profile.h"
 #include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
@@ -9,6 +10,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_source_authority.h"
 #include "agent_tasks.h"
+#include "db1_client/agent_jobs.h"
 #include "server_delegate_scope.h"
 #include "server_session_control.h"
 #include "server_session_capture.h"
@@ -29,8 +31,59 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Inspect the actual capture owner rather than a runtime-owned history copy. */
+static cJSON *capture_history(server_session_capture_t *capture)
+{
+   server_session_capture_t *previous = server_session_capture_bind(capture);
+   cJSON *history = NULL;
+   assert(!server_session_capture_history(capture, &history));
+   assert(server_session_capture_bind(previous) == capture);
+   return history;
+}
+
+/* Canonical catalog shared by transport-boundary cases. Every runtime below
+ * uses the production bound constructor; no unowned transport mode exists. */
+static const server_native_tool_binding_t read_binding = {
+    .space = "aimee", .name = "read_file", .registry_name = "read_file"};
+static aimee_block_t transport_system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+static aimee_tool_t transport_function = {.name = "read_file"};
+static aimee_tool_t transport_space = {.kind = AIMEE_TOOL_NAMESPACE,
+                                       .name = "aimee",
+                                       .children = &transport_function,
+                                       .n_children = 1};
+static aimee_request_t transport_profile = {.model = "selected-model",
+                                            .frontend = AIMEE_WIRE_RESPONSES,
+                                            .system = &transport_system,
+                                            .n_system = 1,
+                                            .tools = &transport_space,
+                                            .n_tools = 1,
+                                            .prompt_cache_key = "",
+                                            .mutated = 1};
+static const char transport_launch[] =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+static _Atomic int service_forward_probe;
+static const aimee_request_t *fixture_service_ticket;
+static _Thread_local struct
+{
+   int valid;
+   request_context_t owner;
+   agent_request_creds_t credentials;
+   server_session_capture_t *capture;
+   const workspace_provider_t *workspace;
+   char cwd[MAX_PATH_LEN];
+} service_saved_callback;
+/* The authenticated service callback is mocked here; its owner fixture tests
+ * the actual callback admission and lifetime separately. */
+int server_native_delegate_active(void)
+{
+   int active = fixture_service_ticket != NULL;
+   fixture_service_ticket = NULL;
+   return active;
+}
+
 static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];
-static _Thread_local int job_id, effect_authorized, scope_admitted;
+static _Thread_local int effect_authorized, scope_admitted;
 static void restored_probe(void);
 static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
@@ -85,13 +138,56 @@ void session_id_set_override(const char *sid)
       scope_admitted = 0;
    }
 }
-void agent_set_durable_job(int id)
+/* Explicit durable-store peer for synthetic transport facts below. Every
+ * other protocol lane still refuses unexpected HTTP accounting writes. */
+static atomic_int transport_fact_active, transport_fact_expected, transport_fact_seen;
+static int persisted_job_counts[23];
+static pthread_mutex_t job_store_lock = PTHREAD_MUTEX_INITIALIZER;
+int fixture_job_get(int id, db1_agent_job_t *out)
 {
-   job_id = id;
+   assert(id == 11 || id == 22);
+   pthread_mutex_lock(&job_store_lock);
+   *out = (db1_agent_job_t){.id = id, .api_call_count = persisted_job_counts[id]};
+   pthread_mutex_unlock(&job_store_lock);
+   return 0;
 }
-int agent_get_durable_job_id(void)
+void fixture_job_free(db1_agent_job_t *out)
 {
-   return job_id;
+   (void)out;
+}
+void fixture_job_heartbeat_ext(int id, const char *tool, int count)
+{
+   assert(atomic_load(&transport_fact_active) && id == 11 && tool && !tool[0]);
+   assert(atomic_fetch_add(&transport_fact_seen, 1) < atomic_load(&transport_fact_expected));
+   pthread_mutex_lock(&job_store_lock);
+   assert(count == persisted_job_counts[id] + 1);
+   persisted_job_counts[id] = count;
+   pthread_mutex_unlock(&job_store_lock);
+}
+static int transport_fact_begin(int attempts)
+{
+   assert(attempts >= 0 && attempts <= 2 && !atomic_load(&transport_fact_active));
+   atomic_store(&transport_fact_expected, attempts);
+   atomic_store(&transport_fact_seen, 0);
+   atomic_store(&transport_fact_active, 1);
+   return agent_job_progress_transport_attempts();
+}
+static void transport_fact_end(int before, int attempts)
+{
+   assert(atomic_load(&transport_fact_seen) == attempts);
+   assert(agent_job_progress_transport_attempts() == before + attempts);
+   atomic_store(&transport_fact_active, 0);
+}
+static void emit_synthetic_transport_facts(int status)
+{
+   assert(atomic_load(&transport_fact_active));
+   int attempts = atomic_load(&transport_fact_expected);
+   wire_fence_transport_observer_t observer =
+       wire_fence_transport_observer_bind((wire_fence_transport_observer_t){0});
+   (void)wire_fence_transport_observer_bind(observer);
+   assert(!attempts || observer.completed);
+   for (int i = 0; i < attempts; i++)
+      observer.completed(observer.context, i + 1 == attempts ? status : -1);
 }
 /* Workspace ownership is an explicit peer mock here; the actual descriptor,
  * cross-thread restoration and replacement tests live in test_workspace_turn. */
@@ -186,11 +282,10 @@ static void owner_tools(int alice)
    agent_tools_set_snap_id(alice ? 71 : 91);
    run_cmd_set_cwd(alice ? "/work/alice" : "/work/bob");
    workspace = alice ? &alice_workspace : &bob_workspace;
-   job_id = alice ? 11 : 22;
+   agent_set_durable_job(alice ? 11 : 22);
    delegate_scope = (server_delegate_scope_t){.depth = alice ? 2 : 0};
    if (alice)
       strcpy(delegate_scope.parent, "parent-alice");
-   delegate_scope.mailbox = alice ? &alice_workspace : NULL;
    if (alice)
       agent_source_authority_tls_set(1, "/source/alice", "src/alice.c\n");
    else
@@ -207,7 +302,7 @@ static _Thread_local const agent_request_cancel_scope_t *current_cancel_scope;
 static _Thread_local char identity[VAULT_PRINCIPAL_MAX];
 static _Thread_local int protocol_captured;
 static pthread_mutex_t ids_mutex = PTHREAD_MUTEX_INITIALIZER;
-static char seen_ids[128][64];
+static char seen_ids[192][64];
 static int seen_count;
 static void probe_replay_scope(const char *path);
 static atomic_int source_missing, source_tampered, source_recreated;
@@ -216,6 +311,7 @@ static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_rem
 
 static void restored_probe(void)
 {
+   assert(!server_native_runtime_forward_service_admitted());
    assert(!current_mirror);
    assert(!current_model && !request_context_get());
    aimee_frontend_state_scope_t guard = aimee_frontend_bind_state_guard(NULL, NULL);
@@ -229,12 +325,33 @@ static void restored_probe(void)
    assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
    assert(agent_tools_get_turn() == -1 && !agent_tools_get_snap_id());
    assert(!run_cmd_get_cwd() && !session_id_override_active());
-   assert(!job_id && !workspace && !effect_authorized && !server_session_capture_current());
-   assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
+   assert(!agent_get_durable_job_id() && !workspace && !effect_authorized &&
+          !server_session_capture_current());
+   assert(!delegate_scope.depth && !delegate_scope.parent[0]);
    agent_source_authority_snapshot_t previous = {0};
    assert(!agent_source_authority_tls_capture_checked(&previous));
    assert(!previous.active && !previous.authority && !previous.root[0] && !previous.paths);
    agent_source_authority_snapshot_destroy(&previous);
+   if (service_saved_callback.valid)
+   {
+      /* Reinstall every getter-visible binding after callback cleanup. A stale
+       * private runtime TLS pointer must still not authorize another forward. */
+      request_context_snapshot_t prior;
+      request_context_snapshot(&prior);
+      agent_request_creds_t credentials = current_credentials;
+      request_context_set(&service_saved_callback.owner);
+      current_credentials = service_saved_callback.credentials;
+      workspace = service_saved_callback.workspace;
+      run_cmd_set_cwd(service_saved_callback.cwd);
+      assert(!server_session_capture_bind(service_saved_callback.capture));
+      assert(!server_native_runtime_forward_service_admitted());
+      assert(server_session_capture_bind(NULL) == service_saved_callback.capture);
+      run_cmd_set_cwd(NULL);
+      workspace = NULL;
+      current_credentials = credentials;
+      request_context_restore(&prior);
+      service_saved_callback.valid = 0;
+   }
 }
 
 void agent_request_creds_snapshot(agent_request_creds_t *out)
@@ -244,6 +361,10 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
 void agent_request_creds_restore(const agent_request_creds_t *value)
 {
    current_credentials = *value;
+}
+const char *agent_get_request_session(void)
+{
+   return current_credentials.session_id;
 }
 void agent_set_request_session(const char *session)
 {
@@ -288,8 +409,7 @@ int agent_request_cancelled(void)
 
 const char *agent_get_request_vault_principal(void)
 {
-   const request_context_t *owner = request_context_get();
-   return owner ? owner->vault_principal : "";
+   return current_credentials.vault_principal;
 }
 char *safe_strdup(const char *text)
 {
@@ -299,6 +419,7 @@ static atomic_int execution_mode, dispatch_count, mcp_execution, cli_shell_probe
 static char revoked_cli_token[65], revoked_cli_url[64], outer_cli_attempt[128];
 static void exercise_nested_cli(void);
 static _Thread_local char execution_attempt[128];
+static int expected_control_reply_capability = 1;
 static void check_execution_owner(const char *name)
 {
    assert(current_mirror == &fixture_mirror);
@@ -307,6 +428,7 @@ static void check_execution_owner(const char *name)
        (!strcmp(name, "read_file") || (atomic_load(&cli_shell_probe) && !strcmp(name, "bash"))) &&
        owner && owner->model_execution);
    assert(!strcmp(owner->vault_principal, "webuser:alice") && !strcmp(identity, "webuser:alice"));
+   assert(owner->control_reply_capability == expected_control_reply_capability);
    if (atomic_load(&cli_shell_probe) && !strcmp(owner->path, "/v1/native/cli"))
       assert(!strcmp(owner->method, "POST"));
    else
@@ -328,7 +450,7 @@ int tool_validate_ir(const aimee_tool_t *function, const char *arguments, char *
    assert(cJSON_IsObject(function->schema) && function->description);
    if (atomic_load(&cli_shell_probe))
       assert(function->name && function->schema);
-   else if (atomic_load(&mcp_execution) && strcmp(function->description, "admitted source schema"))
+   else if (strcmp(function->description, "admitted source schema"))
    {
       aimee_tool_t current = {0};
       assert(!agent_tools_execution_definition("read_file", &current));
@@ -409,12 +531,14 @@ int policy_check_tool_metadata_attempt(const char *name, const aimee_tool_metada
    }
    return execution_mode == 2 ? -1 : 0;
 }
-char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *function, const char *arguments,
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *function, const cJSON *arguments,
                                        int timeout, int *is_error)
 {
    check_execution_owner(function->name);
    assert(effect_authorized && timeout == 120000);
-   assert(strstr(arguments, "123.123456789012345678901234567890"));
+   char *view = cJSON_PrintUnformatted(arguments);
+   assert(view && strstr(view, "123.123456789012345678901234567890"));
+   free(view);
    dispatch_count++;
    if (atomic_load(&cli_shell_probe) && !strcmp(function->name, "bash"))
       exercise_nested_cli();
@@ -481,6 +605,10 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
           64);
    return 0;
 }
+const char *agent_request_auth_error(void)
+{
+   return "Claude sign-in refresh was rate limited (HTTP 429). Try again later.";
+}
 int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
 {
    agent_codex_credentials_t source;
@@ -529,14 +657,16 @@ int agent_set_request_api_credentials_for(const agent_t *agent,
             credentials->target_digest);
    return 0;
 }
-int db1_server_session_get(const char *session, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *session, db1_server_session_owner_t *out)
 {
    memset(out, 0, sizeof *out);
    snprintf(out->created_at, sizeof out->created_at, "%s",
             atomic_load(&source_recreated) ? "2026-10-20T00:01:00Z" : "2026-10-20T00:00:00Z");
    if (atomic_load(&session_removed))
       return -1;
-   if (!strcmp(session, "session-a"))
+   if (atomic_load(&service_forward_probe) && !strcmp(session, "service-session"))
+      strcpy(out->principal, "server");
+   else if (!strcmp(session, "session-a"))
       strcpy(out->principal, "webuser:alice");
    else if (!strcmp(session, "session-b"))
       strcpy(out->principal, "webuser:bob");
@@ -566,7 +696,10 @@ int server_http_route_allowed_caps(int tcp, uint32_t caps, const char *method, c
       return 0;
    if (!strcmp(path, "/v1/chat/control") || !strcmp(path, "/v1/config/set"))
       return 1; /* Parent authority must still be outside the child surface. */
-   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages")) ? (caps & CAP_CHAT) != 0
+   /* The real route descriptor also grants count_tokens only under CAP_CHAT. */
+   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages") ||
+           !strcmp(path, "/v1/messages/count_tokens"))
+              ? (caps & CAP_CHAT) != 0
           : !strcmp(path, "/v1/mcp/call") ? (caps & CAP_TOOL_EXECUTE) != 0
                                           : 0;
 }
@@ -591,12 +724,79 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
                                int length)
 {
    (void)method;
-   probe_replay_scope(path);
+   if (!atomic_load(&service_forward_probe))
+      probe_replay_scope(path);
    assert(protocol_captured);
    assert(length == (int)strlen(body));
    if (strncmp(path, "/v1/mcp/", 8))
       assert(length == 2 && !strcmp(body, "{}"));
    const request_context_t *owner = request_context_get();
+   if (atomic_load(&service_forward_probe) && owner && owner->vault_transport == ATTEST_NONE)
+   {
+      assert(server_native_runtime_forward_service_admitted());
+      service_saved_callback.valid = 1;
+      service_saved_callback.owner = *owner;
+      service_saved_callback.credentials = current_credentials;
+      service_saved_callback.capture = server_session_capture_current();
+      service_saved_callback.workspace = workspace;
+      snprintf(service_saved_callback.cwd, sizeof service_saved_callback.cwd, "%s",
+               run_cmd_get_cwd());
+      assert(!owner->trusted && owner->model_execution == 1 && !owner->operator_script_origin);
+      request_context_snapshot_t saved;
+      request_context_snapshot(&saved);
+      assert(!owner->control_reply_capability);
+      for (int field = 0; field < 9; field++)
+      {
+         request_context_t changed = *owner;
+         if (field == 0)
+            strcpy(changed.principal, "foreign");
+         if (field == 1)
+            strcpy(changed.vault_principal, "foreign");
+         if (field == 2)
+            strcpy(changed.session_key, "foreign");
+         if (field == 3)
+            changed.capabilities ^= CAP_MEMORY_READ;
+         if (field == 4)
+            changed.vault_transport = ATTEST_TCP_BEARER;
+         if (field == 5)
+            changed.trusted = 1;
+         if (field == 6)
+            changed.model_execution = 0;
+         if (field == 7)
+            changed.operator_script_origin = 1;
+         if (field == 8)
+            changed.control_reply_capability = 1;
+         request_context_set(&changed);
+         assert(!server_native_runtime_forward_service_admitted());
+         request_context_restore(&saved);
+         assert(server_native_runtime_forward_service_admitted());
+         owner = request_context_get();
+      }
+      agent_request_creds_t credentials = current_credentials;
+      strcpy(current_credentials.session_id, "foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      current_credentials = credentials;
+      strcpy(current_credentials.vault_principal, "foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      current_credentials = credentials;
+      char previous_cwd[MAX_PATH_LEN];
+      snprintf(previous_cwd, sizeof previous_cwd, "%s", run_cmd_get_cwd());
+      run_cmd_set_cwd("/foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      run_cmd_set_cwd(previous_cwd);
+      const workspace_provider_t *previous_workspace = workspace;
+      workspace = NULL;
+      assert(!server_native_runtime_forward_service_admitted());
+      workspace = previous_workspace;
+      server_session_capture_t *previous_capture = server_session_capture_bind(NULL);
+      assert(!server_native_runtime_forward_service_admitted());
+      assert(!server_session_capture_bind(previous_capture));
+      assert(server_native_runtime_forward_service_admitted());
+      atomic_fetch_add(&calls, 1);
+      const char response[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+      return aimee_core_socket_write_all(fd, response, sizeof response - 1);
+   }
+   assert(!server_native_runtime_forward_service_admitted());
    assert(owner && owner->vault_transport == ATTEST_WEBCHAT_TRUSTED);
    assert(!strcmp(identity, owner->vault_principal));
    assert(!strcmp(owner->method, method) && !strcmp(owner->path, path));
@@ -616,12 +816,11 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(agent_tools_get_snap_id() == (alice ? 71 : 91));
    assert(!strcmp(run_cmd_get_cwd(), alice ? "/work/alice" : "/work/bob"));
    assert(!strcmp(session_id(), owner->session_key));
-   assert(job_id == (alice ? 11 : 22));
+   assert(agent_get_durable_job_id() == (alice ? 11 : 22));
    assert(workspace == (alice ? &alice_workspace : &bob_workspace));
    assert(current_mirror == &fixture_mirror);
    assert(delegate_scope.depth == (alice ? 2 : 0));
    assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
-   assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));
    assert(!effect_authorized);
    assert(server_session_capture_current() == atomic_load(&expected_capture));
    assert(server_control_scope_current() ==
@@ -712,8 +911,9 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
-    flat_bound_probe, preframe_error_probe;
+    flat_bound_probe, preframe_error_probe, buffered_refusal_probe;
 #include "support/native_sdk_metadata_fixture.h"
+static atomic_int usage_probe_active, usage_probe_kind, usage_probe_buffered, preframe_known_prefix;
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -819,6 +1019,49 @@ static int probe_original_tool(void)
    /* A final full snapshot must not create a second claimable original call. */
    return mode == 3 ? probe_tool_snapshot(name, space, arguments) : 0;
 }
+static void probe_usage_response(void)
+{
+   if (atomic_load(&transport_fact_active))
+      emit_synthetic_transport_facts(200); /* Typed peer input, not real HTTP proof. */
+   int kind = atomic_load(&usage_probe_kind);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "original usage response"};
+   aimee_response_t response = {.role = "assistant",
+                                .content = &block,
+                                .n_content = 1,
+                                .stop_reason = AIMEE_STOP_END_TURN,
+                                .usage_unobserved = kind < 0,
+                                .usage_in = kind > 0 ? 7 : 0,
+                                .usage_out = kind > 0 ? 5 : 0,
+                                .usage_cache_read = kind > 0 ? 3 : 0,
+                                .usage_cache_write = kind > 0 ? 2 : 0,
+                                .usage_reasoning = kind > 0 ? 1 : 0};
+   if (atomic_load(&usage_probe_buffered))
+   {
+      assert(!aimee_ir_session_emit_buffered_response(&response, "usage-response"));
+      return;
+   }
+   aimee_delta_t deltas[] = {
+       {.type = AIMEE_DELTA_TURN_START},
+       {.type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_TEXT, .block_id = 0},
+       {.type = AIMEE_DELTA_BLOCK_DELTA, .block_id = 0, .text_delta = block.text},
+       {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
+       {.type = AIMEE_DELTA_TURN_STOP,
+        .stop_reason = response.stop_reason,
+        .usage_unobserved = response.usage_unobserved,
+        .usage_in = response.usage_in,
+        .usage_out = response.usage_out,
+        .usage_cache_read = response.usage_cache_read,
+        .usage_cache_write = response.usage_cache_write,
+        .usage_reasoning = response.usage_reasoning}};
+   for (unsigned i = 0; i < sizeof deltas / sizeof *deltas; i++)
+   {
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
+                                     .role = "assistant",
+                                     .message_id = "usage-response",
+                                     .delta = &deltas[i]};
+      assert(!aimee_ir_session_emit(&event));
+   }
+}
 static void probe_replay_scope(const char *path)
 {
    aimee_frontend_state_scope_t state_guard = aimee_frontend_bind_state_guard(NULL, NULL);
@@ -827,7 +1070,8 @@ static void probe_replay_scope(const char *path)
    aimee_frontend_bind_request_owner(request_owner_scope.guard, request_owner_scope.context);
    void *sink_context = NULL;
    aimee_ir_session_sink_fn installed_sink = aimee_ir_session_get_sink(&sink_context);
-   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
+   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages") ||
+       !strcmp(path, "/v1/messages/count_tokens"))
    {
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
@@ -869,6 +1113,7 @@ static void probe_replay_scope(const char *path)
          assert(request.n_system == 1 + identity);
          assert(!strcmp(request.system[identity].text, "host-owned system"));
          assert(!identity || !strcmp(request.system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+         assert(!identity || request.system[0].context.authority == AIMEE_CTX_AUTH_POLICY);
          assert(request.n_messages == 1 && request.n_tools == 1);
          assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
                                                                 ? "fresh durable one"
@@ -939,8 +1184,13 @@ static void probe_replay_scope(const char *path)
           * native scheduler names do not require a provider namespace feature. */
          for (aimee_wire_t wire = AIMEE_WIRE_ANTHROPIC; wire <= AIMEE_WIRE_RESPONSES; wire++)
          {
-            char *native = aimee_backend_render_wire(&request, wire);
-            assert(native);
+            int losses = -1;
+            char *native =
+                aimee_backend_render_wire_profile(&request, wire, AIMEE_RESPONSES_API, &losses);
+            // The Responses profile's cache key is unsupported by Anthropic.
+            assert(native && losses == (wire == AIMEE_WIRE_ANTHROPIC ? 1 : 0));
+            if (losses)
+               assert(!aimee_backend_render_wire(&request, wire));
             cJSON *rendered = aimee_ir_json_parse_frame(native, strlen(native));
             assert(rendered && cJSON_GetArraySize(cJSON_GetObjectItem(rendered, "tools")) == 1);
             free(native);
@@ -948,8 +1198,34 @@ static void probe_replay_scope(const char *path)
          }
       }
       aimee_request_free(&request);
+      if (!strcmp(path, "/v1/messages/count_tokens"))
+      {
+         emit_synthetic_transport_facts(200); /* Auxiliary send is not a model generation. */
+         return;
+      }
+      if (atomic_load(&usage_probe_active))
+      {
+         probe_usage_response();
+         return;
+      }
+      if (atomic_load(&buffered_refusal_probe))
+      {
+         /* Real buffered ingress emits MESSAGE then terminal metadata without
+          * a streamed builder. The retained result must own the terminal data. */
+         aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "Declined"};
+         aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+         aimee_response_t response = {.role = "assistant",
+                                      .content = &block,
+                                      .n_content = 1,
+                                      .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                                      .raw_stop_reason = "refusal",
+                                      .refusal = &details};
+         assert(!aimee_ir_session_emit_buffered_response(&response, "native-refusal"));
+         return;
+      }
       if (atomic_load(&preframe_error_probe))
       {
+         emit_synthetic_transport_facts(-1); /* Actual TCP producer is tested separately. */
          /* Actual ingress emits this host diagnostic when transport fails
           * before any vendor message_start. It is not an assistant message. */
          aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
@@ -1050,13 +1326,15 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
    agent_tools_begin_turn(300);
    agent_tools_set_snap_id(3000);
-   server_native_runtime_t *copy = server_native_runtime_open(selected, owner, "session-a");
+   server_native_runtime_t *copy = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && !strcmp(baseline, changed)); /* turn/snapshot/transport nonce are ephemeral */
    server_native_runtime_close(copy);
    agent_tools_set_dispatch_role("implement");
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    assert(!strcmp(server_native_runtime_binding(original), server_native_runtime_binding(copy)));
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
@@ -1074,7 +1352,8 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
          agent_tools_knowledge_write_set(1);
       else
          agent_tools_parent_write_guard_set("/parent/alice", "/different/write/root");
-      copy = server_native_runtime_open(selected, owner, "session-a");
+      copy = server_native_runtime_open_bound_request(selected, owner, "session-a",
+                                                      &transport_profile, &read_binding, 1, NULL);
       assert(copy);
       rc = server_native_runtime_cache_scope(copy, &profile, changed);
       assert(rc == 0 && strcmp(baseline, changed));
@@ -1083,20 +1362,23 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
    const char *denied[] = {"write_file", "git_push", "write_file"};
    agent_tools_denied_set(denied, 3);
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, baseline);
    assert(rc == 0);
    server_native_runtime_close(copy);
    const char *reordered[] = {"git_push", "write_file"};
    agent_tools_denied_set(reordered, 2);
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && !strcmp(baseline, changed));
    server_native_runtime_close(copy);
    agent_source_authority_tls_set(1, "/different/source", "src/alice.c\n");
-   copy = server_native_runtime_open(selected, owner, "session-a");
+   copy = server_native_runtime_open_bound_request(selected, owner, "session-a", &transport_profile,
+                                                   &read_binding, 1, NULL);
    assert(copy);
    rc = server_native_runtime_cache_scope(copy, &profile, changed);
    assert(rc == 0 && strcmp(baseline, changed));
@@ -1109,7 +1391,8 @@ int db1_session_ir_running_history_load(const char *session, const char *actor, 
 {
    server_session_capture_t *owner = server_session_capture_current();
    assert(owner && !strcmp(session, server_session_capture_session(owner)));
-   assert(!strcmp(actor, "webuser:alice") && !strcmp(turn, "native-turn"));
+   assert(!strcmp(actor, atomic_load(&service_forward_probe) ? "server" : "webuser:alice") &&
+          !strcmp(turn, "native-turn"));
    *out = NULL;
    if (atomic_load(&snapshot_fault) == 1)
       return -1;
@@ -1361,7 +1644,8 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
     * model callbacks themselves still cannot manufacture completion. */
    assert(atomic_load(&preframe_error_probe));
    assert(!strcmp(session, "private-child") && !strcmp(turn, "native-turn") &&
-          !strcmp(actor, "webuser:alice") && !strcmp(sequence, "3"));
+          !strcmp(actor, "webuser:alice") &&
+          !strcmp(sequence, atomic_load(&preframe_known_prefix) ? "8" : "3"));
    const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
    const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status"));
@@ -1377,14 +1661,19 @@ static void test_retained_capture(const agent_t *selected, const request_context
       server_session_capture_t *capture =
           server_session_capture_open(destination, "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
-      assert(runtime && server_session_capture_bind(NULL) == capture);
-      const cJSON *source = server_native_runtime_source_history(runtime);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
+      cJSON *source = capture_history(capture);
       assert(cJSON_IsArray(source) && cJSON_GetArraySize(source) == 1);
       char *initial = cJSON_PrintUnformatted(source);
       assert(initial && strstr(initial, "canonical source prompt"));
       free(initial);
+      cJSON_Delete(source);
       atomic_store(&expected_capture, capture);
+      atomic_store(&owned_profile_probe, 1);
+      atomic_store(&snapshot_generation, 1);
       atomic_store(&reject_proof, failure == 1);
       atomic_store(&reject_durable, failure == 2);
       captured_rows = cJSON_CreateArray();
@@ -1412,7 +1701,7 @@ static void test_retained_capture(const agent_t *selected, const request_context
       {
          char *wire = cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 1));
          assert(wire && strstr(wire, "native-turn:") && strstr(wire, ":wire-response") &&
-                strstr(wire, "wire-call:original") && strstr(wire, "exec_command") &&
+                strstr(wire, "wire-call:original") && strstr(wire, "read_file") &&
                 strstr(wire, "123.123456789012345678901234567890"));
          free(wire);
       }
@@ -1430,10 +1719,217 @@ static void test_retained_capture(const agent_t *selected, const request_context
       atomic_store(&expected_capture, NULL);
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
+      atomic_store(&owned_profile_probe, 0);
+      atomic_store(&snapshot_generation, 0);
    }
 }
 
-static void test_native_preframe_error(const agent_t *selected, const request_context_t *owner)
+static void test_native_transport_usage(const agent_t *selected, const request_context_t *owner,
+                                        int attempts, int known_prefix, int auxiliary)
+{
+   owner_tools(1);
+   atomic_store(&preframe_known_prefix, known_prefix);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+   assert(server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   if (known_prefix)
+   {
+      atomic_store(&usage_probe_active, 1);
+      atomic_store(&usage_probe_kind, 1);
+      atomic_store(&usage_probe_buffered, 0);
+      int baseline = transport_fact_begin(1);
+      request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+      transport_fact_end(baseline, 1);
+      atomic_store(&usage_probe_active, 0);
+   }
+   int rows_before_error = cJSON_GetArraySize(captured_rows);
+   assert(rows_before_error == (known_prefix ? 6 : 1));
+   char *prefix_record =
+       known_prefix ? cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 5)) : NULL;
+   assert(!known_prefix || prefix_record);
+   atomic_store(&preframe_error_probe, !auxiliary);
+   int baseline = transport_fact_begin(attempts);
+   request(runtime, auxiliary ? "/v1/messages/count_tokens" : "/v1/messages",
+           server_native_runtime_token(runtime), response);
+   transport_fact_end(baseline, attempts);
+   assert(!server_session_capture_failed(capture));
+   assert(server_native_runtime_model_turns(runtime) < 0); /* Callback owner still live. */
+   server_native_runtime_quiesce(runtime);
+   assert(server_native_runtime_model_turns(runtime) == known_prefix + !auxiliary);
+   aimee_response_t original = {0};
+   server_native_usage_t usage = {0};
+   assert(!server_native_runtime_usage(runtime, &usage));
+   assert(usage.unobserved == (!auxiliary && attempts > 0));
+   assert(usage.input == (known_prefix ? 7 : 0) && usage.output == (known_prefix ? 5 : 0));
+   int status = server_native_runtime_result(runtime, &original);
+   if (auxiliary)
+   {
+      assert(known_prefix && !status && !original.usage_unobserved);
+      assert(original.usage_in == 7 && original.usage_out == 5);
+      assert(original.n_content == 1 &&
+             !strcmp(original.content[0].text, "original usage response"));
+      assert(cJSON_GetArraySize(captured_rows) == rows_before_error);
+   }
+   else
+      assert(status < 0 && !original.content); /* Never transfer the prior terminal. */
+   aimee_response_free(&original);
+   server_native_tool_claim_t claim = {0};
+   assert(server_native_runtime_claim_reference(runtime, "invented-call", "aimee", "read_file",
+                                                &claim) < 0);
+   if (!auxiliary)
+   {
+      aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
+                                      .execution_status = "failed",
+                                      .execution_error =
+                                          "Provider transport failed before first frame"};
+      assert(!server_session_capture_append(capture, &failed, NULL, NULL));
+      assert(!server_session_capture_accepting(capture));
+      assert(cJSON_GetArraySize(captured_rows) == rows_before_error + 2);
+      char *wire = cJSON_PrintUnformatted(captured_rows);
+      assert(wire && strstr(wire, "Provider transport failed before first frame") &&
+             strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
+      free(wire);
+   }
+   if (prefix_record)
+   {
+      char *retained = cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 5));
+      assert(retained && !strcmp(prefix_record, retained));
+      free(retained);
+      free(prefix_record);
+   }
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+   atomic_store(&preframe_error_probe, 0);
+   atomic_store(&preframe_known_prefix, 0);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
+}
+
+static void test_native_aggregate_usage(const agent_t *selected, const request_context_t *owner)
+{
+   const int sequences[][2] = {{-1, 1}, {1, -1}, {-1, 0}, {0, 0}, {0, 1}, {1, 1}, {2, 1}};
+   for (int transport = 0; transport < 4; transport++)
+      for (unsigned vector = 0; vector < sizeof sequences / sizeof *sequences; vector++)
+      {
+         owner_tools(1);
+         aimee_tool_t function = {.name = "read_file"};
+         aimee_tool_t space = {
+             .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+         aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+         aimee_request_t profile = {.model = "selected-model",
+                                    .frontend = AIMEE_WIRE_ANTHROPIC,
+                                    .tools = &space,
+                                    .n_tools = 1,
+                                    .system = &system,
+                                    .n_system = 1,
+                                    .prompt_cache_key = "",
+                                    .mutated = 1};
+         server_session_capture_t *capture = server_session_capture_open(
+             "private-child", "native-turn", "webuser:alice", "session-a");
+         assert(capture && !server_session_capture_bind(capture));
+         server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+             selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+         assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+         assert(server_session_capture_bind(NULL) == capture);
+         atomic_store(&expected_capture, capture);
+         captured_rows = cJSON_CreateArray();
+         atomic_store(&owned_profile_probe, 1);
+         atomic_store(&snapshot_generation, 1);
+         atomic_store(&usage_probe_active, 1);
+         aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION,
+                                          .execution_status = "running"};
+         assert(!server_session_capture_append(capture, &started, NULL, NULL));
+         for (int turn = 0; turn < 2; turn++)
+         {
+            atomic_store(&usage_probe_kind, sequences[vector][turn]);
+            atomic_store(&usage_probe_buffered, (transport >> turn) & 1);
+            char response[1024];
+            int attempts = sequences[vector][turn] > 1 ? 2 : 1;
+            int baseline = transport_fact_begin(attempts);
+            request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+            transport_fact_end(baseline, attempts);
+            assert(strstr(response, "200 OK") && !server_session_capture_failed(capture));
+         }
+         int stops = 0;
+         const cJSON *row;
+         cJSON_ArrayForEach(row, captured_rows)
+         {
+            const cJSON *payload = cJSON_GetObjectItemCaseSensitive(row, "payload");
+            const char *type =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "type"));
+            if (!type || strcmp(type, "TURN_STOP"))
+               continue;
+            assert(stops < 2);
+            const cJSON *usage = cJSON_GetObjectItemCaseSensitive(payload, "usage_in");
+            int kind = sequences[vector][stops++];
+            assert(kind < 0 ? !usage
+                            : cJSON_IsNumber(usage) && usage->valuedouble == (kind ? 7 : 0));
+         }
+         assert(stops == 2);
+         char *before = cJSON_PrintUnformatted(captured_rows);
+         server_native_runtime_quiesce(runtime);
+         aimee_response_t aggregate = {0};
+         assert(!server_native_runtime_result(runtime, &aggregate));
+         int unknown =
+             sequences[vector][0] < 0 || sequences[vector][1] < 0 || sequences[vector][0] > 1;
+         server_native_usage_t usage = {0};
+         assert(!server_native_runtime_usage(runtime, &usage));
+         int subtotal = (sequences[vector][0] > 0) + (sequences[vector][1] > 0);
+         assert(usage.unobserved == unknown && usage.input == 7 * subtotal &&
+                usage.output == 5 * subtotal && usage.cache_read == 3 * subtotal &&
+                usage.cache_write == 2 * subtotal && usage.reasoning == subtotal);
+         int known = unknown ? 0 : (sequences[vector][0] > 0) + (sequences[vector][1] > 0);
+         assert(aggregate.usage_unobserved == unknown);
+         assert(aggregate.usage_in == 7 * known && aggregate.usage_out == 5 * known);
+         assert(aggregate.usage_cache_read == 3 * known &&
+                aggregate.usage_cache_write == 2 * known && aggregate.usage_reasoning == known);
+         assert(!aimee_ir_response_complete_valid(&aggregate) && aggregate.n_content == 1 &&
+                !strcmp(aggregate.content[0].text, "original usage response"));
+         char *after = cJSON_PrintUnformatted(captured_rows);
+         assert(before && after && !strcmp(before, after));
+         free(before);
+         free(after);
+         aimee_response_free(&aggregate);
+         server_native_runtime_close(runtime);
+         server_session_capture_close(capture);
+         atomic_store(&expected_capture, NULL);
+         atomic_store(&owned_profile_probe, 0);
+         atomic_store(&snapshot_generation, 0);
+         atomic_store(&usage_probe_active, 0);
+         cJSON_Delete(captured_rows);
+         captured_rows = NULL;
+      }
+   puts("native aggregate usage: unknown taint, observed zero, mixed stream/buffer and original "
+        "records passed");
+}
+
+static void test_native_buffered_refusal(const agent_t *selected, const request_context_t *owner)
 {
    owner_tools(1);
    aimee_tool_t function = {.name = "read_file"};
@@ -1451,14 +1947,15 @@ static void test_native_preframe_error(const agent_t *selected, const request_co
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime && server_session_capture_bind(NULL) == capture);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+   assert(server_session_capture_bind(NULL) == capture);
    atomic_store(&expected_capture, capture);
    captured_rows = cJSON_CreateArray();
    atomic_store(&owned_profile_probe, 1);
    atomic_store(&snapshot_generation, 1);
-   atomic_store(&preframe_error_probe, 1);
+   atomic_store(&buffered_refusal_probe, 1);
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
    assert(!server_session_capture_append(capture, &started, NULL, NULL));
    char response[1024];
@@ -1466,27 +1963,78 @@ static void test_native_preframe_error(const agent_t *selected, const request_co
    assert(!server_session_capture_failed(capture));
    server_native_runtime_quiesce(runtime);
    aimee_response_t original = {0};
-   assert(server_native_runtime_result(runtime, &original) < 0);
-   server_native_tool_claim_t claim = {0};
-   assert(server_native_runtime_claim_reference(runtime, "invented-call", "aimee", "read_file",
-                                                &claim) < 0);
-   aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
-                                   .execution_status = "failed",
-                                   .execution_error =
-                                       "Provider transport failed before first frame"};
-   assert(!server_session_capture_append(capture, &failed, NULL, NULL));
-   assert(!server_session_capture_accepting(capture));
-   assert(cJSON_GetArraySize(captured_rows) == 3);
-   char *wire = cJSON_PrintUnformatted(captured_rows);
-   assert(wire && strstr(wire, "Provider transport failed before first frame") &&
-          strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
-   free(wire);
+   assert(!server_native_runtime_result(runtime, &original));
+   assert(original.stop_reason == AIMEE_STOP_CONTENT_FILTER && original.refusal);
+   assert(!strcmp(original.refusal->category, "future_category") && !original.refusal->explanation);
+   assert(!strcmp(original.raw_stop_reason, "refusal"));
+   aimee_response_free(&original);
    server_native_runtime_close(runtime);
    server_session_capture_close(capture);
    atomic_store(&expected_capture, NULL);
    atomic_store(&owned_profile_probe, 0);
    atomic_store(&snapshot_generation, 0);
-   atomic_store(&preframe_error_probe, 0);
+   atomic_store(&buffered_refusal_probe, 0);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
+}
+
+static void test_native_turn_limit(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_set_turn_limit(runtime, 1));
+   assert(server_native_runtime_set_turn_limit(runtime, -1));
+   assert(!server_native_runtime_attest_launch(runtime, transport_launch));
+   assert(server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   int before = atomic_load(&calls);
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "200 OK") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_turn_limit_reached(runtime));
+   assert(server_native_runtime_set_turn_limit(runtime, 2));
+   int rows = cJSON_GetArraySize(captured_rows);
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before + 1);
+   assert(server_native_runtime_turn_limit_reached(runtime) &&
+          server_session_capture_failed(capture));
+   assert(cJSON_GetArraySize(captured_rows) == rows);
+
+   server_native_runtime_quiesce(runtime);
+   aimee_response_t original = {0};
+   assert(!server_native_runtime_result(runtime, &original));
+   assert(server_native_runtime_model_turns(runtime) == 2);
+   assert(original.stop_reason == AIMEE_STOP_ERROR && original.error_message &&
+          !strcmp(original.error_message, "native model generation turn cap reached"));
+   aimee_response_free(&original);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+
    cJSON_Delete(captured_rows);
    captured_rows = NULL;
 }
@@ -1514,8 +2062,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
       if (mode == 3)
       {
          cJSON *reservation = cJSON_CreateObject();
@@ -1534,7 +2082,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
          assert(server_native_runtime_set_native_owner(runtime, reservation));
          cJSON_Delete(reservation);
       }
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
       atomic_store(&owned_profile_probe, 1);
@@ -1787,19 +2336,10 @@ static void test_native_supervised_execution(const agent_t *selected,
       const server_native_tool_binding_t bindings[] = {
           {.space = "aimee", .name = "bash", .registry_name = "bash"},
           {.space = "aimee", .name = "read_file", .registry_name = "read_file"}};
-      server_native_runtime_t *runtime =
-          mode >= 10 ? server_native_runtime_open_bound_request(selected, &selected_owner,
-                                                                "session-a", &profile, bindings, 2)
-                     : server_native_runtime_open_request(selected, &selected_owner, "session-a",
-                                                          &profile);
-      assert(runtime);
-      if (mode >= 10)
-      {
-         char launch[65];
-         memset(launch, 'a', 64);
-         launch[64] = 0;
-         assert(!server_native_runtime_attest_launch(runtime, launch));
-      }
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, &selected_owner, "session-a", &profile, mode >= 10 ? bindings : bindings + 1,
+          mode >= 10 ? 2 : 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
       cJSON_Delete(schema);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
@@ -1885,8 +2425,19 @@ static void test_native_supervised_execution(const agent_t *selected,
                 strstr(source, "wire-call:original") && !strstr(source, "\"name\":\"read_file\""));
          free(source);
       }
+      int committed_calls, committed_successes;
+      /* Only persisted canonical outcomes count. Canceled, refused-before-claim,
+       * uncertain-effect and duplicate callbacks cannot create SDK counters. */
+      server_native_runtime_quiesce(runtime);
+      server_native_runtime_tool_counts(runtime, &committed_calls, &committed_successes);
+      int expected_committed = mode != 6 && !(mode >= 4 && mode != 9 && mode < 10);
+      assert(committed_calls == expected_committed);
+      assert(committed_successes == (expected_committed && mode != 1 && mode != 2 && mode != 3));
       rc = server_native_runtime_execute_tool(&call, &result, runtime);
       assert(rc == -1 && dispatch_count == before + dispatched + (mode == 10));
+      int replay_calls, replay_successes;
+      server_native_runtime_tool_counts(runtime, &replay_calls, &replay_successes);
+      assert(replay_calls == committed_calls && replay_successes == committed_successes);
       aimee_block_free_contents(&result);
       cJSON_Delete(input);
       agent_set_request_cancel(NULL);
@@ -1986,7 +2537,7 @@ static void test_native_large_mcp_catalog(const agent_t *selected, const request
                               .prompt_cache_key = "",
                               .mutated = 1};
    server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-       selected, owner, "session-a", &profile, bindings, COUNT);
+       selected, owner, "session-a", &profile, bindings, COUNT, NULL);
    assert(runtime);
    cJSON_Delete(schema); /* Real listener owns a deep profile copy. */
    assert(server_session_capture_bind(NULL) == capture);
@@ -2039,23 +2590,37 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
                                               .name = "mcp__aimee__read_file",
                                               .registry_name = "read_file",
                                               .mcp_name = "exposed_read"};
+      if (variant == 0)
+      {
+         agent_t unavailable = *selected;
+         strcpy(unavailable.registration, "unavailable-account");
+         char diagnostic[512] = "stale failure";
+         assert(!server_native_runtime_open_bound_request(&unavailable, owner, "session-a",
+                                                          &profile, &binding, 1, diagnostic));
+         assert(strstr(diagnostic, "connection's credentials are unavailable"));
+         strcpy(unavailable.auth_type, "claude-oauth");
+         assert(!server_native_runtime_open_bound_request(&unavailable, owner, "session-a",
+                                                          &profile, &binding, 1, diagnostic));
+         assert(!strcmp(diagnostic,
+                        "Claude sign-in refresh was rate limited (HTTP 429). Try again later."));
+      }
       server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-          selected, owner, "session-a", &profile, &binding, 1);
+          selected, owner, "session-a", &profile, &binding, 1, NULL);
       assert(runtime);
       assert(server_native_runtime_attest_launch(runtime, "invalid-proof"));
       if (!variant)
       {
          server_native_tool_binding_t duplicate[] = {binding, binding};
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          duplicate, 2));
+                                                          duplicate, 2, NULL));
          server_native_tool_binding_t invalid = binding;
          invalid.registry_name = "not-a-registered-tool";
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &invalid, 1));
+                                                          &invalid, 1, NULL));
          invalid = binding;
          invalid.name = "not-an-advertised-tool";
          assert(!server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &invalid, 1));
+                                                          &invalid, 1, NULL));
          const char *digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
          server_native_execution_profile_t execution = {.sdk = "claude",
                                                         .build_digest = digest,
@@ -2066,12 +2631,12 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
          invalid = binding;
          invalid.mcp_name = "different_exposed_name";
          server_native_runtime_t *other = server_native_runtime_open_bound_request(
-             selected, owner, "session-a", &profile, &invalid, 1);
+             selected, owner, "session-a", &profile, &invalid, 1, NULL);
          assert(other && !server_native_runtime_cache_scope(other, &execution, changed));
          assert(strcmp(baseline, changed));
          server_native_runtime_close(other);
          other = server_native_runtime_open_bound_request(selected, owner, "session-a", &profile,
-                                                          &binding, 1);
+                                                          &binding, 1, NULL);
          assert(other && !server_native_runtime_cache_scope(other, &execution, changed));
          assert(!strcmp(baseline, changed));
          server_native_runtime_close(other);
@@ -2155,7 +2720,8 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
          assert(!pthread_join(responder, NULL));
       assert(atomic_load(&dispatch_count) ==
              before + (mode == 0 || mode == 3 || mode == 4 || mode == 5 || mode == 9));
-      assert(!server_session_capture_current() && workspace == &bob_workspace && job_id == 22);
+      assert(!server_session_capture_current() && workspace == &bob_workspace &&
+             agent_get_durable_job_id() == 22);
       if (mode == 4 || mode == 5 || mode == 10)
       {
          assert(cJSON_IsObject(cJSON_GetObjectItem(rpc, "error")));
@@ -2218,9 +2784,10 @@ static void test_sdk_metadata(const agent_t *selected, const request_context_t *
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, owner, "session-a", &profile);
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       cJSON_Delete(host_metadata); /* The runtime must own the original host fields. */
       captured_rows = cJSON_CreateArray();
       atomic_store(&expected_capture, capture);
@@ -2263,33 +2830,36 @@ static void test_owned_native_context(const agent_t *selected, const request_con
                            .max_tokens = 128,
                            .has_max_tokens = 1,
                            .mutated = 1};
-   server_native_runtime_t *missing =
-       server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   server_native_runtime_t *missing = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &seed, &read_binding, 1, NULL);
    assert(!missing); /* A profile cannot replace missing durable history ownership. */
    server_session_capture_t *capture =
        server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
    assert(capture && !server_session_capture_bind(capture));
    seed.model = "unselected-model";
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    seed.model = "selected-model";
    seed.raw_bytes = "native request";
    seed.raw_length = strlen(seed.raw_bytes);
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    seed.raw_bytes = NULL;
    seed.raw_length = 0;
    seed.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
-   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   missing = server_native_runtime_open_bound_request(selected, owner, "session-a", &seed,
+                                                      &read_binding, 1, NULL);
    assert(!missing && !server_session_capture_failed(capture));
    cJSON_Delete(seed.raw);
    seed.raw = NULL;
    aimee_request_t profile = {0};
    int cloned = aimee_ir_request_clone(&seed, &profile);
    assert(!cloned);
-   server_native_runtime_t *runtime =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(runtime);
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
    server_native_execution_profile_t execution = {
        .sdk = "codex",
        .build_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2298,11 +2868,42 @@ static void test_owned_native_context(const agent_t *selected, const request_con
    char baseline[65], changed[65];
    int scoped = server_native_runtime_cache_scope(runtime, &execution, baseline);
    assert(!scoped);
+   if (workspace->kind == WS_PROVIDER_CONTAINER)
+   {
+      /* Epoch digests are explicit platform-peer inputs here. The actual hash
+       * owner must preserve stable-scope equality and fork on a fresh resource,
+       * while the durable-history callbacks below remain canonical. */
+      char repeated[65], next_epoch[65];
+      assert(!server_native_runtime_cache_scope(runtime, &execution, repeated));
+      assert(!strcmp(repeated, baseline));
+      const char *previous_epoch = execution.workspace_digest;
+      execution.workspace_digest =
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+      server_native_runtime_t *fresh = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+      assert(fresh);
+      assert(!strcmp(server_native_runtime_binding(fresh), server_native_runtime_binding(runtime)));
+      cJSON *before = capture_history(capture);
+      assert(cJSON_IsArray(before) && cJSON_GetArraySize(before) == 1);
+      char *source_wire = cJSON_PrintUnformatted(before);
+      assert(source_wire && strstr(source_wire, "canonical source prompt") &&
+             !strstr(source_wire, "stale initial profile history"));
+      free(source_wire);
+      cJSON_Delete(before);
+      assert(!server_native_runtime_cache_scope(fresh, &execution, next_epoch));
+      assert(strcmp(next_epoch, baseline));
+      assert(!server_native_runtime_cache_scope(fresh, &execution, repeated));
+      assert(!strcmp(repeated, next_epoch));
+      server_native_runtime_close(fresh);
+      execution.workspace_digest = previous_epoch;
+      assert(!server_native_runtime_cache_scope(runtime, &execution, repeated));
+      assert(!strcmp(repeated, baseline));
+   }
    free(profile.system[0].text);
    profile.system[0].text = strdup("different host profile");
-   server_native_runtime_t *other =
-       server_native_runtime_open_request(selected, owner, "session-a", &profile);
-   assert(other);
+   server_native_runtime_t *other = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, &read_binding, 1, NULL);
+   assert(other && !server_native_runtime_attest_launch(other, transport_launch));
    scoped = server_native_runtime_cache_scope(other, &execution, changed);
    assert(!scoped && strcmp(baseline, changed));
    aimee_request_free(&profile);
@@ -2369,7 +2970,8 @@ static void test_source_snapshot_refusal(const agent_t *selected, const request_
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
       atomic_store(&snapshot_fault, failure);
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
       assert(!runtime && server_session_capture_failed(capture));
       server_session_capture_close(capture);
    }
@@ -2384,13 +2986,14 @@ static void test_private_source_revocation(const agent_t *selected, const reques
       server_session_capture_t *capture =
           server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
-      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
-      assert(runtime && server_session_capture_bind(NULL) == capture);
+      server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+          selected, owner, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
+      assert(server_session_capture_bind(NULL) == capture);
       atomic_store(&destination_invalid, failure);
       int before = atomic_load(&calls);
       char response[1024];
-      request(runtime, failure == 1 ? "/v1/responses" : "/v1/mcp/call",
-              server_native_runtime_token(runtime), response);
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       assert(strstr(response, "502") && atomic_load(&calls) == before);
       assert(server_session_capture_failed(capture) && !aimee_ir_session_capture_failed());
       atomic_store(&destination_invalid, 0);
@@ -2403,6 +3006,57 @@ static void test_private_source_revocation(const agent_t *selected, const reques
 
 #include "support/native_sdk_identity_fixture.h"
 
+static void test_private_service_forward_callback(const agent_t *selected)
+{
+   assert(!server_native_runtime_forward_service_admitted());
+   owner_tools(0);
+   run_cmd_set_cwd("/work/service");
+   request_context_t owner = {
+       .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+   strcpy(owner.principal, "server");
+   strcpy(owner.vault_principal, "server");
+   strcpy(owner.session_key, "service-session");
+   aimee_request_t profile = {
+       .model = "selected-model", .frontend = AIMEE_WIRE_RESPONSES, .mutated = 1};
+   atomic_store(&service_forward_probe, 1);
+   server_session_capture_t *capture =
+       server_session_capture_open("service-session", "native-turn", "server", "service-session");
+   assert(capture && !server_session_capture_bind(capture));
+   assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &profile,
+                                                    NULL, 0, NULL));
+   aimee_request_t foreign = profile;
+   foreign.model = "foreign-profile-model";
+   fixture_service_ticket = &foreign;
+   assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &foreign,
+                                                    NULL, 0, NULL));
+   assert(!server_native_runtime_forward_service_admitted());
+   fixture_service_ticket = &profile;
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, &owner, "service-session", &profile, NULL, 0, NULL);
+   assert(runtime);
+   assert(server_session_capture_bind(NULL) == capture);
+   assert(!fixture_service_ticket && !server_native_runtime_forward_service_admitted());
+   atomic_store(&expected_capture, capture);
+   char launch[65];
+   memset(launch, 'a', 64);
+   launch[64] = 0;
+   assert(!server_native_runtime_attest_launch(runtime, launch));
+   char response[1024];
+   int before = atomic_load(&calls);
+   request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "200 OK") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_forward_service_admitted());
+   request(runtime, "/v1/responses", "forged-token", response);
+   assert(strstr(response, "401") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_forward_service_admitted());
+   server_native_runtime_close(runtime);
+   assert(!server_native_runtime_forward_service_admitted());
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&service_forward_probe, 0);
+   owner_tools(0);
+}
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -2410,8 +3064,10 @@ int main(void)
    strcpy(selected.registration, "selected-account");
    strcpy(selected.model, "selected-model");
    strcpy(selected.auth_type, "codex-oauth");
+   test_private_service_forward_callback(&selected);
    request_context_t a = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
-                          .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE};
+                          .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE,
+                          .control_reply_capability = 1};
    strcpy(a.vault_principal, "webuser:alice");
    strcpy(a.principal, "alice");
    strcpy(a.idempotency_key, "browser-turn-only");
@@ -2421,133 +3077,92 @@ int main(void)
    strcpy(b.vault_principal, "webuser:bob");
    strcpy(b.principal, "bob");
    b.capabilities = CAP_CHAT;
-   assert(!server_native_runtime_open(&selected, NULL, "session-a"));
-   assert(!server_native_runtime_open(&selected, &b, "session-a"));
+   assert(!server_native_runtime_open_bound_request(&selected, NULL, "session-a",
+                                                    &transport_profile, &read_binding, 1, NULL));
+   assert(!server_native_runtime_open_bound_request(&selected, &b, "session-a", &transport_profile,
+                                                    &read_binding, 1, NULL));
    owner_tools(1);
    atomic_store(&malformed_source, 1);
-   assert(!server_native_runtime_open(&selected, &a, "session-a"));
+   assert(!server_native_runtime_open_bound_request(&selected, &a, "session-a", &transport_profile,
+                                                    &read_binding, 1, NULL));
    atomic_store(&malformed_source, 0);
    alice_controls = server_control_scope_open("session-a", "native-turn", "webuser:alice");
-   assert(alice_controls && !server_control_scope_bind(alice_controls));
-   server_native_runtime_t *alice = server_native_runtime_open(&selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   owner_tools(0);
-   server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
-   assert(alice && bob);
-   test_unowned_beta_path(alice);
+   assert(alice_controls);
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *alice = server_native_runtime_open_bound_request(
+       &selected, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+   assert(alice);
    test_cache_profile(&selected, &a, alice);
-   test_beta_contract_binding(&selected, &a);
-   /* Destroy/change every original borrowed host value after the owner copy.
-    * Callback workers must retain each captured policy and source independently. */
-   owner_tools(1);
-   agent_tools_set_dispatch_role("changed-after-open");
-   agent_tools_set_active_toolset("coding");
-   agent_source_authority_tls_set(1, "/foreign", "foreign.c");
-   setenv("AIMEE_ACTIVE_TOOLSET", "foreign-toolset", 1);
-   setenv("AIMEE_DELEGATE_SOURCE_PATHS", "foreign-process-path", 1);
-
-   assert(strcmp(server_native_runtime_binding(alice), server_native_runtime_binding(bob)));
-   assert(strlen(server_native_runtime_token(alice)) == 64);
-   char response[1024];
-   for (int i = 0; i < 16; i++)
-   {
-      request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-      assert(strstr(response, "200 OK") && strstr(response, "webuser:alice") &&
-             strstr(response, "session-a") && !strstr(response, "forged"));
-      assert(!strstr(response, "upstream-secret"));
-      request(bob, "/v1/responses", server_native_runtime_token(bob), response);
-      assert(strstr(response, "webuser:bob") && strstr(response, "session-b"));
-   }
-   assert(!request_context_get());
-   assert(!current_credentials.vault_principal[0]);
    int before = atomic_load(&calls);
-   request(alice, "/v1/responses", server_native_runtime_token(bob), response);
+   char response[1024];
+   request(alice, "/v1/responses", "foreign-runtime-token", response);
    assert(strstr(response, "401") && atomic_load(&calls) == before);
-   request(alice, "/v1/chat/control", server_native_runtime_token(alice), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(alice, "/v1/config/set", server_native_runtime_token(alice), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(bob, "/v1/mcp/call", server_native_runtime_token(bob), response);
-   assert(strstr(response, "404") && atomic_load(&calls) == before);
-   request(alice, "/v1/mcp/call", server_native_runtime_token(alice), response);
-   assert(strstr(response, "200 OK") && strstr(response, "webuser:alice"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   atomic_store(&source_changed, 0);
-   atomic_store(&session_removed, 1);
-   request(alice, "/v1/responses", server_native_runtime_token(alice), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   atomic_store(&session_removed, 0);
-   atomic_store(&wait_for_cancel, 1);
-   int fd = send_request(alice, "/v1/responses", server_native_runtime_token(alice));
-   for (int i = 0; i < 300 && atomic_load(&calls) == before; i++)
-      usleep(10000);
-   assert(atomic_load(&calls) > before);
-   aimee_core_socket_shutdown(fd);
-   aimee_core_socket_close(fd);
-   for (int i = 0; i < 300 && !atomic_load(&cancelled); i++)
-      usleep(10000);
-   assert(atomic_load(&cancelled));
+   const char *denied[] = {"/v1/chat/control", "/v1/config/set", "/v1/mcp/call",
+                           "/v1/mcp/recheck",  "/v1/mcp/audit",  "/v1/responses/compact"};
+   for (unsigned i = 0; i < sizeof denied / sizeof *denied; i++)
+   {
+      request(alice, denied[i], server_native_runtime_token(alice), response);
+      assert(strstr(response, "404") && atomic_load(&calls) == before);
+   }
    server_native_runtime_close(alice);
-   server_native_runtime_close(bob);
-   atomic_store(&wait_for_cancel, 0);
-   owner_tools(1);
-   agent_t api_selected = selected;
-   strcpy(api_selected.provider, "openai");
-   strcpy(api_selected.auth_type, "api_key");
-   assert(!server_control_scope_bind(alice_controls));
-   server_native_runtime_t *api = server_native_runtime_open(&api_selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   assert(api);
-   request(api, "/v1/responses", server_native_runtime_token(api), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
-   request(api, "/v1/mcp/call", server_native_runtime_token(api), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(api, "/v1/responses", server_native_runtime_token(api), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   server_native_runtime_t *rotated = server_native_runtime_open(&api_selected, &a, "session-a");
-   assert(rotated &&
-          strcmp(server_native_runtime_binding(api), server_native_runtime_binding(rotated)));
-   request(rotated, "/v1/responses", server_native_runtime_token(rotated), response);
-   assert(strstr(response, "200 OK"));
-   server_native_runtime_close(rotated);
-   server_native_runtime_close(api);
-   atomic_store(&source_changed, 0);
-   agent_t claude_selected = selected;
-   strcpy(claude_selected.provider, "anthropic");
-   strcpy(claude_selected.auth_type, "claude-oauth");
-   assert(!server_control_scope_bind(alice_controls));
-   server_native_runtime_t *claude = server_native_runtime_open(&claude_selected, &a, "session-a");
-   assert(server_control_scope_bind(NULL) == alice_controls);
-   assert(claude);
-   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
-   assert(strstr(response, "200 OK") && !strstr(response, "claude-secret"));
-   request(claude, "/v1/mcp/call", server_native_runtime_token(claude), response);
-   assert(strstr(response, "200 OK"));
-   before = atomic_load(&calls);
-   atomic_store(&source_changed, 1);
-   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
-   assert(strstr(response, "502") && atomic_load(&calls) == before);
-   rotated = server_native_runtime_open(&claude_selected, &a, "session-a");
-   assert(rotated &&
-          strcmp(server_native_runtime_binding(claude), server_native_runtime_binding(rotated)));
-   request(rotated, "/v1/messages", server_native_runtime_token(rotated), response);
-   assert(strstr(response, "200 OK"));
-   server_native_runtime_close(rotated);
-   server_native_runtime_close(claude);
-   atomic_store(&source_changed, 0);
+   assert(server_session_capture_bind(NULL) == capture);
+   server_session_capture_close(capture);
+   test_beta_contract_binding(&selected, &a);
+   /* Selected API-key and OAuth source rotation changes replay identity and
+    * invalidates the old bound runtime before any model dispatch. */
+   for (int vendor = 0; vendor < 2; vendor++)
+   {
+      owner_tools(1);
+      capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      agent_t connection = selected;
+      strcpy(connection.provider, vendor ? "anthropic" : "openai");
+      strcpy(connection.auth_type, vendor ? "claude-oauth" : "api_key");
+      server_native_runtime_t *original = server_native_runtime_open_bound_request(
+          &connection, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(original && !server_native_runtime_attest_launch(original, transport_launch));
+      atomic_store(&source_changed, 1);
+      server_native_runtime_t *rotated = server_native_runtime_open_bound_request(
+          &connection, &a, "session-a", &transport_profile, &read_binding, 1, NULL);
+      assert(rotated && strcmp(server_native_runtime_binding(original),
+                               server_native_runtime_binding(rotated)));
+      before = atomic_load(&calls);
+      request(original, "/v1/responses", server_native_runtime_token(original), response);
+      assert(strstr(response, "502") && atomic_load(&calls) == before);
+      server_native_runtime_close(rotated);
+      server_native_runtime_close(original);
+      atomic_store(&source_changed, 0);
+      assert(server_session_capture_bind(NULL) == capture);
+      server_session_capture_close(capture);
+   }
    test_retained_capture(&selected, &a);
-   test_native_preframe_error(&selected, &a);
+   test_native_transport_usage(&selected, &a, 0, 0, 0);
+   test_native_transport_usage(&selected, &a, 1, 0, 0);
+   test_native_transport_usage(&selected, &a, 0, 1, 0);
+   test_native_transport_usage(&selected, &a, 1, 1, 0);
+   test_native_transport_usage(&selected, &a, 1, 1, 1);
+   test_native_aggregate_usage(&selected, &a);
+   test_native_buffered_refusal(&selected, &a);
+   test_native_turn_limit(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_large_mcp_catalog(&selected, &a);
    test_native_bound_mcp(&selected, &a);
+   request_context_t no_replies = a;
+   no_replies.control_reply_capability = 0;
+   expected_control_reply_capability = 0;
+   test_native_bound_mcp(&selected, &no_replies);
+   expected_control_reply_capability = 1;
    test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
+   /* Same actual runtime/history owner with a synthetic container provider:
+    * no Docker/process custody claim is inferred from the peer's kind. */
+   alice_workspace.kind = WS_PROVIDER_CONTAINER;
+   test_owned_native_context(&selected, &a);
+   alice_workspace.kind = WS_PROVIDER_SHARED;
    test_native_sdk_identity(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);
@@ -2558,6 +3173,7 @@ int main(void)
    agent_tools_denied_set(NULL, 0);
    puts("native runtime: owned actor/model/permissions/source, resource leases and cancellation "
         "passed");
+   agent_set_durable_job(0);
    server_control_scope_close(alice_controls);
    cJSON_Delete(source_rows);
    return 0;

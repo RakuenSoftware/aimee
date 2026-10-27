@@ -2,6 +2,7 @@ package delegates
 
 import (
 	"encoding/binary"
+	"encoding/json"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
@@ -20,7 +21,7 @@ const (
 	EventLaunchPlan uint32 = 6675
 
 	launchPlanRequestMagic  uint32 = 0x514c5044 /* "DPLQ" */
-	launchPlanResponseMagic uint32 = 0x534c5044 /* "DPLS" */
+	launchPlanResponseMagic uint32 = 0x494c5044 /* "DPLI": canonical launch message IR */
 
 	// Ceilings. Generous against real plans, bounded against a malformed
 	// length that would otherwise make us allocate on a whim.
@@ -167,7 +168,11 @@ func handleLaunchPlan(invocation ring.ModuleInvocation, request []byte) ([]byte,
 	for _, t := range d.Tasks {
 		w.strings(t.OwnedFiles)
 		w.str(t.Role)
-		w.str(t.Prompt)
+		message, err := json.Marshal(t.Message)
+		if err != nil {
+			return nil, ring.ModuleStatusInternal
+		}
+		w.str(string(message))
 	}
 
 	w.u32(uint32(len(d.Repairs)))

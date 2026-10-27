@@ -28,7 +28,7 @@ static const char *user_home(void)
    return NULL;
 }
 
-const char *aimee_home(void)
+const char *aimee_home_profile(const char *selected_profile)
 {
    /* Thread-local: this is a per-call scratch buffer whose pointer is returned
     * to the caller. aimee-kb calls legacy_config_read() (which routes here) from
@@ -54,7 +54,7 @@ const char *aimee_home(void)
    /* 2. AIMEE_PROFILE selects a sibling under ~/.config/aimee/profiles/.
     *    Empty / whitespace-only values are treated as unset so
     *    `AIMEE_PROFILE=""` doesn't accidentally land in profiles//. */
-   const char *profile = getenv("AIMEE_PROFILE");
+   const char *profile = selected_profile ? selected_profile : getenv("AIMEE_PROFILE");
    if (profile && profile[0])
    {
       int n = snprintf(path, sizeof(path), "%s/.config/aimee/profiles/%s", home, profile);
@@ -68,6 +68,11 @@ const char *aimee_home(void)
    if (n < 0 || (size_t)n >= sizeof(path))
       return NULL;
    return path;
+}
+
+const char *aimee_home(void)
+{
+   return aimee_home_profile(NULL);
 }
 
 const char *aimee_profiles_dir(void)

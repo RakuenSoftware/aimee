@@ -21,6 +21,12 @@ int server_error_kind_http_status(const char *kind)
    return 0;
 }
 
+static int transport_notifications;
+static void transport_completed(void *expected, int status)
+{
+   assert(expected == &transport_notifications && status != HTTP_RETRY_ADMISSION_REFUSED);
+   transport_notifications++;
+}
 static request_context_t context;
 static econ_request_budget_result_t admission;
 static int admission_calls;
@@ -363,9 +369,14 @@ static void test_stream_receipt_admission_and_commitment(void)
          stream_after_failure = scenario == 3 ? -1 : 0;
          stream_before_calls = stream_after_calls = stream_transport_calls = 0;
          stream_consumed = stream_observed_bytes = 0;
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
          int status = wire_fence_post_stream("fixture", "secret-header", "abc", 3, consume_stream,
                                              NULL, 1000, "secret-extra", "fixture", "fixture-model",
                                              (wire_fence_route_t)route);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == stream_transport_calls);
          if (stream_refuse)
          {
             assert(status == HTTP_RETRY_ADMISSION_REFUSED && stream_before_calls == 1);
@@ -418,6 +429,7 @@ int http_retry_post_observed_bytes(const char *url, const char *auth, const void
       if (observer->before(observer->context, body, length) != 0)
          return HTTP_RETRY_ADMISSION_REFUSED;
       retry_transport_calls++;
+      observer->after(observer->context, 200, NULL, 0);
    }
    return 200;
 }
@@ -435,8 +447,16 @@ static void test_retry_reserves_every_actual_provider_attempt(void)
          retry_calls = retry_transport_calls = 0;
          retry_refuse = refuse;
          char *response = NULL;
-         int rc = wire_fence_post("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0, "fixture",
-                                  "fixture-model", "session", WIRE_FENCE_OPENAI_CHAT);
+         wire_fence_observation_t observation = {.transport_attempts = 99};
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
+         int rc = wire_fence_post_observed("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0,
+                                           "fixture", "fixture-model", "session",
+                                           WIRE_FENCE_OPENAI_CHAT, &observation);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == retry_transport_calls);
+         assert(observation.transport_attempts == (refuse ? refuse - 1 : 2));
          assert(rc == (refuse ? HTTP_RETRY_ADMISSION_REFUSED : 200));
          assert(retry_calls == (refuse ? refuse : 2));
          assert(retry_transport_calls == (refuse ? refuse - 1 : 2));

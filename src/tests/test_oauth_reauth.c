@@ -204,6 +204,23 @@ int main(void)
                           sizeof buf) == -1 &&
           !buf[0]);
 
+   /* A rate-limited refresh remains a transient failure. Expose only the
+    * verified status; an expired access token is still refused and no reauth
+    * marker is fabricated. A later no-refresh lookup clears stale diagnostics. */
+   const oauth_refresh_profile_t limited_profile = {
+       .client_id = "fixture-client", .token_endpoint = "https://fixture.invalid/token"};
+   int refresh_http_status = 418;
+   assert(!setenv("AIMEE_TEST_OAUTH_RESPONSE", "{\"error\":\"temporarily_unavailable\"}\n429", 1));
+   assert(oauth_token_get_profile_status("codex", &limited_profile, 600, buf, sizeof buf,
+                                         &refresh_http_status) == -1 &&
+          !buf[0]);
+   assert(refresh_http_status == 429 && !oauth_token_reauth_required("codex"));
+   resp.expires_at = time(NULL) + 3600;
+   assert(!oauth_token_store("codex", &resp));
+   assert(!oauth_token_get_profile_status("codex", &limited_profile, 0, buf, sizeof buf,
+                                          &refresh_http_status));
+   assert(refresh_http_status == 0 && !strcmp(buf, resp.access_token));
+
    resp.expires_at = time(NULL) + 300;
    assert(!oauth_token_store("codex", &resp));
    assert(!setenv("AIMEE_TEST_OAUTH_RESPONSE", "{\"error\":\"invalid_grant\"}\n400", 1));
@@ -211,6 +228,52 @@ int main(void)
                           sizeof buf) == -1 &&
           !buf[0]);
    assert(oauth_token_reauth_required("codex"));
+
+   /* A 200 response must not truncate any credential field and replace the
+    * original atomic token set. Exercise the real fake-curl refresh path. */
+   const char *oversized_fields[] = {"access_token", "refresh_token", "token_type"};
+   const size_t capacities[] = {sizeof resp.access_token, sizeof resp.refresh_token,
+                                sizeof resp.token_type};
+   for (size_t field = 0; field < 3; field++)
+   {
+      resp.expires_at = time(NULL) + 300;
+      assert(!oauth_token_store("codex", &resp));
+      char before[5][4096] = {{0}}, after[5][4096] = {{0}};
+      const char *names[] = {"oauth_access_token", "oauth_refresh_token", "oauth_expires_at",
+                             "oauth_reauth_required", OAUTH_SOURCE_CREDENTIAL};
+      vault_store_read_t before_reads[5], after_reads[5];
+      for (size_t i = 0; i < 5; i++)
+      {
+         before_reads[i] = (vault_store_read_t){names[i], before[i], sizeof before[i], 0};
+         after_reads[i] = (vault_store_read_t){names[i], after[i], sizeof after[i], 0};
+      }
+      assert(vault_service_read_server_snapshot("codex", before_reads, 5) == VAULT_OK);
+      char *large = malloc(capacities[field] + 1);
+      assert(large);
+      memset(large, 'x', capacities[field]);
+      large[capacities[field]] = 0;
+      cJSON *reply = cJSON_CreateObject();
+      assert(reply && cJSON_AddStringToObject(reply, "access_token", "must-not-store"));
+      cJSON_DeleteItemFromObjectCaseSensitive(reply, oversized_fields[field]);
+      assert(cJSON_AddStringToObject(reply, oversized_fields[field], large));
+      assert(cJSON_AddNumberToObject(reply, "expires_in", 3600));
+      char *json = cJSON_PrintUnformatted(reply);
+      assert(json);
+      char *wire = malloc(strlen(json) + 5);
+      assert(wire);
+      sprintf(wire, "%s\n200", json);
+      assert(!setenv("AIMEE_TEST_OAUTH_RESPONSE", wire, 1));
+      assert(!oauth_token_get("codex", "fixture-client", "https://fixture.invalid/token", 600, buf,
+                              sizeof buf));
+      assert(!strcmp(buf, resp.access_token));
+      assert(vault_service_read_server_snapshot("codex", after_reads, 5) == VAULT_OK);
+      for (size_t i = 0; i < 5; i++)
+         assert(before_reads[i].present == after_reads[i].present && !strcmp(before[i], after[i]));
+      free(wire);
+      free(json);
+      free(large);
+      cJSON_Delete(reply);
+   }
 
    /* Successful refresh replaces an expired access token and clears the marker
     * only through a successful store (a new login first clears rejection). */

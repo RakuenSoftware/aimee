@@ -1,10 +1,8 @@
 /* test_curator_code_unit.c: unit tests for deep-curator Phase 2 code-unit
  * extraction:
- *   1. kb_curator_queue_code_unit — gate-off returns 0 without DB access
- *   2. kb_curator_queue_code_units_for_project — gate-off returns 0
- *   3. null argument guard
- *   4. kb_curator_extract_code_unit_one — empty queue returns 0
- *   5. ON CONFLICT DO NOTHING deduplication via raw shim SQL */
+ *   1. bulk code-unit enqueue gate and database semantics
+ *   2. kb_curator_extract_code_unit_one empty queue and failure paths
+ *   3. ON CONFLICT deduplication, grounding, scoping and transaction safety */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +20,65 @@
 #include "kb_curator_grounding.h"
 #include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
+#include "support/mock_agent_http.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+
+/* Model wire fixtures enter through the real provider decoder, never a shell. */
+static const char *model_payload;
+static const char *model_finish = "stop";
+static int model_thinking_only;
+static int model_calls;
+
+static int code_model_post(const char *url, const char *auth, const char *body, char **out,
+                           int timeout_ms, const char *extra)
+{
+   (void)auth;
+   (void)timeout_ms;
+   (void)extra;
+   assert(strstr(url, "/chat/completions"));
+   cJSON *request = cJSON_Parse(body);
+   assert(request);
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(request, "messages");
+   const cJSON *system = cJSON_GetArrayItem(messages, 0);
+   const char *policy = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(system, "content"));
+   assert(policy && strstr(policy, "code analysis assistant"));
+   const cJSON *input = cJSON_GetArrayItem(messages, 1);
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "content"));
+   assert(text && strstr(text, "target_fn") && strstr(text, "input"));
+   cJSON_Delete(request);
+   cJSON *response = cJSON_CreateObject();
+   cJSON *choices = cJSON_AddArrayToObject(response, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   cJSON_AddItemToArray(choices, choice);
+   cJSON_AddStringToObject(choice, "finish_reason", model_finish);
+   cJSON *message = cJSON_AddObjectToObject(choice, "message");
+   cJSON_AddStringToObject(message, "role", "assistant");
+   cJSON_AddStringToObject(message, model_thinking_only ? "reasoning_content" : "content",
+                           model_payload);
+   *out = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   model_calls++;
+   return 200;
+}
+
+static void code_model_start(const char *payload)
+{
+   model_payload = payload;
+   model_calls = 0;
+   assert(config_set_kb_curator_provider_base_url("http://code-fixture.invalid/v1") == 0);
+   assert(config_set_kb_curator_provider_model("code-fixture") == 0);
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(code_model_post);
+}
+
+static void code_model_stop(void)
+{
+   assert(model_calls == 1);
+   mock_agent_http_reset();
+   model_payload = NULL;
+   assert(config_set_kb_curator_provider_base_url("") == 0);
+   assert(config_set_kb_curator_provider_model("") == 0);
+}
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
@@ -53,8 +109,6 @@ static void test_force_curator_gate_off(void)
 /* Forward declarations (headers live in src/, not src/headers/). The opts struct
  * and kb_curator_extract_code_unit_one come from kb_curator_extract.h (included
  * above). */
-int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
-                               int line);
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
 int kb_store_artifact_count(const char *kind, const char *state);
 
@@ -92,27 +146,11 @@ static int grounding_module_provider(aimee_kb_synthesis_claim_kind_t claim_kind,
 
 /* ── gate-off tests (no DB needed) ─────────────────────────────────────── */
 
-static void test_queue_code_unit_gate_off(void)
-{
-   /* With gate off (default config), function must return 0 immediately. */
-   int rc = kb_curator_queue_code_unit("proj", "src/foo.c", "foo_func", 10);
-   assert(rc == 0);
-   printf("  PASS: test_queue_code_unit_gate_off\n");
-}
-
 static void test_queue_code_units_for_project_gate_off(void)
 {
    int rc = kb_curator_queue_code_units_for_project("proj", "/repo");
    assert(rc == 0);
    printf("  PASS: test_queue_code_units_for_project_gate_off\n");
-}
-
-static void test_queue_null_args(void)
-{
-   assert(kb_curator_queue_code_unit(NULL, "src/foo.c", "foo", 1) == 0);
-   assert(kb_curator_queue_code_unit("proj", NULL, "foo", 1) == 0);
-   assert(kb_curator_queue_code_unit("proj", "src/foo.c", NULL, 1) == 0);
-   printf("  PASS: test_queue_null_args\n");
 }
 
 /* ── DB-backed tests ────────────────────────────────────────────────────── */
@@ -309,7 +347,7 @@ static void test_grounding_module_decisions(void)
 
 /* ── DB-backed full-path gate tests ─────────────────────────────────────── */
 
-/* Run the code-unit extract path once with a stubbed sidecar that returns a
+/* Run the actual code-unit extract path with a canonical provider that returns a
  * single code_unit whose side_effects field is |side_effects_json|. When
  * |callee| is non-NULL, seed a code_calls edge target_fn -> callee so the
  * structural grounding gate has something to check. Reports the resulting
@@ -331,20 +369,14 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    assert(write(src_fd, src_body, strlen(src_body)) == (ssize_t)strlen(src_body));
    close(src_fd);
 
-   /* The stubbed sidecar response. `cat <file>` ignores the redirected stdin
-    * the C harness supplies and just prints this canned JSON. */
-   char resp_path[256];
-   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
-   int resp_fd = mkstemp(resp_path);
-   assert(resp_fd >= 0);
+   /* Provider-native response is admitted before artifact projection. */
    char resp[1024];
    snprintf(resp, sizeof(resp),
             "{\"status\":\"ok\",\"artifacts\":[{\"kind\":\"code_unit\",\"confidence\":0.9,"
             "\"payload\":{\"intent\":\"t\",\"side_effects\":%s,\"invariants\":[],"
             "\"domain_concepts\":[\"x\"]}}]}",
             side_effects_json);
-   assert(write(resp_fd, resp, strlen(resp)) == (ssize_t)strlen(resp));
-   close(resp_fd);
+   code_model_start(resp);
 
    /* Seed project + file + (optionally) a structural call edge. */
    char sql[2048];
@@ -374,7 +406,6 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 3;
    opts.max_tokens = 256;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "cat %s", resp_path);
 
    int rc = kb_curator_extract_code_unit_one(&opts);
    assert(rc == 1); /* claimed and processed one job */
@@ -398,7 +429,7 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
 
    kb_store_test_shim_close();
    unlink(src_path);
-   unlink(resp_path);
+   code_model_stop();
 }
 
 static void test_extract_rejects_false_no_side_effects(void)
@@ -447,6 +478,25 @@ static void test_extract_retries_when_grounding_module_fails(void)
    printf("  PASS: grounding module failure rolls back and requeues extraction\n");
 }
 
+static void test_declined_or_incomplete_code_is_not_artifact(void)
+{
+   const char *stops[] = {"content_filter", "length", "tool_calls"};
+   for (size_t i = 0; i < sizeof(stops) / sizeof(stops[0]); i++)
+   {
+      int proposed, rejected, audit, pending;
+      model_finish = stops[i];
+      run_extract_scenario("[]", NULL, &proposed, &rejected, &audit, &pending);
+      assert(proposed == 0 && rejected == 0 && audit == 0 && pending == 1);
+   }
+   model_finish = "stop";
+   model_thinking_only = 1;
+   int proposed, rejected, audit, pending;
+   run_extract_scenario("[]", NULL, &proposed, &rejected, &audit, &pending);
+   assert(proposed == 0 && rejected == 0 && audit == 0 && pending == 1);
+   model_thinking_only = 0;
+   puts("  PASS: refused, truncated, tool-pending and THINKING cannot create code artifacts");
+}
+
 /* The curator drain runs server-side, where thin-client-ingested files do not
  * exist on disk. The body must come from KB_STORE's file_contents (pushed at ingest),
  * not an open() of the project-relative path. Seed file_contents but NO disk file
@@ -460,16 +510,11 @@ static void test_extract_reads_body_from_kb_store_when_file_absent(void)
    assert(db != NULL);
 
    const char *src_body = "int target_fn(void) { return 0; }\n";
-   char resp_path[256];
-   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
-   int resp_fd = mkstemp(resp_path);
-   assert(resp_fd >= 0);
    const char *resp =
        "{\"status\":\"ok\",\"artifacts\":[{\"kind\":\"code_unit\",\"confidence\":0.9,"
        "\"payload\":{\"intent\":\"t\",\"side_effects\":[],\"invariants\":[],"
        "\"domain_concepts\":[\"x\"]}}]}";
-   assert(write(resp_fd, resp, strlen(resp)) == (ssize_t)strlen(resp));
-   close(resp_fd);
+   code_model_start(resp);
 
    /* Project root that does not exist on disk + a project-relative path with no
     * on-disk file — only KB_STORE file_contents has the body. */
@@ -489,256 +534,17 @@ static void test_extract_reads_body_from_kb_store_when_file_absent(void)
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 3;
    opts.max_tokens = 256;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "cat %s", resp_path);
 
    int rc = kb_curator_extract_code_unit_one(&opts);
    assert(rc == 1); /* claimed + processed (body came from KB_STORE, not disk) */
    assert(kb_store_artifact_count("code_unit", "proposed") == 1);
 
    kb_store_test_shim_close();
-   unlink(resp_path);
+   code_model_stop();
    printf("  PASS: test_extract_reads_body_from_kb_store_when_file_absent\n");
 }
 
 /* ── main ─────────────────────────────────────────────────────────────── */
-
-/* The sidecar resolver must (a) honour an explicit command, (b) pick a READABLE
- * candidate even when it is not executable — invoked as `python3 <path>`, the
- * old access(X_OK) check wrongly rejected the shipped 0644 script and stalled
- * every extract job — and (c) fall back to the cwd-relative path when none match. */
-/* kb_curator_describe_wait_status: pclose(3) hands back a wait(2)-encoded status,
- * not an exit code. Reporting it raw wrote "sidecar exited 256" into
- * kb_code_unit_jobs.last_error for a sidecar that merely exit(1)'d — an opaque
- * number that reads like an exotic fault and hides the real failure mode. These
- * assert each status class decodes to something an operator can act on. */
-static void test_describe_wait_status(void)
-{
-   char out[256];
-
-   /* (a) The regression: exit(1) is 1<<8 == 256 in wait encoding. */
-   kb_curator_describe_wait_status(1 << 8, 300, out, sizeof(out));
-   assert(strcmp(out, "sidecar exited 1") == 0);
-
-   /* (b) Success-shaped status still renders an exit line if a caller asks. */
-   kb_curator_describe_wait_status(0, 300, out, sizeof(out));
-   assert(strcmp(out, "sidecar exited 0") == 0);
-
-   /* (c) timeout(1) reports its wall-clock cap as exit 124 — named only when the
-    *     caller says it wrapped the command, and echoing the cap it was given.
-    *     Hedged, because timeout also PROPAGATES a command's own exit 124: the
-    *     two are indistinguishable, so the message must not assert either. */
-   kb_curator_describe_wait_status(124 << 8, 300, out, sizeof(out));
-   assert(strcmp(out,
-                 "sidecar exited 124 (timeout after 300s, or the command itself exited 124)") == 0);
-
-   /* (d) Same status WITHOUT a timeout wrapper is just the command's exit code;
-    *     claiming a timeout there would be a lie (kb_curator_sidecar.c does not
-    *     wrap, and passes 0). */
-   kb_curator_describe_wait_status(124 << 8, 0, out, sizeof(out));
-   assert(strcmp(out, "sidecar exited 124") == 0);
-
-   /* (e) A real signal death — the kernel says so via WIFSIGNALED, so the
-    *     message may state it as fact. SIGKILL is the OOM-killer signature we
-    *     care about on a box where the model shares RAM with the drain. */
-   kb_curator_describe_wait_status(9 /* WIFSIGNALED: low 7 bits = signo */, 300, out, sizeof(out));
-   assert(strcmp(out, "sidecar killed by signal 9 (Killed)") == 0);
-
-   /* (f) 128+n is the SHELL's convention for a signal-killed child — but a
-    *     process can also exit(137) itself, and the two are indistinguishable
-    *     here. So report the exit code as fact and the signal as a reading:
-    *     asserting a kill outright would fake an OOM that never happened. */
-   kb_curator_describe_wait_status((128 + 9) << 8, 300, out, sizeof(out));
-   assert(strcmp(out, "sidecar exited 137 (128+9: likely killed by signal 9, Killed)") == 0);
-
-   /* (g) pclose itself failing is distinct from any child status. */
-   kb_curator_describe_wait_status(-1, 300, out, sizeof(out));
-   assert(strncmp(out, "pclose failed:", 14) == 0);
-
-   /* (h) Null/zero-length buffers must not be written through. */
-   kb_curator_describe_wait_status(1 << 8, 300, NULL, 0);
-   kb_curator_describe_wait_status(1 << 8, 300, out, 0);
-
-   printf("  PASS: test_describe_wait_status\n");
-}
-
-/* kb_curator_shell_quote: bounding the sidecar with timeout(1) means a SECOND
- * shell parses the command line, so the configured command must be quoted rather
- * than interpolated raw. Without this, adding the timeout wrapper would silently
- * re-interpret commands that worked fine under a bare popen — an embedded quote
- * ends the string early, and $VAR expands twice. */
-static void test_shell_quote(void)
-{
-   char out[2176];
-
-   /* (a) an ordinary command is wrapped, contents untouched. */
-   assert(kb_curator_shell_quote("python3 /opt/aimee/scripts/curator-extract.py", out,
-                                 sizeof(out)) == 0);
-   assert(strcmp(out, "'python3 /opt/aimee/scripts/curator-extract.py'") == 0);
-
-   /* (b) the regression: shell metacharacters must survive as LITERALS. Inside
-    *     single quotes nothing is special, so $VAR cannot expand and the double
-    *     quote cannot terminate anything. */
-   assert(kb_curator_shell_quote("python3 -c \"print($HOME)\"", out, sizeof(out)) == 0);
-   assert(strcmp(out, "'python3 -c \"print($HOME)\"'") == 0);
-
-   /* (c) an embedded single quote is the one case single-quoting can't nest:
-    *     close, escape, reopen. */
-   assert(kb_curator_shell_quote("echo 'hi'", out, sizeof(out)) == 0);
-   assert(strcmp(out, "'echo '\\''hi'\\'''") == 0);
-
-   /* (d) backslashes and backticks are literal too. */
-   assert(kb_curator_shell_quote("a\\b`id`", out, sizeof(out)) == 0);
-   assert(strcmp(out, "'a\\b`id`'") == 0);
-
-   /* (e) empty string still yields a valid empty shell word. */
-   assert(kb_curator_shell_quote("", out, sizeof(out)) == 0);
-   assert(strcmp(out, "''") == 0);
-
-   /* (f) overflow is a hard error, never a truncated (and thus mis-quoted)
-    *     string the caller might still run. */
-   char tiny[8];
-   assert(kb_curator_shell_quote("aaaaaaaaaaaaaaaa", tiny, sizeof(tiny)) == -1);
-   assert(kb_curator_shell_quote("abc", NULL, 16) == -1);
-   assert(kb_curator_shell_quote(NULL, out, sizeof(out)) == -1);
-
-   printf("  PASS: test_shell_quote\n");
-}
-
-/* The quoting must survive a REAL shell round-trip, not just a string compare.
- *
- * The invariant is NOT "nothing expands" — the command still runs under `sh -c`,
- * so the INNER shell applies normal semantics, exactly as the bare popen did.
- * The invariant is that wrapping in timeout(1) changes NOTHING about how the
- * command is interpreted. This command is chosen so the two disagree:
- *
- *   bare popen (correct):        lit::"q"
- *   new, quoted wrapper:         lit::"q"   <- identical, semantics preserved
- *   old, raw interpolation:      lit::q     <- outer shell ate the \" escapes
- */
-static void test_sidecar_quoting_end_to_end(void)
-{
-   char err[256] = "";
-   char *out = kb_curator_sidecar_run("printf '%s' \"lit:$NOT_A_REAL_VAR:\\\"q\\\"\"", "{}", 256,
-                                      err, sizeof(err));
-   assert(out != NULL);
-   assert(strcmp(out, "lit::\"q\"") == 0);
-   free(out);
-
-   /* A single-quoted argument is the case the '\'' escaping exists for. */
-   char *out2 = kb_curator_sidecar_run("printf '%s' 'a b'", "{}", 256, err, sizeof(err));
-   assert(out2 != NULL);
-   assert(strcmp(out2, "a b") == 0);
-   free(out2);
-
-   /* The redirection must stay in the COMMAND's parse context, not the wrapper's.
-    * A pipeline is where the two diverge: under the bare popen the line is
-    * `printf ABC | wc -c < tmp`, so `< tmp` binds to wc (the LAST command) and
-    * wc counts the 2-byte request. Redirecting the timeout wrapper's stdin
-    * instead would feed tmp to printf and leave wc counting printf's 3 bytes —
-    * a silent change of meaning. Asserting 2 pins the bare-popen semantics.
-    *
-    *   bare popen:                  2
-    *   wrapper stdin redirect:      3   <- the bug
-    *   redirect inside, path as $1: 2   <- preserved
-    */
-   char *out3 = kb_curator_sidecar_run("printf ABC | wc -c", "{}", 256, err, sizeof(err));
-   assert(out3 != NULL);
-   long counted = strtol(out3, NULL, 10);
-   assert(counted == 2);
-   free(out3);
-
-   /* The request path is embedded as a quoted literal, not passed as $1. With a
-    * positional, a command containing `set --` rebinds $1 before the redirection
-    * expands and the sidecar silently reads a DIFFERENT file — measured at 5
-    * bytes (/etc/hostname) instead of the 2-byte request. A literal cannot be
-    * reassigned, so this still reads the request. */
-   char *out4 = kb_curator_sidecar_run("set -- /etc/hostname; wc -c", "{}", 256, err, sizeof(err));
-   assert(out4 != NULL);
-   assert(strtol(out4, NULL, 10) == 2);
-   free(out4);
-
-   printf("  PASS: test_sidecar_quoting_end_to_end\n");
-}
-
-/* kb_curator_append_sidecar_error: curator-extract.py's emit_error() prints
- * {"status":"error","error":<why>} to stdout and exits 1. That output was being
- * freed unread, so a job that failed for a knowable reason recorded only
- * "sidecar exited 1". */
-static void test_append_sidecar_error(void)
-{
-   char err[256];
-
-   /* (a) the real shape: the sidecar's reason is appended to the exit code. */
-   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
-   kb_curator_append_sidecar_error(
-       "{\"version\":1,\"status\":\"error\",\"error\":\"LLM returned non-JSON: boom\"}", err,
-       sizeof(err));
-   assert(strcmp(err, "sidecar exited 1: LLM returned non-JSON: boom") == 0);
-
-   /* (b) a SUCCESSFUL payload is not an error — must not be appended. */
-   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
-   kb_curator_append_sidecar_error("{\"status\":\"ok\",\"artifacts\":[]}", err, sizeof(err));
-   assert(strcmp(err, "sidecar exited 1") == 0);
-
-   /* (c) non-JSON / empty / NULL output leaves the wait-status description
-    *     intact rather than inheriting a misleading fragment. */
-   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
-   kb_curator_append_sidecar_error("Traceback (most recent call last):", err, sizeof(err));
-   assert(strcmp(err, "sidecar exited 1") == 0);
-   kb_curator_append_sidecar_error("", err, sizeof(err));
-   assert(strcmp(err, "sidecar exited 1") == 0);
-   kb_curator_append_sidecar_error(NULL, err, sizeof(err));
-   assert(strcmp(err, "sidecar exited 1") == 0);
-
-   /* (d) an error field that is not a string is ignored, not printed as junk. */
-   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
-   kb_curator_append_sidecar_error("{\"status\":\"error\",\"error\":42}", err, sizeof(err));
-   assert(strcmp(err, "sidecar exited 1") == 0);
-
-   /* (e) a full errbuf must not overflow. */
-   char tiny[20];
-   snprintf(tiny, sizeof(tiny), "%s", "sidecar exited 1");
-   kb_curator_append_sidecar_error("{\"status\":\"error\",\"error\":\"a very long reason here\"}",
-                                   tiny, sizeof(tiny));
-   assert(strlen(tiny) < sizeof(tiny));
-
-   printf("  PASS: test_append_sidecar_error\n");
-}
-
-static void test_pick_sidecar_command_resolution(void)
-{
-   char out[768];
-
-   /* (a) explicit command wins verbatim, candidates ignored. */
-   const char *none[] = {"/should/not/matter.py"};
-   kb_curator_pick_sidecar_command(
-       "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py", none, 1, out,
-       sizeof(out));
-   assert(strcmp(out, "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py") ==
-          0);
-
-   /* (b) first READABLE candidate is chosen; a missing one ahead of it is skipped,
-    *     and a 0644 (non-executable) file still qualifies. */
-   char tmpl[256];
-   snprintf(tmpl, sizeof tmpl, "%s/aimee_sidecar_XXXXXX", platform_tmpdir());
-   int fd = mkstemp(tmpl);
-   assert(fd >= 0);
-   close(fd);
-   assert(chmod(tmpl, 0644) == 0); /* readable, NOT executable */
-   const char *cands[] = {"/nonexistent/curator-extract.py", tmpl};
-   kb_curator_pick_sidecar_command("", cands, 2, out, sizeof(out));
-   char want[800];
-   snprintf(want, sizeof(want), "python3 %s", tmpl);
-   assert(strcmp(out, want) == 0);
-   unlink(tmpl);
-
-   /* (c) no readable candidate -> cwd-relative fallback. */
-   const char *missing[] = {"/nonexistent/a.py", NULL};
-   kb_curator_pick_sidecar_command("", missing, 2, out, sizeof(out));
-   assert(strcmp(out, "python3 scripts/curator-extract.py") == 0);
-
-   printf("  PASS: test_pick_sidecar_command_resolution\n");
-}
 
 /* A job whose attempts are exhausted goes to status='failed' — which is neither
  * 'pending' nor 'done'. The queue counters used to report only those two, so a
@@ -909,9 +715,7 @@ int main(void)
     * reclaim's throttle is a process-wide static that a successful earlier
     * reclaim would arm, silently skipping this one. */
    test_reclaim_stale_running_code_unit();
-   test_queue_code_unit_gate_off();
    test_queue_code_units_for_project_gate_off();
-   test_queue_null_args();
    test_extract_code_unit_one_empty_queue();
    test_provider_outage_requeues_code_unit();
    test_queue_dedup_via_conflict();
@@ -925,11 +729,7 @@ int main(void)
    test_extract_accepts_pure_function();
    test_extract_retries_when_grounding_module_fails();
    test_extract_reads_body_from_kb_store_when_file_absent();
-   test_pick_sidecar_command_resolution();
-   test_describe_wait_status();
-   test_shell_quote();
-   test_sidecar_quoting_end_to_end();
-   test_append_sidecar_error();
+   test_declined_or_incomplete_code_is_not_artifact();
 
    test_queue_counts_surface_failures();
    test_stale_generation_job_is_not_claimed();

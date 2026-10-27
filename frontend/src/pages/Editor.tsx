@@ -20,27 +20,46 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 export default function Editor() {
   const { active, patchSession } = useSessions();
   const projectRoot = active?.projectRoot || '';
-  const projectName = active?.projectName || '';
   const aimeeSid = active?.aimeeSid || '';
-  const [folder, setFolder] = useState('');
+  const binding = JSON.stringify([projectRoot, aimeeSid]);
+  const [workspace, setWorkspace] = useState({ binding: '', folder: '', error: '' });
+  const folder = workspace.binding === binding ? workspace.folder : '';
+  const error = workspace.binding === binding ? workspace.error : '';
 
-  // Resolve the folder to open: the session's worktree when it has one, else the
-  // project checkout. Re-resolves when the bound project or session id changes.
+  // Hydrated tab names may be display basenames. Resolve the full registered
+  // identity from the authenticated owner's registry, never by stripping an
+  // owner or trusting a client-supplied checkout path as workspace authority.
   useEffect(() => {
     let cancelled = false;
-    if (!projectRoot) { setFolder(''); return; }
-    setFolder(projectRoot); // immediate fallback while the worktree resolves
-    if (projectName && aimeeSid) {
-      api('/api/git/session-dir', {
-        method: 'POST',
-        body: JSON.stringify({ project: projectName, session_id: aimeeSid }),
-      })
-        .then(r => (r.ok ? r.json() : null))
-        .then(d => { if (!cancelled && d && d.dir) setFolder(d.dir); })
-        .catch(() => { /* keep the project-checkout fallback */ });
-    }
+    setWorkspace({ binding, folder: '', error: '' });
+    if (!projectRoot) return;
+    void (async () => {
+      try {
+        const response = await api('/api/git/projects');
+        if (!response.ok) throw new Error('registry unavailable');
+        const registry = await response.json();
+        const project = typeof registry.root === 'string' && Array.isArray(registry.projects)
+          ? registry.projects.find((name: unknown) => typeof name === 'string' && `${registry.root}/${name}` === projectRoot)
+          : undefined;
+        if (!project) throw new Error('project not registered');
+        if (cancelled) return;
+        let dir = projectRoot;
+        if (aimeeSid) {
+          const resolved = await api('/api/git/session-dir', {
+            method: 'POST', body: JSON.stringify({ project, session_id: aimeeSid }),
+          });
+          if (!resolved.ok) throw new Error('session workspace unavailable');
+          const data = await resolved.json();
+          if (typeof data.dir !== 'string' || !data.dir) throw new Error('missing session workspace');
+          dir = data.dir;
+        }
+        if (!cancelled) setWorkspace({ binding, folder: dir, error: '' });
+      } catch {
+        if (!cancelled) setWorkspace({ binding, folder: '', error: 'Could not resolve this session’s editor workspace.' });
+      }
+    })();
     return () => { cancelled = true; };
-  }, [projectRoot, projectName, aimeeSid]);
+  }, [projectRoot, aimeeSid, binding]);
 
   // Re-key the iframe on folder change so code-server reloads at the new folder.
   const src = folder ? `/vscode/?folder=${encodeURIComponent(folder)}` : '/vscode/';
@@ -55,7 +74,7 @@ export default function Editor() {
           if (active) patchSession(active.id, { projectRoot: r, projectName: sel?.project ?? '' });
         }}
       />
-      {folder ? (
+      {error ? <div role="alert" style={{ padding: 16 }}>{error}</div> : folder ? (
         <iframe
           key={folder}
           title="VSCode"
@@ -66,7 +85,7 @@ export default function Editor() {
         />
       ) : (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--sg-text-faint)', fontFamily: 'system-ui' }}>
-          Select or clone a project for this session to open it in the editor.
+          {projectRoot ? 'Resolving editor workspace…' : 'Select or clone a project for this session to open it in the editor.'}
         </div>
       )}
     </div>

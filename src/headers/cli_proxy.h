@@ -30,6 +30,12 @@ typedef int (*cli_proxy_authorize_fn)(const char *method, const char *path, cons
                                       void *host_context);
 
 typedef int (*cli_proxy_route_fn)(const char *method, const char *path, void *host_context);
+/* A private creator may hand a distinct protocol to its existing owner before
+ * model HTTP framing. Return nonzero only when handled/refused. No wire header
+ * can install this callback; the ordinary TCP/model listener has none. */
+typedef int (*cli_proxy_intercept_fn)(int fd, const char *method, const char *path,
+                                      const char *head, size_t length, int (*cancelled)(void *),
+                                      void *cancel_context, void *host_context);
 
 /* Explicit host runtime policy, in addition to the listener's token/framing
  * checks. A NULL policy retains the model-only CLI boundary. No client header
@@ -45,6 +51,16 @@ cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
                                         const char *session_id, unsigned *bound_port,
                                         cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
                                         cli_proxy_forward_fn forward, void *host_context);
+
+/* Private host-owned listener (including a scoped Unix socket). Ownership of
+ * listener transfers on every call, including refusal. Token, framing and route
+ * admission are identical to the loopback transport; this grants no authority. */
+cli_proxy_t *cli_proxy_start_owned_listener(int listener, unsigned advertised_port,
+                                            const char *local_token, const char *session_id,
+                                            cli_proxy_route_fn route,
+                                            cli_proxy_authorize_fn authorize,
+                                            cli_proxy_forward_fn forward,
+                                            cli_proxy_intercept_fn intercept, void *host_context);
 
 /* Explicit transport for an already authorized host scope. No global CLI auth
  * is consulted. A nonempty bound session overrides client-supplied correlation.

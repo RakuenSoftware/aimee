@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_cmd_delegate.c: unit tests for CLI delegation chain depth guard */
 #include "support/delegate_role_seam_stub.h"
 #include <assert.h>
@@ -153,6 +154,18 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
       return AGENT_ROUTE_NULL;
    return agent->enabled ? AGENT_ROUTE_OK : AGENT_ROUTE_POLICY_EXCLUDED;
 }
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_is_available_for_routing(agent);
+}
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_routing_block_reason(agent, detail, detail_sz);
+}
 
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
@@ -247,7 +260,7 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
    return NULL;
 }
 
-void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
+void model_capability_format_flags(unsigned flags, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
@@ -488,12 +501,26 @@ static void review_tmp_template(char *out, size_t cap, const char *name)
 static unsigned g_review_verdict;
 static const char *g_review_message = "";
 static unsigned g_review_flags_seen;
+static int g_review_calls;
+static const char *g_review_expected_text;
 
 static int test_review_evidence_provider(const char *role, const char *response, unsigned flags,
                                          unsigned *verdict, char *message, size_t message_cap)
 {
    (void)role;
-   (void)response;
+   g_review_calls++;
+   if (flags & AIMEE_DELEGATES_REVIEW_POLICY_ONLY)
+   {
+      assert(flags == AIMEE_DELEGATES_REVIEW_POLICY_ONLY && response && !response[0]);
+      if (verdict)
+         *verdict = g_review_verdict &
+                    (AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS);
+      if (message && message_cap)
+         message[0] = 0;
+      return 0;
+   }
+   if (g_review_expected_text)
+      assert(!strcmp(response, g_review_expected_text));
    g_review_flags_seen = flags;
    if (verdict)
       *verdict = g_review_verdict;
@@ -637,6 +664,97 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
    printf("  PASS: test_review_evidence_drift_ignores_inline_review_annotation\n");
 }
 
+static void review_model_result(agent_result_t *result, const char *text)
+{
+   result->success = 1;
+   assert(!fixture_ir_response_from_text(&result->canonical_response, text, NULL));
+   g_review_expected_text = text;
+}
+static void require_review_projection(const aimee_response_t *source, int success, unsigned policy,
+                                      int expected_rc, int calls)
+{
+   agent_result_t result = {.success = success};
+   assert(!aimee_ir_response_clone(source, &result.canonical_response));
+   aimee_response_t before = result.canonical_response;
+   aimee_block_t blocks_before[3];
+   assert(before.n_content <= 3);
+   memcpy(blocks_before, before.content, before.n_content * sizeof *blocks_before);
+   g_review_expected_text = NULL;
+   g_review_verdict = policy;
+   g_review_message = "";
+   int before_calls = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &result, 0);
+   assert(rc == expected_rc && g_review_calls == before_calls + calls);
+   assert(!memcmp(&before, &result.canonical_response, sizeof before));
+   assert(!memcmp(blocks_before, before.content, before.n_content * sizeof *blocks_before));
+   for (int i = 0; i < before.n_content; i++)
+   {
+      if (source->content[i].text)
+         assert(!strcmp(source->content[i].text, before.content[i].text));
+      if (source->content[i].media_ref)
+         assert(!strcmp(source->content[i].media_ref, before.content[i].media_ref));
+   }
+   agent_result_clear_response(&result);
+}
+static void test_review_role_policy_precedes_text_projection(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://example.invalid/generated.png"},
+                             {.type = AIMEE_BLK_TEXT, .text = "canonical review"},
+                             {.type = AIMEE_BLK_THINKING, .text = "inert reasoning"}};
+   aimee_response_t ir = {.role = "assistant",
+                          .content = blocks,
+                          .n_content = 1,
+                          .stop_reason = AIMEE_STOP_END_TURN,
+                          .raw_stop_reason = "end_turn"};
+   /* Role policy is the module callback's decision, never a C role-name list. */
+   require_review_projection(&ir, 1, 0, 0, 1);
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, -1, 1);
+   ir.n_content = 3;
+   require_review_projection(&ir, 1, 0, 0, 1);
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, -1, 1);
+   ir.content = blocks + 1;
+   ir.n_content = 2;
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, 0, 2);
+   delegate_register_review_evidence_provider(NULL);
+   require_review_projection(&ir, 1, 0, -1, 0);
+   delegate_register_review_evidence_provider(test_review_evidence_provider);
+   require_review_projection(&ir, 0, 0, -1, 0);
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   require_review_projection(&ir, 1, 0, -1, 0);
+   ir.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   ir.raw_stop_reason = "refusal";
+   require_review_projection(&ir, 1, 0, -1, 0);
+   agent_result_t missing = {.success = 1};
+   int before = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &missing, 0);
+   assert(rc == -1 && g_review_calls == before);
+   agent_result_clear_response(&missing);
+   uint8_t wire[128];
+   assert(aimee_delegates_reviewev_request_encode("review", "", AIMEE_DELEGATES_REVIEW_POLICY_ONLY,
+                                                  wire, sizeof wire) > 0);
+   assert(aimee_delegates_reviewev_request_encode("review", "hidden report",
+                                                  AIMEE_DELEGATES_REVIEW_POLICY_ONLY, wire,
+                                                  sizeof wire) == -1);
+   assert(aimee_delegates_reviewev_request_encode("review", "",
+                                                  AIMEE_DELEGATES_REVIEW_POLICY_ONLY |
+                                                      AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY,
+                                                  wire, sizeof wire) == -1);
+   assert(aimee_delegates_reviewev_request_encode("review", "", 1u << 7, wire, sizeof wire) == -1);
+   puts("  PASS: module role policy precedes business-text projection");
+}
+static void test_review_evidence_requires_canonical_output(void)
+{
+   agent_result_t result = {.success = 1};
+   int before = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("review", "/unused", &rc, &result, 0);
+   assert(rc == -1 && !strcmp(result.error, "delegate has no complete canonical outcome"));
+   assert(g_review_calls == before);
+   agent_result_clear_response(&result);
+}
+
 /* The guard reports the module's contradiction verdict, in the module's words.
  *
  * This replaces a fixture that pinned the ROLE list and the claim keywords by
@@ -654,9 +772,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CONTRADICTION;
    g_review_message = "delegate evidence drift: the wording the module chose";
@@ -668,9 +784,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    /* An unguarded verdict leaves the review alone, whatever it said. */
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
    g_review_verdict = 0;
    g_review_message = "";
    rc = 0;
@@ -727,9 +841,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -740,9 +852,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
    agent_result_clear_response(&result);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS;
    rc = 0;
@@ -771,9 +881,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -792,9 +900,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    fclose(f);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
    g_review_flags_seen = 0;
    rc = 0;
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
@@ -1213,6 +1319,8 @@ static void test_inline_acp_agent_synthesis(void)
    assert(strcmp(a->cli_cmd, "claude agent") == 0); /* command + args joined */
    assert(a->role_count == 1 && strcmp(a->roles[0], "code") == 0);
    assert(a->enabled == 1);
+   assert(a->max_parallel == 1);
+   assert(a->model[0] == 0); /* External provider model is not observed. */
    assert(a->tools_enabled == 1);
    assert(a->max_turns == -1); /* no declared cap; role floor applies */
 
@@ -1358,6 +1466,8 @@ int main(void)
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
+   test_review_role_policy_precedes_text_projection();
+   test_review_evidence_requires_canonical_output();
    test_review_evidence_guard_reports_a_contradiction();
    test_review_evidence_guard_runs_the_snippet_check_only_when_asked();
    test_review_evidence_guard_sends_the_facts_it_owns();

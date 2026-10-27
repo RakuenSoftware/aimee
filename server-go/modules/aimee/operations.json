@@ -5041,7 +5041,7 @@
         "step_id",
         "files_json",
         "role",
-        "prompt",
+        "message",
         "cwd",
         "persona"
       ],
@@ -5078,7 +5078,7 @@
             "required": false
           },
           {
-            "name": "prompt",
+            "name": "message_json",
             "type": "text",
             "required": false
           },
@@ -5909,8 +5909,7 @@
         "task_id",
         "role_out",
         "role_cap",
-        "prompt_out",
-        "prompt_cap",
+        "message_out",
         "files_out",
         "files_cap",
         "cwd_out",
@@ -5946,9 +5945,9 @@
             "width": "DB1_COORD_ROLE_LEN"
           },
           {
-            "name": "prompt",
+            "name": "message_json",
             "type": "text",
-            "width": "DB1_COORD_PROMPT_LEN"
+            "width": "DB1_COORD_MESSAGE_LEN"
           },
           {
             "name": "files",
@@ -6378,7 +6377,7 @@
       "family": "agent_work",
       "id": 49,
       "name": "cron_job_record_run",
-      "c_name": "db1_cron_job_record_run",
+      "c_name": "db1_cron_job_record_run_ir",
       "c_params": [
         "job_id",
         "status",
@@ -6386,7 +6385,8 @@
         "delivered",
         "output",
         "error",
-        "output_hash"
+        "output_hash",
+        "output_ir"
       ],
       "c_returns": "int64",
       "wire_format": "db1-fields-v2",
@@ -6432,6 +6432,11 @@
           },
           {
             "name": "output_hash",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "output_ir",
             "type": "text",
             "required": false
           }
@@ -6524,11 +6529,13 @@
       "family": "agent_work",
       "id": 52,
       "name": "cron_job_latest_output",
-      "c_name": "db1_cron_job_latest_output",
+      "c_name": "db1_cron_job_latest_snapshot",
       "c_params": [
-        "job_id"
+        "job_id",
+        "output_out",
+        "output_ir_out"
       ],
-      "c_returns": "text",
+      "c_returns": "int",
       "wire_format": "db1-fields-v2",
       "scope": "global",
       "transaction": "none",
@@ -6553,9 +6560,13 @@
           {
             "name": "output",
             "type": "text"
+          },
+          {
+            "name": "output_ir",
+            "type": "text"
           }
         ],
-        "max_bytes": 262144
+        "max_bytes": 2097216
       }
     },
     {
@@ -9222,285 +9233,6 @@
     },
     {
       "family": "sessions",
-      "id": 10,
-      "name": "primary_session_save",
-      "c_name": "db1_primary_session_save",
-      "c_params": [
-        "session_id",
-        "agent_name",
-        "provider",
-        "messages_json"
-      ],
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "single",
-      "idempotency": "unsafe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "session_id",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "agent_name",
-            "type": "text",
-            "required": false
-          },
-          {
-            "name": "provider",
-            "type": "text",
-            "required": false
-          },
-          {
-            "name": "messages_json",
-            "type": "text",
-            "required": false
-          }
-        ]
-      },
-      "reply": {
-        "fields": [],
-        "max_bytes": 0
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 11,
-      "name": "primary_session_load",
-      "c_name": "db1_primary_session_load",
-      "c_params": [
-        "session_id",
-        "agent_name",
-        "provider"
-      ],
-      "c_returns": "text",
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "required",
-      "idempotency": "safe",
-      "results": [
-        "ok",
-        "missing",
-        "invalid",
-        "too_long",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "session_id",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "agent_name",
-            "type": "text",
-            "required": false
-          },
-          {
-            "name": "provider",
-            "type": "text",
-            "required": false
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "messages_json",
-            "type": "text"
-          }
-        ],
-        "max_bytes": 16777216
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 12,
-      "name": "primary_session_delete",
-      "c_name": "db1_primary_session_delete",
-      "c_params": [
-        "session_id",
-        "agent_name",
-        "provider"
-      ],
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "single",
-      "idempotency": "unsafe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "session_id",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "agent_name",
-            "type": "text",
-            "required": false
-          },
-          {
-            "name": "provider",
-            "type": "text",
-            "required": false
-          }
-        ]
-      },
-      "reply": {
-        "fields": [],
-        "max_bytes": 0
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 13,
-      "name": "primary_session_alloc_recent",
-      "c_name": "db1_primary_session_alloc_recent",
-      "c_params": [
-        "out",
-        "max"
-      ],
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "none",
-      "idempotency": "safe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "max",
-            "type": "int",
-            "required": true
-          }
-        ]
-      },
-      "reply": {
-        "struct": "db1_primary_session_row_t",
-        "list": {
-          "out": "out",
-          "bound": "max",
-          "max_rows": 256,
-          "allocate": true
-        },
-        "fields": [
-          {
-            "name": "session_id",
-            "type": "text"
-          },
-          {
-            "name": "agent_name",
-            "type": "text"
-          },
-          {
-            "name": "provider",
-            "type": "text"
-          },
-          {
-            "name": "created_at",
-            "type": "text"
-          },
-          {
-            "name": "updated_at",
-            "type": "text"
-          },
-          {
-            "name": "messages_json",
-            "type": "text",
-            "alloc": 1048576
-          }
-        ],
-        "max_bytes": 1048576
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 14,
-      "name": "primary_session_alloc_search",
-      "c_name": "db1_primary_session_alloc_search",
-      "c_params": [
-        "query",
-        "out",
-        "max"
-      ],
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "none",
-      "idempotency": "safe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "query",
-            "type": "text",
-            "required": false
-          },
-          {
-            "name": "max",
-            "type": "int",
-            "required": true
-          }
-        ]
-      },
-      "reply": {
-        "struct": "db1_primary_session_row_t",
-        "list": {
-          "out": "out",
-          "bound": "max",
-          "max_rows": 256,
-          "allocate": true
-        },
-        "fields": [
-          {
-            "name": "session_id",
-            "type": "text"
-          },
-          {
-            "name": "agent_name",
-            "type": "text"
-          },
-          {
-            "name": "provider",
-            "type": "text"
-          },
-          {
-            "name": "created_at",
-            "type": "text"
-          },
-          {
-            "name": "updated_at",
-            "type": "text"
-          },
-          {
-            "name": "messages_json",
-            "type": "text",
-            "alloc": 1048576
-          }
-        ],
-        "max_bytes": 1048576
-      }
-    },
-    {
-      "family": "sessions",
       "id": 15,
       "name": "primary_session_get_latest",
       "c_name": "db1_primary_session_get_latest",
@@ -9654,148 +9386,6 @@
           }
         ],
         "max_bytes": 131072
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 18,
-      "name": "webchat_claude_session_get",
-      "c_name": "db1_webchat_claude_session_get",
-      "c_params": [
-        "principal",
-        "aimee_session_id",
-        "out",
-        "out_n"
-      ],
-      "c_returns": "rc",
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "none",
-      "idempotency": "safe",
-      "results": [
-        "ok",
-        "missing",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "principal",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "aimee_session_id",
-            "type": "text",
-            "required": true
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "claude_session_id",
-            "type": "text"
-          },
-          {
-            "name": "rc",
-            "type": "int"
-          }
-        ],
-        "max_bytes": 256
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 19,
-      "name": "webchat_claude_session_owned_by_other",
-      "c_name": "db1_webchat_claude_session_owned_by_other",
-      "c_params": [
-        "principal",
-        "aimee_session_id",
-        "claude_session_id"
-      ],
-      "c_returns": "int64",
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "none",
-      "idempotency": "safe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "principal",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "aimee_session_id",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "claude_session_id",
-            "type": "text",
-            "required": false
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "owned",
-            "type": "int"
-          }
-        ],
-        "max_bytes": 32
-      }
-    },
-    {
-      "family": "sessions",
-      "id": 20,
-      "name": "webchat_claude_session_bind",
-      "c_name": "db1_webchat_claude_session_bind",
-      "c_params": [
-        "principal",
-        "aimee_session_id",
-        "claude_session_id"
-      ],
-      "wire_format": "db1-fields-v2",
-      "scope": "global",
-      "transaction": "single",
-      "idempotency": "unsafe",
-      "results": [
-        "ok",
-        "invalid",
-        "failed"
-      ],
-      "request": {
-        "fields": [
-          {
-            "name": "principal",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "aimee_session_id",
-            "type": "text",
-            "required": true
-          },
-          {
-            "name": "claude_session_id",
-            "type": "text",
-            "required": false
-          }
-        ]
-      },
-      "reply": {
-        "fields": [],
-        "max_bytes": 0
       }
     },
     {
@@ -17322,7 +16912,7 @@
             ]
           },
           {
-            "name": "prompt",
+            "name": "request_ir",
             "type": "text",
             "alloc": 1048576
           },
@@ -17343,7 +16933,7 @@
       "c_params": [
         "id",
         "sender",
-        "text",
+        "message_ir",
         "out"
       ],
       "transaction": "single",
@@ -17369,9 +16959,9 @@
             "required": false
           },
           {
-            "name": "text",
+            "name": "message_ir",
             "type": "text",
-            "required": false
+            "required": true
           }
         ]
       },
@@ -17449,7 +17039,7 @@
             ]
           },
           {
-            "name": "prompt",
+            "name": "request_ir",
             "type": "text",
             "alloc": 1048576
           },
@@ -28307,7 +27897,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {
@@ -28553,7 +28143,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {
@@ -28595,7 +28185,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       },
       "host_only": true
     },
@@ -28626,7 +28216,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 2097152
+        "max_bytes": 2097216
       }
     },
     {
@@ -29382,6 +28972,51 @@
           }
         ],
         "max_bytes": 32768
+      }
+    },
+    {
+      "family": "delegation",
+      "id": 45,
+      "name": "agent_job_canonical_observation",
+      "c_name": "db1_agent_job_canonical_observation",
+      "c_params": [
+        "job_id",
+        "authenticated_actor",
+        "json_out"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "job_id",
+            "type": "int",
+            "required": true
+          },
+          {
+            "name": "authenticated_actor",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "canonical_observation",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 8388620
       }
     }
   ]

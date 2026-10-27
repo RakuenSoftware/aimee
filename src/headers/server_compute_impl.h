@@ -47,7 +47,11 @@ typedef struct compute_ctx
    /* Owned directory capability captured from the producer's actual workspace,
     * never from request-body path claims. Released after worker callbacks join. */
    struct workspace_turn_mirror_lease *source_mirror;
-   cJSON *req; /* owned by this context */
+   cJSON *req;               /* owned by this context */
+   aimee_message_t ir_input; /* Owned canonical user input for this admitted turn. */
+   aimee_request_t
+       delegate_request; /* Owned canonical source, including policy/history/controls. */
+   char *delegate_task;  /* Read-only routing/job display view; never used to rebuild input. */
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
    /* Set only after the canonical compaction owner commits its checkpoint. */
    int ir_history_checkpointed;
@@ -116,9 +120,10 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 /* Failed continuation admission is an execution diagnostic, never model history. */
-int server_chat_ir_replace_steer(cJSON *request, const char *message);
-int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
-int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_replace_steer(cJSON *request, const cJSON *message);
+int server_chat_ir_reject_steer(const char *session, const char *actor, const cJSON *message);
+int server_chat_ir_prepare_turn(compute_ctx_t *cctx);
+int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const aimee_message_t *message);
 int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void server_chat_ir_close(compute_ctx_t *cctx);
@@ -134,9 +139,9 @@ void compute_ctx_clear_request_context(void);
 int tool_execute_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
 /* Dispatch a coord task as a background delegate worker. Returns 0 on success, -1 on failure. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd,
-                                       const char *persona, const char *claim_owner,
-                                       int require_handoff);
+                                       const aimee_message_t *message, const char *files_json,
+                                       const char *cwd, const char *persona,
+                                       const char *claim_owner, int require_handoff);
 /* Delegate worker thread entry point — non-static so skill_jobs.c can reference it. */
 void delegate_worker(void *arg);
 

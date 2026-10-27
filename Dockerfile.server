@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        cmake \
         ca-certificates \
         cmake \
         libpq-dev \
@@ -64,6 +65,7 @@ RUN apt-get update \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 COPY . .
 COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
@@ -79,7 +81,10 @@ RUN build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
     && sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
-         AIMEE_TREESITTER=1 GIT_VERSION="v$build_version"
+         AIMEE_TREESITTER=1 GIT_VERSION="v$build_version" \
+    && cmake -S . -B /thinclient-build -DAIMEE_THIN_CLIENT=ON \
+         -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /thinclient-build --target aimee-client -j"$(nproc)"
 
 # Build the independently supervised same-container module adapters from the
 # canonical contract. C processes link only the extracted event-bus client;
@@ -118,7 +123,11 @@ RUN apt-get update \
         libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=build /thinclient-build/libaimee-client.so /usr/local/lib/libaimee-client.so
+COPY --from=build /thinclient-build/aimee-client-install.pc /usr/local/lib/pkgconfig/aimee-client.pc
+COPY --from=build /src/src/headers/cli_client.h /usr/local/include/aimee-client/cli_client.h
 WORKDIR /src/runtime-web
+COPY server-go/thinclient/ /src/server-go/thinclient/
 COPY server-go/go.mod server-go/go.sum /src/server-go/
 COPY server-go/modules/runtime-web/policy/ /src/server-go/modules/runtime-web/policy/
 COPY server-go/ir/ /src/server-go/ir/
@@ -440,6 +449,7 @@ COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
 # See the build stage: delegates reach aimee THROUGH this binary (`aimee mcp serve`
 # as their MCP server, `aimee hooks pre` as their PreToolUse guard).
 COPY --from=build /src/aimee /usr/local/bin/aimee
+COPY --from=build /thinclient-build/libaimee-client.so /usr/local/lib/libaimee-client.so
 
 # Co-located webchat browser UI: the Go service, the single-file React SPA, and
 # Vault-only bootstrap/launch helpers. webchat shares
@@ -473,7 +483,8 @@ COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoin
 COPY --chmod=0755 deploy/container/kb-role-runtime.sh /usr/local/bin/aimee-kb-role-runtime
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
     /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh \
-    /usr/local/bin/module-supervisor.sh
+    /usr/local/bin/module-supervisor.sh \
+    && ldconfig
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"net"
+	"github.com/JBailes/aimee/server-go/thinclient"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -94,11 +94,7 @@ func (s *server) handleChatSessionEvents(w http.ResponseWriter, r *http.Request)
 	}
 	sock := filepath.Join(filepath.Dir(s.cfg.socketPath), "aimee-http.sock")
 	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			},
-		},
+		Transport: &thinclient.Transport{Endpoint: "unix:" + sock},
 	}
 	// Forward a resume cursor so the browser resumes after a reconnect/remount
 	// instead of replaying the whole ring from 0. Validated as a uint to keep it

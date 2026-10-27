@@ -75,8 +75,8 @@ extern "C"
    } gw_post_action_t;
 
    /* Post-send: classify the upstream `http_status` for a mutated request. On ANY 4xx
-    * (400/413/422/…): restore the pristine array into container[key], run
-    * message_history_repair on it, disable the session, clear provenance, and return
+    * (400/413/422/…): restore the pristine canonical array into container[key],
+    * disable the session, clear provenance, and return
     * GW_POST_RESEND (the caller rebuilds the provider body from the now-restored
     * container and resends ONCE). On 5xx: disable the session, clear provenance, and
     * return GW_POST_NONE (no resend — forward the 5xx as the provider returned it).

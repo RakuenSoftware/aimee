@@ -42,6 +42,33 @@ type Context struct {
 	RevisionScope  string `json:"revision_scope,omitempty"`
 	RevisionEpoch  string `json:"revision_epoch,omitempty"`
 }
+
+// RefusalDetails is inert provider diagnostics, never model content or approval.
+type RefusalDetails struct {
+	Category    *string `json:"category"`
+	Explanation *string `json:"explanation"`
+}
+
+func validRefusalDetails(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if !Decode(raw, &fields) || len(fields) != 2 || fields["category"] == nil || fields["explanation"] == nil {
+		return false
+	}
+	var details RefusalDetails
+	if !Decode(raw, &details) {
+		return false
+	}
+	for _, field := range []struct {
+		value *string
+		limit int
+	}{{details.Category, 64}, {details.Explanation, 4096}} {
+		if field.value != nil && (len(*field.value) > field.limit || strings.ContainsRune(*field.value, 0)) {
+			return false
+		}
+	}
+	return true
+}
+
 type Message struct {
 	ContentScalar bool    `json:"content_scalar,omitempty"`
 	Role          string  `json:"role"`
@@ -118,6 +145,7 @@ func ValidSessionEvent(encoded []byte) bool {
 			Input           json.RawMessage `json:"input"`
 			StopReason      string          `json:"stop_reason"`
 			RawStopReason   string          `json:"raw_stop_reason"`
+			Refusal         json.RawMessage `json:"refusal"`
 			UsageIn         *int64          `json:"usage_in"`
 			UsageOut        *int64          `json:"usage_out"`
 			UsageCacheRead  *int64          `json:"usage_cache_read"`
@@ -126,6 +154,9 @@ func ValidSessionEvent(encoded []byte) bool {
 			Error           string          `json:"error_message"`
 		}
 		if e.MessageID == "" || e.Role == "" || !Decode(e.Payload, &d) || (d.RawStopReason != "" && d.Type != "TURN_STOP") {
+			return false
+		}
+		if d.Refusal != nil && (d.Type != "TURN_STOP" || (!bytes.Equal(bytes.TrimSpace(d.Refusal), []byte("null")) && (d.StopReason != "content_filter" || !validRefusalDetails(d.Refusal)))) {
 			return false
 		}
 		if d.MessageGroup != nil {
@@ -232,18 +263,34 @@ func ValidSessionEvent(encoded []byte) bool {
 			strings.Trim(value[4:68]+value[69:133]+value[134:], "0123456789abcdef") == ""
 	case "projection":
 		var projection struct {
-			Model         string `json:"model"`
-			Boundary      string `json:"boundary"`
-			Reasoning     *int64 `json:"omitted_reasoning_blocks"`
-			Opaque        *int64 `json:"omitted_opaque_state_blocks"`
-			CacheControls int64  `json:"omitted_cache_controls,omitempty"`
+			Model           string          `json:"model"`
+			Boundary        string          `json:"boundary"`
+			Reasoning       *int64          `json:"omitted_reasoning_blocks"`
+			Opaque          *int64          `json:"omitted_opaque_state_blocks"`
+			CacheControls   int64           `json:"omitted_cache_controls,omitempty"`
+			History         json.RawMessage `json:"history_messages_as_text,omitempty"`
+			HostContext     json.RawMessage `json:"host_context_blocks_as_text,omitempty"`
+			RequestControls json.RawMessage `json:"omitted_request_controls,omitempty"`
+			EmptyMessages   json.RawMessage `json:"omitted_empty_messages,omitempty"`
+			ExternalTools   json.RawMessage `json:"unverified_external_tool_reports,omitempty"`
 		}
-		return Decode(e.Payload, &projection) && projection.Model != "" &&
+		if !Decode(e.Payload, &projection) {
+			return false
+		}
+		counts := [5]int64{}
+		for i, raw := range []json.RawMessage{projection.HostContext, projection.ExternalTools, projection.History, projection.RequestControls, projection.EmptyMessages} {
+			if len(raw) != 0 && (bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || !Decode(raw, &counts[i])) {
+				return false
+			}
+		}
+		return projection.Model != "" &&
 			(projection.Boundary == "request" || projection.Boundary == "response") &&
 			projection.Reasoning != nil && projection.Opaque != nil &&
 			*projection.Reasoning >= 0 && *projection.Reasoning <= 9007199254740991 &&
 			projection.CacheControls >= 0 && projection.CacheControls <= 9007199254740991 &&
-			(*projection.Reasoning > 0 || projection.CacheControls > 0) &&
+			counts[0] >= 0 && counts[0] <= 4096 &&
+			counts[1] >= 0 && counts[1] <= 4096 && counts[2] >= 0 && counts[2] <= 4096 && counts[3] >= 0 && counts[3] <= 4096 && counts[4] >= 0 && counts[4] <= 4096 &&
+			(*projection.Reasoning > 0 || projection.CacheControls > 0 || counts[0] > 0 || counts[1] > 0 || counts[2] > 0 || counts[3] > 0 || counts[4] > 0) &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "child_execution":
 		var child ChildExecutionPayload
@@ -309,6 +356,44 @@ func ValidBlock(encoded []byte) bool {
 	if !Decode(encoded, &b) || !irBlockKind(b.Type) || (b.MessageGroup != nil && (*b.MessageGroup < 1 || *b.MessageGroup > 4096)) {
 		return false
 	}
+	var fields map[string]json.RawMessage
+	if !Decode(encoded, &fields) {
+		return false
+	}
+	allowed := map[string]bool{"type": true, "cache_control": true, "cache_ttl": true, "message_group": true, "context": true}
+	specific := map[string][]string{"text": {"text"}, "thinking": {"text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content"}, "tool_use": {"tool_id", "name", "namespace", "input"}, "tool_result": {"tool_id", "content", "is_error"}, "image": {"media_type", "media_ref"}, "document": {"media_type", "media_ref"}}
+	for _, key := range specific[b.Type] {
+		allowed[key] = true
+	}
+	for key := range fields {
+		if !allowed[key] {
+			return false
+		}
+	}
+	for _, key := range []string{"type", "text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content", "cache_control", "cache_ttl", "tool_id", "name", "namespace", "media_type", "media_ref"} {
+		if value := fields[key]; value != nil {
+			var text string
+			if !Decode(value, &text) {
+				return false
+			}
+		}
+	}
+	if raw := fields["context"]; raw != nil && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	if raw := fields["message_group"]; raw != nil {
+		var group int
+		if !Decode(raw, &group) {
+			return false
+		}
+	}
+	if raw := fields["is_error"]; raw != nil {
+		var value bool
+		if !Decode(raw, &value) {
+			return false
+		}
+	}
+
 	if b.ThinkingBinding != nil {
 		value := *b.ThinkingBinding
 		if b.Type != "thinking" || len(value) != 198 || value[:4] != "ap1:" || (value[68] != ':' || value[133] != ':') {

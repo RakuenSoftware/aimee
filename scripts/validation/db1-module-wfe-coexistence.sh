@@ -31,9 +31,8 @@
 #
 # It passes now. The engine reaches DB1 through the module, so there is one
 # holder, nothing for a second writer to alter, and nothing for it to create.
-# The script stays exactly as it was, because an assertion that has started
-# passing is worth more than one written after the fact -- it is the same
-# measurement, and it is what would notice the gap reopening.
+# The current fixture measures PostgreSQL schema metadata and the actual SQL
+# owner across both startup orders; no empty stand-in columns count as proof.
 #
 # Overridable: MODULE, GRANT, SERVER, WFE.
 # The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
@@ -51,16 +50,15 @@ require_store_url() {
 
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 # The container grants the Go WFE bus access too (principal_ref 64). Without it
 # the WFE exits on "bus: attach denied" -- but only AFTER it has opened the
 # store and run its migrations, which is itself worth knowing and was how this
 # was first seen. Install it so the WFE stays up and the coexistence being
 # measured is the sustained one the container actually runs.
-WFE_GRANT=${AIMEE_WFE_GRANT:-/opt/payload/grants/wfe.grant}
-SERVER=${AIMEE_SERVER_BIN:-/usr/local/bin/aimee-server}
-WFE=${AIMEE_WFE_BIN:-/usr/local/bin/aimee-wfe}
+
+. "$(dirname "$0")/workflow-fixture-runtime.sh"
+cleanup() { workflow_fixture_stop_runtime "${WPID2:-${WPID:-}}" "${MPID:-}" "${SPID:-}"; }
+trap cleanup EXIT
 
 PASS=0
 FAIL=0
@@ -88,21 +86,7 @@ BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-# The grant's executable= is what the daemon pins the peer against, so it must
-# name the module this rig actually starts. In a container the two are the same
-# path and a plain copy works; against a build tree they are not, and a grant
-# naming an uninstalled path makes the daemon reject the whole policy and exit.
-sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
-    >"$AIMEE_HOME/modules.d/server/aimee.grant"
-[ -r "$WFE_GRANT" ] && sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
-    >"$AIMEE_HOME/modules.d/server/wfe.grant"
-# The engine answers the workflow control kinds under a SECOND identity. Without
-# this grant that stage is refused at attach -- "workflows attach: bus: attach
-# denied" -- while the rest of the topology comes up looking fine, so the failure
-# reads as something else entirely.
-_wfg=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
-[ -r "$_wfg" ] && sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$_wfg" \
-    >"$AIMEE_HOME/modules.d/server/workflows.grant"
+workflow_fixture_install_policy || exit 1
 
 state() {
    curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health |
@@ -113,19 +97,7 @@ state() {
 # it is asked of the kernel rather than inferred from what the code says.
 # Holding the store is a connection to PostgreSQL, not an open file. The port
 # comes from the DSN so a non-default one is still found.
-STORE_PORT=$(printf '%s' "${AIMEE_STORE_URL:-}" | sed -n 's|.*:\([0-9][0-9]*\)/.*|\1|p')
-[ -n "$STORE_PORT" ] || STORE_PORT=5432
-# Only this rig's processes. The port is shared, so a global scan counts any
-# other module running on the machine and reports two holders for a topology
-# that has one. What is being asserted is about THIS daemon, module and engine.
-holders() {
-   for _p in ${MPID:-} ${SPID:-} ${WPID:-}; do
-      [ -n "$_p" ] || continue
-      if ss -tnp 2>/dev/null | grep ":$STORE_PORT " | grep -q "pid=$_p,"; then
-         printf '%s(%s) ' "$(tr -d '\0' <"/proc/$_p/comm" 2>/dev/null)" "$_p"
-      fi
-   done
-}
+holders() { workflow_fixture_sql_holders; }
 
 # The schema is the module's, and the module is the only thing that can read it.
 # It reports what it applied on connect; that is the account to compare against,
@@ -141,6 +113,7 @@ echo " 1. daemon + module, as the other scripts test it"
 echo "=============================================================="
 "$SERVER" --foreground >"$HOME/server.log" 2>&1 &
 SPID=$!
+workflow_fixture_start_config || exit 1
 i=0
 while [ $i -lt 300 ]; do
    [ -S "$HTTP_SOCK" ] && break
@@ -148,6 +121,7 @@ while [ $i -lt 300 ]; do
    i=$((i + 1))
 done
 require_store_url
+workflow_fixture_start_postgres || exit 1
 AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
@@ -160,6 +134,7 @@ done
    say_fail "two-process topology did not come up"
 
 TABLES_BEFORE=$(schema_applied)
+workflow_fixture_schema_snapshot "$AIMEE_HOME/schema-before.json" || exit 1
 echo "      schema files the module applied: ${TABLES_BEFORE:-0}"
 echo "      holders of the store: $(holders)"
 HOLDERS_2=$(holders | wc -w | tr -d ' ')
@@ -178,22 +153,21 @@ fi
 # --home and no --db, exactly as server-entrypoint.sh does it.
 AIMEE_MODULE_BUS_SOCKET="$BUS_SOCK" "$WFE" \
    --home "$AIMEE_HOME" \
-   --socket "$AIMEE_HOME/aimee-wfe.sock" \
    --workflow-dir "$HOME/workflows" \
    >"$HOME/wfe.log" 2>&1 &
 WPID=$!
 i=0
 while [ $i -lt 100 ]; do
    kill -0 "$WPID" 2>/dev/null || break
-   [ -n "$(holders)" ] && [ "$(holders | wc -w | tr -d ' ')" -ge 2 ] && break
+   workflow_fixture_stage_ready && break
    sleep 0.2
    i=$((i + 1))
 done
 
-if kill -0 "$WPID" 2>/dev/null; then
-   say_pass "the Go WFE started"
+if workflow_fixture_stage_ready; then
+   say_pass "the Go WFE serves the authenticated control stage"
 else
-   say_note "the Go WFE exited early; its output was:"
+   say_fail "the Go WFE did not serve its control stage; its output was:"
    tail -15 "$HOME/wfe.log" 2>/dev/null | sed 's/^/      /'
 fi
 
@@ -210,29 +184,18 @@ echo "=============================================================="
 echo " 3. does the Go side rewrite the module's schema"
 echo "=============================================================="
 TABLES_AFTER=$(schema_applied)
-WI_AFTER=""
-WI_BEFORE=""
-EV_AFTER=""
-EV_BEFORE=""
-echo "      tables: $TABLES_BEFORE -> $TABLES_AFTER"
-[ "$TABLES_AFTER" = "$TABLES_BEFORE" ] &&
-   say_pass "no table added or dropped by the Go WFE" ||
-   say_note "table count changed: $TABLES_BEFORE -> $TABLES_AFTER"
-
-if [ "$WI_AFTER" = "$WI_BEFORE" ]; then
-   say_pass "lifecycle_work_item columns unchanged"
+workflow_fixture_schema_snapshot "$AIMEE_HOME/schema-after.json" || exit 1
+echo "      schema files: $TABLES_BEFORE -> $TABLES_AFTER"
+[ -n "$TABLES_BEFORE" ] && [ "$TABLES_AFTER" = "$TABLES_BEFORE" ] &&
+   say_pass "the module's applied schema history is unchanged" ||
+   say_fail "the applied schema history changed or was unavailable"
+if cmp -s "$AIMEE_HOME/schema-before.json" "$AIMEE_HOME/schema-after.json"; then
+   say_pass "actual PostgreSQL tables and column definitions are unchanged"
 else
-   say_fail "the Go WFE altered lifecycle_work_item"
-   echo "      before: $WI_BEFORE"
-   echo "      after:  $WI_AFTER"
+   say_fail "the workflow engine changed the fixture schema"
 fi
-if [ "$EV_AFTER" = "$EV_BEFORE" ]; then
-   say_pass "lifecycle_event columns unchanged"
-else
-   say_fail "the Go WFE altered lifecycle_event"
-   echo "      before: $EV_BEFORE"
-   echo "      after:  $EV_AFTER"
-fi
+[ ! -e "$DB" ] && say_pass "no retired SQLite store was created" ||
+   say_fail "a retired SQLite store appeared"
 
 echo
 echo "=============================================================="
@@ -267,17 +230,16 @@ tail -12 "$HOME/wfe.log" 2>/dev/null | sed 's/^/      /'
 echo "      --- module log ---"
 tail -8 "$HOME/module.log" 2>/dev/null | sed 's/^/      /'
 
-kill "$WPID" "$MPID" "$SPID" 2>/dev/null
+workflow_fixture_stop_runtime "$WPID" "$MPID" "$SPID"
 sleep 1
 
 echo
 echo "=============================================================="
 echo " 5. the other startup order: Go WFE first, module second"
 echo "=============================================================="
-# Phase 2 had the module create the schema and the Go side amend it. Nothing
-# guarantees that order in a container -- both are started by the same
-# entrypoint. This runs it the other way: the Go WFE creates the lifecycle
-# tables ITS way on an empty file, and the module then has to live with them.
+# The engine starts before the bus/SQL owners in this phase. Read the actual
+# fixture schema before and after that start: the engine has no independent SQL
+# authority and must not change it while waiting for its owners.
 HOME2=$(mktemp -d "${TMPDIR:-/tmp}/aimee-coexist-rev-XXXXXX")
 export AIMEE_HOME="$HOME2/.config/aimee"
 mkdir -p "$AIMEE_HOME/modules.d/server" "$HOME2/workflows"
@@ -286,19 +248,10 @@ BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
-    >"$AIMEE_HOME/modules.d/server/aimee.grant"
-[ -r "$WFE_GRANT" ] && sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
-    >"$AIMEE_HOME/modules.d/server/wfe.grant"
-# The engine answers the workflow control kinds under a SECOND identity. Without
-# this grant that stage is refused at attach -- "workflows attach: bus: attach
-# denied" -- while the rest of the topology comes up looking fine, so the failure
-# reads as something else entirely.
-_wfg=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
-[ -r "$_wfg" ] && sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$_wfg" \
-    >"$AIMEE_HOME/modules.d/server/workflows.grant"
+workflow_fixture_install_policy || exit 1
 
-"$WFE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+workflow_fixture_schema_snapshot "$AIMEE_HOME/schema-before-engine.json" || exit 1
+"$WFE" --home "$AIMEE_HOME" --module-bus-socket "$BUS_SOCK" \
    --workflow-dir "$HOME2/workflows" >"$HOME2/wfe.log" 2>&1 &
 WPID2=$!
 i=0
@@ -307,21 +260,25 @@ while [ $i -lt 60 ]; do
    sleep 0.2
    i=$((i + 1))
 done
-GO_TABLES=$(tablecount)
-GO_WI=$(cols lifecycle_work_item)
-echo "      tables created by the Go WFE alone: ${GO_TABLES:-0}"
-[ "${GO_TABLES:-0}" -gt 0 ] &&
-   say_fail "the Go WFE creates the store when it gets there first (${GO_TABLES} tables)" ||
-   say_pass "the Go WFE created nothing on its own"
+workflow_fixture_schema_snapshot "$AIMEE_HOME/schema-engine-only.json" || exit 1
+if cmp -s "$AIMEE_HOME/schema-before-engine.json" "$AIMEE_HOME/schema-engine-only.json"; then
+   say_pass "the engine starting before its SQL owner changed no PostgreSQL schema"
+else
+   say_fail "the engine changed PostgreSQL schema before its owner started"
+fi
+[ ! -e "$DB" ] && say_pass "the engine created no retired SQLite store" ||
+   say_fail "the engine created a retired SQLite store"
 
 "$SERVER" --foreground >"$HOME2/server.log" 2>&1 &
 SPID=$!
+workflow_fixture_start_config || exit 1
 i=0
 while [ $i -lt 300 ]; do
    [ -S "$HTTP_SOCK" ] && break
    sleep 0.1
    i=$((i + 1))
 done
+workflow_fixture_start_postgres || exit 1
 AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME2/module.log" 2>&1 &
 MPID=$!
 i=0
@@ -331,11 +288,21 @@ while [ $i -lt 150 ]; do
    i=$((i + 1))
 done
 if [ "$(state)" = "ok" ]; then
-   say_pass "the module came up on a store the Go WFE created first"
+   say_pass "the SQL owner and module came up after the workflow engine"
 else
-   say_fail "the module did NOT come up on a Go-created store: $(state)"
+   say_fail "the SQL owner/module did not become ready after the workflow engine: $(state)"
    tail -12 "$HOME2/module.log" 2>/dev/null | sed 's/^/      /'
 fi
+
+i=0
+while [ "$i" -lt 100 ]; do
+   workflow_fixture_stage_ready && break
+   kill -0 "$WPID2" 2>/dev/null || break
+   sleep 0.1
+   i=$((i + 1))
+done
+workflow_fixture_stage_ready && say_pass "the early engine serves authenticated control after its owner starts" ||
+   say_fail "the early engine never attached to its real control stage"
 
 # Same question in the reverse startup order, asked of the module rather than of
 # a file: it reports the schema it applied, and applying the same set either way
@@ -354,15 +321,15 @@ fi
 R=$(curl -s --unix-socket "$HTTP_SOCK" -X POST -H "Content-Type: application/json" \
    -d "{\"title\":\"reverse order\"}" http://localhost/v1/sessions/create)
 case "$R" in
-*"session_id"*) say_pass "the store works when the Go WFE built it first" ;;
+*"session_id"*) say_pass "the store works when the workflow engine starts first" ;;
 *) say_fail "store unusable in this order: $R" ;;
 esac
-kill "$WPID2" "$MPID" "$SPID" 2>/dev/null
+workflow_fixture_stop_runtime "$WPID2" "$MPID" "$SPID"
 
 echo
 echo "=============================================================="
 echo " $PASS passed, $FAIL failed, $NOTE noted"
 echo " home: $HOME"
 echo "=============================================================="
-kill "$WPID" "$MPID" "$SPID" 2>/dev/null
+workflow_fixture_stop_runtime "$WPID" "$MPID" "$SPID"
 [ "$FAIL" -eq 0 ]

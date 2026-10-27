@@ -3,6 +3,8 @@
 
 #include <aimee/translation/aimee_backend.h> /* converse_stop_reason (shared with the non-stream parse) */
 #include "cJSON.h"
+#include "usage_observation.h"
+#include "anthropic_refusal.h"
 
 #include <limits.h>
 #include <math.h>
@@ -59,6 +61,7 @@ int openai_stream_finish(openai_stream_state_t *st, aimee_delta_t *out, int max)
                           .usage_cache_read = st->usage_cache_read,
                           .usage_cache_write = st->usage_cache_write,
                           .usage_reasoning = st->usage_reasoning};
+   wire_unknown_delta_usage(out, st->usage_seen);
    st->stopped = 1;
    return 1;
 }
@@ -70,6 +73,8 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
    if (!chunk || !st || !out || max <= 0)
       return 0;
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive(chunk, "usage");
+   if (usage && !cJSON_IsNull(usage) && !cJSON_IsObject(usage))
+      return -1;
    if (cJSON_IsObject(usage))
    {
       if (optional_usage(usage, "prompt_tokens", &st->usage_in) ||
@@ -79,7 +84,8 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
           optional_usage(cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details"),
                          "reasoning_tokens", &st->usage_reasoning))
          return -1;
-      st->usage_seen = 1;
+      st->usage_fields |= wire_usage_fields(usage, "prompt_tokens", "completion_tokens");
+      st->usage_seen = st->usage_fields == 3;
    }
    if (st->stopped)
       return 0;
@@ -102,6 +108,11 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       if (d)
       {
          d->type = AIMEE_DELTA_TURN_START;
+         d->usage_in = st->usage_in;
+         d->usage_out = st->usage_out;
+         d->usage_cache_read = st->usage_cache_read;
+         d->usage_cache_write = st->usage_cache_write;
+         wire_unknown_delta_usage(d, st->usage_seen);
          st->started = 1;
       }
    }
@@ -323,6 +334,7 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
          return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_TURN_START;
+      out[0].usage_unobserved = 1; /* messageStart contains no usage observation. */
       return 1;
    }
 
@@ -542,6 +554,8 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          return -1;
       if (aimee_ir_read_usage(usage, "output_tokens", &st->pending_usage_out) < 0)
          return -1;
+      st->usage_fields |= wire_usage_fields(usage, "input_tokens", "output_tokens") & 1;
+      out[0].usage_unobserved = wire_usage_fields(usage, "input_tokens", "output_tokens") != 3;
       out[0].usage_out = st->pending_usage_out;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_cache_read = st->pending_cache_read;
@@ -669,6 +683,12 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          return -1;
       /* stop_reason is null on a non-final message_delta; only the last one sets it. */
       const char *sr = ostr(delta, "stop_reason");
+      aimee_refusal_details_t refusal = {0};
+      int has_refusal = 0;
+      if (!aimee_ir_json_unique(payload) ||
+          anthropic_refusal_read(cJSON_GetObjectItemCaseSensitive(delta, "stop_details"), sr,
+                                 &refusal, &has_refusal))
+         return -1;
       if (sr && sr[0])
       {
          if (st->stop_seen || strlen(sr) >= sizeof st->raw_stop_reason)
@@ -676,6 +696,16 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
             if (st->kind_set[i] && !st->closed[i])
                return -1;
+         st->has_refusal = has_refusal;
+         if (has_refusal)
+         {
+            if (refusal.category)
+               strcpy(st->refusal_category, refusal.category);
+            if (refusal.explanation)
+               strcpy(st->refusal_explanation, refusal.explanation);
+            st->refusal.category = refusal.category ? st->refusal_category : NULL;
+            st->refusal.explanation = refusal.explanation ? st->refusal_explanation : NULL;
+         }
          strcpy(st->raw_stop_reason, sr);
          st->stop_seen = 1;
          st->pending_stop_reason = aimee_stop_reason_parse(sr);
@@ -693,6 +723,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       if (aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details"),
                               "thinking_tokens", &st->pending_reasoning) < 0)
          return -1;
+      st->usage_fields |= wire_usage_fields(usage, "input_tokens", "output_tokens");
       return 0; /* message_stop emits the single terminal IR delta */
    }
 
@@ -704,11 +735,13 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       out[0].type = AIMEE_DELTA_TURN_STOP;
       out[0].stop_reason = st->pending_stop_reason;
       out[0].raw_stop_reason = st->raw_stop_reason;
+      out[0].refusal = st->has_refusal ? &st->refusal : NULL;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_out = st->pending_usage_out;
       out[0].usage_cache_read = st->pending_cache_read;
       out[0].usage_cache_write = st->pending_cache_write;
       out[0].usage_reasoning = st->pending_reasoning;
+      wire_unknown_delta_usage(out, st->usage_fields == 3);
       st->terminal_emitted = 1;
       return 1;
    }
@@ -728,34 +761,23 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    return 0;
 }
 
-/* wrap a cJSON `data` object as an SSE frame "event: <ev>\ndata: <json>\n\n"
- * (consumes data). */
-static char *sse_frame(const char *ev, cJSON *data)
-{
-   char *json = cJSON_PrintUnformatted(data);
-   cJSON_Delete(data);
-   if (!json)
-      return NULL;
-   size_t need =
-       strlen("event: ") + strlen(ev) + strlen("\ndata: ") + strlen(json) + strlen("\n\n") + 1;
-   char *buf = malloc(need);
-   if (buf)
-      snprintf(buf, need, "event: %s\ndata: %s\n\n", ev, json);
-   free(json);
-   return buf;
-}
-
 /* Build the Anthropic SSE event object(s) for one IR delta into ev[]/js[] (up to
  * 2 -- TURN_STOP is message_delta + message_stop). Returns the count (0 = no
  * output). The caller owns the returned cJSON (frees / serializes them). st is
- * updated (TURN_START sets st->started). Shared by anthropic_delta_render (frames)
- * and anthropic_delta_emit (callback) so the two never drift. */
+ * updated (TURN_START sets st->started). The live emitter owns serialization. */
 static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *st,
                               const char *msg_id, const char *model, const char *ev[2],
                               cJSON *js[2])
 {
    if (!d)
       return 0;
+   if ((d->type == AIMEE_DELTA_TURN_START || d->type == AIMEE_DELTA_TURN_STOP) &&
+       d->usage_unobserved)
+      return -1; /* Required numeric usage has no truthful projection on this wire. */
+   if (d->refusal &&
+       (d->type != AIMEE_DELTA_TURN_STOP || d->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(d->refusal)))
+      return -1;
    /* Responses opaque state has no Anthropic stream representation. A caller
     * must project with an explicit fidelity decision before crossing this wire. */
    if (d->thinking_id || d->thinking_encrypted_content)
@@ -878,9 +900,21 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
       cJSON_AddStringToObject(o, "type", "message_delta");
       cJSON *dl = cJSON_AddObjectToObject(o, "delta");
       cJSON_AddStringToObject(dl, "stop_reason",
-                              d->raw_stop_reason ? d->raw_stop_reason
-                                                 : aimee_stop_reason_name(d->stop_reason));
+                              d->stop_reason == AIMEE_STOP_CONTENT_FILTER ? "refusal"
+                              : d->raw_stop_reason                        ? d->raw_stop_reason
+                                                   : aimee_stop_reason_name(d->stop_reason));
       cJSON_AddNullToObject(dl, "stop_sequence");
+      if (d->refusal)
+      {
+         cJSON *details = anthropic_refusal_json(d->refusal);
+         if (!details || !cJSON_AddItemToObject(dl, "stop_details", details))
+         {
+            cJSON_Delete(details);
+            cJSON_Delete(o);
+            return -1;
+         }
+      }
+
       cJSON *u = cJSON_AddObjectToObject(o, "usage");
       cJSON_AddNumberToObject(u, "output_tokens", (double)d->usage_out);
       cJSON_AddNumberToObject(u, "input_tokens", (double)d->usage_in);
@@ -915,33 +949,6 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
    default:
       return 0;
    }
-}
-
-char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
-                             const char *msg_id, const char *model)
-{
-   const char *ev[2] = {NULL, NULL};
-   cJSON *js[2] = {NULL, NULL};
-   int n = delta_build_events(d, st, msg_id, model, ev, js);
-   if (n <= 0)
-      return NULL;
-   char *first = sse_frame(ev[0], js[0]); /* sse_frame takes ownership of js[i] */
-   if (n == 1)
-      return first;
-   char *second = sse_frame(ev[1], js[1]);
-   if (!first || !second)
-   {
-      free(first);
-      free(second);
-      return NULL;
-   }
-   size_t need = strlen(first) + strlen(second) + 1;
-   char *both = malloc(need);
-   if (both)
-      snprintf(both, need, "%s%s", first, second);
-   free(first);
-   free(second);
-   return both;
 }
 
 int anthropic_delta_emit(const aimee_delta_t *d, anthropic_stream_state_t *st, const char *msg_id,

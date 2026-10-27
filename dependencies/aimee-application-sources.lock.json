@@ -3,8 +3,8 @@
   "source_repository": "https://github.com/RakuenSoftware/aimee.git",
   "core": {
     "source": "bundled",
-    "version": "0.3.0",
-    "source_sha256": "4c6ec9f236cbeb2cb1ee5fcd17ba72a3490c87e6bc75c903992c96b0c0ce821f"
+    "version": "0.3.1",
+    "source_sha256": "da5f26dc22aba28cb2d2f2510df01d81224b4a9d8aaf51a519e011686fecb873"
   },
   "modules": [
     {
@@ -16,7 +16,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "051022ec21652c6b8c1bd175a0f56b7b1e46fda18a48060b79ab7e7095884947"
+      "source_sha256": "1da7e6bdb71bee9e9c3ac9fa5b7a3e5bd0c1a125339b121867ab78653e8a7253"
     },
     {
       "source": "external",
@@ -48,7 +48,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "c52e72fb82856592a49e93f69d5ce9a7b57b3af0c61a6c9b503b614bf34d9540"
+      "source_sha256": "4afea5970c2fc1e09cf8b6ec6dc37b1ece9b603cd5ec4cd2fd89194513b4994c"
     },
     {
       "id": "translation",
@@ -59,7 +59,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "21bf4b6b73f421ad2f0fde9cee795add8d6e92678391c1852948e85b3e31a46b"
+      "source_sha256": "0e4bdb91051c03feb1fbdc33c84009fa23a5597cf2c7b6e9161880547e87790d"
     },
     {
       "id": "protocols",
@@ -70,7 +70,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "6cd399ac1a5db82de056b33a2dd13de4351110183452be83780cbc7c2a93c2e2"
+      "source_sha256": "5c322660cdd4b65b96be208d060b6ca88f81df838484d401e605f0752a2bc735"
     },
     {
       "id": "gateway",
@@ -81,7 +81,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "dc7f015024d4ab17b4c6bf28047d6494a3659b49467f1c46f4a9f4ffb1097330"
+      "source_sha256": "d6ead5126deb279038aa9340a6b18358d894f593ed95b77b1f6f120e001c8083"
     },
     {
       "id": "memory",
@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "086c24af61953cc5a230a603bc2679fdcd6ddf03218edc0a78db76fbc4dc317a",
+      "source_sha256": "dca5c04bc09f122e6a0a311ae24a7c668364e397947b99563c9209b81443829f",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -117,13 +117,14 @@
         "server",
         "kb"
       ],
-      "source_sha256": "1dea05bd3f434ad922bdbad9ba21c4faab85a7239dbb5bd6153432f30545e71a",
+      "source_sha256": "d4c33f4e652124e38b888e9bee8e1cb869be60d6ab39ea7098e505ad3882aafe",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 8,
       "serve": [
         6145,
-        6146
+        6146,
+        6147
       ]
     },
     {
@@ -134,7 +135,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "28d7dd244b7faff8b4226b6344dd096bad05cf69661f4919a895173e45499617",
+      "source_sha256": "01df5b87ba7c3c2f8df8116c638d46cffbed18f0fde24e733bcc50c61ad6fb22",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 9,
@@ -151,7 +152,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "e957a5199ed135241b04c1af682828fab27e6139dcbcb5afb21da73d1192932d",
+      "source_sha256": "abbb41b2ccae7002e6484b9e40e2bc0a2f1a4f5120583d26afe2800ea082d4fa",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -177,7 +178,8 @@
         6675,
         6676,
         6677,
-        6678
+        6678,
+        6679
       ]
     },
     {
@@ -188,7 +190,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "7a23487ba06ee7be34a67c64101f7543fc820e75541b026200f7171a3c27ec15",
+      "source_sha256": "ab158b5f426b3db462823c81084d3d1b978fc22e6661ee0c003ff93e4122d970",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 11,
@@ -205,7 +207,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "24dc06ae187bed598d5b8f492247bb36dcb94383bd050490acf1410b9e9d7d16",
+      "source_sha256": "68b4484e6032ffa3fba518bb47a82ad38741b4e6149da34ab65b530cdc5886af",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 12,
@@ -223,7 +225,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "8fae3b435f1cb053b82887686ecd04e4752aa2bb4c780c6d5f92fcdd612b6e7c",
+      "source_sha256": "9f0b66b970513db1f2a264dc6c26250422bd0ec86e67a406cf8f4a0e7c53c2dc",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 13,
@@ -244,7 +246,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "0946e53e43bdb6fc2bea88f3035180f21d2205cbb9c7f0f4db1878f6a24074eb",
+      "source_sha256": "cfd8835a2854a9fc647d771e195147ec86191918bd297da4f7282be3cef2c21e",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 14,
@@ -261,7 +263,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "7eec1f4adf0e1f3ea6007468a8c44966329942770e164bb75437138ec78f93ce",
+      "source_sha256": "05c114eeff10cde5f86bc2f73d5ecc29f79d486bc3d767c9eaca39cf2e2297be",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 15,
@@ -278,7 +280,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "755bd00290013447647f7e2666895f9c13c0d7a9f50e8a0c4d05e8b99c95028b"
+      "source_sha256": "e0b62353c858223d69985bd0316d616c7929dedb891823edeb4d07d12215ca7d"
     },
     {
       "id": "execution-policy",
@@ -288,7 +290,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "1c6f3cafd0bf6e595b2080a7f3da6d97bac9d0bc70cbe88eb9d18c4867ef1335",
+      "source_sha256": "99175ceef1c5e198ed1bfa2c09b8172258006a64742dcced62252f8fdf65b2ce",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 17,
@@ -305,7 +307,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "f8dad31b3321bbe65cabdaf5429c343adb07e228d62bbe0d8af2600d7a6a5a77"
+      "source_sha256": "1ebb2269e8e9700a22366ebfb895678b404745a77adecccf4de0a0fa9c185d22"
     },
     {
       "id": "sandbox",
@@ -315,7 +317,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "24fb75337c3f0f0c8dc5db4f055712275a3d6f97e8183f6bf12721fe110efe88",
+      "source_sha256": "27c1759f286eb07f726b212b14e50f442f4fdff7ce5533e238a42f0c04ac3cb6",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 26,
@@ -334,7 +336,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "d32eb3472b04ca5437f421e4dfa122a50b19d02fe6120a94917a00b994b98487",
+      "source_sha256": "ce8b973de05bdac12cbe46bff8a705fb41a79da285d8e87c43f7c582441ac833",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 30,
@@ -373,7 +375,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "b4bc75daeae80772f9e293674b7d2e60aaf6ca4dd1deeb5d151096f8d242c331",
+      "source_sha256": "31f9fbb4c84fa860eaf3d60de67dd2c1c56bf2b640fb05c55f6a8f4188ae2483",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 32,
@@ -395,7 +397,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "f9592dc83e5be8fe88204b8d81be2fb23238ec85ef23c8ef2a6ad10bded1f5e4",
+      "source_sha256": "5fc78a1e5b59d7b2e54a7bc395f158a12759303e64b2a4b9b839880d989c8ae9",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 33,
@@ -413,7 +415,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "2d63f8140670b2ff4b6ad187d6462596b8d7f5a73072d3b7443fe55762fb8676",
+      "source_sha256": "3ea60fcc869ba97d0ca0b14628666b79713862dc4976b831fd4154e1cf146a4e",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 34,
@@ -429,7 +431,7 @@
       "placements": [
         "kb"
       ],
-      "source_sha256": "10b280cec395ee3f2eb3254e9da2245aeb37c8f33d716ff5f8a4dd96aa239c66",
+      "source_sha256": "240b7043339c7efafb08041d1d8326cf15e72b437334c1c5f9edc71bca43acd2",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 35,
@@ -446,7 +448,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "32a305260d2669a585fb849265232e8acbb7c10b92c3a0f5cfd788ce3799e6f9",
+      "source_sha256": "0b6366da836a3e0280bc61b06f56461acc9c8cc8e4d144e20eeeb75a2800873a",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 28,
@@ -464,7 +466,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "b6f596f9aaa2b9aa462efe3026a07548550b7b82aac1c1621fe261dadb51bfba",
+      "source_sha256": "92af3e4adaaec54538430fbb083a0851b0cfdc7506bedc048b8f5ab11c45aa9d",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 19,
@@ -480,7 +482,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "daa8e11862707f6c9c048ebfb45fbde6ad52664b5d8015355d7a415972f3930a",
+      "source_sha256": "36e6778d47f5a7e5e01a84393bbc9e1ec2e1a07bab9c8ee6193544c8e89ad3bf",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 20,
@@ -499,7 +501,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "643b5d4fb0f17cf178f96434dd8f3a16828a47b7ec1b25bc8cb34b8ceb0e7c9b",
+      "source_sha256": "0b2dd0756fd0173ec2c98b415f01d6bd9539985bcc9db6329fd5b7a60318bbf3",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,
@@ -517,7 +519,7 @@
       "placements": [
         "kb"
       ],
-      "source_sha256": "b27ebaa64c5fbfe97e1dafcf77bf26d36d41c053200d7644116182f2c917f4a1",
+      "source_sha256": "d344988f3622677157957b03a6f7cb6fda9f60595e768c6d2978c5248767a2a2",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 22,
@@ -533,7 +535,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "4ae2c922647d4fb2595fbb1d08f600b8fc399c062ecd488e269bf6327a9b3c6e",
+      "source_sha256": "e61e3378fd6685c442da6a6129dafb0ad5187fa7db93e1eaebcd370ec6be3a35",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 23,
@@ -549,7 +551,7 @@
       "placements": [
         "kb"
       ],
-      "source_sha256": "7456d5beaf626dd919f5783111990969b552ffbf6feeca35cc3e38c0f5dc75ef",
+      "source_sha256": "87b192115acff9d97b03f6627a6e98c0804be278d16ffdcd4a5c338a875cc8d2",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 24,
@@ -566,7 +568,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "ecbf0c26b68ec359d7daae032cab8aa02f8c1cf247221369b2631407dcb135f5",
+      "source_sha256": "7ae0c3e5e45612e5f6e835797a97a105bf6a706d18c1672cdc6fe65bd16c3ab2",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 25,
@@ -583,7 +585,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "18ad82de006bfc2872c45a5fd380cf90d55cb7c0ed293b549ac794847fadefd6",
+      "source_sha256": "4450e1765fae59c414189e1aa9ac1f62f0f7a0ccb96369c1caf710d83bd08d74",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 27,
@@ -608,7 +610,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "8331317256252f4b7cb0b439fdf8fbacd2b611d49dcb02250053f7e1b9093a1c"
+      "source_sha256": "4f2c43c6605f51f6f1c89a177e791e019c39eee5f94b752683a6ddfa5d86b060"
     }
   ]
 }

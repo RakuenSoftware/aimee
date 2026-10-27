@@ -1,3 +1,4 @@
+#include "support/ir_tool_fixture.h"
 /* test_agent_delegate_root.c: focused delegate root-cause regressions. */
 #include <assert.h>
 #include <stdio.h>
@@ -11,8 +12,12 @@
 #include "db1_client/agent_jobs.h"
 #include "agent_tasks.h"
 #include "agent_config.h"
+#include "config_client.h"
 #include <aimee/tools/agent_tools.h>
+#include <aimee/delegates/delegate_backend.h>
 #include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_provider_container.h"
+#include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -41,7 +46,7 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void)
 
    char args[1024];
    snprintf(args, sizeof(args), "{\"path\":\"%s\",\"content\":\"should not write\"}", path);
-   char *result = dispatch_tool_call("write_file", args, 1000);
+   char *result = fixture_dispatch_tool("write_file", args, 1000);
    assert(result != NULL);
    assert(strstr(result, "delegate cancelled") != NULL);
    assert(access(path, F_OK) != 0);
@@ -344,16 +349,47 @@ void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void)
 
 void test_parent_write_guard_allows_workspace_file_ops(void)
 {
+   int prior_require_worktree = config_require_session_worktree();
+   assert(config_set_require_session_worktree(1) == 0);
    char root[512];
    snprintf(root, sizeof(root), "%s/aimee_parent_guard_file_ops_XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(root) != NULL);
 
    char worktree[512];
-   snprintf(worktree, sizeof(worktree), "%s/.aimee/worktrees/delegate/main", root);
+   snprintf(worktree, sizeof(worktree), "%s/.aimee/worktrees/delegate/1234abcd", root);
    assert(platform_mkdir_p(worktree, 0700) == 0 || access(worktree, F_OK) == 0);
 
+   /* A real repository marker keeps the non-Git document exception out of this test. */
+   char git_marker[512];
+   snprintf(git_marker, sizeof git_marker, "%s/.git", root);
+   assert(!platform_mkdir_p(git_marker, 0700));
+   agent_tools_parent_write_guard_clear();
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
    agent_tools_parent_write_guard_set(root, worktree);
+   assert(!agent_tools_session_isolation_blocks("native.txt", worktree));
+   assert(agent_tools_session_isolation_blocks("../escape.txt", worktree));
+   assert(agent_tools_session_isolation_blocks("native.txt", root));
+   char sibling[768];
+   snprintf(sibling, sizeof sibling, "%s-other/file.txt", worktree);
+   assert(agent_tools_session_isolation_blocks(sibling, worktree));
    run_cmd_set_cwd(worktree);
+   char *native = fixture_dispatch_tool("write_file",
+                                        "{\"path\":\"native.txt\",\"content\":\"scope\\n\"}", 1000);
+   assert(native && !strstr(native, "write blocked"));
+   free(native);
+   char native_path[768], actual[32] = "";
+   snprintf(native_path, sizeof native_path, "%s/native.txt", worktree);
+   FILE *written = fopen(native_path, "rb");
+   assert(written && fread(actual, 1, sizeof actual - 1, written) == 6 &&
+          !strcmp(actual, "scope\n") && !fclose(written));
+   agent_tools_write_capable_set(0);
+   native = fixture_dispatch_tool("write_file",
+                                  "{\"path\":\"forbidden.txt\",\"content\":\"forbidden\"}", 1000);
+   assert(native && strstr(native, "read-only delegate"));
+   free(native);
+   snprintf(native_path, sizeof native_path, "%s/forbidden.txt", worktree);
+   assert(access(native_path, F_OK) != 0);
+   agent_tools_write_capable_set(1);
    char *result = tool_bash("touch marker.txt", 5000);
    run_cmd_set_cwd(NULL);
 
@@ -419,6 +455,10 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    result = tool_bash(command, 5000);
    run_cmd_set_cwd(NULL);
    agent_tools_parent_write_guard_clear();
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
+   agent_tools_parent_write_guard_set(root, root);
+   assert(agent_tools_session_isolation_blocks("native.txt", worktree));
+   agent_tools_parent_write_guard_clear();
 
    assert(result != NULL);
    json = cJSON_Parse(result);
@@ -433,6 +473,7 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    assert(access(outside, F_OK) != 0);
 
    platform_test_rmrf(root);
+   assert(config_set_require_session_worktree(prior_require_worktree) == 0);
    printf("  PASS: test_parent_write_guard_allows_workspace_file_ops\n");
 }
 
@@ -624,7 +665,7 @@ void test_container_execute_script_runs_in_sandbox(void)
                    sandbox_root) < (int)sizeof(sandbox_cwd));
    assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
    run_cmd_set_cwd(sandbox_cwd);
-   char *result = dispatch_tool_call(
+   char *result = fixture_dispatch_tool(
        "execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\",\"timeout_secs\":7}", 5000);
    run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();

@@ -37,7 +37,7 @@ var aliases = map[string]string{
 }
 
 // NewHandler adds real execution to the delegates module while preserving the
-// fixed v1 role-canonicalization request used by older C callers. V2 is JSON
+// fixed v1 role-canonicalization request used by older C callers. Versioned execution is canonical IR JSON
 // because prompts and responses are variable-sized bus messages.
 func NewHandler(executor Executor) ring.ModuleHandler {
 	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
@@ -136,7 +136,7 @@ func NewHandler(executor Executor) ring.ModuleHandler {
 		if err := decoder.Decode(&trailing); err != io.EOF ||
 			decoded.Version != delegatecontract.WireVersion ||
 			strings.TrimSpace(decoded.Role) == "" || strings.TrimSpace(decoded.Persona) == "" ||
-			strings.TrimSpace(decoded.Prompt) == "" || decoded.MaxTurns < 0 ||
+			decoded.Input == nil || !decoded.Input.Valid() || decoded.MaxTurns < 0 ||
 			decoded.ExecutionTimeoutMS < 0 || decoded.ExecutionTimeoutMS > int64((24*time.Hour)/time.Millisecond) {
 			return nil, ring.ModuleStatusInvalidRequest
 		}
@@ -155,7 +155,7 @@ func NewHandler(executor Executor) ring.ModuleHandler {
 			defer deadlineCancel()
 		}
 		result := executor.Execute(ctx, decoded)
-		if result.Version != delegatecontract.WireVersion ||
+		if delegatecontract.AdmitResult(&result) != nil || result.Version != delegatecontract.WireVersion ||
 			(result.Status != "done" && result.Status != "failed") ||
 			(result.Status == "done" && result.Termination != nil) ||
 			(result.Termination != nil &&

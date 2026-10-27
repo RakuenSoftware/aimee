@@ -101,12 +101,8 @@ func TestSharedLargeLegacySourceReadsAndImport(t *testing.T) {
 					t.Fatal("legacy source lock released between chunk reads")
 				}
 			}
-			status, cells, err := call(11, test.id, "agent", test.provider)
-			if err != nil || status != domain.StatusOK || len(cells) != 1 || cells[0] != test.raw {
-				t.Errorf("exactsource load: status=%d cells=%d err=%v", status, len(cells), err)
-			}
-			status, cells, err = call(15, test.id)
-			if err != nil || status != domain.StatusOK || len(cells) != 6 || cells[3] != test.raw {
+			status, cells, err := call(15, test.id)
+			if err != nil || status != domain.StatusOK || len(cells) != 6 || cells[5] != test.raw {
 				t.Errorf("latest exactsource: status=%d cells=%d err=%v", status, len(cells), err)
 			}
 			sum := sha256.Sum256([]byte(test.raw))
@@ -227,45 +223,36 @@ func TestSharedLegacyGetterExactReplyEnvelopeBoundary(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO primary_sessions(session_id,agent_name,provider,messages_json,created_at,updated_at) VALUES($1,$2,$3,'','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`, session, agent, provider); err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []uint32{11, 15} {
-		for _, excess := range []int{0, 1} {
-			t.Run(fmt.Sprintf("operation%d/extra%d", op, excess), func(t *testing.T) {
-				capacity := int(ring.ModuleMessageMaxBody) - 12
-				fields := []string{session, agent, provider}
-				if op == 15 {
-					capacity = int(ring.ModuleMessageMaxBody) - 8 - 4*6 - len(session) - len(agent) - len(provider) - 2*19
-					fields = []string{session}
+	for _, excess := range []int{0, 1} {
+		t.Run(fmt.Sprintf("extra%d", excess), func(t *testing.T) {
+			capacity := int(ring.ModuleMessageMaxBody) - 8 - 4*6 - len(session) - len(agent) - len(provider) - 2*19
+			fields := []string{session}
+			size := capacity + excess
+			raw := strings.Repeat("火", size/3) + strings.Repeat("x", size%3)
+			if _, err := pool.Exec(ctx, `UPDATE primary_sessions SET messages_json=$1 WHERE session_id=$2`, raw, session); err != nil {
+				t.Fatal(err)
+			}
+			request, err := wire.EncodeFields(15, fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, transport := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
+			status, cells, err := wire.DecodeFields(reply)
+			if transport != ring.ModuleStatusOK || err != nil || len(reply) > int(ring.ModuleMessageMaxBody) {
+				t.Fatal("invalid envelope", transport, status, len(reply), err)
+			}
+			if excess == 0 {
+				const index = 5
+				if status != domain.StatusOK || len(cells) <= index || cells[index] != raw || len(reply) != int(ring.ModuleMessageMaxBody) {
+					t.Fatal("exact-boundary UTF8 source changed", status, len(cells), len(reply))
 				}
-				size := capacity + excess
-				raw := strings.Repeat("火", size/3) + strings.Repeat("x", size%3)
-				if _, err := pool.Exec(ctx, `UPDATE primary_sessions SET messages_json=$1 WHERE session_id=$2`, raw, session); err != nil {
-					t.Fatal(err)
-				}
-				request, err := wire.EncodeFields(op, fields)
-				if err != nil {
-					t.Fatal(err)
-				}
-				reply, transport := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
-				status, cells, err := wire.DecodeFields(reply)
-				if transport != ring.ModuleStatusOK || err != nil || len(reply) > int(ring.ModuleMessageMaxBody) {
-					t.Fatal("invalid envelope", transport, status, len(reply), err)
-				}
-				if excess == 0 {
-					index := 0
-					if op == 15 {
-						index = 3
-					}
-					if status != domain.StatusOK || len(cells) <= index || cells[index] != raw || len(reply) != int(ring.ModuleMessageMaxBody) {
-						t.Fatal("exact-boundary UTF8 source changed", status, len(cells), len(reply))
-					}
-				} else if status != domain.StatusTooLong || len(cells) != 0 || len(reply) != 8 {
-					t.Fatal("over-frame source did not return complete typed refusal", status, len(cells), len(reply))
-				}
-				var unchanged bool
-				if err = pool.QueryRow(ctx, `SELECT messages_json=$1 FROM primary_sessions WHERE session_id=$2`, raw, session).Scan(&unchanged); err != nil || !unchanged {
-					t.Fatal("boundary read changed source", err)
-				}
-			})
-		}
+			} else if status != domain.StatusTooLong || len(cells) != 0 || len(reply) != 8 {
+				t.Fatal("over-frame source did not return complete typed refusal", status, len(cells), len(reply))
+			}
+			var unchanged bool
+			if err = pool.QueryRow(ctx, `SELECT messages_json=$1 FROM primary_sessions WHERE session_id=$2`, raw, session).Scan(&unchanged); err != nil || !unchanged {
+				t.Fatal("boundary read changed source", err)
+			}
+		})
 	}
 }

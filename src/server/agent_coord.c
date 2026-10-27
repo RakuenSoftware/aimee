@@ -1,5 +1,4 @@
-/* agent_coord.c: multi-agent coordination (planner/critic/worker), quorum voting, hard directives
- */
+/* Delegate prompt resources and hard directives. */
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "kb_client.h"
@@ -32,7 +31,7 @@ static int path_within_root(const char *project_root, const char *abs_path)
    return abs_path[root_len] == '/' || abs_path[root_len] == '\0';
 }
 
-char *resolve_file_references(const char *prompt, const char *project_root)
+char *resolve_file_reference_context(const char *prompt, const char *project_root)
 {
    if (!prompt)
       return NULL;
@@ -47,17 +46,16 @@ char *resolve_file_references(const char *prompt, const char *project_root)
    {
       if (*p != '@')
       {
-         dstr_append_char(&out, *p++);
+         p++;
          continue;
       }
 
       const char *path_start = p + 1;
-      /* Not a file reference: end-of-string, a non-path char, or a doubled '@'
-       * (a unified-diff hunk header "@@ -a,b +c,d @@"). Emit the '@' literally so
-       * diffs/code carried in the prompt are never corrupted. */
+      /* Ignore non-references and diff hunk headers. The original authored task
+       * remains in its separate Message block; this view contains file evidence. */
       if (!*path_start || !is_path_char(*path_start) || *path_start == '@')
       {
-         dstr_append_char(&out, *p++);
+         p++;
          continue;
       }
 
@@ -67,7 +65,7 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       size_t path_len = (size_t)(path_end - path_start);
       if (path_len == 0 || path_len >= FILE_REF_PATH_MAX)
       {
-         dstr_append_char(&out, *p++);
+         p++;
          continue;
       }
 
@@ -83,13 +81,9 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       else
          snprintf(abs_path, sizeof(abs_path), "%s", rel_path);
 
-      /* Only an EXISTING, in-project file is treated as a reference. A @token that
-       * escapes the root or doesn't resolve to a real file is emitted LITERALLY
-       * and is NOT counted against the budget: prompts routinely carry diffs and
-       * code whose '@' tokens (decorators like @property, emails, doc tags, diff
-       * hunk headers) are not file references, and rewriting them as markers
-       * corrupted the content and exhausted the ref budget (the roundtable
-       * "sandbox-blind" failure). */
+      /* Only existing in-project files contribute evidence or consume the
+       * reference budget. Decorators, emails, missing paths and escapes add no
+       * evidence; the original task is preserved by its canonical Message owner. */
       size_t abs_len = strlen(abs_path);
       int escapes = (strstr(abs_path, "/../") != NULL ||
                      (abs_len >= 3 && strcmp(abs_path + abs_len - 3, "/..") == 0));
@@ -97,14 +91,11 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       FILE *f = (!escapes && in_root) ? fopen(abs_path, "r") : NULL;
       if (!f)
       {
-         dstr_append_char(&out, '@');
-         dstr_append(&out, rel_path, path_len);
          p = path_end;
          continue;
       }
 
-      /* A real file past the per-prompt budget: explicit marker (diff/code never
-       * reaches here — its non-file @tokens are left literal above). */
+      /* Emit an explicit evidence marker for real files beyond the budget. */
       if (refs_resolved >= FILE_REF_MAX_REFS)
       {
          dstr_appendf(&out, "[file reference limit reached: @%s left unresolved]", rel_path);
@@ -117,8 +108,6 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       if (!content)
       {
          fclose(f);
-         dstr_append_char(&out, '@');
-         dstr_append(&out, rel_path, path_len);
          p = path_end;
          continue;
       }
@@ -339,39 +328,6 @@ char *delegate_prompt_limit(const char *prompt, int token_budget)
  * agent_effective_context_window() in the runtime.
  *
  * Returns 0 when nothing is known, so the caller keeps its existing default. */
-int delegate_token_budget_for_agent(const char *model, int agent_context_window)
-{
-   int window = agent_context_window > 0 ? agent_context_window : model_context_window(model);
-   if (window <= 0)
-      return 0;
-   int reserve = model_max_output(NULL, model);
-   if (reserve > 0 && reserve < window)
-      window -= reserve;
-   if (window < DELEGATE_TOKEN_BUDGET_MIN_TASK)
-      window = DELEGATE_TOKEN_BUDGET_MIN_TASK;
-   return window;
-}
-
-/* The budget that fits EVERY agent still eligible after routing. The agent is
- * chosen downstream, so the prompt must fit whichever one wins; the smallest
- * eligible window is the only safe answer. */
-int delegate_token_budget_for_agents(const agent_config_t *cfg)
-{
-   if (!cfg || cfg->agent_count <= 0)
-      return 0;
-   int smallest = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      int budget = delegate_token_budget_for_agent(cfg->agents[i].model,
-                                                   cfg->agents[i].middleware.context_window);
-      if (budget <= 0)
-         continue;
-      if (smallest == 0 || budget < smallest)
-         smallest = budget;
-   }
-   return smallest;
-}
-
 int delegate_token_budget_load(const char *project_root, const char *role)
 {
    /* Reads from the global per-project config:
@@ -419,195 +375,6 @@ int delegate_token_budget_load(const char *project_root, const char *role)
    }
    fclose(f);
    return budget;
-}
-
-/* --- Multi-Agent Coordination (Feature 8) --- */
-
-int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
-{
-   if (!cfg || !task || !out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   /* Phase 1: Planner creates a plan */
-   char planner_prompt[4096];
-   snprintf(planner_prompt, sizeof(planner_prompt),
-            "Create a step-by-step plan as a JSON array for this task. "
-            "Each step should have: action (shell command), precondition (text), "
-            "success_predicate (text to find in output), rollback (shell command or empty). "
-            "Task: %s\n\nRespond ONLY with a JSON array, no other text.",
-            task);
-
-   agent_result_t planner_result = {0};
-   int rc = agent_run(cfg, "execute", NULL, planner_prompt, 0, &planner_result);
-   if (rc != 0 || !planner_result.response)
-   {
-      snprintf(out->error, sizeof(out->error), "planner failed: %s", planner_result.error);
-      agent_result_clear_response(&planner_result);
-      return -1;
-   }
-
-   /* Phase 2: Critic reviews the plan */
-   char critic_prompt[8192];
-   snprintf(critic_prompt, sizeof(critic_prompt),
-            "Review this plan for a task. Flag any risks, missing steps, or unsafe commands. "
-            "If the plan is good, respond with APPROVED. If not, respond with REJECTED followed "
-            "by your concerns.\n\nTask: %s\n\nPlan:\n%s",
-            task, planner_result.response);
-
-   agent_result_t critic_result = {0};
-   rc = agent_run(cfg, "execute", NULL, critic_prompt, 0, &critic_result);
-
-   int approved = 1;
-   if (rc == 0 && critic_result.response)
-   {
-      if (strstr(critic_result.response, "REJECTED") != NULL)
-         approved = 0;
-   }
-   agent_result_clear_response(&critic_result);
-
-   if (!approved)
-   {
-      snprintf(out->error, sizeof(out->error), "plan rejected by critic");
-      agent_result_move_response(out, &planner_result);
-      return -1;
-   }
-
-   /* Phase 3: Worker executes the plan */
-   cJSON *plan_json = cJSON_Parse(planner_result.response);
-   agent_result_clear_response(&planner_result);
-
-   if (!plan_json || !cJSON_IsArray(plan_json))
-   {
-      /* If the planner didn't return valid JSON, try direct execution */
-      cJSON_Delete(plan_json);
-      return agent_run(cfg, "execute", NULL, task, 0, out);
-   }
-
-   char *steps_doc = cJSON_PrintUnformatted(plan_json);
-   int plan_id = steps_doc ? db1_execution_plan_create(cfg->default_agent, task, steps_doc) : -1;
-   free(steps_doc);
-   cJSON_Delete(plan_json);
-
-   if (plan_id < 0)
-      return agent_run(cfg, "execute", NULL, task, 0, out);
-
-   plan_t plan;
-   if (db1_execution_plan_get(plan_id, &plan) != 0)
-      return -1;
-
-   agent_t *ag = agent_route(cfg, "execute");
-   if (!ag)
-   {
-      /* agent_plan_execute reaches agent_execute, which reads agent->name with
-       * no NULL guard: running the plan without a seat is a segfault, not a
-       * degraded run. The ternary below used to imply a NULL agent was survivable
-       * -- it only ever survived because a route this late almost always found
-       * something. Refuse, and say which of the two reasons it was. */
-      agent_route_failure_message("execute", out->error, sizeof(out->error));
-      (void)db1_execution_plan_set_status(plan.id, "failed");
-      return -1;
-   }
-   rc = agent_plan_execute(&plan, ag, ag->timeout_ms);
-
-   /* Build response from plan outputs */
-   size_t resp_len = 1024;
-   for (int i = 0; i < plan.step_count; i++)
-      resp_len += strlen(plan.steps[i].output) + 128;
-   char *composed = malloc(resp_len);
-   if (composed)
-   {
-      size_t pos = 0;
-      for (int i = 0; i < plan.step_count; i++)
-      {
-         static const char *status_names[] = {"pending", "running", "done", "failed",
-                                              "rolled_back"};
-         const char *sn = (plan.steps[i].status >= 0 && plan.steps[i].status <= 4)
-                              ? status_names[plan.steps[i].status]
-                              : "unknown";
-         pos += (size_t)snprintf(composed + pos, resp_len - pos, "Step %d [%s]: %s\n%s\n\n", i + 1,
-                                 sn, plan.steps[i].action, plan.steps[i].output);
-      }
-   }
-   if (composed)
-   {
-      if (agent_result_from_host_text(out, composed))
-         rc = -1;
-      free(composed);
-   }
-   out->success = (rc == 0);
-   snprintf(out->agent_name, MAX_AGENT_NAME, "%s", plan.agent_name);
-   return rc;
-}
-
-int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
-               agent_result_t *out)
-{
-   if (!cfg || !prompt || !out || n_voters <= 0)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   if (n_voters > AGENT_MAX_COORD_AGENTS)
-      n_voters = AGENT_MAX_COORD_AGENTS;
-
-   agent_task_t tasks[AGENT_MAX_COORD_AGENTS];
-   agent_result_t results[AGENT_MAX_COORD_AGENTS];
-
-   for (int i = 0; i < n_voters; i++)
-   {
-      tasks[i].role = role;
-      tasks[i].system_prompt = NULL;
-      tasks[i].user_prompt = prompt;
-      tasks[i].max_tokens = 0;
-      tasks[i].temperature = 0.3 + (0.1 * i); /* slight variation */
-   }
-
-   int successes = agent_run_parallel(cfg, tasks, n_voters, results, 0 /* no deadline */);
-   if (successes == 0)
-   {
-      snprintf(out->error, sizeof(out->error), "all voters failed");
-      for (int i = 0; i < n_voters; i++)
-         agent_result_clear_response(&results[i]);
-      return -1;
-   }
-
-   /* Simple majority: pick the most common response (by first 200 chars) */
-   int best_idx = -1;
-   int best_count = 0;
-   for (int i = 0; i < n_voters; i++)
-   {
-      if (!results[i].success || !results[i].response)
-         continue;
-      int count = 0;
-      for (int j = 0; j < n_voters; j++)
-      {
-         if (!results[j].success || !results[j].response)
-            continue;
-         if (strncmp(results[i].response, results[j].response, 200) == 0)
-            count++;
-      }
-      if (count > best_count)
-      {
-         best_count = count;
-         best_idx = i;
-      }
-   }
-
-   if (best_idx >= 0)
-   {
-      agent_result_move_response(out, &results[best_idx]); /* don't free, transferred to out */
-      out->success = 1;
-      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", results[best_idx].agent_name);
-      out->confidence = (best_count * 100) / n_voters;
-   }
-
-   /* Free remaining results */
-   for (int i = 0; i < n_voters; i++)
-      agent_result_clear_response(&results[i]);
-
-   return out->success ? 0 : -1;
 }
 
 /* --- Hard Directive Enforcement (Feature 15) --- */

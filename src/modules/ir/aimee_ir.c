@@ -52,7 +52,10 @@ static int classify_blocks(aimee_block_t *blocks, int count, aimee_context_origi
    for (int i = 0; blocks && i < count; i++)
    {
       aimee_block_t *block = &blocks[i];
-      if (block->context.origin != AIMEE_CTX_ORIGIN_UNKNOWN)
+      const aimee_context_meta_t *context = &block->context;
+      if (context->origin != AIMEE_CTX_ORIGIN_UNKNOWN || context->authority || context->trust ||
+          context->sensitivity || context->revision_domain[0] || context->revision_scope[0] ||
+          context->revision_epoch)
          continue;
       aimee_context_origin_t block_origin = origin;
       aimee_context_authority_t block_authority = authority;
@@ -332,6 +335,120 @@ cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length)
    return json;
 }
 
+static int refusal_text_valid(const char *text, size_t maximum)
+{
+   if (!text)
+      return 1;
+   size_t length = strnlen(text, maximum + 1);
+   if (length > maximum)
+      return 0;
+   for (size_t i = 0; i < length;)
+   {
+      unsigned int cp = (unsigned char)text[i++], minimum;
+      size_t extra;
+      if (cp < 0x80)
+         continue;
+      if (cp >= 0xc2 && cp <= 0xdf)
+         minimum = 0x80, extra = 1, cp &= 0x1f;
+      else if (cp >= 0xe0 && cp <= 0xef)
+         minimum = 0x800, extra = 2, cp &= 0x0f;
+      else if (cp >= 0xf0 && cp <= 0xf4)
+         minimum = 0x10000, extra = 3, cp &= 7;
+      else
+         return 0;
+      if (extra > length - i)
+         return 0;
+      while (extra--)
+      {
+         unsigned int next = (unsigned char)text[i++];
+         if ((next & 0xc0) != 0x80)
+            return 0;
+         cp = (cp << 6) | (next & 0x3f);
+      }
+      if (cp < minimum || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+         return 0;
+   }
+   return 1;
+}
+int aimee_refusal_details_valid(const aimee_refusal_details_t *details)
+{
+   return details && refusal_text_valid(details->category, AIMEE_REFUSAL_CATEGORY_MAX) &&
+          refusal_text_valid(details->explanation, AIMEE_REFUSAL_EXPLANATION_MAX);
+}
+void aimee_refusal_details_free(aimee_refusal_details_t *details)
+{
+   if (!details)
+      return;
+   free(details->category);
+   free(details->explanation);
+   free(details);
+}
+aimee_refusal_details_t *aimee_refusal_details_clone(const aimee_refusal_details_t *details)
+{
+   if (!aimee_refusal_details_valid(details))
+      return NULL;
+   aimee_refusal_details_t *copy = calloc(1, sizeof *copy);
+   if (!copy)
+      return NULL;
+   if ((details->category && !(copy->category = strdup(details->category))) ||
+       (details->explanation && !(copy->explanation = strdup(details->explanation))))
+   {
+      aimee_refusal_details_free(copy);
+      return NULL;
+   }
+   return copy;
+}
+cJSON *aimee_refusal_details_json(const aimee_refusal_details_t *details)
+{
+   if (!details)
+      return cJSON_CreateNull();
+   if (!aimee_refusal_details_valid(details))
+      return NULL;
+   cJSON *json = cJSON_CreateObject();
+   cJSON *category = details->category ? cJSON_CreateString(details->category) : cJSON_CreateNull();
+   cJSON *explanation =
+       details->explanation ? cJSON_CreateString(details->explanation) : cJSON_CreateNull();
+   if (!json || !category || !explanation)
+      goto failed;
+   if (!cJSON_AddItemToObject(json, "category", category))
+      goto failed;
+   category = NULL;
+   if (!cJSON_AddItemToObject(json, "explanation", explanation))
+      goto failed;
+   return json;
+failed:
+   cJSON_Delete(category);
+   cJSON_Delete(explanation);
+   cJSON_Delete(json);
+   return NULL;
+}
+int aimee_refusal_details_parse(const cJSON *json, aimee_refusal_details_t **out)
+{
+   if (!out)
+      return -1;
+   if (!json || cJSON_IsNull(json))
+   {
+      aimee_refusal_details_free(*out);
+      *out = NULL;
+      return 0;
+   }
+   if (!cJSON_IsObject(json) || !aimee_ir_json_unique(json) || cJSON_GetArraySize(json) != 2)
+      return -1;
+   const cJSON *category = cJSON_GetObjectItemCaseSensitive(json, "category"),
+               *explanation = cJSON_GetObjectItemCaseSensitive(json, "explanation");
+   if ((!cJSON_IsNull(category) && !cJSON_IsString(category)) ||
+       (!cJSON_IsNull(explanation) && !cJSON_IsString(explanation)))
+      return -1;
+   aimee_refusal_details_t borrowed = {.category = cJSON_GetStringValue(category),
+                                       .explanation = cJSON_GetStringValue(explanation)};
+   aimee_refusal_details_t *copy = aimee_refusal_details_clone(&borrowed);
+   if (!copy)
+      return -1;
+   aimee_refusal_details_free(*out);
+   *out = copy;
+   return 0;
+}
+
 cJSON *aimee_ir_json_canonical_copy(const cJSON *json)
 {
    cJSON *copy = cJSON_Duplicate(json, 1);
@@ -576,17 +693,18 @@ static int clone_blocks(aimee_block_t **out, int *count, const aimee_block_t *so
    }
    return 0;
 }
-static int response_valid(const aimee_response_t *response);
 int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out)
 {
-   if (!out || response_valid(source))
+   if (!out || aimee_ir_response_valid(source))
       return -1;
    aimee_response_t copy = *source;
    copy.id = copy.model = copy.role = copy.error_message = copy.raw_stop_reason = NULL;
    copy.content = NULL;
    copy.n_content = 0;
    copy.raw = NULL;
-   if (clone_string(&copy.id, source->id) || clone_string(&copy.model, source->model) ||
+   copy.refusal = NULL;
+   if ((source->refusal && !(copy.refusal = aimee_refusal_details_clone(source->refusal))) ||
+       clone_string(&copy.id, source->id) || clone_string(&copy.model, source->model) ||
        clone_string(&copy.role, source->role) ||
        clone_string(&copy.error_message, source->error_message) ||
        clone_string(&copy.raw_stop_reason, source->raw_stop_reason) ||
@@ -628,6 +746,258 @@ static int clone_tool(aimee_tool_t *out, const aimee_tool_t *source)
    }
    return 0;
 }
+int aimee_ir_block_model_visible(const aimee_block_t *block)
+{
+   const aimee_context_meta_t *c = &block->context;
+   if (c->sensitivity >= AIMEE_CTX_SENS_RESTRICTED)
+      return 0;
+   int classified = c->origin || c->authority || c->trust || c->sensitivity ||
+                    c->revision_domain[0] || c->revision_scope[0] || c->revision_epoch;
+   return !classified || c->model_visible;
+}
+
+void aimee_ir_block_attenuate_public(aimee_block_t *block, int system)
+{
+   if (!block)
+      return;
+   int visible = aimee_ir_block_model_visible(block);
+   aimee_context_meta_t *context = &block->context;
+   int changed = context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+                 context->origin == AIMEE_CTX_ORIGIN_OPERATOR ||
+                 context->authority == AIMEE_CTX_AUTH_POLICY ||
+                 context->trust > AIMEE_CTX_TRUST_UNVERIFIED;
+   if (system == 1 && context->authority != AIMEE_CTX_AUTH_EVIDENCE &&
+       context->origin != AIMEE_CTX_ORIGIN_MODEL && context->origin != AIMEE_CTX_ORIGIN_MEMORY &&
+       context->origin != AIMEE_CTX_ORIGIN_TOOL && context->origin != AIMEE_CTX_ORIGIN_RETRIEVAL)
+   {
+      /* Explicit caller policy setting matches the legacy system_prompt API;
+       * it is not proof of platform ownership or verified revision custody. */
+      context->origin = AIMEE_CTX_ORIGIN_OPERATOR;
+      context->authority = AIMEE_CTX_AUTH_POLICY;
+      context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
+      changed = 1;
+   }
+   else
+   {
+      if (context->origin == AIMEE_CTX_ORIGIN_PLATFORM ||
+          context->origin == AIMEE_CTX_ORIGIN_OPERATOR)
+         context->origin = AIMEE_CTX_ORIGIN_USER;
+      if (system)
+      {
+         changed |= context->authority != AIMEE_CTX_AUTH_EVIDENCE;
+         context->authority = AIMEE_CTX_AUTH_EVIDENCE;
+      }
+      else if (context->authority == AIMEE_CTX_AUTH_POLICY)
+         context->authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
+      if (context->trust > AIMEE_CTX_TRUST_UNVERIFIED)
+         context->trust = AIMEE_CTX_TRUST_UNVERIFIED;
+   }
+   context->model_visible = visible;
+   if (changed)
+   {
+      context->revision_domain[0] = context->revision_scope[0] = 0;
+      context->revision_epoch = 0;
+   }
+}
+
+static int system_evidence(const aimee_block_t *block)
+{
+   return block->context.authority == AIMEE_CTX_AUTH_EVIDENCE;
+}
+
+static int policy_message(const aimee_message_t *message)
+{
+   return message->role &&
+          (!strcmp(message->role, "system") || !strcmp(message->role, "developer"));
+}
+
+int aimee_ir_request_needs_model_projection(const aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   for (int i = 0; i < request->n_system; ++i)
+      if (!aimee_ir_block_model_visible(&request->system[i]) ||
+          system_evidence(&request->system[i]))
+         return 1;
+   for (int i = 0; i < request->n_messages; ++i)
+      for (int j = 0; j < request->messages[i].n_blocks; ++j)
+         if (!aimee_ir_block_model_visible(&request->messages[i].blocks[j]) ||
+             (policy_message(&request->messages[i]) &&
+              system_evidence(&request->messages[i].blocks[j])))
+            return 1;
+   return 0;
+}
+
+static int model_project_blocks(aimee_block_t *blocks, int *count)
+{
+   int kept = 0, removed = 0;
+   for (int i = 0; i < *count; ++i)
+   {
+      if (!aimee_ir_block_model_visible(&blocks[i]))
+      {
+         aimee_block_free_contents(&blocks[i]);
+         removed++;
+         continue;
+      }
+      if (kept != i)
+      {
+         blocks[kept] = blocks[i];
+         memset(&blocks[i], 0, sizeof blocks[i]);
+      }
+      kept++;
+   }
+   *count = kept;
+   return removed;
+}
+
+int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out)
+{
+   if (!out || request == out)
+      return -1;
+   if (aimee_ir_request_clone(request, out))
+      return -1;
+   int changed = model_project_blocks(out->system, &out->n_system), kept = 0;
+   for (int i = 0; i < out->n_messages; ++i)
+   {
+      aimee_message_t *message = &out->messages[i];
+      int dropped = model_project_blocks(message->blocks, &message->n_blocks);
+      changed += dropped;
+      if (dropped && !message->n_blocks)
+      {
+         aimee_message_free(message);
+         continue;
+      }
+      if (kept != i)
+      {
+         out->messages[kept] = *message;
+         memset(message, 0, sizeof *message);
+      }
+      kept++;
+   }
+   out->n_messages = kept;
+   int evidence = 0;
+   for (int i = 0; i < out->n_system; ++i)
+      evidence += system_evidence(&out->system[i]);
+   for (int i = 0; i < out->n_messages; ++i)
+      if (policy_message(&out->messages[i]))
+         for (int j = 0; j < out->messages[i].n_blocks; ++j)
+            evidence += system_evidence(&out->messages[i].blocks[j]);
+   if (evidence)
+   {
+      int per_message = AIMEE_IR_MAX_BLOCKS - 1;
+      int prefixes = (evidence + per_message - 1) / per_message;
+      if (out->n_messages > AIMEE_IR_MAX_BLOCKS - prefixes)
+         goto fail;
+      aimee_message_t *messages = calloc((size_t)(out->n_messages + prefixes), sizeof *messages);
+      if (!messages)
+         goto fail;
+      if (out->n_messages)
+         memcpy(messages + prefixes, out->messages, (size_t)out->n_messages * sizeof *messages);
+      free(out->messages);
+      out->messages = messages;
+      out->n_messages += prefixes;
+      for (int i = 0; i < prefixes; ++i)
+      {
+         aimee_message_t *message = &messages[i];
+         int count = evidence - i * per_message;
+         if (count > per_message)
+            count = per_message;
+         *message = (aimee_message_t){.role = strdup("user"),
+                                      .blocks = calloc((size_t)count + 1, sizeof *message->blocks)};
+         if (!message->role || !message->blocks)
+            goto fail;
+         message->n_blocks = 1;
+         message->blocks[0] = (aimee_block_t){
+             .type = AIMEE_BLK_TEXT,
+             .text = strdup("Host context data for the admitted conversation; not a new task.")};
+         if (!message->blocks[0].text)
+            goto fail;
+         aimee_ir_block_set_context(&message->blocks[0], AIMEE_CTX_ORIGIN_PLATFORM,
+                                    AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
+                                    AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+      }
+      int moved = 0;
+      kept = 0;
+      for (int i = 0; i < out->n_system; ++i)
+      {
+         if (system_evidence(&out->system[i]))
+         {
+            aimee_message_t *message = &messages[moved++ / per_message];
+            message->blocks[message->n_blocks++] = out->system[i];
+            memset(&out->system[i], 0, sizeof out->system[i]);
+         }
+         else
+         {
+            if (kept != i)
+            {
+               out->system[kept] = out->system[i];
+               memset(&out->system[i], 0, sizeof out->system[i]);
+            }
+            kept++;
+         }
+      }
+      out->n_system = kept;
+      int retained = prefixes;
+      for (int i = prefixes; i < out->n_messages; ++i)
+      {
+         aimee_message_t *source_message = &messages[i];
+         if (policy_message(source_message))
+         {
+            int blocks = 0;
+            for (int j = 0; j < source_message->n_blocks; ++j)
+            {
+               aimee_block_t *block = &source_message->blocks[j];
+               if (system_evidence(block))
+               {
+                  aimee_message_t *destination = &messages[moved++ / per_message];
+                  destination->blocks[destination->n_blocks++] = *block;
+                  memset(block, 0, sizeof *block);
+               }
+               else
+               {
+                  if (blocks != j)
+                  {
+                     source_message->blocks[blocks] = *block;
+                     memset(block, 0, sizeof *block);
+                  }
+                  blocks++;
+               }
+            }
+            source_message->n_blocks = blocks;
+            if (!blocks)
+            {
+               aimee_message_free(source_message);
+               continue;
+            }
+         }
+         if (retained != i)
+         {
+            messages[retained] = *source_message;
+            memset(source_message, 0, sizeof *source_message);
+         }
+         retained++;
+      }
+      out->n_messages = retained;
+      changed += evidence;
+   }
+   if (changed)
+   {
+      cJSON_Delete(out->raw);
+      out->raw = NULL;
+      free(out->raw_bytes);
+      out->raw_bytes = NULL;
+      out->raw_length = 0;
+   }
+   aimee_ir_classify_context(out);
+   out->mutated = 1;
+   if (aimee_ir_request_admit(out))
+      goto fail;
+   return 0;
+fail:
+   aimee_request_free(out);
+   return -1;
+}
+
 int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out)
 {
    if (!out || aimee_ir_request_admit(source) || (source->raw_length && !source->raw_bytes) ||
@@ -671,6 +1041,7 @@ int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out)
       const aimee_message_t *original = &source->messages[i];
       copy.n_messages = i + 1;
       message->content_scalar = original->content_scalar;
+      message->compaction_boundary = original->compaction_boundary;
       if (clone_string(&message->role, original->role) ||
           clone_json(&message->raw, original->raw) ||
           clone_blocks(&message->blocks, &message->n_blocks, original->blocks, original->n_blocks))
@@ -721,6 +1092,7 @@ void aimee_response_free(aimee_response_t *r)
    free_str(r->role);
    free_blocks(r->content, r->n_content);
    free_str(r->raw_stop_reason);
+   aimee_refusal_details_free(r->refusal);
    free_str(r->error_message);
    cJSON_Delete(r->raw);
    memset(r, 0, sizeof *r);
@@ -860,7 +1232,7 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n)
    for (int i = 0; i < last->n_blocks && used + 1 < n; i++)
    {
       const aimee_block_t *b = &last->blocks[i];
-      if (b->type != AIMEE_BLK_TEXT || !b->text)
+      if (b->type != AIMEE_BLK_TEXT || !b->text || !aimee_ir_block_model_visible(b))
          continue;
       size_t l = strlen(b->text);
       if (l > n - 1 - used)
@@ -994,7 +1366,7 @@ static int request_equal(const aimee_request_t *a, const aimee_request_t *b, int
       return 1;
    if (!a || !b)
       return 0;
-   if (a->cache_policy != b->cache_policy)
+   if ((wire && a->system_scalar != b->system_scalar) || a->cache_policy != b->cache_policy)
       return 0;
    if (!blocks_eq(a->system, a->n_system, b->system, b->n_system, wire))
       return 0;
@@ -1002,7 +1374,8 @@ static int request_equal(const aimee_request_t *a, const aimee_request_t *b, int
       return 0;
    for (int i = 0; i < a->n_messages; i++)
    {
-      if ((wire && a->messages[i].content_scalar != b->messages[i].content_scalar) ||
+      if (a->messages[i].compaction_boundary != b->messages[i].compaction_boundary ||
+          (wire && a->messages[i].content_scalar != b->messages[i].content_scalar) ||
           !str_eq(a->messages[i].role, b->messages[i].role))
          return 0;
       if (!blocks_eq(a->messages[i].blocks, a->messages[i].n_blocks, b->messages[i].blocks,
@@ -1079,7 +1452,7 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *name)
       return AIMEE_STOP_TOOL_USE;
    if (strcmp(name, "stop_sequence") == 0)
       return AIMEE_STOP_STOP_SEQUENCE;
-   if (strcmp(name, "content_filter") == 0)
+   if (strcmp(name, "content_filter") == 0 || strcmp(name, "refusal") == 0)
       return AIMEE_STOP_CONTENT_FILTER;
    if (strcmp(name, "error") == 0)
       return AIMEE_STOP_ERROR;
@@ -1116,34 +1489,33 @@ static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_
    return used;
 }
 
-int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model)
+int aimee_ir_request_from_message(aimee_request_t *out, const char *system,
+                                  const aimee_message_t *message, int max_tokens,
+                                  double temperature)
 {
-   if (!out)
+   if (!out || !message || !isfinite(temperature))
       return -1;
-   memset(out, 0, sizeof *out);
-   aimee_block_t *blk = calloc(1, sizeof *blk);
-   out->role = strdup("assistant");
-   out->raw_stop_reason = strdup("end_turn");
-   if (!blk || !out->role || !out->raw_stop_reason)
-   {
-      free(blk);
-      aimee_response_free(out);
-      return -1;
-   }
-   blk->type = AIMEE_BLK_TEXT;
-   blk->text = strdup(text ? text : "");
-   if (!blk->text)
-   {
-      free(blk);
-      aimee_response_free(out);
-      return -1;
-   }
-   out->content = blk; /* owned single-element array; freed by aimee_response_free */
-   out->n_content = 1;
-   out->stop_reason = AIMEE_STOP_END_TURN;
-   if (model && model[0])
-      out->model = strdup(model); /* best-effort; NULL is fine */
-   return 0;
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = system && system[0] ? 1 : 0,
+                              .messages = (aimee_message_t *)message,
+                              .n_messages = 1,
+                              .has_max_tokens = max_tokens > 0,
+                              .max_tokens = max_tokens > 0 ? max_tokens : 0,
+                              .has_temperature = temperature >= 0,
+                              .temperature = temperature >= 0 ? temperature : 0};
+   int rc = aimee_ir_request_clone(&request, out);
+   if (!rc)
+      aimee_ir_classify_context(out);
+   return rc;
+}
+
+int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
+                               int max_tokens, double temperature)
+{
+   aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = (char *)(user ? user : "")};
+   aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+   return aimee_ir_request_from_message(out, system, &message, max_tokens, temperature);
 }
 
 size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)
@@ -1270,15 +1642,24 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
    }
 }
 
-static int response_valid(const aimee_response_t *response)
+int aimee_ir_response_valid(const aimee_response_t *response)
 {
    if (!response || response->n_content < 0 || response->n_content > AIMEE_IR_MAX_BLOCKS ||
        (response->n_content && !response->content))
       return -1;
    if (response->role && strcmp(response->role, "assistant"))
       return -1;
+   if (response->refusal &&
+       (response->error_message || response->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(response->refusal)))
+      return -1;
    if (response->usage_in < 0 || response->usage_out < 0 || response->usage_cache_read < 0 ||
        response->usage_cache_write < 0 || response->usage_reasoning < 0)
+      return -1;
+   if ((response->usage_unobserved != 0 && response->usage_unobserved != 1) ||
+       (response->usage_unobserved &&
+        (response->usage_in || response->usage_out || response->usage_cache_read ||
+         response->usage_cache_write || response->usage_reasoning)))
       return -1;
    for (int i = 0; i < response->n_content; i++)
    {
@@ -1295,9 +1676,45 @@ static int response_valid(const aimee_response_t *response)
    }
    return 0;
 }
+/* General completion is not a business TEXT projection. Retain complete
+ * multimodal answers and their inert companion metadata without authorizing
+ * unfinished effects or promoting private reasoning into an answer. */
+int aimee_ir_response_complete_valid(const aimee_response_t *response)
+{
+   if (aimee_ir_response_valid(response) || response->error_message || response->refusal ||
+       (response->stop_reason != AIMEE_STOP_END_TURN &&
+        response->stop_reason != AIMEE_STOP_STOP_SEQUENCE))
+      return -1;
+   int authored = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      const aimee_block_t *block = &response->content[i];
+      if (block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+      authored |= (block->type == AIMEE_BLK_TEXT && block->text && block->text[0]) ||
+                  block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT;
+   }
+   return authored ? 0 : -1;
+}
+int aimee_ir_response_complete_text_valid(const aimee_response_t *response)
+{
+   if (aimee_ir_response_valid(response) || response->error_message || response->refusal ||
+       (response->stop_reason != AIMEE_STOP_END_TURN &&
+        response->stop_reason != AIMEE_STOP_STOP_SEQUENCE))
+      return -1;
+   int authored = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      const aimee_block_t *block = &response->content[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_THINKING)
+         return -1;
+      authored |= block->type == AIMEE_BLK_TEXT && block->text && block->text[0];
+   }
+   return authored ? 0 : -1;
+}
 int aimee_ir_response_admit(aimee_response_t *response)
 {
-   if (response_valid(response))
+   if (aimee_ir_response_valid(response))
       return -1;
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,
@@ -1364,7 +1781,8 @@ int aimee_ir_request_admit(const aimee_request_t *request)
        request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_system && !request->system) ||
        (request->n_messages && !request->messages) || (request->n_tools && !request->tools))
       return -1;
-   if (request->frontend < AIMEE_WIRE_UNKNOWN || request->frontend > AIMEE_WIRE_RESPONSES ||
+   if ((request->system_scalar != 0 && request->system_scalar != 1) ||
+       request->frontend < AIMEE_WIRE_UNKNOWN || request->frontend > AIMEE_WIRE_RESPONSES ||
        request->cache_policy < AIMEE_CACHE_DEFAULT ||
        request->cache_policy > AIMEE_CACHE_STABLE_PREFIX ||
        request->tool_choice < AIMEE_TOOL_CHOICE_UNSET ||
@@ -1411,7 +1829,8 @@ int aimee_ir_request_admit(const aimee_request_t *request)
           message->n_blocks < 0 || message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
           (message->n_blocks && !message->blocks))
          return -1;
-      if (message->content_scalar != 0 && message->content_scalar != 1)
+      if ((message->content_scalar != 0 && message->content_scalar != 1) ||
+          (message->compaction_boundary != 0 && message->compaction_boundary != 1))
          return -1;
       for (int j = 0; j < message->n_blocks; j++)
       {
@@ -1541,6 +1960,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
 {
    if (!builder || !delta || builder->complete)
       return -1;
+   if (delta->refusal &&
+       (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(delta->refusal)))
+      return -1;
    if (delta->message_group &&
        (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
         delta->type != AIMEE_DELTA_BLOCK_START || delta->kind != AIMEE_BLK_TEXT))
@@ -1576,6 +1999,16 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
       for (int i = 0; i < builder->response.n_content; i++)
          if (!builder->storage[i].stopped)
             return -1;
+      if (delta->refusal)
+      {
+         size_t size = sizeof *delta->refusal +
+                       (delta->refusal->category ? strlen(delta->refusal->category) + 1 : 0) +
+                       (delta->refusal->explanation ? strlen(delta->refusal->explanation) + 1 : 0);
+         if (size > IR_BUILDER_MAX_BYTES || builder->bytes > IR_BUILDER_MAX_BYTES - size ||
+             !(builder->response.refusal = aimee_refusal_details_clone(delta->refusal)))
+            return -1;
+         builder->bytes += size;
+      }
       builder->response.stop_reason = delta->stop_reason;
       builder->response.raw_stop_reason =
           delta->raw_stop_reason ? strdup(delta->raw_stop_reason) : NULL;
@@ -1586,6 +2019,7 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
       builder->response.usage_cache_read = delta->usage_cache_read;
       builder->response.usage_cache_write = delta->usage_cache_write;
       builder->response.usage_reasoning = delta->usage_reasoning;
+      builder->response.usage_unobserved = delta->usage_unobserved;
       if (aimee_ir_response_admit(&builder->response))
          return -1;
       builder->complete = 1;

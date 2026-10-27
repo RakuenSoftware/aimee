@@ -53,7 +53,7 @@ char *server_script_tool_execute(const cJSON *frame, const char *attempt, int *i
    else
    {
       agent_tools_set_effect_authorized(1);
-      result = dispatch_tool_call_ir_ctx_status(&definition, wire, 120000, is_error);
+      result = dispatch_tool_call_ir_ctx_status(&definition, arguments, 120000, is_error);
       agent_tools_set_effect_authorized(0);
       result = policy_annotate_indexed(name, wire, attempt, result);
    }

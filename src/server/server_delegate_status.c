@@ -5,29 +5,134 @@
 #include "server.h"
 #include "db1_client/db1.h"
 #include <aimee/delegates/delegate_role.h>
-#include "liveness.h"
+#include "request_context.h"
+#include <aimee/ir/session_event.h>
+#include <stdlib.h>
 #include "cJSON.h"
 
-static void delegate_status_quarantine_degenerate_done(int job_id, db1_agent_job_t *job)
+/* Read a model observation only from the authenticated canonical log owner.
+ * Polling never rewrites durable terminal state or treats a display as history. */
+int server_delegate_job_observation(cJSON *resp, int job_id, int full)
 {
-   if (!job || strcmp(job->status, "done") != 0 || !job->result[0] ||
-       !liveness_is_degenerate_response(job->result))
-      return;
-
-   const char *message = "delegate returned raw tool-call markup or another degenerate response";
-   db1_agent_job_update(job_id, "failed", job->cursor_turn, message);
-   snprintf(job->status, sizeof(job->status), "%s", "failed");
-   /* result is now heap-owned: replace it (free old, strdup new) — NOT
-    * snprintf into a char* (whose sizeof is 8). */
-   char *dup = strdup(message);
-   if (dup)
+   const request_context_t *context = request_context_get();
+   char *wire = NULL;
+   int rc = context && context->vault_principal[0]
+                ? db1_agent_job_canonical_observation(job_id, context->vault_principal, &wire)
+                : -1;
+   cJSON *observation = rc == 0 && wire ? cJSON_ParseWithOpts(wire, NULL, 1) : NULL;
+   free(wire);
+   if (rc == -2)
    {
-      free(job->result);
-      job->result = dup;
+      cJSON_AddStringToObject(resp, "canonical_state", "forbidden");
+      return -2;
    }
+   if (!observation)
+   {
+      cJSON_AddStringToObject(resp, "canonical_state", rc == 1 ? "missing" : "unavailable");
+      return rc == 1 ? 1 : -1;
+   }
+   const char *schema = cJSON_GetStringValue(cJSON_GetObjectItem(observation, "schema"));
+   const cJSON *parent = cJSON_GetObjectItem(observation, "parent_source");
+   const cJSON *child = cJSON_GetObjectItem(observation, "child");
+   const cJSON *events = cJSON_GetObjectItem(observation, "events");
+   const cJSON *history = cJSON_GetObjectItem(observation, "history");
+   const char *owner = cJSON_GetStringValue(cJSON_GetObjectItem(parent, "actor"));
+   const char *turn = cJSON_GetStringValue(cJSON_GetObjectItem(child, "turn_id"));
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(observation, "job_id"));
+   char expected[32];
+   snprintf(expected, sizeof expected, "%d", job_id);
+   if (!schema || strcmp(schema, "aimee.agent-job-observation.v1") || !context || !owner ||
+       strcmp(owner, context->vault_principal) || !id || strcmp(id, expected) || !turn ||
+       !turn[0] || !cJSON_IsArray(events) || !cJSON_IsArray(history) ||
+       !aimee_ir_json_unique(observation))
+      goto unavailable;
+   cJSON *source = cJSON_CreateObject(), *outputs = cJSON_CreateArray();
+   if (!source || !outputs)
+   {
+      cJSON_Delete(source);
+      cJSON_Delete(outputs);
+      goto unavailable;
+   }
+   const char *fields[] = {"schema",        "job_id",           "parent_source",  "child",
+                           "last_sequence", "execution_status", "terminal_source"};
+   for (size_t i = 0; i < sizeof fields / sizeof *fields; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItem(observation, fields[i]);
+      if (!value || !cJSON_AddItemToObject(source, fields[i], cJSON_Duplicate(value, 1)))
+      {
+         cJSON_Delete(source);
+         cJSON_Delete(outputs);
+         goto unavailable;
+      }
+   }
+   const cJSON *last = NULL, *entry;
+   cJSON_ArrayForEach(entry, events)
+   {
+      const char *entry_turn = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "turn_id"));
+      const char *entry_actor = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "actor"));
+      const cJSON *payload = cJSON_GetObjectItem(entry, "payload");
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "kind"));
+      const cJSON *message = cJSON_GetObjectItem(payload, "payload");
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(message, "role"));
+      if (!entry_turn || strcmp(entry_turn, turn) || !kind || strcmp(kind, "message") || !role ||
+          strcmp(role, "assistant"))
+         continue;
+      aimee_message_t parsed = {0};
+      if (!entry_actor || strcmp(entry_actor, owner) || aimee_ir_message_parse(message, &parsed))
+      {
+         aimee_message_free(&parsed);
+         cJSON_Delete(source);
+         cJSON_Delete(outputs);
+         goto unavailable;
+      }
+      aimee_message_free(&parsed);
+      cJSON *copy = cJSON_Duplicate(message, 1);
+      if (!copy || !cJSON_AddItemToArray(outputs, copy))
+      {
+         cJSON_Delete(copy);
+         cJSON_Delete(source);
+         cJSON_Delete(outputs);
+         goto unavailable;
+      }
+      last = message;
+   }
+   cJSON_AddStringToObject(resp, "canonical_state", "available");
+   cJSON_AddItemToObject(resp, "canonical_source", source);
+   cJSON_AddItemToObject(resp, "outputs", outputs);
+   if (last)
+   {
+      cJSON_AddItemToObject(resp, "output", cJSON_Duplicate(last, 1));
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItem(observation, "execution_status"));
+      const char *job_status = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "job_status"));
+      if (status && !strcmp(status, "completed") && job_status && !strcmp(job_status, "done"))
+      {
+         aimee_message_t parsed = {0};
+         if (!aimee_ir_message_parse(last, &parsed))
+         {
+            aimee_response_t view = {.content = parsed.blocks, .n_content = parsed.n_blocks};
+            char *display = aimee_ir_response_text_alloc(&view);
+            if (display)
+               cJSON_AddStringToObject(resp, "result", display);
+            free(display);
+         }
+         aimee_message_free(&parsed);
+      }
+   }
+   if (full)
+   {
+      cJSON_AddItemToObject(resp, "history", cJSON_Duplicate(history, 1));
+      cJSON_AddItemToObject(resp, "events", cJSON_Duplicate(events, 1));
+   }
+   cJSON_Delete(observation);
+   return 0;
+unavailable:
+   cJSON_Delete(observation);
+   cJSON_AddStringToObject(resp, "canonical_state", "unavailable");
+   return -1;
 }
 
-static void delegate_status_populate_job(cJSON *resp, int job_id)
+static void delegate_status_populate_job(cJSON *resp, int job_id, int full)
 {
    db1_agent_job_t job;
    memset(&job, 0, sizeof(job)); /* so the single-exit free is safe on every branch */
@@ -43,13 +148,23 @@ static void delegate_status_populate_job(cJSON *resp, int job_id)
    }
    else
    {
-      delegate_status_quarantine_degenerate_done(job_id, &job);
       cJSON_AddStringToObject(resp, "job_status", job.status);
+      int observation = server_delegate_job_observation(resp, job_id, full);
+      if (observation == -2)
+      {
+         cJSON_ReplaceItemInObject(resp, "job_status", cJSON_CreateString("forbidden"));
+         db1_agent_job_free(&job);
+         return;
+      }
       cJSON_AddStringToObject(resp, "role", job.role);
       cJSON_AddStringToObject(resp, "agent_name", job.agent_name);
       cJSON_AddNumberToObject(resp, "cursor_turn", job.cursor_turn);
-      if (job.result[0])
-         cJSON_AddStringToObject(resp, "result", job.result);
+      if (observation >= 0 && job.result[0] &&
+          (!strcmp(job.status, "failed") || !strcmp(job.status, "cancelled") ||
+           !strcmp(job.status, "partial")))
+         cJSON_AddStringToObject(resp, "diagnostic", job.result);
+      else if (observation == 1 && full && job.result[0])
+         cJSON_AddStringToObject(resp, "legacy_result", job.result); /* Inert archive only. */
       if (job.heartbeat_at[0])
          cJSON_AddStringToObject(resp, "heartbeat_at", job.heartbeat_at);
       if (job.current_tool[0])
@@ -112,13 +227,13 @@ int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             cJSON_Delete(resp);
             return server_send_error(conn, "failed to allocate delegate status response", NULL);
          }
-         delegate_status_populate_job(job_obj, item->valueint);
+         delegate_status_populate_job(job_obj, item->valueint, cJSON_IsTrue(jfull));
          cJSON_AddItemToArray(jobs, job_obj);
       }
    }
    else
    {
-      delegate_status_populate_job(resp, jid->valueint);
+      delegate_status_populate_job(resp, jid->valueint, cJSON_IsTrue(jfull));
    }
 
    return server_send_ok(conn, resp);

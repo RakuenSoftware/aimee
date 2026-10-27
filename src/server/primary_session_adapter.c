@@ -9,7 +9,6 @@
 #include <openssl/rand.h>
 #include "config.h"
 #include "db1_client/db1.h"
-#include "headers/context_engine.h"
 #include "log.h"
 #include "model_registry.h"
 #include "provider_cli_adapter.h"
@@ -28,27 +27,6 @@
 extern int server_clean_retry_begin(const primary_session_request_t *, cJSON **, char **, char[65],
                                     char *, size_t) __attribute__((weak));
 extern int server_clean_retry_finish(int, const agent_result_t *) __attribute__((weak));
-
-/* Route compaction through the active context engine.
- * Falls back to session_compact() when the active engine is the compactor. */
-static int primary_compact(cJSON *messages, session_compact_result_t *result)
-{
-   const context_engine_t *eng = context_engine_get_active();
-   const context_engine_t *def = context_engine_get_default();
-   if (eng && eng != def && eng->compress)
-   {
-      int rc = eng->compress((context_engine_t *)eng, messages, NULL);
-      if (result && rc == 0)
-      {
-         result->compacted = 1;
-         result->messages_before = cJSON_GetArraySize(messages);
-         result->messages_after = cJSON_GetArraySize(messages);
-         result->messages_removed = 0;
-      }
-      return rc;
-   }
-   return session_compact(messages, NULL, result);
-}
 
 typedef struct primary_session_state
 {
@@ -197,9 +175,9 @@ static int primary_history_import_source(const char *target, const char *id, con
 int primary_session_history_open(const char *session, const char *actor)
 {
    const char *attested = agent_get_request_vault_principal();
-   db1_server_session_t owner;
+   db1_server_session_owner_t owner;
    if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
-       db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+       db1_server_session_owner_get(session, &owner) || strcmp(owner.principal, actor))
       return -1;
    pthread_mutex_lock(&g_primary_sessions_lock);
    primary_session_native_browse_reconcile_fn reconcile = g_primary_native_browse_reconcile;
@@ -258,11 +236,11 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    }
    snprintf(state->scope_id, sizeof state->scope_id, "%s",
             alternate_id && alternate_id[0] ? alternate_id : state->id);
-   db1_server_session_t owner;
-   if (db1_server_session_get(state->scope_id, &owner) != 0)
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(state->scope_id, &owner) != 0)
    {
       if (db1_server_session_create(state->scope_id, "primary", principal) != 0 ||
-          db1_server_session_get(state->scope_id, &owner) != 0)
+          db1_server_session_owner_get(state->scope_id, &owner) != 0)
          return -1;
    }
    if (strcmp(owner.principal, principal))
@@ -377,7 +355,9 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       memset(out, 0, sizeof(*out));
    if (session_id_out && session_id_len > 0)
       session_id_out[0] = '\0';
-   if (!req || !req->agent || !out || !req->user_prompt || !req->user_prompt[0])
+   if (!req || !req->agent || !out || !req->request ||
+       !agent_request_with_tools_supported(req->request) || req->request->n_messages != 1 ||
+       strcmp(req->request->messages[0].role, "user"))
    {
       if (out)
          snprintf(out->error, sizeof(out->error), "invalid primary session request");
@@ -453,7 +433,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
          if (session_compact_pressure(estimated, 0, ctx_window, NULL) == SESSION_PRESSURE_COMPACT)
          {
             session_compact_result_t sc_result;
-            if (primary_compact(initial_messages, &sc_result) == 0 && sc_result.compacted)
+            if (session_compact(initial_messages, NULL, &sc_result) == 0 && sc_result.compacted)
                aimee_log(LOG_INFO, "primary_session",
                          "pre-turn compact: %d→%d messages (%d removed)", sc_result.messages_before,
                          sc_result.messages_after, sc_result.messages_removed);
@@ -472,10 +452,10 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    ingress_preinject_set_task_requirements(req->task_request);
 
    cJSON *updated_messages = NULL;
-   int max_tokens = req->max_tokens > 0 ? req->max_tokens : AGENT_DEFAULT_MAX_TOKENS;
-   double temperature = req->temperature >= 0.0 ? req->temperature : 0.3;
    char retry_attempt[65] = {0};
-   char *retry_summary = NULL, *retry_system = NULL;
+   char *retry_summary = NULL;
+   aimee_request_t retry_request = {0};
+   const aimee_request_t *request = req->request;
    int rc = 0;
    if (cJSON_GetObjectItemCaseSensitive(req->task_request, "clean_retry"))
    {
@@ -488,19 +468,32 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
          rc = server_clean_retry_begin(req, &initial_messages, &retry_summary, retry_attempt,
                                        out->error, sizeof(out->error));
    }
-   const char *system = req->system_prompt;
    if (rc == 0 && retry_summary && retry_summary[0])
    {
-      const char *base = system ? system : "";
-      size_t size = strlen(base) + strlen(retry_summary) + 64;
-      retry_system = malloc(size);
-      if (!retry_system)
-         rc = -1;
+      if (aimee_ir_request_clone(request, &retry_request))
+         rc = AGENT_RC_CONTEXT_REFUSED;
       else
       {
-         snprintf(retry_system, size, "%s\n<host-retry-summary>\n%s\n</host-retry-summary>", base,
-                  retry_summary);
-         system = retry_system;
+         aimee_message_t *message = &retry_request.messages[0];
+         aimee_block_t *blocks =
+             message->n_blocks < AIMEE_IR_MAX_BLOCKS
+                 ? realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks)
+                 : NULL;
+         if (!blocks)
+            rc = AGENT_RC_CONTEXT_REFUSED;
+         else
+         {
+            message->blocks = blocks;
+            message->content_scalar = 0;
+            aimee_block_t *block = &blocks[message->n_blocks++];
+            *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(retry_summary)};
+            aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                                       AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL,
+                                       NULL, 0);
+            if (!block->text || aimee_ir_request_admit(&retry_request))
+               rc = AGENT_RC_CONTEXT_REFUSED;
+            request = &retry_request;
+         }
       }
    }
    cJSON *retry_task = NULL;
@@ -516,8 +509,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       ingress_preinject_set_task_requirements(retry_task);
    }
    if (rc == 0)
-      rc = agent_execute_session_with_tools(req->agent, req->network, system, req->user_prompt,
-                                            max_tokens, temperature, initial_messages,
+      rc = agent_execute_session_with_tools(req->agent, req->network, request, initial_messages,
                                             &updated_messages, out);
    if (retry_attempt[0])
    {
@@ -532,7 +524,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    ingress_preinject_set_task_requirements(NULL);
    cJSON_Delete(retry_task);
    free(retry_summary);
-   free(retry_system);
+   aimee_request_free(&retry_request);
 
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
@@ -661,7 +653,7 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
    }
 
    session_compact_result_t local_result;
-   int rc = primary_compact(messages, &local_result);
+   int rc = session_compact(messages, NULL, &local_result);
    if (result)
       *result = local_result;
 

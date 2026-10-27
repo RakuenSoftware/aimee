@@ -27,6 +27,8 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    (void)max_dim;
+   cJSON_AddNumberToObject(*result, "dim", 0);
+   cJSON_AddBoolToObject(*result, "unavailable", 1);
    return 1;
 }
 int pgvec_curator_entity_upsert(int64_t p, const float *v, int d, const char *sk, const char *si,

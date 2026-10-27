@@ -1212,9 +1212,18 @@ int skill_eval_executable(const char *project_root, const char *name,
             memset(&usage, 0, sizeof(usage));
             char run_err[256] = "";
             const char *system_prompt = treatment_turn ? treatment_system : policy;
-            if (options->runner(options->runner_ctx, system_prompt, prompt, options->max_tokens,
-                                response, &usage, run_err, sizeof(run_err)) != 0 ||
-                !*response)
+            aimee_request_t request = {0};
+            aimee_response_t canonical = {0};
+            int run_rc = aimee_ir_request_from_text(&request, system_prompt, prompt,
+                                                    options->max_tokens, 0.0);
+            if (!run_rc)
+               run_rc = options->runner(options->runner_ctx, &request, &canonical, &usage, run_err,
+                                        sizeof run_err);
+            aimee_request_free(&request);
+            if (!run_rc && !aimee_ir_response_complete_text_valid(&canonical))
+               *response = aimee_ir_response_text_alloc(&canonical);
+            aimee_response_free(&canonical);
+            if (run_rc || !*response)
             {
                skill_trial_fail(out, scenario, run_err[0] ? run_err : "runner failed", 1);
                stop = 1;

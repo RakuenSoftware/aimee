@@ -6,13 +6,12 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include "agent_request_build.h"
 #include <aimee/gateway/gateway_delegate.h>
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
-#include "config.h"
 #include "log.h"
-#include "model_sampling.h"
 #include "model_registry.h"
 #include "agent_config.h" /* agent_catalog_provider */
 #include "cJSON.h"
@@ -37,90 +36,6 @@
  * ================================================================ */
 
 /* --- Request builders --- */
-static int agent_is_local_llama_compat(const agent_t *agent)
-{
-   if (!agent)
-      return 0;
-   if (strcmp(agent->provider, "llama_native") == 0 || strcmp(agent->provider, "ollama") == 0 ||
-       strcmp(agent->provider, "llama-eval") == 0)
-      return 1;
-   return str_contains_ci(agent->name, "llama") || str_contains_ci(agent->model, "qwen") ||
-          str_contains_ci(agent->model, ".gguf");
-}
-static int agent_is_mistral_vibe_model(const agent_t *agent)
-{
-   return agent && strcmp(agent->provider, "mistral") == 0 &&
-          str_contains_ci(agent->model, "mistral-vibe-cli");
-}
-static int json_array_contains_string(cJSON *arr, const char *value)
-{
-   if (!cJSON_IsArray(arr) || !value || !value[0])
-      return 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (cJSON_IsString(item) && strcmp(item->valuestring, value) == 0)
-         return 1;
-   }
-   return 0;
-}
-static void strip_private_json_fields(cJSON *node)
-{
-   if (!node)
-      return;
-   if (cJSON_IsObject(node))
-   {
-      cJSON *child = node->child;
-      while (child)
-      {
-         cJSON *next = child->next;
-         if (child->string && child->string[0] == '_')
-            cJSON_DeleteItemFromObjectCaseSensitive(node, child->string);
-         else
-            strip_private_json_fields(child);
-         child = next;
-      }
-      return;
-   }
-   if (cJSON_IsArray(node))
-   {
-      cJSON *child;
-      cJSON_ArrayForEach(child, node) strip_private_json_fields(child);
-   }
-}
-static cJSON *provider_payload_without_private_fields(cJSON *payload)
-{
-   cJSON *copy;
-   if (!payload)
-      return NULL;
-   copy = cJSON_Duplicate(payload, 1);
-   if (!copy)
-      return NULL;
-   strip_private_json_fields(copy);
-   return copy;
-}
-static const char *const openrouter_fallbacks[] = {
-    "anthropic/claude-opus-4.7", "google/gemini-2.5-flash", "mistralai/mistral-large-2512"};
-
-static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
-{
-   if (!agent || strcmp(agent->provider, "openrouter") != 0 || !req)
-      return;
-
-   cJSON_AddStringToObject(req, "route", "fallback");
-   cJSON *models = cJSON_CreateArray();
-   if (!models)
-      return;
-   if (agent->model[0])
-      cJSON_AddItemToArray(models, cJSON_CreateString(agent->model));
-
-   for (size_t i = 0; i < sizeof openrouter_fallbacks / sizeof *openrouter_fallbacks; i++)
-   {
-      if (!json_array_contains_string(models, openrouter_fallbacks[i]))
-         cJSON_AddItemToArray(models, cJSON_CreateString(openrouter_fallbacks[i]));
-   }
-   cJSON_AddItemToObject(req, "models", models);
-}
 /* Reject the gross misconfiguration where the OUTPUT limit alone would consume
  * the entire context window, leaving no room for any prompt at all.
  *
@@ -166,166 +81,6 @@ int agent_request_max_tokens(const agent_t *agent, int requested)
        model_max_output(agent ? agent_catalog_provider(agent) : NULL, agent ? agent->model : NULL));
 }
 
-cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON *safe_messages = provider_payload_without_private_fields(messages);
-   cJSON_AddStringToObject(req, "model", agent->model);
-   agent_request_shape_openai_messages(agent, safe_messages ? safe_messages : messages);
-   if (safe_messages)
-      cJSON_AddItemToObject(req, "messages", safe_messages);
-   else
-      cJSON_AddItemReferenceToObject(req, "messages", messages);
-   int has_tools = tools && cJSON_GetArraySize(tools) > 0;
-   int is_minimax =
-       agent && (strcmp(agent->provider, "minimax") == 0 ||
-                 strstr(agent->endpoint, "api.minimax.") || strstr(agent->model, "MiniMax-M2.7"));
-   if (has_tools)
-   {
-      cJSON_AddItemReferenceToObject(req, "tools", tools);
-      if (agent_is_local_llama_compat(agent) || is_minimax)
-         cJSON_AddBoolToObject(req, "parallel_tool_calls", 0);
-      /* mistral and minimax default to not using tools without an explicit directive. */
-      if (agent && agent->require_initial_tool_call)
-         cJSON_AddStringToObject(req, "tool_choice", "required");
-      else if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
-         cJSON_AddStringToObject(req, "tool_choice", "auto");
-   }
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-   if (agent_is_mistral_vibe_model(agent))
-      cJSON_AddStringToObject(req, "reasoning_effort", "high");
-   /* The temperature=1 this model requires now comes from the shared
-    * required-temperature table, so the other request builder gets it too. */
-   model_sampling_apply_openai(agent, req, temperature);
-   if (agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent))
-   {
-      cJSON *kwargs = cJSON_AddObjectToObject(req, "chat_template_kwargs");
-      cJSON_AddBoolToObject(kwargs, "enable_thinking", 0);
-   }
-   openrouter_add_routing_hint(agent, req);
-   /* M2.7-only: MiniMax-M3 rejects reasoning_split with HTTP 400, and it is never read back. */
-   if (agent && strstr(agent->model, "MiniMax-M2.7"))
-      cJSON_AddBoolToObject(req, "reasoning_split", 1);
-
-   return req;
-}
-cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *tools,
-                                     const char *system_prompt)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON *safe_input = provider_payload_without_private_fields(input);
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   if (system_prompt && system_prompt[0])
-      cJSON_AddStringToObject(req, "instructions", system_prompt);
-   else
-      cJSON_AddStringToObject(req, "instructions", "You are an execution agent.");
-
-   cJSON_AddBoolToObject(req, "store", 0);
-   cJSON_AddBoolToObject(req, "stream", 1);
-   cJSON *include = cJSON_AddArrayToObject(req, "include");
-   cJSON_AddItemToArray(include, cJSON_CreateString("reasoning.encrypted_content"));
-   if (safe_input)
-      cJSON_AddItemToObject(req, "input", safe_input);
-   else
-      cJSON_AddItemReferenceToObject(req, "input", input);
-   if (tools && cJSON_GetArraySize(tools) > 0)
-   {
-      cJSON_AddItemReferenceToObject(req, "tools", tools);
-      if (agent && agent->require_initial_tool_call)
-      {
-         /* The ChatGPT Responses transport can expose provider-native tools in
-          * addition to this request's function catalog.  A generic `required`
-          * choice therefore does not guarantee that the first call is one Aimee
-          * can execute: Codex may select Task/Agent, which the gateway correctly
-          * removes, leaving an evidence-gated reviewer with no repository lookup.
-          *
-          * Pin only the first turn to an advertised read/search function.  Once
-          * it succeeds the runtime clears require_initial_tool_call and every
-          * advertised tool is available normally on subsequent turns. */
-         static const char *const preferred[] = {"code_search", "find_symbol", "grep",
-                                                 "list_files",  "read_file",   NULL};
-         const char *selected = NULL;
-         for (int p = 0; preferred[p] && !selected; p++)
-         {
-            cJSON *tool;
-            cJSON_ArrayForEach(tool, tools)
-            {
-               cJSON *name = cJSON_GetObjectItem(tool, "name");
-               if (!cJSON_IsString(name))
-               {
-                  cJSON *fn = cJSON_GetObjectItem(tool, "function");
-                  name = cJSON_GetObjectItem(fn, "name");
-               }
-               if (cJSON_IsString(name) && strcmp(name->valuestring, preferred[p]) == 0)
-               {
-                  selected = name->valuestring;
-                  break;
-               }
-            }
-         }
-         if (!selected)
-         {
-            cJSON *first = cJSON_GetArrayItem(tools, 0);
-            cJSON *name = cJSON_GetObjectItem(first, "name");
-            if (!cJSON_IsString(name))
-            {
-               cJSON *fn = cJSON_GetObjectItem(first, "function");
-               name = cJSON_GetObjectItem(fn, "name");
-            }
-            if (cJSON_IsString(name))
-               selected = name->valuestring;
-         }
-         if (selected)
-         {
-            cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
-            cJSON_AddStringToObject(choice, "type", "function");
-            cJSON_AddStringToObject(choice, "name", selected);
-         }
-      }
-   }
-
-   return req;
-}
-cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                     const char *system_prompt, int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON *safe_messages = provider_payload_without_private_fields(messages);
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-
-   /* §3 cache-aware shaping: when enabled, mark the aimee-owned STABLE system
-    * prefix cacheable on this (tool-bearing) Anthropic request, matching the
-    * non-tools path. Default-off so the flag-rollout program can flip it
-    * deliberately. The cache_min_chars floor is applied to the stable prefix
-    * inside the helper, not the whole prompt. */
-   int cache_marking = (config_cache_shaping_enabled()) ? 1 : 0;
-   agent_anthropic_set_system(req, system_prompt, cache_marking,
-                              cache_marking ? config_cache_min_chars() : 0);
-
-   if (safe_messages)
-      cJSON_AddItemToObject(req, "messages", safe_messages);
-   else
-      cJSON_AddItemReferenceToObject(req, "messages", messages);
-   if (tools && cJSON_GetArraySize(tools) > 0)
-   {
-      cJSON_AddItemReferenceToObject(req, "tools", tools);
-      if (agent && agent->require_initial_tool_call)
-      {
-         cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
-         cJSON_AddStringToObject(choice, "type", "any");
-      }
-   }
-
-   model_sampling_apply_anthropic(agent, req, temperature);
-
-   return req;
-}
-
 /* Shape only the owned request copy, before policy and translation. Media and
  * tool-result-only messages retain the compatibility builder's behavior. */
 static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
@@ -341,6 +96,8 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
       for (int j = 0; j < message->n_blocks; j++)
       {
          aimee_block_t *block = &message->blocks[j];
+         if (!aimee_ir_block_model_visible(block))
+            continue;
          if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
             return 0;
          if (block->type != AIMEE_BLK_TOOL_RESULT)
@@ -366,13 +123,15 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
       }
       size_t length = 0;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             length += strlen(message->blocks[j].text);
       char *joined = calloc(length + 1, 1);
       if (!joined)
          return -1;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             strcat(joined, message->blocks[j].text);
       char *shaped = agent_request_shape_user_prompt(agent, joined);
       int changed = shaped && strcmp(joined, shaped);
@@ -394,235 +153,41 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
    return 0;
 }
 
-static int agent_openai_profile_ir(const agent_t *agent, const cJSON *tools,
-                                   const char *system_prompt, int max_tokens, double temperature,
-                                   aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_OPENAI_CHAT;
-   ir->model = strdup(agent->model);
-   if (!ir->model)
-      return -1;
-   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
-   ir->has_max_tokens = 1;
-   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
-   ir->temperature = sampling.temperature;
-   ir->has_temperature = sampling.temperature >= 0;
-   ir->top_p = sampling.top_p;
-   ir->has_top_p = sampling.top_p >= 0;
-   ir->top_k = sampling.top_k;
-   ir->has_top_k = sampling.top_k >= 0;
-   if (agent_is_mistral_vibe_model(agent))
-      ir->reasoning_effort = AIMEE_EFFORT_HIGH;
-   if (system_prompt && system_prompt[0])
-   {
-      ir->system = calloc(1, sizeof *ir->system);
-      if (!ir->system)
-         return -1;
-      ir->n_system = 1;
-      ir->system[0].type = AIMEE_BLK_TEXT;
-      ir->system[0].text = strdup(system_prompt);
-      if (!ir->system[0].text)
-         return -1;
-   }
-   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
-   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
-   if (count && !ir->tools)
-      return -1;
-   for (int i = 0; i < count; i++)
-   {
-      ir->n_tools++;
-      if (openai_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i], 1))
-         return -1;
-   }
-   if (count)
-   {
-      int minimax = !strcmp(agent->provider, "minimax") ||
-                    strstr(agent->endpoint, "api.minimax.") || strstr(agent->model, "MiniMax-M2.7");
-      ir->has_parallel_tool_calls = agent_is_local_llama_compat(agent) || minimax;
-      ir->parallel_tool_calls = 0;
-      if (agent->require_initial_tool_call)
-         ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
-      else if (!strcmp(agent->provider, "mistral") || minimax)
-         ir->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
-   }
-   aimee_openai_host_profile_t profile = {
-       .min_p = sampling.min_p,
-       .repeat_penalty = sampling.repeat_penalty,
-       .disable_thinking =
-           agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent),
-       .split_reasoning = strstr(agent->model, "MiniMax-M2.7") != NULL};
-   if (!strcmp(agent->provider, "openrouter"))
-   {
-      profile.fallback_models = openrouter_fallbacks;
-      profile.n_fallback_models = sizeof openrouter_fallbacks / sizeof *openrouter_fallbacks;
-   }
-   return openai_ir_set_host_profile(ir, &profile);
-}
-
-/* The host Responses execution profile is born canonical. Only the incoming
- * compatibility catalog crosses a tool parser; no synthetic native request is
- * built and re-admitted to recover fields already known by the host. */
-static int agent_responses_profile_ir(const agent_t *agent, const cJSON *tools,
-                                      const char *system_prompt, aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_RESPONSES;
-   ir->stream = 1;
-   ir->model = strdup(agent->model);
-   ir->system = calloc(1, sizeof *ir->system);
-   if (!ir->model || !ir->system)
-      return -1;
-   ir->n_system = 1;
-   ir->system[0].type = AIMEE_BLK_TEXT;
-   ir->system[0].text =
-       strdup(system_prompt && system_prompt[0] ? system_prompt : "You are an execution agent.");
-   if (!ir->system[0].text)
-      return -1;
-   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
-   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
-   if (count && !ir->tools)
-      return -1;
-   for (int i = 0; i < count; i++)
-   {
-      ir->n_tools++;
-      if (openai_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i], 0))
-         return -1;
-   }
-   if (!agent->require_initial_tool_call || !count)
-      return 0;
-   static const char *const preferred[] = {"code_search", "find_symbol", "grep",
-                                           "list_files",  "read_file",   NULL};
-   const char *selected = NULL;
-   for (int p = 0; preferred[p] && !selected; p++)
-   {
-      const aimee_tool_t *tool = aimee_ir_find_function(ir, NULL, preferred[p]);
-      if (tool)
-         selected = tool->name;
-   }
-   for (int i = 0; i < ir->n_tools && !selected; i++)
-      if (ir->tools[i].name && ir->tools[i].name[0])
-         selected = ir->tools[i].name;
-   if (selected)
-   {
-      ir->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
-      ir->tool_choice_name = strdup(selected);
-      if (!ir->tool_choice_name)
-         return -1;
-   }
-   return 0;
-}
-
-static int agent_anthropic_profile_ir(const agent_t *agent, const cJSON *tools,
-                                      const char *system_prompt, int max_tokens, double temperature,
-                                      aimee_request_t *ir)
-{
-   ir->frontend = AIMEE_WIRE_ANTHROPIC;
-   ir->model = strdup(agent->model);
-   if (!ir->model)
-      return -1;
-   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
-   ir->has_max_tokens = 1;
-   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
-   ir->temperature = sampling.temperature;
-   ir->has_temperature = sampling.temperature >= 0;
-   ir->top_p = sampling.top_p;
-   ir->has_top_p = sampling.top_p >= 0;
-   ir->top_k = sampling.top_k;
-   ir->has_top_k = sampling.top_k >= 0;
-   int cache = config_cache_shaping_enabled();
-   if (anthropic_ir_set_host_system(ir, system_prompt, cache, cache ? config_cache_min_chars() : 0))
-      return -1;
-   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
-   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
-   if (count && !ir->tools)
-      return -1;
-   for (int i = 0; i < count; i++)
-   {
-      ir->n_tools++;
-      if (anthropic_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i]))
-         return -1;
-   }
-   if (count && agent->require_initial_tool_call)
-      ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
-   return 0;
-}
-
 /* Host profiles start in IR; compatibility catalogs enter their typed parser.
  * Policy and translation own the complete output and dispatch catalog. */
 /* Execution entry controls belong with canonical request profiles. The loop's
  * economizer must not own provider cache configuration. */
 int agent_request_with_tools_supported(const aimee_request_t *request)
 {
-   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
-       !request->messages)
+   if (aimee_ir_request_admit(request) || request->n_messages < 1 || request->stream)
       return 0;
-   int content = 0;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      if (request->messages[i].n_blocks < 0 ||
-          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
-          (request->messages[i].n_blocks && !request->messages[i].blocks))
-         return 0;
-      for (int j = 0; j < request->messages[i].n_blocks; j++)
+   /* Structural admission is independent of later host catalog/grant checks.
+    * Retain valid controls and content rather than imposing text adapter shape. */
+   for (int i = 0; i < request->n_messages; ++i)
+      for (int j = 0; j < request->messages[i].n_blocks; ++j)
       {
          const aimee_block_t *block = &request->messages[i].blocks[j];
          if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
-            content = 1;
+            return 1;
       }
-   }
-   return content &&
-          !(request->n_tools ||
-            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
-             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
-            request->n_system > 1 ||
-            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
-            request->metadata || request->service_tier || request->prompt_cache_key ||
-            request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
-            request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
-            request->reasoning_summary || request->reasoning_effort ||
-            request->output_format.kind > AIMEE_OUTPUT_TEXT);
+   return 0;
 }
 
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                             const char *system_prompt, int max_tokens, double temperature,
-                             aimee_wire_t wire, int is_delegate, aimee_request_t *out)
+static int prepare_host_profile(const agent_t *agent, const aimee_request_t *catalog,
+                                const char *system_prompt, int max_tokens, double temperature,
+                                aimee_wire_t wire, int is_delegate, aimee_request_t *out)
 {
-   if (!agent || !out || !cJSON_IsArray(messages))
+   if (!agent || !out)
       return -1;
    aimee_request_t ir = {0};
-   if (wire == AIMEE_WIRE_RESPONSES)
-   {
-      if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
-         goto fail;
-   }
-   else if (wire == AIMEE_WIRE_OPENAI_CHAT)
-   {
-      if (agent_openai_profile_ir(agent, tools, system_prompt, max_tokens, temperature, &ir))
-         goto fail;
-   }
-   else if (wire == AIMEE_WIRE_ANTHROPIC)
-   {
-      if (agent_anthropic_profile_ir(agent, tools, system_prompt, max_tokens, temperature, &ir))
-         goto fail;
-   }
-   else
+   aimee_request_t tool_view = {.tools = catalog ? catalog->tools : NULL,
+                                .n_tools = catalog ? catalog->n_tools : 0};
+   if (aimee_ir_request_admit(&tool_view) || aimee_ir_request_clone(&tool_view, &ir))
+      return -1;
+   if (agent_prepare_host_profile(agent, wire, system_prompt, max_tokens, temperature, 0, &ir))
       goto fail;
-   int count = cJSON_GetArraySize(messages);
-   ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
-   if (count && !ir.messages)
-      goto fail;
-   for (int i = 0; i < count; i++)
-   {
-      ir.n_messages++;
-      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]) != 0)
-         goto fail;
-   }
-   if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
-      goto fail;
-   aimee_ir_classify_context(&ir);
-   int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
-   if (policy_changes < 0)
-      goto fail;
-   ir.mutated = 1;
+   /* Policy may remove catalog entries; it must not sanitize an unadmitted
+    * host request into admissible transport by hiding an invalid input. */
    if (aimee_ir_request_admit(&ir))
       goto fail;
    aimee_request_free(out);
@@ -633,72 +198,216 @@ fail:
    return -1;
 }
 
-cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                              const char *system_prompt, int max_tokens, double temperature,
-                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const cJSON *messages, const aimee_request_t *catalog,
+                                    const aimee_message_t *host_context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int is_delegate,
+                                    aimee_request_t *out)
 {
-   aimee_request_t ir = {0};
-   cJSON *rendered = NULL;
-   if (agent_prepare_request_ir(agent, messages, tools, system_prompt, max_tokens, temperature,
-                                wire, is_delegate, &ir))
-      return NULL;
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(&ir, wire, &projection);
-   if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,
-                                                 projection.omitted_opaque_state_blocks,
-                                                 projection.omitted_cache_controls, "request"))
+   if (seed && !agent_request_with_tools_supported(seed))
+      return -1;
+   if (host_context && (!host_context->role || strcmp(host_context->role, "system")))
+      return -1;
+   aimee_request_t profile = {0}, ir = {0}, context_copy = {0};
+   int simple_policy = host_context && host_context->n_blocks == 1 &&
+                       host_context->blocks[0].type == AIMEE_BLK_TEXT &&
+                       host_context->blocks[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
+                       !host_context->blocks[0].raw && !host_context->blocks[0].cache_control &&
+                       !host_context->blocks[0].cache_ttl;
+   int rc =
+       prepare_host_profile(agent, catalog, simple_policy ? host_context->blocks[0].text : NULL,
+                            max_tokens, temperature, wire, is_delegate, &profile) ||
+       (seed && aimee_ir_request_clone(seed, &ir));
+   if (rc || (seed && aimee_backend_preserve_host_extensions(seed, &profile, wire)))
       goto fail;
-   if (projection.omitted_reasoning_blocks)
-      LOG_INFO("translation.projection",
-               "wire=%d omitted_reasoning=%d omitted_opaque_state=%d canonical_history=retained",
-               (int)wire, projection.omitted_reasoning_blocks,
-               projection.omitted_opaque_state_blocks);
-   rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
-              : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
-                                             : openai_backend_build(&ir);
-   if (!rendered)
+   /* The seed's outer provider frame is immutable ingress evidence, not a
+    * host execution profile. Keep every typed control/block (including its
+    * opaque replay state), but carry only host-owned layout extensions here.
+    * The caller's original request and native replay bytes remain untouched. */
+   cJSON_Delete(ir.raw);
+   ir.raw = profile.raw;
+   profile.raw = NULL;
+   free(ir.raw_bytes);
+   ir.raw_bytes = NULL;
+   ir.raw_length = 0;
+   ir.frontend = profile.frontend;
+   free(ir.model);
+   ir.model = profile.model;
+   profile.model = NULL;
+   for (int i = 0; i < ir.n_messages; ++i)
+      aimee_message_free(&ir.messages[i]);
+   free(ir.messages);
+   ir.messages = NULL;
+   ir.n_messages = 0;
+   int count = cJSON_GetArraySize(messages);
+   ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
+   if ((count && !ir.messages) || !cJSON_IsArray(messages))
       goto fail;
-   if (dispatch_catalog)
+   for (int i = 0; i < count; ++i)
    {
-      aimee_request_free(dispatch_catalog);
-      *dispatch_catalog = (aimee_request_t){.tools = ir.tools, .n_tools = ir.n_tools};
+      ++ir.n_messages;
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]))
+         goto fail;
+   }
+   if (simple_policy || !host_context || !host_context->n_blocks)
+   {
+      for (int i = 0; i < profile.n_system; ++i)
+      {
+         if (simple_policy)
+         {
+            profile.system[i].context = host_context->blocks[0].context;
+            profile.system[i].message_group = host_context->blocks[0].message_group;
+         }
+         else
+            aimee_ir_block_set_context(&profile.system[i], AIMEE_CTX_ORIGIN_PLATFORM,
+                                       AIMEE_CTX_AUTH_POLICY, AIMEE_CTX_TRUST_VERIFIED,
+                                       AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+      }
+      if (!ir.n_system)
+         ir.system_scalar = profile.system_scalar;
+      context_copy.system = profile.system;
+      context_copy.n_system = profile.n_system;
+      profile.system = NULL;
+      profile.n_system = 0;
+   }
+   else
+   {
+      aimee_request_t view = {.system = host_context->blocks, .n_system = host_context->n_blocks};
+      if (aimee_ir_request_clone(&view, &context_copy))
+         goto fail;
+   }
+   if (ir.n_system > AIMEE_IR_MAX_BLOCKS - context_copy.n_system)
+      goto fail;
+   if (context_copy.n_system)
+   {
+      aimee_block_t *blocks =
+          realloc(ir.system, (size_t)(ir.n_system + context_copy.n_system) * sizeof *blocks);
+      if (!blocks)
+         goto fail;
+      ir.system = blocks;
+      memcpy(blocks + ir.n_system, context_copy.system,
+             (size_t)context_copy.n_system * sizeof *blocks);
+      ir.n_system += context_copy.n_system;
+      free(context_copy.system);
+      context_copy.system = NULL;
+      context_copy.n_system = 0;
+   }
+   if (ir.n_tools)
+   {
+      aimee_request_t requested = {.tools = ir.tools, .n_tools = ir.n_tools};
+      aimee_request_t hosted = {.tools = profile.tools, .n_tools = profile.n_tools};
+      if (!aimee_ir_request_wire_equal(&requested, &hosted))
+         goto fail; /* A caller catalog cannot add or change host execution grants. */
+   }
+   else
+   {
+      ir.tools = profile.tools;
+      ir.n_tools = profile.n_tools;
+      profile.tools = NULL;
+      profile.n_tools = 0;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_UNSET)
+   {
+      ir.tool_choice = profile.tool_choice;
+      free(ir.tool_choice_name);
+      ir.tool_choice_name = profile.tool_choice_name;
+      profile.tool_choice_name = NULL;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_TOOL &&
+       !aimee_ir_find_function(&ir, NULL, ir.tool_choice_name))
+      goto fail;
+   if (!seed)
+      ir.stream = profile.stream;
+   if (!ir.has_parallel_tool_calls)
+   {
+      ir.has_parallel_tool_calls = profile.has_parallel_tool_calls;
+      ir.parallel_tool_calls = profile.parallel_tool_calls;
+   }
+   if (!ir.has_max_tokens)
+   {
+      ir.max_tokens = profile.max_tokens;
+      ir.has_max_tokens = profile.has_max_tokens;
+   }
+   if (!ir.has_temperature)
+   {
+      ir.temperature = profile.temperature;
+      ir.has_temperature = profile.has_temperature;
+   }
+   if (!ir.has_top_p)
+   {
+      ir.top_p = profile.top_p;
+      ir.has_top_p = profile.has_top_p;
+   }
+   if (!ir.has_top_k)
+   {
+      ir.top_k = profile.top_k;
+      ir.has_top_k = profile.has_top_k;
+   }
+   if (!ir.thinking)
+   {
+      ir.thinking = profile.thinking;
+      profile.thinking = NULL;
+   }
+   if (!ir.reasoning_effort)
+      ir.reasoning_effort = profile.reasoning_effort;
+   if (!ir.reasoning_summary)
+   {
+      ir.reasoning_summary = profile.reasoning_summary;
+      profile.reasoning_summary = NULL;
+   }
+   if (ir.tool_choice == AIMEE_TOOL_CHOICE_NONE)
+   {
+      if (agent->require_initial_tool_call)
+         goto fail;
+      for (int i = 0; i < ir.n_tools; ++i)
+         aimee_tool_free(&ir.tools[i]);
+      free(ir.tools);
       ir.tools = NULL;
       ir.n_tools = 0;
    }
-   aimee_request_free(&ir);
-   return rendered;
+   if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
+      goto fail;
+   aimee_ir_classify_context(&ir);
+   ir.mutated = 1;
+   if (aimee_ir_request_admit(&ir) || gateway_delegate_run_request_pipeline(&ir, is_delegate) < 0)
+      goto fail;
+   aimee_request_free(out);
+   *out = ir;
+   aimee_request_free(&profile);
+   aimee_request_free(&context_copy);
+   return 0;
 fail:
-   cJSON_Delete(rendered);
+   aimee_request_free(&profile);
+   aimee_request_free(&context_copy);
    aimee_request_free(&ir);
-   return NULL;
+   return -1;
 }
 
-/* Compatibility entry for existing diagnostics. Native framing is owned by
- * translation; execution calls its typed decoder directly. */
-cJSON *agent_responses_sse_response_object(const char *body)
+cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                     const cJSON *messages, const aimee_request_t *catalog,
+                                     const aimee_message_t *host_context, int max_tokens,
+                                     double temperature, aimee_wire_t wire, int is_delegate,
+                                     int host_profile, aimee_request_t *dispatch_catalog)
 {
-   return responses_backend_sse_object(body);
-}
-
-/* --- Message utilities --- */
-
-/* Core history is canonical. Legacy provider formats are admitted only by
- * their explicit translation/import boundary, never detected inside execution. */
-int message_history_repair(cJSON *messages)
-{
-   if (!messages)
-      return 0;
-   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   const cJSON *item;
-   cJSON_ArrayForEach(item, messages)
+   aimee_request_t ir = {0}, projected = {0};
+   cJSON *rendered = NULL;
+   if (agent_prepare_seeded_request_ir(agent, seed, messages, catalog, host_context, max_tokens,
+                                       temperature, wire, is_delegate, &ir) ||
+       aimee_ir_request_project_model(&ir, &projected) ||
+       aimee_backend_preserve_host_extensions(&ir, &projected, wire))
+      goto done;
+   rendered = agent_render_request_ir(agent, seed ? seed : &ir, &projected, wire, host_profile, 0);
+   if (rendered && dispatch_catalog)
    {
-      aimee_message_t message = {0};
-      if (aimee_ir_message_parse(item, &message))
-         return -1;
-      aimee_message_free(&message);
+      aimee_request_free(dispatch_catalog);
+      *dispatch_catalog = (aimee_request_t){.tools = projected.tools, .n_tools = projected.n_tools};
+      projected.tools = NULL;
+      projected.n_tools = 0;
    }
-   return aimee_ir_history_repair(messages);
+done:
+   aimee_request_free(&ir);
+   aimee_request_free(&projected);
+   return rendered;
 }
 
 /* ================================================================
@@ -718,23 +427,11 @@ int message_history_repair(cJSON *messages)
  * From: agent_http.c
  * ================================================================ */
 
-/* agent_http.c: HTTP client platform abstraction + shared provider health tracking +
- * provider prompt cache lifecycle (Gemini cached-content).
- * HTTP implementation is in posix/agent_http.c (Linux/macOS) and
- * windows/agent_http.c (Windows). */
+/* HTTP implementation is in posix/agent_bridge.c and windows/agent_http.c. */
 
 /* ================================================================
- * Provider health tracking (shared across platforms)
+ * Provider error classification (shared across platforms)
  * ================================================================ */
-
-#define MAX_TRACKED_PROVIDERS MAX_AGENTS
-static struct
-{
-   char name[64];
-   provider_health_t health;
-} s_provider_health[MAX_TRACKED_PROVIDERS];
-static int s_provider_health_count;
-static pthread_mutex_t s_provider_health_lock = PTHREAD_MUTEX_INITIALIZER;
 
 provider_err_class_t provider_classify_error(int http_status)
 {
@@ -774,67 +471,6 @@ const char *provider_error_message(provider_err_class_t cls)
    }
    return "unknown error.";
 }
-static provider_health_t *find_or_create_health(const char *provider_name)
-{
-   for (int i = 0; i < s_provider_health_count; i++)
-   {
-      if (strcmp(s_provider_health[i].name, provider_name) == 0)
-         return &s_provider_health[i].health;
-   }
-   if (s_provider_health_count >= MAX_TRACKED_PROVIDERS)
-      return NULL; /* Never attribute another registration's failure to the first. */
-   int idx = s_provider_health_count++;
-   snprintf(s_provider_health[idx].name, sizeof(s_provider_health[idx].name), "%s", provider_name);
-   s_provider_health[idx].health.available = -1;
-   s_provider_health[idx].health.last_http_status = -1;
-   return &s_provider_health[idx].health;
-}
-void provider_health_update(const char *provider_name, int http_status)
-{
-   if (!provider_name || !provider_name[0])
-      return;
-   pthread_mutex_lock(&s_provider_health_lock);
-   provider_health_t *h = find_or_create_health(provider_name);
-   if (!h)
-   {
-      pthread_mutex_unlock(&s_provider_health_lock);
-      return;
-   }
-   h->last_http_status = http_status;
-   h->last_check_ms = (int64_t)time(NULL) * 1000;
-
-   provider_err_class_t cls = provider_classify_error(http_status);
-   if (cls == PROVIDER_ERR_NONE)
-   {
-      h->available = 1;
-      h->error[0] = '\0';
-   }
-   else
-   {
-      h->available = 0;
-      snprintf(h->error, sizeof(h->error), "%s", provider_error_message(cls));
-   }
-   pthread_mutex_unlock(&s_provider_health_lock);
-}
-const provider_health_t *provider_health_get(const char *provider_name)
-{
-   static _Thread_local provider_health_t snapshot;
-   if (!provider_name || !provider_name[0])
-      return NULL;
-   pthread_mutex_lock(&s_provider_health_lock);
-   for (int i = 0; i < s_provider_health_count; i++)
-   {
-      if (strcmp(s_provider_health[i].name, provider_name) == 0)
-      {
-         snapshot = s_provider_health[i].health;
-         pthread_mutex_unlock(&s_provider_health_lock);
-         return &snapshot;
-      }
-   }
-   pthread_mutex_unlock(&s_provider_health_lock);
-   return NULL;
-}
-
 /* ================================================================
  * From: agent_tunnel.c
  * ================================================================ */

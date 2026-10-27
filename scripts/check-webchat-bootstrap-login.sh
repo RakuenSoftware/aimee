@@ -9,7 +9,7 @@
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-test_dir=$(mktemp -d -p /tmp aimee-webchat-vault.XXXXXX)
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/aimee-webchat-vault.XXXXXX")
 trap 'find "$test_dir" -depth -delete 2>/dev/null || true' EXIT
 
 export AIMEE_HOME="$test_dir/home"
@@ -352,11 +352,63 @@ AIMEE_WEBCHAT_USER=aimee AIMEE_WEBCHAT_PASSWORD=aimee-local-dev \
 grep -Fq -- "-aG $WEBCHAT_LOGIN_GROUP aimee" "$cleared_users"
 ! grep -q 'useradd' "$cleared_users"
 
-# An explicit pair short-circuits generation entirely.
+# The explicit operator must also be the initial appliance administrator.
+# Export INSIDE the subshell before invoking the real provisioning function:
+# assignments beside command substitution do not supply its environment.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
-AIMEE_WEBCHAT_USER=operator AIMEE_WEBCHAT_PASSWORD=operator-pw \
-  explicit_log=$(webchat_provision_bootstrap_account 2>&1) || true
-! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"${explicit_log:-}"
+(
+  export AIMEE_WEBCHAT_USER=seed-owner AIMEE_WEBCHAT_PASSWORD=seed-test-password
+  explicit_log=$(webchat_provision_bootstrap_account 2>&1)
+  ! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$explicit_log"
+  [[ $(cat "$WEBCHAT_BOOTSTRAP_USER") == explicit:seed-owner ]]
+  [[ $(stat -c %a "$WEBCHAT_BOOTSTRAP_USER") == 644 ]]
+  webchat_has_usable_login seed-owner
+  ! grep -Fq "$AIMEE_WEBCHAT_PASSWORD" "$WEBCHAT_BOOTSTRAP_USER"
+  [[ ! -e $WEBCHAT_BOOTSTRAP_REPLACED ]]
+)
+# Restart/changed seed may provision another login, but cannot reassign admin.
+(
+  export AIMEE_WEBCHAT_USER=other-seed AIMEE_WEBCHAT_PASSWORD=other-test-password
+  webchat_provision_bootstrap_account >/dev/null 2>&1
+  [[ $(cat "$WEBCHAT_BOOTSTRAP_USER") == explicit:seed-owner ]]
+  webchat_has_usable_login other-seed
+)
+# Both established sources of appliance ownership take precedence over seeds.
+printf '%s\n' established-operator > "$WEBCHAT_BOOTSTRAP_REPLACED"
+rm "$WEBCHAT_BOOTSTRAP_USER"
+(
+  export AIMEE_WEBCHAT_USER=operator AIMEE_WEBCHAT_PASSWORD=operator-pw
+  webchat_provision_bootstrap_account >/dev/null 2>&1
+  [[ $(cat "$WEBCHAT_BOOTSTRAP_REPLACED") == established-operator ]]
+  [[ ! -e $WEBCHAT_BOOTSTRAP_USER ]]
+)
+rm "$WEBCHAT_BOOTSTRAP_REPLACED"
+printf '%s\n' generated:aimee-012345abcdef > "$WEBCHAT_BOOTSTRAP_USER"
+(
+  export AIMEE_WEBCHAT_USER=operator AIMEE_WEBCHAT_PASSWORD=operator-pw
+  webchat_provision_bootstrap_account >/dev/null 2>&1
+  [[ $(cat "$WEBCHAT_BOOTSTRAP_USER") == generated:aimee-012345abcdef ]]
+)
+# A different usable group member cannot authorize the requested seed. Check
+# the actual ownership helper against missing, foreign and locked PAM users.
+rm "$WEBCHAT_BOOTSTRAP_USER"
+printf 'operator,legacy\n' > "$group_members"
+! webchat_record_seeded_administrator absent-seed
+! webchat_record_seeded_administrator aimee
+[[ ! -e $WEBCHAT_BOOTSTRAP_USER ]]
+printf 'operator\n' > "$group_members"
+printf '%s %s\n' operator '!locked' > "$shadow_hashes"
+! webchat_record_seeded_administrator operator
+[[ ! -e $WEBCHAT_BOOTSTRAP_USER ]]
+: > "$shadow_hashes"
+# Failed PAM provisioning cannot record authority even when a weak account
+# lookup would report the just-created user as present.
+(
+  chpasswd() { cat >/dev/null; return 1; }
+  export AIMEE_WEBCHAT_USER=seed-provision-fails AIMEE_WEBCHAT_PASSWORD=unused-test-password
+  webchat_provision_bootstrap_account >/dev/null 2>&1
+  [[ ! -e $WEBCHAT_BOOTSTRAP_USER ]]
+)
 unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
 
 echo "webchat-vault-migration-check: first-boot generation ok"

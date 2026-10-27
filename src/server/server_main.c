@@ -1,4 +1,5 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
+#include <aimee/translation/codec_stdio.h>
 #include <ouroboros/runtime.h>
 #include <aimee/audit/instance_identity.h>
 #include "aimee.h"
@@ -28,6 +29,7 @@
 #include "cli_session_pty.h"
 #include "presence.h"
 #include "turn_registry.h"
+#include "server_native_delegate.h"
 #include "events.h"
 #include "agent_exec.h"
 #include "log.h"
@@ -38,7 +40,6 @@
 #include "platform_process.h"
 #include "platform_random.h"
 #include "shutdown_forensics.h"
-#include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
 #include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
@@ -373,12 +374,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
    kb_cache_configure(-1);
    kb_client_ws_start();
 
-   /* Register the bundled context engine and set the active engine from config
-    * (empty = default compactor). */
-   context_engine_register_compactor();
-   if (config_context_engine()[0])
-      context_engine_set_active(config_context_engine());
-
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
    guardrails_action_audit_register_reload();
@@ -421,6 +416,17 @@ static int run_server(const char *socket_path, log_level_t log_level)
    presence_init(); /* unified-presence registry (attachments, turn locks, event ring) */
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
    turn_registry_init(); /* per-turn cancel registry (server-owned turn lifecycle) */
+   if (server_native_delegate_start() != 0)
+   {
+      startup_notify(notify_fd, "error: native delegate host service failed to start\n");
+      server_native_delegate_stop();
+      server_shutdown(&g_ctx);
+      agent_http_cleanup();
+      mcp_client_registry_shutdown();
+      obs_bus_stop();
+      audit_log_close();
+      return 1;
+   }
 
    /* Modules declare their commands over the EVENT BUS when they connect -- a
     * module never links into core and never calls another module. The memory
@@ -474,6 +480,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
                server_http_management_last_error());
       startup_notify(notify_fd, management_error);
       server_http_stop();
+      server_native_delegate_stop();
       server_shutdown(&g_ctx);
       agent_http_cleanup();
       mcp_client_registry_shutdown();
@@ -496,9 +503,11 @@ static int run_server(const char *socket_path, log_level_t log_level)
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   /* Retire dependency probes while their module owners and bus still live. */
    server_code_index_stop();
    server_kb_heartbeat_stop();
    server_http_stop();
+   server_native_delegate_stop();
    server_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("server", getpid());
    agent_http_cleanup();
@@ -511,6 +520,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
 int main(int argc, char **argv)
 {
+   if (argc == 2 && !strcmp(argv[1], "--module-model-codec"))
+      return aimee_model_codec_stdio(stdin, stdout);
+
    /* The container entrypoint must scrub its own inherited environment after
     * the short-lived Vault bootstrap returns. Emit names only, never values, so
     * it does not need to pipe credential plaintext through env/sed. Reject a

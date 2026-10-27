@@ -1,10 +1,14 @@
+#include "support/ir_text_request.h"
 /* test_delegate_ensemble.c: unit tests for MoA ensemble fan-out and synthesis. */
 #include "aimee.h"
 #include "delegate_ensemble.h"
+#include "ensemble_request.h"
 #include "delegate_ensemble_internal.h" /* parse_model_json_lenient */
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include "model_registry.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,10 +20,170 @@
  * g_parallel_mode == 4 sleep below, which must be comfortably longer. */
 #define ROUNDTABLE_DEADLINE_TEST_MS 200
 
+static int g_peer_blocks_seen, g_fixture_response_id;
+static int inspect_model_sources(const aimee_request_t *request)
+{
+   int sources = 0;
+   for (int m = 0; m < request->n_messages; m++)
+      for (int b = 0; b < request->messages[m].n_blocks; b++)
+      {
+         const aimee_block_t *block = &request->messages[m].blocks[b];
+         if (!block->thinking_signature ||
+             strcmp(block->thinking_signature, "typed-fixture-signature"))
+            continue;
+         assert(!strcmp(request->messages[m].role, "assistant"));
+         assert(b == 1 && request->messages[m].n_blocks == 2 &&
+                request->messages[m].blocks[0].type == AIMEE_BLK_TEXT);
+         assert(!strcmp(
+             request->messages[m].blocks[0].text,
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block->raw, "source_text"))));
+         for (int previous = 0; previous < m; previous++)
+            for (int k = 0; k < request->messages[previous].n_blocks; k++)
+            {
+               const aimee_block_t *prior = &request->messages[previous].blocks[k];
+               assert(!prior->thinking_id || strcmp(prior->thinking_id, block->thinking_id));
+            }
+         assert(block->type == AIMEE_BLK_THINKING &&
+                !strcmp(block->text, "private fixture reasoning") &&
+                !strncmp(block->thinking_id, "typed-fixture-id-", 17) &&
+                !strcmp(block->thinking_encrypted_content, "typed-fixture-opaque"));
+         assert(block->context.origin == AIMEE_CTX_ORIGIN_MODEL &&
+                block->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+                block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED &&
+                block->context.sensitivity == AIMEE_CTX_SENS_CONFIDENTIAL &&
+                block->context.model_visible == 0 &&
+                !strcmp(block->context.revision_domain, "fixture-owner") &&
+                !strcmp(block->context.revision_scope, "fixture-scope") &&
+                block->context.revision_epoch == 7);
+         const aimee_context_meta_t *text_context = &request->messages[m].blocks[0].context;
+         assert(text_context->origin == AIMEE_CTX_ORIGIN_MODEL &&
+                text_context->authority == AIMEE_CTX_AUTH_EVIDENCE &&
+                text_context->trust == AIMEE_CTX_TRUST_UNVERIFIED &&
+                text_context->model_visible == 1 && text_context->revision_epoch == 7);
+         assert(block->raw &&
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(block->raw, "fixture_response")));
+         sources++;
+      }
+   g_peer_blocks_seen += sources;
+   return sources;
+}
+
+static char *g_fixture_request_view;
+static const char *fixture_request_view(const aimee_request_t *request)
+{
+   size_t size = 1;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+         if (request->messages[i].blocks[j].text)
+            size += strlen(request->messages[i].blocks[j].text) + 2;
+   free(g_fixture_request_view);
+   g_fixture_request_view = malloc(size);
+   assert(g_fixture_request_view);
+   int sources = inspect_model_sources(request);
+   g_fixture_request_view[0] = 0;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type == AIMEE_BLK_TEXT && block->text)
+         {
+            strcat(g_fixture_request_view, block->text);
+            strcat(g_fixture_request_view, "\n");
+         }
+      }
+   if (strstr(g_fixture_request_view, "You are a synthesis aggregator") ||
+       strstr(g_fixture_request_view, "You are consolidating") ||
+       strstr(g_fixture_request_view, "Score this roundtable artifact") ||
+       strstr(g_fixture_request_view, "Repair this malformed roundtable review") ||
+       strstr(g_fixture_request_view, "Summarize this roundtable context"))
+      assert(sources > 0);
+   if (strstr(g_fixture_request_view, "Judge whether the current roundtable artifact"))
+      assert(sources >= 2);
+   return g_fixture_request_view;
+}
+
+static int fixture_ensemble_run(agent_config_t *agents, const ensemble_panel_t *panel,
+                                const char *text, delegate_ensemble_result_t *out)
+{
+   if (!text)
+      return delegate_ensemble_run(agents, panel, NULL, out);
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, NULL, text, 0, 0.3));
+   int rc = delegate_ensemble_run(agents, panel, &request, out);
+   aimee_request_free(&request);
+   return rc;
+}
+
+/* Text literals here are fixture origins; the production seam accepts IR only. */
+static int fixture_roundtable_run(agent_config_t *agents, const ensemble_panel_t *panel,
+                                  const char *text, const roundtable_opts_t *opts,
+                                  roundtable_result_t *out)
+{
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, NULL, text, 0, -1));
+   int rc = delegate_roundtable_run(agents, panel, &request, opts, out);
+   aimee_request_free(&request);
+   return rc;
+}
+
+static const aimee_request_t *g_expected_task;
+static int g_task_copies, g_task_syntheses, g_expected_continuation;
+static void assert_task_custody(const aimee_request_t *request, int synthesis)
+{
+   if (!g_expected_task)
+      return;
+   synthesis |= g_expected_continuation;
+   assert(!aimee_ir_request_admit(request));
+   assert(request->has_temperature && request->temperature == 0.0);
+   assert(request->has_max_tokens && request->max_tokens == 128);
+   assert(request->stream == g_expected_task->stream);
+   assert((!request->model && !g_expected_task->model) ||
+          !strcmp(request->model, g_expected_task->model));
+   assert(request->n_system >= g_expected_task->n_system);
+   for (int i = 0; i < g_expected_task->n_system; i++)
+      assert(!strcmp(request->system[i].text, g_expected_task->system[i].text));
+   for (int i = g_expected_task->n_system; i < request->n_system; i++)
+      assert(request->system[i].context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+             request->system[i].context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(request->n_messages >= g_expected_task->n_messages);
+   for (int m = 0; m < g_expected_task->n_messages; m++)
+   {
+      const aimee_message_t *got = &request->messages[m], *want = &g_expected_task->messages[m];
+      assert(!strcmp(got->role, want->role));
+      assert(got->content_scalar == want->content_scalar);
+      assert(got->n_blocks == want->n_blocks);
+      for (int i = 0; i < want->n_blocks; i++)
+      {
+         aimee_message_t left = {.role = got->role, .blocks = &got->blocks[i], .n_blocks = 1};
+         aimee_message_t right = {.role = want->role, .blocks = &want->blocks[i], .n_blocks = 1};
+         cJSON *a = aimee_ir_message_json(&left), *b = aimee_ir_message_json(&right);
+         assert(a && b && cJSON_Compare(a, b, 1));
+         assert((!got->blocks[i].raw && !want->blocks[i].raw) ||
+                cJSON_Compare(got->blocks[i].raw, want->blocks[i].raw, 1));
+         cJSON_Delete(a);
+         cJSON_Delete(b);
+      }
+   }
+   if (synthesis)
+   {
+      const aimee_message_t *tail = &request->messages[request->n_messages - 1];
+      const aimee_block_t *notes = &tail->blocks[tail->n_blocks - 1];
+      assert(notes->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+             notes->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+             notes->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      g_task_syntheses++;
+   }
+   else
+      g_task_copies++;
+}
+
+static int
+    g_usage_mode; /* 1=panel unknown, 2=synthesis unknown, 3=observed zero, 4=scorer unknown */
 static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails,
                                  * 11=first seat fails only on the first fan-out */
 static int g_aggregator_mode = 0;
 static int g_reason_mode = 0;
+static int g_tiebreak_calls;
 static int g_scorer_calls = 0; /* counts run_quality_scorer ("reason" + score prompt) invocations */
 static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
@@ -27,6 +191,7 @@ static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
 static char g_aggregator_fallback_who[128] = "";
 static int g_cancel_after_checks = -1;
+static int g_cancel_after_score, g_score_delay, g_question_calls;
 static int g_suppress_successful_tool_calls = 0;
 static char g_last_parallel_prompt[8192];
 static int g_named_require_initial_tool;
@@ -90,6 +255,53 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
    return 0;
 }
 
+/* Scripted provider boundary, not a production display fallback. */
+static void fixture_observation(agent_result_t *out, char *text)
+{
+   if (!text)
+      return;
+   assert(fixture_agent_result_from_text(out, text) == 0);
+   free(text);
+   aimee_response_t *response = &out->canonical_response;
+   aimee_ir_block_set_context(&response->content[0], AIMEE_CTX_ORIGIN_MODEL,
+                              AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 1, "fixture-owner", "fixture-scope", 7);
+   char identity[64];
+   snprintf(identity, sizeof identity, "typed-fixture-id-%d", ++g_fixture_response_id);
+   response->content = realloc(response->content, 2 * sizeof *response->content);
+   assert(response->content);
+   response->content[1] =
+       (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                       .text = strdup("private fixture reasoning"),
+                       .thinking_signature = strdup("typed-fixture-signature"),
+                       .thinking_id = strdup(identity),
+                       .thinking_encrypted_content = strdup("typed-fixture-opaque"),
+                       .raw = cJSON_Parse("{\"fixture_response\":true}")};
+   assert(
+       cJSON_AddStringToObject(response->content[1].raw, "source_text", response->content[0].text));
+   response->n_content = 2;
+   aimee_ir_block_set_context(&response->content[1], AIMEE_CTX_ORIGIN_MODEL,
+                              AIMEE_CTX_AUTH_EVIDENCE, AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_CONFIDENTIAL, 0, "fixture-owner", "fixture-scope", 7);
+
+   int unknown =
+       (g_usage_mode == 1 && out->prompt_tokens < 200) ||
+       (g_usage_mode == 2 && out->prompt_tokens == 200 && strcmp(out->agent_name, "reason")) ||
+       (g_usage_mode == 4 && !strcmp(out->agent_name, "reason")) ||
+       (g_usage_mode == 5 && out->prompt_tokens == 200 && g_aggregator_calls == 2 &&
+        strcmp(out->agent_name, "reason"));
+   if (unknown || g_usage_mode == 3)
+      out->prompt_tokens = out->completion_tokens = 0;
+   out->canonical_response.usage_unobserved = unknown && g_usage_mode != 2;
+   out->usage_unobserved = unknown && g_usage_mode == 2;
+   out->canonical_response.usage_in = out->prompt_tokens;
+   out->canonical_response.usage_out = out->completion_tokens;
+   if (g_parallel_mode == 12)
+      out->canonical_response.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   if (g_parallel_mode == 13)
+      out->success = 0;
+}
+
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out,
                        int deadline_ms)
 {
@@ -97,23 +309,26 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    (void)deadline_ms;
    g_parallel_calls++;
    snprintf(g_last_parallel_prompt, sizeof(g_last_parallel_prompt), "%s",
-            count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
+            count > 0 ? fixture_request_view(&tasks[0].request) : "");
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
    {
+      assert_task_custody(&tasks[i].request, 0);
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
                tasks[i].agent ? tasks[i].agent : "(null)");
       snprintf(g_captured_personas[i], sizeof(g_captured_personas[i]), "%s",
-               tasks[i].system_prompt ? tasks[i].system_prompt : "(null)");
+               tasks[i].request.n_system ? tasks[i].request.system[0].text : "(null)");
       g_captured_require_tool[i] = tasks[i].require_initial_tool_call;
    }
    for (int i = 0; i < count; i++)
       memset(&out[i], 0, sizeof(out[i]));
    if (g_parallel_mode == 1)
    {
-      out[0].response = strdup("only one answer");
+
       out[0].prompt_tokens = 50;
       out[0].completion_tokens = 50;
+      out[0].success = 1;
+      fixture_observation(&out[0], strdup("only one answer"));
       return 1;
    }
    if (g_parallel_mode == 4)
@@ -127,33 +342,33 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    for (int i = 0; i < count; i++)
    {
       char buf[128];
+      char *text = NULL;
       snprintf(out[i].agent_name, sizeof(out[i].agent_name), "%s",
                tasks[i].agent ? tasks[i].agent : "");
       if ((g_parallel_mode == 9 && i == count - 1) || (g_parallel_mode == 10 && i == 0))
          continue;
       if (g_parallel_mode == 2 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
-         out[i].response = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
-                                  "\"location\":\"src/a.c:10\",\"summary\":\"same bug\","
-                                  "\"recommendation\":\"fix it\"}],\"overall\":\"block\"}");
+         text = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
+                       "\"location\":\"src/a.c:10\",\"summary\":\"same bug\","
+                       "\"recommendation\":\"fix it\"}],\"overall\":\"block\"}");
       else if (g_parallel_mode == 3 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
-         out[i].response = strdup(i == 0 ? "not json" : "{\"issues\":[],\"overall\":\"ok\"}");
+         text = strdup(i == 0 ? "not json" : "{\"issues\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 5 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
-         out[i].response = strdup(
+         text = strdup(
              "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
       else if ((g_parallel_mode == 6 || g_parallel_mode == 10) && tasks[i].role &&
                strcmp(tasks[i].role, "review") == 0)
-         out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+         text = strdup("{\"items\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          /* review JSON wrapped in a markdown code fence + prose, as a persona'd
           * panelist actually returns it — the lenient parser must still extract it. */
-         out[i].response =
-             strdup("Here is my review:\n```json\n"
-                    "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
-                    "\"location\":\"src/a.c:1\",\"summary\":\"subtracts instead of adding\","
-                    "\"recommendation\":\"use +\"}],\"overall\":\"block\"}\n```\n");
+         text = strdup("Here is my review:\n```json\n"
+                       "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
+                       "\"location\":\"src/a.c:1\",\"summary\":\"subtracts instead of adding\","
+                       "\"recommendation\":\"use +\"}],\"overall\":\"block\"}\n```\n");
       else if (g_parallel_mode == 7 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
-         out[i].response =
+         text =
              strdup(i == 0 ? "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
                              "\"location\":\"src/a.c:10\",\"summary\":\"first bug\","
                              "\"recommendation\":\"fix first\"},{\"severity\":\"suggestion\","
@@ -167,7 +382,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       {
          snprintf(buf, sizeof(buf), "mock response from %s",
                   tasks[i].agent ? tasks[i].agent : "default");
-         out[i].response = strdup(buf);
+         text = strdup(buf);
       }
       out[i].prompt_tokens = 50;
       out[i].completion_tokens = 50;
@@ -175,6 +390,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       out[i].successful_tool_calls =
           !g_suppress_successful_tool_calls && tasks[i].require_initial_tool_call ? 1 : 0;
       out[i].success = 1;
+      fixture_observation(&out[i], text);
    }
    return count;
 }
@@ -183,9 +399,15 @@ static void fill_aggregator_response(agent_result_t *out, const char *who);
 static int is_synthesis_prompt(const char *p);
 
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out)
+                    const aimee_request_t *request, agent_result_t *out)
 {
+   char *text = NULL;
+   assert_task_custody(request, 1);
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature : 0.3;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -204,33 +426,33 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    if (role && strcmp(role, "review") == 0 &&
        strstr(user_prompt ? user_prompt : "", "Repair this malformed roundtable review"))
    {
-      out->response =
+      text =
           strdup(g_repair_mode == 1 ? "{\"items\":[{\"severity\":\"blocking\","
                                       "\"category\":\"correctness\",\"location\":\"src/fixed.c:9\","
                                       "\"summary\":\"fixed malformed review\"}]}"
                                     : "still not json");
    }
    else if (role && strcmp(role, "review") == 0)
-      out->response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+      text = strdup("{\"items\":[],\"overall\":\"ok\"}");
    else
    {
       char buf[128];
       snprintf(buf, sizeof(buf), "named response from %s", name ? name : "missing");
-      out->response = strdup(buf);
+      text = strdup(buf);
    }
    out->prompt_tokens = 40;
    out->completion_tokens = 20;
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", name ? name : "");
    out->success = 1;
+   fixture_observation(out, text);
    return 0;
 }
 
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out)
+                               const aimee_request_t *request, agent_result_t *out)
 {
-   int rc =
-       agent_run_named(cfg, name, role, system_prompt, user_prompt, max_tokens, temperature, out);
+
+   int rc = agent_run_named(cfg, name, role, request, out);
    if (rc == 0 && g_named_require_initial_tool)
    {
       out->tool_calls = 1;
@@ -241,38 +463,39 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
 /* The aggregator/synthesis step runs without tools: by NAME (agent_run_named)
  * when the aggregator is a bare agent name (a name is not a role, so role-
- * routing can't reach it), else by role (agent_run_ex). Both land here. */
+ * routing can't reach it), else by role (agent_run). Both land here. */
 static void fill_aggregator_response(agent_result_t *out, const char *who)
 {
+   char *text = NULL;
    char buf[128];
    g_aggregator_calls++;
    if (g_aggregator_mode == 1)
-      out->response =
-          strdup(g_aggregator_calls == 1 ? "synthesized answer 1" : "inferior final artifact");
+      text = strdup(g_aggregator_calls == 1 ? "synthesized answer 1" : "inferior final artifact");
    else if (g_aggregator_mode == 2)
    {
       size_t n = 26000;
-      out->response = malloc(n);
-      memset(out->response, 'a', n - 2);
-      out->response[n - 2] = '\n';
-      out->response[n - 1] = '\0';
+      text = malloc(n);
+      memset(text, 'a', n - 2);
+      text[n - 2] = '\n';
+      text[n - 1] = '\0';
    }
    else if (g_aggregator_mode == 3)
    {
       /* The primary aggregator returns empty (fails); a fallback panelist
        * synthesizes. Records who actually produced the artifact. */
-      out->response = g_aggregator_calls == 1 ? NULL : strdup("fallback synthesized artifact");
+      text = g_aggregator_calls == 1 ? NULL : strdup("fallback synthesized artifact");
       snprintf(g_aggregator_fallback_who, sizeof(g_aggregator_fallback_who), "%s", who ? who : "");
    }
    else
    {
       snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
-      out->response = strdup(buf);
+      text = strdup(buf);
    }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", who ? who : "");
    out->success = 1;
+   fixture_observation(out, text);
 }
 
 /* True for the aggregator/synthesis prompt (vs a panel round or a repair). */
@@ -281,9 +504,15 @@ static int is_synthesis_prompt(const char *p)
    return p && (strstr(p, "synthesis aggregator") || strstr(p, "consolidating"));
 }
 
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
+   assert_task_custody(request, 1);
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+   double temperature = request->has_temperature ? request->temperature : 0.3;
+
    (void)cfg;
    (void)system_prompt;
    (void)user_prompt;
@@ -353,6 +582,19 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
       return AGENT_ROUTE_NO_CREDENTIALS;
    return AGENT_ROUTE_OK;
 }
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_is_available_for_routing(agent);
+}
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_routing_block_reason(agent, detail, detail_sz);
+}
+
 /* Stubs for the seat resolver pulled in via ensemble_resolve_random_seats. These
  * test seats are all specific model names (never "$random"), so rt_seat_is_random
  * returns 0 and the resolver passes them through unchanged; delegate_pick_for_role
@@ -413,9 +655,15 @@ void delegate_credentials_release(const char *principal, const char *agent_name,
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out)
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out)
 {
+   char *text = NULL;
+   assert_task_custody(request, 1);
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   const char *user_prompt = fixture_request_view(request);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
+
    (void)cfg;
    (void)role;
    (void)system_prompt;
@@ -426,50 +674,65 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    if (role && strcmp(role, "reason") == 0)
    {
       if (strstr(user_prompt ? user_prompt : "", "Score this roundtable artifact"))
+      {
          g_scorer_calls++;
+         if (g_score_delay)
+         {
+            struct timespec delay = {0, 400000000};
+            nanosleep(&delay, NULL);
+         }
+      }
       if (strstr(user_prompt ? user_prompt : "", "Answer the caller's roundtable review questions"))
-         out->response = strdup("{\"answered_questions\":[{\"question\":\"does auth hold?\","
-                                "\"answer\":\"yes\",\"evidence\":\"review mentions auth\","
-                                "\"answered\":true}],\"coverage_gaps\":[]}");
+         g_question_calls++;
+      if (strstr(user_prompt ? user_prompt : "", "Answer the caller's roundtable review questions"))
+         text = strdup("{\"answered_questions\":[{\"question\":\"does auth hold?\","
+                       "\"answer\":\"yes\",\"evidence\":\"review mentions auth\","
+                       "\"answered\":true}],\"coverage_gaps\":[]}");
       else if (strstr(user_prompt ? user_prompt : "", "{\"completion\":N}"))
-         out->response = strdup("{\"completion\":95}");
+      {
+         g_tiebreak_calls++;
+         text = strdup("{\"completion\":95}");
+      }
       else if (g_reason_mode == 1)
-         out->response =
+         text =
              strdup(strstr(user_prompt ? user_prompt : "", "synthesized answer 1") ? "95" : "10");
       else
-         out->response = strdup("80");
+         text = strdup("80");
    }
    else
    {
       char buf[128];
       g_aggregator_calls++;
       if (g_aggregator_mode == 1)
-         out->response =
+         text =
              strdup(g_aggregator_calls == 1 ? "synthesized answer 1" : "inferior final artifact");
       else if (g_aggregator_mode == 2)
       {
          size_t n = 26000;
-         out->response = malloc(n);
-         memset(out->response, 'a', n - 2);
-         out->response[n - 2] = '\n';
-         out->response[n - 1] = '\0';
+         text = malloc(n);
+         memset(text, 'a', n - 2);
+         text[n - 2] = '\n';
+         text[n - 1] = '\0';
       }
       else
       {
          snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
-         out->response = strdup(buf);
+         text = strdup(buf);
       }
    }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", role ? role : "");
    out->success = 1;
+   fixture_observation(out, text);
    return 0;
 }
 
 static int test_cancel_requested(void *ctx)
 {
    (void)ctx;
+   if (g_cancel_after_score && g_scorer_calls > 0)
+      return 1;
    if (g_cancel_after_checks < 0)
       return 0;
    return g_cancel_after_checks-- <= 0;
@@ -516,15 +779,18 @@ static agent_config_t make_priced_acfg(void)
 
 static void reset_modes(void)
 {
+   g_usage_mode = 0;
    g_parallel_mode = 0;
    g_aggregator_mode = 0;
    g_reason_mode = 0;
    g_scorer_calls = 0;
+   g_tiebreak_calls = 0;
    g_repair_mode = 0;
    g_parallel_calls = 0;
    g_named_calls = 0;
    g_aggregator_calls = 0;
    g_cancel_after_checks = -1;
+   g_cancel_after_score = g_score_delay = g_question_calls = 0;
    g_suppress_successful_tool_calls = 0;
    g_named_require_initial_tool = 0;
    g_last_parallel_prompt[0] = '\0';
@@ -532,23 +798,164 @@ static void reset_modes(void)
 
 /* --- tests --- */
 
+static void test_ensemble_preserves_original_ir(void)
+{
+   reset_modes();
+   ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+   agent_config_t config = make_acfg();
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "Inspect the evidence."},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/a.png",
+                              .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                          .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                          .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                          .model_visible = 1},
+                              .message_group = 7}};
+   blocks[1].raw = cJSON_CreateObject();
+   cJSON_AddStringToObject(blocks[1].raw, "opaque_fixture", "retained");
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = "Retain the original policy."};
+   aimee_request_t request = {.system = &policy,
+                              .n_system = 1,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.0,
+                              .has_max_tokens = 1,
+                              .max_tokens = 128};
+   for (int count = 1; count <= 2; count++)
+   {
+      reset_modes();
+      message.n_blocks = count;
+      message.content_scalar = count == 1;
+      cJSON *snapshot = aimee_ir_request_json(&request);
+      assert(snapshot);
+      g_expected_task = &request;
+      g_task_copies = g_task_syntheses = 0;
+      delegate_ensemble_result_t result = {0};
+      assert(!delegate_ensemble_run(&config, &panel, &request, &result) && result.success);
+      assert(g_task_copies == panel.reference_count && g_task_syntheses == 1);
+      cJSON *after = aimee_ir_request_json(&request);
+      assert(after && cJSON_Compare(snapshot, after, 1));
+      cJSON_Delete(after);
+      delegate_ensemble_result_free(&result);
+      /* Exercise the same custody assertion at every roundtable model seam,
+       * including repair, scorer, convergence, compression, chair and questions. */
+      g_expected_continuation = 1;
+      for (int scenario = 0; scenario < 5; scenario++)
+      {
+         reset_modes();
+         g_task_copies = g_task_syntheses = 0;
+         ensemble_panel_t round_panel = make_cfg(2, 2, 100.0);
+         roundtable_opts_t opts = {.mode = ROUNDTABLE_DRAFT,
+                                   .turns = ROUNDTABLE_PARALLEL,
+                                   .max_rounds = 2,
+                                   .converge_threshold = 25};
+         if (scenario == 1)
+            opts.turns = ROUNDTABLE_SEQUENTIAL;
+         if (scenario == 2 || scenario == 3)
+         {
+            opts.mode = ROUNDTABLE_REVIEW;
+            opts.max_rounds = 1;
+            opts.apply_review = 1;
+            opts.question_count = 1;
+            static const char *questions[] = {"does auth hold?"};
+            opts.questions = questions;
+            round_panel.chair_synthesis = 1;
+            g_parallel_mode = scenario == 2 ? 8 : 3;
+            g_repair_mode = 1;
+         }
+         if (scenario == 4)
+            g_aggregator_mode = 2;
+         roundtable_result_t round_result = {0};
+         assert(!delegate_roundtable_run(&config, &round_panel, &request, &opts, &round_result));
+         assert(g_task_syntheses >= round_panel.reference_count);
+         if (scenario == 0 || scenario == 1)
+            assert(g_scorer_calls > 0 && g_tiebreak_calls == 1);
+         delegate_roundtable_result_free(&round_result);
+         after = aimee_ir_request_json(&request);
+         assert(after && cJSON_Compare(after, snapshot, 1));
+         cJSON_Delete(after);
+      }
+      g_expected_continuation = 0;
+      cJSON_Delete(snapshot);
+   }
+   /* A canonical task may retain conversation history and provider controls.
+    * Neither final assistant history nor a pinned model/stream is a text-task
+    * assumption the roundtable may erase or reject. */
+   aimee_block_t previous = {.type = AIMEE_BLK_TEXT, .text = "Earlier analysis."};
+   aimee_message_t assistant = {.role = "assistant", .blocks = &previous, .n_blocks = 1};
+   for (int final_user = 0; final_user <= 1; final_user++)
+   {
+      reset_modes();
+      aimee_message_t history[] = {final_user ? assistant : message,
+                                   final_user ? message : assistant};
+      request.messages = history;
+      request.n_messages = 2;
+      request.model = "pinned-fixture";
+      request.stream = 1;
+      g_expected_task = &request;
+      g_expected_continuation = 1;
+      g_task_syntheses = 0;
+      cJSON *snapshot = aimee_ir_request_json(&request);
+      roundtable_opts_t opts = {.mode = ROUNDTABLE_DRAFT, .max_rounds = 1};
+      roundtable_result_t result = {0};
+      assert(!delegate_roundtable_run(&config, &panel, &request, &opts, &result));
+      assert(g_task_syntheses >= panel.reference_count);
+      delegate_roundtable_result_free(&result);
+      cJSON *after = aimee_ir_request_json(&request);
+      assert(snapshot && after && cJSON_Compare(snapshot, after, 1));
+      cJSON_Delete(snapshot);
+      cJSON_Delete(after);
+   }
+   g_expected_continuation = 0;
+   g_expected_task = NULL;
+   /* At the canonical per-message block ceiling, retain the full original
+    * Message and append a new evidence Message rather than overflow or truncate. */
+   aimee_block_t *full = calloc(AIMEE_IR_MAX_BLOCKS, sizeof(*full));
+   assert(full);
+   for (int i = 0; i < AIMEE_IR_MAX_BLOCKS; i++)
+      full[i] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "Original evidence."};
+   aimee_message_t full_message = {.role = "user", .blocks = full, .n_blocks = AIMEE_IR_MAX_BLOCKS};
+   aimee_request_t full_request = {.messages = &full_message, .n_messages = 1}, continued = {0};
+   assert(!ensemble_synthesis_request(&full_request, "Continue the task.", &continued));
+   assert(continued.n_messages == 2 && continued.messages[0].n_blocks == AIMEE_IR_MAX_BLOCKS &&
+          continued.messages[1].n_blocks == 1 && !continued.messages[1].content_scalar);
+   assert(
+       !strcmp(continued.messages[0].blocks[AIMEE_IR_MAX_BLOCKS - 1].text, "Original evidence."));
+   aimee_request_free(&continued);
+   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = "Role defaults to assistant."};
+   aimee_response_t roleless = {
+       .content = &answer, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   assert(!ensemble_response_context(&full_request, "Selected output", &roleless, &continued));
+   assert(!roleless.role &&
+          !strcmp(continued.messages[continued.n_messages - 1].role, "assistant"));
+   aimee_request_free(&continued);
+   free(full);
+   cJSON_Delete(blocks[1].raw);
+   g_expected_task = NULL;
+}
+
 static void test_ensemble_basic(void)
 {
    reset_modes();
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, "what is 2+2?", &result);
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&acfg, &cfg, "what is 2+2?", &result);
    assert(rc == 0);
    assert(result.success == 1);
    assert(!result.degraded);
    assert(!result.cost_capped);
-   assert(result.response[0] != '\0');
+   assert(result.canonical_response &&
+          !aimee_ir_response_complete_text_valid(result.canonical_response));
    assert(delegate_ensemble_cost_usd(&result) > 0.0);
    /* Partial-failure metadata: all 3 participants succeeded. */
    assert(result.participants_total == 3);
    assert(result.participants_failed == 0);
    printf("  test_ensemble_basic: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 static void test_ensemble_min_successful_degradation(void)
@@ -556,8 +963,8 @@ static void test_ensemble_min_successful_degradation(void)
    g_parallel_mode = 1; /* only first ref succeeds */
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, "hard question?", &result);
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&acfg, &cfg, "hard question?", &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(!result.cost_capped);
@@ -566,6 +973,7 @@ static void test_ensemble_min_successful_degradation(void)
    assert(result.participants_failed == 2);
    g_parallel_mode = 0;
    printf("  test_ensemble_min_successful_degradation: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 static void test_ensemble_cost_cap(void)
@@ -574,12 +982,13 @@ static void test_ensemble_cost_cap(void)
    /* default: 3 refs * (50+50) tokens * $0.000015 = $0.0045 > $0.001 cap */
    ensemble_panel_t cfg = make_cfg(1, 2, 0.001);
    agent_config_t acfg = make_acfg();
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, "expensive question", &result);
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&acfg, &cfg, "expensive question", &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
    assert(!result.degraded);
    printf("  test_ensemble_cost_cap: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 static void test_ensemble_cost_uses_model_registry_prices(void)
@@ -587,14 +996,15 @@ static void test_ensemble_cost_uses_model_registry_prices(void)
    reset_modes();
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_priced_acfg();
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, "priced question", &result);
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&acfg, &cfg, "priced question", &result);
    assert(rc == 0);
    /* 3 refs at 50 input + 50 output each, plus aggregator at 200 input + 100 output:
     * (350 * $1/MTok) + (250 * $3/MTok) = $0.0011. The old flat fallback would be
     * 600 * $15/MTok = $0.009, so this catches regressions to global pricing. */
    assert(result.cost_usd > 0.00109 && result.cost_usd < 0.00111);
    printf("  test_ensemble_cost_uses_model_registry_prices: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 static void test_delegate_cost_estimate_uses_token_tracker(void)
@@ -628,10 +1038,11 @@ static void test_delegate_cost_estimate_uses_token_tracker(void)
 
 static void test_ensemble_null_args(void)
 {
-   delegate_ensemble_result_t result;
-   assert(delegate_ensemble_run(NULL, NULL, NULL, &result) == -1);
+   delegate_ensemble_result_t result = {0};
+   assert(fixture_ensemble_run(NULL, NULL, NULL, &result) == -1);
    assert(delegate_ensemble_cost_usd(NULL) == 0.0);
    printf("  test_ensemble_null_args: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 /* §0.1 regression: the engine must route each fan-out task to its OWN configured
@@ -644,8 +1055,8 @@ static void test_ensemble_routes_to_distinct_agents(void)
    g_captured_count = 0;
    ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, "route check", &result);
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&acfg, &cfg, "route check", &result);
    assert(rc == 0);
    assert(g_captured_count == 3);
    assert(strcmp(g_captured_agents[0], "model-a") == 0);
@@ -656,6 +1067,7 @@ static void test_ensemble_routes_to_distinct_agents(void)
    assert(strcmp(g_captured_agents[0], g_captured_agents[1]) != 0);
    assert(strcmp(g_captured_agents[1], g_captured_agents[2]) != 0);
    printf("  test_ensemble_routes_to_distinct_agents: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 /* Regression: a large review TARGET (the incompressible task) must not trip the
@@ -689,7 +1101,7 @@ static void test_roundtable_large_task_no_size_degrade(void)
    task[n] = '\0';
 
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, task, &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, task, &opts, &result);
    free(task);
    assert(rc == 0);
    /* A large task alone (no carryover on round 1) must NOT trip the compression
@@ -714,7 +1126,7 @@ static void test_roundtable_parallel_basic(void)
    opts.deadline_ms = 0;
    roundtable_result_t result;
    int rc =
-       delegate_roundtable_run(&acfg, &cfg, "draft a short engineering proposal", &opts, &result);
+       fixture_roundtable_run(&acfg, &cfg, "draft a short engineering proposal", &opts, &result);
    assert(rc == 0);
    assert(result.artifact != NULL);
    assert(strstr(result.artifact, "synthesized answer") != NULL);
@@ -746,7 +1158,7 @@ static void test_roundtable_folds_cost_to_parent_session(void)
    opts.max_rounds = 1;
    opts.parent_session_id = "parent-sess";
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
    assert(rc == 0);
    /* >= 2 panel participants + the aggregator all folded onto the parent. */
    assert(g_cost_fold_calls >= 3);
@@ -759,7 +1171,7 @@ static void test_roundtable_folds_cost_to_parent_session(void)
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
-   rc = delegate_roundtable_run(&acfg, &cfg, "draft again", &opts, &result);
+   rc = fixture_roundtable_run(&acfg, &cfg, "draft again", &opts, &result);
    assert(rc == 0);
    assert(g_cost_fold_calls == 0);
    delegate_roundtable_result_free(&result);
@@ -779,8 +1191,8 @@ static void test_roundtable_sequential_uses_named_agents(void)
    opts.converge_threshold = 10;
    opts.deadline_ms = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review this proposed design for correctness",
-                                    &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review this proposed design for correctness",
+                                   &opts, &result);
    assert(rc == 0);
    assert(result.artifact != NULL);
    assert(g_named_calls == 3);
@@ -802,8 +1214,8 @@ static void test_roundtable_degrades_on_min_success(void)
    opts.max_rounds = 1;
    opts.deadline_ms = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with too few successful participants",
-                                    &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft with too few successful participants", &opts,
+                                   &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(result.artifact != NULL);
@@ -830,8 +1242,8 @@ static void test_roundtable_optional_failure_is_reported_without_degrading(void)
    opts.max_rounds = 1;
    opts.required_participants = 2;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with one unavailable optional seat", &opts,
-                                    &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft with one unavailable optional seat", &opts,
+                                   &result);
    assert(rc == 0);
    assert(result.degraded == 0);
    assert(result.participants_total == 3);
@@ -854,7 +1266,7 @@ static void test_roundtable_required_failure_degrades_even_with_optional_success
    opts.max_rounds = 1;
    opts.required_participants = 2;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft missing one required seat", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft missing one required seat", &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(result.participants_required_failed == 1);
@@ -877,7 +1289,7 @@ static void test_roundtable_required_malformed_review_degrades_when_repair_fails
    opts.required_participants = 1;
    roundtable_result_t result;
    int rc =
-       delegate_roundtable_run(&acfg, &cfg, "review with malformed required seat", &opts, &result);
+       fixture_roundtable_run(&acfg, &cfg, "review with malformed required seat", &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(result.participants_failed == 1);
@@ -898,7 +1310,7 @@ static void test_roundtable_rejects_required_prefix_larger_than_panel(void)
    opts.max_rounds = 1;
    opts.required_participants = 4;
    roundtable_result_t result;
-   assert(delegate_roundtable_run(&acfg, &cfg, "invalid required prefix", &opts, &result) == -1);
+   assert(fixture_roundtable_run(&acfg, &cfg, "invalid required prefix", &opts, &result) == -1);
    assert(g_parallel_calls == 0);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_rejects_required_prefix_larger_than_panel: ok\n");
@@ -915,7 +1327,7 @@ static void test_roundtable_preflight_cap_warns_observed_cap_stops(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 3;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a capped proposal", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft a capped proposal", &opts, &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
    assert(g_parallel_calls == 1);
@@ -937,7 +1349,7 @@ static void test_roundtable_keep_best_not_last(void)
    opts.max_rounds = 2;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft then regress", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft then regress", &opts, &result);
    assert(rc == 0);
    assert(strcmp(result.artifact, "synthesized answer 1") == 0);
    assert(result.best_round == 1);
@@ -959,7 +1371,7 @@ static void test_roundtable_post_fanout_cap_keeps_prior_best(void)
    opts.max_rounds = 2;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft then hit cap", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft then hit cap", &opts, &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
    assert(strcmp(result.artifact, "synthesized answer 1") == 0);
@@ -981,7 +1393,7 @@ static void test_roundtable_summarize_forward_sets_truncated(void)
    opts.max_rounds = 2;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a very large artifact", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft a very large artifact", &opts, &result);
    assert(rc == 0);
    assert(result.truncated == 1);
    assert(result.degraded == 1);
@@ -1003,7 +1415,7 @@ static void test_roundtable_review_saturation_converges(void)
    opts.converge_threshold = 0;
    roundtable_result_t result;
    int rc =
-       delegate_roundtable_run(&acfg, &cfg, "review with repeated blocking issue", &opts, &result);
+       fixture_roundtable_run(&acfg, &cfg, "review with repeated blocking issue", &opts, &result);
    assert(rc == 0);
    assert(result.converged == 1);
    assert(result.rounds_run == 2);
@@ -1027,7 +1439,7 @@ static void test_roundtable_review_brief_and_items_return(void)
    opts.questions = questions;
    opts.question_count = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review all severities", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review all severities", &opts, &result);
    assert(rc == 0);
    assert(strstr(g_last_parallel_prompt, "CALLER BRIEF:") != NULL);
    assert(strstr(g_last_parallel_prompt, "report any blocking issue") != NULL);
@@ -1292,11 +1704,12 @@ static void test_implicit_panel_ignores_legacy_roster_and_caps_two(void)
    assert(strcmp(cfg.aggregator, "codex") == 0);
 
    reset_modes();
-   delegate_ensemble_result_t result;
-   assert(delegate_ensemble_run(&acfg, &cfg, "exercise every filled panel seat", &result) == 0);
+   delegate_ensemble_result_t result = {0};
+   assert(fixture_ensemble_run(&acfg, &cfg, "exercise every filled panel seat", &result) == 0);
    assert(result.participants_total == 2);
    assert(result.participants_failed == 0);
    printf("  test_implicit_panel_ignores_legacy_roster_and_caps_two: ok\n");
+   delegate_ensemble_result_free(&result);
 }
 
 static void test_configured_random_seats_fill_balanced_capacity(void)
@@ -1446,7 +1859,7 @@ static void test_roundtable_review_assigns_personas(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review a change", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review a change", &opts, &result);
    assert(rc == 0);
    /* the engine wired a distinct default-lineup persona onto each panelist's
     * system prompt (the compose stub echoes the persona name) */
@@ -1484,7 +1897,7 @@ static void test_roundtable_no_tool_use_is_visible_degradation(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   assert(delegate_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
+   assert(fixture_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
    assert(result.degraded == 1);
    assert(result.participants_tool_used == 0);
    assert(result.participant_tool_calls == 3);
@@ -1509,7 +1922,7 @@ static void test_roundtable_failed_seat_is_incomplete_evidence_coverage(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   assert(delegate_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
+   assert(fixture_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
    assert(result.participants_total == 3);
    assert(result.participants_failed == 1);
    assert(result.participants_tool_used == 2);
@@ -1525,15 +1938,20 @@ static void test_roundtable_captures_original_request_alignment(void)
    agent_result_t results[3];
    memset(results, 0, sizeof results);
    snprintf(results[0].agent_name, sizeof results[0].agent_name, "codex");
-   results[0].response =
+   assert(!fixture_agent_result_from_text(
+       &results[0],
        "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"implements "
-       "the requested scheduler\"},\"items\":[]}";
+       "the requested scheduler\"},\"items\":[]}"));
+   results[0].success = 1;
    snprintf(results[1].agent_name, sizeof results[1].agent_name, "minimax");
-   results[1].response =
+   assert(!fixture_agent_result_from_text(
+       &results[1],
        "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"builds an "
-       "unrequested dashboard instead\"},\"items\":[]}";
+       "unrequested dashboard instead\"},\"items\":[]}"));
+   results[1].success = 1;
    snprintf(results[2].agent_name, sizeof results[2].agent_name, "kimi");
-   results[2].response = "{\"items\":[]}";
+   assert(!fixture_agent_result_from_text(&results[2], "{\"items\":[]}"));
+   results[2].success = 1;
    roundtable_result_t out;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 3, &out, 2);
@@ -1541,9 +1959,10 @@ static void test_roundtable_captures_original_request_alignment(void)
    assert(strstr(out.original_request_alignment_summary, "unrequested dashboard") != NULL);
    assert(strcmp(out.original_request_alignment_sources, "minimax") == 0);
 
-   results[1].response =
-       "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"\"},"
-       "\"items\":[]}";
+   assert(!fixture_agent_result_from_text(
+       &results[1], "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"\"},"
+                    "\"items\":[]}"));
+   results[1].success = 1;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 2, &out, 2);
    assert(strcmp(out.original_request_alignment, "aligned") == 0);
@@ -1551,9 +1970,10 @@ static void test_roundtable_captures_original_request_alignment(void)
 
    /* A stricter verdict without its required rationale remains stricter and
     * fails closed; it must not inherit an earlier aligned explanation. */
-   results[1].response =
-       "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"\"},"
-       "\"items\":[]}";
+   assert(!fixture_agent_result_from_text(
+       &results[1], "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"\"},"
+                    "\"items\":[]}"));
+   results[1].success = 1;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 2, &out, 2);
    assert(strcmp(out.original_request_alignment, "drifted") == 0);
@@ -1564,20 +1984,26 @@ static void test_roundtable_captures_original_request_alignment(void)
    assert(strcmp(out.original_request_alignment, "unclear") == 0);
    assert(strstr(out.original_request_alignment_summary, "No panelist") != NULL);
 
-   results[0].response = "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
-                         "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}";
+   assert(!fixture_agent_result_from_text(
+       &results[0], "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
+                    "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}"));
+   results[0].success = 1;
    results[0].successful_tool_calls = 0;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 1, &out, 4);
    assert(out.item_count == 1);
    assert(out.items[0].tool_grounded == 0);
 
-   results[1].response = results[0].response;
+   agent_result_clear_response(&results[1]);
+   assert(!aimee_ir_response_clone(&results[0].canonical_response, &results[1].canonical_response));
+   results[1].success = 1;
    results[1].successful_tool_calls = 1;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 2, &out, 4);
    assert(out.item_count == 1);
    assert(out.items[0].tool_grounded == 1); /* grounded duplicate upgrades provenance */
+   for (int i = 0; i < 3; i++)
+      agent_result_clear_response(&results[i]);
    printf("  test_roundtable_captures_original_request_alignment: ok\n");
 }
 
@@ -1595,7 +2021,7 @@ static void test_roundtable_aggregator_fallback_synthesizes(void)
    opts.max_rounds = 2;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft needing synthesis", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft needing synthesis", &opts, &result);
    assert(rc == 0);
    /* The primary aggregator returned empty on its first call; a fallback panelist
     * synthesized rather than collapsing the round to an empty artifact. */
@@ -1653,7 +2079,7 @@ static void test_roundtable_review_parses_fenced_json(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review fenced", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review fenced", &opts, &result);
    assert(rc == 0);
    /* the lenient parser strips the markdown fence/prose, so the review items are
     * captured instead of being dropped (which left artifact empty + degraded). */
@@ -1678,7 +2104,7 @@ static void test_roundtable_single_round_skips_scorer(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review once", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review once", &opts, &result);
    assert(rc == 0);
    assert(g_scorer_calls == 0);     /* no cross-round scorer call */
    assert(g_aggregator_calls == 0); /* no synthesis LLM call — assembled from items */
@@ -1698,7 +2124,7 @@ static void test_roundtable_single_round_skips_scorer(void)
    opts2.max_rounds = 2;
    opts2.converge_threshold = 0;
    roundtable_result_t result2;
-   rc = delegate_roundtable_run(&acfg, &cfg2, "draft twice", &opts2, &result2);
+   rc = fixture_roundtable_run(&acfg, &cfg2, "draft twice", &opts2, &result2);
    assert(rc == 0);
    assert(g_scorer_calls > 0);
    delegate_roundtable_result_free(&result2);
@@ -1720,7 +2146,7 @@ static void test_roundtable_cost_capped_skips_question_pass(void)
    opts.questions = questions;
    opts.question_count = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review with cost cap", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review with cost cap", &opts, &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
    /* The reason-role question pass is skipped on a cost-capped run; the mock would
@@ -1752,7 +2178,7 @@ static void test_roundtable_partial_question_answers_report_gaps(void)
    opts.questions = questions;
    opts.question_count = 2;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review two questions", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review two questions", &opts, &result);
    assert(rc == 0);
    assert(result.answered_question_count == 2);
    assert(strcmp(result.answered_questions[0].question, "does auth hold?") == 0);
@@ -1785,7 +2211,7 @@ static void test_roundtable_draft_brief_questions_not_answered(void)
    opts.questions = questions;
    opts.question_count = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
    assert(rc == 0);
    assert(result.answered_question_count == 0);
    assert(result.coverage_gap_count == 0);
@@ -1807,8 +2233,7 @@ static void test_roundtable_review_summary_fallback_key_converges(void)
    opts.max_rounds = 3;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc =
-       delegate_roundtable_run(&acfg, &cfg, "review with no-location blockers", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review with no-location blockers", &opts, &result);
    assert(rc == 0);
    assert(result.converged == 1);
    assert(result.rounds_run == 2);
@@ -1829,7 +2254,7 @@ static void test_roundtable_review_clean_round_converges(void)
    opts.max_rounds = 3;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review clean document", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review clean document", &opts, &result);
    assert(rc == 0);
    assert(result.converged == 1);
    assert(result.rounds_run == 1);
@@ -1851,7 +2276,7 @@ static void test_roundtable_malformed_review_json_counts_failed(void)
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review malformed json handling", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review malformed json handling", &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(g_named_calls == 1);
@@ -1873,7 +2298,7 @@ static void test_roundtable_malformed_review_json_repair_counts_successful(void)
    opts.max_rounds = 1;
    opts.required_participants = 1;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review malformed json repair", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "review malformed json repair", &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 0);
    assert(result.participants_required_failed == 0);
@@ -1897,10 +2322,24 @@ static void test_roundtable_cancellation_stops(void)
    opts.max_rounds = 3;
    opts.cancel_requested = test_cancel_requested;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft but cancel before work", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft but cancel before work", &opts, &result);
    assert(rc == 0);
    assert(result.cancelled == 1);
    assert(g_parallel_calls == 0);
+   delegate_roundtable_result_free(&result);
+   reset_modes();
+   g_parallel_mode = 2;
+   g_cancel_after_score = 1;
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.apply_review = 1;
+   const char *questions[] = {"Why is the review blocked?"};
+   opts.questions = questions;
+   opts.question_count = 1;
+   assert(!fixture_roundtable_run(&acfg, &cfg, "cancel after adopting the first review", &opts,
+                                  &result));
+   assert(result.cancelled && result.best_round == 1 && result.artifact && result.artifact[0]);
+   assert(g_parallel_calls == 1 && g_scorer_calls == 1 && g_aggregator_calls == 1);
+   assert(!g_question_calls && result.coverage_gap_count == 1);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_cancellation_stops: ok\n");
 }
@@ -1930,11 +2369,26 @@ static void test_roundtable_deadline_returns_best_so_far(void)
    opts.max_rounds = 1;
    opts.deadline_ms = ROUNDTABLE_DEADLINE_TEST_MS;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);
+   int rc = fixture_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);
    assert(rc == 0);
    assert(result.deadline_hit == 1);
    assert(result.rounds_run == 1);
    assert(result.artifact != NULL && result.artifact[0]);
+   delegate_roundtable_result_free(&result);
+   reset_modes();
+   g_parallel_mode = 2;
+   g_score_delay = 1;
+   const char *questions[] = {"Why is the review blocked?"};
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.max_rounds = 3;
+   opts.apply_review = 1;
+   opts.questions = questions;
+   opts.question_count = 1;
+   assert(!fixture_roundtable_run(&acfg, &cfg, "retain review when the scorer reaches deadline",
+                                  &opts, &result));
+   assert(result.deadline_hit && result.best_round == 1 && result.artifact && result.artifact[0]);
+   assert(g_parallel_calls == 1 && g_scorer_calls == 1 && g_aggregator_calls == 1);
+   assert(!g_question_calls && result.coverage_gap_count == 1);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_deadline_returns_best_so_far: ok\n");
 }
@@ -1968,12 +2422,157 @@ static void test_one_seat_panel_skips_chair_pass(void)
    printf("  PASS: one-seat panel skips the chair pass\n");
 }
 
+static void test_refused_native_participants_cannot_synthesize_success(void)
+{
+   reset_modes();
+   g_parallel_mode = 12;
+   ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+   agent_config_t config = make_acfg();
+   delegate_ensemble_result_t result = {0};
+   int rc = fixture_ensemble_run(&config, &panel, "review", &result);
+   assert(rc == 0);
+   assert(!result.success && !result.canonical_response && result.participants_failed == 3);
+   assert(g_aggregator_calls == 0);
+   delegate_ensemble_result_free(&result);
+   reset_modes();
+   g_parallel_mode = 13; /* complete model bytes, failed capture/execution */
+   rc = fixture_ensemble_run(&config, &panel, "review", &result);
+   assert(rc == 0 && !result.success && !result.canonical_response);
+   assert(g_aggregator_calls == 0 && result.participants_failed == 3);
+   delegate_ensemble_result_free(&result);
+   reset_modes();
+}
+
+static void test_review_items_require_canonical_success(void)
+{
+   reset_modes();
+   agent_result_t source = {0};
+   char *text = strdup("{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":"
+                       "\"canonical\"},\"items\":[]}");
+   source.success = 1;
+   fixture_observation(&source, text);
+   roundtable_result_t output = {0};
+   capture_round_review_items(&source, 1, &output, 1);
+   assert(!strcmp(output.original_request_alignment, "aligned"));
+   source.canonical_response.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   capture_round_review_items(&source, 1, &output, 1);
+   assert(!strcmp(output.original_request_alignment, "unclear"));
+   source.canonical_response.stop_reason = AIMEE_STOP_END_TURN;
+   source.success = 0;
+   capture_round_review_items(&source, 1, &output, 1);
+   assert(!strcmp(output.original_request_alignment, "unclear"));
+   agent_result_clear_response(&source);
+}
+
+static void assert_cost_json_null(double cost)
+{
+   /* This is the actual legacy compute handler's cost field writer. */
+   cJSON *report = cJSON_CreateObject();
+   cJSON_AddNumberToObject(report, "cost_usd", cost);
+   char *wire = cJSON_PrintUnformatted(report);
+   cJSON *parsed = cJSON_Parse(wire);
+   assert(parsed && cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(parsed, "cost_usd")));
+   free(wire);
+   cJSON_Delete(report);
+   cJSON_Delete(parsed);
+}
+
+static void test_unknown_usage_cost_and_spend(void)
+{
+   agent_config_t acfg = make_acfg();
+   for (int bounded = 0; bounded <= 1; bounded++)
+   {
+      reset_modes();
+      g_usage_mode = 1;
+      ensemble_panel_t panel = make_cfg(1, 2, bounded ? 10.0 : 0.0);
+      delegate_ensemble_result_t result = {0};
+      assert(!fixture_ensemble_run(&acfg, &panel, "unknown panel usage", &result));
+      assert(result.success && isnan(delegate_ensemble_cost_usd(&result)));
+      assert_cost_json_null(result.cost_usd);
+      assert(result.cost_capped == bounded);
+      assert(g_aggregator_calls == (bounded ? 0 : 1));
+      assert(result.canonical_response &&
+             !aimee_ir_response_complete_text_valid(result.canonical_response));
+      delegate_ensemble_result_free(&result);
+   }
+   for (int usage = 1; usage <= 4; usage++)
+   {
+      reset_modes();
+      g_usage_mode = usage;
+      g_cost_fold_calls = 0;
+      ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+      roundtable_opts_t opts = {
+          .mode = ROUNDTABLE_DRAFT, .max_rounds = 3, .parent_session_id = "usage-parent"};
+      roundtable_result_t result = {0};
+      assert(!fixture_roundtable_run(&acfg, &panel, "usage budget", &opts, &result));
+      assert(result.artifact && result.artifact[0]);
+      if (usage == 3)
+      {
+         assert(result.cost_usd == 0.0 && !result.cost_capped);
+         assert(g_scorer_calls > 0 && g_cost_fold_calls == 0);
+      }
+      else
+      {
+         assert(isnan(result.cost_usd) && result.cost_capped && result.rounds_run == 1);
+         assert_cost_json_null(result.cost_usd);
+         assert(g_scorer_calls == (usage == 4 ? 1 : 0));
+         assert(g_aggregator_calls == (usage == 1 ? 0 : 1));
+         assert(g_cost_fold_calls == (usage == 1 ? 0 : usage == 2 ? 3 : 4));
+      }
+      delegate_roundtable_result_free(&result);
+   }
+   reset_modes();
+   g_usage_mode = 5;
+   g_aggregator_mode = g_reason_mode = 1;
+   ensemble_panel_t graded_panel = make_cfg(1, 2, 10.0);
+   roundtable_opts_t graded_opts = {.mode = ROUNDTABLE_DRAFT, .max_rounds = 3};
+   roundtable_result_t graded = {0};
+   assert(!fixture_roundtable_run(&acfg, &graded_panel, "retain best before unknown synthesis",
+                                  &graded_opts, &graded));
+   assert(graded.cost_capped && isnan(graded.cost_usd) && graded.rounds_run == 2);
+   assert(graded.best_round == 1 && strstr(graded.artifact, "synthesized answer 1"));
+   assert(g_scorer_calls == 1);
+   delegate_roundtable_result_free(&graded);
+   reset_modes();
+   g_usage_mode = 1;
+   ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+   roundtable_opts_t opts = {
+       .mode = ROUNDTABLE_DRAFT, .max_rounds = 3, .turns = ROUNDTABLE_SEQUENTIAL};
+   roundtable_result_t result = {0};
+   assert(!fixture_roundtable_run(&acfg, &panel, "unknown sequential usage", &opts, &result));
+   assert(result.cost_capped && isnan(result.cost_usd) && g_named_calls == 1);
+   delegate_roundtable_result_free(&result);
+   for (int malformed = 0; malformed <= 1; malformed++)
+   {
+      reset_modes();
+      g_usage_mode = 1;
+      g_parallel_mode = malformed ? 3 : 6;
+      const char *questions[] = {"does auth hold?"};
+      opts = (roundtable_opts_t){.mode = ROUNDTABLE_REVIEW,
+                                 .max_rounds = 1,
+                                 .apply_review = 1,
+                                 .questions = questions,
+                                 .question_count = 1};
+      panel.chair_synthesis = 1;
+      assert(!fixture_roundtable_run(&acfg, &panel, "unknown review usage", &opts, &result));
+      assert(result.cost_capped && isnan(result.cost_usd));
+      assert(!g_named_calls && !g_aggregator_calls && !g_scorer_calls);
+      assert(result.answered_question_count == 1 && !result.answered_questions[0].answered);
+      delegate_roundtable_result_free(&result);
+   }
+   reset_modes();
+}
+
 int main(void)
 {
+   test_unknown_usage_cost_and_spend();
+   test_refused_native_participants_cannot_synthesize_success();
+   test_review_items_require_canonical_success();
    printf("delegate_ensemble tests\n");
    test_one_seat_panel_skips_chair_pass();
    test_ensemble_null_args();
    test_ensemble_basic();
+   test_ensemble_preserves_original_ir();
    test_ensemble_cost_cap();
    test_ensemble_cost_uses_model_registry_prices();
    test_delegate_cost_estimate_uses_token_tracker();
@@ -2021,6 +2620,8 @@ int main(void)
    test_roundtable_malformed_review_json_repair_counts_successful();
    test_roundtable_cancellation_stops();
    test_roundtable_deadline_returns_best_so_far();
+   assert(g_peer_blocks_seen > 0);
+   free(g_fixture_request_view);
    printf("all tests passed\n");
    return 0;
 }

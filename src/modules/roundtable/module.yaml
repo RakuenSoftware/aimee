@@ -27,7 +27,8 @@
     "src/modules/roundtable/roundtable_seat_resolve.c",
     "src/modules/roundtable/roundtable_verify.c",
     "src/modules/roundtable/roundtable_review_panel.c",
-    "src/modules/roundtable/module_adapter.c"
+    "src/modules/roundtable/module_adapter.c",
+    "src/modules/roundtable/ensemble_request.c"
   ],
   "go_sources": [
     "server-go/modules/roundtable/chunk.go",
@@ -45,7 +46,9 @@
     "server-go/modules/roundtable/review.go",
     "server-go/modules/roundtable/reviewer.go",
     "server-go/modules/roundtable/roundtable.go",
-    "server-go/modules/roundtable/panelwire/response.go"
+    "server-go/modules/roundtable/panelwire/response.go",
+    "server-go/modules/roundtable/review_admission.go",
+    "server-go/modules/roundtable/panel/review_input.go"
   ],
   "go_tests": [
     "server-go/modules/roundtable/capacity_integration_test.go",
@@ -56,11 +59,15 @@
     "server-go/modules/roundtable/panel/chairman_test.go",
     "server-go/modules/roundtable/panel/convene_request_test.go",
     "server-go/modules/roundtable/panel/discussion_test.go",
+    "server-go/modules/roundtable/panel/ir_fixture_test.go",
     "server-go/modules/roundtable/panel/response_test.go",
     "server-go/modules/roundtable/panel/store_test.go",
     "server-go/modules/roundtable/review_test.go",
     "server-go/modules/roundtable/reviewer_test.go",
-    "server-go/modules/roundtable/roundtable_test.go"
+    "server-go/modules/roundtable/roundtable_test.go",
+    "server-go/modules/roundtable/ir_fixture_test.go",
+    "server-go/modules/roundtable/panel/review_input_test.go",
+    "server-go/modules/roundtable/review_admission_ir_test.go"
   ],
   "public_headers": [
     "src/modules/roundtable/include/aimee/roundtable/module_api.h",
@@ -77,7 +84,8 @@
     "src/modules/roundtable/roundtable_preset.h",
     "src/modules/roundtable/roundtable_seat_resolve.h",
     "src/modules/roundtable/roundtable_types.h",
-    "src/modules/roundtable/roundtable_verify.h"
+    "src/modules/roundtable/roundtable_verify.h",
+    "src/modules/roundtable/ensemble_request.h"
   ],
   "tests": [
     "src/tests/test_delegate_ensemble.c",

@@ -100,7 +100,8 @@ extern "C"
 
    /* Privileged operator cancellation of an exact owned API turn. Native
     * custody must already be resolved. This fences continuation, not effects.
-    * Returns 0 committed/idempotent, 1 stale/refused, -1 storage failure. */
+    * Returns 0 committed/idempotent, 1 stale/refused, 2 exact owned active
+    * native (refused without writes), -1 storage failure. */
    int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
                              char out_sequence[32]);
 
@@ -116,32 +117,11 @@ extern "C"
                                         const char *expected, const char *replacement,
                                         const char *principal);
 
-   /* Upsert the canonical message array JSON for one primary
-    * conversation session. Returns 0 on success. */
-   int db1_primary_session_save(const char *session_id, const char *agent_name,
-                                const char *provider, const char *messages_json);
-
-   /* Return a malloc'd copy of the stored message array JSON, or NULL on miss
-    * or error. Caller frees. */
-   char *db1_primary_session_load(const char *session_id, const char *agent_name,
-                                  const char *provider);
-
-   /* Delete one stored primary conversation session. Returns 0 on success. */
-   int db1_primary_session_delete(const char *session_id, const char *agent_name,
-                                  const char *provider);
-
-   /* Allocate rows for recent or transcript-matching primary sessions. Caller
-    * frees with db1_primary_session_rows_free. Returns row count or -1. */
-   int db1_primary_session_alloc_recent(db1_primary_session_row_t **out, int max);
-   int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_t **out,
-                                        int max);
-
    /* Load the newest transcript row for one session_id. Returns 0 on hit, 1 on miss, -1 on failure.
     */
    int db1_primary_session_get_latest(const char *session_id, db1_primary_session_row_t *out);
 
    void db1_primary_session_row_clear(db1_primary_session_row_t *row);
-   void db1_primary_session_rows_free(db1_primary_session_row_t *rows, int count);
 
 #ifdef __cplusplus
 }

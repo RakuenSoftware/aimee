@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -53,7 +51,6 @@ func main() {
 		homeDefault = filepath.Join(userHome, ".config", "aimee")
 	}
 	home := flag.String("home", homeDefault, "aimee state directory")
-	socket := flag.String("socket", "", "Unix socket path")
 	runnerURL := flag.String("runner-url", os.Getenv("AIMEE_WFE_RUNNER_URL"),
 		"typed WFE runner endpoint; empty keeps execution disabled")
 	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
@@ -79,9 +76,6 @@ func main() {
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
 	flag.Parse()
-	if *socket == "" {
-		*socket = filepath.Join(*home, "aimee-server.sock")
-	}
 	if *workflowDir == "" {
 		*workflowDir = filepath.Join(*home, "workflows")
 	}
@@ -113,7 +107,7 @@ func main() {
 	// processes with two schema authorities on one store. It reaches the module
 	// over the bus instead, which is why the attach happens here, before
 	// anything that needs a store, rather than further down beside the runner.
-	rootCtx, rootCancel := context.WithCancel(context.Background())
+	rootCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer rootCancel()
 	if *moduleBusSocket == "" {
 		log.Fatal("the workflow engine needs --module-bus-socket " +
@@ -170,13 +164,6 @@ func main() {
 		log.Fatal(err)
 	}
 	handler.SetConfigStore(configClient)
-	// The WFE control plane is deliberately Unix-socket-only. Credentials must
-	// never be carried in this long-lived process's argv or environment; the
-	// socket's ownership and 0600 mode are the authentication boundary.
-	server := &http.Server{
-		Handler:           telemetry.HTTPHandler("aimee-server.http", handler),
-		ReadHeaderTimeout: 15 * time.Second,
-	}
 	var runner engine.Runner
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
@@ -319,18 +306,6 @@ func main() {
 		}()
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
-		log.Fatal(err)
-	}
-	_ = os.Remove(*socket)
-	listener, err := net.Listen("unix", *socket)
-	if err == nil {
-		err = os.Chmod(*socket, 0o600)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
 	metricsServer, err = observability.StartMetricsServer(metricsConfig, telemetry.MetricsHandler())
 	if err != nil {
 		log.Fatalf("initialize observability listener: %v", err)
@@ -344,59 +319,26 @@ func main() {
 		}()
 	}
 
-	// Serve the workflow control stage over the event bus.
-	//
-	// This is the same mux the private AF_UNIX socket above serves; what changes
-	// is that the C resource plane no longer needs a second transport to reach
-	// it. The engine and its stores stay here -- only the way in moves -- so this
-	// deletes src/server/wfe_http_proxy.c without relocating any state.
-	//
-	// The socket comes from the SAME value the store attach used, not from the
-	// environment again. --module-bus-socket already defaults to
-	// AIMEE_MODULE_BUS_SOCKET, so reading the variable here served the env case
-	// and silently declined the flag case: an operator who passed the documented
-	// flag got a process that attached its store, logged one line, and left every
-	// /v1/workflow route and /v1/dev/submit answering 503. There is no missing
-	// case left to tolerate -- the flag is checked above and the process does not
-	// get this far without it.
-	{
-		busSocket := *moduleBusSocket
-		go func() {
-			err := ring.RunModuleProcess(rootCtx, ring.ModuleProcessConfig{
-				SocketPath:     busSocket,
-				ModuleName:     "workflows",
-				PrincipalClass: 1,
-				PrincipalRef:   20,
-				Stages: []ring.ModuleStage{
-					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
-					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
-					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
-					{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
-				},
-				Handler: workflows.NewHandler(handler),
-			})
-			if err != nil && rootCtx.Err() == nil {
-				log.Printf("workflow control stage stopped: %v", err)
-			}
-		}()
-	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-stop
-		rootCancel()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if metricsServer != nil {
-			_ = metricsServer.Shutdown(ctx)
-		}
-		_ = server.Shutdown(ctx)
-	}()
-	log.Printf("Go aimee-server listening on %s", listener.Addr())
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Printf("serve: %v", err)
-		return
+	// The authenticated module stage is the only workflow control ingress.
+	// A second HTTP socket would trust caller-supplied identity headers without
+	// the host's source admission. Run the stage on this lifecycle so shutdown
+	// drains its handlers before the outbound store caller is detached.
+	log.Printf("Go workflow control serving authenticated module bus %s", *moduleBusSocket)
+	err = ring.RunModuleProcess(rootCtx, ring.ModuleProcessConfig{
+		SocketPath:     *moduleBusSocket,
+		ModuleName:     "workflows",
+		PrincipalClass: 1,
+		PrincipalRef:   20,
+		Stages: []ring.ModuleStage{
+			{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
+			{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+			{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
+			{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
+		},
+		Handler: workflows.NewHandlerContext(rootCtx, handler),
+	})
+	if rootCtx.Err() == nil {
+		log.Printf("workflow control module stopped: %v", err)
 	}
 }
 

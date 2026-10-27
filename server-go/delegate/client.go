@@ -6,6 +6,7 @@
 package delegate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
@@ -23,7 +25,7 @@ const (
 	StageInvoke          uint32 = 1
 	EventGroupPlan       uint32 = 6678
 	StageGroupPlan       uint32 = 22
-	WireVersion                 = 2
+	WireVersion                 = 3
 	DefaultDeadline             = 30 * time.Minute
 	TerminationDetailMax        = 2048
 
@@ -37,7 +39,7 @@ type DelegateRequest struct {
 	Persona              string
 	Delegate             string
 	Participant          string
-	Prompt               string
+	Input                *canonical.Request
 	Workdir              string
 	Tools                bool
 	WorkItemID           string
@@ -56,7 +58,8 @@ type DelegateRequest struct {
 }
 
 type DelegateResult struct {
-	Response    string
+	Output      *canonical.Response
+	History     []canonical.Message
 	Agent       string
 	Participant string
 	CostUSD     float64
@@ -69,11 +72,87 @@ type AgentClient interface {
 }
 
 type DelegateGroupResult struct {
+	Output      *canonical.Response
+	History     []canonical.Message
 	Participant string
-	Response    string
 	CostUSD     float64
 	CostUnknown bool
 	Err         error
+}
+
+// SemanticText is the explicit application-artifact boundary. Only the
+// admitted canonical output can supply application text.
+func (r DelegateResult) SemanticText() (string, error) {
+	if r.Output == nil {
+		return "", errors.New("delegate returned no canonical response")
+	}
+	return r.Output.SemanticText()
+}
+
+func (r DelegateGroupResult) SemanticText() (string, error) {
+	return (DelegateResult{Output: r.Output}).SemanticText()
+}
+
+// AdmitResult validates the producer contract before any display or domain
+// projection. It does not grant task verification or source custody.
+func AdmitResult(result *InvocationResult) error {
+	if result == nil || result.Version != WireVersion ||
+		(result.Status != "done" && result.Status != "failed") {
+		return errors.New("invalid delegate terminal envelope")
+	}
+	if result.Output != nil && !result.Output.Valid() {
+		return errors.New("invalid delegate canonical response")
+	}
+	pending := make(map[string]bool)
+	seen := make(map[string]bool)
+	for _, message := range result.History {
+		raw, err := json.Marshal(message)
+		if err != nil || !canonical.ValidMessage(raw) {
+			return errors.New("invalid delegate canonical history")
+		}
+		for _, block := range message.Blocks {
+			if block.Type == "tool_use" {
+				if message.Role != "assistant" || seen[block.ToolID] {
+					return errors.New("invalid delegate tool identity history")
+				}
+				pending[block.ToolID], seen[block.ToolID] = true, true
+			} else if block.Type == "tool_result" {
+				if (message.Role != "user" && message.Role != "tool") || !pending[block.ToolID] {
+					return errors.New("unbound delegate tool result")
+				}
+				delete(pending, block.ToolID)
+			}
+		}
+	}
+	if result.Status == "done" {
+		if result.Output == nil || result.Error != "" || result.Termination != nil || len(pending) != 0 || len(result.History) == 0 {
+			return errors.New("successful delegate omitted its canonical terminal observation")
+		}
+		var final []canonical.Block
+		for i := len(result.History) - 1; i >= 0; i-- {
+			if result.History[i].Role == "assistant" {
+				final = result.History[i].Blocks
+				break
+			}
+		}
+		projected := make([]canonical.ResponseBlock, len(result.Output.Blocks))
+		for i, b := range result.Output.Blocks {
+			projected[i] = canonical.ResponseBlock{Block: b.Block}
+		}
+		observed := make([]canonical.ResponseBlock, len(final))
+		for i, b := range final {
+			observed[i] = canonical.ResponseBlock{Block: b}
+		}
+		a, _ := json.Marshal(observed)
+		b, _ := json.Marshal(projected)
+		if !bytes.Equal(a, b) {
+			return errors.New("delegate terminal differs from canonical history")
+		}
+		if !result.Output.Complete() {
+			return errors.New("delegate output is not a complete canonical model response")
+		}
+	}
+	return nil
 }
 
 type DelegateGroupClient interface {
@@ -82,6 +161,7 @@ type DelegateGroupClient interface {
 
 var (
 	ErrDelegateTerminal             = errors.New("delegate execution failed")
+	ErrDelegateOutputLimit          = errors.New("delegate canonical output token limit reached")
 	ErrDelegateReplayUnavailable    = errors.New("delegate calls are stateless; replay-only execution is unavailable")
 	ErrDelegateUnassignedExpired    = errors.New("delegate was not assigned")
 	ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
@@ -93,6 +173,9 @@ var (
 )
 
 type DelegateExecutionError struct {
+	// Output is an admitted producer observation retained only for diagnostics.
+	// A failed envelope never grants business/artifact completion authority.
+	Output      *canonical.Response
 	Err         error
 	Dispatched  bool
 	CostKnown   bool
@@ -106,14 +189,15 @@ func (e *DelegateExecutionError) Unwrap() error { return e.Err }
 // Invocation is the complete delegate-owned wire request. Workflow replay,
 // durable-slot, work-item and retry fields intentionally have no JSON mapping.
 type Invocation struct {
-	Version  int    `json:"version"`
-	Role     string `json:"role"`
-	Persona  string `json:"persona"`
-	Model    string `json:"model,omitempty"`
-	Prompt   string `json:"prompt"`
-	Workdir  string `json:"workdir,omitempty"`
-	Tools    bool   `json:"tools"`
-	MaxTurns int    `json:"max_turns,omitempty"`
+	Operation string             `json:"operation"`
+	Version   int                `json:"version"`
+	Role      string             `json:"role"`
+	Persona   string             `json:"persona"`
+	Model     string             `json:"model,omitempty"`
+	Input     *canonical.Request `json:"ir"`
+	Workdir   string             `json:"workdir,omitempty"`
+	Tools     bool               `json:"tools"`
+	MaxTurns  int                `json:"max_turns,omitempty"`
 	// ExecutionTimeoutMS is a delegate-owned run bound, not workflow state. It
 	// lets the producer terminate work at the same boundary as the bus caller.
 	ExecutionTimeoutMS int64 `json:"execution_timeout_ms,omitempty"`
@@ -122,7 +206,8 @@ type Invocation struct {
 type InvocationResult struct {
 	Version     int                    `json:"version"`
 	Status      string                 `json:"status"`
-	Response    string                 `json:"response,omitempty"`
+	Output      *canonical.Response    `json:"ir,omitempty"`
+	History     []canonical.Message    `json:"history,omitempty"`
 	Agent       string                 `json:"agent,omitempty"`
 	Error       string                 `json:"error,omitempty"`
 	CostUSD     float64                `json:"cost_usd,omitempty"`
@@ -132,7 +217,8 @@ type InvocationResult struct {
 
 // TerminationDiagnostic is the delegate producer's bounded, versioned account
 // of why an invocation stopped. Admission failures and ordinary CLI failures do
-// not fabricate one: only the Go producer owns these execution classifications.
+// not fabricate one: only the actual execution owner (HOST native or external-text producer)
+// owns these execution classifications.
 type TerminationDiagnostic struct {
 	Kind               string `json:"kind"`
 	MaxTurns           int    `json:"max_turns,omitempty"`
@@ -182,7 +268,7 @@ type GroupPlanResult struct {
 }
 
 // StageCaller is the delegate bus-call seam. The production implementation is
-// bus.ConcurrentModuleCaller; exposing the narrow contract also lets integration
+// ring.ConcurrentModuleCaller; exposing the narrow contract also lets integration
 // tests cross the real module handler without opening a daemon socket.
 type StageCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
@@ -208,6 +294,24 @@ func NewClient(caller StageCaller, deadline time.Duration) (*BusClient, error) {
 	return &BusClient{caller: caller, deadline: deadline}, nil
 }
 
+func delegateHasInput(input *canonical.Request) bool {
+	if input == nil || !input.Valid() {
+		return false
+	}
+	for _, message := range input.Messages {
+		if message.Role != "user" {
+			continue
+		}
+		for _, block := range message.Blocks {
+			if block.Type == "image" || block.Type == "document" ||
+				block.Type == "text" && block.Text != nil && *block.Text != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -224,8 +328,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		// dispatch instead of accepting a ceiling the producer cannot enforce.
 		return DelegateResult{}, ErrDelegateCostLimitUnsupported
 	}
-	if request.Role == "" || request.Persona == "" || request.Prompt == "" {
-		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
+	if request.Role == "" || request.Persona == "" || !delegateHasInput(request.Input) {
+		return DelegateResult{}, errors.New("delegate role, persona, and canonical input are required")
 	}
 	deadline := c.deadline
 	if contextDeadline, ok := ctx.Deadline(); ok {
@@ -243,8 +347,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 			deadline = cap
 		}
 	}
-	wire := Invocation{Version: WireVersion, Role: request.Role, Persona: request.Persona,
-		Model: request.Delegate, Prompt: request.Prompt, Workdir: request.Workdir,
+	wire := Invocation{Version: WireVersion, Operation: request.WorkItemID, Role: request.Role, Persona: request.Persona,
+		Model: request.Delegate, Input: request.Input, Workdir: request.Workdir,
 		Tools: request.Tools, MaxTurns: request.MaxTurnsCap,
 		ExecutionTimeoutMS: max(1, deadline.Milliseconds())}
 	body, err := json.Marshal(wire)
@@ -267,8 +371,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		return DelegateResult{}, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false}
 	}
 	var result InvocationResult
-	if err := json.Unmarshal(reply, &result); err != nil {
-		return DelegateResult{}, &DelegateExecutionError{Err: fmt.Errorf("decode delegate result: %w", err),
+	if !canonical.Decode(reply, &result) || AdmitResult(&result) != nil {
+		return DelegateResult{}, &DelegateExecutionError{Err: errors.New("decode delegate result: invalid canonical terminal response"),
 			Dispatched: true, CostKnown: false}
 	}
 	if result.Version != WireVersion || (result.Status != "done" && result.Status != "failed") ||
@@ -301,7 +405,10 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 				failure = fmt.Errorf("%w: %s", ErrDelegateTerminal, detail)
 			}
 		}
-		return DelegateResult{}, &DelegateExecutionError{Err: failure,
+		if result.Output != nil && result.Output.StopReason == canonical.StopMaxTokens {
+			failure = errors.Join(ErrDelegateOutputLimit, failure)
+		}
+		return DelegateResult{}, &DelegateExecutionError{Err: failure, Output: result.Output,
 			Dispatched: true, CostKnown: result.CostKnown, CostUSD: result.CostUSD,
 			Termination: result.Termination}
 	}
@@ -309,7 +416,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 	if participant == "" {
 		participant = result.Agent
 	}
-	return DelegateResult{Response: result.Response, Agent: result.Agent, Participant: participant,
+	return DelegateResult{Output: result.Output, History: result.History,
+		Agent: result.Agent, Participant: participant,
 		CostUSD: result.CostUSD, CostUnknown: !result.CostKnown}, nil
 }
 
@@ -364,7 +472,8 @@ func (c *BusClient) DelegateGroup(ctx context.Context, requests []DelegateReques
 	for i := range planned {
 		go func(i int) {
 			result, err := c.Delegate(ctx, planned[i])
-			out[i] = DelegateGroupResult{Participant: result.Participant, Response: result.Response,
+			out[i] = DelegateGroupResult{Participant: result.Participant, Output: result.Output,
+				History: result.History,
 				CostUSD: result.CostUSD, CostUnknown: result.CostUnknown, Err: err}
 			done <- i
 		}(i)

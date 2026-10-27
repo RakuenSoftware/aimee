@@ -347,6 +347,9 @@ static int ensure_connection(void)
 
 static cJSON *server_request(cJSON *req, int timeout_ms)
 {
+   int remote = cli_v1_has_remote_endpoint();
+   if (cli_native_bridge_enabled() && !remote)
+      return NULL; /* Revoked/malformed scoped authority never becomes a UID dial. */
    /* Remote aimee-server: POST mcp.call to its first-class /v1 route. The local
     * cli_v1_dispatch_local path only speaks the co-located UDS, so a thin client
     * configured with a remote endpoint must route here. Memory/kb/search tools
@@ -354,7 +357,7 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
     * cwd is a registered detached workspace marshal back to this client over the
     * workspace reverse-channel (Phase 2b); on a non-served cwd they fail safe
     * server-side (the path does not exist there). */
-   if (cli_v1_has_remote_endpoint())
+   if (remote)
    {
       char *endpoint = cli_v1_client_endpoint();
       char *bearer = cli_v1_client_bearer();
@@ -366,7 +369,24 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
       const char *method =
           (cJSON_IsString(jmethod) && jmethod->valuestring[0]) ? jmethod->valuestring : "mcp.call";
       const char *verb = NULL;
-      const char *path = cli_v1_route_for_method(method, &verb);
+      const char *path = NULL;
+      if (cli_native_bridge_enabled())
+      {
+         /* A scoped MCP owner exposes exactly these protocol methods, never
+          * the operator command manifest or an ambient UID route. */
+         if (!strcmp(method, "mcp.tools_list"))
+         {
+            path = "/v1/mcp/tools_list";
+            verb = "GET";
+         }
+         else if (!strcmp(method, "mcp.call"))
+         {
+            path = "/v1/mcp/call";
+            verb = "POST";
+         }
+      }
+      else
+         path = cli_v1_route_for_method(method, &verb);
       cJSON *resp = NULL;
       if (endpoint && path)
       {
@@ -507,7 +527,7 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
  * absent, so ordinary initialization remains one cheap readiness read. */
 static void mcp_ensure_remote_repo_index(void)
 {
-   if (!cli_v1_remote_endpoint_is_network())
+   if (cli_native_bridge_enabled() || !cli_v1_remote_endpoint_is_network())
       return;
 
    char cwd[MAX_PATH_LEN];
@@ -541,13 +561,16 @@ static void handle_initialize(cJSON *id)
     * changes. */
    cJSON_AddBoolToObject(tools_cap, "listChanged", 1);
    cJSON_AddItemToObject(caps, "tools", tools_cap);
-   cJSON *res_cap = cJSON_CreateObject();
-   cJSON_AddBoolToObject(res_cap, "subscribe", 0);
-   cJSON_AddBoolToObject(res_cap, "listChanged", 0);
-   cJSON_AddItemToObject(caps, "resources", res_cap);
-   cJSON *prompts_cap = cJSON_CreateObject();
-   cJSON_AddBoolToObject(prompts_cap, "listChanged", 0);
-   cJSON_AddItemToObject(caps, "prompts", prompts_cap);
+   if (!cli_native_bridge_enabled())
+   {
+      cJSON *res_cap = cJSON_CreateObject();
+      cJSON_AddBoolToObject(res_cap, "subscribe", 0);
+      cJSON_AddBoolToObject(res_cap, "listChanged", 0);
+      cJSON_AddItemToObject(caps, "resources", res_cap);
+      cJSON *prompts_cap = cJSON_CreateObject();
+      cJSON_AddBoolToObject(prompts_cap, "listChanged", 0);
+      cJSON_AddItemToObject(caps, "prompts", prompts_cap);
+   }
    cJSON_AddItemToObject(result, "capabilities", caps);
 
    cJSON *info = cJSON_CreateObject();
@@ -665,14 +688,16 @@ static void handle_tools_call(cJSON *id, cJSON *req)
     * consumed one TLS worker per short-lived discovery client; the abandoned
     * polls then filled the 64-worker cap and made an unrelated tools/list fail.
     * The helper is idempotent, so subsequent tool calls are cheap. */
-   cli_workspace_reverse_channel_start();
+   if (!cli_native_bridge_enabled())
+      cli_workspace_reverse_channel_start();
 
    /* A remote Git tool runs in the server's reconstructed mirror. Refresh its
     * immutable client snapshot on every call: unchanged trees reuse the same
     * generation (preserving server-side commits/index state), while local
     * commits or edits select a fresh worktree. Fail closed if the refresh cannot
     * be acknowledged; forwarding would knowingly act on stale source. */
-   if (strcmp(tool, "git") == 0 && cli_workspace_reverse_channel_sync() != 0)
+   if (!cli_native_bridge_enabled() && strcmp(tool, "git") == 0 &&
+       cli_workspace_reverse_channel_sync() != 0)
    {
       cJSON *result = cJSON_CreateObject();
       cJSON *content = cJSON_AddArrayToObject(result, "content");
@@ -697,6 +722,14 @@ static void handle_tools_call(cJSON *id, cJSON *req)
    {
       mcp_error(id, -32000,
                 "aimee-server unavailable after retries. Restart aimee-server and retry.");
+      return;
+   }
+
+   const cJSON *tool_error = cJSON_GetObjectItemCaseSensitive(resp, "isError");
+   if (tool_error && !cJSON_IsBool(tool_error))
+   {
+      mcp_error(id, -32603, "Server returned an invalid tool error status");
+      cJSON_Delete(resp);
       return;
    }
 
@@ -751,6 +784,9 @@ static void handle_tools_call(cJSON *id, cJSON *req)
 
    cJSON *result = cJSON_CreateObject();
    cJSON_AddItemToObject(result, "content", content);
+   cJSON *error_flag = cJSON_DetachItemFromObjectCaseSensitive(resp, "isError");
+   if (error_flag)
+      cJSON_AddItemToObject(result, "isError", error_flag);
    cJSON *structured = cJSON_DetachItemFromObjectCaseSensitive(resp, "structuredContent");
    if (structured)
       cJSON_AddItemToObject(result, "structuredContent", structured);
@@ -1174,6 +1210,11 @@ static void handle_request(cJSON *req)
    {
       if (strncmp(m, "notifications/", 14) == 0)
          return;
+      return;
+   }
+   if (cli_native_bridge_enabled() && (!strncmp(m, "resources/", 10) || !strncmp(m, "prompts/", 8)))
+   {
+      mcp_error(id, -32601, "This owned scope exposes tools only");
       return;
    }
 

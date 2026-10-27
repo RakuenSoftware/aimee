@@ -37,26 +37,3 @@ char *agent_request_shape_user_prompt(const agent_t *agent, const char *user_pro
    snprintf(prefixed, len + 12, "/no_think\n%s", prompt);
    return prefixed;
 }
-
-void agent_request_shape_openai_messages(const agent_t *agent, cJSON *messages)
-{
-   if (!agent_request_prefers_no_think_prompt(agent) || !cJSON_IsArray(messages))
-      return;
-   for (int i = cJSON_GetArraySize(messages) - 1; i >= 0; i--)
-   {
-      cJSON *msg = cJSON_GetArrayItem(messages, i);
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (!role || strcmp(role, "user") != 0)
-         continue;
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
-      if (!cJSON_IsString(content))
-         return;
-      char *shaped = agent_request_shape_user_prompt(agent, content->valuestring);
-      if (shaped)
-      {
-         cJSON_SetValuestring(content, shaped);
-         free(shaped);
-      }
-      return;
-   }
-}

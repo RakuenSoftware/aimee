@@ -208,7 +208,11 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	var arr []json.RawMessage
 	json.Unmarshal(roster, &arr)
 	count := len(arr)
-	json.NewEncoder(w).Encode(map[string]any{"models": arr, "agents": arr, "count": count})
+	// Unpinned browser sessions display the same configured primary the server uses.
+	var defaultAgent string
+	_ = json.Unmarshal(resp["default_agent"], &defaultAgent)
+	json.NewEncoder(w).Encode(map[string]any{"models": arr, "agents": arr, "count": count,
+		"default_agent": defaultAgent})
 }
 
 // handleModelStats proxies GET /api/models/stats -> RPC model.stats, returning

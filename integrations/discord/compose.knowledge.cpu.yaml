@@ -25,15 +25,21 @@ services:
     tmpfs: [/tmp]
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
+      AIMEE_HOME: /run/aimee-client
     volumes:
       - ${AIMEE_DISCORD_CONFIG_DIR:?Set the private bridge configuration directory}/config.json:/run/discord/config.json:ro
       - ${AIMEE_DISCORD_CONFIG_DIR}/webhook.url:/run/discord/webhook.url:ro
       - ${AIMEE_DISCORD_CONFIG_DIR}/bot.token:/run/discord/bot.token:ro
-      - ${AIMEE_DISCORD_CONFIG_DIR}/model.key:/run/discord/model.key:ro
       - ${AIMEE_DISCORD_CONFIG_DIR}/knowledge.token:/run/discord/knowledge.token:ro
-      - discord-chat-home:/run/aimee-server:ro
-      - aimee-model-tls:/run/aimee-tokenizer-tls:ro
-volumes:
-  discord-chat-home:
-    external: true
-    name: ${AIMEE_DISCORD_SERVER_HOME_VOLUME:?Set the dedicated chat server home volume}
+      - type: bind
+        source: ${AIMEE_DISCORD_SERVER_SOCKET:?Set the existing Aimee HTTP socket path}
+        target: /run/aimee-server/aimee-http.sock
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AIMEE_DISCORD_CLIENT_HOME:?Set the enrolled bot thin-client home, never server HOME}
+        target: /run/aimee-client
+        read_only: true
+        bind:
+          create_host_path: false

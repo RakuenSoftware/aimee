@@ -178,6 +178,7 @@ const method_policy_t method_registry[] = {
     {"model.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
+    {"model.generate", CAP_CHAT, "tool-free canonical completion"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
     /* Tool definitions are read-only session metadata. Keeping this behind
@@ -436,11 +437,11 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
     * pre-existed, we just created it, or it appeared via a race, it must belong to
     * the caller — otherwise a caller could overwrite another principal's transcript
     * under a known session id. */
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) != 0)
+   db1_server_session_owner_t existing;
+   if (db1_server_session_owner_get(sid, &existing) != 0)
    {
       (void)db1_server_session_create(sid, client_type, caller);
-      if (db1_server_session_get(sid, &existing) != 0)
+      if (db1_server_session_owner_get(sid, &existing) != 0)
       {
          free(messages_json);
          return server_send_error(conn, "failed to register session", NULL);
@@ -476,8 +477,8 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (limit > 100)
       limit = 100;
 
-   db1_server_session_t rows[100];
-   int n = db1_server_session_list_recent(rows, limit);
+   db1_server_session_record_t rows[100];
+   int n = db1_server_session_record_list_recent(rows, limit);
    if (n < 0)
       return server_send_error(conn, "failed to list sessions", NULL);
 
@@ -495,6 +496,7 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (rows[i].claude_session_id[0])
          cJSON_AddStringToObject(s, "claude_session_id", rows[i].claude_session_id);
       cJSON_AddItemToArray(sessions, s);
+      db1_server_session_record_free(&rows[i]);
    }
 
    cJSON *resp = jo_ok();
@@ -511,8 +513,8 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!sid || !sid[0])
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "missing session_id", NULL);
 
-   db1_server_session_t row;
-   if (db1_server_session_get(sid, &row) != 0)
+   db1_server_session_record_t row;
+   if (db1_server_session_record_get(sid, &row) != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "session not found", NULL);
 
    cJSON *resp = jo_ok();
@@ -527,6 +529,7 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (row.claude_session_id[0])
       cJSON_AddStringToObject(s, "claude_session_id", row.claude_session_id);
    cJSON_AddItemToObject(resp, "session", s);
+   db1_server_session_record_free(&row);
 
    return server_send_ok(conn, resp);
 }

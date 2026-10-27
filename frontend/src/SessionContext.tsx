@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react';
 import {
   cacheBelongsToAccount,
+  validMessages,
+  reconcileSessionMessages,
   legacyProviderAliasIDs,
   isPristineDefaultSession,
   mergePersistedSessions,
@@ -16,8 +18,10 @@ import {
 /* A "session" is the app-level unit of work: one chat conversation bound to one
  * git project (plus the provider session ids that carry that conversation). The
  * authenticated server account is authoritative; localStorage is only a fast
- * cache and a one-time migration source for pre-server transcripts. */
+ * metadata cache. Flat legacy messages remain read-only archives; canonical IR
+ * owns the active conversation and model history. */
 export interface Session extends SessionRecord {
+  /** Legacy archive only; never active transcript or model history. */
   messages: SessionMessage[];
 }
 
@@ -30,7 +34,7 @@ interface SessionCtx {
   selectSession: (id: string) => void;
   renameSession: (id: string, name: string) => void;
   /* Merge a partial update into one session (project binding, sids, attach id). */
-  patchSession: (id: string, patch: Partial<Session>) => void;
+  patchSession: (id: string, patch: Partial<Omit<Session, 'messages'>>) => void;
 }
 
 const SESSIONS_KEY = 'aimee_sessions';
@@ -61,10 +65,12 @@ function blankSession(name: string): Session {
 }
 
 interface LegacyTab {
+  title?: string;
   sessionId?: string;
   aimeeSid?: string;
   sid?: string;
   messages?: SessionMessage[];
+  workflowChannel?: string;
 }
 
 function loadLegacyTabs(): Map<string, LegacyTab> {
@@ -72,48 +78,39 @@ function loadLegacyTabs(): Map<string, LegacyTab> {
   try {
     const parsed = JSON.parse(localStorage.getItem(LEGACY_TABS_KEY) || '[]') as LegacyTab[];
     if (Array.isArray(parsed)) {
-      for (const tab of parsed) if (tab?.sessionId) out.set(tab.sessionId, tab);
+      parsed.forEach((tab, index) => { if (tab && typeof tab === 'object') out.set(tab.sessionId || tab.aimeeSid || `legacy-${index}`, tab); });
     }
   } catch { /* ignore */ }
   return out;
 }
 
-function normalizeMessages(value: unknown): SessionMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((message): message is SessionMessage => {
-    if (!message || typeof message !== 'object') return false;
-    const candidate = message as Partial<SessionMessage>;
-    return (candidate.role === 'user' || candidate.role === 'assistant' || candidate.role === 'narration') &&
-      typeof candidate.text === 'string';
-  });
-}
-
 function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(SESSIONS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Session>[];
-      if (Array.isArray(parsed) && parsed.length) {
-        const legacyTabs = loadLegacyTabs();
-        return parsed.map((session, i) => {
-          const legacy = typeof session.id === 'string' ? legacyTabs.get(session.id) : undefined;
-          const aimeeSid = (typeof session.aimeeSid === 'string' && session.aimeeSid) ||
-            legacy?.aimeeSid || newAimeeSessionID();
-          return {
-            id: typeof session.id === 'string' && session.id ? session.id : aimeeSid,
-            name: typeof session.name === 'string' && session.name ? session.name : `Session ${i + 1}`,
-            projectRoot: typeof session.projectRoot === 'string' ? session.projectRoot : '',
-            projectName: typeof session.projectName === 'string' ? session.projectName : '',
-            claudeSid: (typeof session.claudeSid === 'string' && session.claudeSid) || legacy?.sid || '',
-            aimeeSid,
-            // Presence attachments are browser-process-local and cannot be resumed.
-            attachId: '',
-            messages: normalizeMessages(session.messages).length
-              ? normalizeMessages(session.messages)
-              : normalizeMessages(legacy?.messages),
-          };
-        });
-      }
+    const legacyTabs = loadLegacyTabs();
+    const parsed: Partial<Session>[] = raw ? JSON.parse(raw) : [...legacyTabs].map(([id, tab]) => ({
+      id, name: tab.title, aimeeSid: tab.aimeeSid, claudeSid: tab.sid,
+    }));
+    if (Array.isArray(parsed) && parsed.length) {
+      return parsed.map((session, i) => {
+        const candidate = legacyTabs.get(session.id || '') ?? [...legacyTabs.values()].find(tab => tab.aimeeSid && tab.aimeeSid === session.aimeeSid);
+        const legacy = !session.aimeeSid || !candidate?.aimeeSid || candidate.aimeeSid === session.aimeeSid ? candidate : undefined;
+        const aimeeSid = (typeof session.aimeeSid === 'string' && session.aimeeSid) ||
+          legacy?.aimeeSid || newAimeeSessionID();
+        return {
+          id: typeof session.id === 'string' && session.id ? session.id : aimeeSid,
+          name: typeof session.name === 'string' && session.name ? session.name : `Session ${i + 1}`,
+          projectRoot: typeof session.projectRoot === 'string' ? session.projectRoot : '',
+          projectName: typeof session.projectName === 'string' ? session.projectName : '',
+          claudeSid: (typeof session.claudeSid === 'string' && session.claudeSid) || legacy?.sid || '',
+          aimeeSid,
+          // Presence attachments are browser-process-local and cannot be resumed.
+          attachId: '',
+          workflowChannel: typeof session.workflowChannel === 'string' ? session.workflowChannel
+            : typeof legacy?.workflowChannel === 'string' ? legacy.workflowChannel : undefined,
+          messages: reconcileSessionMessages(validMessages(session.messages), validMessages(legacy?.messages)),
+        };
+      });
     }
   } catch { /* ignore */ }
   return [blankSession('Session 1')];
@@ -129,12 +126,12 @@ async function persistSession(session: Session, legacyProviderAliasID = ''): Pro
         title: session.name,
         cwd: session.projectRoot,
         legacy_provider_alias_id: legacyProviderAliasID || undefined,
-        // The backend imports this only when its transcript is still empty.
+        // Only session metadata crosses this boundary; legacy transcript text
+        // remains a read-only archive and never becomes canonical model history.
         // Provider ids are opaque resume credentials and are never imported
         // directly from browser storage. During the one-time legacy upgrade the
         // optional alias only asks the backend to transfer a binding already
         // present in this authenticated user's server-owned legacy row.
-        messages: session.messages,
       }),
     });
     return response.ok;
@@ -379,18 +376,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const selectSession = useCallback((id: string) => setActiveId(id), []);
 
-  const patchSession = useCallback((id: string, patch: Partial<Session>) => {
+  const patchSession = useCallback((id: string, patch: Partial<Omit<Session, 'messages'>>) => {
+    // JS callers cannot turn a metadata update into a second transcript writer.
+    const { messages: ignoredMessages, ...metadata } = patch as Partial<Session>;
+    void ignoredMessages;
+    if (Object.keys(metadata).length === 0) return;
     const session = sessionsRef.current.find(candidate => candidate.id === id);
     if (!session) return;
-    const next = { ...session, ...patch };
+    const next = { ...session, ...metadata,
+      messages: metadata.aimeeSid && metadata.aimeeSid !== session.aimeeSid ? [] : session.messages };
     updateSessions(sessionsRef.current.map(candidate => candidate.id === id ? next : candidate));
     if (next.aimeeSid !== session.aimeeSid) {
       const pending = writesRef.current.get(session.aimeeSid) ?? Promise.resolve(true);
       void pending.then(() => forgetSession(session.aimeeSid));
     }
-    // Streaming transcripts already persist through the chat backend. Mirror
-    // them in the account cache without sending a metadata write every tick.
-    if (Object.keys(patch).some(key => key !== 'messages')) persistTracked(next);
+    persistTracked(next);
   }, [persistTracked, updateSessions]);
 
   const renameSession = useCallback((id: string, name: string) => {

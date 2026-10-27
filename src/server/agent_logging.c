@@ -321,7 +321,9 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
        .requested_model = result->requested_model,
        .stop_reason = result->stop_reason,
        .agent_log_id = g_agent_log_id,
-       .usage_kind = usage_kind ? usage_kind : "realized",
+       .usage_kind = agent_result_usage_is_unobserved(result)
+                         ? "unobserved"
+                         : (usage_kind ? usage_kind : "realized"),
        .request_id = rctx ? rctx->request_id : "",
        .idempotency_key = rctx ? rctx->idempotency_key : "",
        .attempt = 0,

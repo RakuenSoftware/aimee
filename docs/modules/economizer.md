@@ -22,9 +22,9 @@ Two properties shape the whole module:
 
 The host chooses provider calls and routes. The Go admission stage enforces declared
 limits on the final serialized request; the module does not call providers or predict
-cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
-authorization requires a signed registry entry, and the production registry is empty by
-design.
+cache residency. Task-cost reporting is observe-only; it does not authorize request
+transforms. Unregistered provider-wire planners and their unused proof registry have
+been retired.
 
 ## Public contracts
 
@@ -43,6 +43,7 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 | `economizer-post-status` | 11014 | session, provider status and mutation/stream facts | restore/resend decision and breaker result |
 | `economizer-stats` | 11015 | snapshot operation | reduction telemetry |
 | `economizer-request-budget` | 11016 | final body length/digest, route and explicit limits | admission decision bound to the complete metadata |
+| `economizer-task-cost` | 11017 | declared task bounds and observed usage/cost evidence | observe-only cost report and verdict |
 
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
@@ -82,7 +83,7 @@ unattached module are therefore not presented as genuine zero activity.
 
 ## Providers and readiness
 
-The module serves eight bus stages and calls no provider itself, so it has no upstream to be
+The module serves nine bus stages and calls no provider itself, so it has no upstream to be
 ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
 reports whether an `aimee-module-economizer` process is attached to the bus.
 
@@ -158,14 +159,28 @@ empty page table, which costs one turn of cache warmth instead of failing the re
 
 ## Security and privacy
 
-Prompt content is the most sensitive thing aimee handles, and this module sees all of it.
-It is therefore an in-process bus peer with no network egress of its own.
+Reduction receives canonical conversation content over the local module bus. The registered
+`StageReduce` handler in `server-go/modules/economizer/module.go` calls
+`ir.DecodeMessages` before reduction and rejects provider-shaped or mixed histories.
+`protectedContextPreserved` in `server-go/modules/economizer/protected_context.go`
+compares system, developer and authored user messages in order, including their full
+serialized blocks and context metadata. A changed protected message makes `Reduce`
+return `ReduceReasonProtected` and retain the original history. Tool-result-only user
+messages can be reduced; a reduction must not rewrite them into new user instructions.
 
-Ref validation is strict because a spill ref reaches the filesystem: anything that is not
-a well-formed content-derived ref is refused rather than normalized. The proof registry is
-the second control. `proof.go` can produce evidence that a transform pays for itself, but
-applying one requires a signed registry entry, and production ships with an empty
-registry, so no proof-authorized transform can run.
+Final request admission is separate from optional reduction. `handleRequestBudget` in
+`server-go/modules/economizer/request_budget.go` receives the final body's byte length,
+SHA-256, route and caller/operator limits, without receiving another copy of the prompt.
+Its response commitment binds that exact metadata; the host serialization fence checks
+the decision before provider dispatch. An unavailable admission owner cannot authorize
+a request with declared limits. `handleTaskCost` reports observations and never grants
+permission to transform a request.
+
+Spilled tool output remains sensitive local data. `TCRefValid` and `TCRecall` in
+`server-go/modules/economizer/condense_apply.go` refuse malformed content-derived
+references before filesystem access rather than normalizing arbitrary paths; recall
+opens the spill with `O_NOFOLLOW` to reject symlinks. The module registers
+bus stages in `module.go` and has no provider HTTP client or independent network egress.
 
 ## Supported journeys
 

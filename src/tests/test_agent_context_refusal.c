@@ -1,13 +1,16 @@
+#include "support/ir_text_request.h"
 /* Exercise the production context builder and native initial-dispatch boundary.
  * External module and HTTP transports are fixtures. Memory decisions are supplied
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include "agent_admission.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "modules/tools/tool_catalog_data.h"
 #include <aimee/module-runtime/pre_llm_hook.h>
 #include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_backend.h>
 #include "config.h"
 #include "cJSON.h"
 #include "platform_test_util.h"
@@ -21,12 +24,69 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The canonical tool-free fixture installs its own log sink. Reaching a live
+ * history/learning transport would violate the no-context/no-feedback contract. */
+cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const char *verb,
+                                         const cJSON *args, const cJSON *context)
+{
+   (void)event;
+   (void)stage;
+   (void)verb;
+   (void)args;
+   (void)context;
+   abort();
+}
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t capacity)
+{
+   (void)cwd;
+   (void)out;
+   (void)capacity;
+   abort(); /* This fixture owns no learning source and must never request one. */
+}
+int server_native_history_load(const char *session, const char *actor, const char *turn,
+                               int running, cJSON **messages, cJSON **receipts)
+{
+   (void)session;
+   (void)actor;
+   (void)turn;
+   (void)running;
+   (void)messages;
+   (void)receipts;
+   abort();
+}
+
 static int metadata_available = 1;
 static int fixture_metadata(const char *name, aimee_tool_metadata_t *out)
 {
    if (!metadata_available)
       return -1;
    *out = aimee_tools_catalog_metadata(name);
+   return 0;
+}
+
+static int terminal_intents, terminal_denials;
+static int capture_terminal_denial(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type == AIMEE_BLK_TOOL_USE)
+      {
+         assert(!strcmp(block->tool_id, "terminal-denied-call"));
+         terminal_intents++;
+      }
+      if (block->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         assert(!strcmp(block->tool_id, "terminal-denied-call") && block->tool_is_error);
+         char *text = cJSON_PrintUnformatted(block->tool_result);
+         assert(text && strstr(text, "not dispatched"));
+         free(text);
+         terminal_denials++;
+      }
+   }
    return 0;
 }
 
@@ -96,14 +156,24 @@ static int refusing_capture(const aimee_session_event_t *event, void *context)
 }
 
 static const char *recall_reply;
+static const char *projection_text_override;
 static int recalls;
 static int refuse_after;
 static int provider_calls;
+static int visibility_query_case;
+static char last_ingress_query[4096];
 static int final_response;
+static int usage_mixed;
+static const char *simple_finish;
+static int simple_tools, simple_media, simple_trailing;
 static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
 static int expect_hook_prompt, hook_calls;
+static int owned_generation_case, owned_generation_inputs;
+static int rich_generation_case;
+static int responses_controls_case;
+static int other_controls_case;
 static int fallback_hook_context(const char *user, char *out, size_t capacity, void *context)
 {
    (void)context;
@@ -132,6 +202,170 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (other_controls_case)
+   {
+      cJSON *sent = cJSON_ParseWithLengthOpts(body, body_len, NULL, 0);
+      assert(sent && !cJSON_HasObjectItem(sent, "reasoning") &&
+             !cJSON_HasObjectItem(sent, "reasoning_summary") &&
+             cJSON_HasObjectItem(sent, "metadata") && cJSON_HasObjectItem(sent, "service_tier"));
+      assert(strstr(body, "other provider task") && strstr(body, "retained evidence"));
+      assert(cJSON_GetNumberValue(cJSON_GetObjectItem(sent, "max_tokens")) == 128);
+      assert(cJSON_GetNumberValue(cJSON_GetObjectItem(sent, "top_p")) == 0.8);
+      cJSON_Delete(sent);
+      *response_buf = strdup(
+          other_controls_case == 2
+              ? "{\"id\":\"other-controls\",\"type\":\"message\",\"role\":\"assistant\",\"stop_"
+                "reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"Other controls "
+                "complete.\"}]}"
+              : "{\"id\":\"other-controls\",\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
+                "\"role\":\"assistant\",\"content\":\"Other controls complete.\"}}]}");
+      return 200;
+   }
+   if (responses_controls_case)
+   {
+      cJSON *sent = cJSON_ParseWithLengthOpts(body, body_len, NULL, 0);
+      assert(sent && cJSON_HasObjectItem(sent, "service_tier") &&
+             cJSON_IsFalse(cJSON_GetObjectItem(sent, "parallel_tool_calls")));
+      assert(!cJSON_HasObjectItem(sent, "top_p") && !cJSON_HasObjectItem(sent, "top_k") &&
+             !cJSON_HasObjectItem(sent, "metadata") && !cJSON_HasObjectItem(sent, "stop") &&
+             !cJSON_HasObjectItem(sent, "max_output_tokens") &&
+             !cJSON_HasObjectItem(sent, "temperature") && !cJSON_HasObjectItem(sent, "thinking") &&
+             !cJSON_HasObjectItem(sent, "prompt_cache_retention") &&
+             !cJSON_HasObjectItem(sent, "prompt_cache_options"));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(sent, "prompt_cache_key")),
+                     "owned-cache-scope"));
+      assert(strstr(body, "immutable control task") && strstr(body, "separate control evidence"));
+      cJSON_Delete(sent);
+      *response_buf =
+          strdup("{\"id\":\"controls\",\"object\":\"response\",\"status\":\"completed\","
+                 "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
+                 "\"type\":\"output_text\",\"text\":\"Controls fixture completed.\"}]}]}");
+      return 200;
+   }
+   if (visibility_query_case)
+   {
+      assert(!strstr((const char *)body, "HIDDEN_QUERY_SECRET"));
+      if (visibility_query_case == 1)
+         assert(strstr((const char *)body, "visible primary task"));
+   }
+   if (rich_generation_case)
+   {
+      if (rich_generation_case != 3)
+         assert(agent_admission_agent_active("context-refusal-fixture") == 1);
+      cJSON *sent = cJSON_ParseWithLengthOpts(body, body_len, NULL, 0);
+      assert(sent);
+      if (rich_generation_case == 3)
+         assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(sent, "tools")) > 0);
+      else
+         assert(!cJSON_GetObjectItemCaseSensitive(sent, "tools"));
+      char *encoded = cJSON_PrintUnformatted(sent);
+      assert(encoded);
+      assert(strstr(encoded, "immutable cron task") && strstr(encoded, "script evidence") &&
+             strstr(encoded, "prior evidence"));
+      assert(!strstr(encoded, "private reasoning") && !strstr(encoded, "unrelated signature"));
+      if (rich_generation_case >= 2)
+         assert(strstr(encoded, "prior user task") && strstr(encoded, "prior assistant response") &&
+                strstr(encoded, "second policy block"));
+      if (rich_generation_case == 3)
+      {
+         assert(
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(sent, "stop")), "END"));
+         assert(cJSON_GetObjectItemCaseSensitive(sent, "max_tokens")->valueint == 256);
+         assert(cJSON_GetObjectItemCaseSensitive(sent, "temperature")->valuedouble == 0.3);
+         assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(sent, "min_p")) == 0.07);
+         assert(strstr((const char *)body, "9007199254740993123456789"));
+         cJSON *wire_messages = cJSON_GetObjectItemCaseSensitive(sent, "messages"), *wire_message;
+         int memory_in_user = 0, host_policy_in_system = 0;
+         cJSON_ArrayForEach(wire_message, wire_messages)
+         {
+            const char *role =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_message, "role"));
+            char *wire_text = cJSON_PrintUnformatted(wire_message);
+            assert(role && wire_text);
+            if (strstr(wire_text, "Go owner retained complete context."))
+            {
+               assert(!strcmp(role, "user"));
+               memory_in_user++;
+            }
+            if (!strcmp(role, "system"))
+               assert(!strstr(wire_text, "Go owner retained complete context."));
+            if (strstr(wire_text, "Use paths relative to this workspace"))
+            {
+               assert(!strcmp(role, "system"));
+               host_policy_in_system++;
+            }
+            free(wire_text);
+         }
+         assert(memory_in_user == 1 && host_policy_in_system == 1);
+      }
+      free(encoded);
+      cJSON_Delete(sent);
+   }
+   if (owned_generation_case)
+   {
+      cJSON *sent = cJSON_ParseWithLengthOpts(body, body_len, NULL, 0);
+      assert(sent);
+      assert(cJSON_GetObjectItem(sent, "max_tokens")->valueint == 256);
+      assert(cJSON_GetObjectItem(sent, "temperature")->valuedouble == 0.3);
+      assert(!cJSON_GetObjectItem(sent, "tools"));
+      char *encoded = cJSON_PrintUnformatted(sent);
+      assert(encoded && strstr(encoded, "original prompt") &&
+             !strstr(encoded, "single-hook-context"));
+      free(encoded);
+      cJSON_Delete(sent);
+   }
+   if (simple_finish)
+   {
+      char response[512];
+      snprintf(response, sizeof response,
+               "{\"model\":\"terminal-fixture\",\"choices\":[{\"finish_reason\":\"%s\","
+               "\"message\":{\"role\":\"assistant\",\"content\":\"Partial plausible verdict.\"}}],"
+               "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}",
+               simple_finish);
+      cJSON *root = cJSON_Parse(response);
+      assert(root);
+      if (simple_media)
+      {
+         cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+         cJSON *message = cJSON_GetObjectItem(choice, "message");
+         cJSON *content = cJSON_Parse(
+             "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,YQ==\"},"
+             "\"fixture_sidecar\":{\"opaque\":\"preserve\"}}]");
+         assert(content);
+         if (simple_media == 2)
+         {
+            cJSON *text = cJSON_CreateObject();
+            cJSON_AddStringToObject(text, "type", "text");
+            cJSON_AddStringToObject(text, "text", "Completed visual answer.");
+            cJSON_AddItemToArray(content, text);
+         }
+         cJSON_ReplaceItemInObject(message, "content", content);
+      }
+      if (simple_tools)
+      {
+         cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+         cJSON *message = cJSON_GetObjectItem(choice, "message");
+         cJSON *calls = cJSON_AddArrayToObject(message, "tool_calls");
+         cJSON *call = cJSON_CreateObject();
+         cJSON_AddItemToArray(calls, call);
+         cJSON_AddStringToObject(call, "id", "terminal-denied-call");
+         cJSON_AddStringToObject(call, "type", "function");
+         cJSON *function = cJSON_AddObjectToObject(call, "function");
+         cJSON_AddStringToObject(function, "name", "read_file");
+         cJSON_AddStringToObject(function, "arguments", "{\"path\":\"must-not-run\"}");
+      }
+      *response_buf = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+      if (simple_trailing)
+      {
+         size_t length = strlen(*response_buf);
+         char *extended = realloc(*response_buf, length + sizeof " trailing");
+         assert(extended);
+         *response_buf = extended;
+         memcpy(extended + length, " trailing", sizeof " trailing");
+      }
+      return 200;
+   }
    if (bootstrap_case)
    {
       char *request = strndup(body, body_len);
@@ -177,6 +411,14 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
              cJSON_Parse("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
                          "\"type\":\"output_text\",\"text\":\"Identity fixture completed.\"}]}");
          assert(message && cJSON_AddItemToArray(output, message));
+      }
+      if (usage_mixed == 3 || (usage_mixed == 1 && provider_calls == 2) ||
+          (usage_mixed == 2 && provider_calls == 1))
+      {
+         cJSON *usage = cJSON_AddObjectToObject(reply, "usage");
+         assert(usage);
+         assert(cJSON_AddNumberToObject(usage, "input_tokens", usage_mixed == 3 ? 0 : 7));
+         assert(cJSON_AddNumberToObject(usage, "output_tokens", usage_mixed == 3 ? 0 : 3));
       }
       *response_buf = cJSON_PrintUnformatted(reply);
       cJSON_Delete(reply);
@@ -232,7 +474,7 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
 char *ingress_preinject_task_instructions(const char *instructions, const char *query)
 {
    (void)instructions;
-   (void)query;
+   snprintf(last_ingress_query, sizeof last_ingress_query, "%s", query ? query : "");
    return NULL;
 }
 void policy_action_attempt(const char *attempt)
@@ -329,7 +571,9 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       {
          const cJSON *limit = cJSON_GetObjectItemCaseSensitive(args, "native_context_bytes");
          assert(cJSON_IsNumber(limit) && limit->valuedouble > 0);
-         const char *text = "# Recall\nGo owner retained complete context.\n";
+         const char *text = projection_text_override
+                                ? projection_text_override
+                                : "# Recall\nGo owner retained complete context.\n";
          char digest[72] = "sha256:";
          assert(aimee_sha256_hex(text, strlen(text), digest + 7) == 0);
          cJSON *projection = cJSON_AddObjectToObject(envelope, "native_context");
@@ -397,6 +641,530 @@ static int fixture_classifier(const char *name, int *classification)
    return 0;
 }
 
+static int capture_owned_generation(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind == AIMEE_SESSION_MESSAGE && !strcmp(event->message->role, "user"))
+   {
+      assert(event->message->n_blocks == 1);
+      const aimee_block_t *block = &event->message->blocks[0];
+      assert(block->context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL);
+      assert(block->context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      assert(!strcmp(block->text, "original prompt"));
+      owned_generation_inputs++;
+   }
+   return 0;
+}
+
+static agent_config_t *fixture_config(const agent_t *agent)
+{
+   agent_config_t *cfg = calloc(1, sizeof *cfg);
+   assert(cfg);
+   cfg->agent_count = 1;
+   cfg->agents[0] = *agent;
+   cfg->agents[0].enabled = 1;
+   cfg->agents[0].max_parallel = 1;
+   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
+   return cfg;
+}
+
+static void test_owned_plain_generation(const agent_t *agent)
+{
+   agent_config_t *cfg = fixture_config(agent);
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT,
+                           .text = "Use only the evidence.",
+                           .context = {.origin = AIMEE_CTX_ORIGIN_USER,
+                                       .authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                       .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                       .model_visible = 1}};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT,
+                             .text = "original prompt",
+                             .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                         .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                         .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                         .model_visible = 1}};
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = 1,
+                            .messages = &message,
+                            .n_messages = 1,
+                            .tool_choice = AIMEE_TOOL_CHOICE_NONE,
+                            .max_tokens = 256,
+                            .has_max_tokens = 1,
+                            .temperature = 0.3,
+                            .has_temperature = 1};
+   agent_result_t result = {0};
+   owned_generation_case = 1;
+   owned_generation_inputs = provider_calls = recalls = hook_calls = 0;
+   assert(plugin_chook_register_pre_llm(fallback_hook_context, NULL) >= 0);
+   aimee_ir_session_set_sink(capture_owned_generation, NULL);
+   int rc = agent_generate_request(cfg, &input, &result);
+   aimee_ir_session_set_sink(NULL, NULL);
+   plugin_chook_reset();
+   owned_generation_case = 0;
+   assert(rc == 0 && result.success &&
+          !aimee_ir_response_complete_text_valid(&result.canonical_response));
+   assert(provider_calls == 1 && recalls == 0 && hook_calls == 0 && owned_generation_inputs == 1);
+   agent_result_clear_response(&result);
+   free(cfg);
+}
+
+static void test_actual_generation_preserves_rich_canonical_request(const agent_t *agent)
+{
+   agent_config_t *cfg = fixture_config(agent);
+   cfg->agents[0].tools_enabled = 1;
+   cfg->agents[0].write_capable = 1;
+   aimee_block_t policy[2] = {{.type = AIMEE_BLK_TEXT, .text = "Unattended host policy."},
+                              {.type = AIMEE_BLK_TEXT, .text = "second policy block"}};
+   for (int i = 0; i < 2; i++)
+      aimee_ir_block_set_context(&policy[i], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   aimee_block_t blocks[4] = {{.type = AIMEE_BLK_TEXT, .text = "immutable cron task"},
+                              {.type = AIMEE_BLK_TEXT, .text = "script evidence"},
+                              {.type = AIMEE_BLK_TEXT, .text = "prior evidence"},
+                              {.type = AIMEE_BLK_THINKING,
+                               .text = "private reasoning",
+                               .thinking_signature = "unrelated signature"}};
+   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_ir_block_set_context(&blocks[1], AIMEE_CTX_ORIGIN_TOOL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_ir_block_set_context(&blocks[2], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_ir_block_set_context(&blocks[3], AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNTRUSTED, AIMEE_CTX_SENS_CONFIDENTIAL, 0,
+                              "source-domain", "source-scope", 42);
+   aimee_block_t first = {.type = AIMEE_BLK_TEXT, .text = "prior user task"},
+                 second = {.type = AIMEE_BLK_TEXT, .text = "prior assistant response"};
+   aimee_ir_block_set_context(&first, AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_ir_block_set_context(&second, AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t messages[3] = {{.role = "user", .blocks = &first, .n_blocks = 1},
+                                  {.role = "assistant", .blocks = &second, .n_blocks = 1},
+                                  {.role = "user", .blocks = blocks, .n_blocks = 4}};
+   for (int history = 0; history < 2; history++)
+      for (int method = 0; method < 2; method++)
+      {
+         aimee_request_t source = {.system = policy,
+                                   .n_system = history ? 2 : 1,
+                                   .messages = history ? messages : &messages[2],
+                                   .n_messages = history ? 3 : 1,
+                                   .has_max_tokens = 1,
+                                   .max_tokens = 256,
+                                   .has_temperature = 1,
+                                   .temperature = 0.3,
+                                   .tool_choice =
+                                       method ? AIMEE_TOOL_CHOICE_NONE : AIMEE_TOOL_CHOICE_UNSET};
+         cJSON *before = aimee_ir_request_json(&source);
+         assert(before);
+         rich_generation_case = history + 1;
+         provider_calls = recalls = hook_calls = 0;
+         agent_result_t result = {0};
+         int rc = method ? agent_generate_request(cfg, &source, &result)
+                         : agent_generate(cfg, agent->name, &source, &result);
+         if (rc || !result.success)
+            fprintf(stderr, "actual generation history=%d method=%d rc=%d error=%s\n", history,
+                    method, rc, result.error);
+         assert(!rc && result.success && provider_calls == 1 && recalls == 0 && hook_calls == 0);
+         assert(!aimee_ir_response_complete_text_valid(&result.canonical_response));
+         cJSON *after = aimee_ir_request_json(&source);
+         assert(after && cJSON_Compare(before, after, 1));
+         cJSON_Delete(before);
+         cJSON_Delete(after);
+         assert(cfg->agents[0].write_capable && cfg->agents[0].tools_enabled);
+         agent_result_clear_response(&result);
+         assert(agent_admission_global_active() == 0);
+         if (!history && !method)
+         {
+            provider_calls = 0;
+            source.stream = 1;
+            assert(agent_generate(cfg, agent->name, &source, &result) < 0 && provider_calls == 0);
+            source.stream = 0;
+            source.model = "caller model override";
+            assert(agent_generate(cfg, agent->name, &source, &result) < 0 && provider_calls == 0);
+            source.model = NULL;
+            cJSON *schema = cJSON_Parse("{\"type\":\"object\"}");
+            assert(schema);
+            aimee_tool_t tool = {.name = "write_file", .schema = schema};
+            source.tools = &tool;
+            source.n_tools = 1;
+            assert(!aimee_ir_request_admit(&source));
+            assert(agent_generate(cfg, agent->name, &source, &result) < 0 && provider_calls == 0);
+            source.tools = NULL;
+            source.n_tools = 0;
+            cJSON_Delete(schema);
+            snprintf(cfg->agents[0].backend, sizeof cfg->agents[0].backend, "%s",
+                     AGENT_BACKEND_PROVIDER_CLI);
+            assert(agent_generate(cfg, agent->name, &source, &result) < 0 && provider_calls == 0);
+            cfg->agents[0].backend[0] = 0;
+         }
+      }
+   cJSON *metadata = aimee_ir_json_parse_frame("{\"opaque\":9007199254740993123456789}",
+                                               strlen("{\"opaque\":9007199254740993123456789}"));
+   assert(metadata);
+   char *stops[] = {"END"};
+   aimee_request_t tools_source = {.system = policy,
+                                   .n_system = 2,
+                                   .messages = messages,
+                                   .n_messages = 3,
+                                   .has_max_tokens = 1,
+                                   .max_tokens = 256,
+                                   .has_temperature = 1,
+                                   .temperature = 0.3,
+                                   .metadata = metadata,
+                                   .stop_sequences = stops,
+                                   .n_stop = 1};
+   /* A declared, same-model host extension must survive typed evidence and
+    * privacy projection; it is not a caller model pin or native transcript. */
+   aimee_request_t host_profile_source = {.frontend = AIMEE_WIRE_OPENAI_CHAT,
+                                          .model = cfg->agents[0].model};
+   aimee_openai_host_profile_t host_profile = {.min_p = 0.07, .repeat_penalty = -1};
+   assert(!openai_ir_set_host_profile(&host_profile_source, &host_profile));
+   tools_source.frontend = AIMEE_WIRE_OPENAI_CHAT;
+   tools_source.raw = host_profile_source.raw;
+   host_profile_source.raw = NULL;
+   cJSON *before = aimee_ir_request_json(&tools_source);
+   assert(before);
+   rich_generation_case = 3;
+   provider_calls = recalls = 0;
+   agent_result_t tools_result = {0};
+   int tools_rc = agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review",
+                                                    &tools_source, &tools_result);
+   if (tools_rc || !tools_result.success)
+      fprintf(stderr, "actual rich tools rc=%d calls=%d error=%s\n", tools_rc, provider_calls,
+              tools_result.error);
+   assert(!tools_rc && tools_result.success && provider_calls == 1);
+   cJSON *after = aimee_ir_request_json(&tools_source);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   cJSON_Delete(metadata);
+   cJSON_Delete(tools_source.raw);
+   agent_result_clear_response(&tools_result);
+   rich_generation_case = 0;
+   free(cfg);
+}
+
+typedef struct
+{
+   int expected, events, reject;
+} control_projection_t;
+static int capture_control_projection(const aimee_session_event_t *event, void *context)
+{
+   control_projection_t *observation = context;
+   if (event->kind != AIMEE_SESSION_PROJECTION || !event->projection_request_controls)
+      return 0;
+   assert(event->projection_request_controls == observation->expected);
+   observation->events++;
+   return observation->reject;
+}
+
+static void check_control_projection(agent_config_t *cfg, aimee_request_t *source,
+                                     int expected_controls)
+{
+   control_projection_t observation = {.expected = expected_controls};
+   cJSON *before = aimee_ir_request_json(source);
+   assert(before);
+   agent_result_t result = {0};
+   provider_calls = observation.events = 0;
+   source->tool_choice = AIMEE_TOOL_CHOICE_NONE;
+   assert(agent_generate_request(cfg, source, &result) == AGENT_RC_CONTEXT_REFUSED);
+   source->tool_choice = AIMEE_TOOL_CHOICE_UNSET;
+   assert(!provider_calls);
+   agent_result_clear_response(&result);
+   aimee_response_t response = {0};
+   assert(agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", source,
+                                           &response, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!provider_calls);
+   agent_result_clear_response(&result);
+   aimee_response_free(&response);
+   aimee_ir_session_set_sink(capture_control_projection, &observation);
+   for (int tools = 0; tools <= 1; tools++)
+   {
+      provider_calls = observation.events = 0;
+      int rc = tools ? agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review",
+                                                         source, &result)
+                     : agent_generate(cfg, cfg->agents[0].name, source, &result);
+      if (rc || !result.success || provider_calls != 1 || observation.events != 1)
+         fprintf(stderr, "control provider=%s tools=%d rc=%d calls=%d events=%d error=%s\n",
+                 cfg->agents[0].provider, tools, rc, provider_calls, observation.events,
+                 result.error);
+      assert(!rc && result.success && provider_calls == 1 && observation.events == 1);
+      agent_result_clear_response(&result);
+   }
+   provider_calls = observation.events = 0;
+   observation.reject = 1;
+   assert(agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", source,
+                                            &result) < 0);
+   assert(!provider_calls && observation.events == 1 && aimee_ir_session_capture_failed());
+   agent_result_clear_response(&result);
+   observation.reject = 0;
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_begin_task();
+   cJSON *after = aimee_ir_request_json(source);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+}
+
+static void test_actual_responses_controls(const agent_t *configured)
+{
+   agent_config_t *cfg = fixture_config(configured);
+   cfg->agents[0].tools_enabled = 1;
+   snprintf(cfg->agents[0].provider, sizeof cfg->agents[0].provider, "chatgpt");
+   aimee_request_t source = {0};
+   assert(!aimee_ir_request_from_text(&source, "Retain original policy.", "immutable control task",
+                                      128, 0.3));
+   aimee_block_t *blocks = realloc(source.messages[0].blocks, 2 * sizeof *blocks);
+   assert(blocks);
+   source.messages[0].blocks = blocks;
+   blocks[1] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("separate control evidence")};
+   source.messages[0].n_blocks = 2;
+   aimee_ir_block_set_context(&blocks[1], AIMEE_CTX_ORIGIN_TOOL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   source.has_top_p = source.has_top_k = source.has_parallel_tool_calls = 1;
+   source.top_p = 0.8;
+   source.top_k = 17;
+   source.metadata = cJSON_Parse("{\"source\":\"preserve\"}");
+   source.thinking = cJSON_Parse("{\"type\":\"disabled\"}");
+   source.service_tier = strdup("auto");
+   source.prompt_cache_key = strdup("owned-cache-scope");
+   source.prompt_cache_retention = strdup("24h");
+   source.prompt_cache_options = cJSON_Parse("{\"mode\":\"explicit\"}");
+   source.stop_sequences = calloc(1, sizeof(char *));
+   assert(source.stop_sequences);
+   source.stop_sequences[0] = strdup("END");
+   source.n_stop = 1;
+   responses_controls_case = 1;
+   check_control_projection(cfg, &source, 9);
+   responses_controls_case = 0;
+   aimee_request_free(&source);
+   free(cfg);
+}
+
+static void test_actual_other_provider_controls(const agent_t *configured)
+{
+   for (int provider = 1; provider <= 2; provider++)
+   {
+      agent_config_t *cfg = fixture_config(configured);
+      cfg->agents[0].tools_enabled = 1;
+      snprintf(cfg->agents[0].provider, sizeof cfg->agents[0].provider, "%s",
+               provider == 2 ? "anthropic" : "openai");
+      aimee_request_t source = {0};
+      assert(!aimee_ir_request_from_text(&source, NULL, "other provider task; retained evidence",
+                                         128, 0.3));
+      source.has_top_p = 1;
+      source.top_p = 0.8;
+      source.metadata = cJSON_Parse("{\"user_id\":\"canonical-fixture\"}");
+      source.service_tier = strdup("auto");
+      source.reasoning_summary = strdup("auto");
+      other_controls_case = provider;
+      check_control_projection(cfg, &source, 1);
+      agent_result_t result = {0};
+      aimee_response_t response = {0};
+      free(source.reasoning_summary);
+      source.reasoning_summary = NULL;
+      control_projection_t observation = {0};
+      aimee_ir_session_set_sink(capture_control_projection, &observation);
+      provider_calls = 0;
+      source.tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      int supported_rc = agent_generate_request(cfg, &source, &result);
+      source.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
+      if (supported_rc || !result.success)
+         fprintf(stderr, "supported controls provider=%d rc=%d calls=%d error=%s\n", provider,
+                 supported_rc, provider_calls, result.error);
+      assert(!supported_rc && result.success);
+      assert(provider_calls == 1 && !observation.events);
+      agent_result_clear_response(&result);
+      provider_calls = 0;
+      assert(!agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", &source,
+                                               &response, &result) &&
+             result.success);
+      assert(provider_calls == 1);
+      aimee_response_free(&response);
+      agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
+      aimee_request_free(&source);
+      free(cfg);
+   }
+   other_controls_case = 0;
+}
+
+static void test_visible_primary_and_routing_queries(const agent_t *agent)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "HIDDEN_QUERY_SECRET"},
+                             {.type = AIMEE_BLK_TEXT, .text = "visible primary task"}};
+   aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_RESTRICTED, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   cJSON *before = aimee_ir_message_json(&message), *updated = NULL;
+   assert(before);
+   agent_result_t result = {0};
+   provider_calls = 0;
+   visibility_query_case = 1;
+   last_ingress_query[0] = 0;
+   aimee_request_t request = {.messages = &message,
+                              .n_messages = 1,
+                              .has_max_tokens = 1,
+                              .max_tokens = 128,
+                              .has_temperature = 1,
+                              .temperature = 0.3};
+   int rc = agent_execute_session_with_tools(agent, NULL, &request, NULL, &updated, &result);
+   assert(!rc && result.success && provider_calls == 1);
+   assert(!strcmp(last_ingress_query, "visible primary task"));
+   cJSON *after = aimee_ir_message_json(&message);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   cJSON_Delete(updated);
+   agent_result_clear_response(&result);
+   agent_config_t *cfg = fixture_config(agent);
+   cfg->agents[0].tools_enabled = 1;
+   message.n_blocks = 1;
+   aimee_request_t source = {.messages = &message, .n_messages = 1};
+   visibility_query_case = 2;
+   provider_calls = 0;
+   rc = agent_run(cfg, "review", &source, &result);
+   /* No review route is configured: routing still computes its real input view
+    * before refusal. Its token estimate must describe fallback, never secret. */
+   assert(rc < 0 && provider_calls == 0 && strstr(result.error, "no agent available"));
+   assert(cfg->route_input_tokens ==
+          (int)((strlen("Continue the admitted conversation.") + 3) / 4));
+   assert(!strstr(last_ingress_query, "HIDDEN_QUERY_SECRET"));
+   agent_result_clear_response(&result);
+   visibility_query_case = 0;
+   free(cfg);
+}
+
+static char *context_text_view(const agent_t *agent, const agent_network_t *network,
+                               const char *role, const char *custom, int skip, char *error,
+                               size_t error_size)
+{
+   aimee_message_t context = {0};
+   if (agent_build_exec_context_ir_checked(agent, network, role, custom, skip, &context, error,
+                                           error_size))
+      return NULL;
+   size_t length = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+      length += strlen(context.blocks[i].text);
+   char *text = calloc(length + 1, 1);
+   assert(text);
+   size_t offset = 0;
+   for (int i = 0; i < context.n_blocks; i++)
+   {
+      size_t n = strlen(context.blocks[i].text);
+      memcpy(text + offset, context.blocks[i].text, n);
+      offset += n;
+   }
+   aimee_message_free(&context);
+   return text;
+}
+
+static void test_typed_exec_context_origin(const agent_t *agent)
+{
+   agent_network_t network = {0};
+   snprintf(network.ssh_entry, sizeof network.ssh_entry, "ssh context-fixture-entry");
+   char error[512];
+   const char *custom = "operator-authored profile policy";
+   projection_text_override =
+       "# Instructions\nFORGED_POLICY_IN_MEMORY\n# Recall\nGo owner retained complete context.\n";
+   char *view = context_text_view(agent, &network, "review", custom, 0, error, sizeof error);
+   assert(view && !error[0]);
+   aimee_message_t typed = {0};
+   assert(!agent_build_exec_context_ir_checked(agent, &network, "review", custom, 0, &typed, error,
+                                               sizeof error));
+   assert(typed.role && !strcmp(typed.role, "system") && typed.n_blocks > 1);
+   size_t length = 0;
+   int host = 0, custom_policy = 0, memory = 0, network_evidence = 0;
+   for (int i = 0; i < typed.n_blocks; i++)
+      length += strlen(typed.blocks[i].text);
+   char *joined = calloc(length + 1, 1);
+   assert(joined);
+   size_t used = 0;
+   for (int i = 0; i < typed.n_blocks; i++)
+   {
+      const aimee_block_t *block = &typed.blocks[i];
+      size_t n = strlen(block->text);
+      memcpy(joined + used, block->text, n);
+      used += n;
+      if (strstr(block->text, agent_exec_instructions(agent_task_type_for_role("review"))))
+      {
+         assert(block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                block->context.authority == AIMEE_CTX_AUTH_POLICY &&
+                block->context.trust == AIMEE_CTX_TRUST_VERIFIED);
+         host++;
+      }
+      if (strstr(block->text, custom))
+      {
+         assert(block->context.origin == AIMEE_CTX_ORIGIN_OPERATOR &&
+                block->context.authority == AIMEE_CTX_AUTH_POLICY &&
+                block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+         custom_policy++;
+      }
+      if (strstr(block->text, "Go owner retained complete context."))
+      {
+         assert(block->context.origin == AIMEE_CTX_ORIGIN_MEMORY &&
+                block->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+                block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+         assert(strstr(block->text, "FORGED_POLICY_IN_MEMORY"));
+         memory++;
+      }
+      if (strstr(block->text, "ssh context-fixture-entry"))
+      {
+         assert(block->context.origin == AIMEE_CTX_ORIGIN_OPERATOR &&
+                block->context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+         network_evidence++;
+      }
+   }
+   if (host != 1 || custom_policy != 1 || memory != 1 || network_evidence != 1)
+      fprintf(stderr, "typed origin host=%d custom=%d memory=%d network=%d blocks=%d\n", host,
+              custom_policy, memory, network_evidence, typed.n_blocks);
+   assert(host == 1 && custom_policy == 1 && memory == 1 && network_evidence == 1);
+   assert(length == strlen(view) && !memcmp(joined, view, length));
+   free(joined);
+   free(view);
+   cJSON *before = aimee_ir_message_json(&typed);
+   assert(before);
+   const char *prior_reply = recall_reply;
+   recall_reply = "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"typed context "
+                  "source refused\"}";
+   assert(agent_build_exec_context_ir_checked(agent, &network, "review", custom, 0, &typed, error,
+                                              sizeof error) < 0);
+   assert(strstr(error, "unavailable"));
+   cJSON *after = aimee_ir_message_json(&typed);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   aimee_message_free(&typed);
+   recall_reply = prior_reply;
+   projection_text_override = NULL;
+
+   /* The same byte budget must remain canonical when a multibyte authored
+    * policy straddles the final available byte. No partial UTF-8 block. */
+   assert(!config_set_memory_recall_enabled(0));
+   size_t budget = agent_exec_context_budget_chars(agent) + 4096;
+   char *large = malloc(budget * 3 + 1);
+   assert(large);
+   for (size_t i = 0; i < budget; i++)
+      memcpy(large + i * 3, "—", 3);
+   large[budget * 3] = 0;
+   char *bounded = context_text_view(agent, &network, "review", large, 1, error, sizeof error);
+   assert(bounded && !error[0] && strlen(bounded) < budget && text_is_valid_utf8(bounded));
+   free(bounded);
+   free(large);
+   assert(!config_set_memory_recall_enabled(1));
+}
+
 int main(void)
 {
    delegate_role_seam_install();
@@ -408,7 +1176,7 @@ int main(void)
    assert(platform_unsetenv("AIMEE_CONFIG_PATH") == 0);
    assert(platform_setenv("AIMEE_CONTEXT_NO_KB", "1") == 0);
    assert(config_set_memory_recall_enabled(1) == 0);
-   agent_t agent = {0};
+   agent_t agent = {.max_parallel = 1};
    agent_network_t network = {0};
    snprintf(agent.name, sizeof(agent.name), "context-refusal-fixture");
    snprintf(agent.model, sizeof(agent.model), "fixture-model");
@@ -425,15 +1193,17 @@ int main(void)
    {
       recall_reply = replies[i];
       char error[512];
-      char *text = agent_build_exec_context_checked(&agent, &network, "review", "original prompt",
-                                                    0, error, sizeof(error));
+      char *text =
+          context_text_view(&agent, &network, "review", "original prompt", 0, error, sizeof(error));
       assert(text == NULL);
       assert(strstr(error, "memory context refused"));
-      assert(agent_build_exec_context_for_role(&agent, &network, "review", "original prompt", 0) ==
-             NULL);
+      aimee_message_t refused = {0};
+      assert(agent_build_exec_context_ir_checked(&agent, &network, "review", "original prompt", 0,
+                                                 &refused, error, sizeof error) < 0);
+      assert(!refused.role && !refused.blocks);
       agent_result_t result = {0};
-      int rc = agent_execute_with_tools_for_role(&agent, &network, "review", "original prompt",
-                                                 "task", 128, 0, &result);
+      int rc = fixture_agent_role_text(&agent, &network, "review", "original prompt", "task", 128,
+                                       0, &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED);
       assert(!result.success && result.turns == 0 && result.tool_calls == 0);
       assert(strcmp(result.stop_reason, "context_refused") == 0);
@@ -446,8 +1216,8 @@ int main(void)
     * assembly; the caller prompt must remain intact. */
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
    char error[512] = "stale refusal";
-   char *text = agent_build_exec_context_checked(&agent, &network, "review", "original prompt", 0,
-                                                 error, sizeof(error));
+   char *text =
+       context_text_view(&agent, &network, "review", "original prompt", 0, error, sizeof(error));
    assert(text && !error[0]);
    assert(strstr(text, "original prompt"));
    assert(strstr(text, "Go owner retained complete context."));
@@ -457,8 +1227,8 @@ int main(void)
    for (malformed_projection = 1; malformed_projection <= 8; malformed_projection++)
    {
       agent_result_t invalid_result = {0};
-      int invalid_rc = agent_execute_with_tools_for_role(
-          &agent, &network, "review", "original prompt", "task", 128, 0, &invalid_result);
+      int invalid_rc = fixture_agent_role_text(&agent, &network, "review", "original prompt",
+                                               "task", 128, 0, &invalid_result);
       assert(invalid_rc == AGENT_RC_CONTEXT_REFUSED && provider_calls == 0);
       assert(strstr(invalid_result.error, "invalid_projection"));
       agent_result_clear_response(&invalid_result);
@@ -470,23 +1240,20 @@ int main(void)
    assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
    assert(config_set_kb_mode("") == 0);
    assert(!kb_client_connection_configured());
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(text && !error[0] && strstr(text, "Go owner retained complete context."));
    free(text);
    /* A configured but unavailable KB is different: never silently downgrade
     * to private recall after losing the shared owner's required constraints. */
    assert(config_set_kb_mode("remote") == 0);
    int before_missing_connection = recalls;
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(!text && strstr(error, "unavailable") && recalls == before_missing_connection);
    assert(config_set_kb_mode("") == 0);
    assert(platform_setenv("AIMEE_KB_API_URL", "http://127.0.0.1:1") == 0);
    assert(kb_client_connection_configured());
    int before_shared_refusal = recalls;
-   text =
-       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   text = context_text_view(&agent, &network, "review", NULL, 0, error, sizeof(error));
    assert(!text && strstr(error, "unavailable") && recalls == before_shared_refusal);
    assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
    assert(platform_setenv("AIMEE_CONTEXT_NO_KB", "1") == 0);
@@ -500,8 +1267,8 @@ int main(void)
    agent.max_turns = 8;
    agent.timeout_ms = 10000;
    agent_result_t result = {0};
-   int rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task",
-                                              128, 0, &result);
+   int rc =
+       fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    if (rc != AGENT_RC_CONTEXT_REFUSED)
       fprintf(stderr, "unexpected loop result: rc=%d calls=%d recalls=%d error=%s\n", rc,
               provider_calls, recalls, result.error);
@@ -519,8 +1286,7 @@ int main(void)
    request_context_t inherited = {0};
    request_context_set(&inherited);
    assert(request_context_refuse_assembly("protected_context_overflow") == 0);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success && provider_calls == 0);
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strcmp(result.error, "protected_context_overflow") == 0);
@@ -528,11 +1294,10 @@ int main(void)
    agent_result_clear_response(&result);
    request_context_clear();
    recalls = 0;
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && !result.error[0]);
    assert(recalls == 1 && provider_calls == 1);
-   assert(result.response && strstr(result.response, "Fixture completed."));
+   assert_ir_text(&result.canonical_response, "Fixture completed.");
    agent_result_clear_response(&result);
    for (int fallback = 0; fallback <= 1; fallback++)
    {
@@ -542,8 +1307,8 @@ int main(void)
       transport_refuse = fallback ? 2 : 1;
       snprintf(agent.fallback_model, sizeof(agent.fallback_model), "%s",
                fallback ? "fallback" : "");
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(provider_calls == (fallback ? 2 : 1));
       assert(strcmp(result.stop_reason, "context_refused") == 0);
@@ -557,7 +1322,7 @@ int main(void)
       plugin_chook_reset();
       int hook_registered = plugin_chook_register_pre_llm(fallback_hook_context, NULL);
       assert(hook_registered == 0);
-      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
       assert(hook_calls == 1);
       plugin_chook_reset();
       expect_hook_prompt = 0;
@@ -569,6 +1334,96 @@ int main(void)
       agent_result_clear_response(&result);
       request_context_clear();
    }
+   /* The real non-tool provider path must not grant success to partial text. */
+   const char *incomplete_stops[] = {"content_filter", "length", "tool_calls", "unknown"};
+   transport_refuse = 0;
+   agent.fallback_model[0] = 0;
+   for (size_t i = 0; i < sizeof incomplete_stops / sizeof *incomplete_stops; i++)
+   {
+      simple_finish = incomplete_stops[i];
+      provider_calls = 0;
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(rc != 0 && !result.success && provider_calls == 1);
+      assert(result.canonical_response.n_content == 1);
+      assert(result.canonical_response.usage_in == 7);
+      assert(result.canonical_response.usage_out == 3);
+      assert(!agent_result_take_text(&result));
+   }
+   /* Both real HTTP execution paths must reject bytes after a complete JSON value. */
+   simple_finish = "stop";
+   simple_trailing = 1;
+   for (int tools = 0; tools <= 1; tools++)
+   {
+      provider_calls = 0;
+      rc = tools ? fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128,
+                                           0, &result)
+                 : fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(rc != 0 && !result.success && provider_calls == 1);
+      agent_result_clear_response(&result);
+   }
+   simple_trailing = 0;
+   /* General HTTP completion retains multimedia; business projection refuses it. */
+   simple_finish = "stop";
+   for (simple_media = 1; simple_media <= 2; simple_media++)
+   {
+      simple_finish = "stop";
+      provider_calls = 0;
+      rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+      if (rc || !result.success || result.error[0] || provider_calls != 1)
+         fprintf(stderr, "media fixture=%d rc=%d success=%d calls=%d error=%s blocks=%d stop=%d\n",
+                 simple_media, rc, result.success, provider_calls, result.error,
+                 result.canonical_response.n_content, result.canonical_response.stop_reason);
+      assert(rc == 0 && result.success && !result.error[0] && provider_calls == 1);
+      assert(!aimee_ir_response_complete_valid(&result.canonical_response));
+      assert(result.canonical_response.content[0].type == AIMEE_BLK_IMAGE);
+      assert(result.canonical_response.content[0].raw);
+      assert(cJSON_GetObjectItem(result.canonical_response.content[0].raw, "fixture_sidecar"));
+      assert(result.canonical_response.n_content == simple_media);
+      assert(!agent_result_take_text(&result));
+      const char *declined[] = {"length", "content_filter"};
+      for (size_t i = 0; i < sizeof declined / sizeof *declined; i++)
+      {
+         simple_finish = declined[i];
+         provider_calls = 0;
+         rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+         assert(rc != 0 && !result.success && provider_calls == 1);
+         assert(result.canonical_response.n_content == simple_media);
+         assert(!agent_result_take_text(&result));
+      }
+   }
+   simple_media = 0;
+   /* Even actual native tool-use blocks accompanying a refused, truncated or
+    * contradictory terminal state cannot reach tool execution or a retry. */
+   const char *denied_tool_stops[] = {"content_filter", "length", "unknown", "stop"};
+   simple_tools = 1;
+   for (size_t i = 0; i < sizeof denied_tool_stops / sizeof *denied_tool_stops; i++)
+   {
+      simple_finish = denied_tool_stops[i];
+      provider_calls = terminal_intents = terminal_denials = 0;
+      aimee_ir_session_set_sink(capture_terminal_denial, NULL);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(terminal_intents == 1 && terminal_denials == 1);
+      assert(rc != 0 && !result.success && provider_calls == 1 && result.tool_calls == 0);
+      assert(aimee_ir_response_tool_count(&result.canonical_response) == 1);
+      assert(result.canonical_response.usage_in == 7 && result.canonical_response.usage_out == 3);
+      assert(!agent_result_take_text(&result));
+   }
+   simple_tools = 0;
+   simple_finish = "stop";
+   rc = fixture_agent_execute_text(&agent, NULL, "original prompt", 128, 0, &result);
+   assert(rc == 0 && result.success);
+   char *answer = agent_result_take_text(&result);
+   assert(answer && !strcmp(answer, "Partial plausible verdict."));
+   free(answer);
+   test_owned_plain_generation(&agent);
+   test_actual_generation_preserves_rich_canonical_request(&agent);
+   test_actual_responses_controls(&agent);
+   test_actual_other_provider_controls(&agent);
+   test_visible_primary_and_routing_queries(&agent);
+   test_typed_exec_context_origin(&agent);
+   simple_finish = NULL;
    /* A durable capture loss is local and terminal, including after dispatch.
     * The attempted tool must still be counted when publishing its result fails. */
    for (int mode = 1; mode <= 2; mode++)
@@ -578,8 +1433,8 @@ int main(void)
       final_response = mode == 1;
       capture_failure_mode = mode;
       aimee_ir_session_set_sink(refusing_capture, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
       assert(rc == AGENT_RC_CAPTURE_FAILED && !result.success);
       assert(provider_calls == 1 && capture_events == (mode == 1 ? 1 : 4));
       assert(result.tool_calls == (mode == 1 ? 0 : 1));
@@ -596,8 +1451,7 @@ int main(void)
    cJSON *pending = cJSON_CreateObject();
    assert(pending);
    aimee_ir_session_set_sink(wide_capture, pending);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(result.tool_calls == 17 && wide_uses == 17 && wide_results == 17);
    assert(pending->child == NULL && provider_calls <= 2);
    agent_result_clear_response(&result);
@@ -614,19 +1468,39 @@ int main(void)
    {
       recalls = provider_calls = identity_results = 0;
       aimee_ir_session_set_sink(capture_identity_result, NULL);
-      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
-                                             0, &result);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
+      if (rc || !result.success || provider_calls != 2 || identity_results != 1)
+         fprintf(stderr, "identity case=%d rc=%d calls=%d results=%d error=%s\n", identity_case, rc,
+                 provider_calls, identity_results, result.error);
       assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
       assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
       agent_result_clear_response(&result);
       aimee_ir_session_set_sink(NULL, NULL);
    }
    identity_case = 2;
+   for (usage_mixed = 1; usage_mixed <= 3; usage_mixed++)
+   {
+      recalls = provider_calls = identity_results = 0;
+      aimee_ir_session_set_sink(capture_identity_result, NULL);
+      rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                   &result);
+      assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+      assert(!aimee_ir_response_admit(&result.canonical_response));
+      assert(agent_result_usage_is_unobserved(&result) == (usage_mixed != 3));
+      assert(result.canonical_response.usage_unobserved == (usage_mixed != 3));
+      assert(result.canonical_response.usage_in == 0 && result.canonical_response.usage_out == 0);
+      assert(result.prompt_tokens == (usage_mixed == 3 ? 0 : 7));
+      assert(result.completion_tokens == (usage_mixed == 3 ? 0 : 3));
+      agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
+   }
+   usage_mixed = 0;
+   identity_case = 2;
    metadata_available = 0;
    recalls = provider_calls = identity_results = 0;
    aimee_ir_session_set_sink(capture_identity_result, NULL);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
    assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
    agent_result_clear_response(&result);
@@ -639,8 +1513,7 @@ int main(void)
    provider_calls = recalls = bootstrap_evidence_seen = 0;
    agent_tools_register_classifier(fixture_classifier);
    run_cmd_set_cwd(home);
-   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
-                                          &result);
+   rc = fixture_agent_role_text(&agent, &network, NULL, "original prompt", "task", 128, 0, &result);
    assert(result.successful_tool_calls == 0 && !bootstrap_evidence_seen);
    agent_result_clear_response(&result);
    run_cmd_set_cwd(NULL);

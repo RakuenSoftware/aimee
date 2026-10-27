@@ -1,26 +1,13 @@
-/* router_advise.c -- S1 advisory router hook (see router_advise.h). Ties the pure
- * router (prefilter + decision over the enumerated catalog) to the interaction-
- * event log.
- *
- * Two records per DEFER turn that is sampled:
- *  - the immediate advisory decision (outcome "advisory") is logged inline, with
- *    classifier=NULL so it is latency-neutral (prefilter + the read-only default);
- *  - the SAMPLED LLM classifier runs in a DETACHED thread (never on the user's
- *    turn path) and logs a second "classifier" record with the model's routed id
- *    + wall-clock. Sampling (~1/N of DEFER turns, deterministic) keeps this off
- *    the vast majority of turns; it is telemetry only and binds nothing. */
+/* Canonical advisory routing and autonomous workflow audit.
+ * Routing uses admitted canonical text and remains deterministic on the turn
+ * path; this adapter never starts a separate model execution. */
 #include "router_advise.h"
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "aimee.h" /* MAX_PATH_LEN etc. — must precede the agent headers */
-#include "agent_config.h"
-#include "agent_exec.h"
-#include "agent_types.h"
 #include "cJSON.h"
 #include "ingress_preinject.h" /* Canonical ingress turn/session identity. */
 #include "db1_client/interaction_events.h"
@@ -30,81 +17,12 @@
 #include "wfe_router.h"
 #include "db1_client/wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
 
-/* ~1 in N DEFER turns get the LLM classifier telemetry call. */
-#define ROUTER_SAMPLE_ONE_IN_N 5
-
-/* deterministic per-message sample key (no turn counter needed). */
-static int msg_sample_key(const char *s)
-{
-   unsigned int h = 2166136261u;
-   for (; s && *s; s++)
-      h = (h ^ (unsigned char)*s) * 16777619u;
-   return (int)(h & 0x7fffffff);
-}
-
-typedef struct
-{
-   char session_id[128];
-   char *message; /* owned; freed by the thread */
-} classify_args_t;
-
-/* Detached background classifier: never touches the user's turn latency. Runs the
- * cheap-role LLM classifier, allowlist-parses its reply, and logs a "classifier"
- * telemetry record. */
-static void *classify_thread(void *arg)
-{
-   classify_args_t *a = (classify_args_t *)arg;
-   wfe_router_catalog_t cat;
-   char err[256];
-   if (wfe_router_catalog_load(&cat, err, sizeof err) == 0)
-   {
-      char sys[2048];
-      wfe_router_classify_prompt(&cat, sys, sizeof sys);
-      agent_config_t acfg;
-      memset(&acfg, 0, sizeof acfg);
-      if (agent_load_config(&acfg) == 0)
-      {
-         agent_result_t res = {0};
-         memset(&res, 0, sizeof res);
-         struct timespec t0 = {0, 0}, t1 = {0, 0};
-         clock_gettime(CLOCK_MONOTONIC, &t0);
-         /* role "summarize" routes to a cheap roster agent. 256 tokens: the reply
-          * is just an id, but a REASONING roster agent burns tokens thinking
-          * before it answers, and too tight a cap yields an empty response
-          * (observed live on .254 with minimax at 32 tokens). */
-         int rc = agent_run(&acfg, "summarize", sys, a->message, 256, &res);
-         clock_gettime(CLOCK_MONOTONIC, &t1);
-         double ms =
-             (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1.0e6;
-
-         char cbuf[WFE_ROUTER_ID_LEN] = "";
-         const char *cid =
-             (rc == 0 && res.response &&
-              wfe_router_parse_classification(res.response, &cat, cbuf, sizeof cbuf) == 0)
-                 ? cbuf
-                 : NULL; /* rc!=0 / no id -> DEFER falls back to the read-only default */
-         wfe_route_decision_t d;
-         wfe_router_decide(a->message, &cat, cid, &d);
-         char payload[512];
-         wfe_router_advisory_payload(&d, WFE_PREFILTER_DEFER, 1 /* sampled */, ms, payload,
-                                     sizeof payload);
-         db1_interaction_event_record(a->session_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
-                                      "router-s1", payload, "classifier");
-         agent_result_clear_response(&res);
-      }
-   }
-   free(a->message);
-   free(a);
-   return NULL;
-}
-
 /* The decision + logging CORE: catalog -> prefilter -> decide -> advisory ie
  * record (+ the S2 enforce record when the dial is on). It runs NO LLM classifier
  * and NEVER mutates the request, so it is cheap and safe to call at the universal
  * gateway seam on every turn (primary AND delegate). Returns the prefilter outcome
- * (or -1 on a bad/empty catalog / bad args) so a caller may decide to sample.
- * `corr_id` is the ie correlation id -- a session id on the legacy path, or the
- * ingress turn id at the gateway seam. */
+ * (or -1 on a bad/empty catalog / bad args). `corr_id` is the admitted ingress
+ * turn correlation id. */
 static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char *message)
 {
    if (!corr_id || !corr_id[0] || !message || !message[0])
@@ -161,7 +79,8 @@ void router_advise_ir(const aimee_request_t *request)
          continue;
       size_t length = 0;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
             length += strlen(message->blocks[j].text) + 1;
       if (!length)
          return; /* Tool-result continuation is not a fresh routing request. */
@@ -169,7 +88,8 @@ void router_advise_ir(const aimee_request_t *request)
       if (!query)
          return;
       for (int j = 0; j < message->n_blocks; j++)
-         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text &&
+             aimee_ir_block_model_visible(&message->blocks[j]))
          {
             if (query[0])
                strcat(query, "\n");
@@ -182,33 +102,6 @@ void router_advise_ir(const aimee_request_t *request)
          wfe_bind_interactive(session, query, NULL);
       free(query);
       return;
-   }
-}
-
-void router_advise_turn(const char *session_id, const char *message)
-{
-   wfe_prefilter_outcome_t pf = router_advise_log(session_id, message);
-   if ((int)pf < 0 || !message)
-      return;
-
-   /* Sampled LLM classifier telemetry, off the turn path (detached thread). */
-   if (pf == WFE_PREFILTER_DEFER &&
-       wfe_router_should_sample(session_id, msg_sample_key(message), ROUTER_SAMPLE_ONE_IN_N))
-   {
-      classify_args_t *a = (classify_args_t *)calloc(1, sizeof *a);
-      if (a)
-      {
-         snprintf(a->session_id, sizeof a->session_id, "%s", session_id);
-         a->message = message[0] ? strdup(message) : NULL;
-         pthread_t th;
-         if (a->message && pthread_create(&th, NULL, classify_thread, a) == 0)
-            pthread_detach(th);
-         else
-         {
-            free(a->message);
-            free(a);
-         }
-      }
    }
 }
 

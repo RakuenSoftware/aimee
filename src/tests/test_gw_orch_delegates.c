@@ -13,12 +13,13 @@
 static int g_spawns;
 static char g_last_role[32];
 static char g_last_brief[64];
-static int fake_spawn(void *ctx, const char *role, const char *brief)
+static int fake_spawn(void *ctx, const char *role, const aimee_message_t *message)
 {
    (void)ctx;
    g_spawns++;
    snprintf(g_last_role, sizeof(g_last_role), "%s", role ? role : "");
-   snprintf(g_last_brief, sizeof(g_last_brief), "%s", brief ? brief : "");
+   snprintf(g_last_brief, sizeof(g_last_brief), "%s",
+            message && message->n_blocks ? message->blocks[0].text : "");
    return 0;
 }
 
@@ -26,6 +27,14 @@ static void reset(void)
 {
    g_spawns = 0;
    g_last_role[0] = g_last_brief[0] = 0;
+}
+
+static int fixture_run(const gw_turn_capabilities_t *caps, const char *turn, const char *role,
+                       const char *text, int enabled)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   return gw_orch_delegates_run(caps, turn, role, &message, enabled);
 }
 
 int main(void)
@@ -45,25 +54,25 @@ int main(void)
 
    /* enabled=1: the spawn runs through the capability handle. */
    reset();
-   assert(gw_orch_delegates_run(&caps, "coord-task-7", "reviewer", "check the diff", 1) == 0);
+   assert(fixture_run(&caps, "coord-task-7", "reviewer", "check the diff", 1) == 0);
    assert(g_spawns == 1);
    assert(strcmp(g_last_role, "reviewer") == 0 && strcmp(g_last_brief, "check the diff") == 0);
 
    /* enabled=0: no spawn is attempted and the module reports -1 so the caller can release the
     * claim and retry (delegate spawning is paused while the module is off). */
    reset();
-   assert(gw_orch_delegates_run(&caps, "coord-task-8", "reviewer", "x", 0) == -1);
+   assert(fixture_run(&caps, "coord-task-8", "reviewer", "x", 0) == -1);
    assert(g_spawns == 0);
 
    /* NULL caps is a clean -1 (no spawn), not a crash. */
-   assert(gw_orch_delegates_run(NULL, "t", "r", "b", 1) == -1);
+   assert(fixture_run(NULL, "t", "r", "b", 1) == -1);
 
    /* a missing spawn_delegate handle is fail-open: the module still returns 0 (the hook ran),
     * and no spawn happens -- the runner surfaces the FAIL internally, never blocking. */
    {
       gw_turn_capabilities_t no_spawn = {NULL, NULL, NULL};
       reset();
-      assert(gw_orch_delegates_run(&no_spawn, "t", "r", "b", 1) == 0);
+      assert(fixture_run(&no_spawn, "t", "r", "b", 1) == 0);
       assert(g_spawns == 0);
    }
 

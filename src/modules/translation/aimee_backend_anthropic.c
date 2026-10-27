@@ -5,6 +5,8 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
+#include "anthropic_refusal.h"
 #include "aimee_sha256.h"
 #include <stdint.h>
 #include <ctype.h>
@@ -662,19 +664,9 @@ int anthropic_ir_set_host_system(aimee_request_t *ir, const char *system, int ca
       if (!prepared.system[1].text)
          goto fail;
    }
-   /* This translation-owned sidecar records only native system representation.
-    * It contains no alternate conversation, tools or model authority. */
-   prepared.raw = cJSON_CreateObject();
-   cJSON *native = mark ? blocks_to_anthropic(prepared.system, prepared.n_system, 1)
-                        : cJSON_CreateString(system);
-   if (!prepared.raw || !native || !cJSON_AddItemToObject(prepared.raw, "system", native))
-   {
-      cJSON_Delete(native);
-      goto fail;
-   }
    ir->system = prepared.system;
    ir->n_system = prepared.n_system;
-   ir->raw = prepared.raw;
+   ir->system_scalar = !mark;
    return 0;
 fail:
    aimee_request_free(&prepared);
@@ -693,7 +685,8 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
                    restore_native_section(out, ir->raw, "system");
       left = (aimee_request_t){.messages = ir->messages, .n_messages = ir->n_messages};
       right = (aimee_request_t){.messages = original.messages, .n_messages = original.n_messages};
-      failed |= aimee_ir_request_wire_equal(&left, &right) &&
+      failed |= !anthropic_ir_omitted_empty_messages(ir) &&
+                aimee_ir_request_wire_equal(&left, &right) &&
                 restore_native_section(out, ir->raw, "messages");
       left = (aimee_request_t){.tools = ir->tools, .n_tools = ir->n_tools};
       right = (aimee_request_t){.tools = original.tools, .n_tools = original.n_tools};
@@ -715,6 +708,26 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
    return native_overlay(ir->raw, out, fields, sizeof fields / sizeof fields[0]);
 }
 
+static int last_native_user(const aimee_request_t *request)
+{
+   for (int i = request->n_messages - 1; i >= 0; i--)
+      if (request->messages[i].role && (!strcmp(request->messages[i].role, "user") ||
+                                        !strcmp(request->messages[i].role, "tool")))
+         return i;
+   return -1;
+}
+
+int anthropic_ir_omitted_empty_messages(const aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   int last = last_native_user(request), omitted = 0;
+   for (int i = 0; i < last; i++)
+      omitted += !request->messages[i].n_blocks && request->messages[i].role &&
+                 !strcmp(request->messages[i].role, "assistant");
+   return omitted;
+}
+
 static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
@@ -726,7 +739,8 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
     * unknown native settings. Verify the typed payload against its entry
     * snapshot as well as the mutation flag: a stage forgetting to report an
     * edit must never cause stale user/tool content to be replayed. */
-   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && ir->cache_policy == AIMEE_CACHE_DEFAULT)
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && ir->cache_policy == AIMEE_CACHE_DEFAULT &&
+       !anthropic_ir_omitted_empty_messages(ir))
    {
       aimee_request_t original = {0};
       char error[128];
@@ -814,13 +828,29 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
          cJSON_Delete(out);
          return NULL;
       }
+      if (preserve_cache && ir->system_scalar && ir->n_system == 1 &&
+          ir->system[0].type == AIMEE_BLK_TEXT && !ir->system[0].cache_control &&
+          !ir->system[0].cache_ttl)
+      {
+         cJSON_Delete(sys);
+         sys = cJSON_CreateString(ir->system[0].text ? ir->system[0].text : "");
+         if (!sys)
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
+      }
       cJSON_AddItemToObject(out, "system", sys);
       if (!preserve_cache)
          mark_cache_prefix(sys);
    }
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
+   int last_user = last_native_user(ir);
    for (int i = 0; i < ir->n_messages; i++)
    {
+      if (i < last_user && !ir->messages[i].n_blocks && ir->messages[i].role &&
+          !strcmp(ir->messages[i].role, "assistant"))
+         continue; /* An observed empty assistant stays canonical, never fabricated native text. */
       cJSON *m = cJSON_CreateObject();
       const char *role = ir->messages[i].role;
       cJSON_AddStringToObject(m, "role", role && strcmp(role, "tool") ? role : "user");
@@ -1026,6 +1056,13 @@ void aimee_anthropic_projection_report(const aimee_request_t *request,
                                        aimee_wire_projection_report_t *report)
 {
    memset(report, 0, sizeof *report);
+   aimee_request_t visible = {0};
+   const aimee_request_t *view = request;
+   if (aimee_ir_request_needs_model_projection(request) &&
+       !aimee_ir_request_project_model(request, &visible))
+      view = &visible;
+   report->omitted_empty_messages = anthropic_ir_omitted_empty_messages(view);
+   aimee_request_free(&visible);
    report->omitted_cache_controls = !!request->prompt_cache_key +
                                     !!request->prompt_cache_retention +
                                     !!request->prompt_cache_options;
@@ -1071,14 +1108,34 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
 {
    if (out)
       memset(out, 0, sizeof *out);
-   if (!resp || !cJSON_IsObject(resp) || !out)
+   if (!resp || !cJSON_IsObject(resp) || !out || !aimee_ir_json_unique(resp))
    {
       if (err && errn)
          snprintf(err, errn, "anthropic_backend_parse: null/non-object response");
       return -1;
    }
-   out->raw = cJSON_Duplicate(resp, 1);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   const cJSON *stop_details = cJSON_GetObjectItemCaseSensitive(resp, "stop_details");
+   if (failure && !cJSON_IsNull(failure) && stop_details && !cJSON_IsNull(stop_details))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid stop details on provider error");
+      return -1;
+   }
+   out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (wire_usage_validate(usage) || aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
+   }
+   wire_response_usage(out, usage, "input_tokens", "output_tokens");
+
    if (failure && !cJSON_IsNull(failure))
    {
       const char *message =
@@ -1092,11 +1149,49 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       }
       return 0;
    }
+   if (!wire_response_metadata_valid(resp))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider response metadata");
+      aimee_response_free(out);
+      return -1;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
+   const cJSON *role = cJSON_GetObjectItemCaseSensitive(resp, "role");
+   if (role && (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant")))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider assistant role");
+      aimee_response_free(out);
+      return -1;
+   }
    out->role = dupstr(ostr(resp, "role"));
    const char *sr = ostr(resp, "stop_reason");
    out->raw_stop_reason = dupstr(sr);
+   aimee_refusal_details_t refusal = {0};
+   int has_refusal = 0;
+   if (anthropic_refusal_read(cJSON_GetObjectItemCaseSensitive(resp, "stop_details"), sr, &refusal,
+                              &has_refusal))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider stop details");
+      aimee_response_free(out);
+      return -1;
+   }
+   if (has_refusal)
+   {
+      out->refusal = aimee_refusal_details_clone(&refusal);
+      cJSON *safe = anthropic_refusal_json(&refusal);
+      if (!out->refusal || !safe ||
+          !cJSON_ReplaceItemInObjectCaseSensitive(out->raw, "stop_details", safe))
+      {
+         cJSON_Delete(safe);
+         aimee_response_free(out);
+         return -1;
+      }
+   }
+
    out->stop_reason = aimee_stop_reason_parse(sr); /* end_turn/tool_use/max_tokens/stop_sequence */
 
    const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "content");
@@ -1120,18 +1215,6 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          }
          out->n_content = n;
       }
-   }
-
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
-       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
-       aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
-       aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
-   {
-      if (err && errn)
-         snprintf(err, errn, "invalid provider usage counter");
-      aimee_response_free(out);
-      return -1;
    }
 
    return 0;

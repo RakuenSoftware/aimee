@@ -154,6 +154,14 @@ func TestMetricsServerRejectsPermissiveTokenFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("0123456789abcdef0123456789abcdef"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Mkdir/WriteFile modes are filtered by the caller's umask. Establish
+	// the permissive negative fixture explicitly, including under umask 077.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("negative fixture is not actually permissive: %v %v", info, err)
+	}
 	_, err := StartMetricsServer(MetricsServerConfig{
 		Endpoint: "tcp://127.0.0.1:0", BearerTokenFile: path,
 	}, http.NotFoundHandler())

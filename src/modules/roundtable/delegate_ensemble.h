@@ -23,8 +23,11 @@ typedef aimee_panel_aggregate_result_t delegate_ensemble_result_t;
 /* Fill *out from the live config. */
 void ensemble_panel_from_config(ensemble_panel_t *out);
 
-int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
-                          delegate_ensemble_result_t *out);
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                          const aimee_request_t *request, delegate_ensemble_result_t *out);
+
+/* Releases owned canonical output, retaining scalar/display diagnostics. */
+void delegate_ensemble_result_free(delegate_ensemble_result_t *result);
 
 double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
 
@@ -42,8 +45,9 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
  * chair/verify headers need the result type). The delegate_roundtable_* entry
  * points below still produce and free those types. */
 
-int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                            const roundtable_opts_t *opts, roundtable_result_t *out);
+int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
+                            const aimee_request_t *task, const roundtable_opts_t *opts,
+                            roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json

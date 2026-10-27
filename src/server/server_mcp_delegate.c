@@ -5,6 +5,7 @@
 #include "modules/workspace/workspace_turn.h"
 #include "server_http_internal.h"
 #include "request_context.h"
+#include <aimee/ir/session_event.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -122,7 +123,19 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
    if (cJSON_IsString(jr))
       cJSON_AddStringToObject(dreq, "role", jr->valuestring);
    if (cJSON_IsString(jp))
-      cJSON_AddStringToObject(dreq, "prompt", jp->valuestring);
+   {
+      aimee_request_t input = {0};
+      cJSON *canonical = NULL;
+      if (!aimee_ir_request_from_text(&input, NULL, jp->valuestring, 0, 0.3))
+         canonical = aimee_ir_request_json(&input);
+      aimee_request_free(&input);
+      if (!canonical || !cJSON_AddItemToObject(dreq, "request", canonical))
+      {
+         cJSON_Delete(canonical);
+         cJSON_Delete(dreq);
+         return server_send_error(conn, "cannot import delegate task", NULL);
+      }
+   }
    if (cJSON_IsString(jb) && jb->valuestring[0])
       cJSON_AddStringToObject(dreq, "branch", jb->valuestring);
    if (cJSON_IsString(jpersona) && jpersona->valuestring[0])

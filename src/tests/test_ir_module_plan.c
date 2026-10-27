@@ -77,7 +77,6 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    }
    else
       assert(!provided);
-   if (strcmp(phase, "text") != 0)
    {
       const cJSON *view = cJSON_GetObjectItemCaseSensitive(request, "request");
       const cJSON *messages = cJSON_GetObjectItemCaseSensitive(view, "messages");
@@ -114,8 +113,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       const char *supplied =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "provided_query"));
       const char *fallback = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-          strcmp(phase, "text") ? cJSON_GetObjectItemCaseSensitive(request, "request") : request,
-          "last_user_text"));
+          cJSON_GetObjectItemCaseSensitive(request, "request"), "last_user_text"));
       assert((supplied && strcmp(supplied, fixture_query) == 0) ||
              (fallback && strcmp(fallback, fixture_query) == 0));
       cJSON *step = cJSON_Parse(
@@ -168,10 +166,6 @@ static int apply_tools(aimee_request_t *ir, void *unused)
 {
    (void)unused;
    return apply_plan(ir, NULL, "tools");
-}
-static char *render_text(const char *query)
-{
-   return server_ir_plan_text("memory.runtime", "gateway-plan", "text", query);
 }
 int learning_evidence_write_retrieval_event(const char *fingerprint, const char *role,
                                             const int64_t *ids, int count, char *out, int cap)
@@ -394,31 +388,6 @@ int platform_random_bytes(void *buf, size_t len)
 {
    memset(buf, 0x5a, len);
    return 0;
-}
-
-/* OPENAI_SYSTEM_PROMPT: render_text(q) == ingress_preinject_build(q,0)
- * byte-for-byte (the raw env, no trailing "\n\n"). */
-static void test_system_prompt_raw_env(void)
-{
-   char *sys = render_text("deploy matrix");
-   char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(sys != NULL && direct != NULL);
-   assert(strcmp(sys, direct) == 0);
-   /* The legacy contract: NOT apply()-merged, so no trailing blank line. */
-   size_t n = strlen(sys);
-   assert(!(n >= 2 && sys[n - 1] == '\n' && sys[n - 2] == '\n'));
-   free(sys);
-   free(direct);
-   printf("system_prompt_raw_env OK\n");
-}
-
-/* Pre-injection off / recall empty: every target is a byte-identical no-op. */
-static void test_disabled_noop(void)
-{
-   g_no_recall = 1;
-   assert(render_text("deploy matrix") == NULL);
-   g_no_recall = 0;
-   printf("disabled_noop OK\n");
 }
 
 /* Build a minimal IR carrying a single last-user text block (heap-owned so
@@ -682,9 +651,12 @@ static void test_gate_reply_and_audit(void)
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":{"
        "\"role\":\"RecallGateEnforcedSkip/"
        "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}}],\"result\":\"evidence\"}";
-   assert(render_text("private query") == NULL && fixture_audits == 1);
+   aimee_request_t ir;
+   mk_user_ir(&ir, "private query");
+   assert(apply_context(&ir, NULL) == 0 && fixture_audits == 1 && ir.n_system == 0);
    fixture_gate = "{\"status\":\"error\",\"steps\":[]}";
-   assert(render_text("deploy matrix") == NULL);
+   assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+   aimee_request_free(&ir);
    fixture_gate = NULL;
 }
 
@@ -723,27 +695,21 @@ static void test_required_plan_failure_is_request_scoped(void)
        "{\"status\":\"ok\",\"steps\":[]}",
    };
    request_context_t context = {0};
-   for (int surface = 0; surface < 2; surface++)
-      for (int scenario = 0; scenario < 4; scenario++)
-      {
-         request_context_set(&context);
-         fixture_gate = plans[scenario < 3 ? scenario : 2];
-         fixture_transport_result = scenario == 3 ? -1 : 1;
-         if (surface == 0)
-            assert(render_text("deploy matrix") == NULL);
-         else
-         {
-            aimee_request_t ir;
-            mk_user_ir(&ir, "deploy matrix");
-            assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
-            aimee_request_free(&ir);
-         }
-         assert(request_context_get()->context_refused == (scenario != 2));
-         if (scenario != 2)
-            assert(!strcmp(request_context_get()->context_refusal_kind,
-                           scenario == 0 ? "protected_context_overflow" : "unavailable"));
-         request_context_clear();
-      }
+   for (int scenario = 0; scenario < 4; scenario++)
+   {
+      request_context_set(&context);
+      fixture_gate = plans[scenario < 3 ? scenario : 2];
+      fixture_transport_result = scenario == 3 ? -1 : 1;
+      aimee_request_t ir;
+      mk_user_ir(&ir, "deploy matrix");
+      assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+      aimee_request_free(&ir);
+      assert(request_context_get()->context_refused == (scenario != 2));
+      if (scenario != 2)
+         assert(!strcmp(request_context_get()->context_refusal_kind,
+                        scenario == 0 ? "protected_context_overflow" : "unavailable"));
+      request_context_clear();
+   }
    fixture_gate = NULL;
    fixture_transport_result = 1;
    puts("required plan failures preserve owner kind; successful empty plans remain valid");
@@ -771,17 +737,11 @@ static void test_generic_bindings_full_text_and_epoch(void)
        {"payload", payload_binding}, {"clock", clock_binding}, {NULL, NULL}};
    aimee_ir_module_plan_t config = {.method = "memory.runtime",
                                     .operation = "gateway-plan",
-                                    .phase = "text",
+                                    .phase = "context",
                                     .bindings = bindings,
                                     .context = &opaque_payload};
-   fixture_gate = "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\","
-                  "\"args\":{},\"output\":\"value\"}],\"result\":\"value\"}";
-   char *text = aimee_ir_module_plan_text(&config);
-   assert(text && strcmp(text, payload) == 0);
-   free(text);
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
-   config.phase = "context";
    fixture_gate =
        "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\",\"args\":{},"
        "\"output\":\"value\"},{\"kind\":\"invoke\",\"binding\":\"clock\",\"args\":{},\"output\":"
@@ -860,10 +820,8 @@ static void test_real_go_namespace_policy(void)
 int main(void)
 {
    printf("test_ir_module_plan:\n");
-   test_system_prompt_raw_env();
    test_gate_reply_and_audit();
    test_required_plan_failure_is_request_scoped();
-   test_disabled_noop();
    test_ir_stage_appends_system_block();
    const char *const provided[] = {"guidance", NULL};
    fixture_provided_resources = provided;

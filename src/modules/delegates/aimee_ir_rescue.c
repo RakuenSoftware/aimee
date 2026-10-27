@@ -8,7 +8,13 @@
 
 int aimee_ir_rescue_tool_calls(aimee_response_t *r, int allow_json)
 {
-   if (!r || !r->content || r->n_content <= 0 || aimee_ir_response_has_tool_use(r))
+   if (!r)
+      return 0;
+   if (aimee_ir_response_valid(r))
+      return -1;
+   /* Compatibility recovery cannot turn a provider decline/partial result into tool
+    * authority or erase its terminal reason. Keep diagnostic metadata untouched. */
+   if (aimee_ir_response_complete_text_valid(r))
       return 0;
    if (r->n_content > AIMEE_IR_MAX_BLOCKS)
       return -1;

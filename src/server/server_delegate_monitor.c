@@ -4,7 +4,6 @@
 #include <aimee/delegates/delegate_backend_docker.h> /* delegate_backend_docker_reap_aged (leaked-container reap) */
 #include "agent_admission.h" /* agent_admission_touch / _reap_idle (wedged-slot reclaim) */
 #include "http_retry.h"      /* http_set_progress_cb */
-#include "cli_session.h"     /* cli_session_set_heartbeat_cb (tmux-CLI delegates) */
 #include "log.h"
 
 #include <pthread.h>
@@ -78,26 +77,15 @@ static void delegate_heartbeat_cb(void)
    }
 }
 
-/* cli_session heartbeat callbacks carry a void* ud; ignore it and bump the same
- * thread-local job as the HTTP path so a tmux-CLI delegate (claude/codex) stays
- * alive through a long turn instead of being reaped as idle. */
-static void delegate_heartbeat_cli_cb(void *ud)
-{
-   (void)ud;
-   delegate_heartbeat_cb();
-}
-
 void server_delegate_heartbeat_begin(int job_id)
 {
    g_hb_job_id = job_id > 0 ? job_id : 0;
    http_set_progress_cb(job_id > 0 ? delegate_heartbeat_cb : NULL);
-   cli_session_set_heartbeat_cb(job_id > 0 ? delegate_heartbeat_cli_cb : NULL, NULL);
 }
 
 void server_delegate_heartbeat_end(void)
 {
    http_set_progress_cb(NULL);
-   cli_session_set_heartbeat_cb(NULL, NULL);
    g_hb_job_id = 0;
 }
 

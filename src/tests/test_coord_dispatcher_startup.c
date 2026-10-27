@@ -114,15 +114,14 @@ int db1_coord_job_claim_next(int id, const char *owner, db1_coord_task_t *task)
    assert(0);
    return -1;
 }
-int db1_coord_task_get_dispatch(int id, char *role, size_t role_n, char *prompt, size_t prompt_n,
+int db1_coord_task_get_dispatch(int id, char *role, size_t role_n, aimee_message_t *message,
                                 char *files, size_t files_n, char *cwd, size_t cwd_n, char *persona,
                                 size_t persona_n)
 {
    (void)id;
    (void)role;
    (void)role_n;
-   (void)prompt;
-   (void)prompt_n;
+   (void)message;
    (void)files;
    (void)files_n;
    (void)cwd;
@@ -163,12 +162,12 @@ void compute_ctx_free(compute_ctx_t *ctx)
    free(ctx);
 }
 int gw_orch_delegates_run(const gw_turn_capabilities_t *caps, const char *turn, const char *role,
-                          const char *brief, int enabled)
+                          const aimee_message_t *message, int enabled)
 {
    (void)caps;
    (void)turn;
    (void)role;
-   (void)brief;
+   (void)message;
    (void)enabled;
    assert(0);
    return -1;

@@ -2,11 +2,14 @@
 
 ## Purpose and non-goals
 
-IR is required core and defines Aimee's provider-neutral request, response, block, tool-call, delta,
-usage, stop-reason, and panel-result shapes. `aimee_request_t`, `aimee_response_t`, and
-`aimee_panel_result_t` let core stages operate once
+IR is required core and defines Aimee's provider-neutral message model: request, response, block,
+tool-call, delta, usage and stop-reason shapes. `aimee_request_t` and `aimee_response_t`
+let core stages operate once
 instead of repeating logic for every wire protocol. IR does not choose a provider, authorize tools,
-route work, or define a provider's external JSON contract.
+route work, or define a provider's external JSON contract. Provider formats convert
+at the model adapters; internal model processing uses the shared IR. Ordinary
+thinclient authentication, session controls, peer messages, delivery logs and
+other application records retain their own contracts.
 
 ## Public contracts
 
@@ -21,28 +24,19 @@ not claim that every exported helper is a live production API.
 The canonical implementations are `src/modules/ir/aimee_ir.c` and
 `src/modules/ir/aimee_ir_metrics.c`. Their matching public contracts are
 `src/modules/ir/include/aimee/ir/aimee_ir.h`,
-`src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`, and
-`src/modules/ir/include/aimee/ir/panel_result.h`. Consumers use the canonical include namespace
+`src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`. Consumers use the canonical include namespace
 `aimee/ir`; the former flat `src/headers` and `src/server` paths are retired.
 
-The deferred flat `src/headers/aimee_ir_{rescue,serve,shadow,stream}.h` contracts include the canonical
-IR headers for compatibility. New code should include `aimee/ir/aimee_ir.h` or
-`aimee/ir/aimee_ir_metrics.h` directly when it uses those contracts rather than relying on that transitive
-re-export.
+`src/headers/aimee_ir_serve.h` declares the server's host-stage application seams. It is not a
+provider parser or a compatibility model representation. Rescue belongs to delegates, streaming wire
+conversion belongs to translation, and canonical Message/Response assembly belongs to IR.
 
-These contracts own the provider-neutral message model, its allocation and accessors, IR-local metrics,
-and bounded panel findings, evidence, answered questions, coverage gaps, and result status. IR does not
-own panel seats, turns, convergence, deadlines, cancellation callbacks, provider selection, activation,
-or result destruction; those are provider behavior rather than messages.
-The optional `roundtable` provider produces this panel result today, while core serializers, evidence
-replay, and workflows consume it without depending on roundtable's private execution headers.
-The legacy-named rescue, serve, shadow, and stream files remain outside this ownership set because
-they mix canonical operations with translation or comparison behavior. A later behavior-separation slice
-must split those responsibilities before assigning them to IR or translation. IR does not own provider
-ingress parsing, provider-specific body construction, response composition outside the typed result, or
+IR owns the provider-neutral model fields, allocation, accessors, session codecs and IR-local metrics. Panel findings, evidence, coverage and status are ordinary domain layouts in
+`aimee/core/types/panel_result.h`; roundtable produces them and serializers/workflows consume them.
+IR does not own panel execution, provider selection, native ingress/body construction or
 `shadow_mirror.c` lifecycle behavior.
 
-### Canonical session contract (migration in progress)
+### Canonical session contract
 
 `aimee/ir/session_event.h` serializes typed IR messages and deltas without native provider
 sidecars. Messages carry roles and stable message identities; opaque tool IDs correlate uses
@@ -56,8 +50,10 @@ scope digest, exact canonical block digest, source wire and (for Anthropic) the 
 binding. It contains no credentials or transcript. C, Go and browser consumers validate the same
 shape; history and browser projection advance past it without creating model messages. Parsing
 this event alone never establishes provenance or authorizes replay. The scoped native runtime captures evidence from actual upstream canonical responses and
-checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
-activation and live cache/history adoption remain separate, unfinished work.
+checks it at entry and after restored history/policy edits, before egress. The configured native execution owner selects the measured SDK launcher and cache
+controller; replay metadata alone cannot activate either. Warm resume and cold
+canonical-history adoption are qualified separately under their actual source,
+context, credential and SDK bindings.
 
 The host-only `native_checkpoint` event commits an attested scope, current-context digest,
 canonical-prefix digest and message count (1–4096), harness (`codex` or `claude`), opaque native
@@ -65,9 +61,11 @@ handle and random claim identity. It contains no prompt or credential. C, Go and
 its shape; model-history loading and browser projection advance past it without creating model
 content. The native cache controller additionally verifies the owner, source-log continuity,
 completed source turn and canonical history, and atomically consumes a versioned checkpoint before
-handing out a resume handle. Parsing metadata alone grants no replay authority. Production SDK
-callers have not selected this controller; native adoption/profile/compaction fidelity remains a
-separate qualification before activation.
+handing out a resume handle. Parsing metadata alone grants no replay authority. Production native SDK callers use this controller. An unchanged admitted profile may
+resume its registered handle; a changed catalog, credential lineage or launch binding
+requires the owner to select a new scope and adopt authenticated canonical history.
+Old handles and histories remain preserved. Profile changes are not permission to
+force a warm handle or accept an arbitrary scope.
 
 Thinking deltas can carry `thinking_id` and `encrypted_content` at `BLOCK_START` or
 `BLOCK_DELTA`, using the same field names as complete blocks. These are complete opaque values,
@@ -87,8 +85,42 @@ retains owned IR through governance and tool dispatch; its persisted history con
 provider arrays cross an explicit migration adapter before execution; mixed or unknown content
 fails admission rather than becoming an empty response.
 
+External messaging adapters admit an owned canonical USER Message before releasing
+vendor JSON. Gateway RPC, process mirrors, delivery routing and TTS dispatch retain
+canonical messages and all ordered blocks. The shared CLI subscriber returns owned
+Message collections, including opaque state and tool arguments/results, and refuses
+unfinished snapshots at terminal execution. Human CLI/ACP displays and external
+platform/TTS adapters own their text projections.
+
+Original attachments remain separate non-model-visible IMAGE or DOCUMENT file
+assets; generic DOCUMENT can retain an audio MIME type. ASR adds a derived,
+unverified USER task block with source provenance while retaining the original
+asset. Content bindings use typed Context revisions: `gateway.asset.sha256` on
+an asset and `gateway.asr.source.sha256` on its derived transcript, the same full
+SHA256 in `revision_scope`, and epoch0. The typed asset retains its MIME/reference.
+These are unverified content-addressed source bindings, not policy or verified
+revision authority. They survive strict C/Go admission and public attenuation.
+Provider `raw` sidecars are intentionally absent from canonical serialization and
+cannot be the authoritative home for this information. An unreadable non-audio
+attachment remains explicitly unbound and does not discard valid authored text. ASR source validation remains
+separate from generic message admission. Inert sidecars never promote roles or
+policy authority. These are compiled gateway contracts and fixture coverage, not
+an assertion that a messaging platform has been configured or contacted.
+
 Buffered responses publish `TURN_START`, a complete message, and `TURN_STOP`, retaining canonical
-stop reasons and input/output, cache-read/write and reasoning usage. Provider failures publish
+stop reasons and input/output, cache-read/write and reasoning usage. A `TURN_STOP` may also
+carry optional `refusal` diagnostics: either null (no details), or an exact object with
+`category` and `explanation`, each a string or null. Non-null details require canonical
+`content_filter`; the native stop spelling remains independently preserved. Category is bounded
+to 64 UTF-8 bytes and explanation to 4096; NUL, duplicate/unknown fields and malformed values
+are rejected. Unknown categories are retained as inert diagnostics. These fields never become
+model messages, tool instructions, permissions or automatic retry actions. Go durable admission
+and browser live/replay projection retain the same contract. The browser exposes them as escaped,
+read-only provider-refusal details even when the assistant has no content blocks. Chat Completions
+and Responses wire projections cannot represent these structured diagnostics and explicitly refuse
+non-null details, including an object whose two fields are null. The canonical response remains
+unchanged; legacy `content_filter` responses without details retain their existing rendering.
+No explanation is invented as model text. Provider failures publish
 `ERROR` with a typed error message. Streamed harness snapshots use the existing native stream's
 lifecycle and do not manufacture another turn. Canonical message decoding preserves opaque tool
 IDs, signatures, encrypted/redacted reasoning, media references and context metadata. MIME type
@@ -109,10 +141,18 @@ and subagent prevention/completion repair do not require buffered admission; oth
 modes retain their existing buffered path. Incremental Responses-to-Anthropic projection remains
 unfinished. The decoder's native framing stays inside translation and never becomes core history.
 
-The migration remains incomplete: production SDK activation, full native tool effects and human
-controls, account-bound cache/history admission, credential custody, cross-wire incremental
-Responses ingress and remaining IR consumers still require cutover. The current
-[handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
+Production SDK execution and durable history use canonical IR, with provider conversion at
+the external adapters. Incremental Responses-to-Anthropic projection remains unfinished.
+The current [handoff](../IR_MIGRATION_HANDOFF.md) records source qualification, deployed
+versions and the remaining live browser/control evidence; source tracing alone does not
+establish those live journeys.
+
+Canonical requests may carry `system_scalar` as an optional layout preference.
+The Anthropic egress codec emits a scalar only for one uncached TEXT block;
+appended or cache-marked system blocks remain an array. Host assembly retains
+only typed system blocks, cache flags and this preference, without a manufactured
+native `raw.system` copy. External ingress replay sidecars remain owned by their
+translation boundary. The preference carries no content authority.
 
 ## Dependencies and consumers
 
@@ -139,8 +179,9 @@ to protocols or translation while canonical structural limits remain enforced by
 
 ## Surfaces
 
-The current IR surface exposes installed C headers and symbols, canonical blocks/deltas, and the
-`aimee_ir_build_provider_body` compatibility seam; provider-body conversion moves to target translation.
+The current IR surface exposes installed C headers and symbols and canonical blocks/deltas.
+Provider-body conversion belongs to the translation adapters; the former
+`aimee_ir_build_provider_body` compatibility seam is retired.
 IR also exposes stream events, metrics, and shadow/rescue records. It owns no standalone CLI, HTTP route, listener,
 dashboard, or database. External JSON and stdio/network framing are protocol surfaces translated at the
 boundary into or out of `aimee_request_t` and `aimee_response_t`.
@@ -168,14 +209,15 @@ and canonical data never supplies authorization merely because it parsed success
 
 An ingress adapter parses its external request into `aimee_request_t`; memory, routing, policy, and tools
 then inspect or mutate typed fields; translation builds the selected provider request; returned deltas or
-responses are normalized and serialized to the client protocol. Flat CLI/TUI text enters the same journey
-through `aimee_ir_response_from_text` rather than a parallel answer type.
+responses are normalized and serialized to the client protocol. Provider responses enter through their
+native boundary parser and retain canonical admission.
 
 ## Tests and failure behavior
 
-The descriptor owns `src/tests/test_aimee_ir.c`, `src/tests/test_aimee_ir_metrics.c`, and
-`src/tests/test_panel_ir_contract.c` as its direct contracts. The panel contract test pins bounds, enum
-values, zero initialization, fixed-array copying, and artifact-pointer semantics.
+The descriptor owns `src/tests/test_aimee_ir.c`, `src/tests/test_aimee_ir_metrics.c`,
+`src/tests/test_ir_module_plan.c`, `src/tests/test_ir_session_event.c`, and
+`src/tests/test_ir_request_codec.c` as its direct contracts. Provider-neutral panel domain layouts belong
+to `aimee/core/types/panel_result.h`.
 Cross-protocol, ingress, backend, and parity tests exercise adjacent translation and gateway boundaries
 without becoming IR-owned. Allocation or malformed-structure failure must be
 explicit and leave outputs freed/zeroed; unsupported block loss must never be silent.
@@ -195,13 +237,9 @@ compatibility contracts. Future moves at the
 translation or response-composition boundaries must preserve these installed headers, symbols, fixtures,
 and parity baselines.
 
-The `aimee_ir_build_provider_body` compatibility seam keeps its existing signature, ownership semantics,
-and call sites until provider-body conversion moves into the target translation module. That separate
-slice must preserve wire-parity baselines. The legacy rescue, serve, shadow, and stream files remain in
-their current locations here; their callers, headers, and observable behavior are frozen until a
-behavior-separation slice assigns each responsibility to IR or translation. Symbol removal, signature
-changes, or behavior changes in those deferred files require an explicit compatibility record and consumer
-migration.
+Provider-body conversion is owned by translation's shared wire adapters. The former
+`aimee_ir_build_provider_body` seam and flat response-construction convenience APIs are retired.
+Native protocol corpora and actual legacy-data import adapters remain supported boundaries.
 
 ## Extension and removal
 
@@ -211,10 +249,9 @@ the core type. Duplicate legacy representations should be removed after caller i
 tests prove replacement. Removal of the canonical `ir` contract would break every supported execution
 journey and is disallowed.
 
-The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) found both production sources
-in the shipping server build with non-test consumers. It also records three narrower test-support or
-currently test-only API cleanup candidates. Removing or privatizing them requires a separate
-compatibility-focused slice rather than being hidden in an ownership-metadata change.
+The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) is a historical ownership
+record. Current ownership and API reachability are determined by the module descriptor and serving
+callers rather than its former migration checklist.
 
 The generic module-plan executor accepts host-only plans through named command
 discovery. It snapshots roles, tool names and last-user text, then validates every
@@ -257,3 +294,52 @@ summary. A native cache cannot be checkpointed after this event in its source
 turn. Once the child is quiescent, abort/recovery discards the derived cache and
 the next execution adopts canonical history afresh. Durable capture refusal
 prevents accepting an unrecorded compaction observation.
+
+
+Runtime-armed shadow publishing is an explicit external delivery boundary. HTTP
+scopes capture the actual owner-admitted canonical inbound request once, before
+local policy or KB augmentation, and release it on every exit. Successful local
+preparation may mirror that snapshot; nested internal calls cannot substitute or
+consume it. Translation alone renders native bytes after semantic replay checks;
+legacy text completion has a canonical request renderer. Unknown controls,
+unfaithful nested options, local continuation IDs and incompatible opaque state
+refuse only the best-effort mirror, with a counted drop. Opaque companions that
+the selected codec can faithfully represent remain intact. Disarmed publishing
+and absent subscribers cause no clone or rendering. Subscriber responses are
+discarded: HTTP 2xx means delivery, never canonical model or business success.
+
+The old local command implementations (`cmd_core`, `cmd_data`, `cmd_doctor`,
+`cmd_infra`, `cmd_onboard`, `cmd_run`, `cmd_branch`, `cmd_session_history`) and
+root `dashboard.c` are retired. None belonged to the shipping Make/CMake source
+sets or published module APIs. The thin client's manifest discovery, `/v1`
+marshalling and forwarding remain the command boundary; the platform gateway,
+server dashboard, KB dashboard, session lifecycle and shared command utilities
+retain their existing owners. The legacy dashboard test retains its active
+vector-status assertion without linking the obsolete local dashboard owner.
+Mixed command tests retain Git validation, subcommand dispatch, stack detection
+and rules generation; only the orphan `.mcp.json` writer case is removed.
+
+The IR bypass guard rejects restoration of these retired source/header owners.
+`tests/baselines/modules/cli-native-retirement.json` preserves the original
+reviewed memory findings (including symbols, dispositions and content hashes).
+The ownership ledger classifies their retirement separately and rejects both
+restored files and missing or changed historical findings. Original memory
+inventories, symbols and native-boundary rules remain enforced.
+
+Canonical execution histories use `aimee_ir_history_clone`; it refuses provider-shaped
+messages. Legacy storage imports are owned by the explicit translation boundary.
+Browser submissions and queued sends carry canonical messages; the host assigns
+context authority before capture and execution. Primary-session execution accepts
+a canonical `aimee_request_t` with its system blocks and explicit controls intact.
+The browser leaves unauthored sampling controls unset so the selected agent
+resolves its configured defaults. Clean-retry observations enter an owned request
+clone as `MEMORY` / `EVIDENCE` / `UNVERIFIED` blocks, preserving the original
+user message and policy blocks.
+
+Generated delegate role/persona instructions use a separate canonical policy
+block. `delegate_assemble_policy_ir` accepts configuration selectors and policy
+presence; it receives no task text. Templates refer to the canonical task, and
+both queued and native delegate preparation retain every original system block.
+Responses ingestion treats only message `output_text` as a visible answer when
+reconciling streamed text with a terminal snapshot; opaque reasoning content
+cannot suppress real answer events or become public answer text.

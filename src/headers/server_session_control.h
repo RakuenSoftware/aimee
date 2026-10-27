@@ -22,6 +22,10 @@ void server_control_scope_release(server_control_scope_t *scope);
 void server_control_scope_close(server_control_scope_t *scope);
 server_control_scope_t *server_control_scope_bind(server_control_scope_t *scope);
 server_control_scope_t *server_control_scope_current(void);
+/* Disable only, before publishing a headless scope. Capture/lease ownership is
+ * unaffected; no API can re-enable replies on this execution. */
+void server_control_scope_disable_replies(server_control_scope_t *scope);
+int server_control_scope_can_reply(const server_control_scope_t *scope);
 int server_control_register(server_control_scope_t *scope, const char *native_id, const char *kind,
                             const cJSON *request);
 /* Reserve a host-consumed control before emitting it through canonical capture.

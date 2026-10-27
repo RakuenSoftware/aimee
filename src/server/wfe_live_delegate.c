@@ -106,13 +106,14 @@ static wfe_delegate_result_t wfe_coord_task_wait(int job_id, int task_id, char *
  * derived from whether the block named a captured artifact_path — see below. */
 static void wfe_commit_worktree_changes(const char *workdir);
 
-static int wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt,
-                                 const char *artifact_path, char out_commit_sha[64], char *err,
-                                 size_t errlen)
+static int wfe_live_delegate_run(const char *workdir, const char *role,
+                                 const aimee_message_t *message, const char *artifact_path,
+                                 char out_commit_sha[64], char *err, size_t errlen)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
-   if (!workdir || !workdir[0] || !prompt || !prompt[0])
+   if (!workdir || !workdir[0] || !message || !message->role || strcmp(message->role, "user") ||
+       message->n_blocks < 1)
    {
       if (err && errlen)
          snprintf(err, errlen, "wfe live delegate: missing workdir/prompt");
@@ -140,7 +141,7 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          snprintf(err, errlen, "wfe live delegate: could not create coord job");
       return -1;
    }
-   int task_id = db1_coord_job_add_task(job_id, 0, "[]", delegate_role, prompt, workdir, persona);
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", delegate_role, message, workdir, persona);
    if (task_id <= 0)
    {
       db1_coord_job_cancel(job_id);
@@ -472,7 +473,9 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
       snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not create coord job\"}");
       return 0; /* fail-closed verdict */
    }
-   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "review", prompt, workdir, persona);
+   aimee_block_t content = {.type = AIMEE_BLK_TEXT, .text = prompt};
+   aimee_message_t message = {.role = "user", .blocks = &content, .n_blocks = 1};
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "review", &message, workdir, persona);
    if (task_id <= 0)
    {
       db1_coord_job_cancel(job_id);

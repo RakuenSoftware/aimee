@@ -72,11 +72,12 @@ int main(void)
       return 0;
    }
    char cmd[2048];
-   snprintf(cmd, sizeof cmd,
-            "cd %s && git init -q && git config user.email t@t && git config user.name t && "
-            "git config commit.gpgsign false && printf 'a\\n' > f.txt && git add -A && "
-            "git commit -q -m base",
-            dir);
+   snprintf(
+       cmd, sizeof cmd,
+       "cd %s && git init -q -b master && git config user.email t@t && git config user.name t && "
+       "git config commit.gpgsign false && printf 'a\\n' > f.txt && git add -A && "
+       "git commit -q -m base",
+       dir);
    if (sh(cmd) != 0)
    {
       printf("(skip git freeze: no git) ok\n");

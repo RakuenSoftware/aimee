@@ -46,12 +46,6 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
 int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_request_t *out,
                                          char *error, size_t capacity);
 
-/* Admit host-adjusted native fields with an immutable original frame sidecar.
- * Typed transforms run after this boundary; semantic comparison gates exact replay. */
-int aimee_frontend_parse_native_frame(const struct cJSON *native, const char *frame, size_t length,
-                                      aimee_wire_t wire, aimee_request_t *out, char *error,
-                                      size_t capacity);
-
 /* Parse an Anthropic Messages API request (/v1/messages) into the IR. Returns 0 on
  * success (out owned by caller -> aimee_request_free), -1 on error (err filled;
  * out zeroed). Sets out->frontend = AIMEE_WIRE_ANTHROPIC and keeps a whole-request

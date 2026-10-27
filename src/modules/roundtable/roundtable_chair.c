@@ -3,6 +3,7 @@
 #include "aimee.h" /* MAX_PATH_LEN */
 
 #include "roundtable_chair.h"
+#include "ensemble_request.h"
 
 #include "cJSON.h"
 #include "dstr.h"
@@ -32,15 +33,17 @@ static int valid_demote_target(const char *s)
    return s && (strcmp(s, "suggestion") == 0 || strcmp(s, "nit") == 0);
 }
 
-char *roundtable_chair_build_prompt(const roundtable_result_t *out)
+int roundtable_chair_build_request(const roundtable_result_t *out, const aimee_request_t *task,
+                                   aimee_request_t *request)
 {
    if (!out || out->item_count <= 0)
-      return NULL;
+      return -1;
 
-   dstr_t s;
-   dstr_init(&s);
+   dstr_t policy, findings;
+   dstr_init(&policy);
+   dstr_init(&findings);
    dstr_append_str(
-       &s,
+       &policy,
        "You are the CHAIR of a code-review roundtable. The findings below already SURVIVED "
        "evidence-verification against the code index, so each is grounded in real code. Your job "
        "is judgment the index cannot make: is a finding genuinely actionable, or is it "
@@ -51,22 +54,27 @@ char *roundtable_chair_build_prompt(const roundtable_result_t *out)
        "RULES: DEFAULT TO KEEP — only demote/drop when you can clearly justify it. You CANNOT "
        "escalate a severity and CANNOT add new findings; anything else is ignored. Refute like a "
        "reviewer defending the code, citing the specific reason (a guard elsewhere, the true "
-       "blast radius, an accepted trade-off).\n\n"
-       "FINDINGS:\n");
+       "blast radius, an accepted trade-off).\n\n");
+   dstr_append_str(&findings, "FINDINGS:\n");
    for (int i = 0; i < out->item_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
    {
       const roundtable_review_item_t *it = &out->items[i];
-      dstr_appendf(&s, "%d. [%s] (%s) %s\n", i + 1, it->severity[0] ? it->severity : "suggestion",
+      dstr_appendf(&findings, "%d. [%s] (%s) %s\n", i + 1,
+                   it->severity[0] ? it->severity : "suggestion",
                    it->location[0] ? it->location : "?", it->summary);
    }
    dstr_append_str(
-       &s,
+       &policy,
        "\nReturn ONLY raw JSON (no prose, no code fences):\n"
        "{\"verdicts\":[{\"summary\":\"<the finding's summary text, verbatim>\",\"verdict\":\"keep|"
        "demote|drop\",\"new_severity\":\"suggestion|nit\",\"rationale\":\"why, in one line "
        "(required for demote/drop)\"}]}\n"
        "Include only the findings you demote or drop; omit the ones you keep.");
-   return dstr_steal(&s);
+   int rc = ensemble_continuation_request(task, dstr_cstr(&policy), dstr_cstr(&findings), 0, -1,
+                                          request);
+   dstr_free(&policy);
+   dstr_free(&findings);
+   return rc;
 }
 
 /* Skip to the first '{' so a fenced/prefixed LLM reply still parses. */

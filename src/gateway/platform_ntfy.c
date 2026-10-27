@@ -72,14 +72,19 @@ static int ntfy_send_text(platform_adapter_t *self, const delivery_target_t *tar
       snprintf(auth_header, needed, "Authorization: Bearer %s", ntfy_token);
    }
 
-   int rc = agent_http_post_content_type(url, auth_header, "text/plain", text, NULL, 30000, NULL);
+   char *response = NULL;
+   size_t response_length = 0;
+   int rc = agent_http_post_content_type_bytes(url, auth_header, "text/plain", text,
+                                               text ? strlen(text) : 0, &response, &response_length,
+                                               30000, NULL);
+   free(response);
 
    if (auth_header != NULL)
    {
       free(auth_header);
    }
 
-   if (rc != 0)
+   if (rc < 200 || rc >= 300)
    {
       aimee_log(LOG_ERROR, "ntfy", "send_text: HTTP POST failed (%d)", rc);
       return -1;
@@ -169,14 +174,18 @@ static int ntfy_send_attachment(platform_adapter_t *self, const delivery_target_
       snprintf(auth_header, needed, "Authorization: Bearer %s", ntfy_token);
    }
 
-   rc = agent_http_post_content_type(url, auth_header, mime ? mime : "application/octet-stream",
-                                     file_content, NULL, 60000, NULL);
+   char *response = NULL;
+   size_t response_length = 0;
+   rc = agent_http_post_content_type_bytes(
+       url, auth_header, mime ? mime : "application/octet-stream", file_content, (size_t)file_size,
+       &response, &response_length, 60000, NULL);
+   free(response);
 
    if (auth_header != NULL)
       free(auth_header);
    free(file_content);
 
-   if (rc != 0)
+   if (rc < 200 || rc >= 300)
    {
       aimee_log(LOG_ERROR, "ntfy", "send_attachment: HTTP POST failed (%d)", rc);
       return -1;

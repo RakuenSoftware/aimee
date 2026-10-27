@@ -2,6 +2,8 @@ package delegates
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"testing"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
@@ -76,9 +78,15 @@ func decodeLaunchResponse(t *testing.T, b []byte) launchResp {
 		})
 	}
 	for n := r.count(launchPlanMaxPackets); n > 0; n-- {
-		out.tasks = append(out.tasks, LaunchTask{
-			OwnedFiles: r.strings(launchPlanMaxFiles), Role: r.str(), Prompt: r.str(),
-		})
+		task := LaunchTask{OwnedFiles: r.strings(launchPlanMaxFiles), Role: r.str()}
+		raw := r.str()
+		if !canonical.ValidMessage(json.RawMessage(raw)) {
+			t.Fatalf("launch task is not canonical message IR: %s", raw)
+		}
+		if err := json.Unmarshal([]byte(raw), &task.Message); err != nil {
+			t.Fatal(err)
+		}
+		out.tasks = append(out.tasks, task)
 	}
 	for n := r.count(launchPlanMaxFiles); n > 0; n-- {
 		out.repairs = append(out.repairs, LaunchRepair{From: r.str(), To: r.str()})

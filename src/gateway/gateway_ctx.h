@@ -5,6 +5,7 @@
 #include "gateway_platform.h"
 #include "delivery_target.h"
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 typedef struct gateway_ctx gateway_ctx_t;
 
@@ -14,10 +15,8 @@ void gateway_ctx_free(gateway_ctx_t *ctx);
 
 /* Handle an inbound message from a platform adapter.
  * Parses delivery target, sends to server, routes response back. */
-int gateway_handle_message(gateway_ctx_t *ctx, const session_source_t *src, const char *text,
-                           const attachment_t *attachments, int nattach);
-
-/* Send a text message to a delivery target. */
+int gateway_handle_message_ir(gateway_ctx_t *ctx, const session_source_t *src,
+                              const aimee_message_t *message);
 int gateway_send_text(gateway_ctx_t *ctx, const delivery_target_t *target, const char *text);
 
 /* Authorise a user for a given source. Returns 0 on allow, -1 on deny. */

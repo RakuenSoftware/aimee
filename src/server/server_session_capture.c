@@ -28,7 +28,7 @@ struct server_session_capture
    char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX], execution_session[128];
    pthread_mutex_t lock;
    atomic_uint references;
-   atomic_int closed, failed;
+   atomic_int closed, failed, operator_cancelled;
    server_control_scope_t *controls;
    server_session_capture_counts_t counts;
    char committed_sequence[32];
@@ -94,6 +94,7 @@ server_session_capture_t *server_session_capture_open(const char *session, const
    atomic_init(&owner->references, 1);
    atomic_init(&owner->closed, 0);
    atomic_init(&owner->failed, 0);
+   atomic_init(&owner->operator_cancelled, 0);
    snprintf(owner->session, sizeof owner->session, "%s", session);
    snprintf(owner->turn, sizeof owner->turn, "%s", turn);
    snprintf(owner->principal, sizeof owner->principal, "%s", principal);
@@ -166,12 +167,6 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
    pthread_mutex_unlock(&owner->lock);
    return refused ? -1 : 0;
 }
-int server_session_capture_observe_terminal(server_session_capture_t *owner,
-                                            server_session_terminal_action_fn action,
-                                            void *resource)
-{
-   return server_session_capture_observe_verification(owner, NULL, action, resource);
-}
 int server_session_capture_observe_verification(server_session_capture_t *owner,
                                                 server_session_verification_prepare_fn prepare,
                                                 server_session_terminal_action_fn action,
@@ -229,6 +224,80 @@ void server_session_capture_release(server_session_capture_t *owner)
       free(owner);
    }
 }
+int server_session_capture_operator_cancelled(const server_session_capture_t *owner)
+{
+   return owner && atomic_load(&owner->operator_cancelled);
+}
+
+int server_session_capture_cancel_owned(const char *actor, const char *session, const char *turn,
+                                        char sequence[32], server_session_operator_cancel_fn commit)
+{
+   if (!commit || !actor || !actor[0] || !session || !session[0] || !turn || !turn[0] || !sequence)
+      return 1;
+   sequence[0] = 0;
+   server_session_capture_t *owner = NULL;
+   int foreign = 0;
+   pthread_mutex_lock(&owners_lock);
+   for (server_session_capture_t *entry = owners; entry; entry = entry->next)
+      if (!strcmp(entry->session, session) && !strcmp(entry->turn, turn))
+      {
+         if (strcmp(entry->principal, actor))
+            foreign = 1;
+         else
+         {
+            /* release reaches zero before removing the list entry. Never
+             * resurrect an owner whose destruction already started. */
+            unsigned refs = atomic_load(&entry->references);
+            while (refs && refs < UINT_MAX)
+               if (atomic_compare_exchange_weak(&entry->references, &refs, refs + 1))
+               {
+                  owner = entry;
+                  break;
+               }
+         }
+         break;
+      }
+   pthread_mutex_unlock(&owners_lock);
+   if (foreign)
+      return 1;
+   if (!owner)
+      return commit(actor, session, turn, sequence);
+   terminal_observer_t observers[TERMINAL_OBSERVERS_MAX];
+   int count = 0;
+   server_session_terminal_action_fn action = NULL;
+   void *resource = NULL;
+   pthread_mutex_lock(&owner->lock);
+   int result = 1;
+   if (atomic_load(&owner->operator_cancelled))
+   {
+      snprintf(sequence, 32, "%s", owner->committed_sequence);
+      result = 0;
+   }
+   else if (!atomic_load(&owner->closed))
+   {
+      /* Serialize with producer appends. Go checks exact durable actor/turn,
+       * native custody and atomically writes cancellation + interruptions. */
+      result = commit(actor, session, turn, sequence);
+      if (!result)
+      {
+         atomic_store(&owner->operator_cancelled, 1);
+         atomic_store(&owner->closed, 1);
+         snprintf(owner->committed_sequence, sizeof owner->committed_sequence, "%s", sequence);
+         action = owner->terminal_action;
+         resource = owner->terminal_resource;
+         owner->terminal_action = NULL;
+         owner->terminal_resource = NULL;
+         count = terminal_observers_take(owner, observers);
+      }
+   }
+   pthread_mutex_unlock(&owner->lock);
+   if (action)
+      action(0, resource);
+   terminal_observers_finish(owner, observers, count, 0);
+   server_session_capture_release(owner);
+   return result;
+}
+
 void server_session_capture_close(server_session_capture_t *owner)
 {
    if (!owner)

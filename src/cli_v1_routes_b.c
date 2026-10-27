@@ -440,7 +440,7 @@ static cJSON *marshal_cron_add(int argc, char **argv)
    return req;
 }
 
-static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
+cJSON *marshal_agent_args(const char *method, int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
@@ -449,53 +449,6 @@ static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
    for (int i = 0; i < argc; i++)
       cJSON_AddItemToArray(args, cJSON_CreateString(argv[i]));
    cJSON_AddItemToObject(req, "args", args);
-   return req;
-}
-
-/* workspace.add: keep the {method,args} body the socket dispatch parses, but also
- * surface root + provider as top-level fields so the first-class REST route
- * POST /v1/workspaces (which reads {root, provider}) accepts the same body when
- * the thin client routes over a remote /v1 endpoint. The route's response is the
- * raw dispatch result (ws_dispatch_args -> loopback_rpc), so it parses identically
- * to the socket path. */
-cJSON *marshal_workspace_add(int argc, char **argv)
-{
-   cJSON *req = marshal_agent_args("workspace.add", argc, argv);
-   if (!req)
-      return NULL;
-   cli_args_t opts;
-   /* --no-scan takes no value, so it must be declared boolean: cli_args_parse would
-    * otherwise treat the following argument as its value, and swallow the flag
-    * entirely when it is last. */
-   static const char *ws_bool_flags[] = {"no-scan", NULL};
-   cli_args_parse(argc, argv, ws_bool_flags, &opts);
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "root", opts.positional[0]);
-   const char *prov = cli_args_get(&opts, "provider");
-   if (prov)
-      cJSON_AddStringToObject(req, "provider", prov);
-   /* The mirror coordinates need surfacing for the same reason root and provider
-    * do. This body reaches the server through POST /v1/workspaces -- including
-    * locally, over the HTTP UDS -- and that route reads top-level fields, not
-    * `args`. Left in args only, they were silently dropped, so
-    * `aimee workspace add <path> --provider mirror --remote <url>` came back with
-    * "--provider mirror requires --remote <url>" while staring at the flag the
-    * user had just typed. The socket dispatch still parses argv, so both paths
-    * now carry them. */
-   const char *rem = cli_args_get(&opts, "remote");
-   if (rem)
-      cJSON_AddStringToObject(req, "remote", rem);
-   const char *hd = cli_args_get(&opts, "head");
-   if (hd)
-      cJSON_AddStringToObject(req, "head", hd);
-   /* --no-scan registers the workspace and returns instead of walking every
-    * discovered project first. On a large tree the eager scan makes this RPC
-    * take minutes, so a caller with a timeout abandons a registration that
-    * already succeeded; the background ingest timer indexes them regardless.
-    * Omitted (not sent as true) by default, so an older server sees exactly the
-    * body it saw before. */
-   if (cli_args_has_flag(&opts, "no-scan"))
-      cJSON_AddBoolToObject(req, "scan", 0);
    return req;
 }
 
@@ -1399,6 +1352,7 @@ static const struct
    marshal_argv_fn fn;
 } MARSHAL_ARGV[] = {
     {"model.episodes", marshal_agent_episodes},
+    {"model.generate", marshal_model_generate},
     {"api.enable", marshal_api_enable},
     {"aux.test", marshal_aux_test},
     {"cert.issue", marshal_cert_issue},

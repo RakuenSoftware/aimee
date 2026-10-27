@@ -7,7 +7,7 @@
  * to a buffered upstream fetch + police + canonical response SSE renderer replay.
  *
  * Scope: covers the policy-ON path (drops + replays) AND the policy-OFF
- * regression canary (today's incremental paths are unchanged). */
+ * regression canary (native incremental output and Chat canonical replay). */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -207,19 +207,6 @@ int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, 
       headers[0] = 0;
    snprintf(buf, buf_len, "Bearer test");
    return 0;
-}
-
-cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  int max_tokens, double temperature)
-{
-   cJSON *out = cJSON_CreateObject();
-   (void)agent;
-   (void)messages;
-   (void)tools;
-   (void)max_tokens;
-   (void)temperature;
-   cJSON_AddStringToObject(out, "model", "openai-test");
-   return out;
 }
 
 int agent_request_max_tokens(const agent_t *agent, int requested)
@@ -535,8 +522,10 @@ static void test_streaming_anthropic_policy_off_uses_ir(void)
    g_prevent = 0;
    g_stream_payload =
        "event: message_start\ndata: "
-       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
-       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"usage\":{"
+       "\"input_tokens\":0,\"output_tokens\":0}}}\n\n"
+       "event: message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
        "event: message_stop\ndata: {}\n\n";
 
    memset(&cap, 0, sizeof(cap));
@@ -559,7 +548,7 @@ static void test_streaming_anthropic_policy_off_uses_ir(void)
    assert(saw_stop);
 
    reset_capture();
-   PASS("streaming_anthropic_policy_off_is_byte_neutral");
+   PASS("streaming_anthropic_policy_off_uses_ir");
 }
 
 /* --- OpenAI-via-translator streaming tests ----------------------------- */
@@ -700,9 +689,9 @@ static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
    PASS("streaming_openai_police_on_no_tool_use_passthrough");
 }
 
-/* Policy OFF still runs the canonical incremental relay. A native completion
+/* Policy OFF still runs canonical assembly and replay. A native completion
  * event must precede [DONE], so EOF cannot invent a successful turn. */
-static void test_streaming_openai_policy_off_is_byte_neutral(void)
+static void test_streaming_openai_policy_off_replays_observed_usage(void)
 {
    const delegate_driver_t driver = {
        .name = "openai",
@@ -712,10 +701,12 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    reset_capture();
    g_driver = &driver;
    g_prevent = 0;
-   g_stream_payload = "data: "
-                      "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
-                      "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
-                      "data: [DONE]\n\n";
+   g_stream_payload =
+       "data: "
+       "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+       "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}\n\n"
+       "data: [DONE]\n\n";
 
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,"
@@ -723,7 +714,7 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
                    "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                    replay_capture, &cap);
 
-   /* The translator emits message_start at least once. */
+   /* Canonical replay emits message_start with actual observed input usage. */
    int saw_start = 0;
    for (int i = 0; i < cap.count; i++)
    {
@@ -733,7 +724,7 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    assert(saw_start);
 
    reset_capture();
-   PASS("streaming_openai_policy_off_is_byte_neutral");
+   PASS("streaming_openai_policy_off_replays_observed_usage");
 }
 
 /* An Anthropic client can stream against an OpenAI-compatible delegate. Once
@@ -799,8 +790,11 @@ static void test_native_completion_followup_reaches_provider_system(void)
    reset_capture();
    g_driver = &driver;
    g_stream_payload =
-       "event: message_start\ndata: {\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
-       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":0,\"output_"
+       "tokens\":0}}}\n\n"
+       "event: message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
        "event: message_stop\ndata: {}\n\n";
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
@@ -843,7 +837,10 @@ static void test_signed_stream_snapshot_before_completion(void)
       reject_signed_snapshot = reject;
       g_driver = &driver;
       g_stream_payload =
-          "event: message_start\ndata: {\"message\":{\"id\":\"signed\",\"role\":\"assistant\"}}\n\n"
+          "event: message_start\ndata: "
+          "{\"message\":{\"id\":\"signed\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":0,"
+          "\"output_tokens\":0}}}"
+          "\n\n"
           "event: content_block_start\ndata: "
           "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
           "event: content_block_delta\ndata: "
@@ -852,7 +849,8 @@ static void test_signed_stream_snapshot_before_completion(void)
           "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"opaque-signature\"}"
           "}\n\n"
           "event: content_block_stop\ndata: {\"index\":0}\n\n"
-          "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+          "event: message_delta\ndata: "
+          "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
           "event: message_stop\ndata: {}\n\n";
       aimee_ir_session_set_sink(signed_capture, NULL);
       replay_cap_t cap = {0};
@@ -894,7 +892,8 @@ static void test_strict_provider_stream_frames(void)
 {
    static const char native_nul[] =
        "event: message_start\ndata: "
-       "{\"message\":{\"id\":\"before\\u0000after\",\"role\":\"assistant\"}}\n\n";
+       "{\"message\":{\"id\":\"before\\u0000after\",\"role\":"
+       "\"assistant\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n";
    static const char native_raw_nul[] =
        "event: message_start\ndata: "
        "{\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}}\0{}\n\n";
@@ -960,7 +959,7 @@ int main(void)
    test_streaming_anthropic_partial_drop_preserves_max_tokens();
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();
-   test_streaming_openai_policy_off_is_byte_neutral();
+   test_streaming_openai_policy_off_replays_observed_usage();
    test_streaming_armed_completion_is_provider_neutral();
    test_native_completion_followup_reaches_provider_system();
    printf("anthropic_http_streaming_p2c: OK\n");

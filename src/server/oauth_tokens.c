@@ -116,7 +116,7 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out)
       return -1;
    memset(out, 0, sizeof(*out));
 
-   cJSON *j = cJSON_Parse(json);
+   cJSON *j = cJSON_ParseWithOpts(json, NULL, 1);
    if (!j)
       return -1;
 
@@ -126,13 +126,22 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out)
       cJSON_Delete(j);
       return -1;
    }
+   cJSON *rt = cJSON_GetObjectItemCaseSensitive(j, "refresh_token");
+   cJSON *tt = cJSON_GetObjectItemCaseSensitive(j, "token_type");
+   /* Never turn a successful provider response into a truncated credential.
+    * Validate every copied field before exposing any token in the result. */
+   if (strlen(at->valuestring) >= sizeof out->access_token ||
+       (cJSON_IsString(rt) && strlen(rt->valuestring) >= sizeof out->refresh_token) ||
+       (cJSON_IsString(tt) && strlen(tt->valuestring) >= sizeof out->token_type))
+   {
+      cJSON_Delete(j);
+      return -1;
+   }
    snprintf(out->access_token, sizeof(out->access_token), "%s", at->valuestring);
 
-   cJSON *rt = cJSON_GetObjectItemCaseSensitive(j, "refresh_token");
    if (cJSON_IsString(rt) && rt->valuestring[0])
       snprintf(out->refresh_token, sizeof(out->refresh_token), "%s", rt->valuestring);
 
-   cJSON *tt = cJSON_GetObjectItemCaseSensitive(j, "token_type");
    if (cJSON_IsString(tt) && tt->valuestring[0])
       snprintf(out->token_type, sizeof(out->token_type), "%s", tt->valuestring);
 
@@ -255,8 +264,15 @@ int oauth_token_remove(const char *client_name)
  * |post_data| is the pre-encoded form or JSON body.
  * On success, |*resp_out| is a malloc'd JSON string (caller frees).
  */
+typedef struct
+{
+   int curl_exit;   /* -1 or a bounded process exit code, never captured output */
+   int http_status; /* a verified three-digit HTTP status, or zero */
+} oauth_refresh_diagnostic_t;
+
 static int curl_post_token(const char *token_endpoint, const char *post_data, int json_body,
-                           char **resp_out, size_t *resp_len_out, int *http_status_out)
+                           char **resp_out, size_t *resp_len_out, int *http_status_out,
+                           oauth_refresh_diagnostic_t *diagnostic)
 {
    if (!token_endpoint || !post_data || !resp_out)
       return -1;
@@ -287,6 +303,8 @@ static int curl_post_token(const char *token_endpoint, const char *post_data, in
    char *raw = NULL;
    size_t raw_len = 0;
    int rc = platform_exec_pipe(cmd, post_data, strlen(post_data), &raw, &raw_len);
+   if (diagnostic)
+      diagnostic->curl_exit = rc >= 0 && rc <= 255 ? rc : -1;
    if (rc != 0 || !raw)
    {
       free(raw);
@@ -297,6 +315,11 @@ static int curl_post_token(const char *token_endpoint, const char *post_data, in
    char *nl = strrchr(raw, '\n');
    if (nl)
    {
+      /* Validate the trailer separately for diagnostics. Do not log anything
+       * derived from the response body, stderr, URL, or unvalidated suffix. */
+      if (diagnostic && strlen(nl + 1) == 3 && nl[1] >= '1' && nl[1] <= '5' && nl[2] >= '0' &&
+          nl[2] <= '9' && nl[3] >= '0' && nl[3] <= '9')
+         diagnostic->http_status = (nl[1] - '0') * 100 + (nl[2] - '0') * 10 + nl[3] - '0';
       if (http_status_out)
          *http_status_out = atoi(nl + 1);
       *nl = '\0';
@@ -373,8 +396,11 @@ static char *oauth_refresh_body(const oauth_refresh_profile_t *profile, const ch
    return body;
 }
 
-static int oauth_refresh_profile(const char *client_name, const oauth_refresh_profile_t *profile)
+static int oauth_refresh_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                                 int *refresh_http_status)
 {
+   if (refresh_http_status)
+      *refresh_http_status = 0;
    if (!client_name || !profile || !profile->client_id || !profile->token_endpoint ||
        (profile->format != OAUTH_REFRESH_FORM && profile->format != OAUTH_REFRESH_JSON))
       return OAUTH_REFRESH_TRANSIENT;
@@ -382,16 +408,22 @@ static int oauth_refresh_profile(const char *client_name, const oauth_refresh_pr
    char refresh_token[sizeof result.refresh_token] = "";
    char *body = NULL, *resp = NULL;
    int rc = OAUTH_REFRESH_TRANSIENT, http_status = 0;
+   oauth_refresh_diagnostic_t diagnostic = {.curl_exit = -1};
+   const char *failure = "load_refresh";
    if (oauth_secret_load(client_name, OAUTH_VCRED_REFRESH, OAUTH_KEY_REFRESH_TOKEN, refresh_token,
                          sizeof refresh_token) ||
        !refresh_token[0])
       goto done;
+   failure = "build_request";
    body = oauth_refresh_body(profile, refresh_token);
-   if (!body ||
-       curl_post_token(profile->token_endpoint, body, profile->format == OAUTH_REFRESH_JSON, &resp,
-                       NULL, &http_status) ||
+   if (!body)
+      goto done;
+   failure = "transport";
+   if (curl_post_token(profile->token_endpoint, body, profile->format == OAUTH_REFRESH_JSON, &resp,
+                       NULL, &http_status, &diagnostic) ||
        !resp)
       goto done;
+   failure = "http";
 
    /* Only the actual OAuth error field can reject a refresh credential. Proxy
     * messages mentioning invalid_grant are not an operator reauthentication. */
@@ -403,6 +435,7 @@ static int oauth_refresh_profile(const char *client_name, const oauth_refresh_pr
       cJSON_Delete(error_body);
       if (rejected)
       {
+         failure = "credential_rejected";
          aimee_log(LOG_ERROR, "oauth_flow", "refresh rejected for %s: reauthentication required",
                    client_name);
          (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
@@ -411,10 +444,30 @@ static int oauth_refresh_profile(const char *client_name, const oauth_refresh_pr
       goto done;
    }
    /* Never persist an error response even if it carries token-shaped fields. */
-   if (http_status < 200 || http_status >= 300 || oauth_token_parse_response(resp, &result))
+   if (http_status < 200 || http_status >= 300)
       goto done;
+   failure = "response_parse";
+   if (oauth_token_parse_response(resp, &result))
+      goto done;
+   failure = "credential_store";
    rc = oauth_token_store(client_name, &result) ? OAUTH_REFRESH_TRANSIENT : 0;
 done:
+   if (refresh_http_status)
+      *refresh_http_status = diagnostic.http_status;
+   if (rc)
+   {
+      /* Registration identity is already logged by this owner. Only fixed
+       * categories and validated numeric codes may accompany it. */
+      if (!strcmp(failure, "transport"))
+         aimee_log(LOG_WARN, "oauth_flow", "refresh failed for %s: category=%s curl_exit=%d",
+                   client_name, failure, diagnostic.curl_exit);
+      else if (diagnostic.http_status)
+         aimee_log(LOG_WARN, "oauth_flow", "refresh failed for %s: category=%s http_status=%d",
+                   client_name, failure, diagnostic.http_status);
+      else
+         aimee_log(LOG_WARN, "oauth_flow", "refresh failed for %s: category=%s", client_name,
+                   failure);
+   }
    OPENSSL_cleanse(refresh_token, sizeof refresh_token);
    OPENSSL_cleanse(&result, sizeof result);
    oauth_cleanse_free(body);
@@ -426,12 +479,14 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
 {
    const oauth_refresh_profile_t profile = {.client_id = client_id,
                                             .token_endpoint = token_endpoint};
-   return oauth_refresh_profile(client_name, &profile);
+   return oauth_refresh_profile(client_name, &profile, NULL);
 }
 
-int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
-                            int skew_secs, char *buf, size_t len)
+int oauth_token_get_profile_status(const char *client_name, const oauth_refresh_profile_t *profile,
+                                   int skew_secs, char *buf, size_t len, int *refresh_http_status)
 {
+   if (refresh_http_status)
+      *refresh_http_status = 0;
    if (!buf || len == 0)
       return -1;
    buf[0] = '\0';
@@ -452,7 +507,7 @@ int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile
 
    if (need_refresh && profile && profile->client_id && profile->token_endpoint)
    {
-      if (oauth_refresh_profile(client_name, profile) == OAUTH_REFRESH_REAUTH)
+      if (oauth_refresh_profile(client_name, profile, refresh_http_status) == OAUTH_REFRESH_REAUTH)
          return -1;
    }
 
@@ -465,6 +520,12 @@ int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile
       return -1;
    }
    return 0;
+}
+
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t len)
+{
+   return oauth_token_get_profile_status(client_name, profile, skew_secs, buf, len, NULL);
 }
 
 int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,

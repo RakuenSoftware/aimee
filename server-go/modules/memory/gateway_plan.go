@@ -61,7 +61,7 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, ring.M
 			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
-	if phase != "preview" && phase != "context" && phase != "tools" && phase != "text" {
+	if phase != "preview" && phase != "context" && phase != "tools" {
 		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// These are host assembly facts, not labels parsed from user/model text.
@@ -79,28 +79,22 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, ring.M
 		}
 		guidanceProvided = guidanceProvided || name == "guidance"
 	}
-	var request *canonical.PolicyView
-	if phase != "text" {
-		if args["roles"] != nil || args["tools"] != nil || args["last_user_text"] != nil {
-			return nil, ring.ModuleStatusInvalidRequest
-		}
-		var err error
-		request, err = canonical.DecodePolicyView(args["request"])
-		if err != nil {
-			return nil, ring.ModuleStatusInvalidRequest
-		}
+	if args["roles"] != nil || args["tools"] != nil || args["last_user_text"] != nil {
+		return nil, ring.ModuleStatusInvalidRequest
+	}
+	request, err := canonical.DecodePolicyView(args["request"])
+	if err != nil {
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	start := true
-	if request != nil {
-		for _, message := range request.Messages {
-			if message.Role == "assistant" {
-				start = false
-				break
-			}
+	for _, message := range request.Messages {
+		if message.Role == "assistant" {
+			start = false
+			break
 		}
 	}
 	remove := [][]int{}
-	if start && request != nil {
+	if start {
 		for i := len(request.Tools) - 1; i >= 0; i-- {
 			tool := request.Tools[i]
 			if tool.Kind == "namespace" {
@@ -121,21 +115,14 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, ring.M
 		if len(remove) > 0 {
 			steps = append(steps, gatewayStep{Kind: "remove_tools", Paths: remove})
 		}
-	} else if phase == "context" || phase == "text" {
+	} else if phase == "context" {
 		provided, ok := gatewayOptionalString(args, "provided_query")
-		if !ok {
-			return nil, ring.ModuleStatusInvalidRequest
-		}
-		fallback, ok := gatewayOptionalString(args, "last_user_text")
-		if request != nil {
-			fallback = request.LastUserText
-		}
 		if !ok {
 			return nil, ring.ModuleStatusInvalidRequest
 		}
 		query := provided
 		if query == "" {
-			query = fallback
+			query = request.LastUserText
 			if len(query) > 16383 {
 				end := 16383
 				for end > 0 && !utf8.RuneStart(query[end]) {
@@ -156,16 +143,13 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, ring.M
 				steps = append(steps, gatewayStep{Kind: "invoke", Binding: "context", Args: map[string]any{"query": query}, Output: "evidence"})
 			}
 		}
-		if phase == "context" {
-			if appendGuidance {
-				steps = append(steps, gatewayStep{Kind: "append_context", Resource: "guidance", Context: map[string]any{"origin": "platform", "authority": "task_instruction", "trust": "verified", "sensitivity": "internal", "model_visible": true}})
-			}
-			steps = append(steps,
-				gatewayStep{Kind: "invoke", Binding: "epoch", Args: map[string]any{"domain": "knowledge", "scope": "global"}, Output: "epoch", WhenOutput: "evidence"},
-				gatewayStep{Kind: "append_context", Output: "evidence", WhenOutput: "evidence", EpochOutput: "epoch", Context: map[string]any{"origin": "retrieval", "authority": "evidence", "trust": "unverified", "sensitivity": "internal", "model_visible": true, "revision_domain": "knowledge", "revision_scope": "global"}},
-			)
+		if appendGuidance {
+			steps = append(steps, gatewayStep{Kind: "append_context", Resource: "guidance", Context: map[string]any{"origin": "platform", "authority": "task_instruction", "trust": "verified", "sensitivity": "internal", "model_visible": true}})
 		}
-		result["result"] = "evidence"
+		steps = append(steps,
+			gatewayStep{Kind: "invoke", Binding: "epoch", Args: map[string]any{"domain": "knowledge", "scope": "global"}, Output: "epoch", WhenOutput: "evidence"},
+			gatewayStep{Kind: "append_context", Output: "evidence", WhenOutput: "evidence", EpochOutput: "epoch", Context: map[string]any{"origin": "retrieval", "authority": "evidence", "trust": "unverified", "sensitivity": "internal", "model_visible": true, "revision_domain": "knowledge", "revision_scope": "global"}},
+		)
 	}
 	result["steps"] = steps
 	return commandResult(result)

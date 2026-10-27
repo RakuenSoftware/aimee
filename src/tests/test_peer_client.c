@@ -211,8 +211,8 @@ static void test_three_outcomes(void)
       "expect_reply=true travels as \"1\", the spelling Btoa writes");
    ok(strcmp(seen_cell(3, buf, sizeof buf), "") == 0,
       "an omitted conversation_id travels as the empty cell, which opens a new one");
-   ok(g_seen_kind == 4096u + 31u * 256u + 1u && g_seen_stage == 1u,
-      "the kind is the bus formula for ref 31 stage 1, not a transcribed 12033");
+   ok(g_seen_kind == 4096u + 30u * 256u + 20u && g_seen_stage == 20u,
+      "the kind is the bus formula for ref 30 stage 20");
 }
 
 /* ── a row of the wrong width is not a row ────────────────────────────────── */
@@ -637,8 +637,43 @@ static void test_reply_handle_is_refused_not_guessed(void)
       "a field containing the separator refuses the handle rather than escaping it");
 }
 
+static void test_discarded_rows_and_literal_text(void)
+{
+   const char *literal = "aimee.message.v1\n{\"role\":\"user\",\"text\":\"literal λ\"}";
+   const char *row[PEER_CLIENT_MESSAGE_WIDTH];
+   for (int i = 0; i < PEER_CLIENT_MESSAGE_WIDTH; ++i)
+      row[i] = ROW[i];
+   row[10] = literal;
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   peer_client_message_t got;
+   uint32_t status;
+   int transport;
+   ok(peer_client_send("a", "b", literal, NULL, 0, &got, &status, &transport) == PEER_CLIENT_OK,
+      "JSON-looking Unicode peer text remains ordinary text");
+   ok(strcmp(got.text, literal) == 0, "returned literal text is byte exact");
+   char buf[256];
+   ok(strcmp(seen_cell(2, buf, sizeof buf), literal) == 0,
+      "sent text has no internal IR discriminator");
+   peer_client_message_free(&got);
+   row[7] = "invalid-hop";
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   ok(peer_client_send("a", "b", "t", NULL, 0, NULL, &status, &transport) ==
+              PEER_CLIENT_TRANSPORT &&
+          transport == OURO_MODULE_CALL_PROTOCOL,
+      "discarded send output still validates row fields");
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   ok(peer_client_reply("b", "id|corr|conv|a|a|0", "t", NULL, &status, &transport) ==
+              PEER_CLIENT_TRANSPORT &&
+          transport == OURO_MODULE_CALL_PROTOCOL,
+      "discarded reply output still validates row fields");
+}
+
 int main(void)
 {
+   test_discarded_rows_and_literal_text();
    test_reply_carries_the_hop();
    test_reply_handle_is_refused_not_guessed();
    test_three_outcomes();

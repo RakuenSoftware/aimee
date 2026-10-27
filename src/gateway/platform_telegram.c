@@ -2,6 +2,7 @@
 #include "platform_telegram.h"
 
 #include "gateway_ctx.h"
+#include "gateway_ir.h"
 #include "aimee.h"
 #include "agent_exec.h"
 #include "log.h"
@@ -208,7 +209,12 @@ static int process_file_message(telegram_ctx_t *ctx, cJSON *msg)
    snprintf(attach.path, sizeof(attach.path), "%s", local_path);
    snprintf(attach.mime, sizeof(attach.mime), "application/octet-stream");
 
-   gateway_handle_message(ctx->gw, &src, "", &attach, 1);
+   aimee_message_t admitted = {0};
+   if (!gateway_message_import_external(NULL, &attach, 1, &admitted))
+   {
+      gateway_handle_message_ir(ctx->gw, &src, &admitted);
+      aimee_message_free(&admitted);
+   }
    cJSON_Delete(getfile_json);
    return 1;
 }
@@ -314,7 +320,12 @@ static void *polling_thread(void *arg)
          cJSON *text_json = cJSON_GetObjectItem(msg, "text");
          const char *text = text_json ? text_json->valuestring : "";
 
-         gateway_handle_message(ctx->gw, &src, text, NULL, 0);
+         aimee_message_t admitted = {0};
+         if (!gateway_message_import_external(text, NULL, 0, &admitted))
+         {
+            gateway_handle_message_ir(ctx->gw, &src, &admitted);
+            aimee_message_free(&admitted);
+         }
       }
 
       cJSON_Delete(json);

@@ -17,12 +17,14 @@
  * rationale). This bounds the risk of adding a second fallible model to the very step
  * meant to curb fallible over-flagging. */
 
+#include <aimee/ir/aimee_ir.h>
 #include "roundtable_types.h" /* roundtable_result_t */
 
-/* Build the chair adjudication prompt from the surviving items in `out` (an items
- * digest + the demote/drop-only contract). Returns a malloc'd string (caller frees),
- * or NULL if there is nothing to adjudicate (no items) or on allocation failure. */
-char *roundtable_chair_build_prompt(const roundtable_result_t *out);
+/* Build an owned canonical continuation of task. Generated chair policy and
+ * model-derived surviving findings remain distinct. Returns 0 or -1 when there
+ * is nothing to adjudicate or admission fails. Free with aimee_request_free. */
+int roundtable_chair_build_request(const roundtable_result_t *out, const aimee_request_t *task,
+                                   aimee_request_t *request);
 
 /* Apply the chair's verdict JSON to `out`, CONSERVATIVELY: match each verdict to a
  * surviving item by summary; DEMOTE only lowers severity (an escalation is ignored),

@@ -692,7 +692,7 @@ int db1_session_ir_cancel(const char *actor, const char *session, const char *tu
    assert(0 && "unexpected browser cancellation in dispatch-only fixture");
    return -1;
 }
-int db1_server_session_get(const char *id, db1_server_session_t *out)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *out)
 {
    (void)id;
    (void)out;
@@ -1545,6 +1545,10 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.stats");
+}
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "model.generate");
 }
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

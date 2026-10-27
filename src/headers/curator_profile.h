@@ -2,7 +2,7 @@
  *
  * Selects the optimal [curator.local] backend and model configuration based
  * on detected hardware. The four profiles match the proposal spec:
- *   cpu      — default; Gemma 4 E4B via scripts/curator-extract.py
+ *   cpu      — default; Gemma 4 E4B via the canonical provider
  *   gpu      — ≥24 GB discrete VRAM; Qwen3.6-35B-A3B via llama.cpp
  *   endpoint — caller-supplied OpenAI-compatible URL; no local inference
  *   disabled — no local inference; kb_curator_extract_* disabled
@@ -23,7 +23,7 @@ extern "C"
    /* Curator backend kinds. */
    typedef enum
    {
-      CURATOR_BACKEND_CPU = 0,      /* default: Gemma 4 E4B, scripts/curator-extract.py */
+      CURATOR_BACKEND_CPU = 0,      /* default: Gemma 4 E4B, canonical provider */
       CURATOR_BACKEND_GPU = 1,      /* ≥24 GB VRAM: Qwen3.6-35B-A3B via llama.cpp */
       CURATOR_BACKEND_ENDPOINT = 2, /* OpenAI-compatible endpoint (kb_url / endpoint field) */
       CURATOR_BACKEND_DISABLED = 3  /* no local inference */
@@ -36,11 +36,10 @@ extern "C"
    typedef struct
    {
       curator_backend_t backend;
-      char model[256];           /* model identifier or path */
-      char extract_command[512]; /* kb_curator_extract_command value */
-      char endpoint_url[512];    /* non-empty for CURATOR_BACKEND_ENDPOINT */
-      int docs_enabled;          /* 0 = disabled */
-      int code_enabled;          /* 0 = disabled */
+      char model[256];        /* model identifier or path */
+      char endpoint_url[512]; /* non-empty for CURATOR_BACKEND_ENDPOINT */
+      int docs_enabled;       /* 0 = disabled */
+      int code_enabled;       /* 0 = disabled */
    } curator_profile_t;
 
    /* String ↔ enum helpers. Return a static string; never NULL. */
@@ -50,9 +49,8 @@ extern "C"
    /* Select the best profile given detected hardware.
     * vram_mb: detected discrete VRAM in MiB (0 if no GPU detected).
     * endpoint_url: non-NULL and non-empty → forces CURATOR_BACKEND_ENDPOINT.
-    * Returns the selected profile. Output-shape is consistent across all
-    * backends (extract_command always points at the same sidecar script;
-    * model varies).  */
+    * Returns the selected profile. All model calls use the configured canonical
+    * provider; profile selection never installs a shell model command. */
    curator_profile_t curator_profile_select(int vram_mb, const char *endpoint_url);
 
    /* Apply a curator_profile_t to config fields (does not write the INI

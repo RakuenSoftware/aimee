@@ -17,7 +17,6 @@
   "create_prospective_memory": {"class": "write", "side_effect": "write", "categories": ["write"]},
   "dashboard_metrics": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "delegate": {"class": "exec", "side_effect": "write", "categories": ["write", "execution"]},
-  "delegate_reply": {"class": "control", "side_effect": "write", "categories": ["write", "control"]},
   "delegate_status": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "describe_tool": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "diagnose_evidence": {"class": "control", "side_effect": "write", "categories": ["write", "control"]},

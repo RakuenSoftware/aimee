@@ -55,6 +55,10 @@ typedef struct
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
    int projection_reasoning, projection_opaque, projection_cache_controls;
+   int projection_host_context_blocks_as_text, projection_unverified_external_tool_reports;
+   int projection_history_messages_as_text;
+   int projection_request_controls;
+   int projection_empty_messages;
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
@@ -74,11 +78,17 @@ struct cJSON *aimee_ir_response_json(const aimee_response_t *response);
 int aimee_ir_response_parse(const struct cJSON *json, aimee_response_t *out);
 /* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
 struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
+/* Strict owned inverse. Replaces initialized out only after complete admission;
+ * native raw sidecars are deliberately not part of canonical request snapshots. */
+int aimee_ir_request_parse(const struct cJSON *json, aimee_request_t *out);
 /* Bounded identity/query projection for request policy, never a model prompt. */
 struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out
  * is empty; on success it owns its fields (aimee_message_free). */
 int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
+/* Clone canonical stored messages without accepting or guessing a provider wire.
+ * NULL denotes an empty conversation. The caller owns the returned array. */
+struct cJSON *aimee_ir_history_clone(const struct cJSON *messages);
 /* Repair a compatibility view's tool cycles in order; -1 leaves input untouched.
  * Missing results become explicit platform diagnostics with unknown outcomes,
  * never cancellation/effect receipts. Authoritative loaders reject any repair. */
@@ -114,6 +124,9 @@ void aimee_ir_session_begin_task(void);
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection_full(const char *model, int reasoning, int opaque,
+                                          int cache_controls, int empty_messages,
+                                          const char *boundary);
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary);
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,

@@ -51,6 +51,7 @@ type Request struct {
 	SourceWire           string          `json:"source_wire"`
 	CachePolicy          string          `json:"cache_policy"`
 	System               []Block         `json:"system"`
+	SystemScalar         bool            `json:"system_scalar,omitempty"`
 	Messages             []Message       `json:"messages"`
 	Tools                []Tool          `json:"tools"`
 	ToolChoice           ToolChoice      `json:"tool_choice"`
@@ -131,7 +132,7 @@ func (r *Request) Valid() bool {
 		}
 	}
 	for _, message := range r.Messages {
-		if !validRole(message.Role) || message.Blocks == nil || len(message.Blocks) > 4096 {
+		if !validRole(message.Role) || message.Blocks == nil || len(message.Blocks) > 4096 || (message.ContentScalar && (len(message.Blocks) != 1 || message.Blocks[0].Type != "text")) {
 			return false
 		}
 		for _, block := range message.Blocks {
@@ -146,6 +147,9 @@ func (r *Request) Valid() bool {
 			return false
 		}
 	}
+	if r.ToolChoice.Mode != "tool" && r.ToolChoice.Name != "" {
+		return false
+	}
 	switch r.ToolChoice.Mode {
 	case "unset", "auto", "none", "any":
 		if r.ToolChoice.Name != "" {
@@ -159,6 +163,7 @@ func (r *Request) Valid() bool {
 		return false
 	}
 	if r.MaxTokens != nil && (*r.MaxTokens < 1 || *r.MaxTokens > math.MaxInt32) ||
+		r.TopK != nil && (*r.TopK < math.MinInt32 || *r.TopK > math.MaxInt32) ||
 		r.Temperature != nil && (math.IsNaN(*r.Temperature) || math.IsInf(*r.Temperature, 0)) ||
 		r.TopP != nil && (math.IsNaN(*r.TopP) || math.IsInf(*r.TopP, 0)) {
 		return false
@@ -200,7 +205,7 @@ func (r *Request) Valid() bool {
 }
 func DecodeRequest(encoded []byte) (*Request, error) {
 	var request Request
-	if !utf8.Valid(encoded) || !Decode(encoded, &request) || !request.Valid() {
+	if !utf8.Valid(encoded) || !validRequestJSONShape(encoded) || !Decode(encoded, &request) || !request.Valid() {
 		return nil, fmt.Errorf("invalid canonical request")
 	}
 	return &request, nil
@@ -274,7 +279,7 @@ func DecodeMessages(encoded []byte) ([]Message, error) {
 		return nil, fmt.Errorf("invalid canonical messages")
 	}
 	for _, message := range messages {
-		if !validRole(message.Role) || message.Blocks == nil || len(message.Blocks) > 4096 {
+		if !validRole(message.Role) || message.Blocks == nil || len(message.Blocks) > 4096 || (message.ContentScalar && (len(message.Blocks) != 1 || message.Blocks[0].Type != "text")) {
 			return nil, fmt.Errorf("invalid canonical message")
 		}
 		for _, block := range message.Blocks {
@@ -285,4 +290,103 @@ func DecodeMessages(encoded []byte) ([]Message, error) {
 		}
 	}
 	return messages, nil
+}
+
+// Pointer/default fields cannot silently turn explicit JSON null into absence.
+// Opaque schemas, arguments, results and metadata keep their own JSON semantics.
+func validRequestJSONShape(raw json.RawMessage) bool {
+	object := func(raw json.RawMessage, opaque ...string) (map[string]json.RawMessage, bool) {
+		var fields map[string]json.RawMessage
+		if !Decode(raw, &fields) {
+			return nil, false
+		}
+		skip := map[string]bool{}
+		for _, key := range opaque {
+			skip[key] = true
+		}
+		for key, value := range fields {
+			if !skip[key] && string(value) == "null" {
+				return nil, false
+			}
+		}
+		return fields, true
+	}
+	fields, ok := object(raw, "metadata")
+	if !ok {
+		return false
+	}
+	blocks := func(raw json.RawMessage) bool {
+		var list []json.RawMessage
+		if !Decode(raw, &list) {
+			return false
+		}
+		for _, block := range list {
+			if !ValidBlock(block) {
+				return false
+			}
+			var fields map[string]json.RawMessage
+			_ = Decode(block, &fields)
+			var kind string
+			_ = Decode(fields["type"], &kind)
+			if kind == "tool_result" {
+				var flag bool
+				if fields["is_error"] == nil || !Decode(fields["is_error"], &flag) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !blocks(fields["system"]) {
+		return false
+	}
+	var messages []json.RawMessage
+	if !Decode(fields["messages"], &messages) {
+		return false
+	}
+	for _, message := range messages {
+		m, ok := object(message)
+		if !ok || !blocks(m["blocks"]) {
+			return false
+		}
+	}
+	var tools []json.RawMessage
+	if !Decode(fields["tools"], &tools) {
+		return false
+	}
+	var tool func(json.RawMessage, int) bool
+	tool = func(raw json.RawMessage, depth int) bool {
+		if depth > 1 {
+			return false
+		}
+		fields, ok := object(raw)
+		if !ok {
+			return false
+		}
+		if children := fields["children"]; children != nil {
+			var list []json.RawMessage
+			if !Decode(children, &list) || len(list) > 4096 {
+				return false
+			}
+			for _, child := range list {
+				if !tool(child, depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for _, raw := range tools {
+		if !tool(raw, 0) {
+			return false
+		}
+	}
+	for _, key := range []string{"tool_choice", "provider_config", "output_format"} {
+		if value := fields[key]; value != nil {
+			if _, ok := object(value); !ok {
+				return false
+			}
+		}
+	}
+	return true
 }

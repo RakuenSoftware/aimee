@@ -35,6 +35,7 @@ add_library(aimee-core-connection STATIC
     connection/http1.c
     connection/socket.c
 )
+set_target_properties(aimee-core-connection PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(aimee-core-connection PUBLIC c_std_11)
 target_include_directories(aimee-core-connection PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/connection/include>

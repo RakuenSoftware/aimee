@@ -179,7 +179,6 @@ case "$AIMEE_WFE_ENGINE" in
     go) ;;
     *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
 esac
-export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
 export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server
 # THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
@@ -610,7 +609,7 @@ if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.so
 fi
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
-rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
+rm -f "$AIMEE_HOME/aimee-http.sock"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 # The shipped manifest is decided when the image is built and cannot know what
@@ -683,14 +682,14 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
     # HTTP API. This particular Unix resource-plane socket is passed to the Go
     # WFE only for credentialed forge operations; delegate execution uses the
     # Go delegates process over the module bus.
-    log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
+    log "starting Go WFE control plane (bus=$AIMEE_MODULE_BUS_SOCKET)"
     # The WFE is the workflows bus principal: it serves the advance decision and
     # the control stage the C resource plane calls. The module supervisor does
     # not spawn a workflows process (the contract marks it hosted_by=wfe), because
     # the bus denies a live duplicate of a principal. Pass the bus socket
     # explicitly rather than relying on runuser's environment handling.
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$5"; exec aimee-wfe --home "$1" --socket "$2" --workflow-dir "$3" --forge-service-socket "$4"' sh \
-        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/workflows" \
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$4"; exec aimee-wfe --home "$1" --workflow-dir "$2" --forge-service-socket "$3"' sh \
+        "$AIMEE_HOME" "$AIMEE_HOME/workflows" \
         "$AIMEE_HOME/aimee-http.sock" "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,7 +162,7 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 			t.Fatalf("seatFailureCategory(%v) = %q, want %q", tc.err, got, tc.want)
 		}
 	}
-	result := seatResult("", "", 0, false, delegate.ErrDelegateReplayUnavailable)
+	result := seatResult("", nil, 0, false, delegate.ErrDelegateReplayUnavailable)
 	if !result.ReplayLost {
 		t.Fatal("a lost replay was not marked, so the caller would park instead of recovering")
 	}
@@ -171,7 +172,7 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 }
 
 func TestSeatFailureDetailIsRedacted(t *testing.T) {
-	result := seatResult("", "", 0, false,
+	result := seatResult("", nil, 0, false,
 		errorString("launch failed: authorization: bearer sk-live-secret-value"))
 	if strings.Contains(result.FailureDetail, "sk-live-secret-value") {
 		t.Fatalf("credential survived into a durable seat failure: %q", result.FailureDetail)
@@ -210,7 +211,7 @@ func (s *scriptedSeats) One(_ context.Context, run panel.Run, request panel.Seat
 				`"verdict":"approve","findings":[]}`,
 			run.ID, request.ArtifactHash, request.ArtifactStage)
 	}
-	return panel.SeatResult{Response: response, Participant: "opaque-seat-token"}
+	return panel.SeatResult{Output: canonical.TextResponse(response), Participant: "opaque-seat-token"}
 }
 
 func (s *scriptedSeats) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {
@@ -254,7 +255,7 @@ func TestReviewBindsTheVerdictToTheRunAndArtifact(t *testing.T) {
 		t.Fatal("no seat was convened")
 	}
 	for _, request := range seats.requests {
-		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
+		if !strings.Contains(fixtureInputText(request.Input), "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("seat received another run's artifact: %+v", request)
 		}
 	}
@@ -349,10 +350,10 @@ func (r *recordingRun) One(_ context.Context, run panel.Run, request panel.SeatR
 	r.mu.Lock()
 	r.seen = run
 	r.mu.Unlock()
-	return panel.SeatResult{Response: fmt.Sprintf(
+	return panel.SeatResult{Output: canonical.TextResponse(fmt.Sprintf(
 		`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,`+
 			`"original_request_alignment":{"status":"aligned","summary":"ok"},`+
-			`"verdict":"approve","findings":[]}`, run.ID, request.ArtifactHash, request.ArtifactStage)}
+			`"verdict":"approve","findings":[]}`, run.ID, request.ArtifactHash, request.ArtifactStage))}
 }
 
 func (r *recordingRun) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {

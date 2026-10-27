@@ -20,4 +20,14 @@ static inline int child_environment_overlay(char *const environment[])
    }
    return 0;
 }
+/* Child-only full replacement: never mutate the producer's ambient environ. */
+static inline int child_environment_install(char *const environment[], int replace)
+{
+   if (replace)
+   {
+      extern char **environ;
+      environ = NULL; /* This is the forked child's private pointer. */
+   }
+   return child_environment_overlay(environment);
+}
 #endif

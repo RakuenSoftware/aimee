@@ -97,3 +97,11 @@ int oauth_token_store_source(const char *client_name, const oauth_token_response
               ? 0
               : -1;
 }
+
+int oauth_token_get_profile_status(const char *client_name, const oauth_refresh_profile_t *profile,
+                                   int skew_secs, char *buf, size_t len, int *refresh_http_status)
+{
+   if (refresh_http_status)
+      *refresh_http_status = 0;
+   return oauth_token_get_profile(client_name, profile, skew_secs, buf, len);
+}

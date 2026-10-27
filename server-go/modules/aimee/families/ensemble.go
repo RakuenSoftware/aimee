@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -190,7 +191,7 @@ func ensembleRow(scan func(...any) error) ([]string, error) {
 // would pair turn N's row with turn N+1's prompt, and the result reads as a
 // consistent run that never existed.
 func viewReply(ctx context.Context, q store.Queryer, id int64, rc int, message string,
-	prompt string, transcript []contextMessage) (uint32, []string, error) {
+	request *canonical.Request, transcript []contextMessage) (uint32, []string, error) {
 
 	row, err := ensembleRow(func(dest ...any) error {
 		return q.QueryRow(ctx, ensembleRowSQL, id).Scan(dest...)
@@ -205,8 +206,19 @@ func viewReply(ctx context.Context, q store.Queryer, id int64, rc int, message s
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}
+	requestIR := ""
+	if request != nil {
+		if !request.Valid() {
+			return store.StatusInvalid, nil, nil
+		}
+		raw, encodeErr := json.Marshal(request)
+		if encodeErr != nil {
+			return store.StatusFailed, nil, encodeErr
+		}
+		requestIR = string(raw)
+	}
 	reply := append([]string{store.Itoa(rc), message}, row...)
-	return store.StatusOK, append(reply, prompt, encoded), nil
+	return store.StatusOK, append(reply, requestIR, encoded), nil
 }
 
 // loadTemplate resolves a template by name: the project root first, then the
@@ -309,11 +321,11 @@ func ensembleView(ctx context.Context, q store.Queryer, f []string) (uint32, []s
 	if !found {
 		return store.StatusMissing, nil, nil
 	}
-	prompt := ""
+	var request *canonical.Request
 	if l.state.Status != "complete" {
-		prompt = buildPrompt(l.template, l.ctx, l.state.CurrentPhase, l.state.CurrentTurn)
+		request = buildRequest(l.template, l.ctx, l.state.CurrentPhase, l.state.CurrentTurn)
 	}
-	return viewReply(ctx, q, id, ensembleOK, "", prompt, l.ctx)
+	return viewReply(ctx, q, id, ensembleOK, "", request, l.ctx)
 }
 
 // ensembleAdvance applies one message to a run.
@@ -326,7 +338,11 @@ func ensembleAdvance(ctx context.Context, q store.Queryer, f []string) (uint32, 
 	if !ok || id <= 0 {
 		return store.StatusInvalid, nil, nil
 	}
-	sender, text := f[1], f[2]
+	sender := f[1]
+	var message canonical.Message
+	if !canonical.ValidMessage([]byte(f[2])) || !canonical.Decode([]byte(f[2]), &message) {
+		return store.StatusInvalid, nil, nil
+	}
 
 	l, found, err := loadEnsemble(ctx, q, ensembleLoadForUpdateSQL, id)
 	if err != nil {
@@ -339,11 +355,11 @@ func ensembleAdvance(ctx context.Context, q store.Queryer, f []string) (uint32, 
 	// A refusal answers with the run as it stands, unchanged. It is a verdict,
 	// not a store failure, so it rides a successful reply.
 	refuse := func(message string) (uint32, []string, error) {
-		prompt := ""
+		var request *canonical.Request
 		if l.state.Status != "complete" {
-			prompt = buildPrompt(l.template, l.ctx, l.state.CurrentPhase, l.state.CurrentTurn)
+			request = buildRequest(l.template, l.ctx, l.state.CurrentPhase, l.state.CurrentTurn)
 		}
-		return viewReply(ctx, q, id, ensembleRefused, message, prompt, l.ctx)
+		return viewReply(ctx, q, id, ensembleRefused, message, request, l.ctx)
 	}
 
 	if l.state.Status == "complete" {
@@ -353,7 +369,7 @@ func ensembleAdvance(ctx context.Context, q store.Queryer, f []string) (uint32, 
 		return refuse("--speaker is required")
 	}
 
-	state, transcript, outcome := advance(l.template, l.state, l.ctx, sender, text)
+	state, transcript, outcome := advance(l.template, l.state, l.ctx, sender, message)
 	if outcome == advanceRefused {
 		return refuse("expected '" + l.state.ExpectedAgent + "', got '" + sender + "'")
 	}
@@ -368,11 +384,11 @@ func ensembleAdvance(ctx context.Context, q store.Queryer, f []string) (uint32, 
 		return store.StatusFailed, nil, err
 	}
 
-	prompt := ""
+	var request *canonical.Request
 	if state.Status != "complete" {
-		prompt = buildPrompt(l.template, transcript, state.CurrentPhase, state.CurrentTurn)
+		request = buildRequest(l.template, transcript, state.CurrentPhase, state.CurrentTurn)
 	}
-	return viewReply(ctx, q, id, ensembleOK, "", prompt, transcript)
+	return viewReply(ctx, q, id, ensembleOK, "", request, transcript)
 }
 
 func ensemblePause(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {

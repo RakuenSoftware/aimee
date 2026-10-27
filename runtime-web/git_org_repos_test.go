@@ -28,6 +28,7 @@ func TestGitOrgReposProxy(t *testing.T) {
 		"/api/git/org-repos?host=github.com&owner=RakuenSoftware", nil), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitOrgRepos(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("org-repos: code=%d body=%q", rr.Code, rr.Body.String())
@@ -88,6 +89,7 @@ func TestGitCloneOrgProxy(t *testing.T) {
 		strings.NewReader(reqBody)), "alice")
 	rr := httptest.NewRecorder()
 	s.handleGitCloneOrg(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("clone-org: code=%d body=%q", rr.Code, rr.Body.String())

@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -73,9 +74,9 @@ func (s *server) ensureEditorPort(ctx context.Context, username string, force bo
 }
 
 // handleVSCode reverse-proxies /vscode/* to the calling user's code-server. The
-// path is forwarded UNCHANGED (code-server supports being hosted under a
-// sub-path and derives its asset base from the request path); only the upstream
-// host and scheme are rewritten. The webchat session cookie and bearer are
+// /vscode mount prefix is stripped before forwarding. code-server derives
+// relative asset URLs from the upstream path, as required by its documented
+// path-rewriting proxy deployment. The webchat session cookie and bearer are
 // stripped so code-server never sees webchat's auth material.
 func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 	username := currentUser(r)
@@ -101,7 +102,11 @@ func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 	// upstream Host, leaking the loopback port and bouncing the browser off our
 	// origin. Redirecting here keeps everything same-origin.
 	if r.URL.Path == "/vscode" {
-		http.Redirect(w, r, "/vscode/", http.StatusMovedPermanently)
+		destination := "/vscode/"
+		if r.URL.RawQuery != "" {
+			destination += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, destination, http.StatusMovedPermanently)
 		return
 	}
 
@@ -141,6 +146,7 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
+			stripEditorMount(req.URL)
 			// Preserve the externally-visible host/proto via X-Forwarded-* so
 			// code-server builds correct absolute URLs (asset/WebSocket) for the
 			// proxied sub-path, then point the upstream Host at the loopback peer.
@@ -160,13 +166,34 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 			// it frames regardless of what code-server emits, while still blocking
 			// cross-origin clickjacking of the proxy.
 			resp.Header.Set("X-Frame-Options", "SAMEORIGIN")
-			// Belt-and-braces: if code-server emits a redirect to its own loopback
-			// host, strip it to a relative path so the browser stays on our origin
-			// and the port is never exposed.
+			// Upstream root paths belong to the editor mount, including
+			// redirects back to its loopback peer. Relative and external URLs
+			// retain their original meaning and are never laundered to ours.
 			if loc := resp.Header.Get("Location"); loc != "" {
-				if u, e := url.Parse(loc); e == nil && u.Host == target.Host {
-					u.Scheme, u.Host = "", ""
-					resp.Header.Set("Location", u.String())
+				if u, e := url.Parse(loc); e == nil {
+					local := u.Host == "" && u.Scheme == ""
+					loopback := u.Host == target.Host && (u.Scheme == "" || u.Scheme == "http" || u.Scheme == "https")
+					if loopback && u.Path == "" {
+						u.Path = "/"
+					}
+					if (local || loopback) && strings.HasPrefix(u.Path, "/") {
+						if u.User != nil || !prefixEditorMount(u) {
+							return errors.New("invalid editor redirect")
+						}
+						u.Scheme, u.Host = "", ""
+						resp.Header.Set("Location", u.String())
+					}
+				}
+			}
+			// A worker served through this proxy must not control the parent
+			// application. Translate an upstream root scope to our mount; an
+			// invalid scope falls back to the browser's narrower script path.
+			if allowed := resp.Header.Get("Service-Worker-Allowed"); allowed != "" {
+				u, e := url.Parse(allowed)
+				if e == nil && u.Scheme == "" && u.Host == "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && prefixEditorMount(u) {
+					resp.Header.Set("Service-Worker-Allowed", u.String())
+				} else {
+					resp.Header.Del("Service-Worker-Allowed")
 				}
 			}
 			return nil
@@ -210,6 +237,47 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+// stripEditorMount removes only the proxy mount, retaining the exact escape
+// spelling of the remaining path (including encoded slashes in file URIs).
+func stripEditorMount(u *url.URL) {
+	const prefix = "/vscode"
+	if !strings.HasPrefix(u.Path, prefix+"/") {
+		return
+	}
+	if u.RawPath != "" {
+		escaped, cut := u.EscapedPath(), 0
+		// EscapedPath guarantees valid escapes. The mount itself is ASCII, so each
+		// encoded or literal byte consumes one byte of its decoded prefix.
+		for range len(prefix) {
+			if escaped[cut] == '%' {
+				cut += 3
+			} else {
+				cut++
+			}
+		}
+		u.RawPath = escaped[cut:]
+	}
+	u.Path = u.Path[len(prefix):]
+}
+
+// prefixEditorMount retains encoded path/query bytes while preventing rooted
+// upstream dot segments from escaping the mount during browser normalization.
+func prefixEditorMount(u *url.URL) bool {
+	if !strings.HasPrefix(u.Path, "/") {
+		return false
+	}
+	for _, segment := range strings.Split(strings.ReplaceAll(u.Path, "\\", "/"), "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	u.Path = "/vscode" + u.Path
+	if u.RawPath != "" {
+		u.RawPath = "/vscode" + u.RawPath
+	}
+	return true
 }
 
 // forwardedProto is the scheme the browser used to reach webchat. webchat

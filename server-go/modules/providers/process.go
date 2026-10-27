@@ -42,12 +42,6 @@ func NewProcessHandler(ctx context.Context, socket, home string) (ring.ModuleHan
 		return nil, err
 	}
 	manager := NewManager(store, vaultresource.VaultResources{Home: home})
-	manager.worker, err = newProbeWorker(ctx, home)
-	if err != nil {
-		caller.CloseAndWait()
-		client.Detach()
-		return nil, err
-	}
 	manager.SetEgress(transport)
 	manager.SetConfig(config)
 	return manager.Handle, nil

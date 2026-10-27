@@ -10,6 +10,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 
 #include <stddef.h>
 
@@ -59,7 +60,7 @@ extern "C"
       int rc;
       char err[ENSEMBLE_ERR_LEN];
       ensemble_info_t info;
-      char *prompt;
+      char *request_ir; /* serialized canonical Request */
       char *context;
    } ensemble_view_t;
 
@@ -82,7 +83,7 @@ extern "C"
    /* Read one ensemble, and advance one. The public functions below are thin
     * unpackings of these, kept so callers need not change shape. */
    int db1_ensemble_view(int id, ensemble_view_t *out);
-   int db1_ensemble_advance_view(int id, const char *sender, const char *text,
+   int db1_ensemble_advance_view(int id, const char *sender, const char *message_ir,
                                  ensemble_view_t *out);
 
    /* Template resolution, phase walking and prompt building are NOT declared
@@ -100,11 +101,12 @@ extern "C"
    int db1_ensemble_create(const char *project_root, const char *config_dir,
                            const char *template_name, const char *channel,
                            const char *assignments_json, int *out_id, char *err, size_t errlen);
-   int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out,
-                        char *err, size_t errlen);
+   int db1_ensemble_get(int id, ensemble_info_t *out, aimee_request_t *request_out,
+                        char **context_out, char *err, size_t errlen);
    int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen);
-   int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
-                            char **prompt_out, char *err, size_t errlen);
+   int db1_ensemble_advance(int id, const char *sender, const aimee_message_t *message,
+                            ensemble_info_t *out, aimee_request_t *request_out, char *err,
+                            size_t errlen);
    /* Unlike the reads above, every way this fails is the store failing --
     * out of memory, or SQLite refusing the query. There is no verdict to
     * relay, so it answers with rows or with nothing. */

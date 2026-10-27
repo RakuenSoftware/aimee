@@ -17,14 +17,6 @@
 #include "support/ir_response_fixture.h"
 #include <aimee/ir/session_event.h>
 
-/* The dialect rescue consults the tool registry only on bare-JSON/bracket paths, which
- * these explicit cases never hit -- stub it (same pattern as test_agent_ir_parse.c). */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   (void)tool_name;
-   return NULL;
-}
-
 /* Parse `body` via the IR and assert the fields the turn loop consumes. want_content is
  * compared as empty when NULL. want_call (or NULL) is the single expected tool name. */
 static void expect(const char *label, const char *body, const char *want_content,

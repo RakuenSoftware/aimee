@@ -3,42 +3,38 @@
 #include "aimee.h"
 #include "agent_exec.h"
 
-int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
-                             const char *system_prompt, const char *user_prompt, int max_tokens,
-                             double temperature, agent_result_t *out)
+static int unsupported_tools(agent_result_t *out)
 {
-   (void)agent;
-   (void)network;
-   (void)system_prompt;
-   (void)user_prompt;
-   (void)max_tokens;
-   (void)temperature;
-   memset(out, 0, sizeof(*out));
-   snprintf(out->error, sizeof(out->error), "tool execution not supported on Windows");
+   if (out)
+   {
+      memset(out, 0, sizeof *out);
+      snprintf(out->error, sizeof out->error, "tool execution not supported on Windows");
+   }
    return -1;
 }
 
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
-                                      const char *role, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature,
+                                      const char *role, const aimee_request_t *request,
                                       agent_result_t *out)
 {
+   (void)agent;
+   (void)network;
    (void)role;
-   return agent_execute_with_tools(agent, network, system_prompt, user_prompt, max_tokens,
-                                   temperature, out);
+   (void)request;
+   return unsupported_tools(out);
 }
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
-                                     const char *system_prompt, const char *user_prompt,
-                                     int max_tokens, double temperature,
-                                     struct cJSON *initial_messages,
+                                     const aimee_request_t *request, struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out)
 {
+   (void)agent;
+   (void)network;
+   (void)request;
    (void)initial_messages;
    if (updated_messages)
       *updated_messages = NULL;
-   return agent_execute_with_tools(agent, network, system_prompt, user_prompt, max_tokens,
-                                   temperature, out);
+   return unsupported_tools(out);
 }
 
 int agent_request_with_tools_supported(const aimee_request_t *request)
@@ -316,36 +312,4 @@ char *tool_search_notes(const char *query)
 {
    (void)query;
    return safe_strdup("error: search_notes not supported on Windows");
-}
-
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
-{
-   if (!name)
-      return safe_strdup("error: missing tool name");
-   if (strcmp(name, "bash") == 0)
-      return tool_bash(arguments_json, timeout_ms);
-   if (strcmp(name, "read_file") == 0 || strcmp(name, "Read") == 0)
-   {
-      cJSON *args = cJSON_Parse(arguments_json);
-      cJSON *p = args ? cJSON_GetObjectItem(args, "path") : NULL;
-      char *result = tool_read_file(p && cJSON_IsString(p) ? p->valuestring : "", 0, 0, 1);
-      cJSON_Delete(args);
-      return result;
-   }
-   if (strcmp(name, "write_file") == 0 || strcmp(name, "Write") == 0)
-   {
-      cJSON *args = cJSON_Parse(arguments_json);
-      cJSON *p = args ? cJSON_GetObjectItem(args, "path") : NULL;
-      cJSON *c = args ? cJSON_GetObjectItem(args, "content") : NULL;
-      char *result = tool_write_file(p && cJSON_IsString(p) ? p->valuestring : "",
-                                     c && cJSON_IsString(c) ? c->valuestring : "");
-      cJSON_Delete(args);
-      return result;
-   }
-   return safe_strdup("error: tool not supported on Windows");
-}
-
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms)
-{
-   return dispatch_tool_call_ctx(name, arguments_json, timeout_ms);
 }

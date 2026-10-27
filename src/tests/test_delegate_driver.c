@@ -1,3 +1,4 @@
+#include "support/typed_catalog_fixture.h"
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
@@ -188,25 +189,22 @@ static void test_get_caps(void)
 
 static void test_delegate_respond_spec_shape(void)
 {
-   cJSON *tools = build_tools_array();
-   assert(tools != NULL);
-   int before = cJSON_GetArraySize(tools);
-   assert(agent_tools_append_delegate_respond_tool(tools) == 1);
-   assert(cJSON_GetArraySize(tools) == before + 1);
-   assert(agent_tools_append_delegate_respond_tool(tools) == 0);
-   assert(cJSON_GetArraySize(tools) == before + 1);
-
-   cJSON *respond = cJSON_GetArrayItem(tools, before);
-   cJSON *fn = cJSON_GetObjectItem(respond, "function");
-   cJSON *name = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
-   cJSON *params = fn ? cJSON_GetObjectItem(fn, "parameters") : NULL;
-   cJSON *props = params ? cJSON_GetObjectItem(params, "properties") : NULL;
-   cJSON *message = props ? cJSON_GetObjectItem(props, "message") : NULL;
-   assert(cJSON_IsString(name) && strcmp(name->valuestring, "respond") == 0);
-   assert(cJSON_IsObject(params));
-   assert(cJSON_IsObject(message));
-
-   cJSON_Delete(tools);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES,
+                                 AIMEE_WIRE_ANTHROPIC};
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; ++w)
+   {
+      aimee_request_t catalog = {0};
+      assert(!agent_tools_catalog(wires[w], &catalog));
+      int before = catalog.n_tools;
+      assert(agent_tools_catalog_respond(&catalog) == 1 && catalog.n_tools == before + 1);
+      assert(agent_tools_catalog_respond(&catalog) == 0 && catalog.n_tools == before + 1);
+      const aimee_tool_t *respond = aimee_ir_find_function(&catalog, NULL, "respond");
+      assert(respond &&
+             cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(
+                 cJSON_GetObjectItemCaseSensitive(respond->schema, "properties"), "message")));
+      assert(!aimee_ir_request_admit(&catalog));
+      aimee_request_free(&catalog);
+   }
 }
 
 static void check_delegate_respond(const char *respond_id, const char *real_id, const char *answer)

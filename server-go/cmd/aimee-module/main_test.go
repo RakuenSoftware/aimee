@@ -108,6 +108,7 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
+				HostedBy  string `json:"hosted_by"`
 			} `json:"stages"`
 		} `json:"components"`
 	}
@@ -166,6 +167,16 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			advertised[s.EventKind] = true
 		}
 		for _, s := range declared.Stages {
+			if s.HostedBy != "" {
+				if declared.ID != "delegates" || s.EventKind != 6679 || s.HostedBy != "server-core" {
+					t.Fatal("unknown core stage ownership")
+				}
+				if advertised[s.EventKind] {
+					t.Fatal("Go process claimed core native execution stage")
+				}
+				continue
+			}
+
 			// roundtable-review is registered ONLY when this process can convene a
 			// panel (roundtableReviewer() succeeds), which it cannot under test.
 			// That conditionality is deliberate and documented above; every other

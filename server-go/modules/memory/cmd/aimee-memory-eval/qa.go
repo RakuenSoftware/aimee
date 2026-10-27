@@ -11,20 +11,48 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 )
 
+// Output owns the canonical observation; strings are explicit QA domain projections.
 type modelReply struct {
-	Response         string `json:"response"`
-	PromptTokens     int    `json:"prompt_tokens"`
-	CompletionTokens int    `json:"completion_tokens"`
+	Output           *canonical.Response
+	Response         string
+	PromptTokens     int
+	CompletionTokens int
 }
-type evaluationModel func(context.Context, string, string, int) (modelReply, error)
+
+func projectModelReply(reply modelReply) (modelReply, error) {
+	if reply.Output == nil {
+		return reply, errors.New("evaluation model omitted canonical response")
+	}
+	text, err := reply.Output.SemanticText()
+	if err != nil {
+		return reply, fmt.Errorf("evaluation requires complete canonical text: %w", err)
+	}
+	if reply.Output.Usage.Unobserved {
+		return reply, errors.New("evaluation requires observed provider token usage")
+	}
+	input, err := strconv.Atoi(reply.Output.Usage.Input)
+	if err != nil {
+		return reply, errors.New("evaluation input usage exceeds supported integer range")
+	}
+	output, err := strconv.Atoi(reply.Output.Usage.Output)
+	if err != nil {
+		return reply, errors.New("evaluation output usage exceeds supported integer range")
+	}
+	reply.Response, reply.PromptTokens, reply.CompletionTokens = text, input, output
+	return reply, nil
+}
+
+type evaluationModel func(context.Context, *canonical.Request) (modelReply, error)
 
 type limitedModelOutput struct{ buffer bytes.Buffer }
 
@@ -38,43 +66,60 @@ func (b *limitedModelOutput) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 
-// The existing plain-completion runner owns provider configuration/execution.
-// JSON stdin preserves full prompts without shell interpolation or argv limits.
-// The agentic run path would consume live hints and record feedback; never use it.
+// The registered tool-free canonical owner never enters agentic hint,
+// worktree, tool or feedback paths. Stdin avoids shell and argv interpolation.
 func agentModel(executable string) evaluationModel {
-	return func(ctx context.Context, system, prompt string, tokens int) (modelReply, error) {
+	return func(ctx context.Context, input *canonical.Request) (modelReply, error) {
 		var reply modelReply
 		if executable == "" {
 			return reply, errors.New("QA requires -agent-executable (the configured aimee CLI)")
 		}
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		if strings.IndexByte(system, 0) >= 0 || strings.IndexByte(prompt, 0) >= 0 {
-			return reply, errors.New("evaluation model request contains NUL")
+		if input == nil || !input.Valid() {
+			return reply, errors.New("evaluation request is not admitted canonical IR")
 		}
-		temperature := .3
-		if system == judgeSystem {
-			temperature = 0
-		}
-		request, err := json.Marshal(map[string]any{"system": system, "prompt": prompt, "max_tokens": tokens, "temperature": temperature})
+		request, err := json.Marshal(map[string]any{"ir": input})
 		if err != nil {
 			return reply, err
 		}
 		if len(request) > 1<<20 {
 			return reply, errors.New("evaluation model request exceeds 1 MiB")
 		}
-		cmd := exec.CommandContext(ctx, executable, "--json", "agent", "generate")
+		cmd := exec.CommandContext(ctx, executable, "--json", "model", "generate")
 		cmd.Stdin = bytes.NewReader(request)
 		cmd.WaitDelay = time.Second
 		var output, diagnostic limitedModelOutput
 		cmd.Stdout, cmd.Stderr = &output, &diagnostic
-		if err := cmd.Run(); err != nil {
-			return reply, fmt.Errorf("evaluation agent failed: %w", err)
+		runErr := cmd.Run()
+		var envelope map[string]json.RawMessage
+		if !canonical.Decode(output.Bytes(), &envelope) {
+			if runErr != nil {
+				return reply, fmt.Errorf("evaluation agent failed: %w", runErr)
+			}
+			return reply, errors.New("evaluation owner returned invalid JSON")
 		}
-		if err := json.Unmarshal(output.Bytes(), &reply); err != nil {
-			return reply, fmt.Errorf("evaluation agent response: %w", err)
+		if raw := envelope["ir"]; raw != nil {
+			reply.Output, err = canonical.DecodeResponse(raw)
+			if err != nil {
+				return reply, fmt.Errorf("evaluation owner canonical response: %w", err)
+			}
 		}
-		return reply, nil
+		if runErr != nil {
+			return reply, fmt.Errorf("evaluation agent failed: %w", runErr)
+		}
+		// Successful --json CLI output omits the transport status. A zero
+		// process exit is required above; any explicit status remains strict.
+		if raw, present := envelope["status"]; present {
+			var status string
+			if !canonical.Decode(raw, &status) || status != "ok" {
+				return reply, errors.New("evaluation owner did not complete successfully")
+			}
+		}
+		if hostError := envelope["error"]; hostError != nil && !bytes.Equal(bytes.TrimSpace(hostError), []byte("null")) {
+			return reply, errors.New("evaluation owner returned contradictory host error")
+		}
+		return projectModelReply(reply)
 	}
 }
 
@@ -98,8 +143,15 @@ func judgeScore(s string) (int, error) {
 	}
 	return *result.Score, nil
 }
-func checkedModel(ctx context.Context, model evaluationModel, system, prompt string, tokens int) (modelReply, error) {
-	reply, err := model(ctx, system, prompt, tokens)
+func checkedModel(ctx context.Context, model evaluationModel, request *canonical.Request) (modelReply, error) {
+	if request == nil || !request.Valid() {
+		return modelReply{}, errors.New("evaluation request is not admitted canonical IR")
+	}
+	reply, err := model(ctx, request)
+	if err != nil {
+		return reply, err
+	}
+	reply, err = projectModelReply(reply)
 	if err != nil {
 		return reply, err
 	}
@@ -108,7 +160,7 @@ func checkedModel(ctx context.Context, model evaluationModel, system, prompt str
 	}
 	// Keep the legacy byte/4 fallback visibly labelled in the report.
 	if reply.PromptTokens == 0 {
-		reply.PromptTokens = (len(system)+3)/4 + (len(prompt)+3)/4
+		reply.PromptTokens = qaRequestEstimatedTokens(request)
 	}
 	if reply.CompletionTokens == 0 {
 		reply.CompletionTokens = (len(reply.Response) + 3) / 4
@@ -166,16 +218,11 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 				if contextText == "" {
 					contextText = "[no retrieved context]"
 				}
-				prompt := fmt.Sprintf("Question: %s\n\nRetrieved memory context:\n%s\nFinal answer:", row.Query, contextText)
-				answer, err := checkedModel(ctx, opts.model, answerSystem, prompt, 256)
+				answer, err := checkedModel(ctx, opts.model, answerEvaluationRequest(row.Query, contextText))
 				if err != nil {
 					return err
 				}
-				prompt = fmt.Sprintf("Question: %s\nGold answer: %s\nCandidate answer: %s\n\nReturn JSON only.", row.Query, row.Answer, answer.Response)
-				if row.Answerable != nil && !*row.Answerable {
-					prompt = fmt.Sprintf("Question: %s\nUnanswerable from supplied history. Score 1 only for explicit abstention without asserting an answer.\nCandidate answer: %s\nReturn JSON only.", row.Query, answer.Response)
-				}
-				judge, err := checkedModel(ctx, opts.model, judgeSystem, prompt, 64)
+				judge, err := checkedModel(ctx, opts.model, judgeEvaluationRequest(row.Query, row.Answer, answer.Response, row.Answerable))
 				if err != nil {
 					return err
 				}

@@ -26,7 +26,6 @@ int agent_required_evidence_budget_exhausted(int required, int successful_eviden
 int agent_required_evidence_needs_fallback(int required, int successful_evidence_calls,
                                            int chatgpt_provider, int remaining_calls);
 cJSON *agent_session_text_message(const char *role, const char *text);
-void agent_session_append_final_message(cJSON *messages, const char *content);
 void agent_session_append_final_instruction(cJSON *messages);
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action);
 void agent_session_append_degenerate_retry_instruction(cJSON *messages);

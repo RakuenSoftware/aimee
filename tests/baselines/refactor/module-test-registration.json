@@ -118,12 +118,6 @@
     {
       "ctest": false,
       "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_panel_provider.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
       "module": "economizer",
       "test": "src/tests/test_economizer_module_client.c"
     },
@@ -132,12 +126,6 @@
       "make": true,
       "module": "gateway",
       "test": "src/tests/test_gateway_p4_delegate.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "gateway",
-      "test": "src/tests/test_gateway_pipeline.c"
     },
     {
       "ctest": false,
@@ -269,13 +257,13 @@
       "ctest": false,
       "make": true,
       "module": "ir",
-      "test": "src/tests/test_ir_session_event.c"
+      "test": "src/tests/test_ir_request_codec.c"
     },
     {
       "ctest": false,
-      "make": false,
+      "make": true,
       "module": "ir",
-      "test": "src/tests/test_panel_ir_contract.c"
+      "test": "src/tests/test_ir_session_event.c"
     },
     {
       "ctest": false,

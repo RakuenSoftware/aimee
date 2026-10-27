@@ -1,9 +1,9 @@
 /* shadow_mirror.h -- shadow-traffic publishing to dynamic subscribers.
  *
- * When aimee.api.shadow_publish_enabled is on, peer aimees SUBSCRIBE
+ * When runtime shadow publishing is explicitly armed, peer aimees SUBSCRIBE
  * (POST /v1/shadow/subscribe {url,bearer}) and this server forwards a
- * fire-and-forget COPY of each inbound completion request to every subscriber's
- * REAL ingress -- a plain POST to the subscriber's /v1 endpoint, tagged
+ * fire-and-forget canonical rendering of each admitted inbound completion request to every
+ * subscriber's REAL ingress -- a plain POST to the subscriber's /v1 endpoint, tagged
  * X-Aimee-Shadow. The subscriber processes it exactly as it processes live
  * traffic (its own provider call, its own in-process IR shadow); its response is
  * discarded and never affects this server's turn.
@@ -14,9 +14,16 @@
  * spin up a build under test, it subscribes, done -- with no per-tester config on
  * this side. A subscriber that stops accepting deliveries is self-pruned.
  *
+ * The inbound snapshot precedes local profile/policy preparation, so the peer
+ * applies its own policy once. Unknown/ignored controls, local-only continuation
+ * IDs and unrepresentable native state refuse mirroring; the real request is
+ * unaffected. Raw bytes can only leave through translation's semantic replay
+ * check. Legacy text requests have their own canonical external renderer.
  * Best-effort: bounded in-flight delivery, failures swallowed, drops counted. */
 #ifndef DEC_SHADOW_MIRROR_H
 #define DEC_SHADOW_MIRROR_H 1
+
+#include <aimee/ir/aimee_ir.h>
 
 /* 1 if shadow publishing is currently ARMED. Runtime-only, in-memory: always 0 at
  * boot, so an enable can never persist across a restart. */
@@ -42,12 +49,13 @@ int shadow_mirror_unsubscribe(const char *base_url);
 /* Current subscriber count. */
 int shadow_mirror_subscriber_count(void);
 
-/* Fire-and-forget: forward a copy of this request to every subscriber's ingress.
- * No-op when publishing is off, `is_shadow_inbound` is nonzero (loop guard), the
- * path is not mirrorable, or there are no subscribers. Copies what it needs and
- * returns immediately; never blocks the caller or touches the real response. */
-void shadow_mirror_dispatch(const char *path, const char *body, int body_len,
-                            int is_shadow_inbound);
+/* HTTP ingress scopes are thread-owned and never inherited by internal jobs.
+ * Capture the actual owner-admitted inbound IR once; delivery occurs only after
+ * local preparation succeeds. End releases a pending snapshot on every exit. */
+void shadow_mirror_begin_request(const char *path, int is_shadow_inbound);
+void shadow_mirror_capture_request(const aimee_request_t *request);
+void shadow_mirror_dispatch_admitted(const aimee_request_t *owner);
+void shadow_mirror_end_request(void);
 
 /* Observability: mirrors delivered / dropped-at-cap / subscribers pruned. */
 long shadow_mirror_sent_count(void);

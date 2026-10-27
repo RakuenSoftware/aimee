@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { StrictMode } from 'react';
+import { StrictMode, useLayoutEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Chat from './Chat';
@@ -132,6 +132,7 @@ describe('canonical browser chat', () => {
       await act(async () => {});
       const source = sources.filter(item => !item.closed).at(-1)!;
       await act(async () => {
+        source.emit(envelope({ kind: 'execution', payload: { status: 'running' } }));
         source.emit(envelope({ kind: 'message', message_id: 'historical-user', payload: {
           role: 'user', blocks: [{ type: 'text', text: 'Original question' }],
         } }));
@@ -168,11 +169,13 @@ describe('canonical browser chat', () => {
     await act(async () => { resolveAttach(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'fresh-surface' }))); });
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary?sid=web-one'))).toBe(true);
     expect(sources.filter(source => !source.closed)).toHaveLength(1);
+    const admitted = sources.filter(source => !source.closed).at(-1)!;
+    await act(async () => { admitted.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
     fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Fresh session first turn' } });
     fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
     await act(async () => {});
     const sent = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send');
-    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface' });
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface', message: { role: 'user', blocks: [{ type: 'text', text: 'Fresh session first turn' }] } });
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
     await close();
   });
@@ -242,6 +245,8 @@ describe('canonical browser chat', () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(2);
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/chat/detach' && JSON.parse(String(init?.body)).attach_id === 'attach-1')).toBe(true);
+    const recovered = sources.filter(source => !source.closed).at(-1)!;
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: String(sequence) }) }); });
     fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'An explicitly requested new turn' } });
     fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
     await act(async () => {});
@@ -261,6 +266,8 @@ describe('canonical browser chat', () => {
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     });
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach')).toHaveLength(0);
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
     fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'After a real Back navigation' } });
     fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
     await act(async () => {});
@@ -282,39 +289,44 @@ describe('canonical browser chat', () => {
     const ordinaryFetch = fetchMock.getMockImplementation()!;
     let resolveHistory!: (response: Response) => void;
     const history = new Promise<Response>(resolve => { resolveHistory = resolve; });
-    fetchMock.mockImplementation((url: string) => url === '/api/channels/room/messages' ? history.then(response => response.clone()) : ordinaryFetch(url));
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/channels/room/messages' ? history.then(response => response.clone()) : ordinaryFetch(url, init));
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
     const source = sources.findLast(source => !source.closed && source.url.includes('/channels/room/events'))!;
-    const second = { id: '2', sender: 'user', text: 'Live channel message' };
+    const second = { id: '2', sender: 'user', message: { role: 'user', blocks: [{ type: 'text', text: 'Live channel message' }] } };
     await act(async () => {
       source.listeners.get('message')?.({ data: JSON.stringify(second) });
       source.listeners.get('message')?.({ data: JSON.stringify(second) });
-      resolveHistory(new Response(JSON.stringify({ messages: [{ id: '1', sender: 'user', text: 'Saved channel message' }, second] })));
+      resolveHistory(new Response(JSON.stringify({ messages: [{ id: '1', sender: 'user', message: { role: 'user', blocks: [{ type: 'text', text: 'Saved channel message' }] } }, second] })));
     });
     expect(screen.getAllByText('Live channel message')).toHaveLength(1);
     expect(screen.getAllByText('Saved channel message')).toHaveLength(1);
+    fireEvent.change(screen.getByPlaceholderText(/^Message #room/), { target: { value: 'Canonical channel send' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Message #room/), { key: 'Enter' });
+    await act(async () => {});
+    const post = fetchMock.mock.calls.find(([url, init]) => url === '/api/channels/room/messages' && init?.method === 'POST');
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Canonical channel send' }] } });
   });
 
   it('hides unsupported branching instead of offering a mutation that always fails', async () => {
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
     expect(screen.queryByRole('button', { name: 'Branch', exact: true })).toBeNull();
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/branch')).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread'].includes(url))).toBe(false);
   });
 
-  it('shows a refused branch action if an advertised capability becomes unavailable', async () => {
+  it('does not revive raw thread mutations from a legacy capability response', async () => {
     const ordinaryFetch = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/chat/threads') return Promise.resolve(new Response(JSON.stringify({ capabilities: { branching: true } })));
-      if (url === '/api/chat/branch') return Promise.resolve(new Response(JSON.stringify({ error: 'Conversation branching is unavailable' }), { status: 501 }));
+      if (url === '/api/chat/branch' || url === '/api/chat/switch-thread') return Promise.resolve(new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign thread transcript' }] })));
       return ordinaryFetch(url, init);
     });
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
-    fireEvent.click(screen.getByRole('button', { name: 'Branch', exact: true }));
-    await act(async () => {});
-    expect(screen.getByRole('alert').textContent).toBe('Conversation branching is unavailable');
+    expect(screen.queryByRole('button', { name: /Branch/ })).toBeNull();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Foreign thread transcript');
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread'].includes(url))).toBe(false);
   });
 
   it('labels an unavailable model lookup instead of displaying the default as a known pin', async () => {
@@ -483,6 +495,8 @@ describe('canonical browser chat', () => {
     await act(async () => {});
     fireEvent.change(screen.getByRole('combobox', { name: 'Agent' }), { target: { value: 'new' } });
     await act(async () => {});
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
     const input = screen.getByPlaceholderText(/^Type a message/);
     fireEvent.change(input, { target: { value: 'Use the selected model' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -493,6 +507,216 @@ describe('canonical browser chat', () => {
     await act(async () => {});
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
     await close();
+  });
+
+  it.each([false, true])('shows a failed history connection and reconnects without resubmitting (previously ready: %s)', async (previouslyReady) => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => {
+      source.emit(envelope(message('saved-history', 'Previously admitted history')));
+      source.emit(envelope({ kind: 'control_request', request_id: 'request', control_kind: 'permission', payload: {} }));
+      if (previouslyReady) source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) });
+    });
+    await tick();
+    expect(!!screen.queryByRole('button', { name: 'Allow once' })).toBe(previouslyReady);
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Retain this unsent draft' } });
+    // Browsers expose HTTP 502/refused EventSource responses through this error
+    // event without making the status or response body available to JavaScript.
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.getByRole('alert').textContent).toContain('Conversation connection failed');
+    expect(screen.queryByText('Synchronizing conversation…')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    expect(source.closed).toBe(true);
+    expect(screen.getByText('Previously admitted history')).toBeTruthy();
+    await act(async () => {
+      source.emit(envelope(message('late', 'Failed stream content')));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) });
+    });
+    await tick(15000);
+    expect(screen.queryByText('Failed stream content')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    expect(sources.filter(candidate => !candidate.closed)).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await tick();
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    expect(recovered).not.toBe(source);
+    expect(recovered.url).toContain('cursor=2');
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    // A late error from the retired generation must not disable the new stream.
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    expect(input).toHaveProperty('value', 'Retain this unsent draft');
+    expect(fetchMock.mock.calls.filter(([url, init]) => init?.method === 'POST' && /\/api\/chat\/(send|reply|control-reply|cancel|interrupt)$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it('does not dispatch before initial replay reveals an existing active turn', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Review the current turn before continuing' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send' || url === '/api/chat/cancel')).toHaveLength(0);
+    expect(input).toHaveProperty('value', 'Review the current turn before continuing');
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'running' } })); });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send' || url === '/api/chat/cancel')).toHaveLength(0);
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    expect(screen.getByRole('button', { name: 'Steer', exact: true })).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+
+  it('binds a same-commit session switch and Enter to the selected owner rather than old index refs', async () => {
+    const roots = context.sessions.map(session => session.projectRoot);
+    context.sessions[0].projectRoot = '/work/one'; context.sessions[1].projectRoot = '/work/two';
+    function LayoutEnter({ switched }: { switched: boolean }) {
+      useLayoutEffect(() => { if (switched) fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' }); }, [switched]);
+      return <Chat />;
+    }
+    try {
+      const view = render(<LayoutEnter switched={false} />);
+      await act(async () => {});
+      const first = sources.filter(candidate => !candidate.closed).at(-1)!;
+      await act(async () => { first.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+      fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Only the selected workspace' } });
+      context.active = context.sessions[1];
+      view.rerender(<LayoutEnter switched />);
+      await act(async () => {});
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toEqual([]);
+      expect(screen.getByPlaceholderText(/^Type a message/)).toHaveProperty('value', 'Only the selected workspace');
+      const second = sources.filter(candidate => !candidate.closed).at(-1)!;
+      await act(async () => { second.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-two', cursor: '0' }) }); });
+      fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+      await act(async () => {});
+      const sends = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send');
+      expect(sends).toHaveLength(1);
+      expect(JSON.parse(String(sends[0][1]?.body))).toMatchObject({ aimee_session_id: 'web-two', cwd: '/work/two' });
+      await close();
+    } finally { context.sessions.forEach((session, i) => { session.projectRoot = roots[i]; }); }
+  });
+
+  it('rejects a same-tick stale control click before latching and allows one deliberate reply after replay', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'running' } }));
+      source.emit(envelope({ kind: 'control_request', request_id: 'pending', control_kind: 'permission', payload: {} }));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    const stale = screen.getByRole('button', { name: 'Allow once' });
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); fireEvent.click(stale); });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/control-reply')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await act(async () => {});
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/control-reply')).toHaveLength(1);
+  });
+
+  it('rejects a stale primary control whose canonical terminal arrived before the render flush', async () => {
+    render(<StrictMode><Chat /></StrictMode>); await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'running' } }));
+      source.emit(envelope({ kind: 'control_request', request_id: 'pending', control_kind: 'permission', payload: {} }));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    const stale = screen.getByRole('button', { name: 'Allow once' });
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); fireEvent.click(stale); });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/control-reply')).toHaveLength(0);
+  });
+
+  it('does not classify an uncertain post-dispatch network failure as an unsent draft', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/send'
+      ? Promise.reject(new Error('Connection lost after dispatch began')) : ordinary(url, init));
+    render(<StrictMode><Chat /></StrictMode>); await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Do not automatically repeat this operation' } });
+    fireEvent.keyDown(input, { key: 'Enter' }); await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+    expect(input).toHaveProperty('value', '');
+    expect(screen.queryByRole('button', { name: 'Restore unsent message' })).toBeNull();
+  });
+
+  it('retains a new draft instead of dispatching while failed history awaits explicit canonical reconnect', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Ask the real host question once' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(input).toHaveProperty('value', 'Ask the real host question once');
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await act(async () => {});
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(input).toHaveProperty('value', 'Ask the real host question once');
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+    await close();
+  });
+
+  it('retains an enqueued draft when history fails during attachment admission without dispatching it', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'First explicitly queued message' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+      fireEvent.change(input, { target: { value: 'A different unsent draft' } });
+      source.listeners.get('error')?.({ data: '' });
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(input).toHaveProperty('value', 'A different unsent draft');
+    expect(screen.getByText('First explicitly queued message')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First explicitly queued message');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore unsent message' }));
+    expect(input).toHaveProperty('value', 'First explicitly queued message\n\nA different unsent draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await act(async () => {});
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+
+  it('does not submit a waiting Steer continuation after its connection failed and canonical replay recovered', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' })))
+      : ordinary(url, init));
+    const { source, box } = await runningDraft('Retain this interrupted continuation');
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/cancel')).toHaveLength(1);
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await act(async () => {});
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { recovered.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } }));
+      recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(box).toHaveProperty('value', 'Retain this interrupted continuation');
+    expect(screen.getByRole('alert').textContent).toContain('retained');
   });
 
   it('withdraws controls after a malformed live frame and ignores queued frames from the closed stream', async () => {
@@ -639,4 +863,106 @@ describe('canonical browser chat', () => {
     expect(screen.getByText('Kept content')).toBeTruthy();
     expect(screen.getByRole('alert')).toBeTruthy();
   });
+});
+
+describe('canonical-only active history', () => {
+  it('never renders a flat server transcript as an empty canonical conversation', async () => {
+    render(<Chat />);
+    await tick();
+    const source = sources.filter(item => !item.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'messages'))).toEqual([]);
+  });
+
+  it('keeps flat history out of the active transcript after replay refusal and remount', async () => {
+    const view = render(<Chat />);
+    await tick();
+    const source = sources.filter(item => !item.closed).at(-1)!;
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    view.unmount();
+    render(<Chat />);
+    await tick();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+});
+
+describe('flat history is an archive, never authority', () => {
+  it('sends only the new user input after canonical empty replay, without cached transcript data', async () => {
+    await start();
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')!;
+    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: { role: 'user', blocks: [{ type: 'text', text: 'Please investigate' }] }, aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '' });
+    expect(context.patchSession.mock.calls.some(([, patch]) => Object.hasOwn(patch, 'messages'))).toBe(false);
+    await close();
+  });
+
+  it('preserves archived thread metadata and messages without exposing thread mutations', async () => {
+    const threads = [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0, active: false }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0, active: true }];
+    const messages = [{ role: 'user', text: 'History one' }, { role: 'assistant', text: 'Archived original answer' }];
+    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ sessionId: 'one', title: 'one', aimeeSid: 'web-one', messages, threads, activeThreadId: 2 }]));
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/chat/threads') return new Response(JSON.stringify({ capabilities: { branching: true }, threads, active_id: 2 }));
+      if (url === '/api/chat/switch-thread') return new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign legacy branch answer' }] }));
+      return original(url, init);
+    });
+    const originalMessages = context.sessions[0].messages;
+    // SessionContext owns legacy import; Chat only renders its selected archive.
+    context.sessions[0].messages = messages as typeof originalMessages;
+    render(<Chat />);
+    await tick();
+    context.sessions[0].messages = originalMessages;
+    expect(screen.queryByRole('button', { name: /Alternative|Branch/ })).toBeNull();
+    expect(screen.getByLabelText('Legacy transcript archive').textContent).toContain('Archived original answer');
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Archived original answer');
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Foreign legacy branch answer');
+    const cached = JSON.parse(localStorage.getItem('aimee_chat_tabs')!)[0];
+    expect(cached.threads).toEqual(threads);
+    expect(cached.activeThreadId).toBe(2);
+    expect(cached.messages).toEqual(messages);
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread', '/api/chat/send'].includes(url))).toBe(false);
+  });
+});
+
+it('keeps the idle placeholder short and retains the keyboard hint without sending Shift+Enter', async () => {
+  render(<StrictMode><Chat /></StrictMode>);
+  await act(async () => {});
+  const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+  await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+  const input = screen.getByPlaceholderText(/^Type a message/);
+  expect(input.getAttribute('placeholder')).toBe('Type a message…');
+  expect(input.getAttribute('title')).toBe('Shift+Enter for newline');
+  fireEvent.change(input, { target: { value: 'Unsent draft' } });
+  fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+  expect(input).toHaveProperty('value', 'Unsent draft');
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(false);
+});
+
+it('does not reuse a previous model usage observation for a later unknown turn', async () => {
+  render(<StrictMode><Chat /></StrictMode>);
+  await act(async () => {});
+  const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+  await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+  const finish = async (turn: string, usage?: { usage_in: number; usage_out: number }) => {
+    const send = (event: SessionEvent) => source.emit({ ...envelope(event), turn_id: turn });
+    await act(async () => {
+      send({ kind: 'execution', payload: { status: 'running' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'TURN_START' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_START', block_id: 0, kind: 'text' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: `Answer ${turn}` } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_STOP', block_id: 0, kind: 'text' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'TURN_STOP', stop_reason: 'end_turn', ...usage } });
+      send({ kind: 'execution', payload: { status: 'completed' } });
+    });
+    await tick();
+  };
+  await finish('known', { usage_in: 6, usage_out: 4 });
+  expect(screen.getByText('6 in / 4 out')).toBeTruthy();
+  await finish('unknown');
+  expect(screen.queryByText('6 in / 4 out')).toBeNull();
+  await finish('observed-zero', { usage_in: 0, usage_out: 0 });
+  expect(screen.getByText('0 in / 0 out')).toBeTruthy();
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(false);
 });

@@ -524,7 +524,6 @@ class DescriptorTests(unittest.TestCase):
             ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
             ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
-            ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),

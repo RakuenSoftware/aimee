@@ -28,11 +28,11 @@
  * A module's identity and the kinds it answers on are ONE fact, and writing
  * 12033 here would be a second copy of it free to drift when the aimee module
  * is folded into db1's ref. Derived, the renumber lands in one place. */
-#define PEER_PRINCIPAL_REF     31u
+#define PEER_PRINCIPAL_REF     30u
 #define PEER_EVENT_KIND(stage) (4096u + PEER_PRINCIPAL_REF * 256u + (uint32_t)(stage))
 
-#define PEER_STAGE_DELIVERY 1u
-#define PEER_STAGE_INBOX    2u
+#define PEER_STAGE_DELIVERY 20u
+#define PEER_STAGE_INBOX    21u
 
 #define PEER_OP_SEND       1u
 #define PEER_OP_REPLY      2u
@@ -513,17 +513,18 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
          *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
-   if (stamped)
+   peer_client_message_t checked = {0};
+   peer_client_message_t *result = stamped ? stamped : &checked;
+   if (row_take(r.cells, result) != 0)
    {
-      if (row_take(r.cells, stamped) != 0)
-      {
-         peer_client_message_free(stamped);
-         reply_free(&r);
-         if (transport)
-            *transport = OURO_MODULE_CALL_PROTOCOL;
-         return PEER_CLIENT_TRANSPORT;
-      }
+      peer_client_message_free(result);
+      reply_free(&r);
+      if (transport)
+         *transport = OURO_MODULE_CALL_PROTOCOL;
+      return PEER_CLIENT_TRANSPORT;
    }
+   if (!stamped)
+      peer_client_message_free(&checked);
    reply_free(&r);
    return PEER_CLIENT_OK;
 }
@@ -656,14 +657,18 @@ peer_client_result_t peer_client_reply(const char *from, const char *handle, con
          *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
-   if (stamped && row_take(r.cells, stamped) != 0)
+   peer_client_message_t checked = {0};
+   peer_client_message_t *result = stamped ? stamped : &checked;
+   if (row_take(r.cells, result) != 0)
    {
-      peer_client_message_free(stamped);
+      peer_client_message_free(result);
       reply_free(&r);
       if (transport)
          *transport = OURO_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
+   if (!stamped)
+      peer_client_message_free(&checked);
    reply_free(&r);
    return PEER_CLIENT_OK;
 }

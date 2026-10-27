@@ -75,6 +75,9 @@ func (r *BusReviewer) Review(ctx context.Context, request roundtablecfg.ReviewRe
 	if r == nil || r.caller == nil {
 		return roundtablecfg.RunResult{}, errors.New("roundtable bus reviewer is not configured")
 	}
+	if request.Request == nil || !request.Request.Valid() || request.OriginalRequest != "" {
+		return roundtablecfg.RunResult{}, errors.New("internal roundtable review requires canonical Request")
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return roundtablecfg.RunResult{}, err

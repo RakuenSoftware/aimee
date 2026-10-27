@@ -16,6 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <signal.h>
+#include <poll.h>
+#include <time.h>
 #include <unistd.h>
 
 static int write_all(int fd, const char *p, size_t n)
@@ -32,8 +37,40 @@ static int write_all(int fd, const char *p, size_t n)
    }
    return 0;
 }
-int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, size_t head_len,
-                                  const char *tag)
+static long long adapter_now_ms(void)
+{
+   struct timespec now;
+   return clock_gettime(CLOCK_MONOTONIC, &now)
+              ? -1
+              : (long long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+static int owned_send(int fd, const char *bytes, size_t length, long long deadline,
+                      int (*cancelled)(void *), void *context)
+{
+   size_t offset = 0;
+   while (offset < length)
+   {
+      long long now = adapter_now_ms();
+      if (now < 0 || now >= deadline || (cancelled && cancelled(context)))
+         return -1;
+      ssize_t n = send(fd, bytes + offset, length - offset, MSG_NOSIGNAL);
+      if (n > 0)
+         offset += (size_t)n;
+      else if (n < 0 && errno == EINTR)
+         continue;
+      else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      {
+         struct pollfd pending = {.fd = fd, .events = POLLOUT};
+         if (poll(&pending, 1, 100) < 0 && errno != EINTR)
+            return -1;
+      }
+      else
+         return -1;
+   }
+   return 0;
+}
+static int adapter_serve(int client_fd, int is_uds, const char *head, size_t head_len,
+                         const char *tag, int timeout_ms, int (*cancelled)(void *), void *context)
 {
    if (!is_uds || client_fd < 0 || !head || head_len == 0)
    {
@@ -48,8 +85,12 @@ int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, s
    if (!tag || !tag[0])
       tag = "sandbox";
 
+   long long started = adapter_now_ms();
+   if (timeout_ms > 0 && started < 0)
+      return -1;
+   long long deadline = timeout_ms > 0 ? started + timeout_ms : 0;
    int input[2];
-   if (pipe(input) != 0)
+   if ((timeout_ms > 0 ? socketpair(AF_UNIX, SOCK_STREAM, 0, input) : pipe(input)) != 0)
    {
       aimee_log(LOG_ERROR, "sandbox-proxy", "could not create Go egress input pipe: %s",
                 strerror(errno));
@@ -106,12 +147,47 @@ int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, s
 
    close(inherited_client);
    close(input[0]);
-   int sent = write_all(input[1], head, head_len);
+   if (timeout_ms > 0)
+   {
+      int flags = fcntl(input[1], F_GETFL, 0);
+      if (flags < 0 || fcntl(input[1], F_SETFL, flags | O_NONBLOCK))
+         deadline = adapter_now_ms();
+   }
+   int sent = timeout_ms > 0 ? owned_send(input[1], head, head_len, deadline, cancelled, context)
+                             : write_all(input[1], head, head_len);
    close(input[1]);
    int status = 0;
-   while (waitpid(pid, &status, 0) < 0)
-      if (errno != EINTR)
-         return -1;
+   if (timeout_ms <= 0)
+   {
+      while (waitpid(pid, &status, 0) < 0)
+         if (errno != EINTR)
+            return -1;
+   }
+   else
+   {
+      long long terminate_at = 0;
+      for (;;)
+      {
+         pid_t child = waitpid(pid, &status, WNOHANG);
+         if (child == pid)
+            break;
+         if (child < 0 && errno != EINTR)
+            return -1;
+         long long now = adapter_now_ms();
+         if (!terminate_at &&
+             (sent || now < 0 || now >= deadline || (cancelled && cancelled(context))))
+         {
+            /* This is our unreaped child, never a discovered/recycled PID. */
+            kill(pid, SIGTERM);
+            terminate_at = now < 0 ? 1 : now + 1000;
+            sent = -1;
+         }
+         if (terminate_at && (now < 0 || now >= terminate_at))
+            kill(pid, SIGKILL);
+         struct timespec tick = {.tv_nsec = 10000000};
+         nanosleep(&tick, NULL);
+      }
+   }
    if (sent != 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
    {
       aimee_log(LOG_WARN, "sandbox-proxy",
@@ -119,4 +195,21 @@ int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, s
       return -1;
    }
    return 0;
+}
+int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, size_t head_len,
+                                  const char *tag)
+{
+   return adapter_serve(client_fd, is_uds, head, head_len, tag, 0, NULL, NULL);
+}
+int delegate_egress_adapter_serve_owned(int client_fd, const char *head, size_t head_len,
+                                        const char *tag, int timeout_ms, int (*cancelled)(void *),
+                                        void *context)
+{
+   struct sockaddr_storage address;
+   socklen_t length = sizeof address;
+   int is_uds = client_fd >= 0 && !getsockname(client_fd, (struct sockaddr *)&address, &length) &&
+                address.ss_family == AF_UNIX;
+   if (timeout_ms <= 0 || timeout_ms > 600000)
+      return -1;
+   return adapter_serve(client_fd, is_uds, head, head_len, tag, timeout_ms, cancelled, context);
 }

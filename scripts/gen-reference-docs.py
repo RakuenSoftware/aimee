@@ -1016,7 +1016,6 @@ ENV_DESC = {
     "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
     "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),
     "AIMEE_IR_RESP_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical response IR."),
-    "AIMEE_IR_SHADOW": ("Diagnostics & misc", "Run the canonical IR path in comparison/shadow mode."),
     "AIMEE_IR_STREAM_RELAY": ("Diagnostics & misc", "Enable the canonical streaming-response relay."),
     "AIMEE_KB_HARDENED": ("Knowledge base (aimee-kb)", "Require the hardened KB custody and transport posture at startup."),
     "AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID": ("Knowledge base (aimee-kb)", "Custody identifier for the key that signs JWKS manifests."),
@@ -1074,7 +1073,6 @@ ENV_DESC = {
     "AIMEE_VAULT_TPM2_NV_INDEX": ("Server runtime", "TPM 2 NV index used for anti-rollback state."),
     "AIMEE_VAULT_TPM2_TCTI": ("Server runtime", "TPM 2 TCTI selector."),
     "AIMEE_WFE_ENGINE": ("Workflow engine", "Workflow runtime selector; current server images require `go`."),
-    "AIMEE_WFE_HTTP_SOCKET": ("Workflow engine", "Unix socket for the Go workflow control plane."),
     "AIMEE_WFE_WORKTREE_GC_GRACE_SECS": ("Workflow engine", "Grace period before an unowned workflow worktree can be collected."),
     "AIMEE_WITNESS_CADENCE_TEST_S": ("Diagnostics & misc", "Test-only override that shortens witness checkpoint and verification cadence."),
     "AIMEE_WITNESS_HARNESS_ROLE": ("Diagnostics & misc", "Restricted PostgreSQL role used by the witness live harness."),
@@ -1219,6 +1217,7 @@ EXT_GROUP_ORDER = ["Provider credentials", "Provider endpoints", "Reasoning effo
                    "Network / proxy", "Editor", "Codex / Claude integration"]
 
 EXT_DESC = {
+    "DOCKER_HOST": ("Network / proxy", "Docker daemon endpoint. Owned delegate execution requires a local Unix socket and pins it for the container lease."),
     "EMBEDDER_URL": ("Provider endpoints", "Compatibility embedding endpoint override when the AIMEE-prefixed endpoint is unset."),
     "EMBEDDER_DIMS": ("Provider endpoints", "Embedding dimension override; must match the stored vector-space identity."),
     "SYNTHESIS_AUTH_REQUIRED": ("Provider endpoints", "Require authenticated synthesis for the configured endpoint; checked by the curator provider."),
