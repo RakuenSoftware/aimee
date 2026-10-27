@@ -211,7 +211,7 @@ jobs:
       - name: Deps
         run: |
           sudo apt-get update -q
-          i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
 
       # Stamp the version the SERVER images in this same run are stamped with, so
       # a client and the server it was published beside report the same build.
