@@ -34,6 +34,30 @@ func redirectSurface(client, projectsRoot, memorySegment string) (string, string
 	return filepath.Clean(projectsRoot), filepath.Clean(memorySegment), true
 }
 
+// clientHome is the home a memory path is relative to. The path describes the
+// client's filesystem, so the host's home is right only when client and server
+// share a machine and user; a remote server's home (/var/lib/aimee in the
+// container) prefixes no client path, which let every memory write through as a
+// plain file on CT100 until 2026-10-27. When home does not prefix the path, the
+// part of the path before "/<projectsRoot>/" is the client's home.
+func clientHome(home, path, projectsRoot string) string {
+	clean := filepath.ToSlash(filepath.Clean(path))
+	if !filepath.IsAbs(path) || strings.HasPrefix(clean, filepath.ToSlash(filepath.Clean(home))+"/") {
+		return home
+	}
+	at := strings.Index(clean, "/"+filepath.ToSlash(projectsRoot)+"/")
+	if at <= 0 {
+		return home
+	}
+	derived := clean[:at]
+	for _, part := range strings.Split(strings.TrimPrefix(derived, "/"), "/") {
+		if part == "" || strings.HasPrefix(part, ".") {
+			return home // a home has no empty, dot or hidden segment
+		}
+	}
+	return filepath.FromSlash(derived)
+}
+
 func relativeSurfacePath(value string) bool {
 	normalized := filepath.ToSlash(value)
 	if value == "" || strings.HasSuffix(normalized, "/") || strings.Contains(normalized, "//") {
@@ -52,6 +76,7 @@ func classifyRedirect(client, tool, path, home, projectsRoot, memorySegment stri
 	if !ok || home == "" || path == "" || (tool != "Write" && tool != "Edit" && tool != "MultiEdit") {
 		return redirectDecision{Verdict: redirectAllow}
 	}
+	home = clientHome(home, path, root)
 	prefix := filepath.Clean(home) + string(filepath.Separator) + root + string(filepath.Separator)
 	rawPath := filepath.ToSlash(path)
 	rawPrefix := filepath.ToSlash(prefix)
