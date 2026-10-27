@@ -1,4 +1,4 @@
-#include "../modules/translation/harness_ir.c" /* Exercise private canonical compatibility accumulation. */
+#include <aimee/translation/harness_ir.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
@@ -28,20 +28,13 @@ static int frame(const char *json, aimee_harness_ir_t *s, int codex)
 {
    cJSON *f = cJSON_Parse(json);
    assert(f);
-   int rc = codex == 2 ? aimee_acp_frame_ir(f, s)
-            : codex    ? aimee_codex_frame_ir(f, s)
-                       : aimee_claude_frame_ir(f, s);
+   int rc = codex ? aimee_codex_frame_ir(f, s) : aimee_claude_frame_ir(f, s);
    cJSON_Delete(f);
    return rc;
 }
 static const char *string(const cJSON *o, const char *name)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, name));
-}
-static cJSON *block(int index)
-{
-   cJSON *e = cJSON_GetArrayItem(events, index);
-   return cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(e, "payload"), "blocks"), 0);
 }
 /* The original native gateway owns all model/history/tool observations.
  * This adapter must never synthesize a competing transcript, in any mode. */
@@ -60,7 +53,7 @@ static void native_capture_owner(void)
    for (size_t i = 0; i < sizeof claude_frames / sizeof *claude_frames; i++)
    {
       assert(!frame(claude_frames[i], &state, 0));
-      assert(cJSON_GetArraySize(events) == before && !state.output);
+      assert(cJSON_GetArraySize(events) == before);
    }
    const char *types[] = {"agentMessage",     "userMessage", "reasoning",       "plan",
                           "commandExecution", "mcpToolCall", "dynamicToolCall", "fileChange",
@@ -75,14 +68,12 @@ static void native_capture_owner(void)
                   "MODEL_TEXT\"}}}",
                   complete ? "completed" : "started", types[i]);
          assert(!frame(raw, &state, 1));
-         assert(cJSON_GetArraySize(events) == before && !state.output);
+         assert(cJSON_GetArraySize(events) == before);
       }
    assert(!frame("{\"method\":\"item/agentMessage/"
                  "delta\",\"params\":{\"itemId\":\"m\",\"delta\":\"PRIVATE_DELTA\"}}",
                  &state, 1));
-   assert(cJSON_GetArraySize(events) == before && !state.output);
-   aimee_response_t response = {0};
-   assert(aimee_harness_ir_response(&state, &response) < 0 && !response.content);
+   assert(cJSON_GetArraySize(events) == before);
    /* Incoming controls still persist once and resolve in their own ID space. */
    assert(!frame("{\"id\":7,\"method\":\"item/commandExecution/"
                  "requestApproval\",\"params\":{\"command\":\"pwd\"}}",
@@ -102,70 +93,6 @@ static void native_capture_owner(void)
    next_execution();
 }
 
-static void acp(void)
-{
-   aimee_harness_ir_t s = {0};
-   int before = cJSON_GetArraySize(events);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_thought_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Inspect\"}}}}",
-                &s, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Answer\"}}}}",
-                &s, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call\",\"toolCallId\":"
-                "\"acp:1\",\"title\":\"Read\",\"status\":\"in_progress\",\"rawInput\":{\"path\":"
-                "\"README\"}}}}",
-                &s, 2) == 0);
-   int observed_only = cJSON_GetArraySize(events);
-   assert(s.acp_external_tool_reports == 1);
-   assert(
-       frame(
-           "{\"method\":\"session/"
-           "update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":"
-           "\"acp:1\",\"status\":\"completed\",\"rawOutput\":{\"text\":\"file contents\"}}}}",
-           &s, 2) == 0);
-   assert(cJSON_GetArraySize(events) == observed_only + 1 && s.acp_external_tool_reports == 2);
-   for (int i = before; i < observed_only; i++)
-   {
-      const cJSON *b = block(i);
-      assert(!b ||
-             (strcmp(string(b, "type"), "tool_use") && strcmp(string(b, "type"), "tool_result")));
-   }
-   int durable_reports = 0;
-   for (int i = before; i < cJSON_GetArraySize(events); i++)
-   {
-      const cJSON *event = cJSON_GetArrayItem(events, i);
-      if (!strcmp(string(event, "kind"), "projection"))
-         durable_reports +=
-             cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(event, "payload"),
-                                              "unverified_external_tool_reports")
-                 ->valueint;
-   }
-   assert(durable_reports == 2); /* Committed before any later terminal/transport failure. */
-   assert(frame("{\"id\":9,\"method\":\"session/"
-                "request_permission\",\"params\":{\"options\":[{\"optionId\":\"allow\"}]}}",
-                &s, 2) == 0);
-   cJSON *reply = cJSON_Parse(
-       "{\"id\":9,\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"allow\"}}}");
-   assert(aimee_codex_reply_ir(reply, &s) == 0);
-   cJSON_Delete(reply);
-   assert(!strcmp(string(cJSON_GetArrayItem(events, cJSON_GetArraySize(events) - 1), "kind"),
-                  "control_response"));
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"AA==\"}}}}",
-                &s, 2) == 0);
-   assert(!strcmp(string(block(cJSON_GetArraySize(events) - 1), "media_ref"),
-                  "data:image/png;base64,AA=="));
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"unknown_content\"}}}",
-                &s, 2) < 0);
-   assert(cJSON_GetArraySize(events) > before);
-   aimee_harness_ir_free(&s);
-}
 static void control_outputs(void)
 {
    cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
@@ -310,93 +237,6 @@ static void native_compactions(void)
    aimee_harness_ir_free(&state);
 }
 
-static int decode_refusal(const cJSON *frame, aimee_harness_ir_t *state)
-{
-   (void)frame;
-   (void)state;
-   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
-   aimee_delta_t deltas[] = {
-       {.type = AIMEE_DELTA_TURN_START},
-       {.type = AIMEE_DELTA_BLOCK_START, .block_id = 0, .kind = AIMEE_BLK_TEXT},
-       {.type = AIMEE_DELTA_BLOCK_DELTA,
-        .block_id = 0,
-        .kind = AIMEE_BLK_TEXT,
-        .text_delta = "Declined"},
-       {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
-       {.type = AIMEE_DELTA_TURN_STOP,
-        .stop_reason = AIMEE_STOP_CONTENT_FILTER,
-        .raw_stop_reason = "refusal",
-        .refusal = &details}};
-   for (size_t i = 0; i < sizeof deltas / sizeof *deltas; i++)
-   {
-      aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
-                                     .role = "assistant",
-                                     .message_id = "refused",
-                                     .delta = &deltas[i]};
-      if (aimee_ir_session_emit(&event))
-         return -1;
-   }
-   return 0;
-}
-static void refusal_owned_result(void)
-{
-   next_execution();
-   aimee_harness_ir_t state = {0};
-   aimee_response_t result = {0};
-   assert(!harness_output_decode(NULL, &state, decode_refusal));
-   assert(!aimee_harness_ir_response(&state, &result));
-   assert(result.refusal && !strcmp(result.refusal->category, "future_category") &&
-          !result.refusal->explanation);
-   aimee_harness_ir_free(&state);
-   assert(!strcmp(result.refusal->category, "future_category"));
-   aimee_response_free(&result);
-   next_execution();
-}
-
-static void owned_results(void)
-{
-   next_execution();
-   aimee_harness_ir_t state = {.acp_prompt_id = 3};
-   aimee_response_t result = {0};
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_thought_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Reason\"}}}}",
-                &state, 2) == 0);
-   assert(aimee_harness_ir_response(&state, &result) < 0 && !result.content);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Answer\"}}}}",
-                &state, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"AA==\"}}}}",
-                &state, 2) == 0);
-   assert(frame("{\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}", &state, 2) == 0);
-   assert(!aimee_harness_ir_response(&state, &result));
-   assert(result.n_content == 3);
-   assert(result.content[0].type == AIMEE_BLK_THINKING &&
-          !strcmp(result.content[0].text, "Reason"));
-   assert(result.content[1].type == AIMEE_BLK_TEXT && !strcmp(result.content[1].text, "Answer"));
-   assert(result.content[2].type == AIMEE_BLK_IMAGE &&
-          !strcmp(result.content[2].media_ref, "data:image/png;base64,AA=="));
-   assert(result.content[0].message_group != result.content[1].message_group);
-   aimee_harness_ir_free(&state);
-   assert(!strcmp(result.content[0].text, "Reason")); /* Not borrowed from the frame/state. */
-   aimee_response_free(&result);
-
-   next_execution();
-   state.acp_prompt_id = 3;
-   assert(frame("{\"id\":3,\"result\":{\"content\":\"legacy native "
-                "text\",\"stopReason\":\"max_tokens\"}}",
-                &state, 2) == 0);
-   assert(!aimee_harness_ir_response(&state, &result));
-   aimee_harness_ir_free(&state);
-   assert(result.n_content == 1 && !strcmp(result.content[0].text, "legacy native text"));
-   assert(result.stop_reason == AIMEE_STOP_MAX_TOKENS);
-   assert(!strcmp(result.raw_stop_reason, "max_tokens"));
-   aimee_response_free(&result);
-}
-
 /* SDK 2.1.177 stdout serializes the reserved error field without a flag.
  * Unknown is observed in a synthetic local HTTP400 control; known values below
  * are constructed source-contract cases, not a claim about a live failure. */
@@ -415,7 +255,7 @@ static void claude_legacy_diagnostic(void)
                "\"type\":\"text\",\"text\":\"PRIVATE_DIAGNOSTIC\"}]}}",
                codes[i]);
       assert(!frame(raw, &state, 0));
-      assert(cJSON_GetArraySize(events) == before && !state.output);
+      assert(cJSON_GetArraySize(events) == before);
       assert(state.failure == (i == 1   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
                                : i == 2 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
                                         : AIMEE_HARNESS_FAILURE_NONE));
@@ -436,7 +276,7 @@ static void claude_legacy_diagnostic(void)
             char *malformed = cJSON_PrintUnformatted(bad);
             assert(malformed && frame(malformed, &state, 0) < 0);
             assert(state.failure == AIMEE_HARNESS_FAILURE_NONE &&
-                   cJSON_GetArraySize(events) == before && !state.output);
+                   cJSON_GetArraySize(events) == before);
             free(malformed);
             cJSON_Delete(bad);
             next_execution();
@@ -472,7 +312,7 @@ static void claude_failure_classification(void)
          assert(state.failure == (i == 0   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
                                   : i == 1 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
                                            : AIMEE_HARNESS_FAILURE_NONE));
-         assert(cJSON_GetArraySize(events) == before && !state.output);
+         assert(cJSON_GetArraySize(events) == before);
       }
       assert(
           !frame("{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"rate_limit\","
@@ -520,8 +360,6 @@ int main(void)
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
-   refusal_owned_result();
-   owned_results();
    cJSON_Delete(events);
    events = cJSON_CreateArray();
    native_compactions();
@@ -547,7 +385,6 @@ int main(void)
    claude_legacy_diagnostic();
    claude_failure_classification();
    next_execution();
-   acp();
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(events);
    puts("harness IR boundary tests passed");

@@ -7143,8 +7143,7 @@ $(TESTPREFIX)/unit-test-core-base64: $(OBJDIR)/tests/test_core_base64.o $(CORE_C
 # Include tests appended after the initial unit-test list.
 $(TEST_TARGETS): $(CORE_CODEC_LIB)
 
-$(OBJDIR)/tests/test_harness_ir.o: modules/translation/harness_ir.c
-$(TESTPREFIX)/unit-test-harness-ir: $(OBJDIR)/tests/test_harness_ir.o \
+$(TESTPREFIX)/unit-test-harness-ir: $(OBJDIR)/tests/test_harness_ir.o $(OBJDIR)/modules/translation/harness_ir.o \
     $(OBJDIR)/modules/translation/aimee_ir_stream.o \
     $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o  \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o

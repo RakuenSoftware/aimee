@@ -2139,7 +2139,7 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/harness_ir.h",
-          "sha256": "30813f7fddca8919fd0c40fdb87d4b621c1b7733ae72e5fd8796c5ac0b589f11"
+          "sha256": "3f715278c77ad0c02654c72e66a7d951492ad449aeab89307c421f1b0d97c4d8"
         },
         {
           "path": "src/modules/translation/include/aimee/translation/hook_ir.h",
@@ -2168,7 +2168,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "a4ec6fcb1b2b341ba62354be13352d4cedd591308a11db8c8eeba67e6034231f",
+      "sha256": "08f30881cec30afb985c62d5b5c2fbc07ebdca73212c7070dee0ed801b1e4e1b",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

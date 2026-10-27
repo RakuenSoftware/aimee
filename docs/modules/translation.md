@@ -61,12 +61,11 @@ with their existing owners. `test_aimee_responses_stream.c` and
 The native control adapter lives in `src/modules/translation/harness_ir.c`, exposed by
 `src/modules/translation/include/aimee/translation/harness_ir.h`. It converts Claude stream-json
 and Codex app-server controls, compaction notices and bounded diagnostics into canonical session
-events. Their original gateway capture owns model, tool and history observations. ACP session/update
-frames have a separate canonical decoder and owned output accumulator at this external boundary;
-external agent tool reports remain unverified compatibility metadata. The host owns credentials,
+events. Their original gateway capture owns model, tool and history observations. The retired outgoing
+ACP client has no decoder or compatibility output accumulator here. The host owns credentials,
 execution identity, persistence, browser delivery and actual tool effects.
 `src/tests/test_harness_ir.c` covers exclusive native history ownership, controls, compaction,
-diagnostics, ACP authored output and sink failure propagation.
+diagnostics and sink failure propagation. Incoming ACP framing remains in the protocols module.
 
 Host request-stage application lives in `src/server/aimee_ir_serve.c`, with the
 `aimee_ir_apply_gateway_request_stages` and `aimee_ir_apply_native_request_stages` contracts in

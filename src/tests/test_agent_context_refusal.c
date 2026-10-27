@@ -172,8 +172,8 @@ static int transport_refuse;
 static int expect_hook_prompt, hook_calls;
 static int owned_generation_case, owned_generation_inputs;
 static int rich_generation_case;
-static int responses_controls_case, responses_control_events, responses_control_reject;
-static int other_controls_case, other_control_events, other_control_reject;
+static int responses_controls_case;
+static int other_controls_case;
 static int fallback_hook_context(const char *user, char *out, size_t capacity, void *context)
 {
    (void)context;
@@ -657,7 +657,7 @@ static int capture_owned_generation(const aimee_session_event_t *event, void *co
    return 0;
 }
 
-static void test_owned_plain_generation(const agent_t *agent)
+static agent_config_t *fixture_config(const agent_t *agent)
 {
    agent_config_t *cfg = calloc(1, sizeof *cfg);
    assert(cfg);
@@ -666,6 +666,12 @@ static void test_owned_plain_generation(const agent_t *agent)
    cfg->agents[0].enabled = 1;
    cfg->agents[0].max_parallel = 1;
    snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
+   return cfg;
+}
+
+static void test_owned_plain_generation(const agent_t *agent)
+{
+   agent_config_t *cfg = fixture_config(agent);
    aimee_block_t policy = {.type = AIMEE_BLK_TEXT,
                            .text = "Use only the evidence.",
                            .context = {.origin = AIMEE_CTX_ORIGIN_USER,
@@ -706,15 +712,9 @@ static void test_owned_plain_generation(const agent_t *agent)
 
 static void test_actual_generation_preserves_rich_canonical_request(const agent_t *agent)
 {
-   agent_config_t *cfg = calloc(1, sizeof *cfg);
-   assert(cfg);
-   cfg->agent_count = 1;
-   cfg->agents[0] = *agent;
-   cfg->agents[0].enabled = 1;
-   cfg->agents[0].max_parallel = 1;
+   agent_config_t *cfg = fixture_config(agent);
    cfg->agents[0].tools_enabled = 1;
    cfg->agents[0].write_capable = 1;
-   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
    aimee_block_t policy[2] = {{.type = AIMEE_BLK_TEXT, .text = "Unattended host policy."},
                               {.type = AIMEE_BLK_TEXT, .text = "second policy block"}};
    for (int i = 0; i < 2; i++)
@@ -853,28 +853,72 @@ static void test_actual_generation_preserves_rich_canonical_request(const agent_
    free(cfg);
 }
 
-static int capture_responses_controls(const aimee_session_event_t *event, void *unused)
+typedef struct
 {
-   (void)unused;
-   if (event->kind == AIMEE_SESSION_PROJECTION && event->projection_request_controls)
+   int expected, events, reject;
+} control_projection_t;
+static int capture_control_projection(const aimee_session_event_t *event, void *context)
+{
+   control_projection_t *observation = context;
+   if (event->kind != AIMEE_SESSION_PROJECTION || !event->projection_request_controls)
+      return 0;
+   assert(event->projection_request_controls == observation->expected);
+   observation->events++;
+   return observation->reject;
+}
+
+static void check_control_projection(agent_config_t *cfg, aimee_request_t *source,
+                                      int expected_controls)
+{
+   control_projection_t observation = {.expected = expected_controls};
+   cJSON *before = aimee_ir_request_json(source);
+   assert(before);
+   agent_result_t result = {0};
+   provider_calls = observation.events = 0;
+   source->tool_choice = AIMEE_TOOL_CHOICE_NONE;
+   assert(agent_generate_request(cfg, source, &result) == AGENT_RC_CONTEXT_REFUSED);
+   source->tool_choice = AIMEE_TOOL_CHOICE_UNSET;
+   assert(!provider_calls);
+   agent_result_clear_response(&result);
+   aimee_response_t response = {0};
+   assert(agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", source,
+                                           &response, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!provider_calls);
+   agent_result_clear_response(&result);
+   aimee_response_free(&response);
+   aimee_ir_session_set_sink(capture_control_projection, &observation);
+   for (int tools = 0; tools <= 1; tools++)
    {
-      assert(event->projection_request_controls == 9);
-      responses_control_events++;
-      return responses_control_reject;
+      provider_calls = observation.events = 0;
+      int rc = tools ? agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review",
+                                                         source, &result)
+                     : agent_generate(cfg, cfg->agents[0].name, source, &result);
+      if (rc || !result.success || provider_calls != 1 || observation.events != 1)
+         fprintf(stderr, "control provider=%s tools=%d rc=%d calls=%d events=%d error=%s\n",
+                 cfg->agents[0].provider, tools, rc, provider_calls, observation.events, result.error);
+      assert(!rc && result.success && provider_calls == 1 && observation.events == 1);
+      agent_result_clear_response(&result);
    }
-   return 0;
+   provider_calls = observation.events = 0;
+   observation.reject = 1;
+   assert(agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", source,
+                                           &result) < 0);
+   assert(!provider_calls && observation.events == 1 && aimee_ir_session_capture_failed());
+   agent_result_clear_response(&result);
+   observation.reject = 0;
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_begin_task();
+   cJSON *after = aimee_ir_request_json(source);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
 }
 
 static void test_actual_responses_controls(const agent_t *configured)
 {
-   agent_config_t *cfg = calloc(1, sizeof *cfg);
-   assert(cfg);
-   cfg->agent_count = 1;
-   cfg->agents[0] = *configured;
-   cfg->agents[0].enabled = cfg->agents[0].tools_enabled = 1;
-   cfg->agents[0].max_parallel = 1;
+   agent_config_t *cfg = fixture_config(configured);
+   cfg->agents[0].tools_enabled = 1;
    snprintf(cfg->agents[0].provider, sizeof cfg->agents[0].provider, "chatgpt");
-   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", configured->name);
    aimee_request_t source = {0};
    assert(!aimee_ir_request_from_text(&source, "Retain original policy.", "immutable control task",
                                       128, 0.3));
@@ -899,78 +943,21 @@ static void test_actual_responses_controls(const agent_t *configured)
    assert(source.stop_sequences);
    source.stop_sequences[0] = strdup("END");
    source.n_stop = 1;
-   cJSON *before = aimee_ir_request_json(&source);
-   assert(before);
    responses_controls_case = 1;
-   provider_calls = responses_control_events = 0;
-   agent_result_t result = {0};
-   source.tool_choice = AIMEE_TOOL_CHOICE_NONE;
-   assert(agent_generate_request(cfg, &source, &result) == AGENT_RC_CONTEXT_REFUSED);
-   source.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
-   assert(!provider_calls);
-   agent_result_clear_response(&result);
-   aimee_response_t response = {0};
-   assert(agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", &source,
-                                           &response, &result) == AGENT_RC_CONTEXT_REFUSED);
-   assert(!provider_calls);
-   agent_result_clear_response(&result);
-   aimee_ir_session_set_sink(capture_responses_controls, NULL);
-   int rc = agent_generate(cfg, configured->name, &source, &result);
-   if (rc || !result.success || provider_calls != 1 || responses_control_events != 1)
-      fprintf(stderr, "responses control rc=%d success=%d calls=%d events=%d error=%s\n", rc,
-              result.success, provider_calls, responses_control_events, result.error);
-   assert(!rc && result.success && provider_calls == 1 && responses_control_events == 1);
-   agent_result_clear_response(&result);
-   provider_calls = responses_control_events = 0;
-   rc = agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", &source,
-                                          &result);
-   if (rc || !result.success || provider_calls != 1 || responses_control_events != 1)
-      fprintf(stderr, "responses control rc=%d success=%d calls=%d events=%d error=%s\n", rc,
-              result.success, provider_calls, responses_control_events, result.error);
-   assert(!rc && result.success && provider_calls == 1 && responses_control_events == 1);
-   agent_result_clear_response(&result);
-   provider_calls = responses_control_events = 0;
-   responses_control_reject = 1;
-   rc = agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", &source,
-                                          &result);
-   assert(rc < 0 && !provider_calls && responses_control_events == 1 &&
-          aimee_ir_session_capture_failed());
-   agent_result_clear_response(&result);
-   responses_control_reject = responses_controls_case = 0;
-   aimee_ir_session_set_sink(NULL, NULL);
-   aimee_ir_session_begin_task();
-   cJSON *after = aimee_ir_request_json(&source);
-   assert(after && cJSON_Compare(before, after, 1));
-   cJSON_Delete(before);
-   cJSON_Delete(after);
+   check_control_projection(cfg, &source, 9);
+   responses_controls_case = 0;
    aimee_request_free(&source);
    free(cfg);
-}
-
-static int capture_other_controls(const aimee_session_event_t *event, void *unused)
-{
-   (void)unused;
-   if (event->kind == AIMEE_SESSION_PROJECTION && event->projection_request_controls)
-   {
-      assert(event->projection_request_controls == 1);
-      other_control_events++;
-      return other_control_reject;
-   }
-   return 0;
 }
 
 static void test_actual_other_provider_controls(const agent_t *configured)
 {
    for (int provider = 1; provider <= 2; provider++)
    {
-      agent_config_t *cfg = calloc(1, sizeof *cfg);
-      assert(cfg);
-      cfg->agent_count = 1;
-      cfg->agents[0] = *configured;
-      cfg->agents[0].enabled = cfg->agents[0].tools_enabled = cfg->agents[0].max_parallel = 1;
+      agent_config_t *cfg = fixture_config(configured);
+      cfg->agents[0].tools_enabled = 1;
       snprintf(cfg->agents[0].provider, sizeof cfg->agents[0].provider, "%s",
                provider == 2 ? "anthropic" : "openai");
-      snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", configured->name);
       aimee_request_t source = {0};
       assert(!aimee_ir_request_from_text(&source, NULL, "other provider task; retained evidence",
                                          128, 0.3));
@@ -979,45 +966,15 @@ static void test_actual_other_provider_controls(const agent_t *configured)
       source.metadata = cJSON_Parse("{\"user_id\":\"canonical-fixture\"}");
       source.service_tier = strdup("auto");
       source.reasoning_summary = strdup("auto");
-      cJSON *before = aimee_ir_request_json(&source);
       other_controls_case = provider;
-      provider_calls = other_control_events = 0;
+      check_control_projection(cfg, &source, 1);
       agent_result_t result = {0};
-      source.tool_choice = AIMEE_TOOL_CHOICE_NONE;
-      assert(agent_generate_request(cfg, &source, &result) == AGENT_RC_CONTEXT_REFUSED);
-      source.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
-      agent_result_clear_response(&result);
       aimee_response_t response = {0};
-      assert(agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", &source,
-                                              &response, &result) == AGENT_RC_CONTEXT_REFUSED);
-      assert(!provider_calls);
-      agent_result_clear_response(&result);
-      aimee_ir_session_set_sink(capture_other_controls, NULL);
-      assert(!agent_generate(cfg, configured->name, &source, &result) && result.success);
-      assert(provider_calls == 1 && other_control_events == 1);
-      agent_result_clear_response(&result);
-      provider_calls = other_control_events = 0;
-      assert(!agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", &source,
-                                                &result) &&
-             result.success);
-      assert(provider_calls == 1 && other_control_events == 1);
-      agent_result_clear_response(&result);
-      provider_calls = other_control_events = 0;
-      other_control_reject = 1;
-      assert(agent_execute_with_tools_for_role(&cfg->agents[0], &cfg->network, "review", &source,
-                                               &result) < 0);
-      assert(!provider_calls && other_control_events == 1 && aimee_ir_session_capture_failed());
-      agent_result_clear_response(&result);
-      other_control_reject = 0;
-      aimee_ir_session_set_sink(NULL, NULL);
-      aimee_ir_session_begin_task();
-      cJSON *after = aimee_ir_request_json(&source);
-      assert(before && after && cJSON_Compare(before, after, 1));
-      cJSON_Delete(before);
-      cJSON_Delete(after);
       free(source.reasoning_summary);
       source.reasoning_summary = NULL;
-      provider_calls = other_control_events = 0;
+      control_projection_t observation = {0};
+      aimee_ir_session_set_sink(capture_control_projection, &observation);
+      provider_calls = 0;
       source.tool_choice = AIMEE_TOOL_CHOICE_NONE;
       int supported_rc = agent_generate_request(cfg, &source, &result);
       source.tool_choice = AIMEE_TOOL_CHOICE_UNSET;
@@ -1025,7 +982,7 @@ static void test_actual_other_provider_controls(const agent_t *configured)
          fprintf(stderr, "supported controls provider=%d rc=%d calls=%d error=%s\n", provider,
                  supported_rc, provider_calls, result.error);
       assert(!supported_rc && result.success);
-      assert(provider_calls == 1 && !other_control_events);
+      assert(provider_calls == 1 && !observation.events);
       agent_result_clear_response(&result);
       provider_calls = 0;
       assert(!agent_execute_request_with_tools(&cfg->agents[0], &cfg->network, "review", &source,
@@ -1034,6 +991,7 @@ static void test_actual_other_provider_controls(const agent_t *configured)
       assert(provider_calls == 1);
       aimee_response_free(&response);
       agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
       aimee_request_free(&source);
       free(cfg);
    }
@@ -1069,14 +1027,8 @@ static void test_visible_primary_and_routing_queries(const agent_t *agent)
    cJSON_Delete(after);
    cJSON_Delete(updated);
    agent_result_clear_response(&result);
-   agent_config_t *cfg = calloc(1, sizeof *cfg);
-   assert(cfg);
-   cfg->agent_count = 1;
-   cfg->agents[0] = *agent;
-   cfg->agents[0].enabled = cfg->agents[0].tools_enabled = 1;
-   cfg->agents[0].max_parallel = 1;
-   cfg->agents[0].max_parallel = 1;
-   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
+   agent_config_t *cfg = fixture_config(agent);
+   cfg->agents[0].tools_enabled = 1;
    message.n_blocks = 1;
    aimee_request_t source = {.messages = &message, .n_messages = 1};
    visibility_query_case = 2;

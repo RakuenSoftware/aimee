@@ -298,6 +298,18 @@ static void test_actual_stream_progress(void)
    assert(job_store_count == 6);
    agent_set_durable_job(0);
 }
+static agent_t http_fixture_agent(const char *name, const char *endpoint, int timeout_ms)
+{
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "%s", name);
+   snprintf(agent.model, sizeof agent.model, "gpt-4o");
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "none");
+   snprintf(agent.endpoint, sizeof agent.endpoint, "%s", endpoint);
+   agent.timeout_ms = timeout_ms;
+   return agent;
+}
+
 static void test_plain_refusal_clears_phase(void)
 {
    for (int fallback = 0; fallback < 2; fallback++)
@@ -309,15 +321,9 @@ static void test_plain_refusal_clears_phase(void)
       const char *bodies[] = {"{}"};
       if (fallback)
          child = serve_peer(listener, statuses, bodies, 1);
-      agent_t agent = {0};
-      strcpy(agent.name, "phase-clear");
-      strcpy(agent.model, "gpt-4o");
-      strcpy(agent.provider, "openai");
-      strcpy(agent.auth_type, "none");
-      strcpy(agent.endpoint, url);
+      agent_t agent = http_fixture_agent("phase-clear", url, 1000);
       if (fallback)
          strcpy(agent.fallback_model, "fallback-model");
-      agent.timeout_ms = 1000;
       request_context_snapshot_t previous;
       request_context_snapshot(&previous);
       job_store_count = 3;
@@ -359,16 +365,10 @@ static void test_actual_executor_observations(int only_mode)
          char url[128];
          int listener = listening_peer(url), count = mode == 3 || mode == 5 ? 2 : 1;
          pid_t child = serve_peer(listener, statuses[mode], bodies[mode], count);
-         agent_t agent = {0};
-         strcpy(agent.name, "transport-usage");
-         strcpy(agent.model, "gpt-4o");
-         strcpy(agent.provider, "openai");
-         strcpy(agent.auth_type, "none");
-         strcpy(agent.endpoint, url);
+         agent_t agent = http_fixture_agent("transport-usage", url, 10000);
          if (mode == 5)
             strcpy(agent.fallback_model, "fallback-model");
          agent.max_turns = 2;
-         agent.timeout_ms = 10000;
          agent_network_t network = {0};
          agent_result_t result = {0};
          int rc = execution ? fixture_agent_execute_text(&agent, "system", "task", 128, 0, &result)
@@ -495,16 +495,10 @@ const char *delegation_active_id(void)
 }
 static void test_dispatch_resource_refusal(void)
 {
-   agent_t agent = {0};
-   strcpy(agent.name, "resource-lifetime");
-   strcpy(agent.model, "gpt-4o");
-   strcpy(agent.provider, "openai");
-   strcpy(agent.auth_type, "none");
-   agent.max_parallel = 1;
-   agent.timeout_ms = 10000;
    char url[128];
    int listener = listening_peer(url);
-   strcpy(agent.endpoint, url);
+   agent_t agent = http_fixture_agent("resource-lifetime", url, 10000);
+   agent.max_parallel = 1;
    agent_result_t result = {0};
    fixture_active_delegation = "owned-test-delegation";
    assert(fixture_agent_dispatch_text(&agent, NULL, NULL, NULL, "task", 128, 0, 0, &result) ==

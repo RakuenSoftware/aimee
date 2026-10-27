@@ -21,6 +21,7 @@ RETIRED_OWNERS = ('scripts/llm-chat.py', 'scripts/curator-extract.py',
                   'scripts/curator-synthesize.py', 'scripts/learning-synthesize.py',
                   'scripts/llm-rewrite.py', 'src/modules/gateway/gateway_pipeline.c','src/modules/gateway/include/aimee/gateway/gateway_pipeline.h','src/pipeline/gw_stage_registry.c','src/pipeline/gw_stage_registry.h', 'integrations/discord/prompt_budget.py', 'integrations/discord/test_prompt_budget.py','src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h', 'src/server/aimee_ir_shadow.c', 'src/headers/aimee_ir_shadow.h', 'server-go/modules/economizer/gateway_wire.go', 'server-go/modules/economizer/planner_openai.go', 'server-go/modules/economizer/planner_anthropic.go', 'server-go/modules/economizer/proof.go')
 RETIRED = (
+    "aimee_acp_frame_ir", "aimee_harness_ir_response",
     "probeParts", "probeUsage", "probeStop", "probeResponsesStream",
     "probeResponseOutput", "probeMetadata",
     "gw_pipeline_run_request", "gw_stage_registry_build", "gw_request_t",

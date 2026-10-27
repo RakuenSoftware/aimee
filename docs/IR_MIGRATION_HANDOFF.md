@@ -1,378 +1,73 @@
-# Canonical IR migration continuation
+# Canonical IR migration status
 
-## Objective and constraints
+## Scope
 
-Replace provider-specific model communication inside Aimee with the shared IR.
-Convert incoming model/provider communication to IR at the ingress edge, and
-convert outgoing IR to the required provider, IDE or CLI format at the egress
-edge. Ordinary internal application messages, policy metadata and domain records
-do not automatically become IR. Browser agent sessions must work, including
-retained history and continuation. Retire replaced provider implementations and
-their obsolete tests so the migration reduces code.
+Provider model messages use the shared canonical IR inside Aimee. Provider, SDK,
+IDE and CLI wire formats are admitted or rendered at their external boundaries.
+Session controls, authentication, policy and workflow records retain their domain
+contracts. The browser and Discord use the shared thinclient; the thinclient
+transports ordinary application requests as well as canonical model messages.
 
-Continue on `fix/native-mcp-startup-and-editor` in this worktree. Keep one eventual
-PR; PR administration and authentication questions are not implementation
-prerequisites. Keep implementation and validation within the two goals below.
-Do not call the migration complete while implementation or required live checks
-remain. Historical handoff versions are evidence, not current instructions.
+The migration branch is `fix/native-mcp-startup-and-editor`, targeting `testing`.
+It contains IR unification, browser/thinclient repairs and removal of replaced or
+unused code. Code/test/build changes must be measured separately from prose;
+documentation deletion does not establish code reduction.
 
-Do not investigate or modify `.100`. No KB instance should be configured: unset
-mode/endpoint are intentional. No WOL work belongs here. Keep automatic reviews
-and strict attribution. Prefer registered Aimee Git commands, then SSH Git or
-personally authenticated gh. No connector writes, coauthor trailers or branding.
-Production promotion follows merge to main and the independent review requirement
-in `OWNERS.md`.
+## Deferred work
 
-## Code reduction requirement: unfinished
+ACP host execution/resources, durable delegation authority, container ownership
+and lease recovery, audit/readiness draining, and cumulative accounting changes
+were removed from this migration. Their implementation is preserved on
+`proposal/deferred-execution-and-accounting` for independent review:
 
-The two requirements are working browser agent sessions and IR for internal
-provider-specific model communication.
-The migration must remove duplicate implementations and reduce total code. The previous completion claim did
-not establish this requirement and is withdrawn for the overall task.
+- [Delegation execution and authority](proposals/pending/delegation-execution-hardening.md)
+- [Audit/readiness shutdown](proposals/pending/audit-readiness-shutdown-drain.md)
+- [Cumulative usage accounting](proposals/pending/cumulative-model-usage-accounting.md)
 
-PRs target `testing` under CONTRIBUTING.md. The earlier `main` compare link was
-wrong: it included Rust bus support already integrated into `testing` through
-separate PRs. Do not remove that existing work as part of this migration.
+Incoming ACP/OpenCode support remains. The outgoing ACP client had no production
+execution path after the host feature was deferred; it and its unused decoder,
+resource rendering and private result accumulator were retired. Codex/Claude
+native decoders, controls, diagnostics and canonical history remain supported.
+Canonical absent-versus-zero usage observations remain intact.
 
-At handoff commit `4f063a775`, the actual `testing` comparison was891 files,
-69,059 additions and41,703 deletions, net27,356. Path/extension accounting is:
-implementation/operational scripts +578; tests/fixtures +31,045; documentation
--4,121; other build/config/schema -146. Documentation removal does not establish
-production code reduction. The audit receipt is
-`/var/tmp/aimee-ir-correct-base-growth-audit.json`.
+Confirmed unbuilt tests with no build or script driver were retired. Script-backed
+bus-plugin tests were retained. Active regression fixture setup was consolidated
+without dropping the provider/control cases.
 
-The corrected scope keeps provider codecs at the actual external edges. Old
-OpenAI/Anthropic economizer planners and the unused wire orchestrator, together
-with their dedicated tests, are being retired. Shared request shaping, Responses
-decoding and canonical model execution are consolidated. The unrelated attempt
-to make memory policy metadata use IR was set aside with exact restoration of
-the earlier source; no workflow/domain-record or history-archive migration was
-performed. Browser session cache cleanup is a separate browser simplification. Measure implementation,
-tests, documentation and generated/build data separately. Preserve meaningful
-regression coverage and supported history; deleting it is not architecture
-simplification. No new source is qualified merely because the previous image
-passed. The active QA still runs the b61 image described below.
+## Validation and limits
 
-## Independent model-path trace after edc58e19c
+The final source has a successful server build and focused C normal/sanitizer,
+Go normal/race, frontend and ownership/IR boundary checks. The unchanged frontend
+also passes the existing production-bundle Chromium loopback harness, 128 focused
+frontend tests and 33 runtime-web race fixtures through the shared C thinclient.
+These local fixtures do not establish acceptance by a live upstream provider.
 
-Three parallel audits followed production callers across HTTP providers/KB,
-internal orchestration, and browser/native/ACP/CLI execution. The shared C
-Request/Response/Message types and the Go/browser bindings represent the same
-canonical contract. Native request bodies, response frames and SDK control
-protocols belong to the translation or external adapter boundaries.
+The existing QA instance remains on `8fd0eddae`, with its history, SDK caches and
+single Claude connection preserved. Actual browser evidence on that revision
+covers HTTP model reads/follow-ups, native Codex reads/follow-ups and same-thread
+continuation after restart, fresh Claude reads/follow-ups, exact-turn Steer/cancel,
+and reload at 1280, 390 and 320 pixels. Per-alias repetition was not completed;
+there is no claim that every model was tested live or that QA runs the final
+migration commit.
 
-| Model path | Canonical ownership and external conversion |
-| --- | --- |
-| Anthropic, Chat Completions and Responses ingress | Translation frontends admit Request; HTTP frontends share `server_model_execute_prepared`. |
-| HTTP model execution | Agent profiles, policy, tools and history retain IR; translation renders the upstream body and admits the upstream Response/deltas. |
-| Browser primary sessions | Browser Message, runtime-web admission, canonical session history and one live/replay reducer; legacy display archives do not feed execution. |
-| Claude/Codex SDK execution | Source-bound canonical profile/history and captured upstream IR own model observations; SDK frame decoders handle external controls/lifecycle. |
-| CLI and IDEs | Canonical model messages use the shared thinclient; external adapters own protocol projections. Incoming ACP server support remains; outgoing ACP execution is deferred. |
-| Roundtable, delegates, workflow model steps and repairs | Canonical Request/Response through delegate invocation; structured repair retains prior typed output. Business artifacts remain domain records. |
-| Memory/router/economizer stages | Typed IR or strictly admitted canonical history; policy views and retrieval records remain domain metadata. |
-| KB curator and Bedrock egress | Canonical requests/results; existing translation adapters own native provider bodies. |
-| Availability probes | Fixed canonical request and existing provider transport; the translation owner's bounded pipe client reuses the same C codecs in the existing server executable. |
+A historical Claude context returned the provider's `reasoning_extraction`
+refusal. No codec/history defect was demonstrated and the precise upstream
+trigger is unproven. Preserve that negative result and authored history; do not
+strip content or retry automatically to evade the refusal. Provider explanations
+remain visible in the browser.
 
-The trace found and retired the unused `gw_request_t` request pipeline and its
-registry/tests, the probe's separate Go provider codecs, repeated Codex frame
-parsing, duplicate Go context serialization and the provider client's local
-completed-response admission. JSON and Responses ingress now share one typed
-rescue/admission/capture owner. A decoded Responses stream is admitted as canonical
-IR, without consulting its inert native sidecar as a second completion authority.
-The local-provider thinking extension now has one translation owner. No alternate provider transcript schema was confirmed in the
-examined live execution chains. This is a source audit, not a claim that every
-configured model or live browser interaction has been exercised on this source.
+The unmerged authority migration was removed and subsequent IR migrations were
+renumbered. The old QA migration checksums therefore differ from this branch;
+do not upgrade it in place by waiving checksums or deleting history. The target
+`testing` base ends at migration 50. A deployment needs the normal schema and
+preservation review rather than treating the earlier QA image as final-source
+qualification.
 
-Detailed caller receipts and frozen-source checks are retained under:
+## Operational constraints
 
-- `/var/tmp/aimee-edc-browser-native-deep-trace.md`
-- `/var/tmp/aimee-codex-single-frame-final-proof.json`
-- `/var/tmp/aimee-ir-trace-root-proof.json`
-- `/var/tmp/aimee-ir-internal-model-trace-edc58e19/trace.json`
-- `/var/tmp/aimee-ir-request-stage-retirement/proof.json`
-- `/var/tmp/aimee-edc-provider-edge-deep-trace.md`
-- `/var/tmp/aimee-ir-native-materializer-retirement/proof.json`
-- `/var/tmp/aimee-ir-model-dispatch-census/census.json`
-- `/var/tmp/aimee-discord-canonical-migration/proof.json`
-- `/var/tmp/aimee-discord-thinclient-wrapper-packaging-proof.json`
-- `/var/tmp/aimee-model-generate-rich-proof.json`
-- `/var/tmp/aimee-model-generate-rich-independent-review.json`
-- `/var/tmp/aimee-discord-validation-owner-followup/proof-r2.json`
-
-The dispatch census reconciles 43 concrete C execution calls, seven Go delegate
-calls and 124 C transport/process sites with these traces. Two actual HTTP
-execution paths also now reject trailing bytes after the native response JSON,
-using the existing strict frame parser and a real plain/tool transport regression.
-The browser and Discord reuse the C thinclient rather than carry separate client
-transport implementations. The browser's Go binding replaces its five direct
-Unix HTTP transports; its ordinary auth/session/control/replay payloads and
-headers are unchanged. Discord loads the same client library and uses the existing
-canonical chat collector; no new public chat command or routing field is needed.
-The C owner resolves the enrolled client profile, bearer and TLS identity. Python
-keeps those credential pointers opaque and does not parse provider or NDJSON data.
-Normal server session controls allocate a bot session and select its registered
-primary. Channel/session mappings are in memory; a bot restart begins fresh model
-context, and retained server execution records are not deleted or rebound.
-
-IR applies to provider-model messages, history, tools, responses and opaque model
-state. It replaces Anthropic/OpenAI/Gemini representations between model adapters.
-Ordinary peer text, status replies, delivery logs, TTS and other domain/control
-records keep their own contracts. Peer-domain framing and synthetic gateway
-model-message wrappers were removed; their validation and actual model boundaries
-remain intact. Discord's delivery/query cache is not replayed as a second model
-history; policy, identity and evidence remain separate model-input blocks.
-
-Discord no longer depends on the migration-introduced `model.generate` operation.
-Its bot-specific Request/history/alias expansion is retired. The separate operation
-was introduced by this migration for the tool-free evaluator, not inherited from
-the original project. That evaluator remains its only non-test caller: existing
-agentic delegates are not an equivalent replacement for the plain IR owner. Ordinary
-memory/persona/workflow domain records keep their existing contracts. The bridge
-makes no client-side token-packing or output-limit guarantee; server model limits
-apply. Local failures prevent delivery/cache mutation, while the normal server
-retains the canonical execution record.
-
-Current local checks include the Discord 128-test suite, actual C-library/Python
-Unix fixtures, C collector normal/sanitizer checks, the shared Go transport's nine
-normal/race fixtures, and the complete browser-backend normal/race suites.
-The browser fixtures now explicitly synchronize handler completion and phase
-changes without altering their assertions. The corrected repository browser harness passes against the
-unchanged frontend bundle using local mocked endpoints. These are source checks,
-not live Discord, provider or new-image browser qualification.
-
-Current evidence:
-- `/var/tmp/aimee-discord-shared-client-binding/proof.json`
-- `/var/tmp/aimee-go-thinclient-final-proof.json`
-- `/var/tmp/aimee-peer-domain-undo/proof.json`
-- `/var/tmp/aimee-gateway-domain-scope-correction-proof.json`
-- `/var/tmp/aimee-current-repository-browser-harness/proof.json`
-
-The predecessor8a build completed all41 instructions and its Docker archive,
-but timed out exporting an optional full filesystem. Product qualification was
-not completed; its source-context bytecode exception and failure remain recorded
-in `/var/tmp/aimee-ir-rootless-8a9962450-build/FAILED-ATTEMPT-PROOF.json`.
-No QA import/upgrade occurred. This correction needs its own source/image and
-live browser qualification; older b61 results do not qualify it.
-
-## Qualified source cleanup, not yet deployed
-
-The cleanup removes the four unused economizer wire/planner/proof owners and
-992 lines of their dedicated tests. It also retires the request shadow observer,
-raw provider-policy entry points, compatibility history-repair wrapper and
-inactive predecessor test branches. Actual IR repair cases and live provider
-edge codec tests remain. Registration, source ownership and test scheduling
-were checked after the deletions.
-
-Anthropic and OpenAI frontends now use the same prepared canonical model
-executor in `src/server/server_model_execution.c`. Provider-native parse/render,
-HTTP beta/error/Retry-After behavior and streaming codecs stay at their actual
-external edges. Host assembly no longer manufactures Anthropic `raw.system`;
-typed IR blocks retain cache flags and optional `system_scalar` layout preference.
-The Anthropic backend alone creates the native scalar/array system form.
-Old SDK/cache data is retained; changing the canonical profile can select a new
-owner-issued cache scope instead of falsely reusing an incompatible one.
-
-Current qualification includes focused normal and ASan/UBSan suites, exact
-wire/cache-layout goldens, full Go model-contract compilation, frontend517 tests
-and TypeScript,28 static gates, thin-client mock isolation and local compilation
-of the client/server/KB/gateway/runtime-web products. These are source checks;
-QA still runs b61. Proofs:
-
-- `/var/tmp/aimee-ir-economizer-final-retirement-proof.json`
-- `/var/tmp/aimee-obsolete-provider-test-retirement-proof.json`
-- `/var/tmp/aimee-ir-common-model-final-proof.json`
-- `/var/tmp/aimee-ir-system-scalar-final-proof.json`
-- `/var/tmp/aimee-ir-final-static-integration-r2/proof.json`
-- `/var/tmp/aimee-ir-final-local-build/proof.json`
-- `/var/tmp/aimee-ir-final-go-model-compile/proof.json`
-
-The exact `edc58e19c` image subsequently built successfully after verified retention
-of unused source copies and a builder-cache-only cleanup. Image
-`sha256:5b18af89bee6da7b107bff2ef41edeb3e34207d577cbe353c72ef4918e0336a6`
-contains the verified 87 products and 19 modules. The build preserved all 1798 IR
-rows, 35 Vault entries and protected active/archived QA state, with no deployment
-or model calls. Custody proof:
-`/var/tmp/aimee-ir-single-edc58e19c-build/single-QA-build-custody-proof.json`.
-The further source audit below is newer than that image and requires its own build.
-
-## Last deployed source and browser qualification
-
-The installed and pushed application source is
-`b61ebe1dd64d5ec5c652633999cedcd862001861`, version `1.0.2-491-gb61ebe1dd`,
-image `sha256:58e482c132a1f034409eb1433094bb79300a7cb08a8b65e3621cf8176a0fd9d5`.
-The canonical build verified 87 runtime products and 19 modules. The single-QA
-upgrade preserved all 1680 existing IR rows, 35 Vault entries, native SDK/cache
-state, workspace and configuration. Five installed CLI negative cases pass on
-this exact image. Source and upgrade proofs:
-`/var/tmp/aimee-ir-b61ebe1dd-source-qualification.json`,
-`/var/tmp/aimee-single-QA-next-upgrade-held/proof.json`, and
-`/var/tmp/aimee-ir-final-cli-negative-b61ebe1dd-held/proof.json`.
-
-All six final browser sends pass: retained historical Claude continuation,
-HTTP grounded file read and same-session follow-up, and retained native Codex
-file read, follow-up and same-session continuation after app restart. These are
-six browser sends, not a claim of six upstream model iterations. Actual provider
-telemetry confirms Opus5 and gpt-6.1-sol for the respective native calls.
-The final model-idle seal contains 1798 canonical IR rows with the original 1680
-unchanged. Four additional `resp_` histories are owned canonical Responses
-continuation checkpoints, verified against their actor, parent-session hash,
-ordered history and final count commit. They are not additional browser sends.
-
-The historical Claude call reused its existing connection and session. Five
-existing derived credential slots materialized through the normal OAuth owner;
-the imported source credential and other 30 slots remained exact. The retained
-Codex thread, scope and context were reused, with prior SDK file prefixes
-byte-exact and tool IDs preserved. The Claude SDK cache carries a fixed wrapper seed; authoritative
-history is supplied by the host. Its final upstream HTTP body was not captured,
-so cache comparison does not establish that final wire payload. No failed
-historical case was relabeled or silently retried.
-An earlier zero-send harness preflight and an overstrict seal assertion remain
-as separate artifacts. Receipts:
-`/var/tmp/aimee-live-single-QA-b61ebe1dd/qualification-index.json` and
-`/var/tmp/aimee-live-single-QA-b61ebe1dd/final-idle-proof.json`.
-
-The earlier f3 source exercised all 14 configured ChatGPT model/transport pairs
-(seven HTTP and seven native), with actual grounded reads and same-session
-follow-ups. The final b61 checks above exercise representative HTTP/native
-profiles and retained Claude/Codex history; they do not claim another complete
-14-profile run on b61. Source-owner equivalence records the precise intervening
-changes: `/var/tmp/aimee-ir-f3-b61-source-owner-equivalence.json`.
-
-Responsive replay passes nine views across 1280/390/320px: retained native and
-HTTP tools/usage plus the historical Claude error. GET/reload reproduces the
-same canonical history, with zero JavaScript errors, horizontal overflow or idle
-mutations. The passive HTTP case uses a retained f3 history on the b61 runtime,
-not the new six-send HTTP session. Proof:
-`/var/tmp/aimee-single-QA-next-passive-held/proof.json`.
-
-The isolated channel check passes exactly one new channel and one canonical
-Unicode/JSON-looking literal USER Message, with exact GET/SSE/reload agreement,
-correct sender, zero idle mutations and no model calls. The original attempt
-stopped at a disappearing onboarding tooltip before any channel write; its
-failure and zero-write custody are retained. The bounded helper correction
-reused the same absent channel/tag and performed the one authorized write pair.
-Proof: `/var/tmp/aimee-single-QA-next-channel-r2/proof.json`.
-Root visually inspected actual desktop and320px replay screenshots and the
-reloaded channel screenshot. Final custody preserves all1798 IR rows and all
-protected state, with only the exact authorized channel/message added. Native
-SDK/jobs remain idle. Proof:
-`/var/tmp/aimee-single-QA-final-passive-channel-custody/channel-after-proof.json`.
-Current live permission/question replies, cancel and steer flows were not
-exercised in this QA. Gateway platform delivery remains unwired, as documented below; no live platform delivery
-is claimed. Production promotion remains subject to `OWNERS.md`. All sections
-headed previous checkpoint below are historical evidence.
-
-## Current QA topology: one active instance and one Claude connection
-
-The user paused the larger IR/browser goal, requested consolidation of the
-duplicated QA connections, then requested resumed IR work with all agents. That cleanup keeps exactly one active QA
-instance: `aimee-ir-clean-361fefa7f` at `https://192.168.0.67:8451`. Its existing
-Claude connection is `ir-clean-361fefa7f-claude`, used by the existing default alias
-`ir-clean-361fefa7f-primary`. All15 ChatGPT aliases remain unchanged.
-
-The four other owned QA projects are offline fixtures, with all12 preserved
-containers stopped and restart policy `no`: `aimee-internal-ir-fresh-1b3875369`,
-`aimee-internal-ir-fresh-601aff47e`, `aimee-internal-ir-fresh-d8511ad41`, and
-`aimee-ir-clean-ab1059c6f`. Their histories, volumes, images, configuration,
-encrypted credentials and SDK caches are preserved. Their connection records are
-archival data, not active connections. Ports8445/8447/8449 are closed;8451 is live.
-
-Do not restart these fixtures, clone Claude credentials into another QA instance,
-or reuse old multi-instance build/test wrappers. Future authorized work uses the
-single active QA instance and its connection. Restoring an offline fixture needs
-an explicit topology decision that preserves one active connection. No `.100`
-or real user deployment was investigated or modified.
-
-Authoritative consolidation proof:
-`/var/tmp/aimee-five-qa-Claude-consolidate/proof.json`.
-The live guest manifest is
-`/opt/aimee-single-claude-consolidation-38f813090682565e-proof/active-archived-manifest.json`.
-The consolidation preserved all1680 then-existing active rows; archived last-verified counts are76,128,360
-and93 respectively. All protected configuration/cache/Vault/SDK/workspace hashes
-were checked, and archived live SQL histories/native/jobs were compared after
-app shutdown before stopping their databases. No images, volumes or data were
-removed. The separately approved renewal completed once on this existing active Claude
-connection: HTTP200 acknowledged, exactly one encrypted source entry changed,
-all34 other entries and all1680 prior IR rows/config/cache remained exact. No
-provider or model request was made during that cleanup. Proof:
-`/var/tmp/aimee-fresh-Claude-renewal-next-held/import-custody-proof.json`.
-The wrapper failure after acknowledgement is preserved separately; independent
-acknowledgement/custody checks pass and the POST was never retried.
-
-## Source-binding correction before deployment
-
-The e26 candidate image built successfully but was held before deployment after
-root found a real serialization loss: source/ASR hashes existed only in block.raw,
-which canonical serialization intentionally omits. The first review and JSON
-before/after equality did not establish preservation of those values and are
-explicitly superseded for that claim. The candidate image and original receipts
-remain retained; it was never installed on the active QA.
-
-The bounded correction uses existing typed Context revision fields on assets and
-ASR transcripts, with fixed source-binding namespaces, the full source SHA256 and
-epoch0. It preserves USER/unverified authority and typed file identity. Parsed
-messages retain these bindings after raw/original memory is freed; ASR validates
-the parsed source and rejects changed content. Unknown hashes remain unbound.
-Normal/sanitizer tests, actual C-to-Go acceptance and production gateway relink
-pass. Proof: `/var/tmp/aimee-ir-gateway-source-binding-proof.json`.
-
-Only unused Docker builder cache was pruned once to provide space for the
-corrected image. All images, volumes,15 container identities/configuration,
-renewed35-entry Vault,1680 IR history and native SDK/cache data remain exact.
-Proof: `/var/tmp/aimee-single-QA-builder-cache-prune/proof.json`. The corrected
-b61 image subsequently built, upgraded and passed the final model checks above.
-
-## Gateway source follow-up: implemented and qualified
-
-The gateway retains owned canonical model input and ordered model replies across
-its model RPC/collector boundary. Delivery routing, mirrors, TTS and status replies
-use ordinary domain text/attachment contracts; visible model output is projected
-at that delivery boundary. Platform JSON is released only after admission has
-taken ownership. Every attachment remains a separate hidden
-IMAGE/DOCUMENT file asset; ASR retains its original audio source and adds a
-separate unverified USER task transcript. Unreadable non-audio attachments do not
-discard valid text, and inert sidecars cannot change authority or role.
-
-The typed collector preserves ordered full messages, opaque state, media and
-exact tool JSON. Terminal execution cannot turn an unfinished snapshot into a
-completed answer. Human CLI/ACP displays and actual external adapters own text
-projection. The webhook freed-text bug is fixed and exercised by the real HMAC
-HTTP branch under sanitizers. Eight focused gateway suites pass normally and
-under ASan/UBSan; IR guards, format, full gateway linkage and thin CLI purity pass.
-Independent frozen-source review:
-`/var/tmp/aimee-ir-gateway-independent-final-review.json`.
-
-A separate confirmed MCP defect returned a fabricated delivery acknowledgement
-without a wired gateway owner. It now returns an explicit typed unavailable tool
-error. The question formatter retains long UTF8 input safely and its descriptor
-accurately assigns presentation to the client. Normal/sanitizer handler and
-forwarding tests pass. No messaging owner was added and no external platform was
-contacted. The standalone gateway entrypoint remains unwired; do not claim live
-Telegram/ntfy/webhook delivery. Positive collector coverage is the production
-HTTP-over-UDS canonical NDJSON fixture, not a fabricated scoped CLI chat call.
-
-The numeric embedding and OCR artifact caller audit found no confirmed existing
-conversation reconstruction in those specific producers; its exact domain-origin
-traces are in `/var/tmp/aimee-ir-embedding-seam-audit.md`. This is finite evidence,
-not an inference from a type name or a claim that numeric vectors are messages.
-
-The b61 installed image includes these repairs and the typed source-binding
-correction. Never restart archived fixtures or clone their credentials. All
-earlier failures remain sealed. Current validation is summarized above.
-
-## Historical evidence
-
-The full chronological handoff, including all previous failures and qualification
-limits, is retained in Git at `4f063a775:docs/IR_MIGRATION_HANDOFF.md`:
-
-```sh
-git show 4f063a775:docs/IR_MIGRATION_HANDOFF.md
-```
-
-The sealed proof index is `/var/tmp/aimee-ir-final-qualification-index.json`.
-It records qualification of the old implementation, not satisfaction of the
-code reduction requirement. The original archived7db Claude refusal remains a
-failure; current c28bb continuation success does not relabel it. Earlier HTTP
-empty finals, native empty finals and harness failures remain in their original
-receipts. The source-binding candidate e26 was held, not deployed. No history,
-credential, SDK cache, image or volume should be removed to improve diff counts.
+Do not investigate or modify `.100`, configure a KB instance, or perform WOL work
+for this migration. Preserve the existing QA data and credentials. Keep automatic
+reviews enabled; use registered Aimee Git commands or the established personally
+authenticated fallback, never connector writes or attribution trailers.
+Production promotion follows merge and the independent review requirements in
+[OWNERS.md](../OWNERS.md). Earlier detailed handoffs remain in Git history.
