@@ -45,10 +45,15 @@ def lock() -> dict:
 
 
 def tree_digest(root: Path) -> str:
+    # Ordered by case-sensitive path components, not by Path: Windows paths
+    # compare case-insensitively, which reordered the entries and changed the
+    # digest of the same tree.
+    rels = sorted((p.relative_to(root).as_posix()
+                   for p in root.rglob("*") if p.is_file() and not p.is_symlink()),
+                  key=lambda rel: rel.split("/"))
     entries = []
-    for path in sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink()):
-        rel = path.relative_to(root).as_posix()
-        entries.append(f"{rel}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n")
+    for rel in rels:
+        entries.append(f"{rel}\0{hashlib.sha256((root / rel).read_bytes()).hexdigest()}\n")
     return hashlib.sha256("".join(entries).encode()).hexdigest()
 
 
