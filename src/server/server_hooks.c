@@ -66,17 +66,66 @@ static memory_redirect_verdict_t memory_redirect_bus(const char *operation, cons
 /* Server-side central agent-memory interception. Classification and storage
  * both cross the Go memory data stage; the retired .md is never materialized.
  * Returns 2 (deny, with msg) when intercepted/rejected, else 0. */
+/* The home a harness memory path is relative to. The path describes the CLIENT's
+ * filesystem, so the server's own HOME is right only when both run as the same
+ * user on one machine; on CT100 it is /var/lib/aimee, which prefixes no client
+ * path, so every memory write was allowed through as a plain file (2026-10-27).
+ * Prefer the home the client forwards; for a client that does not forward one,
+ * take the part of the path before "/<projects_root>/". Only a trusted hook
+ * reaches here, and the value decides nothing but whether this caller's own
+ * write is classified as its memory file. */
+static int safe_home(const char *home, size_t len)
+{
+   if (!home || len == 0 || len >= 1024 || home[0] != '/')
+      return 0;
+   for (size_t i = 0; i + 1 < len; i++)
+      if (home[i] == '/' && home[i + 1] == '.')
+         return 0; /* no ".", ".." or hidden segment in a home */
+   return 1;
+}
+
+static const char *memory_intercept_home(const cJSON *req, const char *client, const char *path,
+                                         char *buf, size_t buf_len)
+{
+   const char *forwarded =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_home"));
+   if (forwarded && safe_home(forwarded, strlen(forwarded)))
+      return forwarded;
+   const hmem_scope_t *surface = hmem_scope_for_client(client);
+   if (path && surface && surface->projects_root && surface->projects_root[0])
+   {
+      char marker[512];
+      snprintf(marker, sizeof marker, "/%s/", surface->projects_root);
+      const char *at = strstr(path, marker);
+      if (at && safe_home(path, (size_t)(at - path)) && (size_t)(at - path) < buf_len)
+      {
+         memcpy(buf, path, (size_t)(at - path));
+         buf[at - path] = '\0';
+         return buf;
+      }
+   }
+   return getenv("HOME");
+}
+
 int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len)
 {
-   const char *home = getenv("HOME");
    if (!call || call->type != AIMEE_BLK_TOOL_USE || !call->tool_name ||
-       (call->tool_namespace && call->tool_namespace[0]) || !client || !client[0] || !home ||
-       !home[0] || !hmem_scope_for_client(client))
+       (call->tool_namespace && call->tool_namespace[0]) || !client || !client[0] ||
+       !hmem_scope_for_client(client))
       return 0;
    const char *tool = call->tool_name;
    const cJSON *ti = call->tool_input;
    if (!cJSON_IsObject(ti))
+      return 0;
+   char derived_home[1024];
+   cJSON *jpath = cJSON_GetObjectItemCaseSensitive(ti, "file_path");
+   if (!cJSON_IsString(jpath))
+      jpath = cJSON_GetObjectItemCaseSensitive(ti, "path");
+   const char *home =
+       memory_intercept_home(req, client, cJSON_IsString(jpath) ? jpath->valuestring : NULL,
+                             derived_home, sizeof derived_home);
+   if (!home || !home[0])
       return 0;
 
    if (strcmp(tool, "Bash") == 0)

@@ -1207,6 +1207,13 @@ static int handle_hooks(int argc, char **argv, int json_output)
           * which fails on a remote server (memory interception then no-ops). Audit
           * so this is observable rather than a silent miss. */
          hmem_audit("project-unresolved", NULL, NULL, "hooks pre");
+      /* The harness memory directory is under the CLIENT's home. A remote
+       * server's own HOME (/var/lib/aimee in the container) never prefixes a
+       * client path, so without this every memory write was allowed through
+       * as a plain file and none reached aimee memory. */
+      const char *client_home = getenv("HOME");
+      if (client_home && client_home[0] == '/')
+         cJSON_AddStringToObject(req, "harness_home", client_home);
    }
 
    cJSON *resp = cli_v1_dispatch(req, 5000);

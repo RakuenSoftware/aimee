@@ -113,15 +113,23 @@ func (r *Ring) ProduceCommit() {
 func (r *Ring) ConsumeBegin() []byte {
 	tail := atomic.LoadUint64(r.tail)
 	head := atomic.LoadUint64(r.head)
-	if head == tail {
+	// More than capacity unread means tail has passed head (the difference
+	// wrapped); reading on would replay stale slots forever. See bus_ring.c.
+	if head == tail || head-tail > uint64(r.capacity) {
 		return nil
 	}
 	return r.slot(tail)
 }
 
-// ConsumeCommit releases the slot for reuse (a release store on tail).
+// ConsumeCommit releases the slot for reuse (a release store on tail). With
+// nothing unread it does nothing: moving tail past head would leave the ring
+// never empty again.
 func (r *Ring) ConsumeCommit() {
 	tail := atomic.LoadUint64(r.tail)
+	head := atomic.LoadUint64(r.head)
+	if head == tail || head-tail > uint64(r.capacity) {
+		return
+	}
 	atomic.StoreUint64(r.tail, tail+1)
 }
 
