@@ -320,10 +320,13 @@ class CProcessBuildTests(unittest.TestCase):
                 exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor),
                 encoding="utf-8",
             )
-            (prefix / "aimee-coreConfig.cmake").write_text(
-                "add_library(aimee-core-event-bus-client INTERFACE IMPORTED)\n"
-                "add_library(aimee::aimee-core-event-bus-client ALIAS "
-                "aimee-core-event-bus-client)\n",
+            (prefix / "aimee-coreConfig.cmake").write_text("", encoding="utf-8")
+            ring = root / "prefix/lib/cmake/ouroboros-ring"
+            ring.mkdir(parents=True)
+            (ring / "ouroboros-ringConfig.cmake").write_text(
+                "add_library(ouroboros-ring-client INTERFACE IMPORTED)\n"
+                "add_library(ouroboros::ouroboros-ring-client ALIAS "
+                "ouroboros-ring-client)\n",
                 encoding="utf-8",
             )
             (prefix / "aimee-coreConfigVersion.cmake").write_text(
