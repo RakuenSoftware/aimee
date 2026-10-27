@@ -86,9 +86,9 @@ void git_module_fixture_start(void)
       die("open the grant manifest");
    fprintf(grant,
            "version=1\nprincipal_class=1\nprincipal_ref=13\nuid=self\n"
-           "executable=%s\nserve=%u,%u,%u,%u\n",
+           "executable=%s\nserve=%u,%u,%u,%u,%u\n",
            executable, AIMEE_GIT_EVENT_OPERATION, AIMEE_GIT_EVENT_REF_VALIDATE,
-           AIMEE_GIT_EVENT_CI_GRADE, AIMEE_GIT_EVENT_VERIFY_RUN);
+           AIMEE_GIT_EVENT_CI_GRADE, AIMEE_GIT_EVENT_VERIFY_RUN, AIMEE_GIT_EVENT_CRED_RESOLVE);
    if (fclose(grant) != 0)
       die("write the grant manifest");
 
