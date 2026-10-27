@@ -187,8 +187,12 @@ const void *bus_ring_consume_begin(const bus_ring_t *r)
    uint64_t tail = atomic_load_explicit(&r->shared->tail, memory_order_relaxed);
    uint64_t head = atomic_load_explicit(&r->shared->head, memory_order_acquire);
 
-   if (head == tail)
-      return NULL; /* empty */
+   /* More than capacity unread is not a ring state: it is a tail that has passed
+    * head (the difference wrapped). Reading on would hand out stale slots
+    * forever and keep the producer seeing a full ring; CT100 wedged that way on
+    * 2026-10-22/24/25 (head 49662, tail 24891717573). Report empty instead. */
+   if (head == tail || head - tail > r->capacity)
+      return NULL; /* empty, or an impossible index pair */
 
    return slot_at(r, tail);
 }
@@ -198,6 +202,12 @@ void bus_ring_consume_commit(const bus_ring_t *r)
    if (!r || !r->shared)
       return;
    uint64_t tail = atomic_load_explicit(&r->shared->tail, memory_order_relaxed);
+   uint64_t head = atomic_load_explicit(&r->shared->head, memory_order_acquire);
+   /* A commit with nothing unread would move tail past head, after which the
+    * ring never reads as empty again. Only a slot consume_begin handed out may
+    * be released. */
+   if (head == tail || head - tail > r->capacity)
+      return;
    /* Release: our reads of the slot happen-before the producer's acquire load
     * of this index, so it cannot overwrite bytes we are still reading. */
    atomic_store_explicit(&r->shared->tail, tail + 1, memory_order_release);

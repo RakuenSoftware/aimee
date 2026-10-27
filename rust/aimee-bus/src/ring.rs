@@ -157,7 +157,9 @@ impl Ring {
         assert!(out.len() >= self.slot_size, "buffer smaller than a slot");
         let tail = self.index(OFF_TAIL).load(Ordering::Relaxed);
         let head = self.index(OFF_HEAD).load(Ordering::Acquire);
-        if head == tail {
+        // More than capacity unread means tail has passed head (the difference
+        // wrapped); reading on would replay stale slots forever. See bus_ring.c.
+        if head == tail || head.wrapping_sub(tail) > self.capacity {
             return false;
         }
         // SAFETY: the slot at tail was published by the producer's release
@@ -170,8 +172,14 @@ impl Ring {
     }
 
     /// Release the oldest slot. Call only after a successful [`Ring::peek`].
+    /// With nothing unread it does nothing: moving tail past head would leave
+    /// the ring never empty again.
     pub(crate) fn advance(&self) {
         let tail = self.index(OFF_TAIL).load(Ordering::Relaxed);
+        let head = self.index(OFF_HEAD).load(Ordering::Acquire);
+        if head == tail || head.wrapping_sub(tail) > self.capacity {
+            return;
+        }
         self.index(OFF_TAIL)
             .store(tail.wrapping_add(1), Ordering::Release);
     }

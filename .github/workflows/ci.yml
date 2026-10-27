@@ -46,6 +46,11 @@ permissions:
   # A future write-capable job must opt in with its own minimal permissions.
   contents: read
 
+# Every Linux job names ubuntu-24.04 rather than ubuntu-latest. GitHub began moving
+# ubuntu-latest to Ubuntu 26 on 2026-10-19, and on that image sudo ignores -E (the
+# live-auth rigs lose AIMEE_STORE_URL), Playwright has no supported browser build,
+# and two unit tests fail that pass on 24.04 (PR #3064, 2026-10-27). Move to 26 as
+# one deliberate change, not by the label drifting under every PR.
 jobs:
   cppcheck-shards:
     name: Cppcheck (${{ matrix.shard }}/8)
@@ -194,7 +199,7 @@ jobs:
   # when an entire workflow is skipped by a path filter. Job-level skips report
   # success, so required checks remain mergeable for documentation-only PRs.
   change-scope:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # No job here had a timeout, so a hung one ran until GitHub's 6-hour
     # default. That is not hypothetical: five jobs on one run sat in_progress
     # for three hours, `lint` stuck the whole time on "Install clang-format" --
@@ -276,7 +281,7 @@ jobs:
   lint:
     needs: change-scope
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -344,7 +349,7 @@ jobs:
   frontend-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -432,7 +437,7 @@ jobs:
   go-unit-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -490,7 +495,7 @@ jobs:
   rust-bus-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -518,7 +523,7 @@ jobs:
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -642,7 +647,7 @@ jobs:
   build-integrity:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -691,7 +696,7 @@ jobs:
   unit-test-shards:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: unit-tests (${{ matrix.label }}/4)
     # The sqlite-shim registry runs ONCE, under ASan and UBSan. It used to run
@@ -840,7 +845,7 @@ jobs:
   unit-test-shards-pg:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     name: unit-tests-pg (${{ matrix.label }})
     # The live workflow database/API suite used to ride on shard 1, making it
@@ -970,7 +975,7 @@ jobs:
   postgres-knowledge-replay:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     name: postgres-knowledge-replay (${{ matrix.part }})
     strategy:
@@ -1190,7 +1195,7 @@ jobs:
   unit-tests:
     needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, rust-bus-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Confirm complete unit gate
@@ -1292,7 +1297,7 @@ jobs:
   identity-mint-e2e:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1378,7 +1383,7 @@ jobs:
   live-auth-rigs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1578,7 +1583,7 @@ jobs:
   p1-rls-gate:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1620,7 +1625,7 @@ jobs:
   integration-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_integration_ci
@@ -1737,7 +1742,7 @@ jobs:
   init-migrate-service-test:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -2001,7 +2006,7 @@ jobs:
   e2e-docker:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -2135,7 +2140,7 @@ jobs:
     # fresh `aimee` client against a native aimee-server holding the default
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_adoption_ci
@@ -2207,7 +2212,7 @@ jobs:
   treesitter:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -2241,7 +2246,7 @@ jobs:
     name: vault-pkcs11-token
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
