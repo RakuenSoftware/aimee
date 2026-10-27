@@ -293,3 +293,85 @@ void server_http_log_access(const char *method, const char *path, int status,
    else
       LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
 }
+
+/* Dispatch an NDJSON {method,params} body through server_dispatch() over a
+ * socketpair loopback and capture the response into resp. The write end is
+ * non-blocking so an oversize response can never hang the server thread; if the
+ * response is truncated it fails to parse and we return an error rather than a
+ * partial body. Returns an HTTP status; resp holds the JSON response body. */
+/* Upper bound on how long the dispatch bridge waits for a reply. Generous because
+ * a deferred handler may be running a real tool, and safe because it blocks one
+ * connection's own worker thread rather than the listener. */
+#define LOOPBACK_REPLY_TIMEOUT_SECS 30
+
+int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint32_t conn_caps)
+{
+   int sp[2];
+   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) != 0)
+      return err_json(resp, resp_cap, 500, "dispatch route unavailable");
+   int fl = fcntl(sp[1], F_GETFL, 0);
+   if (fl >= 0)
+      fcntl(sp[1], F_SETFL, fl | O_NONBLOCK);
+   /* A handler that answers inline writes its whole reply before the read below
+    * starts. Let the socket hold a full-size reply, so one that fits resp_cap is
+    * never cut off and one that does not reaches the cap check instead of stalling
+    * the writer into a partial, unparseable reply. */
+   int sndbuf = resp_cap > 0 ? resp_cap * 2 : 0;
+   if (sndbuf > 0)
+      (void)setsockopt(sp[1], SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+   server_conn_t fake;
+   memset(&fake, 0, sizeof(fake));
+   fake.fd = sp[1];
+   fake.capabilities = conn_caps;
+   /* WP-C.0 hop 2 of 3: the memset above zeroes the attested identity; restore
+    * the real one captured by handle_conn so every /v1 request — which only ever
+    * reaches server_dispatch through this synthesized conn — carries the caller's
+    * vault principal through to create_compute_ctx (same thread, identity live). */
+   server_http_identity_apply(&fake);
+   pthread_mutex_init(&fake.mutex, NULL);
+   pthread_cond_init(&fake.can_close, NULL);
+
+   size_t mlen = body_len > 0 ? (size_t)body_len : strlen(body);
+   server_dispatch(server_active_ctx(), &fake, body, mlen);
+
+   pthread_mutex_destroy(&fake.mutex);
+   pthread_cond_destroy(&fake.can_close);
+
+   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
+   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
+   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
+
+   size_t total = 0;
+   for (;;)
+   {
+      ssize_t n = read(sp[0], resp + total, (size_t)resp_cap - 1 - total);
+      if (n <= 0)
+         break;
+      total += (size_t)n;
+      /* server_dispatch emits one NDJSON response. The newline is the message
+       * boundary; another in-process reference may keep the socket alive, so
+       * waiting for process-wide EOF can otherwise hang this adapter. */
+      if (memchr(resp, '\n', total) != NULL)
+         break;
+      if (total >= (size_t)resp_cap - 1)
+         break;
+   }
+   close(sp[0]);
+   close(sp[1]);
+   resp[total] = '\0';
+   while (total > 0 && (resp[total - 1] == '\n' || resp[total - 1] == '\r'))
+      resp[--total] = '\0';
+   if (total == 0)
+      return err_json(resp, resp_cap, 502, "rpc produced no response");
+   if (total >= (size_t)resp_cap - 1)
+   {
+      char msg[96];
+      snprintf(msg, sizeof(msg), "rpc response exceeds the %d-byte relay limit", resp_cap);
+      return err_json(resp, resp_cap, 502, msg);
+   }
+   int status = server_http_declared_status(resp);
+   if (!status)
+      return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
+   return status;
+}

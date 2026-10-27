@@ -358,6 +358,52 @@ static void test_threaded_stress(void)
    printf("  threaded stress: %u items, every byte verified, none lost or torn\n", STRESS_ITEMS);
 }
 
+/* A consumer must never move past its producer. CT100 wedged on 2026-10-22,
+ * 2026-10-24 and 2026-10-25 with a ring at head 49662, tail 24891717573: once
+ * tail passed head, consume_begin kept handing out stale slots, every commit
+ * moved tail further, and the producer saw a full ring forever. */
+static void test_consumer_never_passes_producer(void)
+{
+   const uint32_t cap = 4, slot = 32;
+   size_t need = bus_ring_bytes(slot, cap);
+   void *mem = calloc(1, need);
+   bus_ring_t r;
+   must_result(bus_ring_init(mem, need, slot, cap, &r), BUS_RING_OK, "init");
+
+   /* A stray commit on an empty ring is ignored. */
+   bus_ring_consume_commit(&r);
+   bus_ring_consume_commit(&r);
+   must(bus_ring_count(&r) == 0, "commit on an empty ring does not move tail");
+   must(bus_ring_consume_begin(&r) == NULL, "still empty after stray commits");
+   must(bus_ring_produce_begin(&r) != NULL, "producer still has room");
+
+   /* A double commit releases one slot, not two. */
+   void *s = bus_ring_produce_begin(&r);
+   memset(s, 7, slot);
+   bus_ring_produce_commit(&r);
+   must(bus_ring_consume_begin(&r) != NULL, "one item readable");
+   bus_ring_consume_commit(&r);
+   bus_ring_consume_commit(&r);
+   must(bus_ring_count(&r) == 0, "double commit stops at head");
+   must(bus_ring_consume_begin(&r) == NULL, "empty after double commit");
+   for (uint32_t i = 0; i < cap; i++)
+   {
+      must(bus_ring_produce_begin(&r) != NULL, "full capacity usable after double commit");
+      bus_ring_produce_commit(&r);
+   }
+   must(bus_ring_produce_begin(&r) == NULL, "full at capacity, not before");
+
+   /* An index pair that is already impossible (tail past head) reads as empty
+    * and is never advanced further. */
+   r.shared->head = 49662;
+   r.shared->tail = 24891717573ULL;
+   must(bus_ring_consume_begin(&r) == NULL, "tail past head reads as empty");
+   bus_ring_consume_commit(&r);
+   must(r.shared->tail == 24891717573ULL, "tail past head is not advanced");
+
+   free(mem);
+}
+
 int main(void)
 {
    printf("test_bus_ring:\n");
@@ -365,6 +411,7 @@ int main(void)
    test_attach_validation();
    test_handle_isolates_geometry();
    test_full_empty_and_wrap();
+   test_consumer_never_passes_producer();
    test_threaded_stress();
    printf("test_bus_ring: OK\n");
    return 0;

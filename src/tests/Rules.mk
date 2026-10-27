@@ -615,6 +615,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
                $(TESTPREFIX)/unit-test-git-pr-stage \
+               $(TESTPREFIX)/unit-test-git-pr-failures-log \
                $(TESTPREFIX)/unit-test-git-cred-inject \
                $(TESTPREFIX)/unit-test-git-ssh-agent \
                $(TESTPREFIX)/unit-test-webchat-git-leak \
@@ -2286,6 +2287,15 @@ $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomou
 # stubbed inside the test TU (and abort), which is why no agent_exec object is
 # linked here.
 $(TESTPREFIX)/unit-test-git-pr-stage: $(OBJDIR)/tests/test_git_pr_stage.o \
+                                    $(OBJDIR)/modules/git/git_pr_api.o \
+                                    $(OBJDIR)/egress_credential_envelope.o \
+                                    $(OBJDIR)/modules/git/git_pr_ci_grade.o \
+                                    $(OBJDIR)/module_json_call.o \
+                                    $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+# What `git pr failures` returns from a job log: bounded, and cut at the failed step.
+$(TESTPREFIX)/unit-test-git-pr-failures-log: $(OBJDIR)/tests/test_git_pr_failures_log.o \
                                     $(OBJDIR)/modules/git/git_pr_api.o \
                                     $(OBJDIR)/egress_credential_envelope.o \
                                     $(OBJDIR)/modules/git/git_pr_ci_grade.o \
@@ -7282,3 +7292,37 @@ $(TESTPREFIX)/unit-test-runtime-state-lookup: $(OBJDIR)/tests/test_runtime_state
 
 $(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+# Test binaries outside TEST_TARGETS and BUS_TEST_TARGETS that still link the core
+# archives through L_MINIMAL, L_CORE or L_FULL. With no rule ordering them after the
+# archives, a parallel build linked them while `ar` was still writing: PR #3064's
+# CI (2026-10-27) failed with "cannot find build/obj/libaimee-core-codec.a" for
+# mock-mcp-server and unit-test-bus-guardrail-durability-emit. The list is every
+# such target `make -p` reported that day; a new one belongs here or in TEST_TARGETS.
+CORE_LIB_LINKED_EXTRA_TARGETS := $(addprefix $(TESTPREFIX)/, \
+   aimee-witness-boot-tpm-harness \
+   aimee-witness-cadence-harness \
+   compaction-retention-probe \
+   learning-implicit-replay \
+   mock-mcp-server \
+   p7-reseal-d2b-live \
+   p7-tpm2-harness \
+   p7-vault-rewrap-live \
+   unit-test-bus-guardrail-durability-emit \
+   unit-test-content-scope-pg \
+   unit-test-kb-audit-worm-pg \
+   unit-test-kb-bedrock-live \
+   unit-test-kb-mgmt-live \
+   unit-test-kb-p2b-egress-live \
+   unit-test-panel-provider \
+   unit-test-pgvec-generation-pg \
+   unit-test-server-management-listener-live \
+   unit-test-vault-pg \
+   unit-test-witness-canary-pg \
+   unit-test-witness-checkpoint-produce-pg \
+   unit-test-witness-emit-pg \
+   unit-test-witness-recovery-pg \
+   unit-test-witness-tamper-pg \
+   virtual-context-inspect)
+
+$(CORE_LIB_LINKED_EXTRA_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
