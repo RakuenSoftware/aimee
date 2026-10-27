@@ -144,11 +144,14 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
     # (platform, dstr) no longer carry it at all because CLIENT_C_FLAGS is fixed
     # before the ring include is added. The probe's 42 sources include no ring
     # header directly. Drop exactly the ring's include flag, wherever the
-    # installation it names lives, and the old core one; every other flag, input
-    # and command must still match.
+    # installation it names lives, and the old core one.
+    # Oct 27: GCC builds add -fno-ipa-bit-cp to compile and LTO link (GCC 15.2
+    # miscompiles a live int parameter as constant 0). It disables one
+    # optimization pass and adds no input; drop exactly that token.
+    # Every other flag, input and command must still match.
     def without_ring_include(plan: list[str]) -> list[str]:
         return [" ".join(token for token in line.split()
-                         if token != "-Icore/event_bus/include"
+                         if token not in ("-Icore/event_bus/include", "-fno-ipa-bit-cp")
                          and not RING_INCLUDE_FLAG.fullmatch(token))
                 for line in plan]
     return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))

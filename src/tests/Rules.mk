@@ -1026,6 +1026,34 @@ endif
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-core-base64
 $(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
+# Binaries outside TEST_TARGETS whose link line names the core archives (via
+# L_CORE/L_FULL/TEST_L_FLAGS and friends) need them built first too; without
+# this a parallel build could link before the archive existed.
+CORE_LIB_LINKED_EXTRAS = $(TESTPREFIX)/mock-mcp-server \
+                         $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit \
+                         $(TESTPREFIX)/learning-implicit-replay \
+                         $(TESTPREFIX)/aimee-witness-cadence-harness \
+                         $(TESTPREFIX)/p7-tpm2-harness \
+                         $(TESTPREFIX)/p7-vault-rewrap-live \
+                         $(TESTPREFIX)/virtual-context-inspect \
+                         $(TESTPREFIX)/unit-test-panel-provider \
+                         $(TESTPREFIX)/compaction-retention-probe \
+                         $(TESTPREFIX)/p7-reseal-d2b-live \
+                         $(TESTPREFIX)/aimee-witness-boot-tpm-harness \
+                         $(TESTPREFIX)/unit-test-kb-mgmt-live \
+                         $(TESTPREFIX)/unit-test-kb-bedrock-live \
+                         $(TESTPREFIX)/unit-test-witness-checkpoint-produce-pg \
+                         $(TESTPREFIX)/unit-test-witness-emit-pg \
+                         $(TESTPREFIX)/unit-test-content-scope-pg \
+                         $(TESTPREFIX)/unit-test-server-management-listener-live \
+                         $(TESTPREFIX)/unit-test-witness-recovery-pg \
+                         $(TESTPREFIX)/unit-test-witness-tamper-pg \
+                         $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
+                         $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
+                         $(TESTPREFIX)/unit-test-pgvec-generation-pg \
+                         $(TESTPREFIX)/unit-test-vault-pg \
+                         $(TESTPREFIX)/unit-test-witness-canary-pg
+$(CORE_LIB_LINKED_EXTRAS): | $(CORE_CODEC_LIB) $(CORE_CONNECTION_LIB)
 
 .PHONY: unit-test-communication
 unit-test-communication: $(TESTPREFIX)/unit-test-communication
@@ -1147,6 +1175,9 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	@# printed "Unit test failures:" followed by NOTHING, which is the least
 	@# useful possible output: a red suite that will not say what went red, so the
 	@# whole run has to be repeated serially just to recover the name.
+	@# Each marker also carries the tail of that test's own output: in a
+	@# parallel run its full log is interleaved far above the summary, and
+	@# the summary is what the end of a CI log shows.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	fd="$$(mktemp -d /tmp/autf.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
@@ -1174,7 +1205,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	  done; \
 	else \
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
-	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; rm -f "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
+	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; { printf "FAILED: %s (exit %s), last lines:\\n" "$$t" "$$rc"; tail -n 40 "$$log" | sed "s/^/    /"; } >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; rm -f "$$log"; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
 	    if ! cat "$$fd"/failure.* >&2 2>/dev/null; then \
 	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \

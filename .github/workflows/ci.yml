@@ -762,8 +762,13 @@ jobs:
           # deterministic root-owned copies so the positive path exercises the
           # production trust walk without depending on /usr/bin ownership/mode.
           sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          # Built from the repo, not copied from /usr/bin: the helper is exec'd
+          # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
-            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+            gcc -O2 -Wall -Werror -DFIXTURE_$(echo "$helper" | tr a-z A-Z) \
+              -o "$RUNNER_TEMP/aimee-fixture-$helper" \
+              src/tests/support/workload_helper_fixture.c
+            sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
               "/run/aimee-test-helpers/$helper"
           done
           sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
@@ -901,8 +906,13 @@ jobs:
           # trust-walk tests assert on ownership and mode, which runner image
           # metadata does not guarantee.
           sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          # Built from the repo, not copied from /usr/bin: the helper is exec'd
+          # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
-            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+            gcc -O2 -Wall -Werror -DFIXTURE_$(echo "$helper" | tr a-z A-Z) \
+              -o "$RUNNER_TEMP/aimee-fixture-$helper" \
+              src/tests/support/workload_helper_fixture.c
+            sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
               "/run/aimee-test-helpers/$helper"
           done
           printf '%s\n' 'deterministic root-owned test fixture' | \

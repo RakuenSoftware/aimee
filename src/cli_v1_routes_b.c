@@ -597,33 +597,36 @@ static const struct
    const char *first;  /* what a bare first word means, NULL if none */
    const char *second; /* what a bare second word means, NULL if none */
    int rest_files;     /* remaining bare words accumulate into `files` */
+   const char *usage;  /* printed for a bare call when the first word is required */
 } GIT_CLI[] = {
-    {"status", "git_status", NULL, NULL, 0},
-    {"commit", "git_commit", "message", NULL, 1},
-    {"push", "git_push", NULL, NULL, 0},
-    {"pull", "git_pull", NULL, NULL, 0},
-    {"fetch", "git_fetch", "remote", NULL, 0},
-    {"branch", "git_branch", "action", "name", 0},
-    {"log", "git_log", NULL, NULL, 0},
-    {"diff", "git_diff_summary", "ref", NULL, 1},
-    {"diff_summary", "git_diff_summary", "ref", NULL, 1},
-    {"pr", "git_pr", "action", NULL, 0},
-    {"issue", "git_issue", "action", NULL, 0},
-    {"clone", "git_clone", "url", "path", 0},
-    {"stash", "git_stash", "action", NULL, 0},
-    {"tag", "git_tag", "action", "name", 0},
-    {"reset", "git_reset", "ref", "mode", 0},
-    {"restore", "git_restore", NULL, NULL, 1},
-    {"add", "git_add", NULL, NULL, 1},
-    {"merge", "git_merge", "ref", NULL, 0},
-    {"rebase", "git_rebase", "base", NULL, 0},
-    {"sync", "git_sync", "base", NULL, 0},
-    {"cherry-pick", "git_cherry_pick", "ref", NULL, 0},
-    {"cherry_pick", "git_cherry_pick", "ref", NULL, 0},
-    {"revert", "git_revert", "ref", NULL, 0},
-    {"switch", "git_switch", "ref", NULL, 0},
-    {"checkout", "git_checkout", NULL, NULL, 1},
-    {NULL, NULL, NULL, NULL, 0},
+    {"status", "git_status", NULL, NULL, 0, NULL},
+    {"commit", "git_commit", "message", NULL, 1, "usage: aimee git commit <message> [files...]\n"},
+    {"push", "git_push", NULL, NULL, 0, NULL},
+    {"pull", "git_pull", NULL, NULL, 0, NULL},
+    {"fetch", "git_fetch", "remote", NULL, 0, NULL},
+    {"branch", "git_branch", "action", "name", 0,
+     "usage: aimee git branch <list|create|switch|claim|delete|orphan> [name] [key=value ...]\n"},
+    {"log", "git_log", NULL, NULL, 0, NULL},
+    {"diff", "git_diff_summary", "ref", NULL, 1, NULL},
+    {"diff_summary", "git_diff_summary", "ref", NULL, 1, NULL},
+    {"pr", "git_pr", "action", NULL, 0,
+     "usage: aimee git pr <action> [key=value ...]; actions and keys: aimee get-help git\n"},
+    {"issue", "git_issue", "action", NULL, 0, NULL},
+    {"clone", "git_clone", "url", "path", 0, "usage: aimee git clone <url> [path]\n"},
+    {"stash", "git_stash", "action", NULL, 0, NULL},
+    {"tag", "git_tag", "action", "name", 0, NULL},
+    {"reset", "git_reset", "ref", "mode", 0, NULL},
+    {"restore", "git_restore", NULL, NULL, 1, NULL},
+    {"add", "git_add", NULL, NULL, 1, NULL},
+    {"merge", "git_merge", "ref", NULL, 0, NULL},
+    {"rebase", "git_rebase", "base", NULL, 0, NULL},
+    {"sync", "git_sync", "base", NULL, 0, NULL},
+    {"cherry-pick", "git_cherry_pick", "ref", NULL, 0, NULL},
+    {"cherry_pick", "git_cherry_pick", "ref", NULL, 0, NULL},
+    {"revert", "git_revert", "ref", NULL, 0, NULL},
+    {"switch", "git_switch", "ref", NULL, 0, "usage: aimee git switch <ref> [path=DIR]\n"},
+    {"checkout", "git_checkout", NULL, NULL, 1, NULL},
+    {NULL, NULL, NULL, NULL, 0, NULL},
 };
 
 /* Bare words that mean an action rather than a ref, for the operations that can
@@ -696,6 +699,11 @@ static cJSON *marshal_git_cli(int argc, char **argv)
               "branch log diff pr issue clone stash tag reset restore verify add merge "
               "rebase sync cherry-pick revert switch checkout\n",
               sub);
+      return NULL;
+   }
+   if (argc == 1 && GIT_CLI[row].usage)
+   {
+      fputs(GIT_CLI[row].usage, stderr);
       return NULL;
    }
 
