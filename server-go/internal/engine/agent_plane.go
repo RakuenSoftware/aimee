@@ -21,6 +21,8 @@ var (
 	ErrDelegateUnassignedExpired    = delegate.ErrDelegateUnassignedExpired
 	ErrDelegateCancelUnacknowledged = delegate.ErrDelegateCancelUnacknowledged
 	ErrDelegateTerminal             = delegate.ErrDelegateTerminal
+	ErrDelegateOutputLimit          = delegate.ErrDelegateOutputLimit
+	ErrDelegateCostLimitUnsupported = delegate.ErrDelegateCostLimitUnsupported
 	ErrDelegateReplayUnavailable    = delegate.ErrDelegateReplayUnavailable
 	ErrDelegateCapacityDeadline     = delegate.ErrDelegateCapacityDeadline
 	ErrDelegateExecutionDeadline    = delegate.ErrDelegateExecutionDeadline

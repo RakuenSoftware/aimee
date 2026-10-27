@@ -6,9 +6,6 @@
 
 static void test_builtin_profiles_registered(void)
 {
-   model_provider_t *providers[16];
-   int n = model_provider_list(providers, 16);
-   assert(n >= 6); /* was 7; the gemini profile is gone */
    assert(model_provider_get("openai") != NULL);
    assert(model_provider_get("anthropic") != NULL);
    assert(model_provider_get("openrouter") != NULL);

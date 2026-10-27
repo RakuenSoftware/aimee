@@ -143,19 +143,18 @@ static void async_slot_release(int slot)
 
 /* --- tool.execute worker --- */
 
-static char *tool_execute_arguments(const aimee_tool_t *definition, const char *wire)
+static cJSON *tool_execute_arguments(const aimee_tool_t *definition, const char *wire)
 {
    cJSON *raw = aimee_ir_json_parse_frame(wire, strlen(wire));
    cJSON *canonical = cJSON_IsObject(raw) ? tool_args_canonicalize(definition->schema, raw) : NULL;
-   char *result = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
-   cJSON_Delete(canonical);
    cJSON_Delete(raw);
-   return result;
+   return canonical;
 }
 
 static void tool_execute_worker(void *arg)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
+   char *arguments_view = NULL;
    compute_ctx_begin_budget(cctx);
    cJSON *req = cctx->req;
 
@@ -177,12 +176,14 @@ static void tool_execute_worker(void *arg)
    if (!tool[0])
    {
       compute_error(cctx, "missing tool");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
    if (!is_safe_id(sid))
    {
       compute_error(cctx, "invalid session_id");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
@@ -190,6 +191,7 @@ static void tool_execute_worker(void *arg)
    if (jargs && !cJSON_IsString(jargs))
    {
       compute_error(cctx, "tool arguments must be a JSON string");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
@@ -197,33 +199,35 @@ static void tool_execute_worker(void *arg)
       args = "{}";
    aimee_tool_t admitted = {0};
    char admission_error[256] = {0}, attempt[33];
-   char *canonical = NULL;
+   cJSON *canonical = NULL;
    if (agent_tools_execution_definition(tool, &admitted) != 0 ||
        !(canonical = tool_execute_arguments(&admitted, args)) ||
-       tool_validate_ir(&admitted, canonical, admission_error, sizeof admission_error) != 0 ||
-       directive_check_tool(tool, canonical, admission_error, sizeof admission_error) != 0 ||
+       !(arguments_view = cJSON_PrintUnformatted(canonical)) ||
+       tool_validate_ir(&admitted, arguments_view, admission_error, sizeof admission_error) != 0 ||
+       directive_check_tool(tool, arguments_view, admission_error, sizeof admission_error) != 0 ||
        platform_random_hex(attempt, 32) != 0)
    {
-      free(canonical);
+      cJSON_Delete(canonical);
       aimee_tool_free(&admitted);
       compute_error(cctx, admission_error[0]
                               ? admission_error
                               : "tool is not in current execution catalog or admission failed");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
-   cJSON *canonical_value = cJSON_CreateString(canonical);
-   free(canonical);
+   cJSON *canonical_value = canonical;
    cJSON_DeleteItemFromObjectCaseSensitive(req, "arguments");
    if (!canonical_value || !cJSON_AddItemToObject(req, "arguments", canonical_value))
    {
       cJSON_Delete(canonical_value);
       aimee_tool_free(&admitted);
       compute_error(cctx, "cannot retain admitted tool arguments");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
-   args = canonical_value->valuestring;
+   args = arguments_view;
 
    /* If the tool's cwd is a registered `detached` workspace, bind that workspace's
     * provider so the tool's file/exec ops marshal to the serving client (just as
@@ -237,6 +241,7 @@ static void tool_execute_worker(void *arg)
       aimee_tool_free(&admitted);
       compute_error(cctx, "workspace: a remote session must act within a registered `detached` "
                           "workspace; raw server-side path not accepted");
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
@@ -278,6 +283,7 @@ static void tool_execute_worker(void *arg)
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
       aimee_tool_free(&admitted);
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
@@ -298,6 +304,7 @@ static void tool_execute_worker(void *arg)
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
       aimee_tool_free(&admitted);
+      free(arguments_view);
       compute_ctx_free(cctx);
       return;
    }
@@ -308,7 +315,8 @@ static void tool_execute_worker(void *arg)
     * first-class API; capability-limited remote callers do not inherit it. */
    agent_tools_set_effect_authorized(trusted_local);
    int is_error = 1;
-   char *result = dispatch_tool_call_ir_ctx_status(&admitted, args, timeout_ms, &is_error);
+   char *result =
+       dispatch_tool_call_ir_ctx_status(&admitted, canonical_value, timeout_ms, &is_error);
    agent_tools_set_effect_authorized(0);
    result = policy_annotate_indexed(tool, args, attempt, result);
 
@@ -322,6 +330,7 @@ static void tool_execute_worker(void *arg)
    free(result);
    aimee_tool_free(&admitted);
    compute_respond(cctx, resp);
+   free(arguments_view);
    compute_ctx_free(cctx);
 }
 
@@ -583,12 +592,12 @@ static void chat_stream_worker_pooled(void *arg)
    atomic_int *request_cancel = NULL;
    if (delta_session[0])
    {
-      cancel_entry = turn_registry_publish(delta_session, delta_turn);
+      cancel_entry = turn_registry_publish(delta_session, cctx->ir_turn);
       if (cancel_entry)
       {
          cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
          request_cancel = &cancel_entry->cancel;
-         (void)ti_turn_manifest_init(&cancel_entry->integrity, delta_turn, delta_session,
+         (void)ti_turn_manifest_init(&cancel_entry->integrity, cctx->ir_turn, delta_session,
                                      delta_session);
          (void)ti_turn_transition(&cancel_entry->integrity, TI_TURN_CONTEXTUALIZED,
                                   "async turn admitted");
@@ -659,12 +668,11 @@ static void chat_stream_worker_pooled(void *arg)
    /* Accepted steering is either dispatched once with its actual message or
     * retained as an explicit failed admission. It must never resend the old
     * request after a clone/replacement failure, nor vanish on a busy handoff. */
-   char *steer_msg = NULL;
+   cJSON *steer_msg = NULL;
    if (sid[0] && chat_steer_take(sid, &steer_msg) && steer_msg)
    {
       int dispatched = 0;
-      char *clean = chat_sanitize_message_transcript_tail(steer_msg);
-      if (steer_tmpl && !server_chat_ir_replace_steer(steer_tmpl, clean ? clean : steer_msg))
+      if (steer_tmpl && !server_chat_ir_replace_steer(steer_tmpl, steer_msg))
       {
          /* Only the saved attested request context can authorize this input. */
          request_context_restore(&steer_request);
@@ -678,7 +686,6 @@ static void chat_stream_worker_pooled(void *arg)
                compute_ctx_free(nctx);
          }
       }
-      free(clean);
       if (!dispatched)
       {
          int recorded = !server_chat_ir_reject_steer(sid, steer_principal, steer_msg);
@@ -689,7 +696,7 @@ static void chat_stream_worker_pooled(void *arg)
                              "{\"status\":\"failed\",\"durable\":false,\"reason\":\"continuation_"
                              "not_dispatched\"}");
       }
-      free(steer_msg);
+      cJSON_Delete(steer_msg);
    }
    cJSON_Delete(steer_tmpl);
    request_context_snapshot_clear(&steer_request);
@@ -871,6 +878,8 @@ static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
    }
    if (strcmp(cctx->presence_session, sid) || !presence_turn_host_own(sid, cctx->presence_turn_id))
       goto fail;
+   if (server_chat_ir_prepare_turn(cctx))
+      goto fail;
    if (g_chat_dispatch_override)
    {
       if (g_chat_dispatch_override(cctx))
@@ -940,8 +949,9 @@ static presence_turn_result_t retry_after_reclaiming_abandoned_turn(const char *
 
    /* Not under any presence lock: the registry mutex is a leaf and callers may
     * not hold a presence lock across a registry call (turn_registry.h). */
-   turn_entry_t *owner = turn_registry_find(session_id);
-   if (owner && strcmp(owner->turn_id, stuck) == 0)
+   /* Registry identity is canonical; the presence lease has its own transport
+    * identity. One published worker per session remains evidence of ownership. */
+   if (turn_registry_find(session_id))
       return PRESENCE_TURN_BUSY; /* a worker owns it; it is slow, not lost */
 
    if (!presence_turn_reclaim(session_id, stuck))
@@ -985,6 +995,22 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    free(clean_message);
    if (!cctx)
       return server_send_error(conn, "out of memory", NULL);
+
+   /* Legacy external CLI callers enter here as text; the queued request owns
+    * canonical IR from this boundary onward. Browser callers already send IR. */
+   cJSON *input = cJSON_GetObjectItemCaseSensitive(cctx->req, "message");
+   if (cJSON_IsString(input))
+   {
+      aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = input->valuestring};
+      aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+      cJSON *canonical = aimee_ir_message_json(&message);
+      if (!canonical || !cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "message", canonical))
+      {
+         cJSON_Delete(canonical);
+         compute_ctx_free(cctx);
+         return server_send_error(conn, "cannot admit canonical user input", NULL);
+      }
+   }
 
    /* (see retry_after_reclaiming_abandoned_turn above)
     *

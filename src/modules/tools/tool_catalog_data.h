@@ -24,7 +24,6 @@ static const aimee_tool_catalog_entry_t aimee_tool_catalog[] = {
    {"create_prospective_memory", {2u, 2u, 2u}},
    {"dashboard_metrics", {1u, 1u, 1u}},
    {"delegate", {3u, 2u, 34u}},
-   {"delegate_reply", {4u, 2u, 66u}},
    {"delegate_status", {1u, 1u, 1u}},
    {"describe_tool", {1u, 1u, 1u}},
    {"diagnose_evidence", {4u, 2u, 66u}},

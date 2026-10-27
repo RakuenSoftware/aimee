@@ -197,7 +197,7 @@ func (m *Module) session() *Client {
 	return m.client
 }
 
-// Handle dispatches a stage call. It is the bus.ModuleHandler for this module.
+// Handle dispatches a stage call. It is the ring.ModuleHandler for this module.
 func (m *Module) Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	switch invocation.StageID {
 	case StageDeclareCommands:

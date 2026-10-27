@@ -23,6 +23,98 @@
 #include "support/ir_response_fixture.h"
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
+
+#include "support/typed_catalog_fixture.h"
+static aimee_message_t fixture_context(const char *system)
+{
+   aimee_message_t context = {.role = strdup("system")};
+   assert(context.role);
+   if (system && system[0])
+   {
+      context.blocks = calloc(1, sizeof *context.blocks);
+      assert(context.blocks);
+      context.n_blocks = 1;
+      context.blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(system)};
+      assert(context.blocks[0].text);
+      aimee_ir_block_set_context(context.blocks, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   }
+   return context;
+}
+static cJSON *fixture_build_catalog(const agent_t *agent, const cJSON *messages,
+                                    const aimee_request_t *catalog, const char *system, int maximum,
+                                    double temperature, aimee_wire_t wire, int delegate,
+                                    aimee_request_t *dispatch)
+{
+   aimee_message_t context = fixture_context(system);
+   cJSON *result = agent_build_seeded_request_ir(agent, NULL, messages, catalog, &context, maximum,
+                                                 temperature, wire, delegate, 1, dispatch);
+   aimee_message_free(&context);
+   return result;
+}
+static int fixture_prepare_catalog(const agent_t *agent, const cJSON *messages,
+                                   const aimee_request_t *catalog, const char *system, int maximum,
+                                   double temperature, aimee_wire_t wire, int delegate,
+                                   aimee_request_t *out)
+{
+   aimee_message_t context = fixture_context(system);
+   int result = agent_prepare_seeded_request_ir(agent, NULL, messages, catalog, &context, maximum,
+                                                temperature, wire, delegate, out);
+   aimee_message_free(&context);
+   return result;
+}
+static cJSON *fixture_build_request(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                                    const char *system, int maximum, double temperature,
+                                    aimee_wire_t wire, int delegate, aimee_request_t *dispatch)
+{
+   aimee_request_t catalog = {0};
+   if (fixture_catalog_import(tools, wire, &catalog))
+      return NULL;
+   cJSON *result = fixture_build_catalog(agent, messages, &catalog, system, maximum, temperature,
+                                         wire, delegate, dispatch);
+   aimee_request_free(&catalog);
+   return result;
+}
+static int fixture_prepare_request(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                                   const char *system, int maximum, double temperature,
+                                   aimee_wire_t wire, int delegate, aimee_request_t *out)
+{
+   aimee_request_t catalog = {0};
+   if (fixture_catalog_import(tools, wire, &catalog))
+      return -1;
+   int result = fixture_prepare_catalog(agent, messages, &catalog, system, maximum, temperature,
+                                        wire, delegate, out);
+   aimee_request_free(&catalog);
+   return result;
+}
+/* Native fixture data enters the same explicit history adapter as external clients. */
+static cJSON *build_profile(const agent_t *agent, cJSON *messages, cJSON *tools, const char *system,
+                            int maximum, double temperature, aimee_wire_t wire)
+{
+   cJSON *history = aimee_frontend_history_import(messages, wire);
+   assert(history);
+   cJSON *request =
+       fixture_build_request(agent, history, tools, system, maximum, temperature, wire, 0, NULL);
+   cJSON_Delete(history);
+   return request;
+}
+static cJSON *build_chat_profile(const agent_t *agent, cJSON *messages, cJSON *tools, int maximum,
+                                 double temperature)
+{
+   return build_profile(agent, messages, tools, NULL, maximum, temperature, AIMEE_WIRE_OPENAI_CHAT);
+}
+static cJSON *build_responses_profile(const agent_t *agent, cJSON *messages, cJSON *tools,
+                                      const char *system)
+{
+   return build_profile(agent, messages, tools, system, 0, -1, AIMEE_WIRE_RESPONSES);
+}
+static cJSON *build_anthropic_profile(const agent_t *agent, cJSON *messages, cJSON *tools,
+                                      const char *system, int maximum, double temperature)
+{
+   return build_profile(agent, messages, tools, system, maximum, temperature, AIMEE_WIRE_ANTHROPIC);
+}
 
 static cJSON *make_dummy_tool(void)
 {
@@ -45,7 +137,7 @@ static void test_build_request_openai_omits_empty_tools(void)
    snprintf(agent.model, sizeof(agent.model), "gpt-4o-mini");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "tools") == NULL);
    assert(cJSON_GetObjectItem(req, "parallel_tool_calls") == NULL);
@@ -69,7 +161,7 @@ static void test_build_request_openai_qwen_profile(void)
    cJSON_AddStringToObject(user, "content", "hello");
    cJSON_AddItemToArray(messages, user);
    cJSON *tools = make_dummy_tool();
-   cJSON *req = agent_build_request_openai(&agent, messages, tools, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, tools, 1024, 0.0);
    assert(req != NULL);
    assert(cJSON_IsArray(cJSON_GetObjectItem(req, "tools")));
    cJSON *ptc = cJSON_GetObjectItem(req, "parallel_tool_calls");
@@ -98,7 +190,7 @@ static void test_build_request_openai_qwen_no_tools_disables_thinking(void)
    cJSON_AddStringToObject(user, "role", "user");
    cJSON_AddStringToObject(user, "content", "hello");
    cJSON_AddItemToArray(messages, user);
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "tools") == NULL);
    assert(cJSON_GetObjectItem(req, "parallel_tool_calls") == NULL);
@@ -122,7 +214,7 @@ static void test_build_request_openai_standard_tools(void)
 
    cJSON *messages = cJSON_CreateArray();
    cJSON *tools = make_dummy_tool();
-   cJSON *req = agent_build_request_openai(&agent, messages, tools, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, tools, 1024, 0.0);
    assert(req != NULL);
    assert(cJSON_IsArray(cJSON_GetObjectItem(req, "tools")));
    assert(cJSON_GetObjectItem(req, "parallel_tool_calls") == NULL);
@@ -141,7 +233,7 @@ static void test_build_request_openrouter_routing_hint(void)
    snprintf(agent.model, sizeof(agent.model), "anthropic/claude-opus-4.7");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req != NULL);
 
    cJSON *route = cJSON_GetObjectItem(req, "route");
@@ -170,7 +262,7 @@ static void test_build_request_openai_mistral_vibe_options(void)
    snprintf(agent.model, sizeof(agent.model), "mistral-vibe-cli-latest");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req != NULL);
 
    cJSON *effort = cJSON_GetObjectItem(req, "reasoning_effort");
@@ -197,7 +289,7 @@ static void test_build_request_openai_minimax_options(void)
    snprintf(agent.model, sizeof(agent.model), "MiniMax-M2.7");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req != NULL);
 
    cJSON *split = cJSON_GetObjectItem(req, "reasoning_split");
@@ -208,7 +300,7 @@ static void test_build_request_openai_minimax_options(void)
    /* MiniMax-M3 (and any non-M2.7 MiniMax model) must NOT get reasoning_split —
     * the current MiniMax API rejects it with HTTP 400. */
    snprintf(agent.model, sizeof(agent.model), "MiniMax-M3");
-   cJSON *req_m3 = agent_build_request_openai(&agent, messages, NULL, 1024, 0.0);
+   cJSON *req_m3 = build_chat_profile(&agent, messages, NULL, 1024, 0.0);
    assert(req_m3 != NULL);
    assert(cJSON_GetObjectItem(req_m3, "reasoning_split") == NULL);
    cJSON_Delete(req_m3);
@@ -237,7 +329,7 @@ static void test_openai_recommended_sampling_applies_map(void)
    agent.recommended_sampling = 1;
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, -1);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, -1);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.6);
    assert(cJSON_GetObjectItem(req, "top_p")->valuedouble == 0.95);
@@ -257,7 +349,7 @@ static void test_openai_recommended_sampling_ministral_temperature(void)
    agent.recommended_sampling = 1;
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, -1);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, -1);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.05);
    assert(cJSON_GetObjectItem(req, "top_p") == NULL);
@@ -276,7 +368,7 @@ static void test_openai_sampling_caller_temperature_wins(void)
    agent.recommended_sampling = 1;
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.42);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.42);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.42);
    cJSON_Delete(req);
@@ -292,7 +384,7 @@ static void test_openai_sampling_opt_out_unchanged(void)
    snprintf(agent.model, sizeof(agent.model), "Qwen_Qwen3.6-35B-A3B-Q5_K_M.gguf");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, -1);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, -1);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature") == NULL);
    assert(cJSON_GetObjectItem(req, "top_p") == NULL);
@@ -312,7 +404,7 @@ static void test_openai_sampling_unknown_opt_in_unchanged(void)
    agent.recommended_sampling = 1;
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, -1);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, -1);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature") == NULL);
    assert(cJSON_GetObjectItem(req, "top_p") == NULL);
@@ -336,7 +428,7 @@ static void test_openai_provider_fixed_temperature_fallback(void)
    snprintf(agent.model, sizeof(agent.model), "unknown-local-model");
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, -1);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, -1);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.0);
    cJSON_Delete(req);
@@ -360,7 +452,7 @@ static void test_openai_required_temperature_overrides_caller(void)
    assert(model_sampling_required_temperature(&agent) == 1.0);
 
    cJSON *messages = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.2);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 1024, 0.2);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 1.0);
    cJSON_Delete(req);
@@ -374,7 +466,7 @@ static void test_openai_required_temperature_overrides_caller(void)
    assert(model_sampling_required_temperature(&other) < 0);
 
    messages = cJSON_CreateArray();
-   req = agent_build_request_openai(&other, messages, NULL, 1024, 0.2);
+   req = build_chat_profile(&other, messages, NULL, 1024, 0.2);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.2);
    cJSON_Delete(req);
@@ -466,7 +558,7 @@ static void test_parse_response_openai_rejects_invalid_tool_arguments(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   assert(agent_ir_decode_json_response(root, 0, -1, NULL, &out) != 0);
+   assert(agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out) != 0);
    assert(aimee_ir_response_has_tool_use(&out) == 0 && aimee_ir_response_tool_count(&out) == 0);
    assert(out.n_content == 0 && out.content == NULL);
 
@@ -484,7 +576,7 @@ static void test_parse_response_captures_provider_model(void)
    cJSON *root = cJSON_Parse(oai);
    assert(root != NULL);
    aimee_response_t p;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &p);
    assert(strcmp(p.model, "gpt-4o-2024-11-20") == 0);
    aimee_response_free(&p);
    cJSON_Delete(root);
@@ -493,7 +585,7 @@ static void test_parse_response_captures_provider_model(void)
                      "\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
    root = cJSON_Parse(ant);
    assert(root != NULL);
-   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p);
    assert(strcmp(p.model, "claude-3-5-sonnet-20241022") == 0);
    aimee_response_free(&p);
    cJSON_Delete(root);
@@ -515,7 +607,7 @@ static void test_parse_response_keeps_text_with_tool_use(void)
    assert(root != NULL);
    aimee_response_t p;
    memset(&p, 0, sizeof(p));
-   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
+   agent_ir_decode_json_response_bound(root, 1, -1, NULL, NULL, &p);
    assert(aimee_ir_response_has_tool_use(&p) == 1);
    assert(aimee_ir_response_tool_count(&p) == 1 &&
           strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "grep") == 0);
@@ -545,7 +637,7 @@ static void test_parse_response_openai_mistral_content_array(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "CMAKE_DEP: schema_data_header");
@@ -571,7 +663,7 @@ static void test_parse_response_openai_stray_think_close(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "Final answer");
@@ -598,7 +690,7 @@ static void test_parse_response_openai_strips_thinking_block(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "LOCAL254_OK");
@@ -627,7 +719,7 @@ static void test_parse_response_openai_strips_thinking_process_scaffold(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "Bundle is insufficient.");
@@ -655,7 +747,7 @@ static void test_parse_response_openai_strips_self_correction_scaffold(void)
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    assert_ir_text(&out, "local delegate ok");
@@ -682,7 +774,7 @@ static void test_parse_response_openai_discards_private_scaffold_without_final(v
    assert(root != NULL);
 
    aimee_response_t out;
-   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
+   agent_ir_decode_json_response_bound(root, 0, -1, NULL, NULL, &out);
 
    assert(aimee_ir_response_has_tool_use(&out) == 0);
    /* No visible final text; the private scaffold remains separate. */
@@ -734,7 +826,7 @@ static void test_openai_request_strips_private_message_fields(void)
    cJSON *user = cJSON_GetArrayItem(messages, 0);
    cJSON_AddBoolToObject(user, "_compaction_boundary", 1);
 
-   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 32, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, NULL, 32, 0.0);
    assert(req != NULL);
 
    cJSON *out_messages = cJSON_GetObjectItem(req, "messages");
@@ -758,7 +850,7 @@ static void test_openai_request_llama_compat_options(void)
 
    cJSON *messages = make_one_user_message();
    cJSON *tools = make_one_dummy_tool();
-   cJSON *req = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, tools, 32, 0.0);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "tools") != NULL);
    assert(cJSON_IsFalse(cJSON_GetObjectItem(req, "parallel_tool_calls")));
@@ -783,7 +875,7 @@ static void test_openai_request_omits_empty_tools(void)
 
    cJSON *messages = make_one_user_message();
    cJSON *tools = cJSON_CreateArray();
-   cJSON *req = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   cJSON *req = build_chat_profile(&agent, messages, tools, 32, 0.0);
    assert(req != NULL);
    assert(cJSON_GetObjectItem(req, "tools") == NULL);
    assert(cJSON_GetObjectItem(req, "chat_template_kwargs") == NULL);
@@ -804,26 +896,26 @@ static void test_evidence_review_requires_initial_tool_choice(void)
    cJSON *messages = make_one_user_message();
    cJSON *tools = make_one_dummy_tool();
 
-   cJSON *openai = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   cJSON *openai = build_chat_profile(&agent, messages, tools, 32, 0.0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(openai, "tool_choice")), "required") ==
           0);
    cJSON_Delete(openai);
 
    snprintf(agent.provider, sizeof(agent.provider), "minimax");
    snprintf(agent.model, sizeof(agent.model), "MiniMax-M3");
-   cJSON *minimax = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   cJSON *minimax = build_chat_profile(&agent, messages, tools, 32, 0.0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(minimax, "tool_choice")), "required") ==
           0);
    cJSON_Delete(minimax);
 
    snprintf(agent.provider, sizeof(agent.provider), "mistral");
    snprintf(agent.model, sizeof(agent.model), "mistral-large");
-   cJSON *mistral = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   cJSON *mistral = build_chat_profile(&agent, messages, tools, 32, 0.0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(mistral, "tool_choice")), "required") ==
           0);
    cJSON_Delete(mistral);
 
-   cJSON *responses = agent_build_request_responses(&agent, messages, tools, "review");
+   cJSON *responses = build_responses_profile(&agent, messages, tools, "review");
    cJSON *responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
    assert(cJSON_IsObject(responses_choice));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "type")), "function") ==
@@ -840,7 +932,7 @@ static void test_evidence_review_requires_initial_tool_choice(void)
    cJSON_AddStringToObject(code_search, "type", "function");
    cJSON_AddStringToObject(code_search, "name", "code_search");
    cJSON_AddItemToArray(response_tools, code_search);
-   responses = agent_build_request_responses(&agent, messages, response_tools, "review");
+   responses = build_responses_profile(&agent, messages, response_tools, "review");
    responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
    assert(cJSON_IsObject(responses_choice));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "name")),
@@ -850,12 +942,16 @@ static void test_evidence_review_requires_initial_tool_choice(void)
 
    cJSON *malformed_tools = cJSON_CreateArray();
    cJSON_AddItemToArray(malformed_tools, cJSON_CreateObject());
-   responses = agent_build_request_responses(&agent, messages, malformed_tools, "review");
+   responses = build_responses_profile(&agent, messages, malformed_tools, "review");
    assert(cJSON_GetObjectItem(responses, "tool_choice") == NULL);
    cJSON_Delete(responses);
    cJSON_Delete(malformed_tools);
 
-   cJSON *anthropic = agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
+   cJSON *anthropic_tools = cJSON_Parse("[{\"name\":\"noop\",\"description\":\"No operation\","
+                                        "\"input_schema\":{\"type\":\"object\"}}]");
+   cJSON *anthropic = build_anthropic_profile(&agent, messages, anthropic_tools, "review", 32, 0.0);
+   assert(anthropic);
+   cJSON_Delete(anthropic_tools);
    cJSON *choice = cJSON_GetObjectItem(anthropic, "tool_choice");
    assert(cJSON_IsObject(choice));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "type")), "any") == 0);
@@ -954,8 +1050,8 @@ static void test_canonical_delegate_policy_before_native_egress(void)
             agent_t agent = {0};
             snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
             agent.require_initial_tool_call = 1;
-            cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0,
-                                                   wires[w], delegate, &dispatch);
+            cJSON *native = fixture_build_request(&agent, messages, tools, "host", 128, 0, wires[w],
+                                                  delegate, &dispatch);
             assert(native);
             assert(!strcmp(cJSON_GetObjectItemCaseSensitive(native, "model")->valuestring,
                            agent.model));
@@ -978,7 +1074,7 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       snprintf(agent.model, sizeof agent.model, "%s", "selected");
       agent.require_initial_tool_call = 1;
       cJSON *native =
-          agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
+          fixture_build_request(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
       assert(native && !cJSON_GetObjectItemCaseSensitive(native, "tools"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "parallel_tool_calls"));
@@ -986,6 +1082,27 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       aimee_request_free(&dispatch);
       cJSON_Delete(native);
       cJSON_Delete(tools);
+   }
+   /* An oversized catalog must be rejected before governance can remove all
+    * its entries and accidentally turn an unadmitted request into valid egress. */
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      cJSON *examples = cJSON_Parse(tool_wires[w]);
+      cJSON *task = cJSON_GetArrayItem(examples, 1);
+      cJSON *oversized = cJSON_CreateArray();
+      assert(examples && task && oversized);
+      for (int i = 0; i <= AIMEE_IR_MAX_BLOCKS; i++)
+         assert(cJSON_AddItemToArray(oversized, cJSON_Duplicate(task, 1)));
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "selected");
+      aimee_request_t owned = {0};
+      assert(fixture_prepare_request(&agent, messages, oversized, "host", 128, 0, wires[w], 1,
+                                     &owned) < 0);
+      assert(!owned.model && !owned.n_tools && !owned.messages);
+      assert(cJSON_GetArraySize(oversized) == AIMEE_IR_MAX_BLOCKS + 1);
+      aimee_request_free(&owned);
+      cJSON_Delete(oversized);
+      cJSON_Delete(examples);
    }
    gateway_policy_set_delegates_available_provider(NULL);
    cJSON_Delete(messages);
@@ -1014,8 +1131,8 @@ static void test_owned_canonical_request_preparation(void)
           "\"name\":\"Read\",\"input\":{\"exact\":0.123456789012345678901234567890}}]}]");
       cJSON *tools = cJSON_Parse(catalogs[w]);
       assert(messages && tools);
-      int rc = agent_prepare_request_ir(&agent, messages, tools, "host system", 321, 0.25, wires[w],
-                                        0, &owned);
+      int rc = fixture_prepare_request(&agent, messages, tools, "host system", 321, 0.25, wires[w],
+                                       0, &owned);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
       assert(!rc && !aimee_ir_request_admit(&owned));
@@ -1041,13 +1158,152 @@ static void test_owned_canonical_request_preparation(void)
       char *model = owned.model;
       aimee_message_t *history = owned.messages;
       cJSON *invalid = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"unknown\"}]}]");
-      rc =
-          agent_prepare_request_ir(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
+      rc = fixture_prepare_request(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
       assert(rc < 0 && owned.model == model && owned.messages == history);
       cJSON_Delete(invalid);
    }
    aimee_request_free(&owned);
    puts("owned canonical host context/catalog survives source release and failed replacement OK");
+}
+
+static void test_native_seeded_host_profile(void)
+{
+   const char *wire =
+       "{\"model\":\"public-alias\",\"instructions\":\"source instructions\","
+       "\"max_output_tokens\":128,\"temperature\":0.25,\"top_p\":0.8,"
+       "\"parallel_tool_calls\":false,\"metadata\":{\"request\":\"original\"},"
+       "\"service_tier\":\"auto\",\"prompt_cache_key\":\"original-key\","
+       "\"reasoning\":{\"effort\":\"low\",\"summary\":\"auto\"},"
+       "\"text\":{\"format\":{\"type\":\"json_object\"}},\"input\":["
+       "{\"type\":\"reasoning\",\"id\":\"reason-original\",\"encrypted_content\":\"opaque-cipher\"}"
+       ","
+       "{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"seed task\"},"
+       "{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,aW1hZ2U=\"}]}]}";
+   aimee_request_t seed = {0}, before = {0}, owned = {0};
+   char error[256];
+   assert(!aimee_frontend_parse_wire(wire, strlen(wire), AIMEE_WIRE_RESPONSES, &seed, error,
+                                     sizeof error));
+   aimee_ir_classify_context(&seed);
+   assert(seed.raw && seed.raw_bytes && seed.raw_length == strlen(wire));
+   assert(!aimee_ir_request_clone(&seed, &before));
+   cJSON *messages = cJSON_CreateArray();
+   for (int i = 0; i < seed.n_messages; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(seed.messages + i)));
+   agent_t agent = {0};
+   snprintf(agent.provider, sizeof agent.provider, "chatgpt");
+   snprintf(agent.model, sizeof agent.model, "host-selected-model");
+   aimee_message_t context = fixture_context("host policy");
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, &context, 0, -1,
+                                           AIMEE_WIRE_RESPONSES, 0, &owned));
+   assert(owned.mutated && !owned.raw_bytes && !owned.raw_length &&
+          aimee_backend_host_profile_valid(&owned));
+   assert(!strcmp(owned.model, agent.model));
+   assert(owned.has_max_tokens && owned.max_tokens == 128 && owned.has_temperature &&
+          owned.temperature == 0.25 && owned.has_top_p && owned.top_p == 0.8);
+   assert(owned.has_parallel_tool_calls && !owned.parallel_tool_calls);
+   assert(owned.output_format.kind == AIMEE_OUTPUT_JSON_OBJECT && owned.reasoning_effort &&
+          !strcmp(owned.reasoning_summary, "auto"));
+   assert(cJSON_Compare(owned.metadata, seed.metadata, 1));
+   assert(!strcmp(owned.service_tier, seed.service_tier) &&
+          !strcmp(owned.prompt_cache_key, seed.prompt_cache_key));
+   assert(owned.n_system == seed.n_system + 1 && owned.n_messages == seed.n_messages);
+   for (int i = 0; i < seed.n_system; ++i)
+   {
+      cJSON *source = aimee_ir_block_json(seed.system + i);
+      cJSON *copy = aimee_ir_block_json(owned.system + i);
+      assert(cJSON_Compare(source, copy, 1));
+      cJSON_Delete(source);
+      cJSON_Delete(copy);
+   }
+   int image = 0, opaque = 0;
+   for (int i = 0; i < seed.n_messages; ++i)
+      for (int j = 0; j < seed.messages[i].n_blocks; ++j)
+      {
+         image += seed.messages[i].blocks[j].type == AIMEE_BLK_IMAGE;
+         opaque += seed.messages[i].blocks[j].type == AIMEE_BLK_THINKING &&
+                   seed.messages[i].blocks[j].thinking_encrypted_content != NULL;
+      }
+   assert(image == 1 && opaque == 1);
+   for (int i = 0; i < seed.n_messages; ++i)
+   {
+      cJSON *source = aimee_ir_message_json(seed.messages + i);
+      cJSON *copy = aimee_ir_message_json(owned.messages + i);
+      assert(cJSON_Compare(source, copy, 1));
+      cJSON_Delete(source);
+      cJSON_Delete(copy);
+   }
+   assert(aimee_ir_request_wire_equal(&seed, &before) && cJSON_Compare(seed.raw, before.raw, 1));
+   assert(seed.raw_length == before.raw_length &&
+          !memcmp(seed.raw_bytes, before.raw_bytes, seed.raw_length));
+   /* Normalizing framing must not waive a typed control the selected wire
+    * cannot express: the existing strict translation loss gate still refuses. */
+   owned.has_top_k = 1;
+   owned.top_k = 17;
+   int losses = 0;
+   char *body = aimee_backend_render_wire_profile(&owned, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_API,
+                                                  &losses);
+   assert(body && losses > 0);
+   free(body);
+   assert(
+       !aimee_backend_render_wire_profile(&owned, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_API, NULL));
+   aimee_message_free(&context);
+   cJSON_Delete(messages);
+   aimee_request_free(&seed);
+   aimee_request_free(&before);
+   aimee_request_free(&owned);
+   puts("native host profile normalizes ingress framing, preserving full typed seed and source OK");
+}
+
+static void test_seeded_host_extensions(void)
+{
+   const char *wire =
+       "{\"model\":\"selected\",\"messages\":[{\"role\":\"user\",\"content\":\"task\"}],"
+       "\"min_p\":0.2,\"repeat_penalty\":1.1,\"chat_template_kwargs\":{\"enable_thinking\":false},"
+       "\"route\":\"fallback\",\"models\":[\"other\"],\"reasoning_split\":true}";
+   aimee_request_t seed = {0}, owned = {0};
+   char error[256];
+   assert(!aimee_frontend_parse_wire(wire, strlen(wire), AIMEE_WIRE_OPENAI_CHAT, &seed, error,
+                                     sizeof error));
+   cJSON *source = cJSON_Duplicate(seed.raw, 1), *messages = cJSON_CreateArray();
+   for (int i = 0; i < seed.n_messages; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(seed.messages + i)));
+   agent_t agent = {0};
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   snprintf(agent.model, sizeof agent.model, "selected");
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &owned));
+   assert(aimee_backend_host_profile_valid(&owned) && !owned.raw_bytes && !owned.raw_length);
+   const char *keys[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                         "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof keys / sizeof *keys; ++i)
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(source, keys[i]),
+                           cJSON_GetObjectItemCaseSensitive(owned.raw, keys[i]), 1));
+   assert(!cJSON_HasObjectItem(owned.raw, "messages"));
+   /* An omitted model selector leaves registered selection authoritative; the
+    * extension's existing model marker must still match that selected model. */
+   char *selected_model = seed.model;
+   seed.model = NULL;
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &owned));
+   assert(!seed.model && !strcmp(owned.model, agent.model));
+   seed.model = selected_model;
+   /* A caller extension cannot overwrite an already selected host policy. */
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(owned.raw, "min_p", cJSON_CreateNumber(0.9)));
+   assert(aimee_backend_preserve_host_extensions(&seed, &owned, AIMEE_WIRE_OPENAI_CHAT) < 0);
+   assert(cJSON_GetObjectItemCaseSensitive(owned.raw, "min_p")->valuedouble == 0.9);
+   aimee_request_free(&owned);
+   snprintf(agent.model, sizeof agent.model, "different");
+   assert(agent_prepare_seeded_request_ir(&agent, &seed, messages, NULL, NULL, 0, -1,
+                                          AIMEE_WIRE_OPENAI_CHAT, 0, &owned) < 0);
+   assert(!owned.model && !owned.raw);
+   assert(cJSON_Compare(seed.raw, source, 1) && seed.raw_length == strlen(wire) &&
+          !memcmp(seed.raw_bytes, wire, strlen(wire)));
+   cJSON_Delete(source);
+   cJSON_Delete(messages);
+   aimee_request_free(&seed);
+   aimee_request_free(&owned);
+   puts(
+       "seeded host extensions retain supported semantics, refuse conflicts and model switches OK");
 }
 
 static void test_canonical_request_profiles(void)
@@ -1056,20 +1312,22 @@ static void test_canonical_request_profiles(void)
    const char *models[] = {"qwen3.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
    cJSON *history =
        cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
-   cJSON *native_history = cJSON_Parse("[{\"role\":\"user\",\"content\":\"inspect\"}]");
-   assert(history && native_history);
+   assert(history);
    for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
    {
       agent_t agent = {0};
       snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
       snprintf(agent.model, sizeof agent.model, "%s", models[i]);
       agent.recommended_sampling = 1;
-      cJSON *legacy = agent_build_request_openai(&agent, native_history, NULL, 128, 0.5);
-      cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
-                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
-      assert(legacy && actual);
-      assert(cJSON_Compare(legacy, actual, 1));
-      cJSON_Delete(legacy);
+      cJSON *actual = fixture_build_request(&agent, history, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "model")->valuestring, models[i]));
+      assert(cJSON_GetObjectItemCaseSensitive(actual, "max_tokens")->valueint == 128);
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(message, "content")->valuestring,
+                     i == 0 ? "/no_think\ninspect" : "inspect"));
       cJSON_Delete(actual);
    }
    agent_t qwen = {0};
@@ -1084,8 +1342,8 @@ static void test_canonical_request_profiles(void)
    {
       cJSON *source = cJSON_Parse(shaping_cases[i]);
       cJSON *before = cJSON_Duplicate(source, 1);
-      cJSON *actual = agent_build_request_ir(&qwen, source, NULL, NULL, 128, 0.5,
-                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      cJSON *actual = fixture_build_request(&qwen, source, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
       assert(actual && cJSON_Compare(source, before, 1));
       const cJSON *message =
           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
@@ -1095,12 +1353,36 @@ static void test_canonical_request_profiles(void)
       cJSON_Delete(before);
       cJSON_Delete(source);
    }
+   /* Hidden text must neither suppress shaping of visible text nor acquire it. */
+   for (int visibility = 0; visibility < 2; ++visibility)
+   {
+      aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "/no_think\nHIDDEN_SECRET"},
+                                {.type = AIMEE_BLK_TEXT, .text = "inspect"}};
+      aimee_ir_block_set_context(&blocks[0], AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED,
+                                 visibility ? AIMEE_CTX_SENS_RESTRICTED : AIMEE_CTX_SENS_INTERNAL,
+                                 visibility, NULL, NULL, 0);
+      aimee_message_t typed = {.role = "user", .blocks = blocks, .n_blocks = 2};
+      cJSON *source = cJSON_CreateArray();
+      assert(source && cJSON_AddItemToArray(source, aimee_ir_message_json(&typed)));
+      cJSON *before = cJSON_Duplicate(source, 1);
+      cJSON *actual = fixture_build_request(&qwen, source, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual && cJSON_Compare(source, before, 1));
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      const char *content =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(message, "content"));
+      assert(content && !strcmp(content, "/no_think\ninspect"));
+      cJSON_Delete(actual);
+      cJSON_Delete(before);
+      cJSON_Delete(source);
+   }
    /* Shaping is idempotent and never edits durable canonical source content. */
    const cJSON *block = cJSON_GetArrayItem(
        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 0), "blocks"), 0);
    assert(!strcmp(cJSON_GetObjectItemCaseSensitive(block, "text")->valuestring, "inspect"));
    cJSON_Delete(history);
-   cJSON_Delete(native_history);
    puts("canonical request profile provider settings and source isolation OK");
 }
 
@@ -1118,8 +1400,8 @@ static void test_canonical_responses_profile(void)
    assert(history && tools);
    for (int fallback = 0; fallback < 2; fallback++)
    {
-      cJSON *actual = agent_build_request_ir(&agent, history, tools, NULL, 777, 0.5,
-                                             AIMEE_WIRE_RESPONSES, 0, NULL);
+      cJSON *actual = fixture_build_request(&agent, history, tools, NULL, 777, 0.5,
+                                            AIMEE_WIRE_RESPONSES, 0, NULL);
       assert(actual && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(actual, "store")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(actual, "stream")));
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "instructions")->valuestring,
@@ -1136,8 +1418,8 @@ static void test_canonical_responses_profile(void)
    /* Malformed catalog ingress still refuses before any provider dispatch. */
    cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(tools, 0), "parameters");
    cJSON_AddStringToObject(cJSON_GetArrayItem(tools, 0), "parameters", "malformed");
-   cJSON *actual = agent_build_request_ir(&agent, history, tools, "host", 777, 0.5,
-                                          AIMEE_WIRE_RESPONSES, 0, NULL);
+   cJSON *actual = fixture_build_request(&agent, history, tools, "host", 777, 0.5,
+                                         AIMEE_WIRE_RESPONSES, 0, NULL);
    assert(!actual);
    cJSON_Delete(history);
    cJSON_Delete(tools);
@@ -1152,12 +1434,23 @@ static void test_typed_anthropic_system_cache_parity(void)
                             "stable<aimee-context>volatile",
                             " <aimee-context>volatile",
                             "x<aimee-context>long volatile"};
+   /* Independent wire goldens replace comparison to the retired second builder. */
+   const char *cached[] = {
+       NULL,
+       NULL,
+       "[{\"type\":\"text\",\"text\":\"stable\",\"cache_control\":{\"type\":\"ephemeral\"}}]",
+       "[{\"type\":\"text\",\"text\":\"stable\",\"cache_control\":{\"type\":\"ephemeral\"}},{"
+       "\"type\":\"text\",\"text\":\"<aimee-context>volatile\"}]",
+       NULL,
+       "[{\"type\":\"text\",\"text\":\"x\",\"cache_control\":{\"type\":\"ephemeral\"}},{\"type\":"
+       "\"text\",\"text\":\"<aimee-context>long volatile\"}]"};
    for (size_t i = 0; i < sizeof systems / sizeof *systems; i++)
       for (int cache = 0; cache < 2; cache++)
          for (int floor = 0; floor <= 8; floor += 8)
          {
-            cJSON *expected = cJSON_CreateObject();
-            agent_anthropic_set_system(expected, systems[i], cache, floor);
+            cJSON *expected = cache && !floor && cached[i]  ? cJSON_Parse(cached[i])
+                              : systems[i] && systems[i][0] ? cJSON_CreateString(systems[i])
+                                                            : NULL;
             aimee_request_t ir = {.model = strdup("selected"),
                                   .frontend = AIMEE_WIRE_ANTHROPIC,
                                   .max_tokens = 128,
@@ -1165,7 +1458,7 @@ static void test_typed_anthropic_system_cache_parity(void)
             assert(!anthropic_ir_set_host_system(&ir, systems[i], cache, floor));
             cJSON *actual = anthropic_backend_build(&ir);
             assert(actual);
-            const cJSON *left = cJSON_GetObjectItemCaseSensitive(expected, "system");
+            const cJSON *left = expected;
             const cJSON *right = cJSON_GetObjectItemCaseSensitive(actual, "system");
             assert((!left && !right) || cJSON_Compare(left, right, 1));
             if (left && right)
@@ -1211,12 +1504,74 @@ static void test_missing_response_output(void)
                                        1, NULL) == -1);
 }
 
-int main(void)
+static void test_canonical_catalog_only_projection(void)
 {
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES, AIMEE_WIRE_ANTHROPIC};
+   for (int w = 0; w < 3; ++w)
+   {
+      aimee_request_t catalog = {0}, expected = {0}, actual = {0};
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "selected");
+      assert(!agent_tools_catalog(wires[w], &catalog));
+      assert(agent_tools_catalog_respond(&catalog) == 1);
+      assert(!fixture_prepare_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                      &expected));
+      catalog.stream = 1;
+      catalog.tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      catalog.has_temperature = 1;
+      catalog.temperature = 0.9;
+      catalog.has_max_tokens = 1;
+      catalog.max_tokens = 1;
+      catalog.output_format.kind = AIMEE_OUTPUT_JSON_OBJECT;
+      catalog.has_parallel_tool_calls = 1;
+      catalog.parallel_tool_calls = 0;
+      assert(!aimee_ir_request_admit(&catalog));
+      assert(!fixture_prepare_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                      &actual));
+      assert(actual.stream == expected.stream && actual.tool_choice == expected.tool_choice &&
+             actual.output_format.kind == expected.output_format.kind);
+      assert(actual.max_tokens == expected.max_tokens &&
+             actual.temperature == expected.temperature);
+      assert(actual.has_parallel_tool_calls == expected.has_parallel_tool_calls &&
+             actual.parallel_tool_calls == expected.parallel_tool_calls);
+      assert(actual.n_tools == expected.n_tools && actual.tools != catalog.tools);
+      const aimee_tool_t *respond = aimee_ir_find_function(&actual, NULL, "respond");
+      assert(respond);
+      cJSON *wire =
+          fixture_build_catalog(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0, NULL);
+      assert(wire && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(wire, "tools")) ==
+                         catalog.n_tools);
+      /* Typed respond is valid on Anthropic too; the retired wrapped-Chat append
+       * was invalid input to that old profile, not a wire-preservation case. */
+      cJSON_Delete(wire);
+      aimee_request_free(&catalog);
+      aimee_request_free(&expected);
+      aimee_request_free(&actual);
+   }
+   cJSON_Delete(history);
+   puts("tools-only profile clone rejects metadata contamination; all profiles render typed "
+        "respond OK");
+}
+
+#include "support/offline_model_request_fixture.h"
+int main(int argc, char **argv)
+{
+#ifndef _WIN32
+   if (argc > 1)
+      return offline_model_request_diagnostic(argc, argv);
+#else
+   (void)argc;
+   (void)argv;
+#endif
+   test_canonical_catalog_only_projection();
    test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();
    test_canonical_request_profiles();
    test_owned_canonical_request_preparation();
+   test_native_seeded_host_profile();
+   test_seeded_host_extensions();
    test_missing_response_output();
    printf("test_agent_http: ");
 

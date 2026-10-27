@@ -288,42 +288,6 @@ static int write_delegate_output_file(const char *path, const char *text)
  * URL becomes "tls:host:port" (native client TLS to the server's #304 TLS
  * listener); http:// becomes "tcp:host:port"; an explicit tcp:/tls:/unix:
  * endpoint passes through unchanged. Caller frees. */
-static char *cli_v1_normalize_endpoint(const char *ep)
-{
-   if (!ep || !ep[0])
-      return NULL;
-   const char *scheme = NULL;
-   const char *rest = NULL;
-   if (strncmp(ep, "https://", 8) == 0)
-   {
-      scheme = "tls:";
-      rest = ep + 8;
-   }
-   else if (strncmp(ep, "http://", 7) == 0)
-   {
-      scheme = "tcp:";
-      rest = ep + 7;
-   }
-   if (!scheme)
-      return strdup(ep); /* tcp:/tls:/unix:/host:port already */
-   /* Take host[:port], dropping any trailing path; default the port by scheme. */
-   char hostport[300];
-   size_t n = strcspn(rest, "/");
-   if (n >= sizeof(hostport))
-      n = sizeof(hostport) - 1;
-   memcpy(hostport, rest, n);
-   hostport[n] = '\0';
-   /* Strip any userinfo ("user:pass@host") so it can't corrupt the host:port the
-    * TLS/connect layer parses; credentials belong in the bearer, not the URL. */
-   char *at = strrchr(hostport, '@');
-   char *hp = at ? at + 1 : hostport;
-   char out[320];
-   if (strchr(hp, ':'))
-      snprintf(out, sizeof(out), "%s%s", scheme, hp);
-   else
-      snprintf(out, sizeof(out), "%s%s:%s", scheme, hp, strcmp(scheme, "tls:") == 0 ? "443" : "80");
-   return strdup(out);
-}
 
 char *cli_v1_client_endpoint(void)
 {
@@ -331,7 +295,7 @@ char *cli_v1_client_endpoint(void)
       return cli_native_bridge_endpoint();
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
-      return cli_v1_normalize_endpoint(env);
+      return cli_http_endpoint_normalize(env);
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the
@@ -1178,6 +1142,13 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
 #if defined(AIMEE_POSIX)
 static int g_cli_ws_json_output;
 
+int cli_ws_output_quiet_bind(int quiet)
+{
+   int previous = g_cli_ws_json_output;
+   g_cli_ws_json_output = quiet != 0;
+   return previous;
+}
+
 /* Keep the thin-client push path aligned with the local/canonical scanners.
  * Hidden-root projects are deliberately excluded from index reads and startup
  * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
@@ -1381,7 +1352,14 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
 static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
 {
    char project_name[128];
-   cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name));
+   if (cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name)))
+   {
+      fprintf(stderr, "aimee: cannot resolve canonical project identity for %s\n", abs_root);
+      return 1;
+   }
+
+   if (!g_cli_ws_json_output)
+      printf("indexing project: %s\n", project_name);
 
    ws_ingest_ctx_t s = {0};
    s.remote = remote;
@@ -1428,8 +1406,8 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
 /* Ingest a workspace tree as ONE PROJECT PER GIT REPO: code_collect_discover_repos
  * finds each real checkout under abs_root (skipping linked worktrees and symlink
  * cycles) and we ingest each as its own project (cli_ws_ingest_root names a
- * project by its basename). Falls back to ingesting abs_root itself when it holds
- * no nested git repo — e.g. adding a single repo directly, or a plain directory. */
+ * project by its canonical repository identity). Falls back to ingesting abs_root itself when it
+ * holds no nested git repo — e.g. adding a single repo directly, or a plain directory. */
 typedef struct
 {
    const char *remote;
@@ -1441,13 +1419,6 @@ typedef struct
 static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 {
    ws_tree_ctx_t *t = (ws_tree_ctx_t *)ctx;
-   const char *base = strrchr(repo_abs, '/');
-   base = (base && base[1]) ? base + 1 : repo_abs;
-   if (!g_cli_ws_json_output)
-   {
-      printf("indexing project: %s\n", base);
-      fflush(stdout);
-   }
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -1466,7 +1437,7 @@ static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char
 
 int cli_workspace_add_remote(const char *path, int prepare, int json_output)
 {
-   g_cli_ws_json_output = json_output;
+   (void)cli_ws_output_quiet_bind(json_output);
    if (!path || !path[0])
    {
       fprintf(stderr, "usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
@@ -2026,9 +1997,9 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
-   else if (strcmp(route->method, "model.probe") == 0 && cli_agent_probe_response_is_failure(resp))
+   else if (strcmp(route->method, "model.probe") == 0)
    {
-      exit_rc = 1;
+      exit_rc = cli_agent_probe_response_exit_code(resp, fwd_argc, fwd_argv);
    }
    else if ((strcmp(route->method, "index.investigate") == 0 ||
              strcmp(route->method, "index.hybrid") == 0) &&
@@ -2319,7 +2290,10 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          {
             cJSON_Delete(projects);
             projects = NULL;
-            if (cli_ws_ingest_tree(remote, bearer, worktree_root) == 0)
+            int previous_json = cli_ws_output_quiet_bind(effective_json_output);
+            int ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
+            (void)cli_ws_output_quiet_bind(previous_json);
+            if (ingest_rc == 0)
             {
                projects =
                    cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status);

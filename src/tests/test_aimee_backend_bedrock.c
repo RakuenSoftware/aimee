@@ -516,8 +516,33 @@ static void test_tooluse_input_object(void)
    cJSON_Delete(btu.tool_input);
 }
 
+static void test_usage_presence(void)
+{
+   for (int variant = 0; variant < 3; variant++)
+   {
+      cJSON *wire = cJSON_Parse("{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[{"
+                                "\"text\":\"answer\"}]}},\"stopReason\":\"end_turn\"}");
+      assert(wire);
+      if (variant)
+      {
+         cJSON *usage = cJSON_AddObjectToObject(wire, "usage");
+         cJSON_AddNumberToObject(usage, "inputTokens", variant == 1 ? 7 : 0);
+         if (variant == 2)
+            cJSON_AddNumberToObject(usage, "outputTokens", 0);
+      }
+      aimee_response_t response = {0};
+      char error[128];
+      assert(!bedrock_converse_parse(wire, &response, error, sizeof error));
+      assert(response.usage_unobserved == (variant != 2));
+      assert(!response.usage_in && !response.usage_out);
+      aimee_response_free(&response);
+      cJSON_Delete(wire);
+   }
+}
+
 int main(void)
 {
+   test_usage_presence();
    test_build_allocation_atomicity();
    printf("aimee-backend-bedrock: ");
    test_build_full();

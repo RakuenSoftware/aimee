@@ -26,7 +26,7 @@
 #include <aimee/ir/session_event.h>
 #include "agent_request_shaping.h"
 #include "agent_result_cache.h"
-#include "agent_request_build.h" /* agent_build_request + provider predicates */
+#include "agent_request_build.h" /* canonical builders + provider predicates */
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
@@ -208,20 +208,29 @@ static _Thread_local const char *result_cache_role;
  * Slot safety: there is no non-local exit between acquire and release — the
  * executors (agent_execute / agent_execute_with_tools_for_role) return normally
  * (C has no exceptions), so the release always runs and a slot is never leaked. */
+static int agent_execute_plain_request(const agent_t *agent, const aimee_request_t *request,
+                                       agent_result_t *out, int host_text_profile);
+
+static int host_request_supported(const aimee_request_t *request, int use_tools)
+{
+   return agent_host_request_supported(request, use_tools);
+}
+
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
-                                       const char *role, const char *system_prompt,
-                                       const char *user_prompt, int max_tokens, double temperature,
+                                       const char *role, const aimee_request_t *request,
                                        int use_tools, agent_result_t *out,
-                                       const aimee_request_t *request, aimee_response_t *response)
+                                       aimee_response_t *response, int host_text_profile)
 {
    if (!ag || !out)
       return -1;
-   /* Own `out` from the first instruction, exactly like the executors: memset it so
-    * EVERY early-return path (at-limit, bad-precondition) leaves a clean result —
-    * out->response == NULL — and a caller that frees out->response after a non-zero
-    * return can never hit stale/garbage. (No caller passes a live out->response
-    * here; the executors also memset, so this is the established contract.) */
+   /* Every return leaves a fresh owned canonical result. */
    memset(out, 0, sizeof(*out));
+   if (!request || aimee_ir_request_admit(request) ||
+       (host_text_profile && !host_request_supported(request, use_tools)))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical execution request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
     * the precondition (net != NULL when use_tools) so a future caller that flips
     * use_tools without supplying a network fails cleanly instead of crashing. */
@@ -240,10 +249,16 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
     * not a provider fault. */
    char admit_ctxbuf[192];
    const char *admit_deleg = delegation_active_id();
+   /* Generic ACP may not disclose its provider model. Use one conservative
+    * external-agent concurrency bucket only; keep actual model metadata unknown. */
+   const char *admission_model = ag->model;
+   if (!admission_model[0] && !strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) &&
+       !strcmp(ag->cli_kind, "acp"))
+      admission_model = "acp:unknown-model";
    agent_admit_req_t admit_req = {
        .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
        .agent = ag->name,
-       .model = ag->model,
+       .model = admission_model,
        .per_agent_max = ag->max_parallel,
        .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
                                                    : AGENT_ADMIT_PRIORITY_INTERACTIVE,
@@ -272,27 +287,48 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    server_session_log_t *log_scope = NULL;
-   int capture = server_session_log_begin_selected(role, request ? NULL : user_prompt, ag->name,
-                                                   ag->provider, ag->model, &log_scope);
-   int rc;
-   if (capture < 0)
+   /* Only an admitted chat owner can grant replies to a private child capture.
+    * Headless internal attempts retain the default-denied owner snapshot. */
+   int capture = -1, rc;
+   const request_context_t *owner = request_context_get();
+   if (agent_request_cancelled() || admission_cancel_poll(admit_deleg) ||
+       (owner && owner->context_refused))
    {
-      rc = AGENT_RC_CAPTURE_FAILED;
-      snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
+      rc = AGENT_RC_CONTEXT_REFUSED;
+      snprintf(out->error, sizeof out->error, "delegate request cancelled or refused");
    }
-   else if (request)
-      rc = agent_execute_request_with_tools(ag, net, role, request, response, out);
    else
    {
-      const char *previous_cache_role = result_cache_role;
-      result_cache_role = !use_tools && role && role[0] && !agent_get_request_session()[0] &&
-                                  delegate_role_result_cache_enabled(role)
-                              ? role
-                              : NULL;
-      rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
-                                                         max_tokens, temperature, out)
-                     : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-      result_cache_role = previous_cache_role;
+      capture = server_session_log_begin_selected(
+          role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider, ag->model,
+          owner && owner->control_reply_capability, &log_scope);
+      if (capture < 0)
+      {
+         rc = AGENT_RC_CAPTURE_FAILED;
+         snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
+      }
+      else if (use_tools)
+         rc = host_text_profile
+                  ? agent_execute_with_tools_for_role(ag, net, role, request, out)
+                  : agent_execute_request_with_tools(ag, net, role, request, response, out);
+      else
+      {
+         aimee_session_event_t event = {
+             .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &request->messages[0]};
+         if (!host_text_profile && aimee_ir_session_emit(&event))
+            rc = AGENT_RC_CAPTURE_FAILED;
+         else
+         {
+            const char *previous_cache_role = result_cache_role;
+            result_cache_role = host_text_profile && role && role[0] &&
+                                        !agent_get_request_session()[0] &&
+                                        delegate_role_result_cache_enabled(role)
+                                    ? role
+                                    : NULL;
+            rc = agent_execute_plain_request(ag, request, out, host_text_profile);
+            result_cache_role = previous_cache_role;
+         }
+      }
    }
    if (log_scope && capture == 0)
    {
@@ -337,15 +373,14 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
 }
 
 int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
-                       const char *system, const char *prompt, int max_tokens, double temperature,
-                       int use_tools, agent_result_t *out)
+                       const aimee_request_t *request, int use_tools, agent_result_t *out)
 {
-   return agent_dispatch_one_internal(agent, network, role, system, prompt, max_tokens, temperature,
-                                      use_tools, out, NULL, NULL);
+   return agent_dispatch_one_internal(agent, network, role, request, use_tools, out, NULL, 1);
 }
 
-/* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
+/* Per-thread tool-mode override for agent_run; see agent_run_force_no_tools. */
 static __thread int tl_force_no_tools = 0;
+static __thread int tl_native_turn_limit = 0;
 static __thread int tl_require_initial_tool_call = 0;
 void agent_run_force_no_tools(int on)
 {
@@ -357,10 +392,75 @@ void agent_run_require_initial_tool_call(int on)
    tl_require_initial_tool_call = on ? 1 : 0;
 }
 
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+/* Text projections are routing/hint metadata. Dispatch retains the request. */
+static const char *host_request_query(const aimee_request_t *request, char *query, size_t size)
+{
+   if (request->n_messages == 1 && request->messages[0].n_blocks == 1 &&
+       request->messages[0].blocks[0].type == AIMEE_BLK_TEXT &&
+       aimee_ir_block_model_visible(&request->messages[0].blocks[0]))
+      return request->messages[0].blocks[0].text;
+   aimee_ir_last_user_text(request, query, size);
+   return query[0] ? query : "Continue the admitted conversation.";
+}
+
+/* Add consumed host context without rebuilding the input message. */
+static int host_request_with_hint(const aimee_request_t *source, const char *hint,
+                                  aimee_request_t *out)
+{
+   if (aimee_ir_request_clone(source, out))
+      return -1;
+   if (out->n_messages < 1)
+      goto fail;
+   aimee_message_t *message = &out->messages[out->n_messages - 1];
+   if (strcmp(message->role, "user"))
+   {
+      aimee_message_t *messages =
+          realloc(out->messages, (size_t)(out->n_messages + 1) * sizeof *messages);
+      if (!messages)
+         goto fail;
+      out->messages = messages;
+      message = &messages[out->n_messages++];
+      *message = (aimee_message_t){.role = strdup("user")};
+      if (!message->role)
+         goto fail;
+   }
+   char *text = strdup(hint);
+   aimee_block_t *blocks =
+       realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+   if (!text || !blocks)
+   {
+      free(text);
+      if (blocks)
+         message->blocks = blocks;
+      goto fail;
+   }
+   message->blocks = blocks;
+   message->content_scalar = 0;
+   aimee_block_t *block = &blocks[message->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   out->mutated = 1;
+   return 0;
+fail:
+   aimee_request_free(out);
+   return -1;
+}
+
+int agent_run(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+              agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   if (!host_request_supported(request, 1))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical routing request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   const char *user_prompt = host_request_query(request, query, sizeof query);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
 
    cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
                                     strlen(user_prompt ? user_prompt : "") + 3) /
@@ -405,26 +505,15 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       char *hint = agent_uses_mistral_delegate_path(ag)
                        ? NULL
                        : kb_client_agent_hint_consume(role, user_prompt);
-      const char *effective_prompt = user_prompt;
-      char *enhanced = NULL;
-      if (hint && use_tools)
-      {
-         size_t elen = strlen(user_prompt) + strlen(hint) + 4;
-         enhanced = malloc(elen);
-         if (enhanced)
-         {
-            snprintf(enhanced, elen, "%s\n\n%s", user_prompt, hint);
-            effective_prompt = enhanced;
-         }
-      }
+      aimee_request_t enhanced = {0};
+      int prepared = !hint || !use_tools || !host_request_with_hint(request, hint, &enhanced);
       free(hint);
-
-      /* The turn goes through the single guarded executor: it enforces max_parallel
-       * and records provider health. Returns 0 (ok), AGENT_RC_AT_LIMIT (agent
-       * saturated — no health recorded), or -1 (run failure — health recorded). */
-      int rc = agent_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt,
-                                  max_tokens, temperature, use_tools, out);
-      free(enhanced);
+      agent_result_clear_response(out);
+      int rc = prepared
+                   ? agent_dispatch_one(ag, &cfg->network, role,
+                                        enhanced.n_messages ? &enhanced : request, use_tools, out)
+                   : AGENT_RC_CONTEXT_REFUSED;
+      aimee_request_free(&enhanced);
 
       if (rc == 0)
       {
@@ -439,46 +528,35 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       if (cfg->route_pinned)
       {
          agent_result_clear_response(out);
-         out->response = NULL;
          break;
       }
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
       if (ntried < MAX_AGENTS)
          tried[ntried++] = ag->name;
-      agent_result_clear_response(out);
-      out->response = NULL;
    }
 
+   agent_result_clear_response(out);
    if (!out->error[0])
       agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
-}
-
-/* Thin wrapper preserving the historical 0.3 sampling temperature, so existing
- * agent_run call sites are byte-unchanged while agent_run_ex carries a real
- * temperature parameter for the parallel fan-out path. */
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
-{
-   return agent_run_ex(cfg, role, system_prompt, user_prompt, max_tokens, 0.3, out);
 }
 
 /* One-shot, TOOL-FREE text generation for UI drafting (e.g. "draft this proposal
  * with a delegate"). Deliberately NOT the agentic delegate path: it selects a
  * single non-CLI (HTTP-provider) agent — preferring `agent_name` if given, else
  * the default, else the first enabled non-CLI agent — clones it, forces
- * write_capable off, and calls the plain-completion agent_execute() directly.
+ * write_capable off, and calls the plain canonical completion owner directly.
  * No provider-CLI, no exec role, no worktree, no tools: the model can only return
- * text. Returns 0 on success (out->response holds the text), -1 otherwise.
+ * canonical response. Returns 0 on success, -1 otherwise.
  * Provider-CLI agents are refused as drafters precisely because they are agentic. */
-int agent_generate(agent_config_t *cfg, const char *agent_name, const char *system_prompt,
-                   const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+int agent_generate(agent_config_t *cfg, const char *agent_name, const aimee_request_t *request,
+                   agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
-   if (!cfg || !user_prompt || !user_prompt[0])
+   if (!cfg || !host_request_supported(request, 0))
    {
-      snprintf(out->error, sizeof(out->error), "empty prompt");
+      snprintf(out->error, sizeof(out->error), "unsupported drafting request");
       return -1;
    }
    /* Pick a non-CLI (non-agentic) drafter. */
@@ -510,18 +588,53 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
    agent_apply_runtime_config(&local);
    local.write_capable = 0; /* belt-and-suspenders; not the primary safeguard */
    /* THE tool-safety guarantee: dispatch with use_tools=0, so the single executor
-    * runs the plain agent_execute() completion path — NO tool loop at all (tool
+    * runs the plain canonical completion path — NO tool loop at all (tool
     * execution lives only in agent_execute_with_tools_for_role, reached ONLY when
     * use_tools=1). So regardless of the agent's tools_enabled flag, a draft can
     * only return text: it cannot run a tool, read/write files, or touch a repo.
     * The non-CLI filter above is secondary. (agent_dispatch_one also enforces the
     * drafter's max_parallel + records its health, like every other turn.) */
-   int rc = agent_dispatch_one(&local, &cfg->network, NULL /* role */, system_prompt, user_prompt,
-                               max_tokens, temperature, 0 /* use_tools: plain completion */, out);
+   int rc = agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 1);
    /* Stamp the drafter name for the caller even on the early-guard paths that
     * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
    return rc;
+}
+
+/* Evaluation has a canonical, tool-free owner. It deliberately does not enter
+ * routing, hints, credential-pool retries, tool loops or feedback recording. */
+int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, agent_result_t *out)
+{
+   memset(out, 0, sizeof *out);
+   if (!cfg || !request || aimee_ir_request_admit(request) || request->n_tools || request->stream ||
+       request->model || request->tool_choice != AIMEE_TOOL_CHOICE_NONE || request->n_messages < 1)
+      return AGENT_RC_CONTEXT_REFUSED;
+   agent_t *pick = cfg->default_agent[0] ? agent_find(cfg, cfg->default_agent) : NULL;
+   if (pick && (!pick->enabled || agent_uses_provider_cli(pick)))
+      pick = NULL;
+   for (int i = 0; !pick && i < cfg->agent_count; i++)
+      if (cfg->agents[i].enabled && !agent_uses_provider_cli(&cfg->agents[i]))
+         pick = &cfg->agents[i];
+   if (!pick)
+   {
+      snprintf(out->error, sizeof out->error, "no non-CLI delegate available for generation");
+      return -1;
+   }
+   agent_t local = *pick;
+   agent_apply_runtime_config(&local);
+   local.write_capable = 0;
+   if (request->has_max_tokens &&
+       agent_request_max_tokens(&local, request->max_tokens) != request->max_tokens)
+   {
+      snprintf(out->error, sizeof out->error, "selected model cannot honor generation token cap");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   if (!agent_request_controls_supported(&local, request))
+   {
+      snprintf(out->error, sizeof out->error, "selected model cannot honor generation controls");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   return agent_dispatch_one_internal(&local, &cfg->network, NULL, request, 0, out, NULL, 0);
 }
 
 /* Run one fan-out task on a specifically named configured agent (resolved like
@@ -533,8 +646,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
  * into duplicate participants. Defined here (next to the static execution
  * helpers it needs) but called from agent_parallel.c, so it is not static. */
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                    const char *system_prompt, const char *user_prompt, int max_tokens,
-                    double temperature, agent_result_t *out)
+                    const aimee_request_t *request, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -563,16 +675,11 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
     * (agent saturated) propagates as a non-zero rc; the parallel panel/ensemble
     * caller treats a non-response as "this lens unfilled" and retries a different
     * agent, so a saturated model is spread rather than piled on. */
-   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                               temperature, 0 /* use_tools */, out);
-   {
-   }
-   return rc;
+   return agent_dispatch_one(&local, &cfg->network, role, request, 0, out);
 }
 
 int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
-                               const char *system_prompt, const char *user_prompt, int max_tokens,
-                               double temperature, agent_result_t *out)
+                               const aimee_request_t *request, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -597,20 +704,25 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
     * index-only `review_indexed`) is what actually decides which tools appear. */
    local.write_capable = 0;
 
-   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                               temperature, 1 /* use_tools */, out);
-   {
-   }
-   return rc;
+   return agent_dispatch_one(&local, &cfg->network, role, request, 1, out);
 }
 
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
-                                         const char *system_prompt, const char *user_prompt,
-                                         int max_tokens, int enforce_writes, agent_result_t *out,
-                                         const agent_t *selected, const aimee_request_t *request,
-                                         aimee_response_t *response)
+                                         const aimee_request_t *request, int enforce_writes,
+                                         agent_result_t *out, const agent_t *selected,
+                                         aimee_response_t *response, int host_text_profile)
 {
    memset(out, 0, sizeof(*out));
+   if (!request || aimee_ir_request_admit(request) ||
+       (host_text_profile && !host_request_supported(request, 1)))
+   {
+      snprintf(out->error, sizeof out->error, "unsupported canonical tool routing request");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const char *system_prompt = request->n_system ? request->system[0].text : NULL;
+   char query[4096];
+   const char *user_prompt = host_request_query(request, query, sizeof query);
+   int max_tokens = request->has_max_tokens ? request->max_tokens : 0;
 
    /* Cooperative cancellation (server-owned turn lifecycle): abort before a
     * (potentially long) provider call if the turn was already cancelled
@@ -697,31 +809,20 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       ag->write_capable = enforce_writes ? 1 : 0;
    }
 
-   char *hint =
-       (request || !agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
-           ? NULL
-           : kb_client_agent_hint_consume(role, user_prompt);
-   const char *effective_prompt = user_prompt;
-   char *enhanced = NULL;
-   if (hint)
-   {
-      size_t elen = strlen(user_prompt) + strlen(hint) + 4;
-      enhanced = malloc(elen);
-      if (enhanced)
-      {
-         snprintf(enhanced, elen, "%s\n\n%s", user_prompt, hint);
-         effective_prompt = enhanced;
-      }
-   }
+   char *hint = (!host_text_profile || !agent_tools_knowledge_write_allowed() ||
+                 agent_uses_mistral_delegate_path(ag))
+                    ? NULL
+                    : kb_client_agent_hint_consume(role, user_prompt);
+   aimee_request_t enhanced = {0};
+   int prepared = !hint || !host_request_with_hint(request, hint, &enhanced);
    free(hint);
-
-   /* The delegate turn through the single guarded executor (tools enabled): it
-    * enforces ag->max_parallel and records provider health. */
-   int rc = agent_dispatch_one_internal(
-       ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
-       request && request->has_temperature ? request->temperature : 0.3, 1 /* use_tools */, out,
-       request, response);
-   free(enhanced);
+   if (!prepared)
+      return AGENT_RC_CONTEXT_REFUSED;
+   const aimee_request_t *original = request;
+   int rc = agent_dispatch_one_internal(ag, &cfg->network, role,
+                                        enhanced.n_messages ? &enhanced : request, 1, out, response,
+                                        host_text_profile);
+   aimee_request_free(&enhanced);
 
    if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
@@ -745,21 +846,16 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             break;
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         agent_result_clear_response(out);
-         out->response = NULL;
-         out->error[0] = '\0';
-
          aimee_log(LOG_INFO, "agent", "fallback: trying agent '%s'", fb->name);
-         rc = agent_dispatch_one(fb, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                                 0.3, 1 /* use_tools */, out);
+         agent_result_clear_response(out);
+         rc = agent_dispatch_one(fb, &cfg->network, role, original, 1 /* use_tools */, out);
          if (rc == 0)
             ag = fb; /* update ag for post-run logging (health recorded by dispatch_one) */
       }
    }
 
    if (!route_pinned)
-      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                        enforce_writes, out, rc);
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, original, enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
@@ -770,24 +866,22 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 
 /* Like agent_run but always uses tool execution, even if the agent config
  * does not have tools_enabled set. Used by the delegate command. */
-int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
-                         const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run_with_tools(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         agent_result_t *out)
 {
-   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens, 1, out,
-                                        NULL, NULL, NULL);
+   return agent_run_with_tools_internal(cfg, role, request, 1, out, NULL, NULL, 1);
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
-                                       const char *system_prompt, const char *user_prompt,
-                                       int max_tokens, int enforce_writes, agent_result_t *out)
+                                       const aimee_request_t *request, int enforce_writes,
+                                       agent_result_t *out)
 {
-   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens,
-                                        enforce_writes, out, NULL, NULL, NULL);
+   return agent_run_with_tools_internal(cfg, role, request, enforce_writes, out, NULL, NULL, 1);
 }
 
 /* The parallel fan-out machinery (parallel_worker, agent_run_parallel) lives in
  * agent_parallel.c — extracted to keep this file under the 2000-line cap. It
- * calls the now-non-static agent_run_named / agent_run_ex above. */
+ * calls the now-non-static agent_run_named / agent_run above. */
 
 /* ================================================================
  * From: agent_context.c
@@ -800,25 +894,22 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
 
 /* --- Request/response (simple, non-tool path) --- */
 
-static int text_prompt_token_estimate(const char *system_prompt, const char *user_prompt)
-{
-   size_t len = 0;
-   if (system_prompt)
-      len += strlen(system_prompt);
-   if (user_prompt)
-      len += strlen(user_prompt);
-   return (int)(len / 4) + 1;
-}
-
 static void track_simple_anthropic_payload_rewrite(const delegate_driver_t *driver,
-                                                   const agent_t *agent, const char *system_prompt,
-                                                   const char *user_prompt)
+                                                   const agent_t *agent,
+                                                   const aimee_request_t *request)
 {
+   size_t length = 0;
+   for (int i = 0; i < request->n_system; i++)
+      if (request->system[i].text)
+         length += strlen(request->system[i].text);
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+         if (request->messages[i].blocks[j].text)
+            length += strlen(request->messages[i].blocks[j].text);
    driver_caps_t caps;
    delegate_get_caps(driver, agent, &caps);
-   payload_rewrite_track_request(system_prompt, NULL,
-                                 text_prompt_token_estimate(system_prompt, user_prompt),
-                                 caps.context_limit);
+   payload_rewrite_track_request(request->n_system ? request->system[0].text : NULL, NULL,
+                                 (int)(length / 4) + 1, caps.context_limit);
 }
 
 /* All native output crosses the same entry adapters as the tool runtime. The
@@ -832,9 +923,10 @@ static void parse_response(const char *body, const agent_t *agent,
       rc = agent_ir_decode_responses(body, -1, NULL, &response);
    else
    {
-      cJSON *root = cJSON_Parse(body);
+      cJSON *root = aimee_ir_json_parse_frame(body, body ? strlen(body) : 0);
       if (!root)
       {
+         out->usage_unobserved = 1;
          snprintf(out->error, sizeof out->error, "invalid JSON response");
          return;
       }
@@ -844,12 +936,24 @@ static void parse_response(const char *body, const agent_t *agent,
    }
    if (rc != 0)
    {
+      out->usage_unobserved = 1;
       snprintf(out->error, sizeof out->error, "%s",
                rc == AGENT_IR_CAPTURE_FAILED ? "canonical response persistence failed"
                                              : "provider response could not be admitted as IR");
       if (rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed())
          snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
       return;
+   }
+   out->prompt_tokens = response.usage_in;
+   out->completion_tokens = response.usage_out;
+   out->cache_read_tokens = response.usage_cache_read;
+   out->cache_write_tokens = response.usage_cache_write;
+   out->usage_unobserved |= response.usage_unobserved;
+   if (out->usage_unobserved)
+   {
+      response.usage_unobserved = 1;
+      response.usage_in = response.usage_out = response.usage_cache_read =
+          response.usage_cache_write = response.usage_reasoning = 0;
    }
    if (response.error_message)
    {
@@ -859,24 +963,15 @@ static void parse_response(const char *body, const agent_t *agent,
       out->canonical_response = response;
       return;
    }
-   out->prompt_tokens = response.usage_in;
-   out->completion_tokens = response.usage_out;
-   out->cache_read_tokens = response.usage_cache_read;
-   out->cache_write_tokens = response.usage_cache_write;
    if (response.model && response.model[0])
       snprintf(out->model, sizeof out->model, "%s", response.model);
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             response.raw_stop_reason ? response.raw_stop_reason
                                      : aimee_stop_reason_name(response.stop_reason));
-   char *text = aimee_ir_response_text_alloc(&response);
-   if (text && text[0])
-   {
-      agent_result_clear_response(out);
-      out->response = text;
-      out->success = 1;
-   }
-   else
-      free(text);
+   agent_result_clear_response(out);
+   out->success = !aimee_ir_response_complete_valid(&response);
+   if (!out->success)
+      snprintf(out->error, sizeof out->error, "model did not return a complete canonical answer");
    if (out->cache_read_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache hit: %d tokens read from cache",
                 out->cache_read_tokens);
@@ -888,8 +983,8 @@ static void parse_response(const char *body, const agent_t *agent,
 
 /* --- Simple (non-tool) execution --- */
 
-int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                  int max_tokens, double temperature, agent_result_t *out)
+static int agent_execute_plain_request(const agent_t *agent, const aimee_request_t *request,
+                                       agent_result_t *out, int host_text_profile)
 {
    memset(out, 0, sizeof(*out));
    /* A refused route arrives here as NULL, and the three reads below would fault
@@ -906,10 +1001,10 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
-   if (!user_prompt || !user_prompt[0])
+   if (!request || aimee_ir_request_admit(request))
    {
-      snprintf(out->error, sizeof(out->error), "empty prompt");
-      return -1;
+      snprintf(out->error, sizeof out->error, "invalid canonical request");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
    char stop_reason[128];
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
@@ -940,19 +1035,23 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->error, sizeof(out->error), "%s", why ? why : "auth resolution failed");
       return -1;
    }
-   /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
-   char *augmented_prompt = plugin_chook_apply_pre_llm(user_prompt);
-   const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
-   /* Build request body — derive the output cap from the model when unpinned. */
-   int tok = agent_request_max_tokens(agent, max_tokens);
-   if (is_anthropic_provider(agent))
-      track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = agent_build_request(agent, system_prompt, effective_user, tok, temperature);
+   /* Hook text is evidence in an owned IR block; the original task stays intact. */
+   aimee_request_t prepared = {0};
+   if (host_text_profile && agent_prepare_plain_request_hooks(request, &prepared) < 0)
+   {
+      snprintf(out->error, sizeof out->error, "cannot prepare canonical hook context");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   const aimee_request_t *execution = prepared.n_messages ? &prepared : request;
+   if (host_text_profile && is_anthropic_provider(agent))
+      track_simple_anthropic_payload_rewrite(driver, agent, execution);
+   cJSON *req = !host_text_profile ? agent_build_plain_request_ir(agent, execution)
+                                   : agent_build_host_request_ir(agent, execution);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
    {
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       snprintf(out->error, sizeof(out->error), "failed to build request");
       return -1;
    }
@@ -962,7 +1061,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
        aimee_anthropic_replay_prepare(body, strlen(body), &sent_replay))
    {
       free(body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
       aimee_ir_session_fail_capture();
       return AGENT_RC_CAPTURE_FAILED;
@@ -974,7 +1073,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
        agent_result_cache_read(result_cache_role, cache_key, out))
    {
       free(body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       return 0;
    }
 
@@ -990,17 +1089,25 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    wire_fence_route_t wire_route = is_anthropic_provider(agent) ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                    : strstr(url, "/responses")  ? WIRE_FENCE_OPENAI_RESPONSES
                                                                 : WIRE_FENCE_OPENAI_CHAT;
-   int http_status = wire_fence_revalidate_sources() != 0
-                         ? HTTP_RETRY_ADMISSION_REFUSED
-                         : wire_fence_post(url, auth_header, body, strlen(body), &response_body,
-                                           agent->timeout_ms, extra_headers, ra, rb, rm,
-                                           agent->provider, agent->model, session_id(), wire_route);
+   wire_fence_observation_t observation = {0};
+   agent_job_progress_heartbeat("model");
+   int http_status =
+       wire_fence_revalidate_sources() != 0
+           ? HTTP_RETRY_ADMISSION_REFUSED
+           : wire_fence_post_observed(url, auth_header, body, strlen(body), &response_body,
+                                      agent->timeout_ms, extra_headers, ra, rb, rm, agent->provider,
+                                      agent->model, session_id(), wire_route, &observation);
+   agent_job_progress_heartbeat("");
+   out->usage_unobserved |=
+       observation.transport_attempts > 1 ||
+       (observation.transport_attempts && (http_status != 200 || !response_body));
    free(body);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
+      out->usage_unobserved |= observation.transport_attempts != 0;
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
-      free(augmented_prompt);
+      aimee_request_free(&prepared);
       return -1;
    }
 
@@ -1019,10 +1126,10 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
-      if (is_anthropic_provider(&fb_agent))
-         track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
-      cJSON *fb_req =
-          agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
+      if (host_text_profile && is_anthropic_provider(&fb_agent))
+         track_simple_anthropic_payload_rewrite(driver, &fb_agent, execution);
+      cJSON *fb_req = !host_text_profile ? agent_build_plain_request_ir(&fb_agent, execution)
+                                         : agent_build_host_request_ir(&fb_agent, execution);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -1031,23 +1138,30 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
              aimee_anthropic_replay_prepare(fb_body, strlen(fb_body), &sent_replay))
          {
             free(fb_body);
-            free(augmented_prompt);
+            aimee_request_free(&prepared);
             snprintf(out->error, sizeof out->error, "cannot bind fallback native replay prefix");
             aimee_ir_session_fail_capture();
             return AGENT_RC_CAPTURE_FAILED;
          }
-         http_status =
-             wire_fence_revalidate_sources() != 0
-                 ? HTTP_RETRY_ADMISSION_REFUSED
-                 : wire_fence_post(url, auth_header, fb_body, strlen(fb_body), &response_body,
-                                   agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
-                                   fb_agent.model, session_id(), wire_route);
+         observation = (wire_fence_observation_t){0};
+         agent_job_progress_heartbeat("model");
+         http_status = wire_fence_revalidate_sources() != 0
+                           ? HTTP_RETRY_ADMISSION_REFUSED
+                           : wire_fence_post_observed(
+                                 url, auth_header, fb_body, strlen(fb_body), &response_body,
+                                 agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
+                                 fb_agent.model, session_id(), wire_route, &observation);
+         agent_job_progress_heartbeat("");
+         out->usage_unobserved |=
+             observation.transport_attempts > 1 ||
+             (observation.transport_attempts && (http_status != 200 || !response_body));
          free(fb_body);
       }
    }
-   free(augmented_prompt);
+   aimee_request_free(&prepared);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
+      out->usage_unobserved |= observation.transport_attempts != 0;
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
       return -1;
@@ -1177,43 +1291,6 @@ static size_t ctx_category_budget(task_type_t type, int category, size_t total_b
    return (total_budget * (size_t)weight) / (size_t)total_weight;
 }
 
-static void ctx_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
-{
-   if (!buf || cap == 0 || !pos || *pos >= cap - 1)
-      return;
-
-   va_list ap;
-   va_start(ap, fmt);
-   int n = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
-   va_end(ap);
-
-   if (n < 0)
-      return;
-   if ((size_t)n >= cap - *pos)
-   {
-      *pos = cap - 1;
-      buf[*pos] = '\0';
-      return;
-   }
-   *pos += (size_t)n;
-}
-
-static void ctx_append_bytes(char *buf, size_t cap, size_t *pos, const char *src, size_t len)
-{
-   if (!buf || cap == 0 || !pos || !src || *pos >= cap - 1)
-      return;
-
-   size_t avail = cap - 1 - *pos;
-   if (len > avail)
-      len = avail;
-   if (len == 0)
-      return;
-
-   memcpy(buf + *pos, src, len);
-   *pos += len;
-   buf[*pos] = '\0';
-}
-
 static const char *agent_context_cwd(char *buf, size_t buf_len)
 {
    const char *thread_cwd = run_cmd_get_cwd();
@@ -1267,23 +1344,100 @@ const char *agent_exec_instructions(task_type_t task_type)
           "file-content authority when it differs from indexed snippets.\n";
 }
 
-char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
-                                  const char *custom_prompt, int skip_kb_context)
+/* Assembly owns canonical blocks from the first append. The byte counter is
+ * shared across blocks so source/category budgets retain their original scope. */
+typedef enum
 {
-   return agent_build_exec_context_for_role(agent, network, NULL, custom_prompt, skip_kb_context);
+   EXEC_PLATFORM_POLICY,
+   EXEC_OPERATOR_POLICY,
+   EXEC_MEMORY_EVIDENCE,
+   EXEC_OPERATOR_EVIDENCE,
+   EXEC_TOOL_EVIDENCE
+} exec_context_kind_t;
+typedef struct
+{
+   aimee_message_t message;
+   exec_context_kind_t kind;
+   int failed;
+} exec_context_t;
+
+static aimee_block_t *exec_context_block(exec_context_t *context)
+{
+   aimee_context_origin_t origin = context->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_ORIGIN_PLATFORM
+                                   : context->kind == EXEC_MEMORY_EVIDENCE ? AIMEE_CTX_ORIGIN_MEMORY
+                                   : context->kind == EXEC_TOOL_EVIDENCE
+                                       ? AIMEE_CTX_ORIGIN_TOOL
+                                       : AIMEE_CTX_ORIGIN_OPERATOR;
+   aimee_context_authority_t authority =
+       context->kind == EXEC_PLATFORM_POLICY || context->kind == EXEC_OPERATOR_POLICY
+           ? AIMEE_CTX_AUTH_POLICY
+           : AIMEE_CTX_AUTH_EVIDENCE;
+   aimee_message_t *message = &context->message;
+   aimee_block_t *block = message->n_blocks ? &message->blocks[message->n_blocks - 1] : NULL;
+   if (block && block->context.origin == origin && block->context.authority == authority)
+      return block;
+   aimee_block_t *blocks =
+       realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      return NULL;
+   message->blocks = blocks;
+   block = &blocks[message->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT};
+   aimee_ir_block_set_context(block, origin, authority,
+                              context->kind == EXEC_PLATFORM_POLICY ? AIMEE_CTX_TRUST_VERIFIED
+                                                                    : AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   return block;
 }
 
-char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
-                                        const char *role, const char *custom_prompt,
-                                        int skip_kb_context)
+static void ctx_append_bytes(exec_context_t *context, size_t cap, size_t *pos, const char *text,
+                             size_t len)
 {
-   return agent_build_exec_context_checked(agent, network, role, custom_prompt, skip_kb_context,
-                                           NULL, 0);
+   if (context->failed || !len || *pos >= cap - 1)
+      return;
+   aimee_block_t *block = exec_context_block(context);
+   size_t prior = block && block->text ? strlen(block->text) : 0;
+   size_t available = cap - 1 - *pos;
+   size_t added = len < available ? len : available;
+   char *owned = block ? realloc(block->text, prior + added + 1) : NULL;
+   if (!owned)
+   {
+      context->failed = 1;
+      return;
+   }
+   block->text = owned;
+   memcpy(owned + prior, text, added);
+   owned[prior + added] = '\0';
+   if (added < len)
+      text_trim_partial_utf8(owned);
+   *pos += strlen(owned) - prior;
 }
 
-static int append_native_memory_projection(const cJSON *envelope, size_t available, char *buf,
-                                           size_t cap, size_t *pos, int mark_reminders,
-                                           int *native_started, char *error, size_t error_len)
+static void ctx_appendf(exec_context_t *context, size_t cap, size_t *pos, const char *fmt, ...)
+{
+   if (context->failed || *pos >= cap - 1)
+      return;
+   va_list args;
+   va_start(args, fmt);
+   size_t available = cap - *pos;
+   char *text = malloc(available);
+   int length = text ? vsnprintf(text, available, fmt, args) : -1;
+   va_end(args);
+   if (length < 0)
+      context->failed = 1;
+   else
+   {
+      if ((size_t)length >= available)
+         text_trim_partial_utf8(text);
+      ctx_append_bytes(context, cap, pos, text, strlen(text));
+   }
+   free(text);
+}
+
+static int append_native_memory_projection(const cJSON *envelope, size_t available,
+                                           exec_context_t *context, size_t cap, size_t *pos,
+                                           int mark_reminders, int *native_started, char *error,
+                                           size_t error_len)
 {
    /* The Go owner decides whether recall is usable. Preserve explicit
     * refusals instead of treating an absent recall member as empty memory.
@@ -1340,7 +1494,7 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
       return -1;
    }
    *native_started = 1;
-   ctx_append_bytes(buf, cap, pos, text, strlen(text));
+   ctx_append_bytes(context, cap, pos, text, strlen(text));
    if (text[0] && request_context_get())
       (void)request_context_require_memory_receipt();
    if (mark_reminders)
@@ -1357,9 +1511,10 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    return 0;
 }
 
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom_prompt,
-                                       int skip_kb_context, char *error, size_t error_len)
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context, aimee_message_t *out, char *error,
+                                        size_t error_len)
 {
    if (error && error_len)
       error[0] = '\0';
@@ -1383,12 +1538,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
        "- Do not ask for confirmation. Execute the task directly.\n";
    size_t content_budget = agent_exec_context_budget_chars(agent);
    size_t cap = content_budget + 4096; /* extra room for headers */
-   char *buf = malloc(cap);
-   if (!buf)
+   exec_context_t context = {.message = {.role = strdup("system")}};
+   if (!out || !context.message.role)
    {
       if (error && error_len)
          snprintf(error, error_len, "context assembly allocation failed");
-      return NULL;
+      aimee_message_free(&context.message);
+      return -1;
    }
    size_t pos = 0;
 
@@ -1405,8 +1561,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
                         (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0) ||
                         ((!kb_mode || !kb_mode[0]) && !kb_client_connection_configured());
 
-   ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
-   ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
+   ctx_appendf(&context, cap, &pos, "%s", agent_exec_instructions(task_type));
+   ctx_appendf(&context, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
 
    /* Turn registers (fold §6): ask for the tags the record path already knows how to
     * read. Gated on the same flag that turns on the fold's skeleton annotation, because
@@ -1415,7 +1571,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    {
       const char *registers = prompt_turn_registers_text(config_fold_register_enabled());
       if (registers)
-         ctx_appendf(buf, cap, &pos, "%s", registers);
+         ctx_appendf(&context, cap, &pos, "%s", registers);
    }
 
    char cwd_buf[MAX_PATH_LEN];
@@ -1427,12 +1583,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       char root[MAX_PATH_LEN] = "";
       if (workspace_active_root(cwd, root, sizeof(root)) != 0)
          snprintf(root, sizeof(root), "%s", cwd);
-      ctx_appendf(buf, cap, &pos,
-                  "Workspace root: %s\n"
+      context.kind = EXEC_OPERATOR_EVIDENCE;
+      ctx_appendf(&context, cap, &pos, "Workspace root: %s\n", root);
+      context.kind = EXEC_PLATFORM_POLICY;
+      ctx_appendf(&context, cap, &pos,
                   "Use paths relative to this workspace, or absolute paths under this exact "
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
-                  "unless the user explicitly asks for them.\n",
-                  root);
+                  "unless the user explicitly asks for them.\n");
       (void)workspace_repo_identity(cwd, memory_project, sizeof(memory_project), memory_workspace,
                                     sizeof(memory_workspace));
    }
@@ -1440,13 +1597,17 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
     * repository identity.  An unresolved cwd deliberately yields global/shared
     * memory only rather than another project's rows. */
    kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
-   ctx_appendf(buf, cap, &pos, "\n");
+   ctx_appendf(&context, cap, &pos, "\n");
 
-   /* Custom prompt override */
+   context.kind = EXEC_OPERATOR_POLICY;
+
+   /* Authored profile/role policy, not an inherited first-system projection. */
    if (custom_prompt && custom_prompt[0])
    {
-      ctx_appendf(buf, cap, &pos, "%s\n\n", custom_prompt);
+      ctx_appendf(&context, cap, &pos, "%s\n\n", custom_prompt);
    }
+
+   context.kind = EXEC_MEMORY_EVIDENCE;
 
    /* Replace the prior native proof set once per complete context build;
     * subsequent native blocks in this build add their retained proofs. */
@@ -1469,7 +1630,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    if (rules && rules[0] && strcmp(rules, "No rules configured.") != 0)
    {
       size_t rules_start = pos;
-      ctx_appendf(buf, cap, &pos, "# Rules\n");
+      ctx_appendf(&context, cap, &pos, "# Rules\n");
       /* Truncate rules content to budget */
       size_t rules_len = strlen(rules);
       size_t rules_avail =
@@ -1477,8 +1638,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       if (rules_len > rules_avail)
          rules_len = rules_avail;
       if (rules_len > 0)
-         ctx_append_bytes(buf, cap, &pos, rules, rules_len);
-      ctx_appendf(buf, cap, &pos, "\n\n");
+         ctx_append_bytes(&context, cap, &pos, rules, rules_len);
+      ctx_appendf(&context, cap, &pos, "\n\n");
    }
    free(rules);
 
@@ -1504,9 +1665,9 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
       if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsString(text) &&
           strlen(text->valuestring) <= available)
-         ctx_appendf(buf, cap, &pos, "%s", text->valuestring);
+         ctx_appendf(&context, cap, &pos, "%s", text->valuestring);
       else
-         ctx_appendf(buf, cap, &pos, "[Memory context unavailable]\n");
+         ctx_appendf(&context, cap, &pos, "[Memory context unavailable]\n");
       cJSON_Delete(reply);
    }
    else if (!skip_kb_client)
@@ -1521,13 +1682,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       char *raw = kb_v1_action_request("memory.assemble_context", request);
       cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
       free(raw);
-      if (append_native_memory_projection(reply, available, buf, cap, &pos, 0, &native_started,
+      if (append_native_memory_projection(reply, available, &context, cap, &pos, 0, &native_started,
                                           error, error_len) != 0)
       {
          cJSON_Delete(reply);
          kb_client_memory_scope_context_clear();
-         free(buf);
-         return NULL;
+         aimee_message_free(&context.message);
+         return -1;
       }
       cJSON_Delete(reply);
    }
@@ -1559,13 +1720,14 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
                                                                   session_start, available);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
-         if (append_native_memory_projection(envelope, available, buf, cap, &pos, !skip_kb_client,
-                                             &native_started, error, error_len) != 0)
+         if (append_native_memory_projection(envelope, available, &context, cap, &pos,
+                                             !skip_kb_client, &native_started, error,
+                                             error_len) != 0)
          {
             cJSON_Delete(envelope);
             kb_client_memory_scope_context_clear();
-            free(buf);
-            return NULL;
+            aimee_message_free(&context.message);
+            return -1;
          }
          /* Empty is still the owner's final selection; do not bypass its budget. */
          recall_injected = 1;
@@ -1592,13 +1754,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
          cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
          free(matches_json);
-         if (append_native_memory_projection(response, available, buf, cap, &pos, 1,
+         if (append_native_memory_projection(response, available, &context, cap, &pos, 1,
                                              &native_started, error, error_len) != 0)
          {
             cJSON_Delete(response);
             kb_client_memory_scope_context_clear();
-            free(buf);
-            return NULL;
+            aimee_message_free(&context.message);
+            return -1;
          }
          cJSON_Delete(response);
       }
@@ -1609,12 +1771,12 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    int pcount = skip_kb_client ? 0 : kb_client_index_list(projects, 32);
    if (pcount > 0)
    {
-      ctx_appendf(buf, cap, &pos, "# Repos: ");
+      ctx_appendf(&context, cap, &pos, "# Repos: ");
       for (int i = 0; i < pcount && pos < cap - 64; i++)
       {
-         ctx_appendf(buf, cap, &pos, "%s%s", i > 0 ? ", " : "", projects[i].name);
+         ctx_appendf(&context, cap, &pos, "%s%s", i > 0 ? ", " : "", projects[i].name);
       }
-      ctx_appendf(buf, cap, &pos, "\n\n");
+      ctx_appendf(&context, cap, &pos, "\n\n");
    }
 
    /* Relevant code symbols: query the index for terms matching the task prompt */
@@ -1642,13 +1804,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       if (total_hits > 0)
       {
          size_t code_start = pos;
-         ctx_appendf(buf, cap, &pos, "# Relevant Code\n");
+         ctx_appendf(&context, cap, &pos, "# Relevant Code\n");
          for (int i = 0; i < total_hits && pos < cap - 256 && (pos - code_start) < budget_code; i++)
          {
-            ctx_appendf(buf, cap, &pos, "- %s:%d (%s) [%s]\n", hits[i].file_path, hits[i].line,
+            ctx_appendf(&context, cap, &pos, "- %s:%d (%s) [%s]\n", hits[i].file_path, hits[i].line,
                         hits[i].kind, hits[i].project);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -1682,11 +1844,10 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
                   size_t sg_len = strlen(content);
                   if (sg_len > 0 && pos + sg_len + 4 < cap)
                   {
-                     memcpy(buf + pos, content, sg_len);
-                     pos += sg_len;
-                     if (pos > 0 && buf[pos - 1] != '\n')
-                        buf[pos++] = '\n';
-                     buf[pos++] = '\n';
+                     ctx_append_bytes(&context, cap, &pos, content, sg_len);
+                     if (content[sg_len - 1] != '\n')
+                        ctx_appendf(&context, cap, &pos, "\n");
+                     ctx_appendf(&context, cap, &pos, "\n");
                   }
                   free(sg);
                }
@@ -1696,18 +1857,20 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       }
    }
 
+   context.kind = EXEC_OPERATOR_EVIDENCE;
+
    /* Network access */
    if (network && network->ssh_entry[0])
    {
-      ctx_appendf(buf, cap, &pos, "# Network Access\n");
-      ctx_appendf(buf, cap, &pos, "Default entry: %s\n", network->ssh_entry);
+      ctx_appendf(&context, cap, &pos, "# Network Access\n");
+      ctx_appendf(&context, cap, &pos, "Default entry: %s\n", network->ssh_entry);
       if (network->ssh_key[0])
-         ctx_appendf(buf, cap, &pos, "SSH key: %s\n", network->ssh_key);
-      ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "SSH key: %s\n", network->ssh_key);
+      ctx_appendf(&context, cap, &pos, "\n");
 
       if (network->host_count > 0)
       {
-         ctx_appendf(buf, cap, &pos, "Hosts:\n");
+         ctx_appendf(&context, cap, &pos, "Hosts:\n");
          for (int i = 0; i < network->host_count && pos < cap - 256; i++)
          {
             const agent_net_host_t *h = &network->hosts[i];
@@ -1727,37 +1890,39 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
                   snprintf(ssh_cmd, sizeof(ssh_cmd), "%s -i %s", host_entry, network->ssh_key);
                else
                   snprintf(ssh_cmd, sizeof(ssh_cmd), "%s", host_entry);
-               ctx_appendf(buf, cap, &pos, "  %-16s %s %s@  %s\n", h->name, ssh_cmd,
+               ctx_appendf(&context, cap, &pos, "  %-16s %s %s@  %s\n", h->name, ssh_cmd,
                            h->user[0] ? h->user : "root", h->desc);
             }
             else if (h->port > 0)
-               ctx_appendf(buf, cap, &pos, "  %-16s %s:%d  %-8s %s\n", h->name, h->ip, h->port,
+               ctx_appendf(&context, cap, &pos, "  %-16s %s:%d  %-8s %s\n", h->name, h->ip, h->port,
                            h->user, h->desc);
             else
-               ctx_appendf(buf, cap, &pos, "  %-16s %-20s %-8s %s\n", h->name, h->ip, h->user,
+               ctx_appendf(&context, cap, &pos, "  %-16s %-20s %-8s %s\n", h->name, h->ip, h->user,
                            h->desc);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
 
       if (network->network_count > 0)
       {
-         ctx_appendf(buf, cap, &pos, "Networks:\n");
+         ctx_appendf(&context, cap, &pos, "Networks:\n");
          for (int i = 0; i < network->network_count && pos < cap - 128; i++)
          {
             const agent_net_def_t *nd = &network->networks[i];
-            ctx_appendf(buf, cap, &pos, "  %-16s %-20s %s\n", nd->name, nd->cidr, nd->desc);
+            ctx_appendf(&context, cap, &pos, "  %-16s %-20s %s\n", nd->name, nd->cidr, nd->desc);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
+
+   context.kind = EXEC_MEMORY_EVIDENCE;
 
    /* Working memory context */
    {
       char *wm_ctx = db1_wm_assemble_context(session_id());
       if (wm_ctx && wm_ctx[0])
       {
-         ctx_appendf(buf, cap, &pos, "# Working Memory\n%s\n\n", wm_ctx);
+         ctx_appendf(&context, cap, &pos, "# Working Memory\n%s\n\n", wm_ctx);
       }
       free(wm_ctx);
    }
@@ -1770,8 +1935,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          size_t vc_len = strlen(vc);
          size_t avail = cap - 1 - pos;
          if (avail > 1)
-            ctx_append_bytes(buf, cap, &pos, vc, vc_len < avail - 1 ? vc_len : avail - 1);
-         ctx_appendf(buf, cap, &pos, "\n");
+            ctx_append_bytes(&context, cap, &pos, vc, vc_len < avail - 1 ? vc_len : avail - 1);
+         ctx_appendf(&context, cap, &pos, "\n");
       }
       free(vc);
    }
@@ -1782,7 +1947,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       int acount = db1_wm_list(session_id(), "attempt", attempts, WM_MAX_RESULTS);
       if (acount > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Previous Attempts\n");
+         ctx_appendf(&context, cap, &pos, "# Previous Attempts\n");
          for (int i = 0; i < acount && pos < cap - 256; i++)
          {
             cJSON *v = cJSON_Parse(attempts[i].value);
@@ -1809,13 +1974,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
                }
             }
 
-            ctx_appendf(buf, cap, &pos, "- Tried: %s\n  Result: %s\n", ap, oc);
+            ctx_appendf(&context, cap, &pos, "- Tried: %s\n  Result: %s\n", ap, oc);
             if (ls[0])
-               ctx_appendf(buf, cap, &pos, "  Lesson: %s\n", ls);
+               ctx_appendf(&context, cap, &pos, "  Lesson: %s\n", ls);
 
             cJSON_Delete(v);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -1826,13 +1991,13 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       int tcount = kb_client_task_list(TASK_IN_PROGRESS, NULL, 8, active_tasks, 8);
       if (tcount > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Active Tasks\n");
+         ctx_appendf(&context, cap, &pos, "# Active Tasks\n");
          for (int i = 0; i < tcount && pos < cap - 256; i++)
          {
-            ctx_appendf(buf, cap, &pos, "- [%s] %s\n", active_tasks[i].state,
+            ctx_appendf(&context, cap, &pos, "- [%s] %s\n", active_tasks[i].state,
                         active_tasks[i].title);
          }
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
@@ -1847,14 +2012,14 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       {
          if (!has_failures)
          {
-            ctx_appendf(buf, cap, &pos, "# Recent Failures\n");
+            ctx_appendf(&context, cap, &pos, "# Recent Failures\n");
             has_failures = 1;
          }
-         ctx_appendf(buf, cap, &pos, "- [%s] %.120s\n", fails[i].role[0] ? fails[i].role : "?",
+         ctx_appendf(&context, cap, &pos, "- [%s] %.120s\n", fails[i].role[0] ? fails[i].role : "?",
                      fails[i].error[0] ? fails[i].error : "unknown");
       }
       if (has_failures)
-         ctx_appendf(buf, cap, &pos, "\n");
+         ctx_appendf(&context, cap, &pos, "\n");
    }
 
    /* Recent execution history: skip. Execution traces from other delegates
@@ -1862,31 +2027,37 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
     * Each delegate starts fresh — it has the task prompt and relevant context
     * from memory/index, which is sufficient. */
 
+   context.kind = EXEC_PLATFORM_POLICY;
+
    /* Guardrail warnings */
    {
       const char *mode = config_guardrail_mode();
       if (strcmp(mode, MODE_DENY) == 0)
       {
-         ctx_appendf(buf, cap, &pos,
+         ctx_appendf(&context, cap, &pos,
                      "# Guardrails\n"
                      "Mode: strict. Writes to sensitive files and high blast-radius "
                      "operations will be blocked.\n\n");
       }
       else if (strcmp(mode, MODE_APPROVE) == 0)
       {
-         ctx_appendf(buf, cap, &pos,
+         ctx_appendf(&context, cap, &pos,
                      "# Guardrails\n"
                      "Mode: approve. Writes to sensitive files will trigger warnings.\n\n");
       }
    }
 
+   context.kind = EXEC_OPERATOR_POLICY;
+
    /* Project contract */
    char *contract = agent_load_project_contract(NULL);
    if (contract)
    {
-      ctx_appendf(buf, cap, &pos, "%s\n", contract);
+      ctx_appendf(&context, cap, &pos, "%s\n", contract);
       free(contract);
    }
+
+   context.kind = EXEC_TOOL_EVIDENCE;
 
    /* Environment capabilities */
    {
@@ -1894,55 +2065,33 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       int n = db1_env_capability_list(caps, 20);
       if (n > 0)
       {
-         ctx_appendf(buf, cap, &pos, "# Environment\n");
+         ctx_appendf(&context, cap, &pos, "# Environment\n");
          for (int i = 0; i < n && pos < cap - 128; i++)
-            ctx_appendf(buf, cap, &pos, "  %-20s %s\n", caps[i].key, caps[i].value);
-         ctx_appendf(buf, cap, &pos, "\n");
+            ctx_appendf(&context, cap, &pos, "  %-20s %s\n", caps[i].key, caps[i].value);
+         ctx_appendf(&context, cap, &pos, "\n");
       }
    }
 
+   context.kind = agent->exec_system_prompt[0] ? EXEC_OPERATOR_POLICY : EXEC_PLATFORM_POLICY;
+
    /* Instructions */
-   ctx_appendf(buf, cap, &pos, "%s",
+   ctx_appendf(&context, cap, &pos, "%s",
                agent->exec_system_prompt[0] ? agent->exec_system_prompt
                                             : default_exec_instructions);
 
    kb_client_memory_scope_context_clear();
-   return buf;
-}
-
-char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
-                               const char *custom_prompt)
-{
-   return agent_build_exec_context_ex(agent, network, custom_prompt, 0);
-}
-
-/* --- Ephemeral SSH ---
- * Implemented in posix/agent_context.c (POSIX) and windows/agent_context.c (Windows). */
-
-/* --- Context command (Item 10) --- */
-
-void agent_print_context(const agent_config_t *cfg)
-{
-   if (!cfg || cfg->agent_count == 0)
+   cJSON *validated = context.failed ? NULL : aimee_ir_message_json(&context.message);
+   if (!validated)
    {
-      printf("No agents configured.\n");
-      return;
+      if (error && error_len)
+         snprintf(error, error_len, "canonical execution context admission failed");
+      aimee_message_free(&context.message);
+      return -1;
    }
-
-   agent_t *ag = &((agent_config_t *)cfg)->agents[0]; /* use first agent for context */
-   const agent_network_t *net = cfg->network.ssh_entry[0] ? &cfg->network : NULL;
-
-   char error[512];
-   char *ctx = agent_build_exec_context_checked(ag, net, NULL, NULL, 0, error, sizeof(error));
-   if (ctx)
-   {
-      printf("%s\n", ctx);
-      free(ctx);
-   }
-   else
-   {
-      printf("Failed to assemble context: %s\n", error);
-   }
+   cJSON_Delete(validated);
+   aimee_message_free(out);
+   *out = context.message;
+   return 0;
 }
 
 /* --- Logging ---
@@ -1982,9 +2131,35 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
 {
    if (!config || !selected || !selected->enabled || !request || !response || !out)
       return -1;
-   char query[4096];
-   aimee_ir_last_user_text(request, query, sizeof query);
-   return agent_run_with_tools_internal(
-       config, "execute", NULL, query[0] ? query : "Continue the admitted conversation.",
-       request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
+   return agent_run_with_tools_internal(config, "execute", request, 1, out, selected, response, 0);
+}
+
+/* Only the attested native bridge chooses this scope. Native execution still
+ * uses the normal selected-agent admission, capture, policy and tool owners. */
+int agent_native_request_turn_limit(void)
+{
+   return tl_native_turn_limit;
+}
+int agent_native_request_tools_disabled(void)
+{
+   return tl_force_no_tools;
+}
+int agent_run_native_request_for_role(agent_config_t *config, const agent_t *selected,
+                                      const char *role, int tools, const aimee_request_t *request,
+                                      aimee_response_t *response, agent_result_t *out)
+{
+   if (!config || !selected || !selected->enabled || !role || !role[0] ||
+       (tools != 0 && tools != 1) || !request || !response || !out ||
+       strcmp(selected->backend, "provider-cli") ||
+       (strcmp(selected->cli_kind, "claude") && strcmp(selected->cli_kind, "codex") &&
+        strcmp(selected->cli_kind, "acp")) ||
+       aimee_ir_request_admit(request))
+      return -1;
+   int previous = tl_force_no_tools, previous_limit = tl_native_turn_limit;
+   tl_force_no_tools = !tools;
+   tl_native_turn_limit = selected->max_turns > 0 ? selected->max_turns : 0;
+   int rc = agent_run_with_tools_internal(config, role, request, 1, out, selected, response, 0);
+   tl_force_no_tools = previous;
+   tl_native_turn_limit = previous_limit;
+   return rc;
 }

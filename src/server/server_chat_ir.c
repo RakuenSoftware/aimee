@@ -218,8 +218,15 @@ int server_chat_ir_progress(compute_ctx_t *c)
 static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 {
    compute_ctx_t *c = context;
-   if (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
-       server_session_capture_failed(c->ir_capture))
+   int failure_terminal = event && event->kind == AIMEE_SESSION_EXECUTION &&
+                          event->execution_status &&
+                          (!strcmp(event->execution_status, "failed") ||
+                           !strcmp(event->execution_status, "cancelled"));
+   /* A failed producer cannot publish more content or success. Its host must
+    * still close the real turn through the retained owner's storage checks. */
+   if (!failure_terminal &&
+       (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
+        server_session_capture_failed(c->ir_capture) || aimee_ir_session_capture_failed()))
    {
       c->ir_failed = 1;
       return -1;
@@ -227,7 +234,8 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
    char *json = NULL, sequence[32];
    if (server_session_capture_append(c->ir_capture, event, &json, sequence))
    {
-      c->ir_failed = 1;
+      if (!server_session_capture_operator_cancelled(c->ir_capture))
+         c->ir_failed = 1;
       return -1;
    }
    int rc = chat_ir_deliver(c, json, sequence);
@@ -242,11 +250,20 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 
 /* Preparing a continuation is atomic from the dispatcher's perspective: failure
  * leaves the old request alone, and the caller must never dispatch it. */
-int server_chat_ir_replace_steer(cJSON *request, const char *message)
+int server_chat_ir_replace_steer(cJSON *request, const cJSON *message)
 {
-   if (!cJSON_IsObject(request) || !message || !message[0])
+   aimee_message_t input = {0};
+   if (!cJSON_IsObject(request) || aimee_ir_message_parse(message, &input))
       return -1;
-   cJSON *replacement = cJSON_CreateString(message);
+   int valid = input.role && !strcmp(input.role, "user") && input.n_blocks > 0;
+   for (int i = 0; i < input.n_blocks; ++i)
+      valid = valid &&
+              (input.blocks[i].type == AIMEE_BLK_TEXT || input.blocks[i].type == AIMEE_BLK_IMAGE ||
+               input.blocks[i].type == AIMEE_BLK_DOCUMENT);
+   aimee_message_free(&input);
+   if (!valid)
+      return -1;
+   cJSON *replacement = cJSON_Duplicate(message, 1);
    if (!replacement)
       return -1;
    if (!cJSON_ReplaceItemInObjectCaseSensitive(request, "message", replacement))
@@ -259,13 +276,16 @@ int server_chat_ir_replace_steer(cJSON *request, const char *message)
 
 /* Execution diagnostics never become user-message history. Retain a bounded,
  * escaped observation of the rejected input without authorizing its execution. */
-int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message)
+int server_chat_ir_reject_steer(const char *session, const char *actor, const cJSON *input)
 {
    static const char reason[] = "Steering continuation was not dispatched; no model or tool "
                                 "executed. Send it again explicitly.";
-   db1_server_session_t registered;
-   if (!session || !session[0] || !actor || !actor[0] || !message || !message[0] ||
-       db1_server_session_get(session, &registered) || strcmp(registered.principal, actor))
+   db1_server_session_owner_t registered;
+   if (!session || !session[0] || !actor || !actor[0] || !cJSON_IsObject(input) ||
+       db1_server_session_owner_get(session, &registered) || strcmp(registered.principal, actor))
+      return -1;
+   char *message = cJSON_PrintUnformatted(input);
+   if (!message)
       return -1;
    size_t length = strlen(message), preview_length = length < 1536 ? length : 1536;
    while (preview_length && ((unsigned char)message[preview_length] & 0xc0) == 0x80)
@@ -276,7 +296,11 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
    unsigned char hash[EVP_MAX_MD_SIZE];
    unsigned int hash_length = 0;
    if (!EVP_Digest(message, length, hash, &hash_length, EVP_sha256(), NULL) || hash_length != 32)
+   {
+      free(message);
       return -1;
+   }
+   free(message);
    for (size_t i = 0; i < 32; i++)
       snprintf(digest + 2 * i, 3, "%02x", hash[i]);
    cJSON *diagnostic = cJSON_CreateObject();
@@ -316,30 +340,59 @@ int server_chat_ir_reject_steer(const char *session, const char *actor, const ch
    return result || terminal ? -1 : 0;
 }
 
-int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
+int server_chat_ir_prepare_turn(compute_ctx_t *c)
+{
+   if (!c)
+      return -1;
+   if (c->ir_turn[0])
+      return strlen(c->ir_turn) == 32 && strspn(c->ir_turn, "0123456789abcdef") == 32 ? 0 : -1;
+   unsigned char random[16];
+   if (RAND_bytes(random, sizeof random) != 1)
+      return -1;
+   for (size_t i = 0; i < sizeof random; i++)
+      snprintf(c->ir_turn + 2 * i, 3, "%02x", random[i]);
+   return 0;
+}
+
+int server_chat_ir_begin(compute_ctx_t *c, const char *session, const aimee_message_t *message)
 {
    if (!c->presence_locked || !session || !session[0] || strlen(session) >= sizeof(c->ir_session) ||
        !c->vault_principal[0])
       return -1;
    if (!presence_turn_host_own(c->presence_session, c->presence_turn_id))
       return -1;
-   db1_server_session_t row;
-   int found = db1_server_session_get(session, &row);
+   const cJSON *replies = NULL, *field;
+   cJSON_ArrayForEach(field, c->req) if (field->string && !strcmp(field->string, "control_replies"))
+   {
+      if (replies || !cJSON_IsBool(field))
+         return -1;
+      replies = field;
+   }
+   db1_server_session_owner_t row;
+   int found = db1_server_session_owner_get(session, &row);
    if (found == 0 && strcmp(row.principal, c->vault_principal))
       return -1;
    if (found != 0 && db1_server_session_create(session, "webchat", c->vault_principal) != 0)
       return -1;
    snprintf(c->ir_session, sizeof(c->ir_session), "%s", session);
-   /* Random process-independent turn identity, also for requests without a presence attachment. */
-   unsigned char random[16];
-   if (RAND_bytes(random, sizeof(random)) != 1)
+   /* Async admission already minted this host identity before publishing the
+    * cancel registry. Direct history operations mint it here exactly once. */
+   if (server_chat_ir_prepare_turn(c))
       return -1;
-   for (int i = 0; i < 16; i++)
-      snprintf(c->ir_turn + 2 * i, 3, "%02x", random[i]);
    c->ir_controls = server_control_scope_open(c->ir_session, c->ir_turn, c->vault_principal);
    if (!c->ir_controls)
       return -1;
+   if (cJSON_IsFalse(replies))
+      server_control_scope_disable_replies(c->ir_controls);
    c->ir_previous_controls = server_control_scope_bind(c->ir_controls);
+   const request_context_t *owner = request_context_get();
+   if (owner)
+   {
+      request_context_t headed = *owner;
+      headed.control_reply_capability = server_control_scope_can_reply(c->ir_controls);
+      request_context_set(&headed);
+      c->request_context.value.control_reply_capability = headed.control_reply_capability;
+   }
    c->ir_capture =
        server_session_capture_open(c->ir_session, c->ir_turn, c->vault_principal, c->ir_session);
    if (!c->ir_capture)
@@ -357,12 +410,10 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
                                       .execution_status = "running"};
    if (aimee_ir_session_emit(&lifecycle) != 0)
       return -1;
-   if (!text)
+   if (!message)
       return 0; /* A host history operation has no model/user message to invent. */
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t event = {
-       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &message};
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = message};
    return aimee_ir_session_emit(&event);
 }
 
@@ -371,9 +422,15 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    if (!c->ir_enabled || c->ir_completed)
       return 0;
    c->ir_completed = 1;
+   if (server_session_capture_operator_cancelled(c->ir_capture))
+      return server_chat_ir_progress(c);
    server_session_capture_counts_t counts = {0};
    if (server_session_capture_counts(c->ir_capture, &counts))
       error = "canonical capture owner unavailable";
+   if (!error &&
+       (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
+        server_session_capture_failed(c->ir_capture) || aimee_ir_session_capture_failed()))
+      error = "canonical capture failed";
    if (!error && !agent_request_cancelled() && !counts.model_events && !c->ir_history_checkpointed)
       error = "Selected harness produced no canonical model output";
    aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
@@ -381,7 +438,10 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
                                                           ? "cancelled"
                                                           : (error ? "failed" : "completed"),
                                   .execution_error = error};
-   return aimee_ir_session_emit(&event);
+   int result = aimee_ir_session_emit(&event);
+   if (result && server_session_capture_operator_cancelled(c->ir_capture))
+      return server_chat_ir_progress(c);
+   return result;
 }
 
 void server_chat_ir_close(compute_ctx_t *c)

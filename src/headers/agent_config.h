@@ -155,6 +155,12 @@ typedef enum
  * AGENT_ROUTE_OK when the agent is routable. */
 agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail,
                                                size_t detail_sz);
+/* Explicit execution namespace: container ACP eligibility defers executable
+ * existence to its mandatory verified owner; this is not executable readiness. */
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz);
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution);
 
 /* True if at least one configured agent is enabled AND routable as a delegate
  * right now (loads agents.json). Gates sub-agent interception — only redirect to

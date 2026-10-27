@@ -142,10 +142,11 @@ int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_
  * `verdict` receives AIMEE_DELEGATES_REVIEW_* flags and `message` the
  * contradiction wording, if any.
  *
- * Fails CLOSED, and here that means NOT GUARDED: with no provider the review is
- * accepted rather than rejected. Rejecting on a missing provider would fail
- * honest reviews for a reason the operator cannot see or fix, which is worse
- * than losing a check that only ever catches a specific dishonesty. */
+ * POLICY_ONLY asks the owning module for role policy without a report. The
+ * caller refuses when that owner is unavailable rather than guessing which
+ * outputs require business-text admission. Ordinary evidence judging keeps its
+ * report-specific verdicts separate from this policy query.
+ */
 typedef int (*delegate_review_evidence_fn)(const char *role, const char *response, unsigned flags,
                                            unsigned *verdict, char *message, size_t message_cap);
 

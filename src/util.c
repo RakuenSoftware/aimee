@@ -1181,9 +1181,6 @@ int delegation_error_guidance(const char *error, char *buf, size_t len)
         "\nFix: Use a valid role: code, review, explain, refactor, draft, summarize, deploy, "
         "validate, test, diagnose, execute. If using a custom role, ensure an agent is "
         "configured for it in agents.json."},
-       {"missing delegation_id or content",
-        "\nFix: Both 'delegation_id' and 'content' are required — add them to the "
-        "delegate_reply call."},
        {"delegate creation denied",
         "\nFix: Only the primary agent may create delegates. A delegate should return its "
         "finding to the parent instead of spawning more delegates."},

@@ -38,6 +38,11 @@
  * it, because its samples come from the spec and every id it generated was
  * small; scripts/check_argspec_numeric_parity.py compares the two directly.
  *
+ * `canonical_request` converts positional task text at this user-input boundary
+ * through the same IR constructor as compiled model commands. Its optional
+ * `max_tokens_index` reads an atoi-style positional limit; `temperature` is a
+ * constant sampling control. It emits only the canonical `request` field.
+ *
  * `default` carries the value a field takes when its flag is ABSENT, which is
  * what cli_args_get_int(opts, name, def) does. Absent is not the same as
  * present-but-empty: `--days ""` reaches atoi("") and yields 0, while omitting

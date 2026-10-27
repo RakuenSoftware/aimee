@@ -1,4 +1,13 @@
 #include "server_unknown_effect_policy.h"
+#include "cJSON.h"
+#include <aimee/tools/agent_tools.h>
+int agent_tools_action_managed(const char *name, const cJSON *args)
+{
+   (void)name;
+   (void)args;
+   return 0;
+}
+
 #include "server_session_capture.h"
 #include "server_session_control.h"
 #include "server_native_history.h"

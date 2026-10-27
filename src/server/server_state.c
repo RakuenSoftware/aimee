@@ -1051,12 +1051,7 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddItemToObject(resp, "vector", status);
       free(json_str);
    }
-   /* Canonical-IR shadow counters. The refactor's roundtable (Q6) required these to
-    * "detect parity drift in shadow before flipping the flag" — but until now
-    * aimee_ir_metric_get had NO callers, so they were incremented and never read.
-    * Write-only metrics cannot gate a rollout: without this, an IR-build failure
-    * silently falls back to the legacy translator and nothing can measure how often.
-    * Totals across wires; ir_path vs the *_fail counters is the fallback rate. */
+   /* Active canonical model-path observations, summed across frontend wires. */
    {
       cJSON *ir = cJSON_AddObjectToObject(resp, "ir");
       if (ir)

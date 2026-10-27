@@ -5,6 +5,7 @@ struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
@@ -57,7 +58,6 @@ char *tool_find_symbol(const char *identifier);
 char *tool_create_note(const char *title, const char *content, const char *tags);
 char *tool_list_notes(const char *tag, int limit);
 char *tool_search_notes(const char *query);
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 
 /* Server registration seam for the separately supervised event-bus tool
  * classifier. classification values are the AIMEE_TOOL_CLASS_* constants.
@@ -78,22 +78,21 @@ typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const c
 typedef char *(*agent_tool_action_finish_fn)(const char *, char *, int *);
 void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
                                        agent_tool_action_finish_fn finish);
+/* True only when dispatch will enter the registered governed-action owner.
+ * Its final policy gate runs on owner-canonical arguments before any effect. */
+int agent_tools_action_managed(const char *name, const struct cJSON *arguments);
 
 /* Bind a successful execution-policy decision to the next dispatch on this
  * thread. External mutations and unknown remote tools refuse execution without
  * this trusted caller signal; model-provided arguments cannot set it. */
 void agent_tools_set_effect_authorized(int authorized);
 
-/* Owned built-in canonical definitions, before role/policy projection. The
- * caller frees each entry with aimee_tool_free, then frees the array. Unbound
- * Git capabilities are omitted. No MCP-provider recursion or wire sidecars. */
 struct aimee_tool;
-/* Execute already canonical arguments using their exact admitted definition.
- * Refuses arguments which would change under that schema. */
+/* Execute the canonical input object held in IR using its admitted definition.
+ * Borrows the input; execution owns a clone. Refuses schema-changing arguments. */
 char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
-                                       const char *canonical_arguments_json, int timeout_ms,
+                                       const struct cJSON *canonical_arguments, int timeout_ms,
                                        int *is_error);
-int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
 /* Fresh owned definition from the current execution owner. Unregistered or
  * unavailable capabilities refuse; no process-global schema cache is used. */
 int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
@@ -103,47 +102,30 @@ int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
  * Container/detached providers do not inherit host transport capabilities. */
 char *const *agent_tools_bind_bash_environment(char *const environment[]);
 
-/* Tool definition builders */
-struct cJSON *build_tools_array(void);
-struct cJSON *build_tools_array_responses(void);
-struct cJSON *build_tools_array_anthropic(void);
-struct cJSON *delegate_respond_spec(void);
-int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
+/* Complete registry-owned canonical catalog. Exposure preserves the selected
+ * provider's established inventory; only explicit egress renders native JSON. */
+int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out);
+int agent_tools_catalog_filter(aimee_request_t *catalog, const char *role);
+int agent_tools_catalog_respond(aimee_request_t *catalog);
+int agent_tools_catalog_sanitize(aimee_request_t *catalog, const char *provider);
+int agent_tools_catalog_sanitize_for_agent(aimee_request_t *catalog, const agent_t *agent);
 int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
-void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
-/* Anthropic compatibility ingress; the OpenAI-family helper above accepts Chat
- * and Responses catalogs. Both decide on translation-admitted IR identities. */
-void agent_tools_filter_anthropic_for_role(struct cJSON *tools, const char *role);
 
-/* Look up a tool's parameter schema (the `function.parameters` object) by
+/* Look up a tool's canonical parameter schema by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the
  * caller MUST NOT cJSON_Delete it. Returns NULL if the tool is not in the
  * registry. The cache is built lazily on the first call from
- * build_tools_array() and is safe to call concurrently — first caller
+ * the canonical registry owner and is safe to call concurrently — first caller
  * wins; subsequent callers reuse the same pointer. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
 
 /* Write up to `max` built-in tool names into `out`, returning how many.
  * The names are borrowed from the process-lifetime schema cache. */
 int agent_tool_known_names(const char **out, int max);
 
-/* Walk an OpenAI-format tools array (each element {type:"function",
- * function:{name, description, parameters}}) and rewrite each tool's
- * `function.parameters` schema in place via tool_schema_sanitize for
- * the given provider. No-op for providers that pass schemas through
- * unchanged (openai, openrouter, codex, gemini). Active for
- * llama_native, llama-eval, and ollama. The array is modified in place; ownership
- * unchanged. */
-void agent_tools_sanitize_for_provider(struct cJSON *tools, const char *provider_name);
-void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
-
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
 /* Same dispatch and owned text result, plus the tool owner's authoritative
  * semantic failure flag, including refusals and unconfirmed action receipts.
  * Consumers must not infer success by parsing or matching the result text. */
-char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
-                                    int *is_error);
 
 void agent_tools_set_dispatch_role(const char *role);
 
@@ -222,7 +204,7 @@ void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn ad
 agent_mcp_call_fn agent_tools_mcp_call_provider(void);
 
 /* Declare an MCP tool as part of aimee's native surface. Idempotent. Must be
- * called before the first build_tools_array() so the schema cache sees it. */
+ * called before the first the canonical registry owner so the schema cache sees it. */
 void agent_tools_register_mcp_tool(const char *name);
 
 /* 1 if `name` was registered above and so dispatches through the MCP provider. */
@@ -248,7 +230,7 @@ agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
 
 /* Tool-call lifecycle hook. A streaming chat worker or a /v1/runs worker
  * installs a thread-local callback (NULL by default — every other caller is
- * unaffected) before running a turn; dispatch_tool_call_ctx fires it as each
+ * unaffected) before running a turn; canonical dispatch fires it as each
  * tool starts and completes so the turn's tool activity can be surfaced to the
  * chat SSE / ACP session/update stream and to /v1/runs events. `phase` is
  * "started" or "completed". Mirrors the agent_tools_set_dispatch_role pattern. */
@@ -259,7 +241,7 @@ void agent_tools_set_tool_event_cb(agent_tool_event_cb_t cb, void *ud);
  * above: this is a PROCESS-GLOBAL, NULL-by-default hook (like the vault/sandbox
  * audit hooks) that the server installs ONCE at startup so a bridge can record
  * every completed tool dispatch's OUTCOME on the audit bus. It fires exactly once
- * per dispatch_tool_call_ctx, after execution, on every return path (success,
+ * per canonical dispatch, after execution, on every return path (success,
  * error, timeout, refused). It carries ONLY classified enums + the principal —
  * never argument or result content, and never the raw error text an MCP server
  * returned. A thin client that links the tools module but not the bus leaves the
@@ -271,9 +253,9 @@ typedef struct
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
                             /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
-                            /* "effect_contract" | "precondition" | "postcondition"        */
-   const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
-                            /* "outbound:sse" | "served"                    */
+   /* "effect_contract" | "precondition" | "postcondition" | "effects_unknown" */
+   const char *mode; /* "internal" | "outbound" | "outbound:stdio" | */
+                     /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;
 typedef void (*agent_tool_completion_cb_t)(const char *tool, const agent_tool_completion_t *outcome,
                                            void *ud);

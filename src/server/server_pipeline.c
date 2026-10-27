@@ -22,7 +22,7 @@
 
 #include "agent_config.h"
 #include "aimee_home.h" /* aimee_home() for the origin working dir */
-#include <aimee/ir/panel_result.h>
+#include <aimee/core/types/panel_result.h>
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */

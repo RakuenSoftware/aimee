@@ -23,8 +23,6 @@
 learning:
   synthesize:
     enabled: false
-    command: "python3 /opt/aimee/scripts/learning-synthesize.py"
 
-kb:
-  curator:
-    extract_command: "python3 /opt/aimee/scripts/curator-extract.py"
+# Curator and learning synthesis use admitted canonical requests through the
+# configured provider or SYNTHESIS_ENDPOINT. Shell model commands are retired.

@@ -448,11 +448,11 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      # runtime-web reaches PAM through an indirect cgo dependency, so `go test`
-      # needs the header even though no Go file in the tree includes it. Without
-      # this the job fails at BUILD, not at a test -- which reads as a broken
-      # module rather than a missing package. Only this one header is missing:
-      # gcc and make are preinstalled, and no other Go module here uses cgo.
+      # runtime-web needs PAM through an indirect cgo dependency. The workflow
+      # facade regression also compiles the actual C identity/control adapter,
+      # whose identity header includes OpenSSL. The shared thinclient CGo binding
+      # also uses pkg-config. Declare these dependencies; gcc and make are
+      # preinstalled on this runner.
       - name: Install dependencies
         run: |
           # Same apt hardening as the sibling jobs: runner images preinstall
@@ -460,7 +460,7 @@ jobs:
           # `apt-get update` hard, though nothing we install comes from them.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          i=0; until timeout 240 sudo apt-get install -y -q libpam0g-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
+          i=0; until timeout 240 sudo apt-get install -y -q libpam0g-dev libssl-dev pkg-config; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Go unit tests
         run: |
           # Populate all module caches with bounded retries before tests fan out.
@@ -597,7 +597,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install pinned Codex for proxy compatibility
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.163.0
       - name: Thin-client proxy regression suite (including real Codex config parser)
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
@@ -607,7 +607,7 @@ jobs:
           make -C src -j2 build/obj/tests/unit-test-cli-codex
           # The descriptor launcher attests the actual pinned executable, not
           # npm's JavaScript dispatcher. Resolve the same platform package used
-          # by the installed Codex entry point before running all five modes.
+          # by the installed Codex entry point before running both owned modes.
           codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$(npm root -g)/@openai/codex")
           python3 src/tests/test_codex_native_adoption.py \
             --adapter-binary src/build/obj/tests/unit-test-cli-codex \
@@ -1701,7 +1701,7 @@ jobs:
       - name: Install pinned native SDKs for canonical server integration
         run: |
           native_prefix="$RUNNER_TEMP/aimee-native-sdks"
-          npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
+          npm install --prefix "$native_prefix" @openai/codex@0.163.0 @anthropic-ai/claude-code@2.1.227
           codex_native="$native_prefix/node_modules/.bin/codex"
           claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
           test -x "$codex_native"

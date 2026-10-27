@@ -67,22 +67,6 @@ int aimee_ir_prepend_persona_instructions(aimee_request_t *request, const char *
    return 1;
 }
 
-/* Flat-text persona placement, for plain-chat handlers with no IR to mutate. */
-char *aimee_ir_prepend_persona_text(const char *text, const char *instructions)
-{
-   const char *body = text ? text : "";
-   if (!instructions || !instructions[0] || strstr(body, "<aimee-persona ") != NULL)
-      return strdup(body);
-   size_t ilen = strlen(instructions), blen = strlen(body);
-   char *out = malloc(ilen + blen + 2);
-   if (!out)
-      return NULL;
-   memcpy(out, instructions, ilen);
-   out[ilen] = '\n';
-   memcpy(out + ilen + 1, body, blen + 1);
-   return out;
-}
-
 static int session_text_has(const char *text, const char *needle)
 {
    return text && needle && strstr(text, needle) != NULL;

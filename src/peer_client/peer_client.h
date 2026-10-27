@@ -1,6 +1,6 @@
 /* peer_client.h: the server's side of peer messaging.
  *
- * The aimee module (principal ref 31) serves four stages and, until this file
+ * The aimee module (principal ref 30) serves four stages and, until this file
  * existed, NOTHING in the product called any of them. The module was validated
  * on hardware by a probe binary written for the purpose, which is a test of the
  * engine and not of the feature: no agent had ever sent a message to another

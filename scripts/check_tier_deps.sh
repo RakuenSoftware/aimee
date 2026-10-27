@@ -96,11 +96,11 @@ scan 'project_store_lifecycle\\.h' "legacy project-store lifecycle header outsid
 scan '\\bdatabase_backend\\b' "legacy KB_STORE backend selector outside src/modules/kb/c"
 path_scan '\\bdatabase_(url|pool_size)\\b' \
   "legacy vague KB_STORE config keys outside src/modules/kb/c" \
-  src/headers/config.h src/headers/config_database.h src/cmd_data.c src/cmd_doctor.c \
+  src/headers/config.h src/headers/config_database.h \
   src/kb/kb_main.c
 path_scan '\\bdb_path\\b' \
   "legacy vague DB1 config key in config surfaces" \
-  src/headers/config.h src/cmd_core.c src/headers/commands.h src/headers/cmd_hooks_platform.h
+  src/headers/config.h src/headers/commands.h src/headers/cmd_hooks_platform.h
 path_scan '\\bworkspace_root\\b' \
   "legacy workspace_root config shim" \
   src/headers/config.h
@@ -162,12 +162,9 @@ path_scan 'use sqlite|sqlite WAL' \
 path_scan '\\bsqlite_(memories|units|chunks)\\b' \
   "SQLite-named vector verify row-count fields" \
   src/kb/kb_service.c src/modules/kb_client/kb_client.h
-path_scan '\\b([Pp]ostgres|pg_trgm|libpq)\\b' \
-  "Postgres-named doctor DB surface outside src/modules/kb/c" \
-  src/cmd_doctor.c
 path_scan '\\b(Postgres|libpq|pg_trgm)\\b' \
   "Postgres-named KB_STORE implementation comments outside src/modules/kb/c" \
-  src/cmd_index.c src/kb/kb_main.c src/dashboard.c src/cmd_work.c src/kb/kb.c \
+  src/cmd_index.c src/kb/kb_main.c src/cmd_work.c src/kb/kb.c \
   src/modules/memory/memory_core_search.inc src/headers/config.h src/db1/db_schema.c src/db1/db_schema.h
 path_scan 'system-provided SQLite|SQLite database \(all state\)|`db\.c`[[:space:]]*\|[[:space:]]*SQLite|shared Postgres tier|sqlite\.sql and postgres\.sql' \
   "source docs/build text exposes legacy storage ownership" \
@@ -212,10 +209,10 @@ path_scan 'legacy no-gate behaviour|legacy DBs may|legacy edge|legacy rows|/\* l
   src/modules/kb/include/aimee/kb/graph_kinds.h
 path_scan 'Untagged memories \(legacy\)|legacy promote/demote cycle|legacy hybrid|legacy `symbols` table' \
   "source comments expose legacy storage/route labels" \
-  src/modules/memory/memory_assemble.c src/modules/memory/memory_maintenance.c src/headers/config.h src/cmd_doctor.c
+  src/modules/memory/memory_assemble.c src/modules/memory/memory_maintenance.c src/headers/config.h
 path_scan 'legacy in-repo|legacy behavior|legacy: 1|legacy prospective-only|legacy MCP server|legacy forward path|pre-concurrent legacy behavior' \
   "active source comments expose legacy runtime labels" \
-  src/agent_policy.c src/git_verify.c src/cmd_data.c src/agent_runtime.c \
+  src/agent_policy.c src/git_verify.c src/agent_runtime.c \
   src/mcp_tools.c
 if [[ -e src/headers/memory_curiosity.h ]]; then
   echo "tier-dep violation: legacy KB_STORE curiosity re-export header is present" >&2

@@ -3,6 +3,7 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 #include <winhttp.h>
 
@@ -30,113 +31,156 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
+   size_t response_len = 0;
+   return agent_http_post_content_type_bytes(url, auth_header, content_type, body,
+                                             body ? strlen(body) : 0, response_buf, &response_len,
+                                             timeout_ms, extra_headers);
+}
+
+/* Reject failed conversions before passing any wchar buffer to WinHTTP. */
+static wchar_t *http_utf8_wide(const char *text)
+{
+   if (!text)
+      return NULL;
+   int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
+   if (length <= 0 || (size_t)length > SIZE_MAX / sizeof(wchar_t))
+      return NULL;
+   wchar_t *wide = malloc((size_t)length * sizeof(wchar_t));
+   if (!wide)
+      return NULL;
+   if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, length) != length)
+   {
+      free(wide);
+      return NULL;
+   }
+   return wide;
+}
+
+int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
+                                       const char *content_type, const void *body, size_t body_len,
+                                       char **response_buf, size_t *response_len, int timeout_ms,
+                                       const char *extra_headers)
+{
    (void)extra_headers; /* Phase 2: add WinHTTP extra headers support */
-   *response_buf = NULL;
+   if (response_buf)
+      *response_buf = NULL;
+   if (response_len)
+      *response_len = 0;
+   if (!response_buf || !response_len || (!body && body_len) || body_len > MAXDWORD)
+      return -1;
 
-   /* Parse URL into components */
-   wchar_t wurl[2048];
-   MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, 2048);
-
+   int result_status = -1;
+   HINTERNET session = NULL, conn = NULL, req = NULL;
+   char *ct = NULL, *result = NULL;
+   wchar_t *wurl = http_utf8_wide(url), *host = NULL, *path = NULL;
+   wchar_t *wct = NULL, *wauth = NULL;
+   size_t result_len = 0;
+   if (!wurl)
+      goto done;
+   /* URL component buffers are bounded by the actual converted URL, not fixed
+    * host/path scratch buffers that truncate or reject otherwise valid URLs. */
+   size_t url_length = wcslen(wurl) + 1;
+   host = calloc(url_length, sizeof(wchar_t));
+   path = calloc(url_length, sizeof(wchar_t));
+   if (!host || !path)
+      goto done;
    URL_COMPONENTS uc;
    memset(&uc, 0, sizeof(uc));
    uc.dwStructSize = sizeof(uc);
-   wchar_t host[256], path[1024];
    uc.lpszHostName = host;
-   uc.dwHostNameLength = 256;
+   uc.dwHostNameLength = (DWORD)url_length;
    uc.lpszUrlPath = path;
-   uc.dwUrlPathLength = 1024;
-
+   uc.dwUrlPathLength = (DWORD)url_length;
    if (!WinHttpCrackUrl(wurl, 0, 0, &uc))
-      return -1;
+      goto done;
 
-   HINTERNET session = WinHttpOpen(L"aimee/0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-   if (!session)
-      return -1;
-
-   /* Set timeouts */
-   WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
-
-   BOOL use_ssl = (uc.nScheme == INTERNET_SCHEME_HTTPS);
-   HINTERNET conn = WinHttpConnect(session, host, uc.nPort, 0);
-   if (!conn)
-   {
-      WinHttpCloseHandle(session);
-      return -1;
-   }
-
-   DWORD flags = use_ssl ? WINHTTP_FLAG_SECURE : 0;
-   HINTERNET req = WinHttpOpenRequest(conn, L"POST", path, NULL, WINHTTP_NO_REFERER,
-                                      WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-   if (!req)
-   {
-      WinHttpCloseHandle(conn);
-      WinHttpCloseHandle(session);
-      return -1;
-   }
-
-   /* Add headers. Accept a full header line or a bare media type: WinHttp needs a
-    * complete "Field: value" line, so prefix "Content-Type: " when the caller
-    * passed only the media type (mirrors the POSIX path). */
+   /* Preserve the full-header and bare-media-type calling conventions. */
    const char *ct_in =
        content_type && content_type[0] ? content_type : "Content-Type: application/json";
-   char ct[256];
-   snprintf(ct, sizeof ct, "%s%s", strchr(ct_in, ':') ? "" : "Content-Type: ", ct_in);
-   wchar_t wct[512];
-   MultiByteToWideChar(CP_UTF8, 0, ct, -1, wct, 512);
-   WinHttpAddRequestHeaders(req, wct, -1, WINHTTP_ADDREQ_FLAG_ADD);
-
+   const char *prefix = strchr(ct_in, ':') ? "" : "Content-Type: ";
+   size_t ct_length = strlen(ct_in), prefix_length = strlen(prefix);
+   if (ct_length > SIZE_MAX - prefix_length - 1)
+      goto done;
+   ct = malloc(prefix_length + ct_length + 1);
+   if (!ct)
+      goto done;
+   memcpy(ct, prefix, prefix_length);
+   memcpy(ct + prefix_length, ct_in, ct_length + 1);
+   wct = http_utf8_wide(ct);
+   if (!wct)
+      goto done;
    if (auth_header && auth_header[0])
    {
-      wchar_t wauth[1024];
-      MultiByteToWideChar(CP_UTF8, 0, auth_header, -1, wauth, 1024);
-      WinHttpAddRequestHeaders(req, wauth, -1, WINHTTP_ADDREQ_FLAG_ADD);
+      wauth = http_utf8_wide(auth_header);
+      if (!wauth)
+         goto done;
    }
 
-   /* Send */
-   DWORD body_len = (DWORD)strlen(body);
-   if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, (void *)body, body_len, body_len,
-                           0) ||
+   session = WinHttpOpen(L"aimee/0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+                         WINHTTP_NO_PROXY_BYPASS, 0);
+   if (!session)
+      goto done;
+   WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
+   conn = WinHttpConnect(session, host, uc.nPort, 0);
+   if (!conn)
+      goto done;
+   DWORD flags = uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
+   req = WinHttpOpenRequest(conn, L"POST", path, NULL, WINHTTP_NO_REFERER,
+                            WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+   if (!req || !WinHttpAddRequestHeaders(req, wct, -1, WINHTTP_ADDREQ_FLAG_ADD) ||
+       (wauth && !WinHttpAddRequestHeaders(req, wauth, -1, WINHTTP_ADDREQ_FLAG_ADD)))
+      goto done;
+   if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, (void *)body, (DWORD)body_len,
+                           (DWORD)body_len, 0) ||
        !WinHttpReceiveResponse(req, NULL))
-   {
-      WinHttpCloseHandle(req);
-      WinHttpCloseHandle(conn);
-      WinHttpCloseHandle(session);
-      return -1;
-   }
+      goto done;
 
-   /* Read status */
    DWORD status_code = 0;
-   DWORD sz = sizeof(status_code);
-   WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                       WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &sz, WINHTTP_NO_HEADER_INDEX);
-
-   /* Read body */
-   char *result = NULL;
-   size_t result_len = 0;
-   DWORD bytes_available, bytes_read;
-
-   while (WinHttpQueryDataAvailable(req, &bytes_available) && bytes_available > 0)
+   DWORD size = sizeof(status_code);
+   if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &size,
+                            WINHTTP_NO_HEADER_INDEX))
+      goto done;
+   result = calloc(1, 1);
+   if (!result)
+      goto done;
+   for (;;)
    {
-      char *tmp = realloc(result, result_len + bytes_available + 1);
-      if (!tmp)
-      {
-         free(result);
-         result = NULL;
+      DWORD available, read;
+      if (!WinHttpQueryDataAvailable(req, &available))
+         goto done;
+      if (!available)
          break;
-      }
-      result = tmp;
-      WinHttpReadData(req, result + result_len, bytes_available, &bytes_read);
-      result_len += bytes_read;
+      if ((size_t)available > SIZE_MAX - result_len - 1)
+         goto done;
+      char *grown = realloc(result, result_len + available + 1);
+      if (!grown)
+         goto done;
+      result = grown;
+      if (!WinHttpReadData(req, result + result_len, available, &read) || !read)
+         goto done;
+      result_len += read;
       result[result_len] = '\0';
    }
-
-   WinHttpCloseHandle(req);
-   WinHttpCloseHandle(conn);
-   WinHttpCloseHandle(session);
-
    *response_buf = result;
-   return (int)status_code;
+   *response_len = result_len;
+   result = NULL;
+   result_status = (int)status_code;
+done:
+   if (req)
+      WinHttpCloseHandle(req);
+   if (conn)
+      WinHttpCloseHandle(conn);
+   if (session)
+      WinHttpCloseHandle(session);
+   free(wurl);
+   free(host);
+   free(path);
+   free(ct);
+   free(wct);
+   free(wauth);
+   free(result);
+   return result_status;
 }
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
@@ -150,7 +194,7 @@ int agent_http_get(const char *url, const char *extra_headers, char **response_b
 }
 
 int agent_http_get_location(const char *url, const char *extra_headers, char *location,
-                           size_t location_cap, char **response_buf, int timeout_ms)
+                            size_t location_cap, char **response_buf, int timeout_ms)
 {
    /* Phase 2, with agent_http_get: the forge API path is POSIX-only today. */
    (void)url;

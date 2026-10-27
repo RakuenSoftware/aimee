@@ -107,6 +107,32 @@ const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host
    }
    return NULL;
 }
+const char *cli_claude_mcp_status_name(cli_claude_mcp_status_t status)
+{
+   switch (status)
+   {
+   case CLI_CLAUDE_MCP_PENDING:
+      return "pending";
+   case CLI_CLAUDE_MCP_FAILED:
+      return "failed";
+   case CLI_CLAUDE_MCP_NEEDS_AUTH:
+      return "needs-auth";
+   case CLI_CLAUDE_MCP_DISABLED:
+      return "disabled";
+   case CLI_CLAUDE_MCP_CONNECTED:
+      return "connected";
+   default:
+      return "unknown";
+   }
+}
+static cli_claude_mcp_status_t native_mcp_status(const char *status)
+{
+   if (status)
+      for (int i = CLI_CLAUDE_MCP_PENDING; i <= CLI_CLAUDE_MCP_CONNECTED; i++)
+         if (!strcmp(status, cli_claude_mcp_status_name((cli_claude_mcp_status_t)i)))
+            return (cli_claude_mcp_status_t)i;
+   return CLI_CLAUDE_MCP_UNKNOWN;
+}
 void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host, const cJSON *frame,
                                        cli_claude_profile_summary_t *summary)
 {
@@ -125,11 +151,18 @@ void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host, con
    {
       summary->mcp_servers = cJSON_GetArraySize(servers);
       const cJSON *server;
-      cJSON_ArrayForEach(server, servers) if (field(server, "name") &&
-                                              !strcmp(field(server, "name"), "aimee") &&
-                                              field(server, "status") &&
-                                              !strcmp(field(server, "status"), "connected"))
-          summary->aimee_connected = 1;
+      int matches = 0;
+      cJSON_ArrayForEach(server, servers)
+      {
+         if (!field(server, "name") || strcmp(field(server, "name"), "aimee"))
+            continue;
+         matches++;
+         summary->aimee_status = native_mcp_status(field(server, "status"));
+         if (field(server, "status") && !strcmp(field(server, "status"), "connected"))
+            summary->aimee_connected = 1;
+      }
+      if (matches != 1)
+         summary->aimee_status = CLI_CLAUDE_MCP_UNKNOWN;
    }
    if (cJSON_IsArray(plugins))
       summary->plugins = cJSON_GetArraySize(plugins);
@@ -195,6 +228,11 @@ static char **native_arguments(const provider_cli_cfg_t *cfg)
    ARG("--bare");
    ARG("--setting-sources");
    ARG("");
+   /* Bare mode keeps these SDK-bundled hooks/skills enabled. Disable them
+    * before the unchanged empty-plugin launch proof can admit execution. */
+   ARG("--settings");
+   ARG("{\"enabledPlugins\":{\"cc-plugin-agents-md@builtin\":false,"
+       "\"cc-plugin-plugin-authoring@builtin\":false}}");
    ARG("--strict-mcp-config");
    ARG("--tools");
    ARG("");
@@ -401,15 +439,18 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
       return -1;
 
    int in[2] = {-1, -1}, out[2] = {-1, -1};
-   if (pipe(in) || pipe(out))
+   if (cli_native_pipe(in) || cli_native_pipe(out))
       goto failure;
    pid_t child = fork();
    if (child < 0)
       goto failure;
    if (!child)
    {
-      if (setsid() < 0 || fchdir(host->cwd_fd) || dup2(in[0], STDIN_FILENO) < 0 ||
-          dup2(out[1], STDOUT_FILENO) < 0 || dup2(out[1], STDERR_FILENO) < 0)
+      int executable = cli_native_pin_fd(host->executable_fd);
+      int cwd = cli_native_pin_fd(host->cwd_fd);
+      if (executable < 0 || cwd < 0 || setsid() < 0 || fchdir(cwd) ||
+          dup2(in[0], STDIN_FILENO) < 0 || dup2(out[1], STDOUT_FILENO) < 0 ||
+          dup2(out[1], STDERR_FILENO) < 0)
          _exit(126);
       close(in[0]);
       close(in[1]);
@@ -422,10 +463,10 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
          if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
             _exit(126);
       if (host->spawn_guard &&
-          host->spawn_guard->child(host->spawn_guard->context, host->executable_fd, host->cwd_fd))
+          host->spawn_guard->child(host->spawn_guard->context, executable, cwd))
          _exit(126);
 #if defined(__linux__)
-      fexecve(host->executable_fd, args, host->environment);
+      fexecve(executable, args, host->environment);
 #endif
       _exit(127);
    }

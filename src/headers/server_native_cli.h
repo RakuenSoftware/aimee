@@ -1,6 +1,7 @@
 #ifndef AIMEE_SERVER_NATIVE_CLI_H
 #define AIMEE_SERVER_NATIVE_CLI_H
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stdatomic.h>
 
 typedef struct server_native_cli server_native_cli_t;
@@ -18,7 +19,6 @@ int server_native_cli_retain(server_native_cli_t *grant);
 void server_native_cli_release(server_native_cli_t *grant);
 int server_native_cli_cancelled(const server_native_cli_t *grant);
 const atomic_int *server_native_cli_cancel_flag(const server_native_cli_t *grant);
-unsigned server_native_cli_depth(const server_native_cli_t *grant);
 /* Marks revoked and waits for admitted callbacks to finish before erasing its
  * credential/environment. The owner must first remove it from lookup. */
 void server_native_cli_close(server_native_cli_t *grant);
@@ -35,4 +35,8 @@ int server_native_cli_project(const cJSON *request, char tool[128], cJSON **argu
 int server_native_cli_begin(server_native_cli_t *grant, const cJSON *request,
                             const char *request_id, char attempt[128], cJSON **replay);
 int server_native_cli_finish(server_native_cli_t *grant, const cJSON *response);
+/* Execute an exact retained catalog operation using the existing action owner.
+ * No model ToolUse IDs or operator authority are synthesized. */
+int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
+                              const aimee_tool_t *advertised, int timeout_ms, cJSON **response);
 #endif

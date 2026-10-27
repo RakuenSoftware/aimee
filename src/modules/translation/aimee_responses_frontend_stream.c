@@ -259,6 +259,12 @@ int aimee_responses_frontend_delta(aimee_responses_frontend_t *state, const aime
 {
    if (!state || state->failed || state->complete || !delta || !emit)
       return -1;
+   /* Refuse before changing projected state or emitting a false completion. */
+   if (delta->refusal)
+   {
+      state->failed = 1;
+      return -1;
+   }
    if (delta_emit(state, delta, emit, context))
    {
       state->failed = 1;

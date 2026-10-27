@@ -325,11 +325,16 @@ int describe_one(const char *project_name, const char *project_path)
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
-   int rc = agent_run_with_tools(&cfg, "execute", describe_system_prompt, prompt, 4096, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, describe_system_prompt, prompt, 4096, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                       : agent_run_with_tools(&cfg, "execute", &request, &result);
+   aimee_request_free(&request);
 
    free(prompt);
 
-   if (rc != 0 || !result.response || !result.response[0])
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       fprintf(stderr, "describe: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
@@ -351,13 +356,15 @@ int describe_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "describe: cannot write %s: %s\n", path, strerror(errno));
+      free(authored);
       agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
 
-   fprintf(f, "%s\n", result.response);
+   fprintf(f, "%s\n", authored);
    fclose(f);
+   free(authored);
 
    fprintf(stderr, "describe: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);
@@ -483,11 +490,16 @@ int style_one(const char *project_name, const char *project_path)
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
-   int rc = agent_run_with_tools(&cfg, "execute", style_system_prompt, prompt, 4096, &result);
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_text(&request, style_system_prompt, prompt, 4096, 0.3);
+   int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                       : agent_run_with_tools(&cfg, "execute", &request, &result);
+   aimee_request_free(&request);
 
    free(prompt);
 
-   if (rc != 0 || !result.response || !result.response[0])
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       fprintf(stderr, "style: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
@@ -509,13 +521,15 @@ int style_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "style: cannot write %s: %s\n", path, strerror(errno));
+      free(authored);
       agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
 
-   fprintf(f, "%s\n", result.response);
+   fprintf(f, "%s\n", authored);
    fclose(f);
+   free(authored);
 
    fprintf(stderr, "style: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);

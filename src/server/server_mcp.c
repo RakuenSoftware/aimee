@@ -60,7 +60,6 @@
 #include "agent_help_data.h"
 int agent_load_config(agent_config_t *cfg);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* printf-append into buf at pos, returning the new pos clamped to [0, cap].
  * snprintf returns the would-be length, so the raw `pos += snprintf(...)` idiom
@@ -1641,7 +1640,7 @@ cJSON *tool_job_start(cJSON *args)
    int added = 0;
    for (int i = 0; i < plan.step_count; i++)
    {
-      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "engineer") > 0)
+      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", NULL, "", "engineer") > 0)
          added++;
    }
 
@@ -2084,8 +2083,8 @@ void mcp_session_register(server_conn_t *conn, const char *sid)
 {
    if (!conn || !sid || !sid[0] || !is_safe_id(sid))
       return;
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) == 0)
+   db1_server_session_owner_t existing;
+   if (db1_server_session_owner_get(sid, &existing) == 0)
       return; /* already registered */
    char principal[32];
    snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
@@ -2316,24 +2315,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       return rc;
    }
 
-   /* Delegate reply: forward to existing handler */
-   if (strcmp(tool, "delegate_reply") == 0)
-   {
-      cJSON *dreq = cJSON_CreateObject();
-      cJSON_AddStringToObject(dreq, "method", "delegate.reply");
-      cJSON *jid = cJSON_GetObjectItemCaseSensitive(jargs, "delegation_id");
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "content");
-      if (cJSON_IsString(jid))
-         cJSON_AddStringToObject(dreq, "delegation_id", jid->valuestring);
-      if (cJSON_IsString(jc))
-         cJSON_AddStringToObject(dreq, "content", jc->valuestring);
-      int rc = handle_delegate_reply(ctx, conn, dreq);
-      cJSON_Delete(dreq);
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return rc;
-   }
-
    /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
     * pipeline_* tool to its handler, which sends its own response on conn (like
     * roundtable_review/delegate). Capability is enforced against the matching
@@ -2403,7 +2384,17 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
    }
    if (!content)
-      content = mcp_gateway_tool_dispatch(tool, jargs);
+   {
+      cJSON *gateway_result = mcp_gateway_tool_dispatch(tool, jargs);
+      if (gateway_result)
+      {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(gateway_result, "isError")))
+            served_outcome("error", "tool_error");
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_ok(conn, gateway_result);
+      }
+   }
    if (!content)
       content = server_mcp_process_tool(tool, jargs);
    if (!content)

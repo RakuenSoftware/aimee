@@ -8,7 +8,6 @@
 #include "log.h"
 #include "json_fluent.h"
 #include "economizer.h"
-#include "tool_args_coerce.h"
 #include "sandbox_learned.h"
 #include "modules/workspace/workspace_provider.h"
 #include <aimee/tools/module_api.h>
@@ -60,34 +59,6 @@ static void agent_tools_emit_tool_event(const char *phase, const char *name)
  * wrapper classifies the remaining ok/error/timeout from the execution result
  * WITHOUT ever storing that string. The hook only ever sees these classified
  * enums, so no argument/result/error content can cross. */
-static __thread const char *g_td_verdict = "ok";
-static __thread const char *g_td_reason = "";
-static __thread const char *g_td_mode = "internal";
-static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
-
-/* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
- * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
- * entry with no save/restore, so a nested call would overwrite the outer frame's
- * outcome. Today every caller is a top-level per-thread entry (agent turn loop,
- * server_compute, script_rpc) and the MCP-derived provider calls the tool fn
- * directly, so nesting cannot occur; if an in-process tool-of-tools is ever added,
- * snapshot/restore these four values around the emit. The same holds for g_served_*
- * in handle_mcp_call. */
-static void td_outcome_reset(void)
-{
-   g_td_verdict = "ok";
-   g_td_reason = "";
-   g_td_mode = "internal";
-   g_td_explicit = 0;
-   agent_tools_effect_reset();
-}
-/* Record a definitive verdict at a return path (refusal, or a known error). */
-static void td_outcome_set(const char *verdict, const char *reason)
-{
-   g_td_verdict = verdict;
-   g_td_reason = reason;
-   g_td_explicit = 1;
-}
 
 /* db1_session_write_path_record from db1/session_paths.h — declared
  * locally so the dispatch path doesn't pull the full db1 umbrella. */
@@ -158,11 +129,11 @@ static int tool_dispatch_cancelled(char *buf, size_t bufsz)
    return agent_delegation_stop_requested(buf, bufsz);
 }
 
-static char *guardrail_input_json(const char *name, const char *arguments_json)
+static char *guardrail_input_json(const char *name, const cJSON *arguments)
 {
-   cJSON *args = cJSON_Parse(arguments_json);
+   cJSON *args = cJSON_Duplicate(arguments, 1);
    if (!args)
-      return safe_strdup(arguments_json);
+      return cJSON_PrintUnformatted(arguments);
 
    cJSON *mapped = cJSON_CreateObject();
    if (strcmp(name, "bash") == 0)
@@ -203,13 +174,13 @@ static char *guardrail_input_json(const char *name, const char *arguments_json)
       /* Pass through original */
       cJSON_Delete(mapped);
       cJSON_Delete(args);
-      return safe_strdup(arguments_json);
+      return cJSON_PrintUnformatted(arguments);
    }
 
    char *json = cJSON_PrintUnformatted(mapped);
    cJSON_Delete(mapped);
    cJSON_Delete(args);
-   return json ? json : safe_strdup(arguments_json);
+   return json ? json : cJSON_PrintUnformatted(arguments);
 }
 
 static int command_word_matches(const char *s, const char *word)
@@ -2049,76 +2020,8 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
-static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
-                                          int timeout_ms, cJSON *admitted_arguments);
-
-/* Public entry: fire the tool-event hook (no-op unless a worker installed one)
- * around the actual dispatch, so streaming/run consumers see started/completed
- * without the dispatcher's many return paths needing to care. */
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
+static char *dispatch_admitted_tool(const char *name, int timeout_ms, cJSON *args)
 {
-   return dispatch_tool_call_ctx_status(name, arguments_json, timeout_ms, NULL);
-}
-
-char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
-                                    int *is_error)
-{
-   return agent_tools_dispatch_owned(name, arguments_json, timeout_ms, is_error, NULL);
-}
-
-char *agent_tools_dispatch_owned(const char *name, const char *arguments_json, int timeout_ms,
-                                 int *is_error, cJSON *admitted_arguments)
-{
-   agent_tools_emit_tool_event("started", name);
-   td_outcome_reset();
-   char *result =
-       dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms, admitted_arguments);
-   agent_tools_emit_tool_event("completed", name);
-
-   /* Completion audit (a no-op unless the server installed a bridge). Fires once
-    * for every return path of _inner. If _inner did not set a definitive verdict:
-    * the exec family carries its outcome in a JSON envelope (classified above from
-    * exit_code/status, not a prefix); every other tool signals failure with a
-    * leading "error:" marker — read only that marker, never the rest of the
-    * string, so no tool output can reach the hook. */
-   if (!g_td_explicit && result &&
-       agent_tools_classification(name ? name : "") == AIMEE_TOOL_CLASS_EXEC)
-   {
-      const char *verdict, *reason;
-      if (agent_tools_effect_exec_failure(result, &verdict, &reason))
-         td_outcome_set(verdict, reason);
-   }
-   if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
-      td_outcome_set("timeout", "timeout");
-   else if (!g_td_explicit && result && strncmp(result, "error: timed out", 16) == 0)
-      td_outcome_set("timeout", "timeout");
-   else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
-      td_outcome_set("error", "tool_error");
-   int failed = !result || strcmp(g_td_verdict, "ok") != 0;
-   result = agent_tools_effect_receipt(g_td_verdict, result, &failed);
-   failed = failed || !result;
-   if (failed && !strcmp(g_td_verdict, "ok"))
-      td_outcome_set("error", "effect_contract");
-   else if (!failed && strcmp(g_td_verdict, "ok"))
-      td_outcome_set("ok", ""); /* The owner returned a confirmed prior receipt. */
-   agent_tools_effect_finish(g_td_verdict, g_td_reason);
-   if (is_error)
-      *is_error = failed;
-   {
-      const char *who = session_id();
-      agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
-                                   .verdict = g_td_verdict,
-                                   .reason_code = g_td_reason,
-                                   .mode = g_td_mode};
-      agent_tools_emit_tool_completion(name ? name : "", &o);
-   }
-   return result;
-}
-
-static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
-                                          int timeout_ms, cJSON *admitted_arguments)
-{
-   cJSON *args = admitted_arguments ? admitted_arguments : cJSON_Parse(arguments_json);
    if (!args)
    {
       td_outcome_set("error", "bad_args");
@@ -2131,18 +2034,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       cJSON_Delete(args);
       td_outcome_set("refused", "cancelled");
       return safe_strdup(cancel_msg);
-   }
-
-   /* Legacy ingress still normalizes using the cached catalog. Canonical IR
-    * callers transfer the exact admitted arguments and must not use that cache. */
-   if (!admitted_arguments)
-   {
-      cJSON *canonical = tool_args_canonicalize(agent_tool_get_schema_cached(name), args);
-      if (canonical && canonical != args)
-      {
-         cJSON_Delete(args);
-         args = canonical;
-      }
    }
 
    /* Shared by in-process execution and isolated native MCP callbacks. Toolset
@@ -2226,7 +2117,13 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
        * the orchestrator coordination reminders do not apply to them. */
       state.is_delegate = 1;
 
-      char *gr_input = guardrail_input_json(name, arguments_json);
+      char *gr_input = guardrail_input_json(name, args);
+      if (!gr_input)
+      {
+         cJSON_Delete(args);
+         td_outcome_set("error", "bad_args");
+         return safe_strdup("error: cannot prepare canonical guardrail input");
+      }
 
       char msg[1024] = "";
       int rc = agent_tools_is_mcp_derived(name)
@@ -2399,13 +2296,13 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       switch (mcp_client_registry_transport_kind(name))
       {
       case MCP_TRANSPORT_STDIO:
-         g_td_mode = "outbound:stdio";
+         agent_tools_dispatch_outcome.mode = "outbound:stdio";
          break;
       case MCP_TRANSPORT_SSE:
-         g_td_mode = "outbound:sse";
+         agent_tools_dispatch_outcome.mode = "outbound:sse";
          break;
       default:
-         g_td_mode = "outbound";
+         agent_tools_dispatch_outcome.mode = "outbound";
          break;
       }
       cJSON *remote_result = NULL;
@@ -2474,7 +2371,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          /* The wrapper classifies the ordinary tool failure. */
       }
       else if (!agent_tools_effect_result_claims_success(result))
-         td_outcome_set("error", "precondition");
+      {
+         if (!agent_tools_dispatch_outcome.explicit_verdict)
+            td_outcome_set("error", "precondition");
+      }
       else
       {
          int verified = agent_tools_effect_verify_file_postcondition(name, args, dispatch_cwd);
@@ -2494,7 +2394,54 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    return result;
 }
 
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms)
+char *agent_tools_dispatch_ir_owned(const char *name, int timeout_ms, int *is_error,
+                                    cJSON *admitted_arguments)
 {
-   return dispatch_tool_call_ctx(name, arguments_json, timeout_ms);
+   agent_tools_emit_tool_event("started", name);
+   td_outcome_reset();
+   char *result = dispatch_admitted_tool(name, timeout_ms, admitted_arguments);
+   agent_tools_emit_tool_event("completed", name);
+
+   /* Completion audit (a no-op unless the server installed a bridge). Fires once
+    * for every return path of _inner. If _inner did not set a definitive verdict:
+    * the exec family carries its outcome in a JSON envelope (classified above from
+    * exit_code/status, not a prefix); every other tool signals failure with a
+    * leading "error:" marker — read only that marker, never the rest of the
+    * string, so no tool output can reach the hook. */
+   if (!agent_tools_dispatch_outcome.explicit_verdict && result &&
+       agent_tools_classification(name ? name : "") == AIMEE_TOOL_CLASS_EXEC)
+   {
+      const char *verdict, *reason;
+      if (agent_tools_effect_exec_failure(result, &verdict, &reason))
+         td_outcome_set(verdict, reason);
+   }
+   if (!agent_tools_dispatch_outcome.explicit_verdict && result &&
+       strncmp(result, "error: timeout", 14) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!agent_tools_dispatch_outcome.explicit_verdict && result &&
+            strncmp(result, "error: timed out", 16) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!agent_tools_dispatch_outcome.explicit_verdict && result &&
+            strncmp(result, "error:", 6) == 0)
+      td_outcome_set("error", "tool_error");
+   int failed = !result || strcmp(agent_tools_dispatch_outcome.verdict, "ok") != 0;
+   result = agent_tools_effect_receipt(agent_tools_dispatch_outcome.verdict, result, &failed);
+   failed = failed || !result;
+   if (failed && !strcmp(agent_tools_dispatch_outcome.verdict, "ok"))
+      td_outcome_set("error", "effect_contract");
+   else if (!failed && strcmp(agent_tools_dispatch_outcome.verdict, "ok"))
+      td_outcome_set("ok", ""); /* The owner returned a confirmed prior receipt. */
+   agent_tools_effect_finish(agent_tools_dispatch_outcome.verdict,
+                             agent_tools_dispatch_outcome.reason);
+   if (is_error)
+      *is_error = failed;
+   {
+      const char *who = session_id();
+      agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
+                                   .verdict = agent_tools_dispatch_outcome.verdict,
+                                   .reason_code = agent_tools_dispatch_outcome.reason,
+                                   .mode = agent_tools_dispatch_outcome.mode};
+      agent_tools_emit_tool_completion(name ? name : "", &o);
+   }
+   return result;
 }

@@ -49,6 +49,7 @@ struct cli_proxy
    cli_proxy_forward_fn forward;
    cli_proxy_route_fn route;
    cli_proxy_authorize_fn authorize;
+   cli_proxy_intercept_fn intercept;
    void *forward_context;
    char token[256], session_id[128];
    atomic_int stopping;
@@ -205,8 +206,18 @@ static void proxy_request(proxy_worker_t *worker)
       goto malformed;
    *line_end = '\0';
    char method[16], path[2048], version[16], extra;
-   if (sscanf(buffer, "%15s %2047s %15s %c", method, path, version, &extra) != 3 ||
-       strcmp(version, "HTTP/1.1") != 0)
+   if (sscanf(buffer, "%15s %2047s %15s %c", method, path, version, &extra) != 3)
+      goto malformed;
+   if (proxy->intercept)
+   {
+      *line_end = '\r';
+      int handled = proxy->intercept(fd, method, path, buffer, received, proxy_cancelled, worker,
+                                     proxy->forward_context);
+      *line_end = '\0';
+      if (handled)
+         goto done;
+   }
+   if (strcmp(version, "HTTP/1.1"))
       goto malformed;
    if (!(proxy->route ? proxy->route(method, path, proxy->forward_context)
                       : model_route(method, path)))
@@ -387,29 +398,35 @@ static void *proxy_worker(void *context)
    return 0;
 }
 
-cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
-                                        const char *session_id, unsigned *bound_port,
-                                        cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
-                                        cli_proxy_forward_fn forward, void *forward_context)
+cli_proxy_t *cli_proxy_start_owned_listener(int listener, unsigned advertised_port,
+                                            const char *local_token, const char *session_id,
+                                            cli_proxy_route_fn route,
+                                            cli_proxy_authorize_fn authorize,
+                                            cli_proxy_forward_fn forward,
+                                            cli_proxy_intercept_fn intercept, void *forward_context)
 {
    char auth[272];
-   if (!bound_port || !local_token || strlen(local_token) >= 256 ||
+   if (listener < 0 || !local_token || strlen(local_token) >= 256 ||
        aimee_core_bearer_value(auth, sizeof(auth), local_token) != 0 ||
        (session_id && !session_valid(session_id)) || !forward)
+   {
+      if (listener >= 0)
+         aimee_core_socket_close(listener);
       return NULL;
+   }
    cli_proxy_t *proxy = calloc(1, sizeof(*proxy));
    if (!proxy)
+   {
+      aimee_core_socket_close(listener);
       return NULL;
+   }
    proxy->forward = forward;
    proxy->route = route;
    proxy->authorize = authorize;
+   proxy->intercept = intercept;
    proxy->forward_context = forward_context;
-   proxy->listener = aimee_core_socket_listen_loopback(port, &proxy->port);
-   if (proxy->listener < 0)
-   {
-      free(proxy);
-      return NULL;
-   }
+   proxy->listener = listener;
+   proxy->port = advertised_port;
    snprintf(proxy->token, sizeof(proxy->token), "%s", local_token);
    snprintf(proxy->session_id, sizeof(proxy->session_id), "%s", session_id ? session_id : "");
    atomic_init(&proxy->stopping, 0);
@@ -472,7 +489,25 @@ cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
       return NULL;
    }
    proxy->monitor_started = 1;
-   *bound_port = proxy->port;
+   return proxy;
+}
+
+cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
+                                        const char *session_id, unsigned *bound_port,
+                                        cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
+                                        cli_proxy_forward_fn forward, void *forward_context)
+{
+   if (!bound_port)
+      return NULL;
+   unsigned actual = 0;
+   int listener = aimee_core_socket_listen_loopback(port, &actual);
+   cli_proxy_t *proxy = cli_proxy_start_owned_listener(
+       listener, actual, local_token, session_id, route, authorize, forward, NULL, forward_context);
+   if (proxy)
+   {
+      proxy->port = actual;
+      *bound_port = actual;
+   }
    return proxy;
 }
 

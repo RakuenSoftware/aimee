@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "modules/git/mcp_git.h"
 #include "request_context.h"
+#include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,6 +131,12 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
    (void)conn;
    if (check_context)
       assert_caller_context();
+   aimee_request_t canonical = {0};
+   assert(!cJSON_HasObjectItem(request, "prompt"));
+   assert(!aimee_ir_request_parse(cJSON_GetObjectItem(request, "request"), &canonical));
+   assert(canonical.n_messages == 1 && !strcmp(canonical.messages[0].role, "user"));
+   assert(!strcmp(canonical.messages[0].blocks[0].text, "Inspect the branch"));
+   aimee_request_free(&canonical);
    launched++;
    forwarded = cJSON_Duplicate(request, 1);
    assert(forwarded);

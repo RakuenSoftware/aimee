@@ -11,6 +11,7 @@ SRC_DIR="$SCRIPT_DIR/src"
 LOCAL_BIN="$SCRIPT_DIR/aimee"
 LOCAL_SERVER="$SCRIPT_DIR/aimee-server"
 LOCAL_RUNTIME_WEB="$SCRIPT_DIR/aimee-runtime-web"
+LOCAL_CLIENT_LIBRARY="$SCRIPT_DIR/libaimee-client.so"
 LOCAL_KB="$SCRIPT_DIR/aimee-kb"
 
 # shellcheck source=distro-detect.sh
@@ -125,7 +126,7 @@ needs_build() {
     # present; without Go the C core still builds and installs (see make all's
     # ALL_WEBCHAT gate), so don't let a missing webchat force a rebuild loop.
     local bins=("$LOCAL_BIN" "$LOCAL_SERVER" "$LOCAL_KB")
-    command -v go >/dev/null 2>&1 && bins+=("$LOCAL_RUNTIME_WEB")
+    command -v go >/dev/null 2>&1 && bins+=("$LOCAL_RUNTIME_WEB" "$LOCAL_CLIENT_LIBRARY")
     local bin
 
     for bin in "${bins[@]}"; do
@@ -193,7 +194,11 @@ cp "$LOCAL_SERVER" "$INSTALL_DIR/aimee-server"
 cp "$LOCAL_KB" "$INSTALL_DIR/aimee-kb"
 chmod +x "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" "$INSTALL_DIR/aimee-kb"
 # webchat is optional (built only when Go is available); install it if present.
-if [ -f "$LOCAL_RUNTIME_WEB" ]; then
+if [ -f "$LOCAL_RUNTIME_WEB" ] && [ -f "$LOCAL_CLIENT_LIBRARY" ]; then
+    # The browser host links the shared thinclient SDK through its sibling
+    # $ORIGIN lookup, including per-user installations outside ldconfig paths.
+    cp "$LOCAL_CLIENT_LIBRARY" "$INSTALL_DIR/libaimee-client.so"
+    chmod +x "$INSTALL_DIR/libaimee-client.so"
     cp "$LOCAL_RUNTIME_WEB" "$INSTALL_DIR/aimee-runtime-web"
     chmod +x "$INSTALL_DIR/aimee-runtime-web"
 fi

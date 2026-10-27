@@ -105,12 +105,12 @@ int session_persona_delivery_claim(const char *session_id)
 {
    if (!session_id || !session_id[0])
       return 1;
-   db1_server_session_t row;
-   if (db1_server_session_get(session_id, &row) != 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(session_id, &row) != 0)
    {
       const char *principal = server_http_identity_principal();
       (void)db1_server_session_create(session_id, "gateway", principal ? principal : "");
-      if (db1_server_session_get(session_id, &row) != 0)
+      if (db1_server_session_owner_get(session_id, &row) != 0)
          return -1;
    }
    return db1_server_session_persona_delivery_claim(session_id);

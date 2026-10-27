@@ -259,14 +259,14 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: delegates.EventNamedFileDrift, StageID: delegates.StageNamedFileDrift},
 			{EventKind: delegates.EventGroupPlan, StageID: delegates.StageGroupPlan},
 		}
-		var executor delegates.Executor
-		registryExecutor, err := delegates.NewRegistryExecutor(os.Getenv("AIMEE_HOME"))
+		hostHandler, err := delegates.NewProcessHandler(ctx, moduleBusSocket)
 		if err != nil {
 			log.Printf("delegate execution unavailable: %v", err)
+			config.Handler = delegates.NewHandler(nil)
 		} else {
-			executor = registryExecutor
+			config.Handler = hostHandler
 		}
-		config.Handler = delegates.NewHandler(executor)
+
 	case "tools":
 		config.ModuleName = name
 		config.PrincipalRef = 11
@@ -703,12 +703,6 @@ func main() {
 		os.Exit(code)
 	}
 	if handled, code := providers.RunBootstrapLookup(os.Args); handled {
-		os.Exit(code)
-	}
-	if handled, code := providers.RunProbeWorker(os.Args); handled {
-		os.Exit(code)
-	}
-	if handled, code := delegates.RunWatchdog(os.Args); handled {
 		os.Exit(code)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

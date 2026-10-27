@@ -104,13 +104,13 @@ static int validate_plan(const aimee_request_t *ir, const cJSON *steps,
       {
          aimee_context_meta_t metadata;
          const char *name = string_field(step, "resource"), *output = string_field(step, "output");
-         if (!ir || (name && output) || (!name && !output) || (name && !resource(config, name)) ||
+         if ((name && output) || (!name && !output) || (name && !resource(config, name)) ||
              context_decode(cJSON_GetObjectItemCaseSensitive(step, "context"), &metadata) != 0)
             return -1;
       }
       else if (strcmp(kind, "remove_tools") == 0)
       {
-         if (!ir || tool_patch++)
+         if (tool_patch++)
             return -1;
          if (!aimee_ir_tool_paths_valid(ir, cJSON_GetObjectItemCaseSensitive(step, "paths")))
             return -1;
@@ -140,14 +140,11 @@ static cJSON *request_plan(const aimee_request_t *ir, const aimee_ir_module_plan
          if (!cJSON_AddItemToArray(provided, cJSON_CreateString(*name)))
             goto done;
    }
-   if (ir)
+   cJSON *view = aimee_ir_policy_view_json(ir);
+   if (!view || !cJSON_AddItemToObject(args, "request", view))
    {
-      cJSON *view = aimee_ir_policy_view_json(ir);
-      if (!view || !cJSON_AddItemToObject(args, "request", view))
-      {
-         cJSON_Delete(view);
-         goto done;
-      }
+      cJSON_Delete(view);
+      goto done;
    }
    if (aimee_module_commands_dispatch_internal_timeout(config->method, args, 500, &reply) <= 0)
    {
@@ -209,10 +206,11 @@ static int append_context(aimee_request_t *ir, const cJSON *step, const cJSON *o
    block->context = metadata;
    return 1;
 }
-static int execute(aimee_request_t *ir, const aimee_ir_module_plan_t *config, char **text_result)
+int aimee_ir_stage_module_plan(aimee_request_t *ir, void *configuration)
 {
-   if (text_result)
-      *text_result = NULL;
+   if (!ir)
+      return 0;
+   const aimee_ir_module_plan_t *config = configuration;
    cJSON *plan = request_plan(ir, config), *outputs = cJSON_CreateObject();
    const char *status = string_field(plan, "status");
    const cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
@@ -250,27 +248,8 @@ static int execute(aimee_request_t *ir, const aimee_ir_module_plan_t *config, ch
       else if (aimee_ir_remove_tool_paths(ir, cJSON_GetObjectItemCaseSensitive(step, "paths")) > 0)
          changed = 1;
    }
-   if (text_result)
-   {
-      const char *key = string_field(plan, "result");
-      const char *value = key ? string_field(outputs, key) : NULL;
-      if (value && value[0])
-         *text_result = strdup(value);
-   }
 done:
    cJSON_Delete(outputs);
    cJSON_Delete(plan);
    return changed;
-}
-int aimee_ir_stage_module_plan(aimee_request_t *request, void *configuration)
-{
-   if (!request)
-      return 0;
-   return execute(request, configuration, NULL);
-}
-char *aimee_ir_module_plan_text(const aimee_ir_module_plan_t *configuration)
-{
-   char *text = NULL;
-   execute(NULL, configuration, &text);
-   return text;
 }

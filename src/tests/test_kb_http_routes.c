@@ -4813,9 +4813,15 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);
-   if (!g_vec_enabled || max_dim < 2560)
+   if (g_vec_unauthorized || !g_vec_enabled || max_dim < 2560)
+   {
+      cJSON_AddNumberToObject(*result, "dim", 0);
+      cJSON_AddStringToObject(*result, "error",
+                              g_vec_unauthorized ? "embed: HTTP 403" : "embed: unavailable");
       return 1;
+   }
    int dim = 2560;
+   cJSON_AddNumberToObject(*result, "dim", dim);
    cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
    for (int i = 0; i < dim; ++i)
       cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.01f * (float)(i % 7)));

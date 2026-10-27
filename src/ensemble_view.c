@@ -15,8 +15,9 @@
 #include <string.h>
 
 #include "ensemble.h"
+#include <aimee/ir/session_event.h>
 
-static int unpack(ensemble_view_t *view, int rc, ensemble_info_t *out, char **prompt_out,
+static int unpack(ensemble_view_t *view, int rc, ensemble_info_t *out, aimee_request_t *request_out,
                   char **context_out, char *err, size_t errlen)
 {
    if (rc != 0)
@@ -24,7 +25,7 @@ static int unpack(ensemble_view_t *view, int rc, ensemble_info_t *out, char **pr
       /* The store could not answer at all, so there is no verdict to relay. */
       if (err && errlen)
          snprintf(err, errlen, "ensemble store unavailable");
-      free(view->prompt);
+      free(view->request_ir);
       free(view->context);
       return -1;
    }
@@ -32,16 +33,35 @@ static int unpack(ensemble_view_t *view, int rc, ensemble_info_t *out, char **pr
       snprintf(err, errlen, "%s", view->err);
    if (view->rc != 0)
    {
-      free(view->prompt);
+      free(view->request_ir);
       free(view->context);
       return view->rc;
    }
    if (out)
       *out = view->info;
-   if (prompt_out)
-      *prompt_out = view->prompt;
+   aimee_request_t request = {0};
+   cJSON *json = view->request_ir && view->request_ir[0]
+                     ? aimee_ir_json_parse_frame(view->request_ir, strlen(view->request_ir))
+                     : NULL;
+   int invalid =
+       view->request_ir && view->request_ir[0] && (!json || aimee_ir_request_parse(json, &request));
+   cJSON_Delete(json);
+   free(view->request_ir);
+   if (invalid)
+   {
+      free(view->context);
+      aimee_request_free(&request);
+      if (err && errlen)
+         snprintf(err, errlen, "ensemble returned invalid canonical request");
+      return -1;
+   }
+   if (request_out)
+   {
+      aimee_request_free(request_out);
+      *request_out = request;
+   }
    else
-      free(view->prompt);
+      aimee_request_free(&request);
    if (context_out)
       *context_out = view->context;
    else
@@ -49,22 +69,29 @@ static int unpack(ensemble_view_t *view, int rc, ensemble_info_t *out, char **pr
    return 0;
 }
 
-int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out, char *err,
-                     size_t errlen)
+int db1_ensemble_get(int id, ensemble_info_t *out, aimee_request_t *request_out, char **context_out,
+                     char *err, size_t errlen)
 {
    ensemble_view_t view;
    memset(&view, 0, sizeof view);
    int rc = db1_ensemble_view(id, &view);
-   return unpack(&view, rc, out, prompt_out, context_out, err, errlen);
+   return unpack(&view, rc, out, request_out, context_out, err, errlen);
 }
 
-int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
-                         char **prompt_out, char *err, size_t errlen)
+int db1_ensemble_advance(int id, const char *sender, const aimee_message_t *message,
+                         ensemble_info_t *out, aimee_request_t *request_out, char *err,
+                         size_t errlen)
 {
    ensemble_view_t view;
    memset(&view, 0, sizeof view);
-   int rc = db1_ensemble_advance_view(id, sender, text, &view);
-   return unpack(&view, rc, out, prompt_out, NULL, err, errlen);
+   cJSON *json = aimee_ir_message_json(message);
+   char *message_ir = json ? cJSON_PrintUnformatted(json) : NULL;
+   cJSON_Delete(json);
+   if (!message_ir)
+      return -1;
+   int rc = db1_ensemble_advance_view(id, sender, message_ir, &view);
+   free(message_ir);
+   return unpack(&view, rc, out, request_out, NULL, err, errlen);
 }
 
 /* The same unpacking for the two operations that answer with an id. */

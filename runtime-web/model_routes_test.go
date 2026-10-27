@@ -55,7 +55,7 @@ func TestModelRoutesServedUnderBothPrefixes(t *testing.T) {
 func TestHandleModelsEmitsBothRosterKeys(t *testing.T) {
 	v1 := http.NewServeMux()
 	v1.HandleFunc("/v1/model/list", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"status":"ok","models":[{"name":"gpt"},{"name":"claude"}]}`)
+		fmt.Fprint(w, `{"status":"ok","models":[{"name":"gpt"},{"name":"claude"}],"default_agent":"claude"}`)
 	})
 	s := &server{cfg: startFakeV1(t, v1)}
 
@@ -66,9 +66,10 @@ func TestHandleModelsEmitsBothRosterKeys(t *testing.T) {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
 	}
 	var out struct {
-		Models []struct{ Name string } `json:"models"`
-		Agents []struct{ Name string } `json:"agents"`
-		Count  int                     `json:"count"`
+		Models       []struct{ Name string } `json:"models"`
+		Agents       []struct{ Name string } `json:"agents"`
+		Count        int                     `json:"count"`
+		DefaultAgent string                  `json:"default_agent"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v (body %q)", err, rr.Body.String())
@@ -81,6 +82,9 @@ func TestHandleModelsEmitsBothRosterKeys(t *testing.T) {
 	}
 	if out.Count != 2 {
 		t.Fatalf("count=%d want 2", out.Count)
+	}
+	if out.DefaultAgent != "claude" {
+		t.Fatalf("configured primary lost: %q", out.DefaultAgent)
 	}
 }
 

@@ -37,6 +37,10 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf);
  * a conn (e.g. the webchat-git /v1/workspace/clone route). Valid only between
  * capture and clear, i.e. during a route handler on the serving thread. */
 const char *server_http_identity_principal(void);
+/* Public workflow account names keep their historical bare PAM spelling. Only
+ * a kernel-attested webchat identity is projected; vault/audit identity remains
+ * canonical and unchanged. Never strips caller-supplied, un-attested strings. */
+const char *server_http_identity_workflow_principal(void);
 /* Raw attestation captured from this connection, never inferred from headers. */
 attested_transport_t server_http_identity_transport(void);
 /* Internal handoff of an already authenticated, host-populated owner. Never

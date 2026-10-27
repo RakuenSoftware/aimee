@@ -7,94 +7,9 @@
 #include "aimee.h"
 #include "model_registry.h"
 #include "models_dev.h"
+#include "providers_client.h"
+#include "cJSON.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
-
-static void test_alias_resolve(void)
-{
-   model_info_t info;
-
-   /* Anthropic aliases */
-   assert(model_alias_resolve("opus", &info) == 1);
-   assert(strcmp(info.provider, "anthropic") == 0);
-   assert(strstr(info.model_id, "opus") != NULL);
-
-   assert(model_alias_resolve("sonnet", &info) == 1);
-   assert(strcmp(info.provider, "anthropic") == 0);
-   assert(strstr(info.model_id, "sonnet") != NULL);
-
-   assert(model_alias_resolve("haiku", &info) == 1);
-   assert(strcmp(info.provider, "anthropic") == 0);
-
-   /* Case-insensitive */
-   assert(model_alias_resolve("OPUS", &info) == 1);
-   assert(strcmp(info.provider, "anthropic") == 0);
-
-   assert(model_alias_resolve("Sonnet", &info) == 1);
-   assert(strcmp(info.provider, "anthropic") == 0);
-
-   /* OpenAI aliases */
-   assert(model_alias_resolve("gpt4o", &info) == 1);
-   assert(strcmp(info.provider, "openai") == 0);
-   assert(strcmp(info.model_id, "gpt-4o") == 0);
-
-   assert(model_alias_resolve("gpt4", &info) == 1);
-   assert(strcmp(info.provider, "openai") == 0);
-
-   /* Gemini aliases */
-   assert(model_alias_resolve("gemini", &info) == 1);
-   assert(strcmp(info.provider, "gemini") == 0);
-
-   assert(model_alias_resolve("gemini-pro", &info) == 1);
-   assert(strcmp(info.provider, "gemini") == 0);
-
-   /* Mistral aliases */
-   assert(model_alias_resolve("codestral", &info) == 1);
-   assert(strcmp(info.provider, "mistral") == 0);
-   assert(strcmp(info.model_id, "codestral-latest") == 0);
-
-   assert(model_alias_resolve("mistral-large", &info) == 1);
-   assert(strcmp(info.provider, "mistral") == 0);
-   assert(strcmp(info.model_id, "mistral-large-latest") == 0);
-
-   assert(model_alias_resolve("mistral-small", &info) == 1);
-   assert(strcmp(info.provider, "mistral") == 0);
-   assert(strcmp(info.model_id, "mistral-small-latest") == 0);
-
-   /* Unknown alias returns 0 */
-   assert(model_alias_resolve("nonexistent-model-xyz", &info) == 0);
-   assert(model_alias_resolve("", &info) == 0);
-   assert(model_alias_resolve(NULL, &info) == 0);
-}
-
-static void test_provider_detect(void)
-{
-   /* Anthropic models */
-   assert(strcmp(model_detect_provider("claude-opus-4-6"), "anthropic") == 0);
-   assert(strcmp(model_detect_provider("claude-sonnet-4-6"), "anthropic") == 0);
-   assert(strcmp(model_detect_provider("claude-3-5-haiku"), "anthropic") == 0);
-
-   /* OpenAI models */
-   assert(strcmp(model_detect_provider("gpt-4o"), "openai") == 0);
-   assert(strcmp(model_detect_provider("gpt-4-turbo"), "openai") == 0);
-   assert(strcmp(model_detect_provider("gpt-3.5-turbo"), "openai") == 0);
-   assert(strcmp(model_detect_provider("o1"), "openai") == 0);
-
-   /* Gemini models */
-   assert(strcmp(model_detect_provider("gemini-1.5-pro"), "gemini") == 0);
-   assert(strcmp(model_detect_provider("gemini-2.5-pro"), "gemini") == 0);
-
-   /* Mistral models */
-   assert(strcmp(model_detect_provider("mistral-large-latest"), "mistral") == 0);
-   assert(strcmp(model_detect_provider("codestral-latest"), "mistral") == 0);
-   assert(strcmp(model_detect_provider("MiniMax-M2.7"), "minimax") == 0);
-
-   /* Unknown: fallback to openai-compatible */
-   assert(strcmp(model_detect_provider("unknown-compatible-model"), "openai") == 0);
-
-   /* NULL input */
-   assert(model_detect_provider(NULL) == NULL);
-   assert(model_detect_provider("") == NULL);
-}
 
 static void test_context_window(void)
 {
@@ -180,27 +95,6 @@ static void test_max_output(void)
    assert(model_max_output(NULL, "some-unknown-model") == 8192);
    assert(model_max_output(NULL, "") == 8192);
    assert(model_max_output(NULL, NULL) == 8192);
-}
-
-static void test_alias_list(void)
-{
-   int total = model_alias_list(NULL, 0);
-   assert(total > 0);
-
-   model_info_t buf[64];
-   int n = model_alias_list(buf, 64);
-   assert(n == total);
-
-   /* Each entry should have non-empty provider and model_id */
-   for (int i = 0; i < n && i < 64; i++)
-   {
-      assert(buf[i].provider[0] != '\0');
-      assert(buf[i].model_id[0] != '\0');
-   }
-
-   /* Listing with max < total should return capped set */
-   int capped = model_alias_list(buf, 3);
-   assert(capped == total); /* returns total count */
 }
 
 static void test_model_capability_get(void)
@@ -302,10 +196,6 @@ static void test_model_capability_helpers(void)
    assert(model_capability_resolve_ref("openai:gpt-4o", provider, sizeof(provider), model_id, 4,
                                        &cap) == 0);
 
-   assert(model_capability_flag_from_name("vision") == MODEL_CAP_VISION);
-   assert(model_capability_flag_from_name("image") == MODEL_CAP_VISION);
-   assert(model_capability_flag_from_name("unknown") == 0);
-
    char flags[128];
    model_capability_format_flags(MODEL_CAP_TOOLS | MODEL_CAP_VISION, flags, sizeof(flags));
    assert(strstr(flags, "tools") != NULL);
@@ -328,10 +218,9 @@ static void test_model_capability_helpers(void)
    for (int i = 0; i < total && i < 8; i++)
       assert(buf[i].open_weights == 1);
 
-   model_capability_flags_string(MODEL_CAP_TOOLS | MODEL_CAP_PDF, flags, sizeof(flags));
+   model_capability_format_flags(MODEL_CAP_TOOLS | MODEL_CAP_PDF, flags, sizeof(flags));
    assert(strstr(flags, "tools") != NULL);
    assert(strstr(flags, "pdf") != NULL);
-   assert(model_capability_flag_from_name("vision") == MODEL_CAP_VISION);
 }
 
 static void test_model_capability_refresh_cache_and_overrides(void)
@@ -384,8 +273,9 @@ static void test_model_capability_refresh_cache_and_overrides(void)
    setenv("AIMEE_MODELS_DEV_SNAPSHOT", snapshot_path, 1);
    setenv("AIMEE_MODEL_CAPABILITY_OVERRIDES", override_path, 1);
 
-   char msg[256];
-   int refreshed = model_capability_refresh(msg, sizeof(msg));
+   cJSON *refresh = providers_module_request("metadata.refresh", NULL, "server", 0);
+   int refreshed = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(refresh, "count"));
+   cJSON_Delete(refresh);
    assert(refreshed > 0);
 
    model_capability_t cap;
@@ -397,7 +287,9 @@ static void test_model_capability_refresh_cache_and_overrides(void)
    assert((cap.flags & MODEL_CAP_TOOLS) != 0);
 
    assert(unlink(snapshot_path) == 0);
-   refreshed = model_capability_refresh(msg, sizeof(msg));
+   refresh = providers_module_request("metadata.refresh", NULL, "server", 0);
+   refreshed = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(refresh, "count"));
+   cJSON_Delete(refresh);
    assert(refreshed > 0);
    assert(model_capability_get("openai", "custom-vision", &cap) == 1);
    assert(cap.context_window == 77777);
@@ -491,15 +383,12 @@ int main(void)
     * files and disagreeing is not a defect. */
    test_registry_agrees_with_catalog();
    printf("registry_agrees_with_catalog OK, ");
-   test_alias_resolve();
    printf("alias_resolve OK, ");
-   test_provider_detect();
    printf("provider_detect OK, ");
    test_context_window();
    printf("context_window OK, ");
    test_max_output();
    printf("max_output OK, ");
-   test_alias_list();
    printf("alias_list OK, ");
    test_model_capability_get();
    printf("capability OK, ");

@@ -14,7 +14,6 @@
 #include "platform_path.h"
 #include <aimee/translation/harness_ir.h>
 #include <poll.h>
-#include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1_client/db1.h"
 #include "webchat_live.h" /* db1_webchat_live_set — mirror the live turn for browser polling */
@@ -420,8 +419,8 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
 {
    if (!aimee_sid || !aimee_sid[0])
       return;
-   db1_server_session_t row;
-   if (db1_server_session_get(aimee_sid, &row) == 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(aimee_sid, &row) == 0)
       return; /* already registered */
    const char *principal = agent_get_request_vault_principal();
    (void)db1_server_session_create(aimee_sid,
@@ -432,8 +431,8 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
 static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
                                       size_t selected_len);
-static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
-                                     const char *aimee_sid, const char *provider,
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const aimee_message_t *message,
+                                     const char *cwd, const char *aimee_sid, const char *provider,
                                      const char *model_override);
 static void chat_agent_add_default_roles(agent_t *ag)
 {
@@ -653,9 +652,14 @@ static int chat_native_progress(void *context)
 /* The original task stays with the canonical host request; the native process
  * only schedules model/tool exchanges through its scoped local capability. */
 static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent_network_t *network,
-                             const char *cwd, const char *system, const char *prompt,
+                             const char *cwd, const char *system, const aimee_message_t *message,
                              agent_result_t *out)
 {
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT, .text = (char *)system};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = system && system[0] ? 1 : 0,
+                            .messages = (aimee_message_t *)message,
+                            .n_messages = 1};
    agent_t selected = *agent;
    if (!strcmp(selected.cli_kind, "claude-code"))
       snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
@@ -663,9 +667,12 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
                              .network = network,
                              .cwd = cwd,
                              .system_prompt = system,
-                             .user_prompt = prompt,
+                             /* The native owner reads the captured canonical turn. */
+                             .user_prompt = "Continue the server-owned canonical turn.",
+                             .canonical_request = &input,
                              .primary = 1,
-                             .control_channel = c->ir_delivery,
+                             .control_channel =
+                                 c->ir_delivery && server_control_scope_can_reply(c->ir_controls),
                              .session_id = c->ir_session,
                              .native_progress = chat_native_progress,
                              .native_progress_context = c};
@@ -698,8 +705,8 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
    return rc;
 }
 
-static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
-                                     const char *aimee_sid, const char *provider,
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const aimee_message_t *message,
+                                     const char *cwd, const char *aimee_sid, const char *provider,
                                      const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s", provider && provider[0] ? provider : "agent");
@@ -801,7 +808,8 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    agent_t *selected_agent = agent_find(&acfg, selected);
    int native = selected_agent && (!strcmp(selected_agent->cli_kind, "claude") ||
                                    !strcmp(selected_agent->cli_kind, "claude-code") ||
-                                   !strcmp(selected_agent->cli_kind, "codex"));
+                                   !strcmp(selected_agent->cli_kind, "codex") ||
+                                   !strcmp(selected_agent->cli_kind, "acp"));
    int rc;
    if (native && !cctx->ir_enabled)
    {
@@ -813,8 +821,14 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       rc = chat_native_print(cctx, selected_agent, &acfg.network, use_cwd,
                              system_prompt ? system_prompt : "", message, &result);
    else
-      rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
-                                AGENT_DEFAULT_MAX_TOKENS, &result);
+   {
+      aimee_request_t request = {0};
+      rc = aimee_ir_request_from_message(&request, system_prompt, message, AGENT_DEFAULT_MAX_TOKENS,
+                                         0.3)
+               ? AGENT_RC_CONTEXT_REFUSED
+               : agent_run_with_tools(&acfg, "code", &request, &result);
+      aimee_request_free(&request);
+   }
    agent_routing_set_primary_turn(0);
 
    agent_tools_set_tool_event_cb(NULL, NULL);
@@ -854,8 +868,13 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    }
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
-   if (!cctx->ir_native_owned && result.response && result.response[0])
-      stream_event(cctx, "text", "content", result.response);
+   if (!cctx->ir_native_owned)
+   {
+      char *display = aimee_ir_response_text_alloc(&result.canonical_response);
+      if (display && display[0])
+         stream_event(cctx, "text", "content", display);
+      free(display);
+   }
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
    agent_result_clear_response(&result);
@@ -863,10 +882,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    compute_ctx_free(cctx);
 }
 
-static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *message,
-                                               const char *provider_sid, const char *cwd,
-                                               const char *aimee_sid, const char *provider,
-                                               const char *model_override)
+static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *provider_sid,
+                                               const char *cwd, const char *aimee_sid,
+                                               const char *provider, const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s session=%s",
                         provider && provider[0] ? provider : "agent",
@@ -959,17 +977,19 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.aimee_session_id = aimee_sid;
    preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
    preq.cwd = use_cwd;
-   preq.system_prompt = system_prompt ? system_prompt : "";
-   preq.user_prompt = message;
+   aimee_request_t request = {0};
+   int request_rc = aimee_ir_request_from_message(&request, system_prompt, &cctx->ir_input, 0, -1);
+   preq.request = &request;
    preq.task_request = cctx->req;
-   preq.max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-   preq.temperature = 0.3;
 
    char session_id[128];
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-   int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   int rc = request_rc
+                ? AGENT_RC_CONTEXT_REFUSED
+                : primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   aimee_request_free(&request);
    agent_tools_set_tool_event_cb(NULL, NULL);
    if (result.clean_retry_attempt[0])
       stream_event(cctx, "retry_attempt", "id", result.clean_retry_attempt);
@@ -986,8 +1006,10 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
 
    if (session_id[0])
       stream_event(cctx, "session", "id", session_id);
-   if (result.response && result.response[0])
-      stream_event(cctx, "text", "content", result.response);
+   char *display = aimee_ir_response_text_alloc(&result.canonical_response);
+   if (display && display[0])
+      stream_event(cctx, "text", "content", display);
+   free(display);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
    agent_result_clear_response(&result);
@@ -1101,7 +1123,22 @@ void chat_stream_worker(void *arg)
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jcompact = cJSON_GetObjectItemCaseSensitive(req, "compact");
 
-   const char *message = cJSON_IsString(jmsg) ? jmsg->valuestring : "";
+   /* The queue and every execution branch retain the original canonical input. */
+   int input_rc = jmsg ? aimee_ir_message_parse(jmsg, &cctx->ir_input) : 0;
+   int has_content = 0;
+   for (int i = 0; !input_rc && i < cctx->ir_input.n_blocks; i++)
+   {
+      const aimee_block_t *block = &cctx->ir_input.blocks[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
+          block->type != AIMEE_BLK_DOCUMENT)
+         input_rc = -1;
+      if (block->type == AIMEE_BLK_TEXT && block->text && block->text[0])
+      {
+         has_content = 1;
+      }
+      if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
+         has_content = 1;
+   }
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *provider_sid = cJSON_IsString(jpsid) ? jpsid->valuestring : "";
    if (!provider_sid[0] && cJSON_IsString(jcsid))
@@ -1110,18 +1147,26 @@ void chat_stream_worker(void *arg)
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
    int compact = cJSON_IsTrue(jcompact);
 
-   if (!message[0] && !compact)
+   if (input_rc || (!compact && (!cctx->ir_input.role || strcmp(cctx->ir_input.role, "user") ||
+                                 cctx->ir_input.n_blocks < 1 || !has_content)))
    {
       compute_error(cctx, "missing message");
       compute_ctx_free(cctx);
       return;
    }
 
+   if (!compact)
+   {
+      for (int i = 0; i < cctx->ir_input.n_blocks; i++)
+         aimee_ir_block_attenuate_public(&cctx->ir_input.blocks[i], 0);
+      aimee_request_t input = {.messages = &cctx->ir_input, .n_messages = 1};
+      aimee_ir_classify_context(&input);
+   }
    cJSON *ir_version = cJSON_GetObjectItemCaseSensitive(req, "ir_version");
    cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
    /* Capture ownership follows the admitted host turn, independently of the
     * subscriber's transport version. Legacy consumers retain their projection. */
-   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
+   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : &cctx->ir_input) != 0)
    {
       compute_error(cctx, "cannot initialize canonical session");
       compute_ctx_free(cctx);
@@ -1188,10 +1233,10 @@ void chat_stream_worker(void *arg)
    compute_ctx_release_budget(cctx);
    if (chat_provider_uses_primary_session(provider))
    {
-      chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
+      chat_stream_worker_primary_session(cctx, provider_sid, cwd, aimee_sid, provider,
                                          model_override);
    }
    else
-      chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override);
+      chat_stream_worker_agent(cctx, &cctx->ir_input, cwd, aimee_sid, provider, model_override);
    return;
 }

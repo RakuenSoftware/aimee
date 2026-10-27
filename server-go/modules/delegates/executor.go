@@ -1,33 +1,24 @@
 package delegates
 
 import (
-	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unicode/utf8"
 
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
-	"golang.org/x/sys/unix"
 )
 
-const maxExecutorOutput = 16 << 20
-
-const (
-	watchdogArgument = "__aimee_delegate_watchdog"
-	watchdogArgvEnv  = "AIMEE_DELEGATE_WATCHDOG_ARGV"
-)
+var errNoConfiguredAgents = errors.New("agent registry has no agents")
 
 type Executor interface {
 	Execute(context.Context, delegatecontract.Invocation) delegatecontract.InvocationResult
@@ -100,11 +91,15 @@ func (r agentRegistry) roster() []agentEntry {
 	return r.Models
 }
 
-// RegistryExecutor is the Go-owned delegate producer. It selects a configured
-// agent and runs its argv directly; there is no shell, HTTP agent service, job
-// row, status poller, or C agent loop in this path.
+// RegistryExecutor selects the current configured registration. Native providers
+// execute through the canonical, C host owner. Unstructured and
+// unknown CLI commands are never internal model candidates or execution fallbacks.
 type RegistryExecutor struct {
+	host     delegatecontract.StageCaller
+	home     string
 	path     string
+	fileInfo os.FileInfo
+	digest   [sha256.Size]byte
 	mu       sync.Mutex
 	registry agentRegistry
 	stamp    int64
@@ -123,12 +118,8 @@ func NewRegistryExecutor(home string) (*RegistryExecutor, error) {
 	if home == "" {
 		return nil, errors.New("AIMEE_HOME is required for delegate execution")
 	}
-	models := filepath.Join(home, "models.json")
-	if _, err := os.Stat(models); errors.Is(err, os.ErrNotExist) {
-		models = filepath.Join(home, "agents.json")
-	}
-	r := &RegistryExecutor{path: models, limits: make(map[string]*agentLimiter)}
-	if _, err := r.load(); err != nil {
+	r := &RegistryExecutor{home: home, limits: make(map[string]*agentLimiter)}
+	if _, err := r.load(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errNoConfiguredAgents) {
 		return nil, err
 	}
 	return r, nil
@@ -137,36 +128,70 @@ func NewRegistryExecutor(home string) (*RegistryExecutor, error) {
 func (r *RegistryExecutor) load() (agentRegistry, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	info, err := os.Stat(r.path)
+	// Setup may create models.json after this long-lived executor starts. Resolve
+	// the authoritative owner on every load; only an absent canonical entry may
+	// select the legacy file. A broken symlink is an error, not legacy authority.
+	path := filepath.Join(r.home, "models.json")
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if _, entryErr := os.Lstat(path); !errors.Is(entryErr, os.ErrNotExist) {
+			// The canonical entry exists but is unusable; do not let constructor
+			// treat its target ENOENT as an unconfigured first boot.
+			return agentRegistry{}, fmt.Errorf("open canonical agent registry entry: %v", err)
+		}
+		path = filepath.Join(r.home, "agents.json")
+		file, err = os.Open(path)
+	}
+	if err != nil {
+		return agentRegistry{}, fmt.Errorf("open agent registry: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return agentRegistry{}, fmt.Errorf("stat agent registry: %w", err)
 	}
-	if r.stamp == info.ModTime().UnixNano() && len(r.registry.roster()) > 0 {
-		return r.registry, nil
-	}
-	body, err := os.ReadFile(r.path)
+	body, err := io.ReadAll(file)
 	if err != nil {
 		return agentRegistry{}, fmt.Errorf("read agent registry: %w", err)
+	}
+	// Bind the cache to the selected owner and actual file bytes. Atomic owner
+	// writes and in-place rewrites can preserve timestamps and file sizes.
+	digest := sha256.Sum256(body)
+	if r.path == path && r.fileInfo != nil && os.SameFile(r.fileInfo, info) &&
+		r.stamp == info.ModTime().UnixNano() && r.fileInfo.Size() == info.Size() &&
+		r.digest == digest && len(r.registry.roster()) > 0 {
+		return r.registry, nil
 	}
 	var registry agentRegistry
 	if err := json.Unmarshal(body, &registry); err != nil {
 		return agentRegistry{}, fmt.Errorf("decode agent registry: %w", err)
 	}
 	if len(registry.roster()) == 0 {
-		return agentRegistry{}, errors.New("agent registry has no agents")
+		return agentRegistry{}, errNoConfiguredAgents
 	}
 	for _, agent := range registry.roster() {
 		if agent.MaxParallel != nil && *agent.MaxParallel < 0 {
 			return agentRegistry{}, fmt.Errorf("agent %q has negative max_parallel", agent.Name)
 		}
 	}
-	r.registry, r.stamp = registry, info.ModTime().UnixNano()
+	r.registry, r.path, r.fileInfo, r.stamp, r.digest = registry, path, info, info.ModTime().UnixNano(), digest
 	return registry, nil
 }
 
 func enabled(a agentEntry) bool { return a.Enabled == nil || bool(*a.Enabled) }
 
 func available(a agentEntry) bool { return a.Available == nil || bool(*a.Available) }
+
+var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude or Codex host registration")
+
+func canonicalModelAdapter(a agentEntry) bool {
+	switch strings.ToLower(strings.TrimSpace(a.CLIKind)) {
+	case "claude", "claude-code", "codex":
+		return true
+	default:
+		return false
+	}
+}
 
 func containsOrWildcard(values []string, wanted string, emptyMeansAll bool) bool {
 	if len(values) == 0 {
@@ -289,7 +314,7 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 	candidates := make([]groupCandidate, 0, len(registry.roster()))
 	bySelector := make(map[string]groupCandidate)
 	for _, agent := range registry.roster() {
-		if !enabled(agent) || !available(agent) || agent.PrimaryOnly || strings.TrimSpace(agent.CLICmd) == "" {
+		if !enabled(agent) || !available(agent) || agent.PrimaryOnly || !canonicalModelAdapter(agent) || strings.TrimSpace(agent.CLICmd) == "" {
 			continue
 		}
 		provider, model := strings.TrimSpace(agent.Provider), strings.TrimSpace(agent.Model)
@@ -384,6 +409,12 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 		for _, a := range registry.roster() {
 			if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" && eligible(a, role, persona) &&
 				(a.Name == name || a.Model == name) {
+				if !canonicalModelAdapter(a) {
+					if explicit {
+						return agentEntry{}, errUnsupportedModelAdapter
+					}
+					continue
+				}
 				return a, nil
 			}
 		}
@@ -392,398 +423,12 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 		}
 	}
 	for _, a := range registry.roster() {
-		if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" &&
+		if enabled(a) && available(a) && !a.PrimaryOnly && canonicalModelAdapter(a) && strings.TrimSpace(a.CLICmd) != "" &&
 			eligible(a, role, persona) {
 			return a, nil
 		}
 	}
-	return agentEntry{}, errors.New("no enabled delegate CLI is configured")
-}
-
-func splitCommand(command string) ([]string, error) {
-	var out []string
-	var word strings.Builder
-	var quote rune
-	escaped := false
-	flush := func() {
-		if word.Len() > 0 {
-			out = append(out, word.String())
-			word.Reset()
-		}
-	}
-	for _, ch := range strings.TrimSpace(command) {
-		if escaped {
-			word.WriteRune(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' && quote != '\'' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if ch == quote {
-				quote = 0
-			} else {
-				word.WriteRune(ch)
-			}
-			continue
-		}
-		switch ch {
-		case '\'', '"':
-			quote = ch
-		case ' ', '\t', '\n':
-			flush()
-		case ';', '|', '&', '<', '>', '`':
-			return nil, errors.New("delegate CLI command contains a shell operator")
-		default:
-			word.WriteRune(ch)
-		}
-	}
-	if escaped || quote != 0 {
-		return nil, errors.New("delegate CLI command has an unterminated escape or quote")
-	}
-	flush()
-	if len(out) == 0 {
-		return nil, errors.New("delegate CLI command is empty")
-	}
-	return out, nil
-}
-
-func executorArgv(agent agentEntry, request delegatecontract.Invocation) ([]string, error) {
-	argv, err := splitCommand(agent.CLICmd)
-	if err != nil {
-		return nil, err
-	}
-	kind := strings.ToLower(strings.TrimSpace(agent.CLIKind))
-	switch kind {
-	case "codex":
-		if !request.Tools {
-			return nil, errors.New("codex CLI cannot guarantee a tools-disabled invocation")
-		}
-		argv = append(argv, "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--color", "never")
-		if RoleIsWrite(request.Role) {
-			argv = append(argv, "--sandbox", "workspace-write")
-		} else {
-			argv = append(argv, "--sandbox", "read-only")
-		}
-		if agent.Model != "" {
-			argv = append(argv, "--model", agent.Model)
-		}
-		argv = append(argv, "-")
-	case "claude", "claude-code":
-		argv = append(argv, "-p", "--output-format", "stream-json", "--verbose")
-		if agent.Model != "" {
-			argv = append(argv, "--model", agent.Model)
-		}
-		if !request.Tools {
-			// Claude documents an empty --tools value as the explicit mechanism
-			// for disabling every built-in tool; preserve the empty argv element.
-			argv = append(argv, "--tools", "")
-		} else if !RoleIsWrite(request.Role) {
-			argv = append(argv, "--allowedTools", "Read", "Glob", "Grep")
-		}
-	case "", "generic":
-		// A generic adapter consumes the prompt on stdin and writes its final
-		// response on stdout. This keeps custom CLIs argv-only and testable.
-		if !RoleIsWrite(request.Role) {
-			return nil, errors.New("generic delegate CLIs cannot prove read-only role isolation")
-		}
-		if !request.Tools {
-			return nil, errors.New("generic delegate CLIs cannot guarantee a tools-disabled invocation")
-		}
-		if request.MaxTurns > 0 {
-			return nil, errors.New("generic delegate CLIs cannot enforce a maximum turn count")
-		}
-	default:
-		return nil, fmt.Errorf("unsupported delegate cli_kind %q", agent.CLIKind)
-	}
-	return argv, nil
-}
-
-type limitedBuffer struct {
-	mu        sync.Mutex
-	buffer    bytes.Buffer
-	remaining int
-}
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	n := len(p)
-	if b.remaining <= 0 {
-		return n, nil
-	}
-	if len(p) > b.remaining {
-		p = p[:b.remaining]
-	}
-	_, _ = b.buffer.Write(p)
-	b.remaining -= len(p)
-	return n, nil
-}
-
-func (b *limitedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.String()
-}
-
-func (b *limitedBuffer) BytesCopy() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]byte(nil), b.buffer.Bytes()...)
-}
-
-// turnMonitor enforces MaxTurns from observable JSONL events. Claude emits one
-// assistant event per model turn. Codex exec exposes one initial model turn and
-// completed non-reasoning/non-final items for tool work; counting each such
-// item as another turn is conservative when tools run in parallel, so it may
-// stop early but can never permit more model continuations than the cap.
-type turnMonitor struct {
-	mu       sync.Mutex
-	kind     string
-	max      int
-	turns    int
-	pending  []byte
-	exceeded bool
-	trigger  string
-	cancel   context.CancelFunc
-	output   io.Writer
-}
-
-func newTurnMonitor(kind string, max int, cancel context.CancelFunc, output io.Writer) *turnMonitor {
-	turns := 0
-	if strings.EqualFold(strings.TrimSpace(kind), "codex") && max > 0 {
-		turns = 1
-	}
-	return &turnMonitor{kind: strings.ToLower(strings.TrimSpace(kind)), max: max,
-		turns: turns, cancel: cancel, output: output}
-}
-
-func (m *turnMonitor) Write(p []byte) (int, error) {
-	n, err := m.output.Write(p)
-	m.mu.Lock()
-	m.pending = append(m.pending, p...)
-	for {
-		end := bytes.IndexByte(m.pending, '\n')
-		if end < 0 {
-			break
-		}
-		line := append([]byte(nil), m.pending[:end]...)
-		m.pending = m.pending[end+1:]
-		m.observe(line)
-	}
-	m.mu.Unlock()
-	return n, err
-}
-
-func (m *turnMonitor) observe(line []byte) {
-	if m.max <= 0 || m.exceeded {
-		return
-	}
-	var item map[string]any
-	if json.Unmarshal(line, &item) != nil {
-		return
-	}
-	switch m.kind {
-	case "claude", "claude-code":
-		if item["type"] == "assistant" {
-			m.turns++
-		}
-	case "codex":
-		if item["type"] == "item.completed" {
-			nested, _ := item["item"].(map[string]any)
-			typeName, _ := nested["type"].(string)
-			if typeName != "agent_message" && typeName != "reasoning" {
-				m.turns++
-			}
-		}
-	}
-	if m.turns > m.max {
-		m.exceeded = true
-		m.trigger = string(line)
-		m.cancel()
-	}
-}
-
-func (m *turnMonitor) Exceeded() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.exceeded
-}
-
-func (m *turnMonitor) Turns() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.turns
-}
-
-func (m *turnMonitor) Detail() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.trigger
-}
-
-func boundedTerminationDetail(detail string) string {
-	detail = strings.ToValidUTF8(delegatecontract.SafeDiagnostic(strings.TrimSpace(detail)), "�")
-	if len(detail) <= delegatecontract.TerminationDetailMax {
-		return detail
-	}
-	end := delegatecontract.TerminationDetailMax
-	for end > 0 && !utf8.ValidString(detail[:end]) {
-		end--
-	}
-	return detail[:end]
-}
-
-func terminationDiagnostic(kind string, request delegatecontract.Invocation, elapsed time.Duration,
-	monitor *turnMonitor, detail string) *delegatecontract.TerminationDiagnostic {
-	diagnostic := &delegatecontract.TerminationDiagnostic{
-		Kind: kind, ExecutionTimeoutMS: request.ExecutionTimeoutMS,
-		ElapsedMS: elapsed.Milliseconds(), Detail: boundedTerminationDetail(detail),
-	}
-	if kind == delegatecontract.TerminationTurnCap {
-		diagnostic.MaxTurns = request.MaxTurns
-		diagnostic.ObservedTurns = monitor.Turns()
-	}
-	return diagnostic
-}
-
-func finalOutput(kind string, output []byte) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	if kind == "" || kind == "generic" {
-		return strings.TrimSpace(string(output))
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 4096), maxExecutorOutput)
-	var final string
-	for scanner.Scan() {
-		var item map[string]any
-		if json.Unmarshal(scanner.Bytes(), &item) != nil {
-			continue
-		}
-		if kind == "claude" || kind == "claude-code" {
-			if item["type"] == "result" {
-				if value, ok := item["result"].(string); ok {
-					final = value
-				}
-			}
-			continue
-		}
-		if kind == "codex" && item["type"] == "item.completed" {
-			if nested, ok := item["item"].(map[string]any); ok && nested["type"] == "agent_message" {
-				if value, ok := nested["text"].(string); ok {
-					final = value
-				}
-			}
-		}
-	}
-	return strings.TrimSpace(final)
-}
-
-// RunWatchdog handles the private re-exec mode used by executorCommand. Every
-// delegates process entry point calls this before parsing normal arguments.
-func RunWatchdog(args []string) (bool, int) {
-	if len(args) != 2 || args[1] != watchdogArgument {
-		return false, 0
-	}
-	var argv []string
-	if json.Unmarshal([]byte(os.Getenv(watchdogArgvEnv)), &argv) != nil || len(argv) == 0 {
-		return true, 125
-	}
-	control := os.NewFile(3, "delegate-producer-lifecycle")
-	if control == nil {
-		return true, 125
-	}
-	defer control.Close()
-	syscall.CloseOnExec(int(control.Fd()))
-	return true, runWatchdog(control, argv, os.Stdin, os.Stdout, os.Stderr)
-}
-
-func runWatchdog(control io.Reader, argv []string, stdin io.Reader,
-	stdout, stderr io.Writer) int {
-	// Reparent grandchildren here so killing the process group cannot leave
-	// zombies behind after the CLI leader exits.
-	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-		_, _ = fmt.Fprintf(stderr, "configure delegate watchdog: %v\n", err)
-		return 125
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	// The CLI leads a fresh group. Pdeathsig covers an unexpected watchdog
-	// failure; the producer pipe below covers module death and kills the group.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
-	if err := cmd.Start(); err != nil {
-		_, _ = fmt.Fprintf(stderr, "start delegate CLI: %v\n", err)
-		return 125
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	producerGone := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(io.Discard, control)
-		close(producerGone)
-	}()
-	select {
-	case err := <-done:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		reapWatchdogChildren()
-		if err == nil {
-			return 0
-		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() >= 0 {
-			return exit.ExitCode()
-		}
-		return 125
-	case <-producerGone:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		reapWatchdogChildren()
-		return 125
-	}
-}
-
-func reapWatchdogChildren() {
-	for {
-		var status syscall.WaitStatus
-		if _, err := syscall.Wait4(-1, &status, 0, nil); errors.Is(err, syscall.ECHILD) {
-			return
-		} else if err != nil && !errors.Is(err, syscall.EINTR) {
-			return
-		}
-	}
-}
-
-func executorCommand(ctx context.Context, argv []string) (*exec.Cmd, func(), error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return nil, nil, err
-	}
-	encoded, err := json.Marshal(argv)
-	if err != nil {
-		return nil, nil, err
-	}
-	controlRead, controlWrite, err := os.Pipe()
-	if err != nil {
-		return nil, nil, err
-	}
-	cmd := exec.CommandContext(ctx, executable, watchdogArgument)
-	cmd.Env = append(os.Environ(), watchdogArgvEnv+"="+string(encoded))
-	cmd.ExtraFiles = []*os.File{controlRead}
-	var closeOnce sync.Once
-	closeControl := func() {
-		closeOnce.Do(func() {
-			_ = controlWrite.Close()
-			_ = controlRead.Close()
-		})
-	}
-	cmd.Cancel = func() error {
-		closeControl()
-		return nil
-	}
-	cmd.WaitDelay = 5 * time.Second
-	return cmd, closeControl, nil
+	return agentEntry{}, errors.New("no enabled canonical delegate model is configured; generic or unknown CLI adapters are unsupported")
 }
 
 func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract.Invocation) delegatecontract.InvocationResult {
@@ -822,75 +467,10 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 			return result
 		}
 	}
-	argv, err := executorArgv(agent, request)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	prompt := request.Prompt
-	if persona := strings.TrimSpace(request.Persona); persona != "" {
-		prompt = "You are acting as " + persona + ".\n\n" + prompt
-	}
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-	cmd, closeCommand, err := executorCommand(runCtx, argv)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	defer closeCommand()
-	if request.Workdir != "" {
-		cmd.Dir = request.Workdir
-	}
-	cmd.Stdin = strings.NewReader(prompt)
-	output := &limitedBuffer{remaining: maxExecutorOutput}
-	monitor := newTurnMonitor(agent.CLIKind, request.MaxTurns, runCancel, output)
-	cmd.Stdout, cmd.Stderr = output, output
-	if request.MaxTurns > 0 {
-		cmd.Stdout = monitor
-	}
-	started := time.Now()
-	if err := cmd.Run(); err != nil {
-		elapsed := time.Since(started)
-		if monitor.Exceeded() {
-			result.Error = fmt.Sprintf("%s (configured=%d observed=%d)",
-				delegatecontract.ErrDelegateTurnCap, request.MaxTurns, monitor.Turns())
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationTurnCap,
-				request, elapsed, monitor, monitor.Detail())
-			return result
-		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			result.Error = delegatecontract.ErrDelegateExecutionDeadline.Error()
-			if detail := boundedTerminationDetail(output.String()); detail != "" {
-				result.Error += ": " + detail
-			}
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationExecutionDeadline,
-				request, elapsed, monitor, output.String())
-			return result
-		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			result.Error = context.Canceled.Error()
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationCancelled,
-				request, elapsed, monitor, output.String())
-			return result
-		}
-		detail := strings.TrimSpace(output.String())
-		if detail == "" {
-			detail = err.Error()
-		}
-		result.Error = delegatecontract.SafeDiagnostic(detail)
-		return result
-	}
-	response := finalOutput(agent.CLIKind, output.BytesCopy())
-	if response == "" {
-		result.Error = "delegate CLI returned no final response"
-		return result
-	}
-	result.Status, result.Response = "done", response
-	return result
+	return r.executeHost(ctx, request, agent)
 }
 
-// cancelledContext bridges the bus runtime's cancellation bit into os/exec.
+// cancelledContext bridges the bus runtime cancellation bit into host calls.
 func cancelledContext(invocationCancelled func() bool) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -910,5 +490,3 @@ func cancelledContext(invocationCancelled func() bool) (context.Context, context
 	}()
 	return ctx, cancel
 }
-
-var _ io.Writer = (*limitedBuffer)(nil)

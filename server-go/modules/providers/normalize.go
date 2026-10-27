@@ -125,6 +125,14 @@ func normalizeModel(model object) error {
 			model["cli_cmd"] = "claude"
 		}
 	}
+	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "codex" {
+		if str(model, "cli_cmd") == "" {
+			model["cli_cmd"] = "codex"
+		}
+		if _, present := model["session_reuse"]; !present {
+			model["session_reuse"] = true
+		}
+	}
 	if _, ok := model["primary_only"]; !ok {
 		model["primary_only"] = str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "claude"
 	}

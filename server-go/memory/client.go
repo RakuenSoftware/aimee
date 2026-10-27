@@ -340,8 +340,42 @@ func (c *Client) Embed(ctx context.Context, trace uint64, request EmbedRequest) 
 	if json.Unmarshal(response, &required) != nil || required.Dim == nil {
 		return EmbedResponse{}, ErrClientResponse
 	}
-	if result.Dim < 0 || result.Dim != len(result.Vector) {
+	if result.Dim < 0 {
 		return EmbedResponse{}, ErrClientResponse
+	}
+	if request.Operation == "batch" || request.Operation == "dimension" {
+		// These operations produce a positive bounded dimension or an explicit
+		// owner decline. Zero alone cannot establish a completed embedding.
+		declined := result.Error != "" || result.Unavailable || result.Unauthorized
+		if (result.Dim == 0 && !declined) ||
+			(result.Dim > 0 && (request.MaxDim <= 0 || result.Dim > request.MaxDim)) {
+			return EmbedResponse{}, ErrClientResponse
+		}
+	}
+	switch request.Operation {
+	case "batch":
+		if len(result.Vector) != 0 || (result.Dim == 0 && len(result.Vectors) != 0) {
+			return EmbedResponse{}, ErrClientResponse
+		}
+		if result.Dim > 0 {
+			if len(result.Vectors) == 0 || len(result.Vectors) != len(request.Texts) {
+				return EmbedResponse{}, ErrClientResponse
+			}
+			for _, vector := range result.Vectors {
+				if len(vector) != result.Dim {
+					return EmbedResponse{}, ErrClientResponse
+				}
+			}
+		}
+	case "dimension":
+		// Programs return only Dim; HTTP probes also return their vector.
+		if len(result.Vectors) != 0 || (len(result.Vector) != 0 && result.Dim != len(result.Vector)) {
+			return EmbedResponse{}, ErrClientResponse
+		}
+	default:
+		if result.Dim != len(result.Vector) {
+			return EmbedResponse{}, ErrClientResponse
+		}
 	}
 	return result, nil
 }

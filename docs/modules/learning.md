@@ -112,15 +112,13 @@ useful changes without silently exceeding their weekly limits.
 
 ## Tests and failure behavior
 
-The descriptor's two direct tests are `test_learning_bundle.c` (the evidence-bundle builder) and
-`test_learning_metrics.c` (the router metrics through the public learning API). `test_learning_synth.c`
-and `test_learning_version.c` exercise `kb/kb_learning_synth.c` and `kb/kb_learning_version.c`; they
+The descriptor's direct C test is `test_learning_bundle.c` (the evidence-bundle builder).
+`test_learning_synth.c` and `test_learning_version.c` exercise `kb/kb_learning_synth.c` and `kb/kb_learning_version.c`; they
 carry the `learning` name and link `learning_bundle.o` as a dependency but are KB tests, so they are not
 claimed here, the same way gateway does not claim the delivery-binary `test_gateway_*` tests.
-`learning_implicit_replay.c` is a replay harness, not a `unit-test-learning-*` target. Together these
-cover evidence, detection, proposals, metrics, candidate synthesis, and version behavior. Invalid
-signals, unavailable storage, and unavailable learning-module classification fail closed. The router
-metrics test verifies that a missing classifier returns before producing a signal or proposal result.
+`learning_implicit_replay.c` is a replay harness, not a `unit-test-learning-*` target. The unbuilt
+native metrics test has been retired; it is not current coverage. Invalid signals, unavailable storage,
+and unavailable learning-module classification fail closed.
 Optional synthesis failure leaves evidence/proposals inspectable and must not fabricate an accepted
 action.
 

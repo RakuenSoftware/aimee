@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
@@ -57,8 +58,23 @@ func NewReviewHandler(reviewer Reviewer) ring.ModuleHandler {
 			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var decoded panel.ReviewRequest
+		if !canonical.ValidJSON(request) {
+			return nil, ring.ModuleStatusInvalidRequest
+		}
 		if err := json.Unmarshal(request, &decoded); err != nil {
 			return nil, ring.ModuleStatusInvalidRequest
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(request, &fields); err != nil {
+			return nil, ring.ModuleStatusInvalidRequest
+		}
+		if raw, present := fields["request"]; present {
+			input, err := canonical.DecodeRequest(raw)
+			if err != nil || decoded.OriginalRequest != "" {
+				return nil, ring.ModuleStatusInvalidRequest
+			}
+			attenuateReviewRequest(input)
+			decoded.Request = input
 		}
 		if invocation.Cancelled() {
 			return nil, ring.ModuleStatusCancelled

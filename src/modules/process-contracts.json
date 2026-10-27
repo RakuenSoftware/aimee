@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "principal_class": 1,
   "components": [
     {
@@ -387,6 +387,15 @@
           "event_kind": 6678,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 23,
+          "name": "native-host-execute",
+          "event_kind": 6679,
+          "hosted_by": "server-core",
+          "durability": "ledger",
+          "durability_reason": "host-owned canonical native execution admission and lifecycle require durable execution receipts",
           "emitter": "obs_bus_emit_durable_event"
         }
       ]
@@ -1407,6 +1416,17 @@
       ],
       "request": [
         4609
+      ]
+    },
+    {
+      "id": "delegates-host",
+      "principal_ref": 76,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-delegates",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        6679
       ]
     }
   ]

@@ -1031,7 +1031,13 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON *dreq = cJSON_CreateObject();
          cJSON_AddStringToObject(dreq, "role", "execute");
          cJSON_AddStringToObject(dreq, "persona", "engineer");
-         cJSON_AddStringToObject(dreq, "prompt", prompt);
+         aimee_request_t input = {0};
+         cJSON *canonical = NULL;
+         if (!aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3))
+            canonical = aimee_ir_request_json(&input);
+         aimee_request_free(&input);
+         if (canonical)
+            cJSON_AddItemToObject(dreq, "request", canonical);
          if (sid && sid[0])
             cJSON_AddStringToObject(dreq, "session_id", sid);
          if (cwd && cwd[0])
@@ -1264,8 +1270,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
     * findable record. Idempotent (SessionStart also fires on resume); best-effort. */
    if (sid && sid[0])
    {
-      db1_server_session_t existing;
-      if (db1_server_session_get(sid, &existing) != 0)
+      db1_server_session_owner_t existing;
+      if (db1_server_session_owner_get(sid, &existing) != 0)
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
@@ -2194,7 +2200,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
     * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
-    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * precede any toolset_registry_init() / agent_tools_catalog(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */

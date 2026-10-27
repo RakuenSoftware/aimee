@@ -212,7 +212,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    if (relaxed)
    {
       char sc[128];
-      model_capability_flags_string(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
+      model_capability_format_flags(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
       aimee_log(LOG_WARN, "delegate.route",
                 "no model satisfies inferred modality caps (%s) for role '%s'; routing on hard "
                 "caps only",
@@ -234,7 +234,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    if (kept == 0)
    {
       char caps[128];
-      model_capability_flags_string(required_caps, caps, sizeof(caps));
+      model_capability_format_flags(required_caps, caps, sizeof(caps));
       if (caps[0] == '\0')
          snprintf(caps, sizeof(caps), "-");
       if (errbuf && errbuf_sz > 0)
@@ -259,7 +259,7 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
    {
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled || strcmp(ag->provider, provider) != 0 ||
-          !agent_is_available_for_routing(ag))
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (role && !agent_has_role(ag, role))
          continue;
@@ -285,7 +285,7 @@ int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (role && !agent_has_role(ag, role))
          continue;
@@ -328,6 +328,7 @@ int delegate_add_inline_acp_agent(agent_config_t *cfg, const char *command, cons
    snprintf(a->roles[0], sizeof(a->roles[0]), "%s", (role && role[0]) ? role : "execute");
    a->role_count = 1;
    a->enabled = 1;
+   a->max_parallel = 1;  /* One admitted execution for this ephemeral external agent. */
    a->tools_enabled = 1; /* ACP agents drive aimee's tools/worktree per the protocol */
    a->max_turns = -1;    /* no declared cap; the role floor applies */
    a->cost_tier = 3;     /* external agent: it bills its own model, outside aimee */
@@ -399,7 +400,8 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
          return -1;
       }
       char rdetail[128];
-      agent_route_block_t rblock = agent_routing_block_reason(selected, rdetail, sizeof(rdetail));
+      agent_route_block_t rblock = agent_routing_block_reason_for_execution(
+          selected, cfg->route_execution, rdetail, sizeof(rdetail));
       if (rblock != AGENT_ROUTE_OK)
       {
          /* Report the ACTUAL reason routing declined, tagged with the matching

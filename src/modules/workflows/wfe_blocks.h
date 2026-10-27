@@ -5,6 +5,7 @@
 #define DEC_WFE_BLOCKS_H 1
 
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 /* Register the real executors for every non-gate block type. Gates are
  * registered by their own slices (W4 human, W5 roundtable). */
@@ -100,8 +101,8 @@ typedef struct
     * only when the delegate completed but the write-role no-op detector proved
     * the worktree stayed unchanged; return WFE_DELEGATE_ERROR for transport,
     * provider, or execution failures. */
-   int (*run)(const char *workdir, const char *role, const char *prompt, const char *artifact_path,
-              char out_commit_sha[64], char *err, size_t errlen);
+   int (*run)(const char *workdir, const char *role, const aimee_message_t *message,
+              const char *artifact_path, char out_commit_sha[64], char *err, size_t errlen);
 } wfe_delegate_provider_t;
 
 /* Classify the stable no-op diagnostics emitted by delegate_detect_noop_write.

@@ -122,6 +122,17 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
 /* One guardrail payload, as it arrives off the ring. */
 #define AB_GUARDRAIL_MAX 2048
 
+struct obs_bus_module_service
+{
+   ouro_client_t bus;
+   ouro_module_process_config_t config;
+   pthread_t thread;
+   atomic_int stop;
+   int attached;
+   int running;
+   struct obs_bus_module_service *next;
+};
+
 static struct
 {
    ouro_host_t host;
@@ -180,6 +191,7 @@ static struct
    atomic_uint durable_pending_count;
    uint64_t durable_retry_after_ns;
    module_fragment_tracker_t module_fragments[AB_MODULE_FRAGMENT_TRACKERS];
+   obs_bus_module_service_t *services;
    int started;
    int terminated; /* set by stop; blocks lazy resurrection after shutdown */
 
@@ -1026,11 +1038,15 @@ static void *consumer_main(void *arg)
 struct serve_arg
 {
    int fd;
+   int owned;
 };
 static void *serve_thread(void *p)
 {
-   int fd = ((struct serve_arg *)p)->fd;
-   ouro_host_serve_attach(&g.host, fd);
+   struct serve_arg *argument = p;
+   if (argument->owned)
+      ouro_host_serve_attach_owned(&g.host, argument->fd);
+   else
+      ouro_host_serve_attach(&g.host, argument->fd);
    return NULL;
 }
 
@@ -1100,12 +1116,31 @@ static void module_client_release(int index)
    pthread_mutex_unlock(&g.module_client_lock);
 }
 
-static int attach(ouro_client_t *c)
+static int attach_mode(ouro_client_t *c, int owned)
 {
    int sv[2];
-   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
+   int socket_type = SOCK_SEQPACKET;
+#ifdef SOCK_CLOEXEC
+   socket_type |= SOCK_CLOEXEC;
+#endif
+   if (socketpair(AF_UNIX, socket_type, 0, sv) != 0)
+   {
+#ifdef SOCK_CLOEXEC
+      if ((errno != EINVAL && errno != EPROTONOSUPPORT) ||
+          socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
+         return -1;
+#else
       return -1;
-   struct serve_arg a = {.fd = sv[1]};
+#endif
+   }
+   /* Retain close-on-exec on POSIX platforms without atomic socket flags. */
+   if (fcntl(sv[0], F_SETFD, FD_CLOEXEC) < 0 || fcntl(sv[1], F_SETFD, FD_CLOEXEC) < 0)
+   {
+      close(sv[0]);
+      close(sv[1]);
+      return -1;
+   }
+   struct serve_arg a = {.fd = sv[1], .owned = owned};
    pthread_t t;
    if (pthread_create(&t, NULL, serve_thread, &a) != 0)
    {
@@ -1118,6 +1153,115 @@ static int attach(ouro_client_t *c)
    close(sv[0]);
    close(sv[1]);
    return rc == OURO_CLIENT_OK ? 0 : -1;
+}
+
+static int attach(ouro_client_t *client)
+{
+   return attach_mode(client, 0);
+}
+
+static int service_stopped(void *context)
+{
+   return atomic_load_explicit(&((obs_bus_module_service_t *)context)->stop, memory_order_acquire);
+}
+static void *module_service_main(void *context)
+{
+   obs_bus_module_service_t *service = context;
+   (void)ouro_module_service_run(&service->bus, &service->config, service_stopped, service);
+   return NULL;
+}
+/* start_lock held; bus pump/module owners MUST still be alive while joining. */
+static void module_service_stop_locked(obs_bus_module_service_t *service)
+{
+   if (service->running)
+   {
+      atomic_store_explicit(&service->stop, 1, memory_order_release);
+      pthread_join(service->thread, NULL);
+      service->running = 0;
+   }
+   if (service->attached)
+   {
+      pthread_mutex_lock(&g.host_lock);
+      /* Route already queued cancellation replies before retiring the serving
+       * slot. A blocked caller still has its own AMOD deadline/failure fence. */
+      (void)ouro_host_pump(&g.host);
+      (void)ouro_host_release_slot(&g.host, service->bus.reply.handle_id);
+      pthread_mutex_unlock(&g.host_lock);
+      ouro_client_detach(&service->bus);
+      service->attached = 0;
+   }
+}
+int obs_bus_module_service_start(const ouro_module_stage_t *stages, size_t count,
+                                 ouro_module_handler_fn handler, void *user_data,
+                                 obs_bus_module_service_t **out)
+{
+   if (!out || !stages || !count || !handler)
+      return -1;
+   *out = NULL;
+   for (size_t i = 0; i < count; i++)
+      if (!stages[i].event_kind || !stages[i].stage_id)
+         return -1;
+   obs_bus_module_service_t *service = calloc(1, sizeof *service);
+   if (!service)
+      return -1;
+   service->config = (ouro_module_process_config_t){
+       .stages = stages, .stage_count = count, .handler = handler, .user_data = user_data};
+   atomic_init(&service->stop, 0);
+   pthread_mutex_lock(&start_lock);
+   if (!g.started || g.terminated || !atomic_load(&g.accepting_calls))
+      goto failed;
+   /* The external runtime owns admission callbacks now. A private same-process
+    * socketpair uses the host-only seam, serialized with all host mutation. */
+   pthread_mutex_lock(&g.host_lock);
+   int attach_result = attach_mode(&service->bus, 1);
+   pthread_mutex_unlock(&g.host_lock);
+   if (attach_result)
+      goto failed;
+   service->attached = 1;
+   int registered = 1;
+   pthread_mutex_lock(&g.host_lock);
+   for (size_t i = 0; i < count; i++)
+      if (ouro_host_kind_has_server(&g.host, stages[i].event_kind) ||
+          ouro_host_serve_kind(&g.host, service->bus.reply.handle_id, stages[i].event_kind) !=
+              OURO_HOST_OK)
+      {
+         registered = 0;
+         break;
+      }
+   pthread_mutex_unlock(&g.host_lock);
+   if (!registered || pthread_create(&service->thread, NULL, module_service_main, service))
+      goto failed;
+   service->running = 1;
+   service->next = g.services;
+   g.services = service;
+   *out = service;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+failed:
+   if (service->attached)
+      module_service_stop_locked(service);
+   pthread_mutex_unlock(&start_lock);
+   free(service);
+   return -1;
+}
+void obs_bus_module_service_stop(obs_bus_module_service_t **owner)
+{
+   if (!owner || !*owner)
+      return;
+   pthread_mutex_lock(&start_lock);
+   obs_bus_module_service_t *service = *owner;
+   if (g.started)
+   {
+      obs_bus_module_service_t **link = &g.services;
+      while (*link && *link != service)
+         link = &(*link)->next;
+      if (*link)
+         *link = service->next;
+   }
+   module_service_stop_locked(service);
+   pthread_mutex_unlock(&start_lock);
+   free(service);
+   *owner = NULL;
 }
 
 /* ------------------------------------------------------- lifecycle ------- */
@@ -1373,6 +1517,7 @@ static const struct
     {6676u, "delegates.delegate-review-evidence"},
     {6677u, "delegates.delegate-named-file-drift"},
     {6678u, "delegates.delegate-group-plan"},
+    {6679u, "delegates.native-host-execute"},
     {6913u, "tools.tool-dispatch"},
     {7169u, "workspace.workspace-access"},
     {7170u, "workspace.workspace-runner"},
@@ -1480,7 +1625,18 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
     * caller, stage, trace, lengths and status are recorded below in WORM; raw
     * payload capture is deliberately suppressed. The forge request still
     * carries its legacy token until credential-handle migration completes. */
-   int sensitive_transport = frame->event_kind == 7428u || frame->event_kind == 12547u ||
+   /* Execution scopes are authorization secrets. These private owner channels
+    * carry them in invoke/control objects, scope replies, or DB1 positional
+    * cells. The downstream SQL protocol (11266) carries those same parameters
+    * and result cells. A frame tap cannot safely redact assembled JSON or
+    * positional fields: fragment tails need not contain a key at all. Suppress
+    * only body capture for these auth-bearing protocols, in both directions;
+    * structural WORM identity/length/status receipts below remain mandatory.
+    * Canonical model execution history has its separate admitted owner. */
+   int sensitive_transport = frame->event_kind == 6657u || frame->event_kind == 6679u ||
+                             frame->event_kind == 9218u || frame->event_kind == 9474u ||
+                             frame->event_kind == 11792u || frame->event_kind == 11266u ||
+                             frame->event_kind == 7428u || frame->event_kind == 12547u ||
                              (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
@@ -2001,6 +2157,14 @@ void obs_bus_stop(void)
    {
       pthread_mutex_unlock(&start_lock);
       return;
+   }
+   /* Embedded native work must join while dependent module RPC and the pump
+    * are alive, before the final audit/guardrail drain begins. */
+   while (g.services)
+   {
+      obs_bus_module_service_t *service = g.services;
+      g.services = service->next;
+      module_service_stop_locked(service);
    }
    /* Reject new emits, then WAIT for every in-flight producer to leave the emit
     * window before signalling the consumer or touching the producer/host. A

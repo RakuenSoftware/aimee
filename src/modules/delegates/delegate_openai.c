@@ -1,7 +1,6 @@
 /* delegate_openai.c: OpenAI-compatible provider driver (covers openai, ollama, chatgpt) */
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
-#include <aimee/tools/agent_tools.h>
 #include <string.h>
 
 /* --- OpenAI chat/completions driver --- */
@@ -65,11 +64,6 @@ static int openai_build_url(const agent_t *agent, char *url, size_t url_len)
    return openai_join_endpoint(agent->endpoint, "/chat/completions", url, url_len);
 }
 
-static cJSON *openai_build_tools(void)
-{
-   return build_tools_array();
-}
-
 static void openai_get_caps(const agent_t *agent, driver_caps_t *caps)
 {
    caps->capability_flags = DRIVER_CAP_TOOL_CALLS | DRIVER_CAP_STREAMING | DRIVER_CAP_VISION;
@@ -90,8 +84,6 @@ static void openai_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_openai = {
     .name = "openai",
     .build_url = openai_build_url,
-
-    .build_tools = openai_build_tools,
     .get_caps = openai_get_caps,
 };
 
@@ -100,11 +92,6 @@ const delegate_driver_t delegate_driver_openai = {
 static int chatgpt_build_url(const agent_t *agent, char *url, size_t url_len)
 {
    return openai_join_endpoint(agent->endpoint, "/responses", url, url_len);
-}
-
-static cJSON *chatgpt_build_tools(void)
-{
-   return build_tools_array_responses();
 }
 
 static void chatgpt_get_caps(const agent_t *agent, driver_caps_t *caps)
@@ -119,8 +106,6 @@ static void chatgpt_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_chatgpt = {
     .name = "chatgpt",
     .build_url = chatgpt_build_url,
-
-    .build_tools = chatgpt_build_tools,
     .get_caps = chatgpt_get_caps,
 };
 
@@ -152,11 +137,6 @@ static int anthropic_build_url(const agent_t *agent, char *url, size_t url_len)
    return 0;
 }
 
-static cJSON *anthropic_build_tools(void)
-{
-   return build_tools_array_anthropic();
-}
-
 static void anthropic_get_caps(const agent_t *agent, driver_caps_t *caps)
 {
    caps->capability_flags =
@@ -175,8 +155,6 @@ static void anthropic_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_anthropic = {
     .name = "anthropic",
     .build_url = anthropic_build_url,
-
-    .build_tools = anthropic_build_tools,
     .get_caps = anthropic_get_caps,
 };
 
@@ -199,8 +177,6 @@ static void openrouter_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_openrouter = {
     .name = "openrouter",
     .build_url = openai_build_url,
-
-    .build_tools = openai_build_tools,
     .get_caps = openrouter_get_caps,
 };
 
@@ -217,8 +193,6 @@ static void mistral_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_mistral = {
     .name = "mistral",
     .build_url = openai_build_url,
-
-    .build_tools = openai_build_tools,
     .get_caps = mistral_get_caps,
 };
 
@@ -238,7 +212,5 @@ static void minimax_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_minimax = {
     .name = "minimax",
     .build_url = openai_build_url,
-
-    .build_tools = openai_build_tools,
     .get_caps = minimax_get_caps,
 };

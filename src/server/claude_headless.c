@@ -56,6 +56,37 @@ static char *claude_initialize_line(void)
    cJSON_AddObjectToObject(request, "hooks");
    return claude_input_line(frame);
 }
+/* Readiness is transport scheduling only. Status/config/error metadata never
+ * enters IR; the later actual system/init frame still proves the full profile. */
+static char *claude_mcp_status_line(const char *id)
+{
+   cJSON *frame = cJSON_CreateObject();
+   if (!frame)
+      return NULL;
+   cJSON_AddStringToObject(frame, "type", "control_request");
+   cJSON_AddStringToObject(frame, "request_id", id);
+   cJSON *request = cJSON_AddObjectToObject(frame, "request");
+   cJSON_AddStringToObject(request, "subtype", "mcp_status");
+   return claude_input_line(frame);
+}
+static int claude_mcp_ready(const cli_claude_host_launch_t *host, const cJSON *control)
+{
+   const cJSON *response = cJSON_GetObjectItemCaseSensitive(control, "response");
+   const cJSON *servers = cJSON_GetObjectItemCaseSensitive(response, "mcpServers");
+   if (!host || !host->catalog || !cJSON_IsObject(response) || !cJSON_IsArray(servers) ||
+       cJSON_GetArraySize(servers) != (host->catalog->n_tools ? 1 : 0))
+      return -1;
+   if (!host->catalog->n_tools)
+      return 1;
+   const cJSON *server = cJSON_GetArrayItem(servers, 0);
+   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(server, "name"));
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(server, "status"));
+   if (!cJSON_IsObject(server) || !name || strcmp(name, "aimee") || !status)
+      return -1;
+   if (!strcmp(status, "connected"))
+      return 1;
+   return !strcmp(status, "pending") ? 0 : -1;
+}
 static char *claude_user_line(const char *prompt, const char *resume)
 {
    cJSON *frame = cJSON_CreateObject();
@@ -72,9 +103,16 @@ static char *claude_user_line(const char *prompt, const char *resume)
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind_session,
                         void *context, agent_result_t *out)
 {
-   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0] || !out)
+   if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
+   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0])
+      return -1;
+   if (!cfg->claude_host)
+   {
+      snprintf(out->error, sizeof out->error, "canonical Claude execution owner unavailable");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    uint64_t execution_started = mono_ms();
    const agent_t *agent = cfg->agent;
    const char *prompt = cfg->user_prompt;
@@ -82,17 +120,24 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    int in = -1, output = -1, status = 0, rc = -1, saw_result = 0, interrupted = 0, eof = 0,
        capture_failed = 0;
    pid_t pid = -1;
-   aimee_harness_ir_t ir = {.host_model_capture = cfg->claude_host != NULL};
+   aimee_harness_ir_t ir = {0};
    int profile_seen = 0;
    char *input_line = NULL;
    int initialized = !cfg->control_channel, prompt_sent = !cfg->control_channel;
+   int native_readiness = cfg->control_channel;
+   int mcp_ready =
+       !native_readiness || (cfg->claude_host->catalog && !cfg->claude_host->catalog->n_tools);
+   int mcp_waiting = 0;
+   unsigned mcp_request = 0;
+   char mcp_id[64] = "";
+   uint64_t mcp_next = 0;
    server_control_scope_t *controls = server_control_scope_current();
    if (cfg->control_channel && !controls)
    {
       snprintf(out->error, sizeof out->error, "browser control owner is unavailable");
       goto finish;
    }
-   if (claude_provider_cli_adapter.spawn(cfg, prompt, &in, &output, &pid) != 0)
+   if (cli_claude_native_spawn(cfg, &in, &output, &pid) != 0)
    {
       snprintf(out->error, sizeof(out->error), "could not start claude -p");
       goto finish;
@@ -109,7 +154,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    uint64_t last = mono_ms(), started = last;
    while (!eof)
    {
-      if (cfg->claude_host && cfg->claude_host->progress &&
+      if (cfg->claude_host->progress &&
           cfg->claude_host->progress(cfg->claude_host->progress_context))
          goto capture_stop;
       if (agent_request_cancelled())
@@ -117,14 +162,25 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          interrupted = 1;
          break;
       }
-      if (cfg->control_channel && !initialized && mono_ms() - started > 60000)
+      if (cfg->control_channel && (!initialized || !mcp_ready) && mono_ms() - started > 60000)
       {
          snprintf(out->error, sizeof out->error, "Claude control initialization timed out");
          break;
       }
       if (cfg->control_channel && initialized && !input_line && in >= 0)
       {
-         if (!prompt_sent)
+         if (!mcp_ready)
+         {
+            if (!mcp_waiting && mono_ms() >= mcp_next)
+            {
+               snprintf(mcp_id, sizeof mcp_id, "aimee:mcp:%u", ++mcp_request);
+               input_line = claude_mcp_status_line(mcp_id);
+               if (!input_line)
+                  goto capture_stop;
+               mcp_waiting = 1;
+            }
+         }
+         else if (!prompt_sent)
          {
             input_line = claude_user_line(prompt, cfg->resume_id);
             prompt_sent = 1;
@@ -264,6 +320,36 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                const cJSON *control = cJSON_GetObjectItemCaseSensitive(frame, "response");
                const char *control_id =
                    cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(control, "request_id"));
+               if (native_readiness && cJSON_IsString(frame_type) &&
+                   !strcmp(frame_type->valuestring, "control_response") &&
+                   (mcp_waiting || (control_id && !strncmp(control_id, "aimee:mcp:", 10)) ||
+                    (initialized && !prompt_sent) ||
+                    (!initialized && (!control_id || strcmp(control_id, "aimee:init")))))
+               {
+                  const char *subtype =
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(control, "subtype"));
+                  int ready = -1;
+                  if (initialized && mcp_waiting && control_id && !strcmp(control_id, mcp_id) &&
+                      subtype && !strcmp(subtype, "success"))
+                     ready = claude_mcp_ready(cfg->claude_host, control);
+                  cJSON_Delete(frame);
+                  if (ready < 0)
+                  {
+                     snprintf(out->error, sizeof out->error,
+                              "Claude MCP readiness response was refused");
+                     goto capture_stop;
+                  }
+                  mcp_waiting = 0;
+                  mcp_ready = ready;
+                  mcp_next = mono_ms() + 250;
+                  goto next_line;
+               }
+               if (native_readiness && !prompt_sent && cJSON_IsString(frame_type) &&
+                   !strcmp(frame_type->valuestring, "control_request"))
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
                if (cfg->control_channel && cJSON_IsString(frame_type) &&
                    !strcmp(frame_type->valuestring, "control_response") && control_id &&
                    !strcmp(control_id, "aimee:init"))
@@ -276,14 +362,26 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                      goto capture_stop;
                   }
                   initialized = 1;
+                  if (native_readiness)
+                  {
+                     cJSON_Delete(frame);
+                     goto next_line;
+                  }
                }
-               if (cfg->claude_host && cJSON_IsString(frame_type))
+               if (cJSON_IsString(frame_type))
                {
                   const char *subtype =
                       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "subtype"));
                   if (!strcmp(frame_type->valuestring, "system") && subtype &&
                       !strcmp(subtype, "init"))
                   {
+                     if (native_readiness && !prompt_sent)
+                     {
+                        cJSON_Delete(frame);
+                        snprintf(out->error, sizeof out->error,
+                                 "Claude native initialization preceded readiness");
+                        goto capture_stop;
+                     }
                      const char *reason =
                          profile_seen ? "duplicate initialization"
                                       : cli_claude_native_profile_error(cfg->claude_host, frame);
@@ -297,10 +395,11 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                         cli_claude_native_profile_summary(cfg->claude_host, frame, &summary);
                         aimee_log(LOG_ERROR, "native.claude",
                                   "init profile mismatch: expected_tools=%d reported_tools=%d "
-                                  "mcp_servers=%d aimee_connected=%d plugins=%d "
+                                  "mcp_servers=%d aimee_connected=%d aimee_status=%s plugins=%d "
                                   "missing_owned_sha256=%s unexpected_reported_sha256=%s",
                                   summary.expected_tools, summary.reported_tools,
-                                  summary.mcp_servers, summary.aimee_connected, summary.plugins,
+                                  summary.mcp_servers, summary.aimee_connected,
+                                  cli_claude_mcp_status_name(summary.aimee_status), summary.plugins,
                                   summary.missing_owned_sha256, summary.unexpected_reported_sha256);
                         cJSON_Delete(frame);
                         snprintf(out->error, sizeof out->error,
@@ -318,11 +417,6 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                      goto capture_stop;
                   }
                }
-               if (aimee_claude_frame_ir(frame, &ir) != 0)
-               {
-                  cJSON_Delete(frame);
-                  goto capture_stop;
-               }
                const cJSON *sid = cJSON_GetObjectItemCaseSensitive(frame, "session_id");
                if (cJSON_IsString(sid) && sid->valuestring[0] && strcmp(bound, sid->valuestring) &&
                    (strlen(sid->valuestring) > 1024 ||
@@ -333,6 +427,11 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                }
                if (cJSON_IsString(sid) && strlen(sid->valuestring) <= 1024)
                   snprintf(bound, sizeof(bound), "%s", sid->valuestring);
+               if (aimee_claude_frame_ir(frame, &ir) != 0)
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
                const cJSON *type = cJSON_GetObjectItemCaseSensitive(frame, "type");
                if (cJSON_IsString(type) && !strcmp(type->valuestring, "result"))
                {
@@ -346,6 +445,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                }
             }
             cJSON_Delete(frame);
+         next_line:
             if (!end)
             {
                line = buffer + used;
@@ -398,42 +498,10 @@ stop:
       }
    }
    if (eof && initialized && prompt_sent && !capture_failed && !interrupted && saw_result == 1 &&
-       (!cfg->claude_host || profile_seen) && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+       profile_seen && WIFEXITED(status) && WEXITSTATUS(status) == 0)
    {
-      if (cfg->claude_host)
-      {
-         /* Only scheduler completion. The server factory still requires the
-          * original canonical terminal response before reporting task success. */
-         out->success = 1;
-         out->turns = 1;
-         rc = 0;
-         goto finish;
-      }
-      /* Compatibility callers receive a projection of the admitted native
-       * snapshot. A terminal result alone cannot invent model history. */
-      aimee_response_t response = {0};
-      char error[128];
-      if (!ir.claude_message ||
-          anthropic_backend_parse(ir.claude_message, &response, error, sizeof error) != 0)
-      {
-         aimee_response_free(&response);
-         snprintf(out->error, sizeof out->error,
-                  "Claude completed without canonical assistant output");
-         capture_failed = 1;
-         goto finish;
-      }
-      out->response = aimee_ir_response_text_alloc(&response);
-      out->prompt_tokens = (int)response.usage_in;
-      out->completion_tokens = (int)response.usage_out;
-      out->cache_read_tokens = (int)response.usage_cache_read;
-      out->cache_write_tokens = (int)response.usage_cache_write;
-      out->canonical_response = response;
-      if (!out->response)
-      {
-         snprintf(out->error, sizeof out->error, "cannot allocate canonical Claude response");
-         capture_failed = 1;
-         goto finish;
-      }
+      /* Only scheduler completion. The factory installs the original canonical
+       * response after joining callbacks; SDK stdout is never model authority. */
       out->success = 1;
       out->turns = 1;
       rc = 0;

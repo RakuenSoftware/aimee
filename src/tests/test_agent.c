@@ -1,7 +1,12 @@
+#include "support/ir_tool_fixture.h"
+#include "support/ir_text_request.h"
+#include "support/typed_catalog_fixture.h"
 #include "modules/tools/tool_catalog_data.h"
 #include "support/delegate_role_seam_stub.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
+#include <errno.h>
+#include "modules/tools/agent_tools_internal.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -27,6 +32,7 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "agent.h"
 #include "request_context.h"
 #include "agent_config.h"
+#include "cmd_agent_delegate_impl.h"
 #include "oauth_flow.h"
 #include "vault_service.h"
 #include "runtime_secret.h"
@@ -113,7 +119,6 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
                      int replace_all);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
-char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_script_rpc_keeps_permission_scope(void);
@@ -324,6 +329,66 @@ static int test_policy_exclude_primary_unless_primary_turn(const agent_t *ag)
    if (agent_routing_primary_turn())
       return 0;
    return strcmp(ag->name, "primary") == 0;
+}
+
+static int test_container_route_blocked(const agent_t *agent)
+{
+   (void)agent;
+   return 1;
+}
+static int test_container_health_blocked(const char *name)
+{
+   (void)name;
+   return 1;
+}
+static void test_agent_container_execution_routing(void)
+{
+   agent_config_t *cfg = calloc(1, sizeof *cfg);
+   assert(cfg);
+   cfg->agent_count = 1;
+   agent_t *agent = &cfg->agents[0];
+   strcpy(agent->name, "image-only-acp");
+   strcpy(agent->backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(agent->cli_kind, "acp");
+   strcpy(agent->auth_type, "none");
+   strcpy(agent->roles[0], "code");
+   agent->role_count = 1;
+   agent->enabled = 1;
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent");
+   assert(access(agent->cli_cmd, X_OK) != 0);
+   strcpy(cfg->default_delegate, agent->name);
+   strcpy(cfg->default_agent, agent->name);
+   assert(cfg->route_execution == AGENT_ROUTE_EXECUTION_HOST);
+   assert(!agent_is_available_for_routing(agent) && !agent_route(cfg, "code"));
+   agent_routing_set_primary_turn(1);
+   assert(!agent_route(cfg, "code")); /* The local-primary namespace still refuses. */
+   agent_routing_set_primary_turn(0);
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   assert(agent_route(cfg, "code") == agent); /* Eligibility only, not executable verification. */
+   assert(!agent_is_available_for_routing(agent)); /* Default API remains host-only. */
+   char error[512];
+   assert(!delegate_apply_route_overrides(cfg, "code", agent->name, -1, NULL, NULL, error,
+                                          sizeof error));
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent ; /bin/true");
+   assert(!agent_route(cfg, "code")); /* Deferral cannot accept shell syntax. */
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_HOST;
+   assert(!agent_route(cfg, "code"));
+   strcpy(agent->cli_cmd, "/__aimee_fixture_container_only__/acp-agent");
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   agent_set_route_policy_filter(test_container_route_blocked);
+   assert(!agent_route(cfg, "code"));
+   agent_set_route_policy_filter(NULL);
+   agent_set_route_health_filter(test_container_health_blocked);
+   assert(!agent_route(cfg, "code"));
+   agent_set_route_health_filter(NULL);
+   cfg->route_execution = (agent_route_execution_t)99;
+   assert(!agent_route(cfg, "code"));
+   cfg->route_execution = AGENT_ROUTE_EXECUTION_CONTAINER;
+   strcpy(agent->cli_kind, "unknown");
+   assert(!agent_route(cfg, "code")); /* No generic container CLI admission. */
+   free(cfg);
+   puts("  PASS: container-planned ACP route defers only executable existence; "
+        "host/syntax/policy/health remain guarded");
 }
 
 static void test_agent_route_primary_turn_marker(void)
@@ -691,9 +756,12 @@ static int catalog_metadata(const char *name, aimee_tool_metadata_t *out)
 
 static void test_tool_surface_single_source(void)
 {
-   aimee_tool_t *canonical = NULL, *independent = NULL;
-   int count = 0, independent_count = 0;
-   int status = agent_tools_builtin_catalog(&canonical, &count);
+   aimee_request_t canonical_catalog = {0}, independent_catalog = {0};
+   int status = agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &canonical_catalog);
+   aimee_tool_t *canonical = canonical_catalog.tools;
+   int count = canonical_catalog.n_tools;
+   cJSON *chat = fixture_chat_tools();
+   cJSON *resp = fixture_responses_tools();
    assert(status == 0 && count > 20);
    aimee_tool_metadata_t metadata = {0};
    assert(agent_tools_metadata("read_file", &metadata) == -1);
@@ -705,6 +773,13 @@ static void test_tool_surface_single_source(void)
          fprintf(stderr, "missing built-in policy metadata: %s\n", canonical[i].name);
       assert(classified == 0 && aimee_tool_metadata_valid(&metadata));
    }
+   const cJSON *response_tool;
+   cJSON_ArrayForEach(response_tool, resp)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(response_tool, "name"));
+      assert(name && !agent_tools_metadata(name, &metadata));
+      assert(aimee_tool_metadata_valid(&metadata));
+   }
    metadata = (aimee_tool_metadata_t){AIMEE_TOOL_CLASS_READ, 1, 1};
    assert(agent_tools_metadata("unregistered_tool", &metadata) == -1);
    assert(!metadata.classification && !metadata.primary && !metadata.categories);
@@ -713,10 +788,9 @@ static void test_tool_surface_single_source(void)
    assert(metadata.categories & AIMEE_TOOL_POLICY_EXTERNAL);
    agent_tools_register_metadata(NULL);
 
-   status = agent_tools_builtin_catalog(&independent, &independent_count);
-   assert(status == 0 && independent_count == count);
-   cJSON *chat = build_tools_array();
-   cJSON *resp = build_tools_array_responses();
+   status = agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &independent_catalog);
+   aimee_tool_t *independent = independent_catalog.tools;
+   assert(status == 0 && independent_catalog.n_tools == count);
    assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
    cJSON *question = tools_find(chat, "request_input", 1);
    cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
@@ -775,13 +849,8 @@ static void test_tool_surface_single_source(void)
    cJSON_AddBoolToObject(canonical[0].schema, "fixture_mutation", 1);
    assert(independent[0].name[0] != '!');
    assert(!cJSON_GetObjectItem(independent[0].schema, "fixture_mutation"));
-   for (int i = 0; i < count; i++)
-   {
-      aimee_tool_free(canonical + i);
-      aimee_tool_free(independent + i);
-   }
-   free(canonical);
-   free(independent);
+   aimee_request_free(&canonical_catalog);
+   aimee_request_free(&independent_catalog);
 
    cJSON_Delete(chat);
    cJSON_Delete(resp);
@@ -796,9 +865,9 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    assert(agent_tools_tool_allowed_for_role("validate", "bash") == 1);
    assert(agent_tools_tool_allowed_for_role("validate", "write_file") == 0);
    assert(agent_tools_tool_allowed_for_role("search", "bash") == 0);
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools_array_has_name(tools, "read_file") && tools_array_has_name(tools, "find_symbol"));
-   agent_tools_filter_for_role(tools, "review");
+   fixture_filter_tools(tools, "review");
    /* review uses review_indexed: the branch-index nav tools plus the read-only
     * worktree tools survive the filter. The read tools are reachability-gated
     * (slice 7); the default provider here is SHARED (reachable), so they are
@@ -815,12 +884,12 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    /* diagnose stays on the current_code toolset (no index tools). */
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
    cJSON_Delete(tools);
-   tools = build_tools_array_anthropic();
-   agent_tools_filter_anthropic_for_role(tools, "diagnose");
+   tools = fixture_anthropic_tools();
+   fixture_filter_tools(tools, "diagnose");
    assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "find_symbol"));
    cJSON_Delete(tools);
-   tools = build_tools_array();
-   agent_tools_filter_for_role(tools, "validate");
+   tools = fixture_chat_tools();
+   fixture_filter_tools(tools, "validate");
    assert(tools_array_has_name(tools, "bash") && tools_array_has_name(tools, "read_file"));
    assert(tools_array_has_name(tools, "search_memory") &&
           !tools_array_has_name(tools, "write_file"));
@@ -893,31 +962,24 @@ static void test_permissions_clamp_the_toolset(void)
    agent_tools_denied_set(denied, 3);
 
    /* Offered: the tool is gone from the array a `code` delegate is handed. */
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools_array_has_name(tools, "write_file"));
-   agent_tools_filter_for_role(tools, "code");
+   fixture_filter_tools(tools, "code");
    assert(!tools_array_has_name(tools, "write_file"));
    assert(!tools_array_has_name(tools, "edit_file"));
    /* And what the permission does NOT withhold survives the same filter. */
    assert(tools_array_has_name(tools, "read_file"));
    cJSON_Delete(tools);
-   for (int surface = 0; surface < 3; surface++)
-   {
-      tools = surface == 2 ? build_tools_array_anthropic()
-              : surface    ? build_tools_array_responses()
-                           : build_tools_array();
-      cJSON *definition = tools_find(tools, "read_file", surface == 0);
-      assert(definition);
-      cJSON_ReplaceItemInObjectCaseSensitive(
-          definition, surface == 2 ? "input_schema" : "parameters", cJSON_CreateArray());
-      if (surface == 2)
-         agent_tools_filter_anthropic_for_role(tools, "code");
-      else
-         agent_tools_filter_for_role(tools, "code");
-      assert(!tools_has(tools, "read_file", surface == 0));
-      assert(cJSON_GetArraySize(tools) > 0);
-      cJSON_Delete(tools);
-   }
+   aimee_request_t invalid = {0};
+   assert(!agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &invalid));
+   aimee_tool_t *read = (aimee_tool_t *)aimee_ir_find_function(&invalid, NULL, "read_file");
+   assert(read);
+   cJSON_Delete(read->schema);
+   read->schema = cJSON_CreateArray();
+   int original_count = invalid.n_tools;
+   assert(agent_tools_catalog_filter(&invalid, "code") == -1);
+   assert(invalid.n_tools == original_count); /* malformed authority is not repaired by filtering */
+   aimee_request_free(&invalid);
 
    /* Allowed: and the same answer at the gate that runs it. */
    assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
@@ -934,19 +996,19 @@ static void test_a_delegate_without_shell_cannot_run_commands(void)
    agent_tools_set_dispatch_role("code");
    agent_tools_shell_set(0);
 
-   char *result = dispatch_tool_call("bash", "{\"command\":\"ls\"}", 1000);
+   char *result = fixture_dispatch_tool("bash", "{\"command\":\"ls\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") != NULL);
    free(result);
 
-   result = dispatch_tool_call("execute_script", "{\"body\":\"echo hi\"}", 1000);
+   result = fixture_dispatch_tool("execute_script", "{\"body\":\"echo hi\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") != NULL);
    free(result);
 
    /* Holding it, the refusal is gone: whatever bash does next, it is not this. */
    agent_tools_shell_set(1);
-   result = dispatch_tool_call("bash", "{\"command\":\"true\"}", 1000);
+   result = fixture_dispatch_tool("bash", "{\"command\":\"true\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "`shell` permission") == NULL);
    free(result);
@@ -962,17 +1024,17 @@ static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
     * into the run rather than worked out per call. */
    agent_tools_knowledge_write_set(0);
 
-   char *result = dispatch_tool_call("find_symbol", "{\"identifier\":\"main\"}", 1000);
+   char *result = fixture_dispatch_tool("find_symbol", "{\"identifier\":\"main\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "current-checkout evidence") != NULL);
    free(result);
 
-   result = dispatch_tool_call("aimee:search_memory", "{\"query\":\"prior facts\"}", 1000);
+   result = fixture_dispatch_tool("aimee:search_memory", "{\"query\":\"prior facts\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "current-checkout evidence") != NULL);
    free(result);
 
-   result = dispatch_tool_call("bash", "{\"command\":\"aimee index scan\"}", 1000);
+   result = fixture_dispatch_tool("bash", "{\"command\":\"aimee index scan\"}", 1000);
    assert(result != NULL);
    assert(strstr(result, "mutating or broad aimee context commands are disabled") != NULL);
    free(result);
@@ -1083,8 +1145,8 @@ static void test_dispatch_carries_owner_failure_status(void)
 {
    agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
    int is_error = 0;
-   char *result = dispatch_tool_call_ctx_status("read_file", "{\"path\":\"unopened-fixture\"}",
-                                                1000, &is_error);
+   char *result = fixture_dispatch_tool_status("read_file", "{\"path\":\"unopened-fixture\"}", 1000,
+                                               &is_error);
    assert(result && is_error && !strncmp(result, "{", 1));
    assert(strstr(result, "fixture_resource_unavailable"));
    free(result);
@@ -1314,33 +1376,21 @@ static int headless_legacy_capture(const aimee_session_event_t *event, void *con
    int *messages = context;
    if (event->kind == AIMEE_SESSION_MESSAGE && event->message &&
        !strcmp(event->message->role, "assistant"))
-   {
-      assert(event->message->n_blocks == 1);
-      assert(event->message->blocks[0].type == AIMEE_BLK_TEXT);
-      assert(!strcmp(event->message->blocks[0].text, "structured legacy runtime"));
       (*messages)++;
-   }
    return 0;
 }
 
-static void test_legacy_tmux_executes_structured_headless(void)
+static void test_legacy_tmux_requires_owned_headless(void)
 {
-   char path[512];
+   char path[512], marker[544];
    snprintf(path, sizeof path, "%s/aimee-headless-legacy-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
+   snprintf(marker, sizeof marker, "%s.launched", path);
    FILE *f = fdopen(fd, "w");
    assert(f);
-   fputs("#!/bin/sh\n"
-         "case \" $* \" in *' --output-format stream-json '*) ;; *) exit 91;; esac\n"
-         "cat >/dev/null\n"
-         "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"id\":\"legacy-frame\","
-         "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"structured legacy "
-         "runtime\"}]}}'\n"
-         "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"structured legacy "
-         "runtime\"}'\n",
-         f);
-   fclose(f);
+   assert(fputs("#!/bin/sh\nprintf launched > \"$0.launched\"\nexit 93\n", f) >= 0);
+   assert(!fclose(f));
    assert(!chmod(path, 0700));
    agent_t agent = {0};
    snprintf(agent.name, sizeof agent.name, "legacy-claude");
@@ -1354,9 +1404,8 @@ static void test_legacy_tmux_executes_structured_headless(void)
    int messages = 0;
    aimee_ir_session_set_sink(headless_legacy_capture, &messages);
    agent_result_t out = {0};
-   assert(!agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out));
-   assert(out.success && out.response && !strcmp(out.response, "structured legacy runtime"));
-   assert(messages == 1);
+   assert(fixture_agent_tools_text(&agent, NULL, "system", "user", 100, 0.1, &out) < 0);
+   assert(!out.success && messages == 0 && access(marker, F_OK) < 0);
    agent_result_clear_response(&out);
    aimee_ir_session_set_sink(NULL, NULL);
    agent_request_creds_restore(&previous);
@@ -1961,7 +2010,9 @@ static void test_claude_selected_vault_lineage(void)
    assert(vault_service_set_server(registration, "oauth", legacy) == VAULT_OK);
    assert(!agent_claude_connection_credentials(registration, &current));
    assert(!strcmp(test_oauth_profile_client, "9d1c250a-e61b-44d9-88ed-5944d1962f5e"));
-   assert(!strcmp(test_oauth_profile_scope, "user:inference"));
+   assert(!strcmp(test_oauth_profile_scope,
+                  "user:profile user:inference user:sessions:claude_code user:mcp_servers "
+                  "user:file_upload"));
    assert(strcmp(current.source_digest, original.source_digest));
    agent_t agent = {0};
    snprintf(agent.name, sizeof agent.name, "claude");
@@ -2036,6 +2087,78 @@ static void test_claude_selected_vault_lineage(void)
    runtime_secret_wipe(&current, sizeof current);
    runtime_secret_wipe(&codex_credentials, sizeof codex_credentials);
    puts("  PASS: selected Vault Claude lineage, exact refresh profile and vendor switching");
+}
+
+static void test_claude_sdk_refresh_scope_selection(void)
+{
+   const char *registration = "claude-scope-fixture";
+   const char *defaults = "user:profile user:inference user:sessions:claude_code user:mcp_servers "
+                          "user:file_upload";
+   const char *metadata[] = {"",
+                             ",\"subscriptionType\":null",
+                             ",\"subscriptionType\":false",
+                             ",\"subscriptionType\":\"\"",
+                             ",\"subscriptionType\":0",
+                             ",\"subscriptionType\":\"max\"",
+                             ",\"subscriptionType\":true",
+                             ",\"subscriptionType\":{}",
+                             ",\"subscriptionType\":[]"};
+   agent_claude_credentials_t original, current;
+   test_oauth_tokens_reset();
+   int stores = 0;
+   for (size_t i = 0; i < sizeof metadata / sizeof *metadata; i++)
+   {
+      char source[1024], stored[1024];
+      snprintf(source, sizeof source,
+               "{\"claudeAiOauth\":{\"accessToken\":\"scope-access\","
+               "\"refreshToken\":\"scope-refresh\",\"expiresAt\":4102444800000,"
+               "\"scopes\":[\"user:profile\"]%s}}",
+               metadata[i]);
+      assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+      assert(!agent_claude_connection_credentials(registration, &current));
+      assert(!strcmp(test_oauth_profile_scope, i < 5 ? "user:profile" : defaults));
+      /* Pin the pre-repair digest over ORIGINAL effective source fields. */
+      assert(!strcmp(current.source_digest,
+                     "dbb59a4302e816c9f0c212f9c80de10473487feb8f8f89f9c1343aaee8cdbe5e"));
+      vault_store_read_t read = {"oauth", stored, sizeof stored, 0};
+      assert(vault_service_read_server_snapshot(registration, &read, 1) == VAULT_OK);
+      assert(read.present && !strcmp(stored, source));
+      if (!i)
+      {
+         original = current;
+         oauth_token_response_t rotated = {0};
+         snprintf(rotated.access_token, sizeof rotated.access_token, "scope-rotated-access");
+         assert(!oauth_token_store(registration, &rotated));
+         stores = test_oauth_stores;
+      }
+      else
+      {
+         assert(!strcmp(current.token, "scope-rotated-access"));
+         assert(!strcmp(current.source_digest, original.source_digest));
+         assert(test_oauth_stores == stores);
+      }
+   }
+   /* Explicit clientId wins even when it is the standard public client and
+    * scopes/subscription metadata would otherwise select the default set. */
+   const char *clients[] = {"custom-client", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"};
+   for (size_t i = 0; i < sizeof clients / sizeof *clients; i++)
+   {
+      char source[1024];
+      snprintf(source, sizeof source,
+               "{\"claudeAiOauth\":{\"accessToken\":\"explicit-access\","
+               "\"refreshToken\":\"explicit-refresh\",\"expiresAt\":4102444800000,"
+               "\"clientId\":\"%s\",\"subscriptionType\":\"max\","
+               "\"scopes\":[\"user:inference\",\"custom:scope\"]}}",
+               clients[i]);
+      assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+      assert(!agent_claude_connection_credentials(registration, &current));
+      assert(!strcmp(test_oauth_profile_client, clients[i]));
+      assert(!strcmp(test_oauth_profile_scope, "user:inference custom:scope"));
+   }
+   test_oauth_tokens_reset();
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&current, sizeof current);
+   puts("  PASS: SDK Claude refresh scope selection preserves source and rotating-token lineage");
 }
 
 static void test_codex_oauth_auth_resolution(void)
@@ -2322,7 +2445,7 @@ static void test_shell_worktree_rewrite_is_applied_not_refused(void)
       assert(system(shellcmd) == 0);
 
       run_cmd_set_cwd(repo);
-      char *out = dispatch_tool_call("bash", "{\"command\":\"pwd\"}", 10000);
+      char *out = fixture_dispatch_tool("bash", "{\"command\":\"pwd\"}", 10000);
       run_cmd_set_cwd(NULL);
       assert(out != NULL);
       if (strstr(out, "guardrail blocked") != NULL)
@@ -3367,9 +3490,9 @@ static void test_git_tools_default_to_session_worktree(void)
    }
 
    run_cmd_set_cwd(root);
-   char *st = dispatch_tool_call("git_status", "{}", 5000);
-   char *lg = dispatch_tool_call("git_log", "{}", 5000);
-   char *df = dispatch_tool_call("git_diff", "{}", 5000);
+   char *st = fixture_dispatch_tool("git_status", "{}", 5000);
+   char *lg = fixture_dispatch_tool("git_log", "{}", 5000);
+   char *df = fixture_dispatch_tool("git_diff", "{}", 5000);
    run_cmd_set_cwd(NULL);
 
    /* None of the three read-only git tools may error for a missing 'path' now
@@ -3470,7 +3593,7 @@ static void test_tool_grep_excludes_heavy_dirs(void)
 static void test_dispatch_tool_call(void)
 {
    /* bash tool */
-   char *result = dispatch_tool_call("bash", "{\"command\":\"echo dispatch_test\"}", 5000);
+   char *result = fixture_dispatch_tool("bash", "{\"command\":\"echo dispatch_test\"}", 5000);
    assert(result != NULL);
    cJSON *json = parse_json_or_die(result);
    assert(strstr(cJSON_GetObjectItem(json, "stdout")->valuestring, "dispatch_test") != NULL);
@@ -3478,24 +3601,24 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Unknown tool */
-   result = dispatch_tool_call("unknown_tool", "{}", 5000);
+   result = fixture_dispatch_tool("unknown_tool", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error: unknown tool") != NULL);
    free(result);
 
    /* Unknown tool with suggestion */
-   result = dispatch_tool_call("read_flie", "{}", 5000);
+   result = fixture_dispatch_tool("read_flie", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "Did you mean 'read_file'?") != NULL);
    free(result);
 
-   result = dispatch_tool_call("writ_file", "{}", 5000);
+   result = fixture_dispatch_tool("writ_file", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "Did you mean 'write_file'?") != NULL);
    free(result);
 
    /* Argument alias: "cmd" → "command" */
-   result = dispatch_tool_call("bash", "{\"cmd\":\"echo alias_test\"}", 5000);
+   result = fixture_dispatch_tool("bash", "{\"cmd\":\"echo alias_test\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "alias_test") != NULL);
    assert(strstr(result, "error") == NULL);
@@ -3511,7 +3634,7 @@ static void test_dispatch_tool_call(void)
                    script_root) < (int)sizeof(script_cwd));
    assert(platform_mkdir_p(script_cwd, 0700) == 0 || access(script_cwd, F_OK) == 0);
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call(
+   result = fixture_dispatch_tool(
        "execute_script",
        "{\"language\":\"python\",\"body\":\"print('script_dispatch')\",\"timeout_secs\":5}", 5000);
    run_cmd_set_cwd(NULL);
@@ -3523,14 +3646,14 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Argument alias: "filepath" → "file_path" then falls through to "path" */
-   result = dispatch_tool_call("read_file", "{\"filepath\":\"/dev/null\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"filepath\":\"/dev/null\"}", 5000);
    assert(result != NULL);
    /* Should not fail with "missing 'path'" */
    assert(strstr(result, "missing") == NULL);
    free(result);
 
    /* Type coercion: string "5" → integer for offset */
-   result = dispatch_tool_call("read_file", "{\"path\":\"/dev/null\",\"offset\":\"5\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"/dev/null\",\"offset\":\"5\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error") == NULL);
    free(result);
@@ -3538,22 +3661,22 @@ static void test_dispatch_tool_call(void)
    /* Reversible writes are contracted and independently read back before the
     * dispatcher reports success. */
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call(
+   result = fixture_dispatch_tool(
        "write_file", "{\"path\":\"contract.txt\",\"content\":\"verified write\\n\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error:") == NULL);
    free(result);
-   result = dispatch_tool_call("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
    assert(result != NULL && strcmp(result, "verified write\n") == 0);
    free(result);
-   result = dispatch_tool_call("write_file", "{\"content\":\"no target\"}", 5000);
+   result = fixture_dispatch_tool("write_file", "{\"content\":\"no target\"}", 5000);
    assert(result != NULL && strstr(result, "effect contract refused") != NULL);
    free(result);
    run_cmd_set_cwd(NULL);
 
    /* Write file error includes recovery hint */
    run_cmd_set_cwd(script_cwd);
-   result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
+   result = fixture_dispatch_tool("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
    run_cmd_set_cwd(NULL);
    assert(result != NULL);
    if (strstr(result, "error"))
@@ -3562,7 +3685,7 @@ static void test_dispatch_tool_call(void)
    platform_test_rmrf(script_root);
 
    /* Missing parameter */
-   result = dispatch_tool_call("bash", "{}", 5000);
+   result = fixture_dispatch_tool("bash", "{}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error: missing 'command' parameter") != NULL);
    free(result);
@@ -3804,7 +3927,7 @@ static void test_path_traversal_rejected(void)
    free(result);
 
    /* dispatch traversal via read_file */
-   result = dispatch_tool_call("read_file", "{\"path\":\"/tmp/../../etc/shadow\"}", 5000);
+   result = fixture_dispatch_tool("read_file", "{\"path\":\"/tmp/../../etc/shadow\"}", 5000);
    assert(result != NULL);
    assert(strstr(result, "error:") != NULL);
    free(result);
@@ -3870,8 +3993,7 @@ static void test_delegation_error_guidance(void)
    assert(delegation_error_guidance("no agent available for role 'xyzzy'", buf, sizeof(buf)) == 1);
    assert(strstr(buf, "valid role") != NULL);
 
-   assert(delegation_error_guidance("missing delegation_id or content", buf, sizeof(buf)) == 1);
-   assert(strstr(buf, "delegate_reply") != NULL);
+   assert(delegation_error_guidance("missing delegation_id or content", buf, sizeof(buf)) == 0);
 
    assert(delegation_error_guidance("delegation depth limit exceeded (3/3)", buf, sizeof(buf)) ==
           1);
@@ -4269,6 +4391,82 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 void test_competence_contract_roundtrip_and_routing(void);
 void test_cost_selection_filters_before_learning(void);
 
+static void test_seeded_tool_profile_retains_request_custody(void)
+{
+   aimee_block_t first[] = {{.type = AIMEE_BLK_TEXT, .text = "original task"},
+                            {.type = AIMEE_BLK_TEXT, .text = "retrieved evidence"}};
+   aimee_block_t answer = {.type = AIMEE_BLK_TEXT, .text = "prior assistant"};
+   aimee_block_t repair = {.type = AIMEE_BLK_TEXT, .text = "repair policy"};
+   aimee_message_t history[] = {{.role = "user", .blocks = first, .n_blocks = 2},
+                                {.role = "assistant", .blocks = &answer, .n_blocks = 1},
+                                {.role = "user", .blocks = &repair, .n_blocks = 1}};
+   aimee_block_t system[] = {{.type = AIMEE_BLK_TEXT, .text = "first original policy"},
+                             {.type = AIMEE_BLK_TEXT, .text = "second original policy"}};
+   char *stops[] = {"EXACT_STOP"};
+   aimee_request_t seed = {.system = system,
+                           .n_system = 2,
+                           .messages = history,
+                           .n_messages = 3,
+                           .has_max_tokens = 1,
+                           .max_tokens = 64,
+                           .has_temperature = 1,
+                           .temperature = 0.25,
+                           .has_top_p = 1,
+                           .top_p = 0.9,
+                           .stop_sequences = stops,
+                           .n_stop = 1,
+                           .metadata = cJSON_Parse("{\"exact\":9007199254740993123456789}")};
+   aimee_ir_block_set_context(&first[1], AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "source",
+                              "revision", 17);
+   cJSON *messages = cJSON_CreateArray();
+   for (int i = 0; i < 3; ++i)
+      assert(cJSON_AddItemToArray(messages, aimee_ir_message_json(&history[i])));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "seed fixture");
+   snprintf(agent.provider, sizeof agent.provider, "openai");
+   snprintf(agent.model, sizeof agent.model, "fixture-model");
+   aimee_block_t generated = {.type = AIMEE_BLK_TEXT, .text = "mixed host context and memory"};
+   aimee_ir_block_set_context(&generated, AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t context = {.role = "system", .blocks = &generated, .n_blocks = 1};
+   aimee_request_t prepared = {0}, catalog = {0};
+   assert(!agent_prepare_seeded_request_ir(&agent, &seed, messages, &catalog, &context, 128, 0.7,
+                                           AIMEE_WIRE_OPENAI_CHAT, 0, &prepared));
+   assert(prepared.frontend == AIMEE_WIRE_OPENAI_CHAT && seed.frontend == AIMEE_WIRE_UNKNOWN);
+   assert(prepared.n_messages == 3 && prepared.messages[0].n_blocks == 2);
+   assert(!strcmp(prepared.messages[0].blocks[0].text, "original task"));
+   assert(!strcmp(prepared.messages[1].blocks[0].text, "prior assistant"));
+   assert(!strcmp(prepared.messages[2].blocks[0].text, "repair policy"));
+   assert(prepared.messages[0].blocks[1].context.revision_epoch == 17);
+   assert(prepared.n_system >= 3 && !strcmp(prepared.system[0].text, system[0].text) &&
+          !strcmp(prepared.system[1].text, system[1].text));
+   assert(prepared.system[2].context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+          prepared.system[2].context.origin == AIMEE_CTX_ORIGIN_MEMORY);
+   assert(prepared.has_max_tokens && prepared.max_tokens == 64 && prepared.has_temperature &&
+          prepared.temperature == 0.25 && prepared.has_top_p && prepared.top_p == 0.9);
+   assert(prepared.n_stop == 1 && !strcmp(prepared.stop_sequences[0], "EXACT_STOP"));
+   char *metadata = cJSON_PrintUnformatted(prepared.metadata);
+   assert(metadata && strstr(metadata, "9007199254740993123456789"));
+   free(metadata);
+   assert(seed.n_system == 2 && seed.n_messages == 3 && seed.messages[0].n_blocks == 2);
+   free(prepared.messages[0].blocks[0].text);
+   prepared.messages[0].blocks[0].text = strdup("mutated clone");
+   assert(!strcmp(seed.messages[0].blocks[0].text, "original task"));
+   aimee_request_free(&prepared);
+   aimee_tool_t unregistered = {.name = "unregistered", .schema = cJSON_CreateObject()};
+   seed.tools = &unregistered;
+   seed.n_tools = 1;
+   assert(agent_prepare_seeded_request_ir(&agent, &seed, messages, &catalog, &context, 128, 0.7,
+                                          AIMEE_WIRE_OPENAI_CHAT, 0, &prepared) == -1);
+   assert(!prepared.messages && seed.n_messages == 3);
+   cJSON_Delete(unregistered.schema);
+   cJSON_Delete(seed.metadata);
+   cJSON_Delete(messages);
+   puts("seeded tool profile retains full canonical task, controls and evidence custody");
+}
+
 static void test_canonical_external_run_preserves_budget_refusal(void)
 {
    request_context_snapshot_t previous;
@@ -4295,18 +4493,18 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
       assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
                                               &result) != 0);
       assert(!strcmp(result.error, "request_budget_unavailable"));
-      assert(!response.n_content && !result.response);
+      assert(!response.n_content && !result.canonical_response.n_content);
       aimee_response_free(&response);
       for (int control = 0; control < 3; control++)
       {
          request.prompt_cache_key = control == 0 ? "" : NULL;
          request.prompt_cache_retention = control == 1 ? "24h" : NULL;
          request.prompt_cache_options = control == 2 ? cJSON_CreateObject() : NULL;
-         assert(!agent_request_with_tools_supported(&request));
+         assert(agent_request_with_tools_supported(&request));
          assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
-                                                 &result) == AGENT_RC_CONTEXT_REFUSED);
-         assert(!strcmp(result.error, "run request contains unsupported execution controls"));
-         assert(!response.n_content && !result.response);
+                                                 &result) != 0);
+         assert(!strcmp(result.error, "request_budget_unavailable"));
+         assert(!response.n_content && !result.canonical_response.n_content);
          cJSON_Delete(request.prompt_cache_options);
          request.prompt_cache_key = request.prompt_cache_retention = NULL;
          request.prompt_cache_options = NULL;
@@ -4359,8 +4557,8 @@ static void test_owned_tool_and_source_handoff(void)
    assert(!agent_tools_tool_denied("changed_after_capture"));
    /* Both admission and advertisement must ignore another turn's global env. */
    assert(agent_tools_tool_allowed_for_role(NULL, "write_file"));
-   cJSON *tools = build_tools_array();
-   agent_tools_filter_for_role(tools, NULL);
+   cJSON *tools = fixture_chat_tools();
+   fixture_filter_tools(tools, NULL);
    assert(tools_array_has_name(tools, "write_file"));
    cJSON_Delete(tools);
    agent_tools_scope_restore(&previous);
@@ -4396,6 +4594,12 @@ int main(int argc, char **argv)
 {
    if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
       return script_rpc_admission_fixture_main();
+   if (argc == 2 && !strcmp(argv[1], "--container-routing"))
+   {
+      delegate_role_seam_install();
+      test_agent_container_execution_routing();
+      return 0;
+   }
    char test_executable[MAX_PATH_LEN];
    char *self = realpath(argv[0], test_executable);
    assert(self);
@@ -4432,6 +4636,7 @@ int main(int argc, char **argv)
     * here rather than silently deleting it. */
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
+   test_seeded_tool_profile_retains_request_custody();
    test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
    test_agent_endpoint_valid();
@@ -4445,6 +4650,7 @@ int main(int argc, char **argv)
    test_agent_route_selection_provider();
    test_route_authority_refuses_without_provider();
    test_agent_route_policy_filter();
+   test_agent_container_execution_routing();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
@@ -4465,7 +4671,7 @@ int main(int argc, char **argv)
    test_codex_credentials_follow_selected_registration();
    test_codex_oauth_reads_vault_only();
    test_request_creds_snapshot_carries_vault_principal();
-   test_legacy_tmux_executes_structured_headless();
+   test_legacy_tmux_requires_owned_headless();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_default_primary_skips_disabled();
@@ -4508,6 +4714,7 @@ int main(int argc, char **argv)
    test_vault_api_key_lineage_and_request_binding();
    test_codex_source_lineage_and_paired_headers();
    test_claude_selected_vault_lineage();
+   test_claude_sdk_refresh_scope_selection();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();

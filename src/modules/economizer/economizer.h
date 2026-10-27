@@ -1,6 +1,6 @@
 /* economizer.h -- the C transport facade for the Go economizer.
  *
- * Context reduction, folding, condensation policy and the proof planner all live
+ * Context reduction, folding and condensation policy live
  * in server-go/modules/economizer now and are reached over the event bus;
  * economizer_module_client.h is the whole call surface.
  *

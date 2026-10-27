@@ -162,7 +162,13 @@ func readReplacementUsername(marker string) (string, bool) {
 // name was sitting in the file — the exact lockout this marker exists to prevent.
 // 0644 leaks nothing: the account name is already visible in every audit line.
 func writeMarkerFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	// MkdirAll applies the process umask and leaves existing modes unchanged.
+	// This dedicated metadata directory must remain traversable by the C server.
+	if err := os.Chmod(dir, 0o755); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".setup-account-*")

@@ -70,8 +70,10 @@ func TestRoundtableAdministratorMutationsCarryAttestedIdentity(t *testing.T) {
 			rr := httptest.NewRecorder()
 			if tc.item {
 				s.handleRoundtableItem(rr, req)
+				waitFakeV1(t)
 			} else {
 				s.handleRoundtables(rr, req)
+				waitFakeV1(t)
 			}
 			if rr.Code != http.StatusOK {
 				t.Fatalf("code=%d body=%q, want 200", rr.Code, rr.Body.String())
@@ -129,6 +131,7 @@ func TestRoundtableAdminIsTheReplacementAccount(t *testing.T) {
 		strings.NewReader(`{"name":"default"}`)), "virant")
 	rr := httptest.NewRecorder()
 	s.handleRoundtableItem(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !reached {
 		t.Fatalf("save-as-default: code=%d reached=%v body=%q", rr.Code, reached, rr.Body.String())
 	}

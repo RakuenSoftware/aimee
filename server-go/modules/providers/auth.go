@@ -79,21 +79,31 @@ func (m *Manager) commitCredentials(ctx context.Context, changes []credentialCha
 
 // Resolve the same selected, refresh-aware credential/account snapshot as serving.
 // This private resource response is never a provider roster or model payload.
-func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, error) {
+type codexCredentialSnapshot struct {
+	Token         string `json:"token"`
+	Account       string `json:"account_id"`
+	Source        string `json:"source_digest"`
+	ClientVersion string `json:"client_version"`
+}
+
+func (m *Manager) resolveCodexSnapshot(ctx context.Context, p object) (codexCredentialSnapshot, error) {
 	if m.resources == nil {
-		return "", "", errors.New("credential service unavailable")
+		return codexCredentialSnapshot{}, errors.New("credential service unavailable")
 	}
 	document, err := m.resources.Credential(ctx, "get", str(p, "name"), "codex_oauth_credentials", "")
 	if err != nil {
-		return "", "", err
+		return codexCredentialSnapshot{}, err
 	}
-	var pair struct {
-		Token   string `json:"token"`
-		Account string `json:"account_id"`
-		Source  string `json:"source_digest"`
-	}
+	var pair codexCredentialSnapshot
 	if json.Unmarshal([]byte(document), &pair) != nil || pair.Token == "" || len(pair.Source) != 64 || strings.ContainsAny(pair.Token+pair.Account, "\r\n") {
-		return "", "", errors.New("Codex OAuth credential unavailable; re-authenticate this provider")
+		return codexCredentialSnapshot{}, errors.New("Codex OAuth credential unavailable; re-authenticate this provider")
 	}
-	return pair.Token, pair.Account, nil
+	return pair, nil
+}
+
+// Preserve the serving/probe helper's credential-only contract. Catalog callers
+// additionally require the declared compatibility version from the same pair.
+func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, error) {
+	pair, err := m.resolveCodexSnapshot(ctx, p)
+	return pair.Token, pair.Account, err
 }

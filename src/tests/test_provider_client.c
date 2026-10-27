@@ -1,5 +1,5 @@
 /* test_provider_client.c: shared provider-client request builder + response parser.
- * Network-free: exercises the pure build/parse halves (provider_client_complete's
+ * Network-free: exercises the pure build/parse halves (provider_client_complete_ir's
  * transport is covered by integration once a curator endpoint is wired). */
 #include "provider_client.h"
 #include "cJSON.h"
@@ -10,14 +10,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-static cJSON *two_messages(void)
+static void assert_text(const provider_completion_t *out, const char *expected)
 {
-   cJSON *msgs = cJSON_CreateArray();
-   cJSON *m = cJSON_CreateObject();
-   cJSON_AddStringToObject(m, "role", "user");
-   cJSON_AddStringToObject(m, "content", "extract entities");
-   cJSON_AddItemToArray(msgs, m);
-   return msgs;
+   char *text = aimee_ir_response_text_alloc(&out->ir);
+   assert(text && strcmp(text, expected) == 0);
+   free(text);
+}
+
+static aimee_request_t complete_request(void);
+static cJSON *captured_request;
+static int capture_build_request(const char *url, const char *auth, const char *body,
+                                 char **response, int timeout, const char *extra)
+{
+   (void)url;
+   (void)auth;
+   (void)timeout;
+   (void)extra;
+   assert(!captured_request);
+   captured_request = cJSON_Parse(body);
+   assert(captured_request);
+   *response = strdup("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":"
+                      "\"assistant\",\"content\":\"captured\"}}]}");
+   assert(*response);
+   return 200;
 }
 
 static void test_build_basic(void)
@@ -29,9 +44,13 @@ static void test_build_basic(void)
        .temperature = -1.0, /* omit */
        .max_tokens = 0,     /* omit */
    };
-   cJSON *msgs = two_messages();
-   cJSON *req = provider_client_build_openai(&def, msgs, NULL);
-   assert(req);
+   aimee_request_t request = complete_request();
+   provider_completion_t result = {0};
+   mock_agent_http_set_post_handler(capture_build_request);
+   assert(!provider_client_complete_ir(&def, &request, &result, NULL, 0));
+   cJSON *req = captured_request;
+   captured_request = NULL;
+   assert(req && result.http_status == 200);
 
    cJSON *model = cJSON_GetObjectItemCaseSensitive(req, "model");
    assert(cJSON_IsString(model) && strcmp(model->valuestring, "granite-3b") == 0);
@@ -45,8 +64,14 @@ static void test_build_basic(void)
    /* disable_thinking defaults off => no chat_template_kwargs. */
    assert(!cJSON_GetObjectItemCaseSensitive(req, "chat_template_kwargs"));
 
+   request.messages[0].blocks[0].text[0] = 'X';
+   assert(!strcmp(cJSON_GetStringValue(
+                      cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rmsgs, 0), "content")),
+                  "extract entities"));
    cJSON_Delete(req);
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
+   provider_completion_free(&result);
+   mock_agent_http_reset();
    printf("provider_client: build basic ok\n");
 }
 
@@ -60,12 +85,18 @@ static void test_build_options_and_schema(void)
        .max_tokens = 512,
        .disable_thinking = 1,
    };
-   cJSON *msgs = two_messages();
-   cJSON *schema = cJSON_CreateObject();
-   cJSON_AddStringToObject(schema, "type", "object");
-
-   cJSON *req = provider_client_build_openai(&def, msgs, schema);
-   assert(req);
+   aimee_request_t request = complete_request();
+   request.output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
+                                                   .name = strdup("curator_output"),
+                                                   .schema = cJSON_Parse("{\"type\":\"object\"}"),
+                                                   .strict = AIMEE_STRICT_TRUE};
+   assert(request.output_format.name && request.output_format.schema);
+   provider_completion_t result = {0};
+   mock_agent_http_set_post_handler(capture_build_request);
+   assert(!provider_client_complete_ir(&def, &request, &result, NULL, 0));
+   cJSON *req = captured_request;
+   captured_request = NULL;
+   assert(req && result.http_status == 200);
    cJSON *temp = cJSON_GetObjectItemCaseSensitive(req, "temperature");
    assert(cJSON_IsNumber(temp) && temp->valuedouble > 0.19 && temp->valuedouble < 0.21);
    cJSON *mt = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
@@ -89,10 +120,36 @@ static void test_build_options_and_schema(void)
    cJSON *etype = cJSON_GetObjectItemCaseSensitive(embedded, "type");
    assert(cJSON_IsString(etype) && strcmp(etype->valuestring, "object") == 0);
 
+   assert(cJSON_IsObject(request.output_format.schema));
    cJSON_Delete(req);
-   cJSON_Delete(msgs);
-   cJSON_Delete(schema); /* still owned by the caller — proves no take-over */
+   aimee_request_free(&request);
+   provider_completion_free(&result);
+   mock_agent_http_reset();
    printf("provider_client: build options + schema ok\n");
+}
+
+static void test_build_model_visibility(void)
+{
+   provider_def_t def = {.base_url = "http://h/v1", .model = "m", .temperature = -1};
+   aimee_request_t request = complete_request();
+   request.system = calloc(1, sizeof *request.system);
+   assert(request.system);
+   request.n_system = 1;
+   request.system[0].type = AIMEE_BLK_TEXT;
+   request.system[0].text = strdup("internal-only source");
+   request.system[0].context.origin = AIMEE_CTX_ORIGIN_MEMORY;
+   provider_completion_t result = {0};
+   mock_agent_http_set_post_handler(capture_build_request);
+   assert(!provider_client_complete_ir(&def, &request, &result, NULL, 0));
+   char *body = cJSON_PrintUnformatted(captured_request);
+   assert(body && !strstr(body, "internal-only source") && strstr(body, "extract entities"));
+   assert(!strcmp(request.system[0].text, "internal-only source"));
+   free(body);
+   cJSON_Delete(captured_request);
+   captured_request = NULL;
+   aimee_request_free(&request);
+   provider_completion_free(&result);
+   mock_agent_http_reset();
 }
 
 static void test_parse_success(void)
@@ -104,10 +161,10 @@ static void test_parse_success(void)
    provider_completion_t out;
    int rc = provider_client_parse_openai(body, &out);
    assert(rc == 0);
-   assert(out.content && strcmp(out.content, "{\"entities\":[]}") == 0);
-   assert(out.prompt_tokens == 42 && out.completion_tokens == 7);
-   assert(strcmp(out.model, "granite-3b-instruct") == 0);
-   assert(strcmp(out.finish_reason, "stop") == 0);
+   assert_text(&out, "{\"entities\":[]}");
+   assert(out.ir.usage_in == 42 && out.ir.usage_out == 7);
+   assert(strcmp(out.ir.model, "granite-3b-instruct") == 0);
+   assert(strcmp(out.ir.raw_stop_reason, "stop") == 0);
    provider_completion_free(&out);
    provider_completion_free(&out); /* idempotent */
    printf("provider_client: parse success ok\n");
@@ -154,8 +211,9 @@ static void test_owned_response_blocks(void)
    char *body = cJSON_PrintUnformatted(root);
    provider_completion_t out;
    assert(body && !provider_client_parse_openai(body, &out));
-   assert(out.ir.n_content == 22 && !strcmp(out.content, "beforeafter") &&
-          !strcmp(out.reasoning, "why"));
+   assert(out.ir.n_content == 22);
+   assert_text(&out, "beforeafter");
+   assert(!strcmp(out.ir.content[0].text, "why"));
    assert(out.ir.content[0].type == AIMEE_BLK_THINKING);
    assert(out.ir.content[1].type == AIMEE_BLK_TEXT && out.ir.content[2].type == AIMEE_BLK_IMAGE);
    assert(out.ir.content[3].type == AIMEE_BLK_TEXT && out.ir.content[4].type == AIMEE_BLK_DOCUMENT);
@@ -197,19 +255,28 @@ static void test_parse_failures(void)
    assert(provider_client_parse_openai(NULL, &out) == -1);
    provider_completion_free(&out);
    /* out zeroed even on failure */
-   assert(out.content == NULL && out.prompt_tokens == 0);
+   assert(out.ir.content == NULL && out.ir.usage_in == 0);
    printf("provider_client: parse failures ok\n");
 }
 
-/* The reasoning_content shape matrix.
- *
- * These are the JSON shapes real providers actually emit, and the precedence
- * between them is the whole point: reasoning_content is PRIVATE reasoning, never
- * the answer. The one exception is content:null — the answer is absent and the
- * reasoning is all there is, which is why the old code returned rc=-1
- * "unparseable provider response" and threw a usable reply away. Each case below
- * pins one shape so that recovery cannot quietly widen into "reasoning is the
- * answer whenever content looks empty". */
+/* Canonical THINKING is diagnostic state, never a substitute authored answer.
+ * A reasoning-only response remains available in out.ir but is not a usable
+ * textual completion for a curator or other application consumer. */
+static void test_refused_text_is_not_answer(void)
+{
+   provider_completion_t out = {0};
+   const char *body = "{\"choices\":[{\"finish_reason\":\"content_filter\","
+                      "\"message\":{\"role\":\"assistant\","
+                      "\"content\":\"{\\\"synthesis\\\":\\\"partial unapproved data\\\"}\"}}],"
+                      "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}";
+   assert(provider_client_parse_openai(body, &out) < 0);
+   assert(out.ir.stop_reason == AIMEE_STOP_CONTENT_FILTER);
+   assert(out.ir.usage_in == 7 && out.ir.usage_out == 3);
+   assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_TEXT);
+   assert(strstr(out.ir.content[0].text, "partial unapproved data"));
+   provider_completion_free(&out);
+}
+
 static void test_parse_reasoning_shapes(void)
 {
    provider_completion_t out;
@@ -219,27 +286,29 @@ static void test_parse_reasoning_shapes(void)
               "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"the answer\","
               "\"reasoning_content\":\"weighing it up\"}}]}",
               &out) == 0);
-   assert(out.content && strcmp(out.content, "the answer") == 0);
-   assert(out.reasoning && strcmp(out.reasoning, "weighing it up") == 0);
+   assert_text(&out, "the answer");
+   assert(out.ir.content[0].type == AIMEE_BLK_THINKING &&
+          !strcmp(out.ir.content[0].text, "weighing it up"));
    assert(out.ir.n_content == 2 && out.ir.content[0].type == AIMEE_BLK_THINKING &&
           out.ir.content[1].type == AIMEE_BLK_TEXT);
    provider_completion_free(&out);
 
-   /* (2) content:null with reasoning — the shape that used to fail outright.
-    * The reasoning IS the reply here; recovering it is the fix. */
+   /* (2) A reasoning-only response cannot become application answer data. */
    assert(provider_client_parse_openai(
               "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null,"
               "\"reasoning_content\":\"recovered body\"}}]}",
-              &out) == 0);
-   assert(out.content && strcmp(out.content, "recovered body") == 0);
+              &out) == -1);
+   assert_text(&out, "");
+   assert(!strcmp(out.ir.content[0].text, "recovered body"));
    assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_THINKING);
    provider_completion_free(&out);
 
    /* (3) content absent entirely (not an explicit null) behaves the same. */
    assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
                                        "\"reasoning_content\":\"only reasoning\"}}]}",
-                                       &out) == 0);
-   assert(out.content && strcmp(out.content, "only reasoning") == 0);
+                                       &out) == -1);
+   assert_text(&out, "");
+   assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_THINKING);
    provider_completion_free(&out);
 
    /* (4) reasoning present but NOT a string: no coercion, no silent fallback.
@@ -264,31 +333,47 @@ static void test_parse_reasoning_shapes(void)
    assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
                                        "\"content\":\"<think>hmm</think>real answer\"}}]}",
                                        &out) == 0);
-   assert(out.content && strcmp(out.content, "real answer") == 0);
+   assert_text(&out, "real answer");
    provider_completion_free(&out);
 
    printf("provider_client: reasoning shapes ok\n");
+}
+
+static aimee_request_t complete_request(void)
+{
+   aimee_request_t request = {0};
+   request.messages = calloc(1, sizeof *request.messages);
+   assert(request.messages);
+   request.n_messages = 1;
+   request.messages[0].role = strdup("user");
+   request.messages[0].blocks = calloc(1, sizeof *request.messages[0].blocks);
+   assert(request.messages[0].role && request.messages[0].blocks);
+   request.messages[0].n_blocks = 1;
+   request.messages[0].blocks[0].type = AIMEE_BLK_TEXT;
+   request.messages[0].blocks[0].text = strdup("extract entities");
+   assert(request.messages[0].blocks[0].text && !aimee_ir_request_admit(&request));
+   return request;
 }
 
 static void test_complete_arg_guards(void)
 {
    char err[128];
    provider_completion_t out;
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_def_t def = {.base_url = "http://h/v1", .wire = PROVIDER_WIRE_OPENAI_CHAT};
 
    /* missing base_url */
    provider_def_t no_url = def;
    no_url.base_url = "";
-   assert(provider_client_complete(&no_url, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(provider_client_complete_ir(&no_url, &request, &out, err, sizeof(err)) == -1);
    assert(err[0] != '\0');
 
    /* unsupported wire */
    provider_def_t bad_wire = def;
    bad_wire.wire = (provider_wire_t)99;
-   assert(provider_client_complete(&bad_wire, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(provider_client_complete_ir(&bad_wire, &request, &out, err, sizeof(err)) == -1);
 
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    printf("provider_client: complete arg guards ok\n");
 }
 
@@ -360,20 +445,20 @@ static void test_complete_success(void)
                          .api_key = "secret",
                          .wire = PROVIDER_WIRE_OPENAI_CHAT,
                          .temperature = -1.0};
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_completion_t out;
    char err[128];
-   int rc = provider_client_complete(&def, msgs, NULL, &out, err, sizeof(err));
+   int rc = provider_client_complete_ir(&def, &request, &out, err, sizeof(err));
    assert(rc == 0);
    assert(g_post_calls == 1);
    /* URL assembled with exactly one slash; auth carries the bearer. */
    assert(strcmp(g_seen_url, "http://h:8080/v1/chat/completions") == 0);
    assert(strcmp(g_seen_auth, "Authorization: Bearer secret") == 0);
-   assert(out.content && strcmp(out.content, "hi") == 0);
-   assert(out.prompt_tokens == 3 && out.completion_tokens == 1);
+   assert_text(&out, "hi");
+   assert(out.ir.usage_in == 3 && out.ir.usage_out == 1);
    assert(out.http_status == 200);
    provider_completion_free(&out);
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    mock_agent_http_reset();
    printf("provider_client: complete success (url/auth/parse) ok\n");
 }
@@ -386,14 +471,14 @@ static void test_complete_trailing_slash(void)
    /* a base_url WITH a trailing slash must not double up. */
    provider_def_t def = {
        .base_url = "http://h/v1/", .wire = PROVIDER_WIRE_OPENAI_CHAT, .temperature = -1.0};
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_completion_t out;
-   assert(provider_client_complete(&def, msgs, NULL, &out, NULL, 0) == 0);
+   assert(provider_client_complete_ir(&def, &request, &out, NULL, 0) == 0);
    assert(strcmp(g_seen_url, "http://h/v1/chat/completions") == 0);
    /* keyless: no Authorization header. */
    assert(g_seen_auth[0] == '\0');
    provider_completion_free(&out);
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    mock_agent_http_reset();
    printf("provider_client: complete trailing-slash + keyless ok\n");
 }
@@ -407,14 +492,14 @@ static void test_complete_retry_then_ok(void)
                          .wire = PROVIDER_WIRE_OPENAI_CHAT,
                          .temperature = -1.0,
                          .max_attempts = 3};
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_completion_t out;
-   int rc = provider_client_complete(&def, msgs, NULL, &out, NULL, 0);
+   int rc = provider_client_complete_ir(&def, &request, &out, NULL, 0);
    assert(rc == 0);
    assert(g_post_calls == 2); /* retried once after the 503 */
-   assert(out.content && strcmp(out.content, "ok") == 0);
+   assert_text(&out, "ok");
    provider_completion_free(&out);
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    mock_agent_http_reset();
    printf("provider_client: complete retry-then-ok ok\n");
 }
@@ -428,17 +513,17 @@ static void test_complete_non_retryable(void)
                          .wire = PROVIDER_WIRE_OPENAI_CHAT,
                          .temperature = -1.0,
                          .max_attempts = 3};
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_completion_t out;
    char err[128];
-   int rc = provider_client_complete(&def, msgs, NULL, &out, err, sizeof(err));
+   int rc = provider_client_complete_ir(&def, &request, &out, err, sizeof(err));
    assert(rc == -1);
    assert(g_post_calls == 1); /* 401 is not retried */
    assert(out.http_status == 401);
-   assert(out.content == NULL);
+   assert(out.ir.content == NULL);
    assert(err[0] != '\0');
    provider_completion_free(&out);
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    mock_agent_http_reset();
    printf("provider_client: complete non-retryable (no retry) ok\n");
 }
@@ -447,7 +532,7 @@ static void test_complete_truncation_guards(void)
 {
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(ok_handler);
-   cJSON *msgs = two_messages();
+   aimee_request_t request = complete_request();
    provider_completion_t out;
    char err[128];
 
@@ -457,7 +542,7 @@ static void test_complete_truncation_guards(void)
    big[sizeof(big) - 1] = '\0';
    provider_def_t d1 = {.base_url = big, .wire = PROVIDER_WIRE_OPENAI_CHAT, .temperature = -1.0};
    g_post_calls = 0;
-   assert(provider_client_complete(&d1, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(provider_client_complete_ir(&d1, &request, &out, err, sizeof(err)) == -1);
    assert(g_post_calls == 0 && err[0] != '\0');
 
    /* api_key longer than the auth buffer -> truncation error, no transport call. */
@@ -469,10 +554,10 @@ static void test_complete_truncation_guards(void)
                         .wire = PROVIDER_WIRE_OPENAI_CHAT,
                         .temperature = -1.0};
    g_post_calls = 0;
-   assert(provider_client_complete(&d2, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(provider_client_complete_ir(&d2, &request, &out, err, sizeof(err)) == -1);
    assert(g_post_calls == 0 && err[0] != '\0');
 
-   cJSON_Delete(msgs);
+   aimee_request_free(&request);
    mock_agent_http_reset();
    printf("provider_client: complete truncation guards ok\n");
 }
@@ -481,10 +566,12 @@ int main(void)
 {
    test_build_basic();
    test_build_options_and_schema();
+   test_build_model_visibility();
    test_parse_success();
    test_owned_response_blocks();
    test_parse_failures();
    test_parse_reasoning_shapes();
+   test_refused_text_is_not_answer();
    test_complete_arg_guards();
    test_complete_success();
    test_complete_trailing_slash();

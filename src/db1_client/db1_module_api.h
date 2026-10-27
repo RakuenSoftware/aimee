@@ -227,6 +227,7 @@
 #define AIMEE_DB1_OP_AGENT_LOG_ENTRY_LIST                    42u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
+#define AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION          45u
 
 /* Family 6: server and webchat session rows: who is talking, when they last
  * spoke, and what the conversation was called. */
@@ -243,17 +244,9 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_COUNT                   7u
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED            8u
 #define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED          9u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                   10u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                   11u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                 12u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT           13u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH           14u
 #define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST             15u
 #define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD              16u
 #define AIMEE_DB1_OP_SESSION_STALE_READS                    17u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET             18u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER  19u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND            20u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                       21u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                       22u
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM  23u

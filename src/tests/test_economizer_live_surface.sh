@@ -11,8 +11,15 @@ if grep -R -n 'aimee_backend_anthropic_set_cache_enabled' headers server posix >
     fail "economizer still controls Anthropic cache decoration"
 fi
 
-for source in posix/agent_runtime.c server/openai_chat.c server/anthropic_http.c; do
+for source in posix/agent_runtime.c server/server_model_execution.c server/anthropic_http.c; do
     grep -q 'wire_fence_select' "$source" || fail "$source bypasses the wire snapshot selector"
+done
+
+# Buffered facades share the typed prepared executor; streaming Anthropic keeps
+# its native edge path. Both must still reach an actual fenced transport.
+for source in server/openai_chat.c server/anthropic_http.c; do
+    grep -q 'server_model_execute_prepared(' "$source" ||
+        fail "$source bypasses the common canonical executor"
 done
 
 # SAFE has exactly one live transform: strict JSON compaction at the fresh local
@@ -31,8 +38,8 @@ grep -q 'mreq.history_fold = preset.history_fold || config_fold_enabled();' posi
     fail "the delegate history fold is gated again (chatgpt exclusion reintroduced?)"
 grep -q 'gw_mutate_upstream_ok(parity)' server/anthropic_http.c ||
     fail "Anthropic ingress mutation does not preserve native Anthropic prefixes"
-grep -q 'gw_mutate_upstream_ok(wire == AIMEE_WIRE_ANTHROPIC)' server/openai_chat.c ||
-    fail "OpenAI ingress mutation must classify the canonical selected provider wire"
+grep -q 'gw_mutate_upstream_ok(wire == AIMEE_WIRE_ANTHROPIC)' server/server_model_execution.c ||
+    fail "Common ingress mutation must classify the canonical selected provider wire"
 
 # The economizer never adds, removes, or moves provider cache controls and does
 # not perform a remote token-counting preflight.
@@ -44,8 +51,8 @@ fi
 
 grep -q 'wire_fence_post' posix/agent_runtime.c ||
     fail "delegate retries do not use the exact-length snapshot transport"
-grep -q 'wire_fence_post' server/openai_chat.c ||
-    fail "OpenAI ingress does not use the exact-length snapshot transport"
+grep -q 'wire_fence_post' server/server_model_execution.c ||
+    fail "Common buffered ingress does not use the exact-length snapshot transport"
 grep -q 'wire_fence_post' server/anthropic_http.c ||
     fail "Anthropic buffered ingress does not use the exact-length snapshot transport"
 grep -q 'wire_fence_post_stream' server/anthropic_http.c ||

@@ -55,5 +55,22 @@ class NamedDescriptorContractTests(unittest.TestCase):
         self.assertIn("not in the catalog", output)
 
 
+class OwnedSessionContractTests(unittest.TestCase):
+    def test_owned_request_and_reply_shape_remain_catalog_checked(self):
+        for request, reply, expected in ((1, 10, 0), (2, 10, 1), (1, 11, 1)):
+            with self.subTest(request=request, reply=reply), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "sessions.c").write_text(
+                    f"session_record_read(AIMEE_DB1_OP_SERVER_SESSION_GET, fields, "
+                    f"{request}, {reply}, rows, 1, 1);\n")
+                catalog = {"server_session_get": {"request": 1, "reply": 10,
+                              "family": "sessions", "variadic": False}}
+                with patch.object(checker, "CLIENT_DIR", root), \
+                        patch.object(checker, "MODULE_API", root / "absent.h"), \
+                        patch.object(checker, "load_catalog", return_value=(catalog, {})), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(checker.main(), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

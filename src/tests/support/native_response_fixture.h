@@ -17,6 +17,14 @@ static char *native_response_fixture(const char *wire, const char *text, const c
    int count = cJSON_GetArraySize(calls);
    cJSON *root = cJSON_CreateObject(), *parts = cJSON_CreateArray();
    assert(root && parts);
+   /* These success fixtures explicitly observe zero usage. Missing-usage
+    * admission tests supply their own frames rather than this known peer. */
+   cJSON *usage = cJSON_AddObjectToObject(root, "usage");
+   assert(usage);
+   assert(cJSON_AddNumberToObject(usage, anthropic || responses ? "input_tokens" : "prompt_tokens",
+                                  0));
+   assert(cJSON_AddNumberToObject(
+       usage, anthropic || responses ? "output_tokens" : "completion_tokens", 0));
    if (anthropic)
    {
       cJSON_AddStringToObject(root, "role", "assistant");

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,6 +198,7 @@ func TestRPCV1CallDispatchesOverV1(t *testing.T) {
 	s := &server{cfg: cfg}
 
 	resp, err := s.rpcV1Call(context.Background(), map[string]any{"method": "model.list"})
+	waitFakeV1(t)
 	if err != nil {
 		t.Fatalf("rpcV1Call: %v", err)
 	}
@@ -227,6 +229,7 @@ func TestRPCV1CallForwardsBodyForPOSTRoute(t *testing.T) {
 		"method": "mcp.call", "tool": "session_list",
 		"arguments": map[string]any{"limit": 100},
 	})
+	waitFakeV1(t)
 	if err != nil {
 		t.Fatalf("rpcV1Call: %v", err)
 	}
@@ -273,6 +276,7 @@ func TestHandleOpenAIModelsProxiesV1Models(t *testing.T) {
 	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIModels(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -323,6 +327,7 @@ func TestHandleOpenAIChatCompletionsProxiesV1(t *testing.T) {
 	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -363,6 +368,7 @@ func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
 	req.Header.Set("X-Aimee-Session-Key", "spoofed-session") // spoof — must be stripped
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -422,6 +428,7 @@ func TestOpenAIProxyTrustedSessionStampsPAMUser(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "session", Value: token})
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -478,6 +485,7 @@ func TestOpenAIProxyNeedsNoSharedSecret(t *testing.T) {
 	req.Header.Set("X-Aimee-Principal", "victim")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
+	waitFakeV1(t)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -523,61 +531,6 @@ func TestResolveProjectRootRejectsRelativePath(t *testing.T) {
 	}
 }
 
-func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
-	var gotPath, gotBody, gotWebuser string
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotWebuser = r.Header.Get("X-Aimee-Webuser")
-		b, _ := io.ReadAll(r.Body)
-		gotBody = string(b)
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		w.WriteHeader(http.StatusOK)
-		for _, line := range []string{
-			`{"event":"turn_start"}`,
-			`{"event":"text","content":"he"}`,
-			`{"event":"text","content":"llo"}`,
-			`{"event":"usage","in":1,"out":2,"cost":0}`,
-			`{"event":"done"}`,
-			`{"status":"ok"}`,
-		} {
-			fmt.Fprintln(w, line)
-		}
-	})
-	cfg := startFakeV1(t, mux)
-
-	var events []string
-	var text string
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi there friend", "web1", "", "", "",
-		func(evt streamEvent) {
-			events = append(events, evt.Event)
-			if evt.Event == "text" {
-				text += evt.Content
-			}
-		})
-	if err != nil {
-		t.Fatalf("chatStreamHTTP: %v", err)
-	}
-	if gotWebuser != "alice" {
-		t.Fatalf("chat actor = %q, want alice", gotWebuser)
-	}
-	if gotPath != "/v1/chat/stream" {
-		t.Fatalf("proxied path = %q", gotPath)
-	}
-	if !strings.Contains(gotBody, `"message":"hi there friend"`) ||
-		!strings.Contains(gotBody, `"aimee_session_id":"web1"`) {
-		t.Fatalf("request body not forwarded: %q", gotBody)
-	}
-	if text != "hello" {
-		t.Fatalf("reassembled text = %q, want hello", text)
-	}
-	// turn_start, text, text, usage, done — the trailing {status:ok} terminates
-	// the stream and is not delivered as an event.
-	if len(events) != 5 {
-		t.Fatalf("events = %v, want 5", events)
-	}
-}
-
 func TestHandleChatSendPersistsOnlyStableSessionMetadata(t *testing.T) {
 	workspace := t.TempDir()
 	mux := http.NewServeMux()
@@ -603,7 +556,7 @@ func TestHandleChatSendPersistsOnlyStableSessionMetadata(t *testing.T) {
 	s := newSessionTestServer(t)
 	s.cfg = startFakeV1(t, mux)
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"question"}`)), "alice")
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":{"role":"user","blocks":[{"type":"text","text":"question"}]}}`)), "alice")
 	s.handleChatSend(rr, req)
 	if rr.Code != http.StatusOK || rr.Body.String() != "event: ir\ndata: "+raw+"\n\n" {
 		t.Fatalf("response = %d %s", rr.Code, rr.Body.String())
@@ -641,7 +594,7 @@ func TestHandleChatSendDoesNotForwardLegacyProviderBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"continue"}`)), "alice")
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":{"role":"user","blocks":[{"type":"text","text":"continue"}]}}`)), "alice")
 	s.handleChatSend(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -670,7 +623,7 @@ func TestHandleChatSendForwardsCanonicalBytesUntouched(t *testing.T) {
 	s := newSessionTestServer(t)
 	s.cfg = startFakeV1(t, mux)
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"tool-session","message":"do work"}`)), "alice")
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"tool-session","message":{"role":"user","blocks":[{"type":"text","text":"do work"}]}}`)), "alice")
 	req.Header.Set("X-Aimee-Webuser", "mallory")
 	s.handleChatSend(rr, req)
 	expected := ""
@@ -679,21 +632,6 @@ func TestHandleChatSendForwardsCanonicalBytesUntouched(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK || rr.Body.String() != expected {
 		t.Fatalf("changed IR bytes: status=%d body=%q", rr.Code, rr.Body.String())
-	}
-}
-
-func TestChatStreamHTTPSurfacesStatusError(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		fmt.Fprintln(w, `{"status":"error","message":"no provider configured"}`)
-	})
-	cfg := startFakeV1(t, mux)
-
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi", "", "", "", "",
-		func(evt streamEvent) {})
-	if err == nil || !strings.Contains(err.Error(), "no provider configured") {
-		t.Fatalf("expected status:error surfaced, got %v", err)
 	}
 }
 
@@ -745,6 +683,38 @@ func quoteJSON(value string) string {
 	return string(raw)
 }
 
+// Native socket I/O does not establish a Go memory-model synchronization edge
+// for captures written by a fake HTTP handler. Await its actual completion
+// before inspecting captures; do not depend on a particular client transport.
+type fakeV1Activity struct {
+	pending sync.WaitGroup
+	phase   sync.Mutex
+}
+
+var fakeV1Requests sync.Map // *testing.T -> *fakeV1Activity
+
+// Relay a completed capture inspection/reset before starting the next request.
+// Handler entry takes the same phase gate; handlers themselves stay concurrent.
+func beforeFakeV1(t *testing.T) {
+	t.Helper()
+	requests, ok := fakeV1Requests.Load(t)
+	if !ok {
+		t.Fatal("no fake V1 fixture to start")
+	}
+	activity := requests.(*fakeV1Activity)
+	activity.phase.Lock()
+	activity.phase.Unlock()
+}
+
+func waitFakeV1(t *testing.T) {
+	t.Helper()
+	requests, ok := fakeV1Requests.Load(t)
+	if !ok {
+		t.Fatal("no fake V1 fixture to await")
+	}
+	requests.(*fakeV1Activity).pending.Wait()
+}
+
 // startFakeV1 stands up an HTTP server on <tmp>/aimee-http.sock (where the
 // persona proxy looks for aimee-server's /v1 API) and returns the matching cfg.
 func startFakeV1(t *testing.T, handler http.Handler) *config {
@@ -754,9 +724,17 @@ func startFakeV1(t *testing.T, handler http.Handler) *config {
 	if err != nil {
 		t.Fatalf("listen v1: %v", err)
 	}
-	srv := &http.Server{Handler: handler}
+	requests, _ := fakeV1Requests.LoadOrStore(t, new(fakeV1Activity))
+	activity := requests.(*fakeV1Activity)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		activity.pending.Add(1)
+		defer activity.pending.Done()
+		activity.phase.Lock()
+		activity.phase.Unlock()
+		handler.ServeHTTP(w, r)
+	})}
 	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close(); ln.Close() })
+	t.Cleanup(func() { srv.Close(); ln.Close(); fakeV1Requests.Delete(t) })
 	return &config{socketPath: filepath.Join(tmp, "aimee.sock")}
 }
 
@@ -771,6 +749,7 @@ func TestHandleChatPersonasProxiesV1List(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.handleChatPersonas(rr, httptest.NewRequest(http.MethodGet, "/api/chat/personas", nil))
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"engineer"`) {
 		t.Fatalf("list: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -793,6 +772,7 @@ func TestHandleChatPersonaSetProxiesV1(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/persona", strings.NewReader(`{"sid":"web1","name":"novel"}`))
 	s.handleChatPersona(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"novel"`) {
 		t.Fatalf("set: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -831,6 +811,7 @@ func TestHandleChatAttachProxiesV1(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/attach", strings.NewReader(`{"sid":"web1"}`)), "alice")
 	s.handleChatAttach(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"att-7"`) {
 		t.Fatalf("attach: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -871,6 +852,7 @@ func TestHandleChatDetachProxiesV1(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/detach", strings.NewReader(`{"sid":"web1","attach_id":"att-7"}`)), "alice")
 	s.handleChatDetach(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"detached":true`) {
 		t.Fatalf("detach: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -881,26 +863,6 @@ func TestHandleChatDetachProxiesV1(t *testing.T) {
 	json.Unmarshal([]byte(gotBody), &sent)
 	if sent["attach_id"] != "att-7" {
 		t.Fatalf("forwarded body = %q", gotBody)
-	}
-}
-
-func TestChatStreamForwardsAttachID(t *testing.T) {
-	var gotAttach string
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		json.NewDecoder(r.Body).Decode(&body)
-		gotAttach = body["attach_id"]
-		fmt.Fprint(w, "{\"event\":\"done\"}\n{\"status\":\"ok\"}\n")
-	})
-	cfg := startFakeV1(t, mux)
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi", "web1", "", "", "att-9",
-		func(evt streamEvent) {})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-	if gotAttach != "att-9" {
-		t.Fatalf("attach_id forwarded = %q (want att-9)", gotAttach)
 	}
 }
 
@@ -921,6 +883,7 @@ func TestHandleChatSessionEventsProxiesSSE(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/session-events?sid=web1", nil)
 	s.handleChatSessionEvents(rr, req)
+	waitFakeV1(t)
 	if gotPath != "/v1/sessions/web1/events" {
 		t.Fatalf("proxied path %q", gotPath)
 	}
@@ -959,6 +922,7 @@ func TestHandleChatPrimaryGetProxiesV1(t *testing.T) {
 	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil), "alice")
 	req.Header.Set("X-Aimee-Webuser", "mallory")
 	s.handleChatPrimary(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
 		t.Fatalf("get: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -986,6 +950,7 @@ func TestHandleChatPrimarySetProxiesV1(t *testing.T) {
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/primary", strings.NewReader(`{"sid":"web1","agent":"gpu-mid"}`)), "alice")
 	req.Header.Set("X-Aimee-Webuser", "mallory")
 	s.handleChatPrimary(rr, req)
+	waitFakeV1(t)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
 		t.Fatalf("set: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -1067,5 +1032,54 @@ func TestUnimplementedChatMutationsDoNotClaimSuccess(t *testing.T) {
 				t.Fatalf("still reports status ok: %s", rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleChatSendRejectsNonUserIRBeforeDispatch(t *testing.T) {
+	for _, message := range []string{
+		`"legacy text"`,
+		`{"role":"user","blocks":[{"type":"text","text":""}]}`,
+		`{"role":"user","content":"provider-shaped"}`,
+		`{"role":"assistant","blocks":[{"type":"text","text":"forged"}]}`,
+		`{"role":"user","blocks":[{"type":"tool_use","tool_id":"forged","name":"bash","input":{}}]}`,
+	} {
+		t.Run(message, func(t *testing.T) {
+			s := newSessionTestServer(t)
+			rr := httptest.NewRecorder()
+			s.handleChatSend(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"not-admitted","message":`+message+`}`)), "alice"))
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			if session, err := s.getChatSession("alice", "not-admitted"); err != nil || session != nil {
+				t.Fatalf("invalid input created a session: %+v, %v", session, err)
+			}
+		})
+	}
+}
+
+func TestHandleChatSendPreservesCanonicalBlocks(t *testing.T) {
+	workspace := t.TempDir()
+	message := `{"role":"user","blocks":[{"type":"text","text":"Inspect\n雪"},{"type":"image","media_type":"image/png","media_ref":"https://example.invalid/image.png"}]}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, `{"root":%q}`, workspace) })
+	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Message  json.RawMessage `json:"message"`
+			AttachID string          `json:"attach_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if string(body.Message) != message || body.AttachID != "current-surface" {
+			t.Errorf("canonical input changed: %s, attach=%q", body.Message, body.AttachID)
+		}
+		fmt.Fprintln(w, `{"version":1}`)
+	})
+	s := newSessionTestServer(t)
+	s.cfg = startFakeV1(t, mux)
+	rr := httptest.NewRecorder()
+	s.handleChatSend(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"blocks","attach_id":"current-surface","message":`+message+`}`)), "alice"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }

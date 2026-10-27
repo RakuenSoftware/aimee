@@ -205,7 +205,6 @@ static void test_repository_evidence_message(void)
 
 static void test_null_safe(void)
 {
-   agent_session_append_final_message(NULL, "done");
    agent_session_append_final_instruction(NULL);
    agent_session_append_final_retry_instruction(NULL, "tool call");
    agent_session_append_degenerate_retry_instruction(NULL);

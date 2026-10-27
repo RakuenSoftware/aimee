@@ -17,6 +17,17 @@ set -e
 # Explicit local diagnostic profile; the default CI qualification is unchanged.
 NATIVE_RECOVERY_ONLY="${AIMEE_TEST_NATIVE_RECOVERY_ONLY:-0}"
 case "$NATIVE_RECOVERY_ONLY" in 0|1) ;; *) echo "invalid native recovery mode"; exit 2 ;; esac
+NATIVE_MATRIX_ONLY="${AIMEE_TEST_NATIVE_MATRIX_ONLY:-0}"
+case "$NATIVE_MATRIX_ONLY" in 0|1) ;; *) echo "invalid native matrix mode"; exit 2 ;; esac
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    if [ "$NATIVE_RECOVERY_ONLY" != 0 ] ||
+       [ ! -x "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ ! -x "${AIMEE_TEST_NATIVE_CLAUDE:-}" ] ||
+       [ -z "${AIMEE_STORE_URL:-}" ] || [ -z "${AIMEE_STORE_MIGRATION_URL:-}" ]; then
+        echo "focused native SDK matrix requires both explicit SDK executables and real store/runtime migration configuration; recovery-only is separate"
+        exit 2
+    fi
+    echo "FOCUSED native SDK matrix: all eight profiles, refusal and source fences; general integration and Docker grading are not run"
+fi
 if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" != 1 ] ||
        [ -z "${AIMEE_NATIVE_CONTAINMENT_ROOT:-}" ] ||
@@ -226,6 +237,9 @@ install_delegates_module() {
     cp "$DB1_MODULE_BUILT" "$DELEGATES_MODULE"
     chmod 0755 "$DELEGATES_MODULE"
     install_generated_grant delegates "$DELEGATES_MODULE"
+    # Native execution uses the same process's separate authenticated outbound
+    # identity; the serving grant does not imply permission to attach as76.
+    install_generated_grant delegates-host "$DELEGATES_MODULE"
 }
 start_delegates_module() {
     stop_delegates_module
@@ -593,7 +607,7 @@ install_workflow_module() {
 start_workflow_module() {
     [ -x "$WFE_MODULE" ] || return 1
     stop_workflow_module
-    "$WFE_MODULE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+    "$WFE_MODULE" --home "$AIMEE_HOME" \
         --module-bus-socket "$MODULE_BUS_SOCK" >"$HOME/aimee-wfe.log" 2>&1 &
     WFE_MODULE_PID=$!
     # Attachment is what matters, not the process: poll the seam itself until it
@@ -1087,12 +1101,12 @@ trap cleanup EXIT
 # 1. No server reachable
 # ============================================================
 
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ] || [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
     # The general profile enables this owner after its intentional outage
     # checks. Focused native execution starts the same real owner immediately.
     MEMORY_MODULE_ENABLED=1
     start_server && SERVER_STARTED=1 || SERVER_STARTED=0
-    check "focused recovery owned server started" test "$SERVER_STARTED" = 1
+    check "focused native owned server started" test "$SERVER_STARTED" = 1
     if [ "$SERVER_STARTED" != 1 ]; then exit 1; fi
     MEMORY_READY=0
     for attempt in $(seq 1 100); do
@@ -1100,7 +1114,7 @@ if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
         case "$RESP" in *'"kind":"invalid_argument"'*) MEMORY_READY=1; break ;; esac
         sleep 0.1
     done
-    check "focused recovery real memory owner ready" test "$MEMORY_READY" = 1
+    check "focused native real memory owner ready" test "$MEMORY_READY" = 1
     if [ "$MEMORY_READY" != 1 ]; then exit 1; fi
 else
 # This used to be "auto-start", and asserted that a command failed *because
@@ -1247,7 +1261,7 @@ fi
 # bytes whether reached over the always-on Unix socket or the optional localhost
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
-TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
+TCP_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-tcp-XXXXXX") || true
 mkdir -p "$TCP_HOME/.config/aimee/modules.d/server"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
@@ -2279,6 +2293,32 @@ fi  # MIRROR_SHA256
 # suite covers that in isolation) but "the routes a client actually calls still
 # behave when their state lives in another process".
 
+# Source authority must describe a real server-owned workspace, not a dummy
+# relative label. Register through the same public owner used by deployment.
+WF_WORKSPACE="$HOME/workflow-control-workspace"
+git init -b main "$WF_WORKSPACE" >/dev/null
+git -C "$WF_WORKSPACE" config user.name "Aimee Integration"
+git -C "$WF_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'workflow control fixture\n' >"$WF_WORKSPACE/README.md"
+git -C "$WF_WORKSPACE" add README.md
+git -C "$WF_WORKSPACE" commit -m fixture >/dev/null
+WF_REGISTER=$(python3 - "$WF_WORKSPACE" <<'PYWORKSPACE'
+import json, sys
+print(json.dumps(dict(method="workspace.add", root=sys.argv[1], provider="shared", scan=False)))
+PYWORKSPACE
+)
+RESP=$(http_rpc "$WF_REGISTER") || true
+check_output "workflow control workspace registered" '"status":"ok"' echo "$RESP"
+workflow_submit() {
+    local body
+    body=$(python3 - "$WF_WORKSPACE" "$1" <<'PYSUBMIT'
+import json, sys
+print(json.dumps(dict(proposal_md=sys.argv[2], workflow="build", repo=sys.argv[1])))
+PYSUBMIT
+)
+    http_call POST /v1/dev/submit "$body"
+}
+
 WF_STEP=""
 if [ "$WORKFLOW_MODULE_INSTALLED" -ne 1 ]; then
     WF_STEP="install (go toolchain, build, or generated grants)"
@@ -2306,6 +2346,10 @@ else
 
 check_output "workflow defs list" '"defs"' echo "$(http_call GET /v1/workflow/defs)"
 check_output "the shipped definitions are served" 'build' echo "$(http_call GET /v1/workflow/defs)"
+# A live authenticated stage is required; absence of a process is not evidence
+# that the retired, unauthenticated workflow HTTP listeners stayed closed.
+check "workflow engine has no retired requested HTTP socket" test ! -S "$AIMEE_HOME/aimee-wfe.sock"
+check "workflow engine has no retired default HTTP socket" test ! -S "$AIMEE_HOME/aimee-server.sock"
 check_output "workflow items list answers" '200' echo "$(http_status GET /v1/workflow/items)"
 check_output "workflow triggers list answers" '200' echo "$(http_status GET /v1/workflow/triggers)"
 check_output "workflow blocks list answers" '200' echo "$(http_status GET /v1/workflow/blocks)"
@@ -2317,13 +2361,13 @@ check_output "submit without a proposal is refused" '400' \
 check_output "submit without a repo is refused too" '400' \
     echo "$(http_status POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
 
-WF_SUB1=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ one\n\ndo the first thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB1=$(workflow_submit $'# integ one\n\ndo the first thing')
 check_output "a submit is admitted" '200' echo "${WF_SUB1%% *}"
 check_output "and it names the run it started" '"work_item_id"' echo "$WF_SUB1"
 WI1=$(echo "$WF_SUB1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the submit returned an id" test -n "$WI1"
 
-WF_SUB2=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ two\n\ndo the second thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB2=$(workflow_submit $'# integ two\n\ndo the second thing')
 check_output "a second submit is admitted" '200' echo "${WF_SUB2%% *}"
 WI2=$(echo "$WF_SUB2" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
@@ -2344,7 +2388,7 @@ check_output "while the second says its own thing" 'do the second thing' \
 # "the third one" fails for the wrong reason the day the default moves.
 WF_CAP_CODE="" ; WF_CAP_BODY=""
 for i in 1 2 3 4 5 6 7 8; do
-    WF_C=$(http_call POST /v1/dev/submit "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"integ/repo\"}")
+    WF_C=$(workflow_submit "# cap probe $i")
     WF_CAP_CODE="${WF_C%% *}"
     WF_CAP_BODY="$WF_C"
     [ "$WF_CAP_CODE" != "200" ] && break
@@ -2388,7 +2432,7 @@ check_output "resuming a park the operator cannot clear is refused" '409' \
 # consequence that matters, since a cap that never released would wedge intake.
 check_output "the run can be stopped" '200' \
     echo "$(http_status POST /v1/workflow/items/$WI1/stop '{}')"
-WF_SUB4=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ four\n\nafter a slot freed","workflow":"build","repo":"integ/repo"}')
+WF_SUB4=$(workflow_submit $'# integ four\n\nafter a slot freed')
 check_output "stopping a run frees the admission slot it held" '200' echo "${WF_SUB4%% *}"
 
 check_output "a run can be deleted" '200' echo "$(http_status DELETE /v1/workflow/items/$WI2)"
@@ -2421,7 +2465,7 @@ PYREQ
 )
 RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
 check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
-if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
 PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
 if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
     PASS=$((PASS + 1))
@@ -2429,6 +2473,7 @@ if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/t
     SKIP=$((SKIP + PRIMARY_SKIPS))
     grep '^SKIP:' "$PRIMARY_IR_LOG" || true
     grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
+    grep '^canonical evaluation' "$PRIMARY_IR_LOG" || true
     grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
     grep '^delegate mirror:' "$PRIMARY_IR_LOG" || true
     grep '^delegate source:' "$PRIMARY_IR_LOG" || true
@@ -2581,7 +2626,7 @@ run_execution_grade_fixture() {
     fi
     return "$status"
 }
-if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
 EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
 if run_execution_grade_fixture; then
     GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
@@ -2658,7 +2703,10 @@ fi
 REACHED_SUMMARY=1
 TOTAL=$((PASS + FAIL)) || true
 echo ""
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "focused native SDK matrix qualification: $PASS/$TOTAL setup/eight-profile/shutdown checks passed"
+    echo "General integration and Docker grading were not run in this invocation."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     echo "focused native recovery qualification: $PASS/$TOTAL setup/recovery/shutdown checks passed"
     echo "General integration and eight-profile SDK qualification were not run in this invocation."
 else
@@ -2671,7 +2719,9 @@ if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failures)"
     exit 1
 fi
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "Focused eight-profile native SDK qualification passed."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     echo "Focused native crash/interruption recovery qualification passed."
 else
     echo "All integration tests passed."

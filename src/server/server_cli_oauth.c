@@ -8,6 +8,7 @@
  * never log raw pane contents. Tokens live in 0700 per-vendor dirs on the home
  * volume. A per-vendor lock serialises setups. */
 #include "server_cli_oauth.h"
+#include "codex_client_version.h"
 #include "aimee.h"
 #include "util.h" /* safe_exec_capture_env */
 #include "log.h"
@@ -56,7 +57,7 @@ static const vendor_info_t g_vendors[] = {
     [CLI_OAUTH_CLAUDE] = {"claude", "claude", "@anthropic-ai/claude-code", "2.1.177", "claude",
                           "https://claude.com/", "install.cjs"},
     /* codex ships a plain-JS entrypoint (bin/codex.js) with no postinstall. */
-    [CLI_OAUTH_CODEX] = {"codex", "codex", "@openai/codex", "0.139.0", "codex",
+    [CLI_OAUTH_CODEX] = {"codex", "codex", "@openai/codex", AIMEE_CODEX_CLIENT_VERSION, "codex",
                          "https://auth.openai.com/codex/device", NULL},
 };
 
@@ -274,16 +275,6 @@ static int oauth_store_token_in_vault(cli_oauth_vendor_t v)
    }
    aimee_log(LOG_INFO, "cli.oauth", "%s OAuth token sealed in Vault", g_vendors[v].name);
    return 0;
-}
-
-/* Strong override of cli_session.c's weak materialize seam: read the vaulted
- * (agent, "oauth") token so a delegate launch can write it into its ephemeral HOME
- * (the single-source-of-truth read side). This TU already links the vault; keeping
- * the seam out of cli_session.c means test binaries linking cli_session.o need no
- * vault objects. Returns 0 (token written to out) or non-zero (no entry / error). */
-int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len)
-{
-   return vault_service_get_server_principal(agent, "oauth", out, out_len) == VAULT_OK ? 0 : 1;
 }
 
 /* Build the explicit child environment for a vendor command: HOME + per-vendor

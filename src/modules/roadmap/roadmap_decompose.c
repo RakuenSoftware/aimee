@@ -15,8 +15,9 @@
 
 /* ── prompt builder ──────────────────────────────────────────────────────── */
 
-int roadmap_decompose_build_prompt(const char *goal, const char *planning_depth,
-                                   const char *token_profile, const char *prior_err, char **out)
+int roadmap_decompose_build_request(const char *goal, const char *planning_depth,
+                                    const char *token_profile, const char *prior_err,
+                                    aimee_request_t *out)
 {
    if (!goal || !goal[0])
       return -1;
@@ -59,27 +60,40 @@ int roadmap_decompose_build_prompt(const char *goal, const char *planning_depth,
                        "- tool_policy_mode is one of: planning, docs, execution.\n"
                        "- Output ONLY the JSON object, nothing else.\n\n");
 
-   dstr_append_str(&s, "Goal: ");
-   dstr_append_str(&s, goal);
-   dstr_append_str(&s, "\n\n");
-
    const char *depth = planning_depth && planning_depth[0] ? planning_depth : "standard";
    const char *profile = token_profile && token_profile[0] ? token_profile : "balanced";
-
-   dstr_appendf(&s, "planning_depth: %s\n", depth);
-   dstr_appendf(&s, "token_profile: %s\n\n", profile);
-
-   if (prior_err && prior_err[0])
-   {
-      dstr_append_str(&s, "Your previous attempt was rejected by the validator: ");
-      dstr_append_str(&s, prior_err);
-      dstr_append_str(&s, ". Fix it and output only the corrected JSON object.\n");
-   }
-
-   *out = strdup(dstr_cstr(&s));
+   dstr_t options;
+   dstr_init(&options);
+   dstr_appendf(&options, "planning_depth: %s\ntoken_profile: %s\n", depth, profile);
+   aimee_block_t policy[2] = {
+       {.type = AIMEE_BLK_TEXT, .text = (char *)dstr_cstr(&s)},
+       {.type = AIMEE_BLK_TEXT,
+        .text = "Your previous attempt was rejected by the validator. Fix the supplied validation "
+                "failure and output only the corrected JSON object."}};
+   aimee_block_t content[3] = {{.type = AIMEE_BLK_TEXT, .text = (char *)goal},
+                               {.type = AIMEE_BLK_TEXT, .text = (char *)dstr_cstr(&options)},
+                               {.type = AIMEE_BLK_TEXT, .text = (char *)prior_err}};
+   for (int i = 0; i < 2; ++i)
+      aimee_ir_block_set_context(&policy[i], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   for (int i = 0; i < 3; ++i)
+      aimee_ir_block_set_context(
+          &content[i], i == 2 ? AIMEE_CTX_ORIGIN_TOOL : AIMEE_CTX_ORIGIN_USER,
+          i == 0 ? AIMEE_CTX_AUTH_TASK_INSTRUCTION : AIMEE_CTX_AUTH_EVIDENCE,
+          AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   int retry = prior_err && prior_err[0];
+   aimee_message_t message = {.role = "user", .blocks = content, .n_blocks = retry ? 3 : 2};
+   aimee_request_t request = {.system = policy,
+                              .n_system = retry ? 2 : 1,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .has_temperature = 1,
+                              .temperature = 0.3};
+   int rc = aimee_ir_request_clone(&request, out);
+   dstr_free(&options);
    dstr_free(&s);
-
-   return (*out) ? 0 : -1;
+   return rc;
 }
 
 /* ── JSON extraction ─────────────────────────────────────────────────────── */
@@ -191,18 +205,21 @@ int roadmap_decompose_run(const char *goal, const char *planning_depth, const ch
 
    for (int i = 0; i < attempts; i++)
    {
-      char *prompt = NULL;
-      if (roadmap_decompose_build_prompt(goal, planning_depth, token_profile,
-                                         prior[0] ? prior : NULL, &prompt) != 0)
+      aimee_request_t request = {0};
+      if (roadmap_decompose_build_request(goal, planning_depth, token_profile,
+                                          prior[0] ? prior : NULL, &request) != 0)
       {
          snprintf(prior, sizeof(prior), "prompt build failed");
          continue;
       }
 
-      char *text = NULL;
-      int mrc = model(prompt, &text, ud);
-      free(prompt);
-      prompt = NULL;
+      aimee_response_t response = {0};
+      int mrc = model(&request, &response, ud);
+      aimee_request_free(&request);
+      char *text = !mrc && !aimee_ir_response_complete_text_valid(&response)
+                       ? aimee_ir_response_text_alloc(&response)
+                       : NULL;
+      aimee_response_free(&response);
 
       if (mrc != 0 || !text)
       {

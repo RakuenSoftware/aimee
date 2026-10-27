@@ -295,16 +295,6 @@ cJSON *server_native_cache_claim_json(const server_native_cache_t *cache)
    }
    return value;
 }
-const char *server_native_cache_metadata_key(const server_native_cache_t *cache)
-{
-   return cache ? cache->metadata : NULL;
-}
-server_native_cache_t *server_native_cache_begin(const char *session, const char *actor,
-                                                 const char *turn, const char *harness,
-                                                 const char *scope, const aimee_request_t *request)
-{
-   return server_native_cache_begin_epoch(session, actor, turn, harness, scope, request, "0", NULL);
-}
 server_native_cache_t *server_native_cache_begin_epoch(const char *session, const char *actor,
                                                        const char *turn, const char *harness,
                                                        const char *scope,
@@ -502,52 +492,4 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
    snprintf(cache->token, sizeof cache->token, "%s", completed);
    cache->phase = 3;
    return 0;
-}
-
-int server_native_cache_recover(const char *session, const char *actor, const char *turn,
-                                const char *harness, const char *scope,
-                                const aimee_request_t *request)
-{
-   if (!identity(session) || !identity(actor) || !identity(turn) || !harness ||
-       (strcmp(harness, "codex") && strcmp(harness, "claude")) || !hex(scope, 64) || !request ||
-       agent_request_cancelled())
-      return -1;
-   server_native_cache_t cache = {0};
-   snprintf(cache.session, sizeof cache.session, "%s", session);
-   snprintf(cache.actor, sizeof cache.actor, "%s", actor);
-   snprintf(cache.turn, sizeof cache.turn, "%s", turn);
-   snprintf(cache.harness, sizeof cache.harness, "%s", harness);
-   snprintf(cache.scope, sizeof cache.scope, "%s", scope);
-   cJSON *canonical = aimee_ir_request_json(request);
-   if (!canonical)
-      return -1;
-   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "messages");
-   int failed = digest(canonical, cache.context) || cache_keys(&cache);
-   cJSON_Delete(canonical);
-   if (failed)
-      return -1;
-   char prior[1025] = "", claim[33], source_turn[129];
-   int found = db1_session_harness_get(session, cache.metadata, prior, sizeof prior, actor);
-   if (found)
-      return found == 1 ? 1 : -1;
-   const char *phase = !strncmp(prior, "pending:", 8)      ? "pending"
-                       : !strncmp(prior, "finishing:", 10) ? "finishing"
-                       : !strncmp(prior, "complete:", 9)   ? "complete"
-                                                           : "invalid";
-   if (token_parts(prior, phase, claim, source_turn))
-      return -1;
-   if (!strcmp(phase, "complete") || !strcmp(phase, "invalid"))
-      return 1;
-   /* A stale recovery caller cannot invalidate a new execution's claim. The
-    * caller must separately prove this exact native child is quiescent. */
-   if (strcmp(source_turn, turn))
-      return -1;
-   int state;
-   cJSON *unused = NULL;
-   if (observations(&cache, NULL, NULL, &unused, &state, 0) || state < 2 ||
-       agent_request_cancelled())
-      return -1;
-   char invalid[192];
-   snprintf(invalid, sizeof invalid, "invalid:%s:%s", claim, turn);
-   return db1_session_harness_compare_swap(session, cache.metadata, prior, invalid, actor) ? -1 : 0;
 }

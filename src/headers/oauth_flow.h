@@ -87,6 +87,10 @@ typedef struct
    const char *scope; /* JSON profile: exact granted scopes; NULL omits */
    oauth_refresh_format_t format;
 } oauth_refresh_profile_t;
+/* Same token policy; exposes only the verified refresh HTTP status (zero when
+ * no HTTP response was observed). No response body or credential is returned. */
+int oauth_token_get_profile_status(const char *client_name, const oauth_refresh_profile_t *profile,
+                                   int skew_secs, char *buf, size_t len, int *refresh_http_status);
 int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
                             int skew_secs, char *buf, size_t len);
 

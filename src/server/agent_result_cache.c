@@ -30,10 +30,8 @@ int agent_result_cache_read(const char *role, const char *key, agent_result_t *o
    cJSON *json = wire ? cJSON_ParseWithOpts(wire, NULL, 1) : NULL;
    free(wire);
    aimee_response_t response = {0};
-   int valid = json && !aimee_ir_response_parse(json, &response) && response.n_content &&
-               !response.error_message && response.stop_reason != AIMEE_STOP_ERROR &&
-               response.stop_reason != AIMEE_STOP_TOOL_USE &&
-               !aimee_ir_response_has_tool_use(&response);
+   int valid = json && !aimee_ir_response_parse(json, &response) &&
+               !aimee_ir_response_complete_text_valid(&response);
    cJSON_Delete(json);
    if (!valid || wire_fence_revalidate_sources() || agent_result_adopt_response(out, &response))
    {
@@ -44,6 +42,7 @@ int agent_result_cache_read(const char *role, const char *key, agent_result_t *o
    agent_reject_degenerate_plain_response(out, out->agent_name);
    if (!out->success)
    {
+      agent_result_clear_response(out);
       out->error[0] = 0;
       out->abstained = 0;
       out->abstain_reason[0] = 0;
@@ -61,10 +60,8 @@ int agent_result_cache_read(const char *role, const char *key, agent_result_t *o
 void agent_result_cache_write(const char *role, const char *key, const agent_result_t *out)
 {
    if (!role || !role[0] || !key || !key[0] || !out || !out->success || out->cache_hit ||
-       wire_fence_revalidate_sources() || out->canonical_response.error_message ||
-       out->canonical_response.stop_reason == AIMEE_STOP_ERROR ||
-       out->canonical_response.stop_reason == AIMEE_STOP_TOOL_USE ||
-       aimee_ir_response_has_tool_use(&out->canonical_response))
+       wire_fence_revalidate_sources() ||
+       aimee_ir_response_complete_text_valid(&out->canonical_response))
       return;
    cJSON *json = aimee_ir_response_json(&out->canonical_response);
    char *wire = json ? cJSON_PrintUnformatted(json) : NULL;

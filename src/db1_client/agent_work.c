@@ -3,6 +3,7 @@
 /* clang-format off */
 #include "agent_log.h"
 #include "coord_jobs.h"
+#include "cJSON.h"
 #include "db1_client/db1_cron_jobs.h"
 #include "db1_client/db1_trigger.h"
 
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <aimee/ir/session_event.h>
 
 
 static db1_family_t family = {"db1.agent_work", "agent work", AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_STAGE_AGENT_WORK, 2000, 0};
@@ -844,17 +846,34 @@ int db1_coord_job_create(int plan_id, int max_concurrent)
    return (int)strtoll(slot0, NULL, 10);
 }
 
-int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const char *prompt, const char *cwd, const char *persona)
+int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const aimee_message_t *message, const char *cwd, const char *persona)
 {
+   aimee_request_t view = {.messages = (aimee_message_t *)message, .n_messages = message ? 1 : 0};
+   if (message && (aimee_ir_request_admit(&view) || strcmp(message->role, "user") || message->raw))
+      return -1;
+   /* Native sidecars have their own source-owned cache boundary; queue message
+    * JSON must never silently discard them. */
+   for (int i = 0; message && i < message->n_blocks; i++)
+      if (message->blocks[i].raw)
+         return -1;
+   cJSON *json = message ? aimee_ir_message_json(message) : NULL;
+   char *encoded = json ? cJSON_PrintUnformatted(json) : NULL;
+   cJSON_Delete(json);
+   if (message && (!encoded || strlen(encoded) >= DB1_COORD_MESSAGE_LEN))
+   {
+      free(encoded);
+      return -1;
+   }
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", job_id);
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", step_id);
-   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", prompt ? prompt : "", cwd ? cwd : "", persona ? persona : ""};
+   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", encoded ? encoded : "", cwd ? cwd : "", persona ? persona : ""};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_COORD_TASK_ADD, fields, 7, values, caps, 1, NULL);
+   free(encoded);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1213,21 +1232,29 @@ int db1_coord_job_list_active_ids(int *out_ids, int max)
    return wire_rows;
 }
 
-int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out, size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
+int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, aimee_message_t *message_out, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
 {
-   if (!role_out || role_cap == 0 || !prompt_out || prompt_cap == 0 || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+   if (!role_out || role_cap == 0 || !message_out || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+      return -1;
+   char *message_json = malloc(DB1_COORD_MESSAGE_LEN);
+   if (!message_json)
       return -1;
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", task_id);
    const char *fields[] = {arg0};
-   char *const values[] = {role_out, prompt_out, files_out, cwd_out, persona_out};
-   const size_t caps[] = {role_cap, prompt_cap, files_cap, cwd_cap, persona_cap};
+   char *const values[] = {role_out, message_json, files_out, cwd_out, persona_out};
+   const size_t caps[] = {role_cap, DB1_COORD_MESSAGE_LEN, files_cap, cwd_cap, persona_cap};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH, fields, 1, values, caps, 5, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
+      free(message_json);
       return -1;
    }
-   return 0;
+   cJSON *json = cJSON_Parse(message_json);
+   free(message_json);
+   int rc = json ? aimee_ir_message_parse(json, message_out) : -1;
+   cJSON_Delete(json);
+   return rc;
 }
 
 int db1_cron_job_upsert(const cron_job_t *job)
@@ -1392,7 +1419,7 @@ int db1_cron_job_delete(const char *job_id)
    return write_result(db1_call(&family, AIMEE_DB1_OP_CRON_JOB_DELETE, fields, 1, NULL, NULL, 0, NULL));
 }
 
-int db1_cron_job_record_run(const char *job_id, const char *status, int silent, int delivered, const char *output, const char *error, const char *output_hash)
+int db1_cron_job_record_run_ir(const char *job_id, const char *status, int silent, int delivered, const char *output, const char *error, const char *output_hash, const char *output_ir)
 {
    if (!job_id || !job_id[0] || !status || !status[0])
       return -1;
@@ -1400,14 +1427,20 @@ int db1_cron_job_record_run(const char *job_id, const char *status, int silent, 
    snprintf(arg2, sizeof arg2, "%d", silent);
    char arg3[32];
    snprintf(arg3, sizeof arg3, "%d", delivered);
-   const char *fields[] = {job_id, status, arg2, arg3, output ? output : "", error ? error : "", output_hash ? output_hash : ""};
+   const char *fields[] = {job_id, status, arg2, arg3, output ? output : "", error ? error : "", output_hash ? output_hash : "", output_ir ? output_ir : ""};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 7, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 8, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_cron_job_record_run(const char *job_id, const char *status, int silent, int delivered,
+                            const char *output, const char *error, const char *output_hash)
+{
+   return db1_cron_job_record_run_ir(job_id, status, silent, delivered, output, error, output_hash, NULL);
 }
 
 char *db1_cron_jobs_list_json()
@@ -1450,24 +1483,50 @@ char *db1_cron_job_history_json(const char *job_id, int limit)
    return shrunk ? shrunk : value;
 }
 
-char *db1_cron_job_latest_output(const char *job_id)
+int db1_cron_job_latest_snapshot(const char *job_id, char **output_out, char **output_ir_out)
 {
-   if (!job_id || !job_id[0])
-      return NULL;
+   if (output_out)
+      *output_out = NULL;
+   if (output_ir_out)
+      *output_ir_out = NULL;
+   if (!job_id || !job_id[0] || !output_out || !output_ir_out)
+      return -1;
    const char *fields[] = {job_id};
-   char *value = malloc(262144u);
-   if (!value)
-      return NULL;
-   char *const values[] = {value};
-   const size_t caps[] = {262144u};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   char *value = calloc(1, 1048577u), *ir = calloc(1, 1048577u);
+   if (!value || !ir)
    {
       free(value);
+      free(ir);
+      return -1;
+   }
+   char *const values[] = {value, ir};
+   const size_t caps[] = {1048577u, 1048577u};
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      free(value);
+      free(ir);
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+   }
+   if (ir[0])
+      *output_ir_out = ir;
+   else
+      free(ir);
+   *output_out = value;
+   return 0;
+}
+
+char *db1_cron_job_latest_output(const char *job_id)
+{
+   char *output = NULL, *ir = NULL;
+   int rc = db1_cron_job_latest_snapshot(job_id, &output, &ir);
+   free(ir);
+   if (rc || (output && !output[0]))
+   {
+      free(output);
       return NULL;
    }
-   char *shrunk = realloc(value, strlen(value) + 1u);
-   return shrunk ? shrunk : value;
+   return output;
 }
 
 char *db1_cron_job_last_output_hash(const char *job_id)

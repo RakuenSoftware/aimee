@@ -1,4 +1,3 @@
-#include "server_native_history.h"
 #include "server_session_log.h"
 #include "server_session_capture.h"
 #include "server_session_control.h"
@@ -99,12 +98,12 @@ static int publish_child(server_session_log_t *scope, const char *status)
 
 static int ensure_owner(const char *session, const char *type, const char *principal)
 {
-   db1_server_session_t row;
-   if (db1_server_session_get(session, &row) != 0)
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(session, &row) != 0)
    {
       // Another admitted worker may create the same parent concurrently.
       (void)db1_server_session_create(session, type, principal);
-      if (db1_server_session_get(session, &row) != 0)
+      if (db1_server_session_owner_get(session, &row) != 0)
          return -1;
    }
    return strcmp(row.principal, principal) ? -1 : 0;
@@ -153,17 +152,15 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
    }
    return binding;
 }
-int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out)
-{
-   return server_session_log_begin_selected(role, prompt, NULL, NULL, NULL, out);
-}
-int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
-                                      const char *provider, const char *model,
-                                      server_session_log_t **out)
+int server_session_log_begin_selected(const char *role, const aimee_message_t *message,
+                                      const char *agent, const char *provider, const char *model,
+                                      int control_replies, server_session_log_t **out)
 {
    if (!out)
       return -1;
    *out = NULL;
+   if (control_replies != 0 && control_replies != 1)
+      return -1;
    agent_request_creds_t attestation;
    agent_request_creds_snapshot(&attestation);
    if (!attestation.session_id[0])
@@ -207,6 +204,9 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
                                                          scope->principal, attestation.session_id);
    if (!scope->controls)
       goto fail;
+   server_control_scope_t *parent_controls = server_control_scope_current();
+   if (!control_replies || (parent_controls && !server_control_scope_can_reply(parent_controls)))
+      server_control_scope_disable_replies(scope->controls);
    scope->previous_controls = server_control_scope_bind(scope->controls);
    scope->capture = server_session_capture_open(scope->session, scope->turn, scope->principal,
                                                 attestation.session_id);
@@ -225,14 +225,12 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
    aimee_ir_session_set_sink(log_event, scope);
    *out = scope;
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)(prompt ? prompt : "")};
-   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t user = {
-       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &message};
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = message};
    if (aimee_ir_session_emit(&started) || publish_child(scope, "running"))
       return -1;
    scope->announced = scope->parent[0] != 0;
-   if (prompt && aimee_ir_session_emit(&user))
+   if (message && aimee_ir_session_emit(&user))
       return -1; /* Caller must finish *out, including failed admission. */
    return 0;
 fail:
@@ -243,26 +241,6 @@ fail:
 int server_session_log_active(void)
 {
    return current != NULL;
-}
-int server_session_log_history_load(cJSON **out)
-{
-   if (!out)
-      return -1;
-   *out = NULL;
-   if (!current)
-      return 1;
-   char *json = NULL;
-   int rc = db1_session_ir_history_load(current->session, "primary", current->principal,
-                                        current->turn, &json);
-   if (rc == 0)
-   {
-      cJSON *receipts = NULL;
-      rc = server_native_history_load(current->session, current->principal, current->turn, 0, out,
-                                      &receipts);
-      cJSON_Delete(receipts);
-   }
-   free(json);
-   return rc;
 }
 int server_session_log_history_save(const cJSON *messages)
 {

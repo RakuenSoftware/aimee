@@ -196,8 +196,9 @@ int kb_pdf_exec_bbox_layout(const unsigned char *bytes, int n, char *out, int ou
             "</page></doc>");
    return 0;
 }
-/* kb_http_ingest.o calls the OCR path for a PDF with no text layer; these tests
- * never configure OCR, and newer toolchains keep the call, so it must resolve. */
+/* OCR is disabled in this handler suite. Keep the new production dependency at
+ * the same explicit test-double boundary as XHTML ingestion, and fail if routing
+ * ever calls it instead of silently reporting a fabricated OCR success. */
 int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
                           const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
                           const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats)
@@ -210,7 +211,8 @@ int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char
    (void)n;
    (void)ocr_endpoint;
    (void)stats;
-   return 0;
+   assert(!"OCR must not be invoked while disabled in the HTTP ingestion suite");
+   return -1;
 }
 static int g_ingest_called = 0;
 static char g_ingest_project[64], g_ingest_fp[256], g_ingest_hash[80], g_ingest_class[32];

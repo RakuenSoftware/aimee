@@ -239,19 +239,16 @@ int agent_eval_ablation_preset(const char *preset, agent_ablation_flags_t *out)
 
 static int eval_check_success(const eval_task_t *task, const agent_result_t *result)
 {
-   if (!result->success || !result->response)
+   if (!result->success || aimee_ir_response_complete_text_valid(&result->canonical_response))
       return 0;
-
-   if (task->success_check_type[0] == '\0')
-      return result->success; /* no check defined, use agent success */
-
-   if (strcmp(task->success_check_type, "contains") == 0)
-      return strstr(result->response, task->success_check_value) != NULL;
-
-   if (strcmp(task->success_check_type, "exit_code") == 0)
-      return result->success; /* agent already checks exit codes */
-
-   return result->success;
+   char *authored = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!authored)
+      return 0;
+   int success = 1;
+   if (!strcmp(task->success_check_type, "contains"))
+      success = strstr(authored, task->success_check_value) != NULL;
+   free(authored);
+   return success;
 }
 
 static int eval_tool_failures(const agent_result_t *result, int passed)
@@ -280,6 +277,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
    agent_eval_manifest_t manifest;
    int have_manifest = agent_eval_manifest_build(suite, all_tasks, task_count, result->agent_name,
                                                  seed, &manifest) == 0;
+   char *text = aimee_ir_response_text_alloc(&result->canonical_response);
    db1_eval_result_row_t row = {
        .suite = suite,
        .task_name = task->name,
@@ -293,7 +291,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
        .prompt_tokens = result->prompt_tokens,
        .completion_tokens = result->completion_tokens,
        .latency_ms = result->latency_ms,
-       .response = result->response,
+       .response = text,
        .error = result->error[0] ? result->error : NULL,
        .dataset_hash = have_manifest ? manifest.dataset_hash : "",
        .target_hash = have_manifest ? manifest.target_hash : "",
@@ -302,6 +300,7 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
        .seed = (int)seed,
    };
    (void)db1_eval_result_insert(&row);
+   free(text);
 }
 
 /* The Go owner retrieves and serializes the artifact; the host owns the file. */
@@ -364,7 +363,11 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
          for (int i = 0; i < task_count; i++)
          {
             agent_result_t ar = {0};
-            int rc = agent_run(cfg, tasks[i].role, NULL, tasks[i].prompt, 0, &ar);
+            aimee_request_t request = {0};
+            int request_rc = aimee_ir_request_from_text(&request, NULL, tasks[i].prompt, 0, 0.3);
+            int rc = request_rc ? AGENT_RC_CONTEXT_REFUSED
+                                : agent_run(cfg, tasks[i].role, &request, &ar);
+            aimee_request_free(&request);
 
             int passed = (rc == 0) && eval_check_success(&tasks[i], &ar);
             if (passed && tasks[i].max_latency_ms > 0 && ar.latency_ms > tasks[i].max_latency_ms)

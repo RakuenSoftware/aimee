@@ -10,6 +10,35 @@ package economizer
 // ambiguous case bypasses rather than mutates — a gateway that mangles a live
 // customer request is far worse than one that fails to save tokens.
 
+// Counter names, kept stable because dashboards key on them.
+const (
+	StatSessionDisabledBlocks = "session_disabled_blocks"
+	StatMutateAttempted       = "mutate_attempted"
+	StatMutateApplied         = "mutate_applied"
+	Stat4xxRestoreResend      = "4xx_restore_resend"
+	Stat5xxDisable            = "5xx_disable"
+	StatStreamErrorDisable    = "stream_error_disable"
+	StatHardBypass            = "hard_bypass"
+
+	// Reducer state is an optimization, so a store failure degrades silently by
+	// design -- the reduction still runs, it just never warms up. That is
+	// exactly why it has to be COUNTED: a fold that has quietly stopped reusing
+	// its freeze boundary looks like a fold that is working, and the only other
+	// evidence is a token bill that does not fall.
+	StatStateUnavailable = "state_unavailable"
+	StatStateSaveFailed  = "state_save_failed"
+)
+
+// PostAction is what the caller must do after the upstream status.
+type PostAction int
+
+const (
+	PostNone PostAction = iota
+	// PostResend means the request was restored to pristine and must be sent
+	// once more.
+	PostResend
+)
+
 // GWBypassReason records why the gateway did NOT apply the reduced payload.
 // GWBypassNone means "apply".
 type GWBypassReason int
@@ -83,12 +112,9 @@ func reduceErrorToBypass(e ReduceError) GWBypassReason {
 // that is made to fail. MessageHistoryRepair in repair.go is the production
 // implementation and is what the reduce stage passes.
 //
-// The C still has its own message_history_repair in src/server/agent_bridge.c,
-// where it is a shared MESSAGE-PIPELINE utility (format detection plus
-// per-provider orphan repair) used well beyond this seam. Two implementations
-// therefore exist for as long as the cutover runs; that is deliberate and
-// temporary, and the Go port is pinned against the C's cases so they cannot
-// drift apart silently.
+// The reduce stage validates canonical tool-call/result structure before the
+// reduced history can replace the original. Provider-format conversion belongs
+// to the external wire boundary.
 //
 // Any NON-ZERO result means the reduced view was not structurally clean.
 type StructuralCheck func(messages *JSONValue) int

@@ -6,7 +6,6 @@
  * Fail-safe: any error is swallowed.
  *
  * Provider ingress routes the admitted canonical request through router_advise_ir.
- * router_advise_turn is the per-message entry with sampled classifier telemetry.
  */
 #ifndef DEC_ROUTER_ADVISE_H
 #define DEC_ROUTER_ADVISE_H 1
@@ -16,11 +15,6 @@
 /* Consume canonical text blocks after ingress admission; no provider-wire
  * history reader is available. Records routing and optional S2 binding. */
 void router_advise_ir(const aimee_request_t *request);
-
-/* Legacy per-message entry: classify `message` for `session_id`, record the
- * advisory decision, and (on a sampled DEFER) run the LLM classifier telemetry.
- * No-op on empty args / invalid catalog. */
-void router_advise_turn(const char *session_id, const char *message);
 
 /* S4 autonomous parity: pick the workflow for an autonomous submission whose
  * `workflow` was omitted. Routes `text` through the request->workflow router (no

@@ -320,13 +320,42 @@ webchat_snapshot_identities() {
     return 0
 }
 
+# Only the operator-supplied, usable managed PAM login may become the initial
+# appliance administrator. These non-secret identity records are shared by
+# runtime-web and the C policy gate. Existing generated/replaced ownership wins
+# forever; changing a seed pair on restart must never transfer administration.
+webchat_record_seeded_administrator() {
+    _wc_seed_owner="$1"
+    if [ -e "$WEBCHAT_BOOTSTRAP_USER" ] || [ -L "$WEBCHAT_BOOTSTRAP_USER" ] ||
+       [ -e "$WEBCHAT_BOOTSTRAP_REPLACED" ] || [ -L "$WEBCHAT_BOOTSTRAP_REPLACED" ]; then
+        _wc_seed_owner=""
+        return 0
+    fi
+    if [ -z "$_wc_seed_owner" ] || ! webchat_has_usable_login "$_wc_seed_owner"; then
+        _wc_seed_owner=""
+        return 1
+    fi
+    mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_USER")" || return 1
+    # Noclobber makes creation exclusive even if another bootstrap observes the
+    # same absent marker. 0644 exposes only the username, not a password/hash.
+    if ! (umask 022; set -C; printf 'explicit:%s\n' "$_wc_seed_owner" > "$WEBCHAT_BOOTSTRAP_USER") 2>/dev/null; then
+        _wc_seed_owner=""
+        return 1
+    fi
+    chmod 644 "$WEBCHAT_BOOTSTRAP_USER" || return 1
+    _wc_seed_owner=""
+}
+
 webchat_provision_bootstrap_account() {
     # Before anything asks whether a login is needed: put back the ones this
     # appliance already had. Without this an upgrade hands the operator a new
     # generated account while their projects stay filed under the old name.
     webchat_restore_identities
     if webchat_read_seeded_credentials; then
-        webchat_provision_login "$wc_seed_user" "$wc_seed_pass" || true
+        if webchat_provision_login "$wc_seed_user" "$wc_seed_pass"; then
+            webchat_record_seeded_administrator "$wc_seed_user" ||
+                webchat_log "WARNING: could not record the seeded appliance administrator"
+        fi
     fi
     wc_seed_user="" wc_seed_pass=""
     if webchat_read_generated_credentials; then
@@ -347,6 +376,7 @@ webchat_has_usable_login() {
     _wc_members=$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null | cut -d: -f4 | tr ',' ' ')
     for _wc_u in $_wc_members; do
         [ -n "$_wc_u" ] || continue
+        [ -z "${1:-}" ] || [ "$_wc_u" = "$1" ] || continue
         getent passwd "$_wc_u" >/dev/null 2>&1 || continue
         _wc_h=$(getent shadow "$_wc_u" 2>/dev/null | cut -d: -f2)
         # Empty, "!"-locked, or "*"-disabled are all unusable for PAM auth.

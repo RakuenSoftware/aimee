@@ -16,6 +16,8 @@ extern "C"
     * for SNI and hostname verification. Returns an opaque handle (caller frees
     * via aimee_tls_free; the fd is NOT closed here) or NULL on failure. */
    aimee_tls_t *aimee_tls_connect(int fd, const char *host);
+   /* Same identity/trust owner with an explicit call-scoped client directory. */
+   aimee_tls_t *aimee_tls_connect_home(int fd, const char *host, const char *home);
 
    /* Write exactly |len| bytes. Returns 0 on success, -1 on error. */
    int aimee_tls_write_all(aimee_tls_t *t, const void *buf, size_t len);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
@@ -99,7 +100,17 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 		}
 		return status, result
 	}
-	archive := `[{"role":"assistant","blocks":[{"type":"text","text":"SDK evidence"},{"type":"thinking","text":"secret reasoning"},{"type":"tool_use","tool_id":"sdk-call","name":"exec","input":{"secret":"private argument"}},{"type":"text","text":"classified data","context":{"model_visible":true,"sensitivity":2}},{"type":"text","text":"hidden data","context":{"model_visible":false}}]}]`
+	archiveBytes, err := json.Marshal([]map[string]any{{"role": "assistant", "blocks": []map[string]any{
+		{"type": "text", "text": "SDK evidence"},
+		{"type": "thinking", "text": "secret reasoning"},
+		{"type": "tool_use", "tool_id": "sdk-call", "name": "exec", "input": map[string]string{"secret": "private argument"}},
+		{"type": "text", "text": "classified data", "context": &canonical.Context{ModelVisible: true, Sensitivity: 2}},
+		{"type": "text", "text": "hidden data", "context": &canonical.Context{ModelVisible: false}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := string(archiveBytes)
 	if save("sdk", "alice", "sdk-source-1", externalSDKHistoryScope, archive) != store.StatusOK || save("foreign", "bob", "foreign-source", externalSDKHistoryScope, archive) != store.StatusOK {
 		t.Fatal("archive rejected")
 	}

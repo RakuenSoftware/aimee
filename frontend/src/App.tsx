@@ -261,7 +261,9 @@ export default function App() {
           {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve.
            * position:relative anchors the per-tab tutorial overlay/"?" button. */}
           <main style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: 'var(--sg-surface)' }}>
-            <SilentBoundary><TabTutorial route={location.pathname} /></SilentBoundary>
+            {!wizardOpen && (
+              <SilentBoundary><TabTutorial route={location.pathname} /></SilentBoundary>
+            )}
             <ErrorBoundary key={location.pathname}>
               <Routes>
                 <Route path="/chat" element={<Chat />} />

@@ -91,7 +91,6 @@ CONFIG_NUMBER(concurrency_preempt_enabled, int, "concurrency_preempt_enabled", 0
 CONFIG_NUMBER(concurrency_preempt_requeue_max, int, "concurrency_preempt_requeue_max", 0)
 CONFIG_NUMBER(concurrency_preempt_single_slot_only, int, "concurrency_preempt_single_slot_only", 0)
 CONFIG_STRING(constraint_solver_command, "constraint_solver_command", 512)
-CONFIG_STRING(context_engine, "context_engine", 64)
 CONFIG_NUMBER(coord_closet_budget_bytes, int, "coord_closet_budget_bytes", 0)
 CONFIG_STRING(coord_closet_denylist, "coord_closet_denylist", 256)
 CONFIG_NUMBER(coord_closet_enabled, int, "coord_closet_enabled", 0)

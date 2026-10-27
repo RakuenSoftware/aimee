@@ -6,6 +6,8 @@
 #include "gateway/stt.h"
 #include "gateway/pairing.h"
 #include "gateway/mirror.h"
+#include "gateway/gateway_ir.h"
+#include <aimee/ir/session_event.h>
 
 /* Tests use distinct user_ids / chat_ids per case to avoid cross-test state
  * leakage (the in-memory pairing registry and mirror ring buffer have no

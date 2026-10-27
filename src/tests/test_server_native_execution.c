@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 #include "aimee_sha256.h"
 /* Factory lifecycle fixture. Peer owners are explicit mocks; actual private HOME,
  * executable descriptors, launch configuration and cleanup use production code.
@@ -17,6 +18,7 @@
 #include <aimee/tools/agent_tools.h>
 #include <aimee/ir/session_event.h>
 #include "modules/workspace/workspace_turn.h"
+#include "modules/workspace/workspace_provider.h"
 #include "db1_client/primary_sessions.h"
 #include "cJSON.h"
 #include "cli_session.h"
@@ -50,7 +52,10 @@ static request_context_t owner;
 static server_session_terminal_action_fn terminal;
 static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
+static int fixture_usage_unknown, fixture_usage_prefix;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
+static int refuse_runtime, reject_final_source;
+static int expected_turn_limit;
 static char parent_role[64], private_home[4096], host_workspace[4096], observed_sdk_identity[65];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
@@ -296,7 +301,14 @@ server_native_cache_t *server_native_cache_begin_epoch(const char *session, cons
       cJSON_Delete(claim);
       published_claim++;
    }
-   return server_native_cache_begin(session, actor, turn, harness, scope, request);
+   assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(turn, "turn"));
+   assert(!strcmp(harness, active_sdk) && !strcmp(scope, digest));
+   assert(request->n_messages == (mode == 10 ? 2 : 0));
+   if (mode == 11)
+      assert(request->n_system == 1 &&
+             !strcmp(request->system[0].text, "generated native evidence"));
+   began++;
+   return &cache;
 }
 const request_context_t *request_context_get(void)
 {
@@ -353,11 +365,23 @@ int server_session_capture_after_terminal(server_session_capture_t *held,
    terminal_resource = resource;
    return 0;
 }
+/* Explicit platform-resource peer, not an actual Docker daemon/lease proof.
+ * Cache hashing is tested through the REAL runtime owner in its own fixture. */
+static int fixture_container_identity;
+static workspace_provider_t fixture_container_provider = {.kind = WS_PROVIDER_CONTAINER};
 int workspace_turn_resource_identity(const char *cwd, int *fd, char identity[65])
 {
    assert(!strcmp(cwd, host_workspace));
-   *fd = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-   assert(*fd >= 0);
+   if (fixture_container_identity)
+   {
+      assert(workspace_provider_active() == &fixture_container_provider);
+      *fd = -1; /* A container identity is not a borrowed host-directory capability. */
+   }
+   else
+   {
+      *fd = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      assert(*fd >= 0);
+   }
    snprintf(identity, 65, "%s", digest);
    return 0;
 }
@@ -379,31 +403,25 @@ int agent_tools_knowledge_write_allowed(void)
 {
    return 0;
 }
-cJSON *build_tools_array_responses(void)
+int agent_tools_catalog(aimee_wire_t wire, aimee_request_t *out)
 {
-   return cJSON_CreateArray();
+   assert(wire == expected_wire);
+   out->n_tools = 1;
+   out->tools = calloc(1, sizeof *out->tools);
+   assert(out->tools);
+   out->tools[0].name = strdup("read_file");
+   out->tools[0].schema = cJSON_Parse("{\"type\":\"object\"}");
+   return 0;
 }
-cJSON *build_tools_array(void)
+int agent_tools_catalog_filter(aimee_request_t *tools, const char *role)
 {
-   return cJSON_CreateArray();
-}
-cJSON *build_tools_array_anthropic(void)
-{
-   return cJSON_CreateArray();
-}
-
-void agent_tools_filter_for_role(cJSON *tools, const char *role)
-{
-   assert(cJSON_IsArray(tools));
+   assert(tools && tools->n_tools >= 0 && tools->n_tools <= 1);
    assert(!strcmp(parent_role, role ? role : "primary"));
+   return 0;
 }
-void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
-{
-   agent_tools_filter_for_role(tools, role);
-}
-char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
-                                       const char *role, const char *custom, int skip, char *error,
-                                       size_t size)
+int agent_build_exec_context_ir_checked(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom, int skip,
+                                        aimee_message_t *out, char *error, size_t size)
 {
    (void)network;
    (void)role;
@@ -411,15 +429,33 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    (void)error;
    (void)size;
    assert(!strcmp(agent->model, "selected-model") && skip);
-   return strdup("host environment");
+   out->role = strdup("system");
+   out->blocks = calloc(1, sizeof *out->blocks);
+   assert(out->role && out->blocks);
+   out->n_blocks = 1;
+   out->blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("host environment")};
+   aimee_ir_block_set_context(&out->blocks[0], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   if (mode == 11)
+   {
+      free(out->blocks[0].text);
+      out->blocks[0].text = strdup("generated native evidence");
+      aimee_ir_block_set_context(&out->blocks[0], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+   }
+   return 0;
 }
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                             const char *system, int max_tokens, double temperature,
-                             aimee_wire_t wire, int delegate, aimee_request_t *out)
+static int expected_no_tools;
+static int fixture_prepare_profile(const agent_t *agent, const cJSON *messages,
+                                   const aimee_request_t *tools, const char *system, int max_tokens,
+                                   double temperature, aimee_wire_t wire, int delegate,
+                                   aimee_request_t *out)
 {
    assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
-   assert(cJSON_GetArraySize(messages) == 0 && cJSON_IsArray(tools));
+   assert(cJSON_GetArraySize(messages) == 0 && tools);
+   assert(tools->n_tools == (expected_no_tools ? 0 : 1));
    assert(!strcmp(system, "host environment") && wire == expected_wire);
    if (expected_provider)
       assert(!strcmp(agent->provider, expected_provider));
@@ -428,6 +464,8 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    if (expected_auth)
       assert(!strcmp(agent->auth_type, expected_auth));
    out->model = strdup(agent->model);
+   if (expected_no_tools)
+      return 0;
    out->tools = calloc(1, sizeof *out->tools);
    assert(out->tools);
    out->n_tools = 1;
@@ -435,6 +473,27 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    out->tools[0].schema = cJSON_Parse("{\"type\":\"object\"}");
    return 0;
 }
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const cJSON *messages, const aimee_request_t *tools,
+                                    const aimee_message_t *context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int delegate,
+                                    aimee_request_t *out)
+{
+   (void)seed;
+   int rc = fixture_prepare_profile(agent, messages, tools, "host environment", max_tokens,
+                                    temperature, wire, delegate, out);
+   if (rc)
+      return rc;
+   aimee_request_t view = {.system = context->blocks, .n_system = context->n_blocks}, copy = {0};
+   assert(!aimee_ir_request_clone(&view, &copy));
+   out->system = copy.system;
+   out->n_system = copy.n_system;
+   copy.system = NULL;
+   copy.n_system = 0;
+   aimee_request_free(&copy);
+   return 0;
+}
+
 int db1_session_ir_history_load(const char *session, const char *kind, const char *actor,
                                 const char *active, char **out)
 {
@@ -466,7 +525,7 @@ int server_native_history_admit_source(const char *session, const char *actor, c
 {
    assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(active, "turn") &&
           running);
-   return aimee_ir_history_admit(messages);
+   return reject_final_source ? -1 : aimee_ir_history_admit(messages);
 }
 int server_native_runtime_set_native_owner(server_native_runtime_t *value, const cJSON *reservation)
 {
@@ -477,13 +536,26 @@ int server_native_runtime_set_native_owner(server_native_runtime_t *value, const
 }
 server_native_runtime_t *server_native_runtime_open_bound_request(
     const agent_t *selected, const request_context_t *request_owner, const char *source,
-    const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count)
+    const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count,
+    char error[512])
 {
+   assert(error);
+   error[0] = 0;
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
+   if (mode == 11)
+   {
+      assert(profile->n_system == 1);
+      assert(!strcmp(profile->system[0].text, "generated native evidence"));
+      assert(profile->system[0].context.origin == AIMEE_CTX_ORIGIN_MEMORY &&
+             profile->system[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   }
    if (!strcmp(active_sdk, "claude"))
       assert(profile->n_system > 0 &&
-             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY) &&
+             profile->system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+             profile->system[0].context.authority == AIMEE_CTX_AUTH_POLICY &&
+             profile->system[0].context.trust == AIMEE_CTX_TRUST_VERIFIED);
    else
       assert(!profile->n_system || strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
    assert(!strcmp(selected->provider, expected_provider ? expected_provider : "chatgpt"));
@@ -492,6 +564,19 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
    if (expected_auth)
       assert(!strcmp(selected->auth_type, expected_auth));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
+   if (refuse_runtime)
+   {
+      if (refuse_runtime == 2)
+         snprintf(error, 512,
+                  "Claude sign-in refresh was rate limited (HTTP 429). Try again later.");
+      return NULL;
+   }
+   if (expected_no_tools)
+   {
+      assert(!profile->n_tools && !count && !bindings);
+      opened++;
+      return &runtime;
+   }
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
    const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
    assert(!strcmp(profile->tools[0].name, logical));
@@ -517,6 +602,21 @@ const char *server_native_runtime_binding(const server_native_runtime_t *r)
 {
    assert(r == &runtime);
    return digest;
+}
+int server_native_runtime_set_turn_limit(server_native_runtime_t *r, int limit)
+{
+   assert(r == &runtime && limit == expected_turn_limit);
+   return 0;
+}
+int server_native_runtime_turn_limit_reached(const server_native_runtime_t *r)
+{
+   assert(r == &runtime);
+   return 0;
+}
+int server_native_runtime_model_turns(const server_native_runtime_t *r)
+{
+   assert(r == &runtime);
+   return 0;
 }
 int server_native_runtime_attest_launch(server_native_runtime_t *r, const char *proof)
 {
@@ -560,13 +660,37 @@ void server_native_runtime_close(server_native_runtime_t *r)
       joined = 1;
    }
 }
+static int fixture_host_calls, fixture_host_successes;
+void server_native_runtime_tool_counts(const server_native_runtime_t *r, int *calls,
+                                       int *successful)
+{
+   assert(r == &runtime);
+   *calls = fixture_host_calls;
+   *successful = fixture_host_successes;
+}
+int server_native_runtime_usage(const server_native_runtime_t *r, server_native_usage_t *out)
+{
+   assert(r == &runtime && joined && child_closed);
+   *out = (server_native_usage_t){.unobserved = fixture_usage_unknown};
+   if (fixture_usage_prefix)
+      *out = (server_native_usage_t){.input = fixture_usage_prefix == 2 ? LONG_MAX : 7,
+                                     .output = 5,
+                                     .cache_read = 3,
+                                     .cache_write = 2,
+                                     .reasoning = 1,
+                                     .unobserved = fixture_usage_unknown};
+   else if (!fixture_usage_unknown && mode != 3)
+      *out = (server_native_usage_t){.input = 73, .output = 29, .cache_read = 11, .cache_write = 7};
+   return 0;
+}
+
 int server_native_runtime_result(const server_native_runtime_t *r, aimee_response_t *out)
 {
    assert(r == &runtime && joined && child_closed);
    if (mode == 3)
       return -1;
    out->role = strdup("assistant");
-   out->n_content = mode == 11 ? 2 : 1;
+   out->n_content = mode == 19 ? 4 : mode == 11 || mode == 22 ? 2 : 1;
    out->content = calloc((size_t)out->n_content, sizeof *out->content);
    out->content[0].type = AIMEE_BLK_TEXT;
    out->content[0].text = strdup("ORIGINAL canonical output");
@@ -575,11 +699,63 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
                                         .text = strdup("original reasoning"),
                                         .thinking_id = strdup("original-reasoning-id"),
                                         .thinking_encrypted_content = strdup("opaque-original")};
+   if (mode == 21 || mode == 22)
+   {
+      free(out->content[0].text);
+      out->content[0].text = strdup("");
+      if (mode == 22)
+         out->content[1] =
+             (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                             .thinking_id = strdup("empty-final-reasoning-id"),
+                             .thinking_encrypted_content = strdup("opaque-empty-final")};
+   }
+   if (mode == 19)
+   {
+      out->content[1] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                        .media_type = strdup("image/png"),
+                                        .media_ref = strdup("data:image/png;base64,cGl4ZWw=")};
+      out->content[1].raw = cJSON_Parse("{\"native_media\":{\"id\":9007199254740993}}");
+      out->content[2] = (aimee_block_t){.type = AIMEE_BLK_DOCUMENT,
+                                        .media_type = strdup("application/pdf"),
+                                        .media_ref = strdup("https://owned.invalid/document.pdf")};
+      out->content[3] =
+          (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                          .text = strdup("retained thought"),
+                          .thinking_encrypted_content = strdup("opaque-encrypted-thought")};
+   }
+   if (mode == 20)
+   {
+      free(out->content[0].text);
+      out->content[0] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                        .media_type = strdup("image/png"),
+                                        .media_ref = strdup("data:image/png;base64,cGl4ZWw=")};
+   }
    out->usage_in = 73;
    out->usage_out = 29;
    out->usage_cache_read = 11;
    out->usage_cache_write = 7;
-   out->stop_reason = mode == 4 ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
+   if (fixture_usage_unknown)
+   {
+      out->usage_unobserved = 1;
+      out->usage_in = out->usage_out = out->usage_cache_read = out->usage_cache_write = 0;
+   }
+   out->stop_reason = mode == 4                  ? AIMEE_STOP_TOOL_USE
+                      : mode == 12 || mode == 15 ? AIMEE_STOP_CONTENT_FILTER
+                      : mode == 13               ? AIMEE_STOP_MAX_TOKENS
+                      : mode == 14               ? AIMEE_STOP_UNKNOWN
+                      : mode == 16               ? AIMEE_STOP_ERROR
+                                                 : AIMEE_STOP_END_TURN;
+   if (mode == 12 || mode == 15)
+   {
+      out->raw_stop_reason = strdup("refusal");
+      out->refusal = calloc(1, sizeof *out->refusal);
+      out->refusal->category = strdup("future_provider_category");
+      out->refusal->explanation = strdup("retained provider detail");
+   }
+   if (mode == 16)
+      out->error_message = strdup("retained upstream diagnostic");
+   if (mode == 17)
+      out->content[0].type = AIMEE_BLK_THINKING;
    return 0;
 }
 int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t *result, void *ctx)
@@ -589,16 +765,7 @@ int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t 
    assert(ctx == &runtime);
    return -1;
 }
-server_native_cache_t *server_native_cache_begin(const char *session, const char *actor,
-                                                 const char *turn, const char *harness,
-                                                 const char *scope, const aimee_request_t *profile)
-{
-   assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(turn, "turn"));
-   assert(!strcmp(harness, active_sdk) && !strcmp(scope, digest));
-   assert(profile->n_messages == (mode == 10 ? 2 : 0));
-   began++;
-   return &cache;
-}
+
 int server_native_cache_history_offset(const server_native_cache_t *c)
 {
    assert(c == &cache);
@@ -683,21 +850,32 @@ static int sdk_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
    assert(cfg->tool_catalog && cfg->tool_call == server_native_runtime_execute_tool);
    int rc = sdk_peer(cfg->codex_host);
    assert(!cfg->bind_session("native-result", cfg->bind_context));
-   out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
+   out->tool_calls = 999; /* SDK display metadata is not a host execution receipt. */
+   out->successful_tool_calls = 998;
    out->success = !rc;
-   return rc;
+   return mode == 15 || mode == 16 || mode == 18 ? -1 : rc;
 }
 const provider_cli_adapter_t codex_provider_cli_adapter = {.cli_kind = "codex",
                                                            .execute = sdk_execute};
-int cli_codex_chat_stream(const cli_codex_chat_request_t *request, cli_codex_chat_event_cb cb,
-                          void *context, cli_codex_chat_result_t *out)
+typedef struct
 {
-   (void)cb;
-   (void)context;
-   assert(!request->home && !request->thread_id && !request->history && request->host_launch);
-   int rc = sdk_peer(request->host_launch);
-   snprintf(out->thread_id, sizeof out->thread_id, "native-result");
-   return rc;
+   struct stat program, directory;
+} stdio_launch_identity_t;
+static int stdio_guard_child(void *context, int executable, int cwd)
+{
+   stdio_launch_identity_t *expected = context;
+   struct stat program, directory;
+   assert(executable >= 0 && cwd >= 0 && executable != cwd);
+   assert(!fstat(executable, &program) && !fstat(cwd, &directory));
+   assert(program.st_dev == expected->program.st_dev && program.st_ino == expected->program.st_ino);
+   assert(directory.st_dev == expected->directory.st_dev &&
+          directory.st_ino == expected->directory.st_ino);
+   return 0;
+}
+static int stdio_guard_parent(void *context, pid_t child)
+{
+   assert(context && child > 0);
+   return 0;
 }
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind,
                         void *context, agent_result_t *out)
@@ -817,15 +995,43 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    assert(probe_host.executable_fd >= 0);
    probe_host.spawn_guard = NULL;
    probe_cfg.claude_host = &probe_host;
-   int input = -1, output = -1, status = -1;
-   pid_t probe;
-   assert(!cli_claude_native_spawn(&probe_cfg, &input, &output, &probe));
-   close(input);
-   char observed[128] = {0};
-   ssize_t bytes = read(output, observed, sizeof observed - 1);
-   assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
-   close(output);
-   assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   for (int holes = 0; holes < 8; holes++)
+   {
+      pid_t verifier = fork();
+      assert(verifier >= 0);
+      if (!verifier)
+      {
+         for (int fd = 0; fd < 3; fd++)
+            if (holes & (1 << fd))
+               close(fd);
+         cli_claude_host_launch_t launched = probe_host;
+         launched.executable_fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+         launched.cwd_fd = open(host->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         assert(launched.executable_fd >= 0 && launched.cwd_fd >= 0);
+         stdio_launch_identity_t identity;
+         assert(!fstat(launched.executable_fd, &identity.program) &&
+                !fstat(launched.cwd_fd, &identity.directory));
+         cli_native_spawn_guard_t guard = {stdio_guard_child, stdio_guard_parent, &identity};
+         launched.spawn_guard = &guard;
+         provider_cli_cfg_t launch = probe_cfg;
+         launch.claude_host = &launched;
+         int input = -1, output = -1, status = -1;
+         pid_t probe;
+         assert(!cli_claude_native_spawn(&launch, &input, &output, &probe));
+         close(input);
+         char observed[128] = {0};
+         ssize_t bytes = read(output, observed, sizeof observed - 1);
+         assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
+         close(output);
+         assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && !WEXITSTATUS(status));
+         close(launched.executable_fd);
+         close(launched.cwd_fd);
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(verifier, &status, 0) == verifier && WIFEXITED(status) &&
+             !WEXITSTATUS(status));
+   }
    close(probe_host.executable_fd);
 #endif
    snprintf(private_home, sizeof private_home, "%s", host->home);
@@ -879,6 +1085,18 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
       assert(!strcmp(cli_claude_native_profile_error(host, bad), shape_reasons[i]));
       cJSON_Delete(bad);
    }
+   /* Disabling bundled plugins is a launch input, never an acceptance exception. */
+   const char *bundled[] = {"cc-plugin-agents-md", "cc-plugin-plugin-authoring"};
+   for (unsigned i = 0; i < sizeof bundled / sizeof *bundled; i++)
+   {
+      cJSON *bad = cJSON_Duplicate(frame, 1);
+      cJSON *plugin = cJSON_CreateObject();
+      assert(plugin && cJSON_AddStringToObject(plugin, "name", bundled[i]) &&
+             cJSON_AddStringToObject(plugin, "source", "builtin") &&
+             cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(bad, "plugins"), plugin));
+      assert(!strcmp(cli_claude_native_profile_error(host, bad), "plugins"));
+      cJSON_Delete(bad);
+   }
    cJSON *bad_name = cJSON_Duplicate(frame, 1);
    cJSON_ReplaceItemInArray(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0,
                             cJSON_CreateString("unowned-value-must-not-be-logged"));
@@ -898,6 +1116,26 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0)),
                   unexpected));
    cJSON_Delete(bad_name);
+   /* SDK status strings are untrusted. Only the closed enum can reach logs,
+    * including when a future SDK emits private diagnostic text as status. */
+   const char *statuses[] = {"pending",    "failed",
+                             "needs-auth", "disabled",
+                             "connected",  "PRIVATE_SDK_STATUS=https://secret.invalid/token"};
+   const char *safe_statuses[] = {"pending",  "failed",    "needs-auth",
+                                  "disabled", "connected", "unknown"};
+   for (unsigned i = 0; i < sizeof statuses / sizeof statuses[0]; i++)
+   {
+      cJSON *status_frame = cJSON_Duplicate(frame, 1);
+      cJSON *status_server =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(status_frame, "mcp_servers"), 0);
+      assert(cJSON_ReplaceItemInObjectCaseSensitive(status_server, "status",
+                                                    cJSON_CreateString(statuses[i])));
+      cli_claude_native_profile_summary(host, status_frame, &summary);
+      assert(!strcmp(cli_claude_mcp_status_name(summary.aimee_status), safe_statuses[i]));
+      assert(!strstr(cli_claude_mcp_status_name(summary.aimee_status), "PRIVATE_SDK_STATUS"));
+      cJSON_Delete(status_frame);
+   }
+   assert(!strcmp(cli_claude_mcp_status_name((cli_claude_mcp_status_t)-1), "unknown"));
    cli_claude_native_profile_summary(host, frame, &summary);
    assert(!strcmp(summary.missing_owned_sha256, "-") &&
           !strcmp(summary.unexpected_reported_sha256, "-"));
@@ -918,7 +1156,8 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    sdk_calls++;
    child_closed = 1;
    out->success = 1;
-   out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
+   out->tool_calls = 999; /* SDK display metadata is not a host execution receipt. */
+   out->successful_tool_calls = 998;
    return 0;
 }
 
@@ -943,6 +1182,9 @@ static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   fixture_usage_unknown = fixture_usage_prefix = 0;
+   fixture_host_calls = fixture_host_successes = reject_final_source = 0;
+   owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
    expected_wire = AIMEE_WIRE_RESPONSES;
    expected_provider = expected_endpoint = expected_auth = NULL;
    reserved = quiesced = finished_reservation = published_claim = 0;
@@ -972,10 +1214,30 @@ static void finish(int success)
    action(success, terminal_resource);
    terminal_resource = NULL;
 }
+
 int main(int argc, char **argv)
 {
    if (argc > 1 && !strcmp(argv[1], "--bare"))
    {
+      struct stat channel;
+      for (int fd = 0; fd < 3; fd++)
+         assert(!fstat(fd, &channel) && S_ISFIFO(channel.st_mode));
+      int plugin_settings = 0;
+      for (int i = 1; i < argc; i++)
+         if (!strcmp(argv[i], "--settings"))
+         {
+            assert(!plugin_settings++ && i + 1 < argc);
+            cJSON *settings = cJSON_Parse(argv[++i]);
+            const cJSON *disabled = cJSON_GetObjectItemCaseSensitive(settings, "enabledPlugins");
+            assert(cJSON_IsObject(settings) && cJSON_GetArraySize(settings) == 1 &&
+                   cJSON_IsObject(disabled) && cJSON_GetArraySize(disabled) == 2 &&
+                   cJSON_IsFalse(
+                       cJSON_GetObjectItemCaseSensitive(disabled, "cc-plugin-agents-md@builtin")) &&
+                   cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(
+                       disabled, "cc-plugin-plugin-authoring@builtin")));
+            cJSON_Delete(settings);
+         }
+      assert(plugin_settings == 1);
       const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
       assert(setting && !strcmp(setting, "0"));
       setting = getenv("MCP_CONNECTION_NONBLOCKING");
@@ -983,6 +1245,27 @@ int main(int argc, char **argv)
       assert(!getenv("PARENT_SECRET") && !getenv("ANTHROPIC_AUTH_TOKEN"));
       assert(getenv("ANTHROPIC_API_KEY") &&
              !strcmp(getenv("ANTHROPIC_API_KEY"), "local-capability-fixture"));
+      /* The real factory's descriptor spawn has already fchdir'd this probe.
+       * Read the exact path selected by the SDK environment, not a duplicate
+       * test-generated config or the original operator/tool workspace. */
+      char actual_cwd[4096], config_path[8192], config_bytes[16385];
+      const char *config_dir = getenv("CLAUDE_CONFIG_DIR");
+      assert(config_dir && getcwd(actual_cwd, sizeof actual_cwd));
+      assert(snprintf(config_path, sizeof config_path, "%s/.claude.json", config_dir) <
+             (int)sizeof config_path);
+      FILE *config = fopen(config_path, "r");
+      assert(config);
+      size_t count = fread(config_bytes, 1, sizeof config_bytes - 1, config);
+      assert(!ferror(config) && feof(config) && !fclose(config));
+      config_bytes[count] = 0;
+      cJSON *value = cJSON_Parse(config_bytes);
+      assert(cJSON_IsObject(value));
+      cJSON *projects = cJSON_GetObjectItemCaseSensitive(value, "projects");
+      assert(cJSON_IsObject(projects) && cJSON_GetArraySize(projects) == 1);
+      cJSON *project = cJSON_GetObjectItemCaseSensitive(projects, actual_cwd);
+      assert(project && "factory config must key trust to actual SDK getcwd");
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(project, "hasTrustDialogAccepted")));
+      cJSON_Delete(value);
       puts("native Claude gateway environment verified");
       return 0;
    }
@@ -1004,6 +1287,26 @@ int main(int argc, char **argv)
    snprintf(selected.model, sizeof selected.model, "selected-model");
    provider_cli_cfg_t cfg = {.agent = &selected, .role = "worker", .user_prompt = "current task"};
 #if defined(__linux__)
+   /* Runtime preparation also resolves credential/source lineage. A refusal
+    * must not misdiagnose that boundary as a tool-catalog defect or model reply. */
+   for (int diagnostic = 1; diagnostic <= 2; diagnostic++)
+   {
+      reset(0);
+      refuse_runtime = diagnostic;
+      agent_result_t preparation_refused = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &preparation_refused) ==
+             AGENT_RC_CAPTURE_FAILED);
+      assert(!preparation_refused.success && !preparation_refused.canonical_response.content &&
+             !preparation_refused.canonical_response.n_content);
+      assert(!strcmp(preparation_refused.error,
+                     diagnostic == 1
+                         ? "native SDK launch refused during native runtime preparation"
+                         : "Claude sign-in refresh was rate limited (HTTP 429). Try again later."));
+      assert(!sdk_calls && !opened && !began && !reserved && !private_home[0] && !retained);
+      assert(restored == 1);
+      agent_result_clear_response(&preparation_refused);
+   }
+   refuse_runtime = 0;
    for (int scenario = 0; scenario <= 10; scenario++)
    {
       reset(scenario);
@@ -1015,6 +1318,7 @@ int main(int argc, char **argv)
           scenario == 0 || scenario == 6 || scenario == 7 || scenario == 8 || scenario == 10;
       assert((rc == 0) == success && out.success == success && !retained);
       assert(restored == 1 && !strcmp(parent_role, "parent"));
+      assert(out.tool_calls == 0 && out.successful_tool_calls == 0);
       if (private_home[0])
       {
          assert(access(private_home, F_OK));
@@ -1023,13 +1327,15 @@ int main(int argc, char **argv)
       }
       if (success)
       {
-         assert(!strcmp(out.response, "ORIGINAL canonical output"));
+         assert_ir_text(&out.canonical_response, "ORIGINAL canonical output");
          assert(out.prompt_tokens == 73 && out.completion_tokens == 29);
+         assert(out.tool_calls == 0 && out.successful_tool_calls == 0);
          assert(out.cache_read_tokens == 11 && out.cache_write_tokens == 7);
          assert(terminal && !completed && !aborted && !closed);
          char lease_error[512];
-         assert(!server_native_cache_lease_open(getenv("AIMEE_HOME"), active_sdk, "destination",
-                                                digest, "actor", "concurrent-turn", lease_error));
+         assert(!server_native_cache_lease_acquire_unpublished(
+             getenv("AIMEE_HOME"), active_sdk, "destination", digest, "actor", "concurrent-turn",
+             NULL, lease_error));
          assert(strstr(lease_error, "busy"));
          finish(scenario != 6);
          assert(completed == (scenario == 6 ? 0 : 1));
@@ -1039,9 +1345,227 @@ int main(int argc, char **argv)
       {
          assert(!terminal && !completed);
          assert(!began || (aborted == 1 && closed == 1));
+         if (scenario == 9) /* Exact terminal custody rejected the otherwise complete answer. */
+            assert(!strcmp(out.error, "canonical native execution was refused"));
       }
       agent_result_clear_response(&out);
    }
+   for (int diagnostic = 0; diagnostic < 2; diagnostic++)
+   {
+      reset(diagnostic ? 12 : 0);
+      fixture_usage_unknown = 1;
+      aimee_response_t canonical = {0};
+      cfg.canonical_response = &canonical;
+      agent_result_t unknown = {0};
+      int rc = provider_cli_adapter_host_execute(&cfg, &unknown);
+      assert(diagnostic ? rc < 0 && !unknown.success : !rc && unknown.success);
+      assert(agent_result_usage_is_unobserved(&unknown) && canonical.usage_unobserved);
+      assert(!unknown.prompt_tokens && !unknown.completion_tokens && !unknown.cache_read_tokens &&
+             !unknown.cache_write_tokens && !canonical.usage_in && !canonical.usage_out);
+      assert(unknown.canonical_response.n_content == 1 &&
+             !strcmp(unknown.canonical_response.content[0].text, "ORIGINAL canonical output"));
+      assert(canonical.stop_reason ==
+             (diagnostic ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_END_TURN));
+      if (!diagnostic)
+         finish(1);
+      assert(!retained && closed == 1);
+      aimee_response_free(&canonical);
+      agent_result_clear_response(&unknown);
+      cfg.canonical_response = NULL;
+   }
+   reset(3); /* Typed runtime peer: uncertain send, no canonical final response. */
+   fixture_usage_unknown = 1;
+   aimee_response_t absent = {0};
+   cfg.canonical_response = &absent;
+   agent_result_t incomplete = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &incomplete) < 0);
+   assert(!incomplete.success && agent_result_usage_is_unobserved(&incomplete));
+   assert(!incomplete.canonical_response.content && !absent.content &&
+          !incomplete.canonical_response.n_content);
+   assert(!incomplete.prompt_tokens && !incomplete.completion_tokens);
+   agent_result_clear_response(&incomplete);
+   cfg.canonical_response = NULL;
+   for (int unknown = 0; unknown < 2; unknown++)
+   {
+      reset(3);
+      fixture_usage_unknown = unknown;
+      fixture_usage_prefix = 1;
+      agent_result_t subtotal = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &subtotal) < 0 && !subtotal.success);
+      assert(subtotal.usage_unobserved == unknown && !subtotal.canonical_response.content);
+      assert(subtotal.prompt_tokens == 7 && subtotal.completion_tokens == 5 &&
+             subtotal.cache_read_tokens == 3 && subtotal.cache_write_tokens == 2);
+      agent_result_clear_response(&subtotal);
+   }
+   reset(0);
+   fixture_usage_unknown = 1;
+   fixture_usage_prefix = 1;
+   agent_result_t partial_usage = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &partial_usage));
+   assert(partial_usage.success && partial_usage.prompt_tokens == 7 &&
+          partial_usage.completion_tokens == 5 && partial_usage.usage_unobserved);
+   assert(partial_usage.canonical_response.usage_unobserved &&
+          !partial_usage.canonical_response.usage_in &&
+          !partial_usage.canonical_response.usage_out);
+   finish(1);
+   agent_result_clear_response(&partial_usage);
+   reset(3);
+   fixture_usage_unknown = 1;
+   fixture_usage_prefix = 2;
+   agent_result_t bounded_usage = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &bounded_usage) < 0);
+   assert(bounded_usage.prompt_tokens == INT_MAX && bounded_usage.usage_unobserved &&
+          !bounded_usage.canonical_response.content);
+   agent_result_clear_response(&bounded_usage);
+   /* A legitimate container namespace identity may have no host execution FD.
+    * The real factory retains canonical history and gives the owned fake SDK
+    * its independently held private workspace, never a source-FD substitution. */
+   reset(10);
+   fixture_container_identity = 1;
+   workspace_provider_set_active(&fixture_container_provider);
+   agent_result_t container_result = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &container_result));
+   assert(container_result.success);
+   assert_ir_text(&container_result.canonical_response, "ORIGINAL canonical output");
+   assert(began == 1 && terminal && !completed);
+   finish(1);
+   assert(completed == 1 && closed == 1);
+   agent_result_clear_response(&container_result);
+   workspace_provider_clear_active();
+   fixture_container_identity = 0;
+   /* Provider declines/partials and failed SDK framing retain original IR,
+    * never the SDK display, and cannot publish a successful native cache. */
+   for (int diagnostic = 12; diagnostic <= 18; diagnostic++)
+   {
+      reset(diagnostic);
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t failed = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &failed) < 0);
+      assert(!failed.success && !terminal && !completed && aborted == 1 && closed == 1);
+      assert(original.n_content == 1 && original.usage_in == 73 && original.usage_out == 29);
+      assert(failed.canonical_response.n_content == 1);
+      char *failure_text = aimee_ir_response_text_alloc(&failed.canonical_response);
+      assert(!failure_text || !strstr(failure_text, "SDK REWRITE"));
+      free(failure_text);
+      if (diagnostic == 12 || diagnostic == 15)
+      {
+         assert(original.stop_reason == AIMEE_STOP_CONTENT_FILTER && original.refusal &&
+                !strcmp(original.refusal->category, "future_provider_category") &&
+                !strcmp(original.refusal->explanation, "retained provider detail") &&
+                !strcmp(original.raw_stop_reason, "refusal"));
+      }
+      if (diagnostic == 13)
+         assert(original.stop_reason == AIMEE_STOP_MAX_TOKENS);
+      if (diagnostic == 14)
+         assert(original.stop_reason == AIMEE_STOP_UNKNOWN);
+      if (diagnostic == 16)
+         assert(original.stop_reason == AIMEE_STOP_ERROR && original.error_message &&
+                !strcmp(original.error_message, "retained upstream diagnostic"));
+      if (diagnostic == 17)
+      {
+         assert(original.content[0].type == AIMEE_BLK_THINKING);
+         assert(
+             !strcmp(failed.error, "native provider completed without an authored final answer"));
+      }
+      else
+         assert(strcmp(failed.error, "native provider completed without an authored final answer"));
+      if (diagnostic == 18)
+         assert(original.stop_reason == AIMEE_STOP_END_TURN && !failed.success);
+      aimee_response_free(&original);
+      agent_result_clear_response(&failed);
+      cfg.canonical_response = NULL;
+   }
+   /* Empty canonical finals retain original typed diagnostics and fail exactly
+    * as before. A failed source check must not be mislabeled as model emptiness. */
+   for (int scenario = 0; scenario < 3; scenario++)
+   {
+      reset(scenario ? 22 : 21);
+      reject_final_source = scenario == 2;
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t empty = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &empty) == AGENT_RC_CAPTURE_FAILED);
+      assert(!empty.success && !terminal && !completed && aborted == 1 && closed == 1);
+      assert(!strcmp(empty.stop_reason, "capture_failed"));
+      assert(
+          !strcmp(empty.error, reject_final_source
+                                   ? "canonical native execution was refused"
+                                   : "native provider completed without an authored final answer"));
+      assert(original.stop_reason == AIMEE_STOP_END_TURN && original.usage_in == 73 &&
+             original.usage_out == 29 && original.n_content == (scenario ? 2 : 1));
+      assert(original.content[0].type == AIMEE_BLK_TEXT && original.content[0].text &&
+             !original.content[0].text[0]);
+      assert(empty.canonical_response.n_content == original.n_content);
+      if (scenario)
+         assert(original.content[1].type == AIMEE_BLK_THINKING &&
+                !strcmp(original.content[1].thinking_id, "empty-final-reasoning-id") &&
+                !strcmp(original.content[1].thinking_encrypted_content, "opaque-empty-final") &&
+                !strcmp(empty.canonical_response.content[1].thinking_encrypted_content,
+                        "opaque-empty-final"));
+      aimee_response_free(&original);
+      agent_result_clear_response(&empty);
+      cfg.canonical_response = NULL;
+   }
+   /* General native/primary completion preserves all admitted visible media,
+    * even with no text. Business TEXT-only projection is a different boundary. */
+   for (int media = 19; media <= 20; media++)
+   {
+      reset(media);
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t rendered = {0};
+      assert(!provider_cli_adapter_host_execute(&cfg, &rendered));
+      assert(rendered.success && terminal && !completed && !aborted);
+      assert(original.n_content == (media == 19 ? 4 : 1) && original.usage_in == 73);
+      if (media == 19)
+      {
+         assert(original.content[1].type == AIMEE_BLK_IMAGE &&
+                original.content[2].type == AIMEE_BLK_DOCUMENT);
+         assert(original.content[1].raw && !strcmp(original.content[3].thinking_encrypted_content,
+                                                   "opaque-encrypted-thought"));
+         char *raw = cJSON_PrintUnformatted(original.content[1].raw);
+         assert(raw && strstr(raw, "9007199254740993"));
+         cJSON_free(raw);
+      }
+      else
+      {
+         assert(original.content[0].type == AIMEE_BLK_IMAGE);
+         assert_ir_text(&rendered.canonical_response, "");
+      }
+      assert(aimee_ir_response_complete_text_valid(&original)); /* not a business artifact */
+      aimee_response_free(&original);
+      agent_result_clear_response(&rendered);
+      cfg.canonical_response = NULL;
+      finish(1);
+      assert(completed == 1 && !aborted);
+   }
+   /* The actual factory must forward the adapter's admitted cap unchanged to
+    * the runtime owner, including zero's existing unlimited/default meaning. */
+   const int turn_limits[] = {0, 1, 3};
+   for (size_t i = 0; i < sizeof turn_limits / sizeof turn_limits[0]; i++)
+   {
+      reset(0);
+      cfg.native_turn_limit = expected_turn_limit = turn_limits[i];
+      agent_result_t limited = {0};
+      assert(!provider_cli_adapter_host_execute(&cfg, &limited));
+      assert(limited.success && opened == 1);
+      finish(1);
+      agent_result_clear_response(&limited);
+   }
+   cfg.native_turn_limit = expected_turn_limit = 0;
+   /* The source-bound no-tools selection must reach the actual native profile
+    * and runtime tool owner, not just hide tools in a display/Go request. */
+   reset(0);
+   expected_no_tools = 1;
+   cfg.no_tools = 1;
+   agent_result_t tool_less = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &tool_less));
+   assert(tool_less.success && opened == 1);
+   finish(1);
+   agent_result_clear_response(&tool_less);
+   cfg.no_tools = 0;
+   expected_no_tools = 0;
    /* DB40 acknowledgement can precede the marker at a crash: recover by
     * authenticated directory lookup, never by adopting a marker into DB40. */
    reset(0);
@@ -1109,8 +1633,9 @@ int main(int argc, char **argv)
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
    assert(!quiesced && !recovered && durable_reservation);
    lookup_missing = 0;
-   server_native_cache_lease_t *live = server_native_cache_lease_open(
-       getenv("AIMEE_HOME"), "codex", "destination", digest, "actor", "old-turn", recovery_error);
+   server_native_cache_lease_t *live = server_native_cache_lease_acquire_unpublished(
+       getenv("AIMEE_HOME"), "codex", "destination", digest, "actor", "old-turn", NULL,
+       recovery_error);
    assert(live);
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
    assert(!quiesced && !recovered);
@@ -1205,6 +1730,16 @@ int main(int argc, char **argv)
    assert(!server_native_session_reconcile("destination", "actor", "turn", recovery_error));
    assert(finished_reservation == 1 && !recovered && !strcmp(observed_epoch, "0"));
    old_completed = 0;
+   /* External runtime peer reports its already committed canonical outcomes;
+    * these replace contradictory SDK display counters, rather than adding to them. */
+   reset(0);
+   fixture_host_calls = 2;
+   fixture_host_successes = 1;
+   agent_result_t host_counted = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &host_counted));
+   assert(host_counted.tool_calls == 2 && host_counted.successful_tool_calls == 1);
+   agent_result_clear_response(&host_counted);
+   finish(1);
    /* The optional qualified path must reserve before HOME and finish only
     * after the real canonical terminal and exact boundary quiescence. */
    reset(0);
@@ -1227,7 +1762,10 @@ int main(int argc, char **argv)
    quiescence_failure = 1;
    agent_result_t retained_boundary = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &retained_boundary) < 0);
-   assert(terminal && reserved && !runtime_closed);
+   assert(terminal && reserved && !runtime_closed && sdk_calls == 1);
+   assert(retained_boundary.tool_calls == 0 && retained_boundary.successful_tool_calls == 0);
+   assert(agent_result_usage_is_unobserved(&retained_boundary) &&
+          !retained_boundary.canonical_response.content);
    finish(0);
    assert(!runtime_closed && !completed && !aborted && !finished_reservation);
    atomic_store(&quiescence_failure, 0);
@@ -1272,14 +1810,6 @@ int main(int argc, char **argv)
    agent_result_t denied = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &denied) < 0);
    assert(!opened && !retained && !sdk_calls && !restored);
-   reset(0);
-   cli_codex_chat_request_t request = {.user_prompt = "primary task"};
-   cli_codex_chat_result_t result = {0};
-   assert(!server_native_codex_chat_stream(&selected, &request, NULL, NULL, &result));
-   assert(result.prompt_tokens == 73 && result.completion_tokens == 29 && terminal);
-   assert(!retained && restored == 1 && access(private_home, F_OK));
-   finish(1);
-   assert(completed == 1 && closed == 1);
    reset(11);
    aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = "seeded canonical task"};
    aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
@@ -1293,7 +1823,7 @@ int main(int argc, char **argv)
    assert(canonical.usage_in == 73 && canonical.usage_cache_read == 11);
    assert(!strcmp(canonical.content[0].text, "ORIGINAL canonical output"));
    assert(!strcmp(canonical.content[1].thinking_encrypted_content, "opaque-original"));
-   assert(!strcmp(seeded.response, "ORIGINAL canonical output"));
+   assert_ir_text(&seeded.canonical_response, "ORIGINAL canonical output");
    aimee_response_free(&canonical);
    agent_result_clear_response(&seeded);
    finish(1);
@@ -1304,7 +1834,8 @@ int main(int argc, char **argv)
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
    agent_result_t claude = {0};
    assert(!provider_cli_adapter_host_execute(&cfg, &claude));
-   assert(!strcmp(claude.response, "ORIGINAL canonical output") && !retained && joined);
+   assert_ir_text(&claude.canonical_response, "ORIGINAL canonical output");
+   assert(!retained && joined);
    assert(access(private_home, F_OK));
    agent_result_clear_response(&claude);
    finish(1);
@@ -1383,8 +1914,9 @@ int main(int argc, char **argv)
    finish(1);
    assert(completed == 1 && !finished_reservation && durable_reservation);
    char retained_error[512];
-   assert(!server_native_cache_lease_open(getenv("AIMEE_HOME"), active_sdk, "destination", digest,
-                                          "actor", "after-uncertain-ack", retained_error));
+   assert(!server_native_cache_lease_acquire_unpublished(
+       getenv("AIMEE_HOME"), active_sdk, "destination", digest, "actor", "after-uncertain-ack",
+       NULL, retained_error));
    assert(strstr(retained_error, "unresolved") || strstr(retained_error, "busy"));
    agent_result_clear_response(&uncertain_ack);
    atomic_store(&finish_failure, 0);
@@ -1396,7 +1928,7 @@ int main(int argc, char **argv)
    qualified_mode = 0;
    active_sdk = "codex";
    reset(0);
-   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "acp");
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "unsupported");
    agent_result_t unsupported = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &unsupported) == AGENT_RC_CONTEXT_REFUSED);
    assert(!unsupported.success && unsupported.error[0]);

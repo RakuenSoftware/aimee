@@ -10,6 +10,7 @@
 #include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
+#include "server_native_runtime.h"
 #include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
@@ -471,13 +472,13 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
          cJSON_Delete(req);
          return err_json(resp, cap, 403, "browser session owner mismatch");
       }
-      db1_server_session_t row;
-      if (db1_server_session_get(session_id, &row) != 0)
+      db1_server_session_owner_t row;
+      if (db1_server_session_owner_get(session_id, &row) != 0)
       {
          /* Creation never updates an existing owner. A concurrent creator or
           * lost acknowledgement is resolved only by reading the durable row. */
          (void)db1_server_session_create(session_id, "webchat", actor);
-         if (db1_server_session_get(session_id, &row) != 0)
+         if (db1_server_session_owner_get(session_id, &row) != 0)
          {
             cJSON_Delete(req);
             return err_json(resp, cap, 503, "browser session admission unavailable");
@@ -1101,32 +1102,27 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Run a streaming /v1/responses request: write event-stream headers, let the
- * handler emit typed events; the Responses protocol has no `data: [DONE]`
- * terminator (it ends with the handler's `response.completed`). */
-static void handle_responses_stream(int fd, const char *body, const char *request_id)
+/* Responses and Anthropic handlers emit typed SSE with their own terminal
+ * event. Share the live writer without appending the OpenAI [DONE] trailer. */
+static void handle_typed_stream(int fd, const char *body, server_http_responses_stream_fn handler,
+                                const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_responses_stream_handler);
-}
-
-/* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
- * Anthropic typed-event sequence (message_start … message_stop) via the same
- * `event:`/`data:` framer as Responses; unlike the OpenAI SSE path there is no
- * terminal `data: [DONE]` (the stream ends with message_stop). */
-static void handle_messages_stream(int fd, const char *body, const char *request_id)
-{
-   write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_messages_stream_handler);
+   server_http_sse_live_run(fd, body, handler);
 }
 
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
                                int body_len)
 {
    const request_context_t *owner = request_context_get();
-   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0] ||
-       server_http_identity_transport() != owner->vault_transport ||
-       strcmp(server_http_identity_principal(), owner->vault_principal) ||
+   int service_scope = owner && owner->vault_transport == ATTEST_NONE &&
+                       server_native_runtime_forward_service_admitted() &&
+                       server_http_identity_transport() == ATTEST_NONE &&
+                       !server_http_identity_principal()[0];
+   if (!owner || !owner->vault_principal[0] ||
+       (!service_scope && (owner->vault_transport == ATTEST_NONE ||
+                           server_http_identity_transport() != owner->vault_transport ||
+                           strcmp(server_http_identity_principal(), owner->vault_principal))) ||
        server_http_identity_browser_operator() || !method || !path || strncmp(path, "/v1/", 4) ||
        strchr(path, '?') || strchr(path, '#') || body_len < 0 ||
        !server_http_route_allowed_caps(0, owner->capabilities, method, path, 0))
@@ -1146,10 +1142,10 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    int rc = 0;
    if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
        !strcmp(path, "/v1/responses") && g_responses_stream_handler)
-      handle_responses_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_responses_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/messages") && g_messages_stream_handler)
-      handle_messages_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_messages_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/chat/completions") && g_chat_stream_handler)
       handle_stream(fd, body, g_chat_stream_handler, owner->request_id);
@@ -1294,7 +1290,7 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
-void handle_conn(int fd, int is_tcp, int is_management)
+static void handle_conn_impl(int fd, int is_tcp, int is_management)
 {
    server_http_keepalive_set(0);
    server_http_gzip_set(0);
@@ -1899,13 +1895,10 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       char shadow_hdr[8] = "";
       int inbound_is_shadow = http_header(buf, "X-Aimee-Shadow", shadow_hdr, sizeof shadow_hdr);
-      shadow_mirror_dispatch(path, body, body_len, inbound_is_shadow);
+      shadow_mirror_begin_request(path, inbound_is_shadow);
    }
 
-   /* Native streaming chat over HTTP — hands off to the async chat worker, which
-    * streams newline-delimited aimee events. The outer route-allowed gate (TCP)
-    * already enforces CAP_CHAT via server_http_route_caps; re-check here so the
-    * UDS path is explicit too. */
+   /* Recheck chat capability for UDS as well as the outer TCP route gate. */
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
@@ -1923,14 +1916,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* Auditable-correctness P1: for OpenAI-family ingress endpoints, mint the
-    * per-turn retrieval-event id up-front — before any response header is
-    * written — when evidence emission is on. The same id is then (a) surfaced
-    * to the client via the X-Aimee-Retrieval-Event response header and (b)
-    * reused by ingress_preinject_build for the emitted retrieval_event. Gated
-    * on the endpoint + flag so flag-off / non-ingress requests are byte-
-    * identical on the wire (config is read only for these three paths, which
-    * already pay a legacy_config_read inside the ingress builder). */
+   /* Mint the shared retrieval-event ID before writing response headers.
+    * Only supported OpenAI endpoints consult the evidence-emission flag. */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
@@ -1978,14 +1965,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
       if (strcmp(path, "/v1/responses") == 0 && g_responses_stream_handler)
       {
-         handle_responses_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_responses_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;
       }
       if (strcmp(path, "/v1/messages") == 0 && g_messages_stream_handler)
       {
-         handle_messages_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_messages_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;
@@ -2011,6 +1998,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
    free(resp);
    free(body);
 }
+/* Scope teardown also covers streaming and every early refusal/keep-alive exit. */
+void handle_conn(int fd, int is_tcp, int is_management)
+{
+   shadow_mirror_end_request();
+   handle_conn_impl(fd, is_tcp, is_management);
+   shadow_mirror_end_request();
+}
+
 /* Per-connection worker: each accepted connection is handled on its own
  * detached thread, so a slow request (e.g. a synchronous chat completion) or an
  * SSE stream cannot block the accept loop, and independent /v1 requests run

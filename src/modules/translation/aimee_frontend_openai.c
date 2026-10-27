@@ -448,6 +448,20 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       aimee_request_free(out);
       return -1;
    }
+   const cJSON *tier = cJSON_GetObjectItemCaseSensitive(req, "service_tier");
+   if (tier && !cJSON_IsNull(tier))
+   {
+      if (!cJSON_IsString(tier) || !tier->valuestring || !tier->valuestring[0])
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid service_tier");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->service_tier = strdup(tier->valuestring);
+      if (!out->service_tier)
+         goto oom;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);
@@ -744,6 +758,11 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
             goto invalid;
       }
    }
+   /* Owned input sidecar for explicit external replay/representation checks.
+    * This legacy wire has no native-byte fast path and is never Chat history. */
+   out->raw = cJSON_Duplicate(root, 1);
+   if (!out->raw)
+      goto invalid;
    cJSON_Delete(root);
    return 0;
 invalid:
@@ -830,9 +849,10 @@ fail:
    return NULL;
 }
 
+/* This wire has no representation for typed provider refusal diagnostics. */
 cJSON *openai_frontend_render(const aimee_response_t *r)
 {
-   if (!r)
+   if (!r || r->refusal)
       return NULL;
    if (r->error_message)
    {
@@ -938,6 +958,8 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
 
    cJSON_AddStringToObject(choice, "finish_reason", openai_finish(r));
 
+   if (r->usage_unobserved)
+      return out; /* Optional usage is absent; no measured zero was observed. */
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "prompt_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "completion_tokens", (double)r->usage_out);

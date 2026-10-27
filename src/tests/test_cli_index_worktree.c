@@ -211,12 +211,12 @@ static void check_missing_registration_bootstrap(const char *main_root)
             assert(used < sizeof bytes - 1);
          }
          cJSON *reply = cJSON_Parse("{\"status\":\"ok\"}");
-         if (step == 0 || step == 1 || step == 4)
+         if (step == 0 || step == 4)
          {
             assert(strstr(bytes, " /v1/index/projects "));
             cJSON_AddArrayToObject(reply, "projects");
             if (step == 4)
-               add_project(reply, "registered-after-ingest", main_root);
+               add_project(reply, "registered-project", main_root);
          }
          else
          {
@@ -226,14 +226,28 @@ static void check_missing_registration_bootstrap(const char *main_root)
             {
                assert(strstr(bytes, " /v1/index/ingest "));
                assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "phase")),
-                              step == 2 ? "begin" : "seal"));
+                              step == 1   ? "begin"
+                              : step == 2 ? "stage"
+                                          : "seal"));
                assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "root")), main_root));
+               assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "name")),
+                              "registered-project"));
+               if (step == 2)
+               {
+                  const cJSON *files = cJSON_GetObjectItem(req, "files");
+                  assert(cJSON_GetArraySize(files) == 1);
+                  const cJSON *file = cJSON_GetArrayItem(files, 0);
+                  assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(file, "rel_path")),
+                                 "aimee.workspace.yaml"));
+                  assert(strstr(cJSON_GetStringValue(cJSON_GetObjectItem(file, "content")),
+                                "id: registered-project"));
+               }
             }
             else
             {
                assert(strstr(bytes, " /v1/index/query "));
                assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "project")),
-                              "registered-after-ingest"));
+                              "registered-project"));
                assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), main_root));
                cJSON_AddItemToObject(reply, "results", cJSON_Parse("[{\"result\":{\"hits\":[]}}]"));
             }
@@ -257,12 +271,88 @@ static void check_missing_registration_bootstrap(const char *main_root)
    close(listener);
    cli_v1_route_t route = {.method = "index.hybrid", .timeout_ms = 2000};
    char *args[] = {"needle"};
-   assert(cli_v1_forward(NULL, &route, 1, NULL, NULL, 1, args) == 0);
+   FILE *output = tmpfile();
+   assert(output && fflush(stdout) == 0);
+   int saved_stdout = dup(STDOUT_FILENO);
+   assert(saved_stdout >= 0 && dup2(fileno(output), STDOUT_FILENO) >= 0);
+   int rc = cli_v1_forward(NULL, &route, 1, NULL, NULL, 1, args);
+   assert(fflush(stdout) == 0 && dup2(saved_stdout, STDOUT_FILENO) >= 0);
+   close(saved_stdout);
+   assert(rc == 0 && fseek(output, 0, SEEK_SET) == 0);
+   char wire[4096];
+   size_t length = fread(wire, 1, sizeof wire - 1, output);
+   assert(length && !ferror(output));
+   wire[length] = 0;
+   fclose(output);
+   cJSON *published = cJSON_ParseWithOpts(wire, NULL, 1);
+   assert(published && cJSON_IsArray(cJSON_GetObjectItem(published, "results")));
+   cJSON_Delete(published); /* --json never leaks bootstrap prose on stdout. */
    int status;
    assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
    cli_v1_manifest_set_for_test(NULL);
    unsetenv("AIMEE_API_ENDPOINT");
    assert(chdir(original) == 0);
+}
+
+static void write_manifest(const char *root, const char *identity)
+{
+   char path[4096];
+   assert(snprintf(path, sizeof path, "%s/aimee.workspace.yaml", root) < (int)sizeof path);
+   FILE *f = fopen(path, "w");
+   assert(f && fprintf(f, "id: %s\n", identity) > 0 && fclose(f) == 0);
+}
+
+static void check_canonical_identity(const char *tmp)
+{
+   char left[4096], right[4096], a[128], b[128];
+   assert(snprintf(left, sizeof left, "%s/first", tmp) < (int)sizeof left);
+   assert(snprintf(right, sizeof right, "%s/second", tmp) < (int)sizeof right);
+   assert(mkdir(left, 0700) == 0 && mkdir(right, 0700) == 0);
+   strncat(left, "/repo", sizeof left - strlen(left) - 1);
+   strncat(right, "/repo", sizeof right - strlen(right) - 1);
+   assert(mkdir(left, 0700) == 0 && mkdir(right, 0700) == 0);
+   write_manifest(left, "canonical-alpha");
+   write_manifest(right, "canonical-beta");
+   cli_ws_project_identity(NULL, NULL, left, a, sizeof a);
+   cli_ws_project_identity(NULL, NULL, right, b, sizeof b);
+   assert(!strcmp(a, "canonical-alpha") && !strcmp(b, "canonical-beta"));
+   cJSON *registry = cJSON_Parse("{\"projects\":[]}");
+   add_project(registry, "repo", left); /* Prior wrong label must not win. */
+   add_project(registry, "canonical-beta", right);
+   check_project(left, left, registry, NULL);
+   check_project(right, right, registry, "canonical-beta");
+   add_project(registry, "canonical-alpha", left);
+   check_project(left, left, registry, "canonical-alpha");
+   cJSON_Delete(registry);
+   write_manifest(left, "invalid identity with spaces");
+   cli_ws_project_identity(NULL, NULL, left, a, sizeof a);
+   assert(!a[0]); /* No basename fallback after an invalid explicit owner. */
+   char path[4096];
+   assert(snprintf(path, sizeof path, "%s/aimee.workspace.yaml", left) < (int)sizeof path);
+   assert(unlink(path) == 0);
+   cli_ws_project_identity(NULL, NULL, left, a, sizeof a);
+   cli_ws_project_identity(NULL, NULL, left, b, sizeof b);
+   assert(!strncmp(a, "local:", 6) && !strcmp(a, b));
+   char gitroot[4096], linked[4096];
+   assert(snprintf(gitroot, sizeof gitroot, "%s/identity-git", tmp) < (int)sizeof gitroot);
+   assert(snprintf(linked, sizeof linked, "%s/identity-linked", tmp) < (int)sizeof linked);
+   run((const char *const[]){"git", "init", "-q", gitroot, NULL});
+   run((const char *const[]){"git", "-C", gitroot, "-c", "user.name=test", "-c",
+                             "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+                             "commit", "--allow-empty", "-qm", "identity fixture", NULL});
+   cli_ws_project_identity(NULL, NULL, gitroot, a, sizeof a);
+   assert(!strncmp(a, "local:", 6));
+   run((const char *const[]){"git", "-C", gitroot, "worktree", "add", "-q", "--detach", linked,
+                             "HEAD", NULL});
+   cli_ws_project_identity(NULL, NULL, linked, b, sizeof b);
+   assert(!strcmp(a, b));
+   run((const char *const[]){"git", "-C", gitroot, "remote", "add", "origin",
+                             "git@github.com:org/identity-fixture.git", NULL});
+   cli_ws_project_identity(NULL, NULL, linked, b, sizeof b);
+   assert(!strcmp(b, "https://github.com/org/identity-fixture"));
+   run((const char *const[]){"git", "-C", gitroot, "worktree", "remove", "--force", linked, NULL});
+   puts("PASS: same-basename manifest owners, invalid owner refusal, UUID/worktree and forge "
+        "identity");
 }
 
 int main(void)
@@ -273,10 +363,16 @@ int main(void)
    assert(snprintf(main_root, sizeof(main_root), "%s/main repo", tmp) < (int)sizeof(main_root));
    assert(snprintf(linked, sizeof(linked), "%s/work tree ;$`quoted`", tmp) < (int)sizeof(linked));
    assert(snprintf(subdir, sizeof(subdir), "%s/sub", linked) < (int)sizeof(subdir));
+   check_canonical_identity(tmp);
    run((const char *const[]){"git", "init", "-q", main_root, NULL});
+   write_manifest(main_root, "registered-project");
    run((const char *const[]){"git", "-C", main_root, "-c", "user.name=test", "-c",
                              "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
                              "commit", "--allow-empty", "-qm", "fixture", NULL});
+   run((const char *const[]){"git", "-C", main_root, "add", "aimee.workspace.yaml", NULL});
+   run((const char *const[]){"git", "-C", main_root, "-c", "user.name=test", "-c",
+                             "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+                             "commit", "-qm", "canonical identity", NULL});
    run((const char *const[]){"git", "-C", main_root, "worktree", "add", "-q", "--detach", linked,
                              "HEAD", NULL});
    assert(mkdir(subdir, 0700) == 0);
@@ -323,31 +419,32 @@ int main(void)
    assert(cli_index_worktree_root("index.hybrid", req) == NULL);
    cJSON_Delete(req);
 
-   check_project(subdir, main_root, response, "registered-name-not-a-basename");
+   check_project(subdir, main_root, response, NULL); /* Mismatched old label retained, unused. */
+   add_project(response, "registered-project", main_root);
+   check_project(subdir, main_root, response, "registered-project");
    check_project(subdir, "/unregistered", response, NULL);
    check_project(subdir, main_root, NULL, NULL);
    cJSON *error = cJSON_Parse("{\"status\":\"error\"}");
    check_project(subdir, main_root, error, NULL);
    cJSON_Delete(error);
    char sibling[4096];
-   assert(snprintf(sibling, sizeof(sibling), "%s-other", main_root) < (int)sizeof(sibling));
+   assert(snprintf(sibling, sizeof sibling, "%s-other", main_root) < (int)sizeof sibling);
    check_project(subdir, sibling, response, NULL); /* Component boundary. */
    add_project(response, "another-name", main_root);
-   check_project(subdir, main_root, response, NULL); /* Ambiguous, independent of order. */
-   add_project(response, "registered-name-not-a-basename", main_root);
-   check_project(subdir, main_root, response, NULL);
+   check_project(subdir, main_root, response, "registered-project");
    add_project(response, "worktree-project", linked);
-   check_project(subdir, main_root, response, "worktree-project");
+   check_project(subdir, main_root, response, "registered-project");
+   add_project(response, "registered-project", linked);
+   check_project(subdir, main_root, response, "registered-project");
    add_project(response, "nested-project", subdir);
-   check_project(subdir, main_root, response, "nested-project");
    add_project(response, "nested-alias", subdir);
-   check_project(subdir, main_root, response, NULL);
+   check_project(subdir, main_root, response, "registered-project");
    cJSON_Delete(response);
    response = cJSON_Parse("{\"projects\":[]}");
    char trailing[4096];
-   assert(snprintf(trailing, sizeof(trailing), "%s/", main_root) < (int)sizeof(trailing));
-   add_project(response, "registered", trailing);
-   check_project(subdir, main_root, response, "registered");
+   assert(snprintf(trailing, sizeof trailing, "%s/", main_root) < (int)sizeof trailing);
+   add_project(response, "registered-project", trailing);
+   check_project(subdir, main_root, response, "registered-project");
    cJSON_Delete(response);
 
    check_forwarding(main_root, subdir);

@@ -11,11 +11,11 @@
 
 #include <stddef.h>
 #include "agent_config.h"
+#include <aimee/ir/aimee_ir.h>
 
-/* Build the reassessment prompt for a roadmap. Loads the roadmap goal
- * and all milestone acceptance criteria from KB_STORE. Returns heap string
- * (caller frees), or NULL on error. */
-char *roadmap_reassess_build_prompt(const char *roadmap_id);
+/* Build an owned canonical request: host policy is separate from retrieved
+ * artifact evidence. Free out with aimee_request_free. Returns 0 or -1. */
+int roadmap_reassess_build_request(const char *roadmap_id, aimee_request_t *out);
 
 /* Run the reassessment pass: calls agent_run("reason") with the
  * reassessment prompt, parses the response for completeness.

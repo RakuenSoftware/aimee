@@ -10,9 +10,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Default sidecar script used across all local-inference backends. */
-#define CURATOR_EXTRACT_SCRIPT "scripts/curator-extract.py"
-
 /* ── enum helpers ─────────────────────────────────────────────────────────── */
 
 const char *curator_backend_name(curator_backend_t b)
@@ -50,7 +47,6 @@ curator_profile_t curator_profile_select(int vram_mb, const char *endpoint_url)
 {
    curator_profile_t p;
    memset(&p, 0, sizeof(p));
-   snprintf(p.extract_command, sizeof(p.extract_command), "%s", CURATOR_EXTRACT_SCRIPT);
 
    /* Endpoint takes priority: caller explicitly configured an external service. */
    if (endpoint_url && endpoint_url[0])
@@ -104,9 +100,6 @@ int curator_profile_apply(curator_profile_t *profile)
       return -1;
    if (config_set_kb_curator_extract_code_enabled(code) != 0)
       return -1;
-   if (profile->extract_command[0] &&
-       config_set_kb_curator_extract_command(profile->extract_command) != 0)
-      return -1;
    return 0;
 }
 
@@ -132,8 +125,7 @@ char *curator_profile_describe(const curator_profile_t *p, char *buf, size_t len
                curator_backend_name(p->backend), p->model, p->endpoint_url, p->docs_enabled,
                p->code_enabled);
    else
-      snprintf(buf, len, "backend=%s model=%s extract_command=%s docs=%d code=%d",
-               curator_backend_name(p->backend), p->model, p->extract_command, p->docs_enabled,
-               p->code_enabled);
+      snprintf(buf, len, "backend=%s model=%s docs=%d code=%d", curator_backend_name(p->backend),
+               p->model, p->docs_enabled, p->code_enabled);
    return buf;
 }

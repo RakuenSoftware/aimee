@@ -307,8 +307,77 @@ static void test_verification_proofs(void)
    cJSON_Delete(proofs);
 }
 
+static void test_refusal_terminal_json(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_STOP,
+                          .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                          .raw_stop_reason = "refusal",
+                          .refusal = &details};
+   cJSON *json = aimee_ir_delta_json(&delta);
+   assert(json);
+   cJSON *refusal = cJSON_GetObjectItemCaseSensitive(json, "refusal");
+   assert(cJSON_IsObject(refusal) && cJSON_GetArraySize(refusal) == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(refusal, "category")),
+                  "future_category"));
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(refusal, "explanation")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "raw_stop_reason")),
+                  "refusal"));
+   cJSON_Delete(json);
+   details.category = NULL;
+   json = aimee_ir_delta_json(&delta);
+   assert(json && cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(
+                      cJSON_GetObjectItemCaseSensitive(json, "refusal"), "category")));
+   cJSON_Delete(json);
+   delta.type = AIMEE_DELTA_TURN_START;
+   assert(!aimee_ir_delta_json(&delta));
+   delta.type = AIMEE_DELTA_TURN_STOP;
+   delta.stop_reason = AIMEE_STOP_END_TURN;
+   assert(!aimee_ir_delta_json(&delta));
+   delta.refusal = NULL;
+   json = aimee_ir_delta_json(&delta);
+   assert(json && !cJSON_HasObjectItem(json, "refusal"));
+   cJSON_Delete(json);
+}
+
+static void test_compaction_boundary_roundtrip(void)
+{
+   cJSON *json = cJSON_Parse("{\"role\":\"user\",\"_compaction_boundary\":true,\"blocks\":[{"
+                             "\"type\":\"text\",\"text\":\"history\"}]}");
+   aimee_message_t message = {0};
+   assert(json && !aimee_ir_message_parse(json, &message) && message.compaction_boundary);
+   cJSON *encoded = aimee_ir_message_json(&message);
+   assert(encoded &&
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(encoded, "_compaction_boundary")));
+   cJSON_Delete(encoded);
+   aimee_message_free(&message);
+   cJSON *history = cJSON_CreateArray();
+   assert(history && cJSON_AddItemToArray(history, cJSON_Duplicate(json, 1)));
+   cJSON *copy = aimee_ir_history_clone(history);
+   assert(copy && !aimee_ir_message_parse(cJSON_GetArrayItem(copy, 0), &message) &&
+          message.compaction_boundary);
+   aimee_message_free(&message);
+   cJSON_Delete(copy);
+   cJSON_Delete(history);
+   cJSON_ReplaceItemInObjectCaseSensitive(json, "_compaction_boundary", cJSON_CreateString("true"));
+   assert(aimee_ir_message_parse(json, &message) == -1);
+   cJSON_Delete(json);
+   const char *native[] = {
+       "[{\"role\":\"user\",\"content\":\"native\"}]",
+       "[{\"type\":\"message\",\"role\":\"user\",\"content\":[]}]",
+       "[{\"role\":\"user\",\"blocks\":[]},{\"role\":\"assistant\",\"content\":\"mixed\"}]", "{}"};
+   for (size_t i = 0; i < sizeof native / sizeof *native; i++)
+   {
+      history = cJSON_Parse(native[i]);
+      assert(history && !aimee_ir_history_clone(history));
+      cJSON_Delete(history);
+   }
+}
+
 int main(void)
 {
+   test_compaction_boundary_roundtrip();
+   test_refusal_terminal_json();
    test_verification_proofs();
    test_response_snapshot();
    test_owned_delta_assembly();
@@ -600,7 +669,8 @@ int main(void)
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"same\",\"content\":"
        "\"ok\",\"is_error\":false}]},"
        "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":"
-       "\"read_file\",\"input\":{}}]},"
+       "\"read_file\",\"input\":{\"marker\":0.123456789012345678901234567890}},"
+       "{\"type\":\"tool_use\",\"tool_id\":\"second\",\"name\":\"read_file\",\"input\":{}}]},"
        "{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"next\"}]},"
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"orphan\","
        "\"content\":\"bad\",\"is_error\":false}]}]");
@@ -611,8 +681,8 @@ int main(void)
    assert(unresolved_after && !strcmp(unresolved_before, unresolved_after));
    free(unresolved_before);
    free(unresolved_after);
-   assert(aimee_ir_history_repair(history) == 2);
-   assert(cJSON_GetArraySize(history) == 5);
+   assert(aimee_ir_history_repair(history) == 3);
+   assert(cJSON_GetArraySize(history) == 6);
    cJSON *repaired =
        cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 3), "blocks"), 0);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "tool_id")), "same"));
@@ -631,6 +701,12 @@ int main(void)
            cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 1), "blocks"), 0),
            "content")),
        "ok"));
+   char *precise = cJSON_PrintUnformatted(history);
+   assert(precise && strstr(precise, "0.123456789012345678901234567890"));
+   free(precise);
+   const cJSON *second =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 4), "blocks"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(second, "tool_id")), "second"));
    assert(aimee_ir_history_repair(history) == 0);
    assert(aimee_ir_history_admit(history) == -1); /* Diagnostics do not become receipts. */
    cJSON *resolved = cJSON_Parse(
@@ -718,6 +794,89 @@ int main(void)
    compaction_json = aimee_ir_session_event_json(&compaction_event);
    assert(!compaction_json);
 
+   aimee_delta_t unknown_usage = {
+       .type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN, .usage_unobserved = 1};
+   cJSON *unknown_json = aimee_ir_delta_json(&unknown_usage);
+   assert(unknown_json && !cJSON_GetObjectItem(unknown_json, "usage_in") &&
+          !cJSON_GetObjectItem(unknown_json, "usage_out"));
+   cJSON_Delete(unknown_json);
+   aimee_ir_response_builder_t unknown_builder = {0};
+   aimee_delta_t unknown_start = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&unknown_builder, &unknown_start));
+   assert(!aimee_ir_response_builder_apply(&unknown_builder, &unknown_usage));
+   assert(unknown_builder.response.usage_unobserved);
+   aimee_ir_response_builder_free(&unknown_builder);
+   unknown_usage.usage_in = 1;
+   assert(!aimee_ir_delta_json(&unknown_usage));
+   unknown_usage.usage_in = 0;
+   unknown_usage.usage_unobserved = 0;
+   unknown_json = aimee_ir_delta_json(&unknown_usage);
+   assert(unknown_json && cJSON_GetObjectItem(unknown_json, "usage_in") &&
+          cJSON_GetObjectItem(unknown_json, "usage_out"));
+   cJSON_Delete(unknown_json);
+
+   aimee_session_event_t external_projection = {.kind = AIMEE_SESSION_PROJECTION,
+                                                .projection_model = "configured ACP agent",
+                                                .projection_boundary = "request",
+                                                .projection_host_context_blocks_as_text = 1};
+   cJSON *fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity);
+   const cJSON *fidelity_payload = cJSON_GetObjectItem(fidelity, "payload");
+   assert(cJSON_GetObjectItem(fidelity_payload, "host_context_blocks_as_text")->valueint == 1);
+   assert(!cJSON_GetObjectItem(fidelity_payload, "unverified_external_tool_reports"));
+   assert(!cJSON_GetObjectItem(fidelity_payload, "omitted_reasoning_blocks")->valueint);
+   cJSON_Delete(fidelity);
+   external_projection.projection_host_context_blocks_as_text = 0;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = 2;
+   fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity);
+   cJSON_Delete(fidelity);
+   external_projection.projection_unverified_external_tool_reports = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = -1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_unverified_external_tool_reports = 0;
+   external_projection.projection_history_messages_as_text = 2;
+   fidelity = aimee_ir_session_event_json(&external_projection);
+   assert(fidelity &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(fidelity, "payload"), "history_messages_as_text")
+                  ->valueint == 2);
+   cJSON_Delete(fidelity);
+   external_projection.projection_history_messages_as_text = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+   external_projection.projection_history_messages_as_text = -1;
+   assert(!aimee_ir_session_event_json(&external_projection));
+
+   aimee_session_event_t settings = {.kind = AIMEE_SESSION_PROJECTION,
+                                     .projection_model = "subscription-model",
+                                     .projection_boundary = "request",
+                                     .projection_request_controls = 2};
+   cJSON *settings_json = aimee_ir_session_event_json(&settings);
+   assert(settings_json && cJSON_GetObjectItem(cJSON_GetObjectItem(settings_json, "payload"),
+                                               "omitted_request_controls")
+                                   ->valueint == 2);
+   cJSON_Delete(settings_json);
+   settings.projection_request_controls = -1;
+   assert(!aimee_ir_session_event_json(&settings));
+   settings.projection_request_controls = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&settings));
+
+   aimee_session_event_t empty = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = "anthropic",
+                                  .projection_boundary = "request",
+                                  .projection_empty_messages = 1};
+   cJSON *empty_json = aimee_ir_session_event_json(&empty);
+   assert(empty_json &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(empty_json, "payload"), "omitted_empty_messages")
+                  ->valueint == 1);
+   cJSON_Delete(empty_json);
+   empty.projection_empty_messages = -1;
+   assert(!aimee_ir_session_event_json(&empty));
+   empty.projection_empty_messages = AIMEE_IR_MAX_BLOCKS + 1;
+   assert(!aimee_ir_session_event_json(&empty));
+   empty.projection_empty_messages = 0;
+   assert(!aimee_ir_session_event_json(&empty));
    puts("IR session event tests passed");
    return 0;
 }

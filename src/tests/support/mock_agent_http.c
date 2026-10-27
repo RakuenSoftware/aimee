@@ -1,6 +1,8 @@
 #include "mock_agent_http.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 static mock_agent_http_stream_handler_t g_stream_handler = NULL;
@@ -105,6 +107,40 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
       return 200;
    }
    return -1;
+}
+
+/* Legacy fixtures provide text JSON handlers. Preserve their exact bytes when
+ * an adapter uses the explicit-length transport; binary fixtures supply their
+ * own byte handler rather than silently losing NUL-delimited content here. */
+int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
+                                       const char *content_type, const void *body, size_t length,
+                                       char **response_buf, size_t *response_length, int timeout_ms,
+                                       const char *extra_headers)
+{
+   (void)content_type;
+   if (response_buf)
+      *response_buf = NULL;
+   if (response_length)
+      *response_length = 0;
+   if (!response_buf || !response_length || (!body && length) || length == SIZE_MAX ||
+       (length && memchr(body, '\0', length)))
+      return -1;
+   char *text = malloc(length + 1);
+   if (!text)
+      return -1;
+   if (length)
+      memcpy(text, body, length);
+   text[length] = '\0';
+   int status = agent_http_post(url, auth_header, text, response_buf, timeout_ms, extra_headers);
+   free(text);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+   }
+   else if (*response_buf)
+      *response_length = strlen(*response_buf);
+   return status;
 }
 
 int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)

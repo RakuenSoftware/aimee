@@ -56,30 +56,30 @@ int db1_ensemble_view(int id, ensemble_view_t *out)
    char slot8[32];
    char slot9[32];
    memset(out, 0, sizeof *out);
-   out->prompt = malloc(1048576u);
-   if (!out->prompt)
+   out->request_ir = malloc(1048576u);
+   if (!out->request_ir)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
    }
-   out->prompt[0] = '\0';
+   out->request_ir[0] = '\0';
    out->context = malloc(1048576u);
    if (!out->context)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
    }
    out->context[0] = '\0';
-   char *const values[] = {slot0, out->err, slot2, out->info.template_name, out->info.channel, out->info.status, slot6, slot7, slot8, slot9, out->info.phase_name, out->info.expected_agent, out->info.expected_role, out->info.paused_reason, out->info.created_at, out->info.updated_at, out->prompt, out->context};
+   char *const values[] = {slot0, out->err, slot2, out->info.template_name, out->info.channel, out->info.status, slot6, slot7, slot8, slot9, out->info.phase_name, out->info.expected_agent, out->info.expected_role, out->info.paused_reason, out->info.created_at, out->info.updated_at, out->request_ir, out->context};
    const size_t caps[] = {sizeof slot0, sizeof out->err, sizeof slot2, sizeof out->info.template_name, sizeof out->info.channel, sizeof out->info.status, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9, sizeof out->info.phase_name, sizeof out->info.expected_agent, sizeof out->info.expected_role, sizeof out->info.paused_reason, sizeof out->info.created_at, sizeof out->info.updated_at, 1048576u, 1048576u};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_ENSEMBLE_VIEW, fields, 1, values, caps, 18, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
@@ -90,22 +90,22 @@ int db1_ensemble_view(int id, ensemble_view_t *out)
    out->info.current_turn = (int)strtol(slot7, NULL, 10);
    out->info.phase_count = (int)strtol(slot8, NULL, 10);
    out->info.turns_in_phase = (int)strtol(slot9, NULL, 10);
-   char *shrunk_prompt = realloc(out->prompt, strlen(out->prompt) + 1u);
+   char *shrunk_prompt = realloc(out->request_ir, strlen(out->request_ir) + 1u);
    if (shrunk_prompt)
-      out->prompt = shrunk_prompt;
+      out->request_ir = shrunk_prompt;
    char *shrunk_context = realloc(out->context, strlen(out->context) + 1u);
    if (shrunk_context)
       out->context = shrunk_context;
    return 0;
 }
 
-int db1_ensemble_advance_view(int id, const char *sender, const char *text, ensemble_view_t *out)
+int db1_ensemble_advance_view(int id, const char *sender, const char *message_ir, ensemble_view_t *out)
 {
    if (!out)
       return -1;
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", id);
-   const char *fields[] = {arg0, sender ? sender : "", text ? text : ""};
+   const char *fields[] = {arg0, sender ? sender : "", message_ir ? message_ir : ""};
    char slot0[32];
    char slot2[32];
    char slot6[32];
@@ -113,30 +113,30 @@ int db1_ensemble_advance_view(int id, const char *sender, const char *text, ense
    char slot8[32];
    char slot9[32];
    memset(out, 0, sizeof *out);
-   out->prompt = malloc(1048576u);
-   if (!out->prompt)
+   out->request_ir = malloc(1048576u);
+   if (!out->request_ir)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
    }
-   out->prompt[0] = '\0';
+   out->request_ir[0] = '\0';
    out->context = malloc(1048576u);
    if (!out->context)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
    }
    out->context[0] = '\0';
-   char *const values[] = {slot0, out->err, slot2, out->info.template_name, out->info.channel, out->info.status, slot6, slot7, slot8, slot9, out->info.phase_name, out->info.expected_agent, out->info.expected_role, out->info.paused_reason, out->info.created_at, out->info.updated_at, out->prompt, out->context};
+   char *const values[] = {slot0, out->err, slot2, out->info.template_name, out->info.channel, out->info.status, slot6, slot7, slot8, slot9, out->info.phase_name, out->info.expected_agent, out->info.expected_role, out->info.paused_reason, out->info.created_at, out->info.updated_at, out->request_ir, out->context};
    const size_t caps[] = {sizeof slot0, sizeof out->err, sizeof slot2, sizeof out->info.template_name, sizeof out->info.channel, sizeof out->info.status, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9, sizeof out->info.phase_name, sizeof out->info.expected_agent, sizeof out->info.expected_role, sizeof out->info.paused_reason, sizeof out->info.created_at, sizeof out->info.updated_at, 1048576u, 1048576u};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_ENSEMBLE_ADVANCE, fields, 3, values, caps, 18, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
-      free(out->prompt);
+      free(out->request_ir);
       free(out->context);
       memset(out, 0, sizeof *out);
       return -1;
@@ -147,9 +147,9 @@ int db1_ensemble_advance_view(int id, const char *sender, const char *text, ense
    out->info.current_turn = (int)strtol(slot7, NULL, 10);
    out->info.phase_count = (int)strtol(slot8, NULL, 10);
    out->info.turns_in_phase = (int)strtol(slot9, NULL, 10);
-   char *shrunk_prompt = realloc(out->prompt, strlen(out->prompt) + 1u);
+   char *shrunk_prompt = realloc(out->request_ir, strlen(out->request_ir) + 1u);
    if (shrunk_prompt)
-      out->prompt = shrunk_prompt;
+      out->request_ir = shrunk_prompt;
    char *shrunk_context = realloc(out->context, strlen(out->context) + 1u);
    if (shrunk_context)
       out->context = shrunk_context;

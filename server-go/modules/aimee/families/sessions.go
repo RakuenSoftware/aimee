@@ -14,7 +14,7 @@ import (
 )
 
 // The sessions family: the server's sessions, per-agent transcripts, the
-// write-path log, and the two webchat bindings.
+// write-path log, legacy import source, and live display state.
 const (
 	EventSessions uint32 = 11782
 	StageSessions uint32 = 6
@@ -28,17 +28,9 @@ const (
 	opServerSessionCount          uint32 = 7
 	opServerSessionListExpired    uint32 = 8
 	opServerSessionDeleteExpired  uint32 = 9
-	opPrimarySessionSave          uint32 = 10
-	opPrimarySessionLoad          uint32 = 11
-	opPrimarySessionDelete        uint32 = 12
-	opPrimarySessionAllocRecent   uint32 = 13
-	opPrimarySessionAllocSearch   uint32 = 14
 	opPrimarySessionGetLatest     uint32 = 15
 	opSessionWritePathRecord      uint32 = 16
 	opSessionStaleReads           uint32 = 17
-	opWebchatClaudeSessionGet     uint32 = 18
-	opWebchatClaudeOwnedByOther   uint32 = 19
-	opWebchatClaudeSessionBind    uint32 = 20
 	opWebchatLiveSet              uint32 = 21
 	opWebchatLiveGet              uint32 = 22
 	opPersonaDeliveryClaim        uint32 = 23
@@ -324,37 +316,6 @@ const (
 	                       SET persona_delivery_state = $2, last_activity_at = now()
 	                     WHERE id = $1 AND persona_delivery_state = 2`
 
-	primarySessionSaveSQL = `INSERT INTO primary_sessions
-	                             (session_id, agent_name, provider, messages_json)
-	                         VALUES ($1, $2, $3, $4)
-	                         ON CONFLICT (session_id, agent_name, provider)
-	                         DO UPDATE SET messages_json = EXCLUDED.messages_json,
-	                                       updated_at = now()`
-
-	primarySessionDeleteSQL = `DELETE FROM primary_sessions
-	                            WHERE session_id = $1 AND agent_name = $2 AND provider = $3`
-
-	primarySessionColumns = `session_id, agent_name, provider, messages_json,
-	        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
-	        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
-
-	primaryAllocRecentSQL = `SELECT ` + primarySessionColumns + `
-	                           FROM primary_sessions
-	                          ORDER BY updated_at DESC, session_id
-	                          LIMIT $1`
-
-	// Four columns, because the caller is searching for a transcript and any of
-	// these is how a person recognises one. The wire carries a RAW query, not a
-	// pattern: the module wraps it, which is what the C did.
-	primaryAllocSearchSQL = `SELECT ` + primarySessionColumns + `
-	                           FROM primary_sessions
-	                          WHERE messages_json ILIKE $1 ESCAPE '\'
-	                             OR session_id    ILIKE $1 ESCAPE '\'
-	                             OR agent_name    ILIKE $1 ESCAPE '\'
-	                             OR provider      ILIKE $1 ESCAPE '\'
-	                          ORDER BY updated_at DESC, session_id
-	                          LIMIT $2`
-
 	primaryGetLatestSQL = `SELECT session_id,agent_name,provider,
  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
  to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
@@ -377,26 +338,6 @@ const (
 	                  ORDER BY r.path
 	                  LIMIT $3`
 
-	// principal is attribution, never a namespace: a tab is identified by its
-	// aimee_session_id alone, and the C passed principal in and then explicitly
-	// ignored it at every read.
-	webchatClaudeGetSQL = `SELECT claude_session_id FROM webchat_claude_sessions
-	                        WHERE aimee_session_id = $1
-	                        ORDER BY updated_at DESC
-	                        LIMIT 1`
-
-	webchatOwnedByOtherSQL = `SELECT 1 FROM webchat_claude_sessions
-	                           WHERE claude_session_id = $1 AND aimee_session_id <> $2
-	                           LIMIT 1`
-
-	webchatBindUpdateSQL = `UPDATE webchat_claude_sessions
-	                           SET claude_session_id = $1, updated_at = now()
-	                         WHERE aimee_session_id = $2`
-
-	webchatBindInsertSQL = `INSERT INTO webchat_claude_sessions
-	                            (principal, aimee_session_id, claude_session_id)
-	                        VALUES ($1, $2, $3)`
-
 	webchatLiveSetSQL = `INSERT INTO webchat_live (session_id, turn_id, rev, text, status)
 	                     VALUES ($1, $2, 1, $3, $4)
 	                     ON CONFLICT (session_id) DO UPDATE SET
@@ -414,19 +355,6 @@ const (
 func serverSessionRow(scan func(...any) error) ([]string, error) {
 	cells := make([]string, 10)
 	dest := make([]any, 10)
-	for i := range cells {
-		dest[i] = &cells[i]
-	}
-	if err := scan(dest...); err != nil {
-		return nil, err
-	}
-	return cells, nil
-}
-
-// primarySessionRow reads the six cells of a primary-session row.
-func primarySessionRow(scan func(...any) error) ([]string, error) {
-	cells := make([]string, 6)
-	dest := make([]any, 6)
 	for i := range cells {
 		dest[i] = &cells[i]
 	}
@@ -738,62 +666,6 @@ func personaDeliveryFinish(ctx context.Context, q store.Queryer, f []string) (ui
 
 // --- primary sessions ----------------------------------------------------------
 
-func primarySessionSave(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	if _, err := q.Exec(ctx, primarySessionSaveSQL, f[0], f[1], f[2], f[3]); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
-
-func primarySessionLoad(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	messages, err := legacyPrimaryTextBounded(ctx, q, f[0], f[1], f[2], legacyPrimaryReplyCapacity())
-	switch {
-	case store.IsNoRows(err):
-		return store.StatusMissing, nil, nil
-	case err == errLegacyPrimaryReplyTooLong:
-		return store.StatusTooLong, nil, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	return store.StatusOK, []string{messages}, nil
-}
-
-func primarySessionDelete(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" || f[1] == "" || f[2] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	if _, err := q.Exec(ctx, primarySessionDeleteSQL, f[0], f[1], f[2]); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
-
-func primarySessionAllocRecent(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	max, ok := boundedMax(f[0])
-	if !ok {
-		return store.StatusInvalid, nil, nil
-	}
-	return collect(ctx, q, primaryAllocRecentSQL, 6, primarySessionRow, max)
-}
-
-// primarySessionAllocSearch is op 14: find transcripts by free text.
-//
-// f[0] is the user's raw query, NOT a pattern -- it is wrapped here and escaped,
-// so a query containing % matches a literal % rather than everything.
-func primarySessionAllocSearch(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	max, ok := boundedMax(f[1])
-	if f[0] == "" || !ok {
-		return store.StatusInvalid, nil, nil
-	}
-	return collect(ctx, q, primaryAllocSearchSQL, 6, primarySessionRow, likeContains(f[0]), max)
-}
-
 func primarySessionGetLatest(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" {
 		return store.StatusInvalid, nil, nil
@@ -813,7 +685,7 @@ func primarySessionGetLatest(ctx context.Context, q store.Queryer, f []string) (
 	if err != nil {
 		return 0, nil, err
 	}
-	cells := []string{session, agent, provider, messages, created, updated}
+	cells := []string{session, agent, provider, created, updated, messages}
 	return store.StatusOK, cells, nil
 }
 
@@ -846,75 +718,6 @@ func sessionStaleReads(ctx context.Context, q store.Queryer, f []string) (uint32
 }
 
 // --- webchat ---------------------------------------------------------------------
-
-func webchatClaudeSessionGet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[1] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	var claudeID string
-	switch err := q.QueryRow(ctx, webchatClaudeGetSQL, f[1]).Scan(&claudeID); {
-	case store.IsNoRows(err):
-		return store.StatusMissing, nil, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	if claudeID == "" {
-		// A row with no binding is the same answer as no row.
-		return store.StatusMissing, nil, nil
-	}
-	return store.StatusOK, []string{claudeID, "0"}, nil
-}
-
-// webchatOwnedByOther is op 19: does another tab already own this id.
-//
-// It answers 0 on failure rather than reporting one, because the C did and
-// because the caller uses it as a guard -- an error that read as "not owned"
-// would be the wrong way to fail, but reporting a status the caller does not
-// branch on would be worse.
-func webchatOwnedByOther(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[2] == "" {
-		return store.StatusOK, []string{"0"}, nil
-	}
-	var one int
-	switch err := q.QueryRow(ctx, webchatOwnedByOtherSQL, f[2], f[1]).Scan(&one); {
-	case store.IsNoRows(err):
-		return store.StatusOK, []string{"0"}, nil
-	case err != nil:
-		return 0, nil, err
-	}
-	return store.StatusOK, []string{"1"}, nil
-}
-
-// webchatClaudeSessionBind is op 20.
-//
-// A binding is never hijacked: if another tab already owns this claude session
-// id, the bind is refused rather than repointing it. Existing databases can
-// hold one tab under several historical principals, so the update touches every
-// copy -- principal is attribution, not a namespace.
-func webchatClaudeSessionBind(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	principal, aimeeID, claudeID := f[0], f[1], f[2]
-	if aimeeID == "" || claudeID == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	var one int
-	switch err := q.QueryRow(ctx, webchatOwnedByOtherSQL, claudeID, aimeeID).Scan(&one); {
-	case err == nil:
-		return store.StatusFailed, nil, nil
-	case !store.IsNoRows(err):
-		return 0, nil, err
-	}
-	tag, err := q.Exec(ctx, webchatBindUpdateSQL, claudeID, aimeeID)
-	if err != nil {
-		return 0, nil, err
-	}
-	if tag.RowsAffected() > 0 {
-		return store.StatusOK, nil, nil
-	}
-	if _, err := q.Exec(ctx, webchatBindInsertSQL, principal, aimeeID, claudeID); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, nil, nil
-}
 
 func webchatLiveSet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" {
@@ -962,17 +765,9 @@ var Sessions = store.Family{
 		opServerSessionCount:                {Name: "server_session_count", Args: 1, Run: serverSessionCount},
 		opServerSessionListExpired:          {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
 		opServerSessionDeleteExpired:        {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
-		opPrimarySessionSave:                {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
-		opPrimarySessionLoad:                {Name: "primary_session_load", Timeout: store.CanonicalHistoryTimeout, Args: 3, Tx: true, Run: primarySessionLoad},
-		opPrimarySessionDelete:              {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
-		opPrimarySessionAllocRecent:         {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
-		opPrimarySessionAllocSearch:         {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
 		opPrimarySessionGetLatest:           {Name: "primary_session_get_latest", Timeout: store.CanonicalHistoryTimeout, Cells: 6, Args: 1, Tx: true, Run: primarySessionGetLatest},
 		opSessionWritePathRecord:            {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
 		opSessionStaleReads:                 {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
-		opWebchatClaudeSessionGet:           {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
-		opWebchatClaudeOwnedByOther:         {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
-		opWebchatClaudeSessionBind:          {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
 		opWebchatLiveSet:                    {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
 		opWebchatLiveGet:                    {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
 		opPersonaDeliveryClaim:              {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},

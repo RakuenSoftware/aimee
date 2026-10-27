@@ -343,7 +343,7 @@ static void test_owned_tool_policy_metadata(void)
 
 int main(void)
 {
-   int loaded = agent_tools_builtin_catalog(&catalog.tools, &catalog.n_tools);
+   int loaded = agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &catalog);
    assert(!loaded && catalog.n_tools > 0);
    test_ir_catalog_is_schema_authority();
    test_owned_tool_policy_metadata();

@@ -27,7 +27,7 @@ static const builtin_toolset_t BUILTINS[] = {
       "context_contract_expand", "search_memory",
       /* aimee condenses long tool output and leaves a '[... ref "tc-..."]' pointer.
        * The tool that expands it was advertised to every agent (TSURF_ALL) and named
-       * by no toolset, so agent_tools_filter_for_role stripped it from every role
+       * by no toolset, so agent_tools_catalog_filter stripped it from every role
        * that has one: agents were handed a ref they had no tool to redeem. It
        * belongs in core because the condensation applies to every tool. */
       "tool_output_get", NULL}},
@@ -38,7 +38,7 @@ static const builtin_toolset_t BUILTINS[] = {
      *
      * Without it a delegate has no way to land work but `bash git` — the very thing
      * require_aimee_git forbids. Adding the tools to the builtin registry is not
-     * enough on its own: agent_tools_filter_for_role strips anything the role's
+     * enough on its own: agent_tools_catalog_filter strips anything the role's
      * toolset does not name, so the rule would point at tools the filter hides. */
     {"git_write", {NULL}, {"git_commit", "git_push", "git_branch", "git_pr", NULL}},
     {"web", {NULL}, {"web_search", NULL}},

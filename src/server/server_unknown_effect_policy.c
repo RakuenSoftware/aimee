@@ -7,6 +7,7 @@
 #include "aimee_sha256.h"
 #include "util.h"
 #include <aimee/tools/module_api.h>
+#include <aimee/tools/agent_tools.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -159,6 +160,15 @@ int server_unknown_effect_policy_stage(const char *tool, const char *arguments, 
    char digest[65], id[96];
    if (server_control_unknown_effect_denied(scope))
       goto finish;
+   /* The governed owner resolves the actual resource and arguments before its
+    * final policy gate. Ask there once, rather than approve a relative spelling
+    * here and then ask again for the canonical action. Baseline authorization,
+    * source verification and sticky denial still run before this deferral. */
+   if (!final_stage && cJSON_IsObject(args) && agent_tools_action_managed(tool, args))
+   {
+      result = 0;
+      goto finish;
+   }
    if (!action || !args || !cJSON_AddStringToObject(action, "session_id", session) ||
        !cJSON_AddStringToObject(action, "turn_id", turn) ||
        !cJSON_AddStringToObject(action, "actor", ctx->vault_principal) ||
@@ -192,10 +202,11 @@ int server_unknown_effect_policy_stage(const char *tool, const char *arguments, 
    if (!request || !cJSON_AddStringToObject(request, "tool", tool) ||
        !cJSON_AddStringToObject(
            request, "description",
-           final_stage ? "The action or earlier uncertain outcomes changed during preparation. "
-                         "Allow the exact action below once? Earlier effects remain unknown."
-                       : "An earlier tool's effects are unknown. Allow this requested action once? "
-                         "This does not confirm or retry the earlier action automatically.") ||
+           final_stage && prior_action[0]
+               ? "The action or earlier uncertain outcomes changed during preparation. "
+                 "Allow the exact action below once? Earlier effects remain unknown."
+               : "An earlier tool's effects are unknown. Allow this requested action once? "
+                 "This does not confirm or retry the earlier action automatically.") ||
        !cJSON_AddItemToObject(request, "input", permission_display(action)))
       goto finish;
    if (server_control_reserve(scope, id, "permission", request))

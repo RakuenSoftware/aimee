@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* openai_chat.c: inference-backed handlers for the OpenAI-compatible
  * /v1/chat/completions and /v1/completions routes.
  *
@@ -16,9 +17,7 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "ir_host_bindings.h"
-#include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
 #include "gw_stage_completion.h"                /* bounded incomplete-repair continuation */
 #include "dogfood.h"                            /* dogfood_autolabel_next_turn_live */
@@ -26,7 +25,8 @@
 #include "retrieval_outcome_bridge.h"           /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
-#include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
+#include "shadow_mirror.h"
+#include "log.h" /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
 #include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
@@ -36,6 +36,7 @@
 #include "modules/workspace/workspace_turn.h"
 #include <aimee/workspace/workspace.h>
 #include "agent_request_build.h"
+#include "server_model_execution.h"
 #include "agent_protocol.h" /* message_history_repair */
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
@@ -50,7 +51,7 @@
 #include "cJSON.h"
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
+#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_ir — tool-policing stage */
 #include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
 #include "request_context.h"
@@ -65,6 +66,7 @@
 #include <pthread.h>
 #include <openssl/crypto.h>
 #include <limits.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,8 +80,13 @@
  * provider call was skipped, so the avoided estimated cost is logged separately
  * and never added to spend totals (see db1_token_audit_spend_breakdown). Tokens
  * are zero because no real call happened. */
+static void openai_account_response(const agent_t *agent, const char *model,
+                                    const aimee_response_t *response);
+
 static void record_avoided_turn(const char *model, double avoided_cost)
 {
+   if (!isfinite(avoided_cost))
+      return;
    /* Carry the request-context attribution (#3) so an avoided row is attributed
     * to the same principal/request as a realized one. The avoided cost is a
     * special value (the prior realized cost replayed), so this writes directly
@@ -106,8 +113,6 @@ static void record_avoided_turn(const char *model, double avoided_cost)
    (void)db1_token_audit_insert(&row);
 }
 
-static int openai_governance_enabled(void);
-
 /* Dedup eligibility for the buffered completion path (§4): only when the flag is
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. The key
@@ -128,7 +133,7 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    snprintf(flags, sizeof(flags), "ir1-sha256 cs%d rc%d pi%d dw%d gv%d sp%d",
             config_cache_shaping_enabled(), config_reasoning_cap_enabled(),
             config_ingress_preinject_enabled(), config_dedup_window_seconds(),
-            openai_governance_enabled(), gateway_prevent_subagents_enabled());
+            server_model_governance_enabled(), gateway_prevent_subagents_enabled());
    /* Key composition needs commitments, not a second copy of a potentially
     * megabyte-scale prompt in the bounded bus frame. Domain separation keeps
     * this canonical-input key format distinct from legacy raw-body callers. */
@@ -177,8 +182,6 @@ static int openai_admit_completion(const char *body, int chat, aimee_request_t *
 static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
                                     double temperature, aimee_response_t *out, char *error,
                                     size_t capacity, int preserve_messages);
-static cJSON *openai_ir_history_json(const aimee_request_t *request);
-static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
@@ -206,6 +209,7 @@ static int openai_admit_completion(const char *body, int chat, aimee_request_t *
       snprintf(error, capacity, "messages must be a non-empty array");
       return -1;
    }
+   shadow_mirror_capture_request(request);
    return 0;
 }
 
@@ -259,20 +263,16 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       snprintf(error, sizeof error, "text completion cannot represent a tool call");
       goto failure;
    }
-   if (!cache.avoided && agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent.name, agent.model, model,
-          response.raw_stop_reason ? response.raw_stop_reason
-                                   : aimee_stop_reason_name(response.stop_reason),
-          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
-          (int)response.usage_cache_read, "openai-ingress", NULL);
+   if (!cache.avoided)
+      openai_account_response(&agent, model, &response);
    char *text = chat ? NULL : aimee_ir_response_text_alloc(&response);
-   int length = chat   ? aimee_openai_buffered_response(&response, cache.client_id, model,
-                                                        cache.created, 0, resp, cap)
-                : text ? openai_format_text_completion(cache.client_id, model, text, cache.created,
-                                                       (int)response.usage_in,
-                                                       (int)response.usage_out, resp, cap)
-                       : -1;
+   int length = chat ? aimee_openai_buffered_response(&response, cache.client_id, model,
+                                                      cache.created, 0, resp, cap)
+                : text
+                    ? openai_format_text_completion(cache.client_id, model, text, cache.created,
+                                                    (int)response.usage_in, (int)response.usage_out,
+                                                    response.usage_unobserved, resp, cap)
+                    : -1;
    free(text);
    status = length >= 0 ? 200 : 500;
    if (status != 200)
@@ -514,8 +514,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
       (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                     &embed_0_reply);
       cJSON_Delete(embed_0_args);
-      int d = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vecs[i],
-                             EMBED_MAX_DIM);
+      int d = embed_reply_vector(embed_0_reply, vecs[i], EMBED_MAX_DIM);
       cJSON_Delete(embed_0_reply);
       if (d <= 0)
       {
@@ -611,7 +610,7 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
    }
    cJSON *history = cJSON_Parse(json);
    free(json);
-   cJSON *current = openai_ir_history_json(request);
+   cJSON *current = aimee_ir_request_history_json(request);
    if (!cJSON_IsArray(history) || !current)
    {
       cJSON_Delete(history);
@@ -630,7 +629,7 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
       }
    }
    cJSON_Delete(current);
-   int rc = openai_ir_history_replace(request, history);
+   int rc = aimee_ir_request_history_replace(request, history);
    cJSON_Delete(history);
    return rc;
 }
@@ -641,7 +640,7 @@ static int responses_store_history(const char *id, const aimee_request_t *reques
    char scope[80];
    if (!actor || !actor[0] || responses_history_scope(scope))
       return -1;
-   cJSON *history = openai_ir_history_json(request);
+   cJSON *history = aimee_ir_request_history_json(request);
    aimee_message_t assistant = {
        .role = "assistant", .blocks = response->content, .n_blocks = response->n_content};
    cJSON *message = aimee_ir_message_json(&assistant);
@@ -679,18 +678,20 @@ static int responses_admit_request(const char *body, aimee_request_t *request, c
       return -1;
    if (responses_restore_history(request, error, capacity) || aimee_ir_request_admit(request))
       return -1;
+   shadow_mirror_capture_request(request);
    return 0;
 }
-static void responses_account(const agent_t *agent, const char *model,
-                              const aimee_response_t *response)
+static void openai_account_response(const agent_t *agent, const char *model,
+                                    const aimee_response_t *response)
 {
    if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent->name, agent->model, model,
-          response->raw_stop_reason ? response->raw_stop_reason
+      agent_ingress_record_cost(agent->name, agent->model, model,
+                                response->raw_stop_reason
+                                    ? response->raw_stop_reason
                                     : aimee_stop_reason_name(response->stop_reason),
-          (int)response->usage_in, (int)response->usage_out, (int)response->usage_cache_write,
-          (int)response->usage_cache_read, "openai-ingress", NULL);
+                                (int)response->usage_in, (int)response->usage_out,
+                                (int)response->usage_cache_write, (int)response->usage_cache_read,
+                                "openai-ingress", response->usage_unobserved ? "unobserved" : NULL);
 }
 static int responses_handler(const char *body, char *buffer, int capacity)
 {
@@ -724,7 +725,7 @@ static int responses_handler(const char *body, char *buffer, int capacity)
       free(model);
       goto failed;
    }
-   responses_account(&agent, model, &response);
+   openai_account_response(&agent, model, &response);
    char id[64];
    if (responses_mint_id((long)time(NULL), id, sizeof id) ||
        responses_store_history(id, &request, &response))
@@ -817,13 +818,7 @@ static int completion_stream_ir(int chat, const char *body, server_http_sse_emit
       snprintf(error, sizeof error, "text completion cannot represent a tool call");
       goto failure;
    }
-   if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent.name, agent.model, model,
-          response.raw_stop_reason ? response.raw_stop_reason
-                                   : aimee_stop_reason_name(response.stop_reason),
-          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
-          (int)response.usage_cache_read, "openai-ingress", NULL);
+   openai_account_response(&agent, model, &response);
    if (chat)
    {
       emit_chunk(emit, ctx, id, model, created, 1, NULL, 0);
@@ -875,110 +870,6 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
 
 /* Shared canonical request preparation and provider execution. */
 
-static cJSON *openai_ir_history_json(const aimee_request_t *request)
-{
-   cJSON *history = cJSON_CreateArray();
-   if (!history)
-      return NULL;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      cJSON *message = aimee_ir_message_json(&request->messages[i]);
-      if (!message || !cJSON_AddItemToArray(history, message))
-      {
-         cJSON_Delete(message);
-         cJSON_Delete(history);
-         return NULL;
-      }
-   }
-   return history;
-}
-static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history)
-{
-   int count = cJSON_GetArraySize(history);
-   if (!cJSON_IsArray(history) || count > AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   aimee_request_t replacement = {0};
-   replacement.messages = count ? calloc((size_t)count, sizeof *replacement.messages) : NULL;
-   if (count && !replacement.messages)
-      return -1;
-   replacement.n_messages = count;
-   for (int i = 0; i < count; i++)
-      if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &replacement.messages[i]))
-      {
-         aimee_request_free(&replacement);
-         return -1;
-      }
-   for (int i = 0; i < request->n_messages; i++)
-      aimee_message_free(&request->messages[i]);
-   free(request->messages);
-   request->messages = replacement.messages;
-   request->n_messages = replacement.n_messages;
-   request->mutated = 1;
-   return 0;
-}
-static int openai_ir_append_policy(aimee_request_t *request, char *policy)
-{
-   if (!policy)
-      return 0;
-   if (request->n_system >= AIMEE_IR_MAX_BLOCKS)
-   {
-      free(policy);
-      return -1;
-   }
-   aimee_block_t *blocks =
-       realloc(request->system, (size_t)(request->n_system + 1) * sizeof *blocks);
-   if (!blocks)
-   {
-      free(policy);
-      return -1;
-   }
-   request->system = blocks;
-   aimee_block_t *block = &blocks[request->n_system++];
-   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = policy};
-   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
-                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
-   request->mutated = 1;
-   return 0;
-}
-static char *openai_build_ir_body(aimee_request_t *request, aimee_wire_t wire)
-{
-   if (aimee_frontend_guard_state(request, NULL, 0))
-      return NULL;
-   if (aimee_ir_request_admit(request))
-      return NULL;
-   char *body = aimee_backend_render_wire(request, wire);
-   if (!body)
-      return NULL;
-   aimee_wire_projection_report_t projection;
-   aimee_backend_projection_report(request, wire, &projection);
-   if (aimee_ir_session_emit_projection_controls(
-           request->model, projection.omitted_reasoning_blocks,
-           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
-   {
-      free(body);
-      return NULL;
-   }
-   /* A Chat provider's explicitly counted template extension stays at its
-    * native boundary. It is never turned into model content or another wire. */
-   const cJSON *kwargs =
-       request->frontend == AIMEE_WIRE_OPENAI_CHAT && wire == AIMEE_WIRE_OPENAI_CHAT
-           ? cJSON_GetObjectItemCaseSensitive(request->raw, "chat_template_kwargs")
-           : NULL;
-   if (cJSON_IsObject(kwargs))
-   {
-      cJSON *native = cJSON_Parse(body);
-      free(body);
-      cJSON_DeleteItemFromObjectCaseSensitive(native, "chat_template_kwargs");
-      if (!cJSON_AddItemToObject(native, "chat_template_kwargs", cJSON_Duplicate(kwargs, 1)))
-      {
-         cJSON_Delete(native);
-         return NULL;
-      }
-      body = cJSON_PrintUnformatted(native);
-      cJSON_Delete(native);
-   }
-   return body;
-}
 static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *agent, int max_tokens,
                                      double temperature, int preserve_messages)
 {
@@ -1009,65 +900,16 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
    router_advise_ir(request);
    if (!preserve_messages)
    {
-      if (openai_ir_append_policy(request, gw_ir_request_tool_system_prompt(request, NULL)) ||
-          openai_ir_append_policy(request, gw_ir_request_completion_system_prompt(request, NULL)))
+      if (agent_request_append_host_policy(request,
+                                           gw_ir_request_tool_system_prompt(request, NULL)) ||
+          agent_request_append_host_policy(request,
+                                           gw_ir_request_completion_system_prompt(request, NULL)))
          return -1;
       aimee_ir_apply_gateway_request_stages(request);
    }
-   return aimee_ir_request_admit(request);
-}
-static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire,
-                          const char *url, const char *auth, const char *headers, char **reply,
-                          aimee_anthropic_replay_t *replay, char *error, size_t capacity,
-                          server_responses_stream_t *stream, aimee_response_t *streamed_response)
-{
-   /* Completion repair may append a governed tool call after the answer. Its
-    * existing owner requires buffering before any response is projected. */
-   int incremental = stream && wire == AIMEE_WIRE_RESPONSES && !openai_governance_enabled() &&
-                     !gateway_prevent_subagents_enabled() &&
-                     !gw_ir_response_completion_armed(request);
-   if (incremental)
-      request->stream = 1;
-   char *body = openai_build_ir_body(request, wire);
-   if (!body)
-   {
-      snprintf(error, capacity, "the selected provider cannot represent the canonical request");
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   wire_fence_route_t route = wire == AIMEE_WIRE_ANTHROPIC   ? WIRE_FENCE_ANTHROPIC_MESSAGES
-                              : wire == AIMEE_WIRE_RESPONSES ? WIRE_FENCE_OPENAI_RESPONSES
-                                                             : WIRE_FENCE_OPENAI_CHAT;
-   wire_fence_t *snapshot = NULL;
-   wire_fence_bytes_t bytes;
-   if (wire_fence_select(econ_mode_current() != ECON_MODE_OFF, route, body, strlen(body), &snapshot,
-                         &bytes))
-   {
-      snprintf(error, capacity, "%s", wire_fence_last_error());
-      free(body);
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   if (wire == AIMEE_WIRE_ANTHROPIC &&
-       aimee_anthropic_replay_prepare(bytes.data, bytes.len, replay))
-   {
-      wire_fence_destroy(snapshot);
-      free(body);
-      snprintf(error, capacity, "cannot bind native replay prefix");
-      return HTTP_RETRY_ADMISSION_REFUSED;
-   }
-   int attempts =
-       config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
-   int base = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
-   int maximum = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int status = incremental ? server_responses_stream_post(stream, url, auth, bytes.data, bytes.len,
-                                                           headers, agent->provider, agent->model,
-                                                           agent->timeout_ms, streamed_response)
-                            : wire_fence_post(url, auth, bytes.data, bytes.len, reply,
-                                              agent->timeout_ms, headers, attempts, base, maximum,
-                                              agent->provider, agent->model, NULL, route);
-   wire_fence_destroy(snapshot);
-   free(body);
-   if (status == HTTP_RETRY_ADMISSION_REFUSED)
-      snprintf(error, capacity, "%s", wire_fence_last_error());
+   int status = aimee_ir_request_admit(request);
+   if (!status)
+      shadow_mirror_dispatch_admitted(request);
    return status;
 }
 /* Cache payloads are canonical message blocks plus typed response metadata.
@@ -1075,6 +917,10 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
 static char *openai_ir_cache_encode(const aimee_response_t *response,
                                     const openai_ir_cache_t *cache)
 {
+   if (response->refusal &&
+       (response->error_message || response->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(response->refusal)))
+      return NULL;
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,
                               .n_blocks = response->n_content};
@@ -1090,6 +936,7 @@ static char *openai_ir_cache_encode(const aimee_response_t *response,
             cJSON_AddNumberToObject(root, "created", cache->created) &&
             cJSON_AddStringToObject(root, "stop_reason",
                                     aimee_stop_reason_name(response->stop_reason)) &&
+            cJSON_AddBoolToObject(root, "usage_unobserved", response->usage_unobserved) &&
             cJSON_AddNumberToObject(root, "usage_in", response->usage_in) &&
             cJSON_AddNumberToObject(root, "usage_out", response->usage_out) &&
             cJSON_AddNumberToObject(root, "usage_cache_read", response->usage_cache_read) &&
@@ -1101,6 +948,15 @@ static char *openai_ir_cache_encode(const aimee_response_t *response,
       ok = ok && cJSON_AddStringToObject(root, "model", response->model);
    if (response->raw_stop_reason)
       ok = ok && cJSON_AddStringToObject(root, "raw_stop_reason", response->raw_stop_reason);
+   if (response->refusal)
+   {
+      cJSON *details = aimee_refusal_details_json(response->refusal);
+      if (!details || !cJSON_AddItemToObject(root, "refusal", details))
+      {
+         cJSON_Delete(details);
+         ok = 0;
+      }
+   }
    char *encoded = ok ? cJSON_PrintUnformatted(root) : NULL;
    cJSON_Delete(root);
    return encoded;
@@ -1114,8 +970,8 @@ static int openai_ir_cache_decode(const char *encoded, aimee_response_t *respons
    const char *stop = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stop_reason"));
    aimee_message_t message = {0};
    long created;
-   if (!schema || strcmp(schema, "aimee.response-cache.ir.v1") || !id || !id[0] ||
-       strlen(id) >= sizeof cache->client_id || !stop ||
+   if (!aimee_ir_json_unique(root) || !schema || strcmp(schema, "aimee.response-cache.ir.v1") ||
+       !id || !id[0] || strlen(id) >= sizeof cache->client_id || !stop ||
        aimee_ir_read_usage(root, "created", &created) ||
        aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(root, "message"), &message))
       goto invalid;
@@ -1133,7 +989,13 @@ static int openai_ir_cache_decode(const char *encoded, aimee_response_t *respons
       if (field && (!cJSON_IsString(field) || !(*destinations[i] = strdup(field->valuestring))))
          goto invalid;
    }
-   if (aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
+   const cJSON *unobserved = cJSON_GetObjectItemCaseSensitive(root, "usage_unobserved");
+   if (!cJSON_IsBool(unobserved))
+      goto invalid;
+   response->usage_unobserved = cJSON_IsTrue(unobserved);
+   if (aimee_refusal_details_parse(cJSON_GetObjectItemCaseSensitive(root, "refusal"),
+                                   &response->refusal) ||
+       aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
        aimee_ir_read_usage(root, "usage_out", &response->usage_out) ||
        aimee_ir_read_usage(root, "usage_cache_read", &response->usage_cache_read) ||
        aimee_ir_read_usage(root, "usage_cache_write", &response->usage_cache_write) ||
@@ -1150,51 +1012,10 @@ invalid:
    return -1;
 }
 
-static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
-                                             aimee_response_t *out, char *error, size_t capacity,
-                                             int preserve_messages, openai_ir_cache_t *cache,
-                                             server_responses_stream_t *stream)
+static int openai_cache_read(const agent_t *agent, const aimee_request_t *request,
+                             aimee_response_t *out, char *error, size_t capacity, void *context)
 {
-   memset(out, 0, sizeof *out);
-   snprintf(error, capacity, "canonical provider request failed");
-   if (!agent || aimee_ir_request_admit(request))
-      return -1;
-   delegate_drivers_init();
-   const delegate_driver_t *driver = delegate_driver_get(agent->provider);
-   char url[MAX_ENDPOINT_LEN + 64], auth[MAX_API_KEY_LEN + 32], headers[512];
-   if (!driver || delegate_build_url(driver, agent, url, sizeof url))
-   {
-      snprintf(error, capacity, "upstream model provider or endpoint is unavailable");
-      return -1;
-   }
-   if (agent_resolve_auth_headers(agent, auth, sizeof auth, headers, sizeof headers))
-   {
-      snprintf(error, capacity, "upstream model credentials are unavailable");
-      return -1;
-   }
-   aimee_wire_t wire = !strcmp(driver->name, "anthropic") ? AIMEE_WIRE_ANTHROPIC
-                       : strstr(url, "/responses")        ? AIMEE_WIRE_RESPONSES
-                                                          : AIMEE_WIRE_OPENAI_CHAT;
-   gw_mutate_ctx_t mutation;
-   gw_mutate_ctx_init(&mutation);
-   cJSON *container = NULL;
-   if (!preserve_messages && gw_mutate_upstream_ok(wire == AIMEE_WIRE_ANTHROPIC))
-   {
-      container = cJSON_CreateObject();
-      cJSON *history = openai_ir_history_json(request);
-      if (!container || !history || !cJSON_AddItemToObject(container, "input", history))
-      {
-         cJSON_Delete(history);
-         cJSON_Delete(container);
-         return -1;
-      }
-      gw_buffered_mutate(container, "input", agent->model, "", server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(),
-                         &mutation);
-      if (mutation.mutated &&
-          openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
-         goto refused;
-   }
+   openai_ir_cache_t *cache = context;
    if (cache && !request->n_tools && config_present() && config_dedup_enabled() &&
        request_context_idempotency_key()[0])
    {
@@ -1209,8 +1030,6 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       if (cache->enabled < 0)
       {
          snprintf(error, capacity, "response composition unavailable");
-         cJSON_Delete(container);
-         gw_mutate_ctx_free(&mutation);
          return -1;
       }
       char *encoded = NULL;
@@ -1221,80 +1040,27 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
          free(encoded);
          if (!decoded)
          {
-            cJSON_Delete(container);
-            gw_mutate_ctx_free(&mutation);
             if (aimee_ir_session_emit_buffered_response(out, NULL))
             {
                snprintf(error, capacity, "canonical cached response persistence failed");
                return -1;
             }
             cache->avoided = 1;
-            if (agent_ingress_accounting_enabled())
+            if (!out->usage_unobserved && agent_ingress_accounting_enabled())
                record_avoided_turn(agent->model, avoided);
-            return 0;
+            return 1;
          }
       }
    }
-   char *reply = NULL;
-   aimee_anthropic_replay_t replay = {0};
-   int status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
-                               capacity, stream, out);
-   if (!(stream && stream->used) && status != HTTP_RETRY_ADMISSION_REFUSED && container &&
-       gw_buffered_after_status(container, "input", status, &mutation) == GW_POST_RESEND)
-   {
-      if (cache)
-         cache->enabled = 0; /* The restored request has a different cache identity. */
-      free(reply);
-      reply = NULL;
-      if (openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
-         goto refused;
-      status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
-                              capacity, stream, out);
-   }
-   cJSON_Delete(container);
-   gw_mutate_ctx_free(&mutation);
-   if (status != 200 || (!reply && !(stream && stream->used)))
-   {
-      if (status != HTTP_RETRY_ADMISSION_REFUSED)
-         openai_upstream_error_message(status, reply, error, capacity);
-      free(reply);
-      return -1;
-   }
-   int rc = stream && stream->used
-                ? 0
-                : aimee_backend_parse_wire(reply, strlen(reply), wire, out, error, capacity);
-   free(reply);
-   if (!rc && wire == AIMEE_WIRE_ANTHROPIC && aimee_anthropic_bind_response(&replay, out))
-   {
-      aimee_ir_session_fail_capture();
-      rc = -1;
-      snprintf(error, capacity, "cannot retain native replay binding");
-   }
-   if (rc || out->error_message ||
-       (!(stream && stream->used) && aimee_ir_session_emit_buffered_response(out, NULL)))
-   {
-      if (!rc)
-         snprintf(error, capacity, "%s",
-                  out->error_message ? out->error_message
-                                     : "canonical response persistence failed");
-      return -1;
-   }
-   rc = agent_response_govern(out, openai_governance_enabled(), gateway_prevent_subagents_enabled(),
-                              NULL, 0);
-   if (rc >= 0 && !preserve_messages)
-      rc = gw_ir_response_run_completion(out, request);
-   if (rc < 0)
-   {
-      snprintf(error, capacity, "canonical response policy or persistence failed");
-      return -1;
-   }
-   if (stream && stream->used &&
-       (aimee_responses_frontend_matches(stream->frontend, out) ||
-        aimee_ir_session_emit_response(out, stream->message_id)))
-   {
-      snprintf(error, capacity, "canonical streamed response policy or persistence failed");
-      return -1;
-   }
+   return 0;
+}
+static void openai_cache_invalidate(void *context)
+{
+   ((openai_ir_cache_t *)context)->enabled = 0;
+}
+static void openai_cache_write(const agent_t *agent, const aimee_response_t *out, void *context)
+{
+   openai_ir_cache_t *cache = context;
    if (cache && cache->enabled && !aimee_ir_response_tool_count(out))
    {
       char *encoded = openai_ir_cache_encode(out, cache);
@@ -1304,18 +1070,35 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
                                 .output_tokens = out->usage_out,
                                 .cache_write_tokens = out->usage_cache_write,
                                 .cache_read_tokens = out->usage_cache_read};
-         response_dedup_put(cache->key, encoded,
-                            token_estimate_cost(out->model ? out->model : agent->model, &usage),
-                            (long)time(NULL), cache->ttl);
+         response_dedup_put(
+             cache->key, encoded,
+             out->usage_unobserved
+                 ? NAN
+                 : token_estimate_cost(out->model ? out->model : agent->model, &usage),
+             (long)time(NULL), cache->ttl);
          free(encoded);
       }
    }
-   return 0;
-refused:
-   cJSON_Delete(container);
-   gw_mutate_ctx_free(&mutation);
-   snprintf(error, capacity, "canonical economizer history is invalid");
-   return -1;
+}
+static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
+                                             aimee_response_t *out, char *error, size_t capacity,
+                                             int preserve_messages, openai_ir_cache_t *cache,
+                                             server_responses_stream_t *stream)
+{
+   server_model_execution_options_t options = {
+       .preserve_messages = preserve_messages,
+       .stream = stream,
+       .stream_post = server_responses_stream_post,
+       .retry_attempts =
+           config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS,
+       .retry_base_ms = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS,
+       .retry_max_ms = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS,
+       .upstream_error = openai_upstream_error_message,
+       .cache_read = cache ? openai_cache_read : NULL,
+       .cache_write = cache ? openai_cache_write : NULL,
+       .cache_invalidate = cache ? openai_cache_invalidate : NULL,
+       .cache_context = cache};
+   return server_model_execute_prepared(agent, request, out, error, capacity, &options);
 }
 static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
                                     double temperature, aimee_response_t *out, char *error,
@@ -1337,12 +1120,6 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
  * canonical history, with no retry after incremental transport begins. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
  * deprecated env default. Cached legacy_config_read; keeps gw_stage_governance config-free. */
-static int openai_governance_enabled(void)
-{
-   int tri = config_present() ? config_module_governance() : -1;
-   return config_module_enabled(tri, gw_response_governance_enabled());
-}
-
 static int responses_stream_handler(const char *body, server_http_sse_event_emit emit,
                                     void *context)
 {
@@ -1382,7 +1159,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        agent_execute_prepared_ir_request(&agent, &request, &response, error, sizeof error, 0, NULL,
                                          &stream))
       goto failed;
-   responses_account(&agent, model, &response);
+   openai_account_response(&agent, model, &response);
    if (responses_store_history(id, &request, &response))
    {
       snprintf(error, sizeof error, "durable Responses history could not be committed");
@@ -1391,6 +1168,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    aimee_delta_t terminal = {.type = AIMEE_DELTA_TURN_STOP,
                              .stop_reason = response.stop_reason,
                              .raw_stop_reason = response.raw_stop_reason,
+                             .refusal = response.refusal,
                              .usage_in = response.usage_in,
                              .usage_out = response.usage_out,
                              .usage_cache_read = response.usage_cache_read,
@@ -1471,6 +1249,41 @@ static cJSON *run_object(const run_job_t *job, const char *status, const aimee_r
       cJSON_AddStringToObject(detail, "message", error);
    }
    return object;
+}
+/* Public presentation is distinct from reusable business-answer authority. */
+static int run_project_terminal_response(int rc, const agent_result_t *result,
+                                         aimee_response_t *response)
+{
+   if (!result || !response)
+      return -1;
+   const aimee_response_t *source = &result->canonical_response;
+   int incomplete = rc == -1 && !result->success &&
+                    !strcmp(result->stop_reason, aimee_stop_reason_name(AIMEE_STOP_MAX_TOKENS)) &&
+                    !aimee_ir_response_valid(source) &&
+                    source->stop_reason == AIMEE_STOP_MAX_TOKENS && !source->error_message &&
+                    !source->refusal;
+   if (!incomplete && (rc || !result->success || aimee_ir_response_complete_valid(source)))
+      return -1;
+   for (int i = 0; incomplete && i < source->n_content; i++)
+      if (source->content[i].type == AIMEE_BLK_TOOL_USE ||
+          source->content[i].type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+   aimee_response_t view = {0};
+   if (aimee_ir_response_clone(source, &view))
+      return -1;
+   if (incomplete)
+   {
+      /* The original observation stays unchanged. Public usage covers the
+       * whole host run, including preceding tool turns; this does not turn an
+       * incomplete observation into a successful business answer. */
+      view.usage_in = result->prompt_tokens;
+      view.usage_out = result->completion_tokens;
+      view.usage_cache_read = result->cache_read_tokens;
+      view.usage_cache_write = result->cache_write_tokens;
+   }
+   aimee_response_free(response);
+   *response = view;
+   return 0;
 }
 static char *run_status_json(const run_job_t *job, const char *status, const char *error)
 {
@@ -1629,7 +1442,7 @@ static void *run_job_worker(void *context)
       run_finish_status(job, OPENAI_RUN_CANCELLED, NULL);
       goto done;
    }
-   if (rc || !result.success)
+   if (run_project_terminal_response(rc, &result, &response))
    {
       run_finish_status(job, OPENAI_RUN_FAILED, result.error[0] ? result.error : "run failed");
       goto done;
@@ -1714,7 +1527,8 @@ static int runs_handler(const char *body, char *resp, int cap)
       job->request.has_max_tokens = 1;
       job->request.max_tokens = (int)alias;
    }
-   if (!agent_request_with_tools_supported(&job->request))
+   /* This endpoint owns its executable catalog; caller tools are not grants. */
+   if (job->request.n_tools || !agent_request_with_tools_supported(&job->request))
    {
       snprintf(error, sizeof error, "run request contains unsupported execution controls");
       goto invalid;

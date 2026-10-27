@@ -19,7 +19,7 @@ type SessionDirectory struct {
 	deadline time.Duration
 }
 
-// ModuleCaller is the narrow slice of bus.ConcurrentModuleCaller this needs.
+// ModuleCaller is the narrow slice of ring.ConcurrentModuleCaller this needs.
 //
 // The interface keeps status mapping independently testable without opening a
 // database or constructing a daemon.

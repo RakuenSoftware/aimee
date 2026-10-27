@@ -1,7 +1,7 @@
 /* kb_learning_synth.h: cross-source learning candidate-generation pass.
  *
  * Builds an evidence neighbourhood for a seed query (learning_bundle), hands it
- * to the configured model sidecar (learning_synthesize_command), and writes the
+ * to the canonical curator SYNTHESIZE provider, and writes the
  * returned candidates as proposed charter artifacts — each citing every
  * neighbourhood evidence artifact as a corroborating source, so the existing
  * judge -> promote machinery can act on them unchanged.
@@ -19,16 +19,17 @@ extern "C"
 #endif
 
    /* Generate candidates from the neighbourhood around `query`.
-    *   synth_cmd:   sidecar command (required; NULL/"" -> error).
+    *   synth_cmd:   retired compatibility argument; nonempty commands fail explicitly.
+    *                NULL/"" selects the canonical configured provider.
     *   embed_cmd:   embedding command for the bundle ("builtin"/NULL ok).
     *   k:           neighbourhood size.
-    *   max_tokens:  per-call token budget passed to the sidecar.
+    *   max_tokens:  per-call canonical request token budget.
     *   scope_kind/scope_id/operator_id: scope stamped on the proposed candidates.
     *   proposed_ids/max_ids: optional out-array of written candidate ids (each
     *                 >= 37 bytes); may be NULL.
     * Returns the number of candidates written (>= 0), or -1 on error (no
-    * sidecar, embedder/DB failure, or sidecar failure). An empty neighbourhood
-    * is a valid result of 0. */
+    * provider, embedder/DB failure, or incomplete/refused provider response). An empty
+    * neighbourhood is a valid result of 0. */
    int kb_learning_synth_generate(const char *query, const char *synth_cmd, const char *embed_cmd,
                                   int k, int max_tokens, const char *scope_kind,
                                   const char *scope_id, const char *operator_id,

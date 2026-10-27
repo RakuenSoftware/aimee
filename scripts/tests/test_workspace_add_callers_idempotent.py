@@ -26,7 +26,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Every site that calls config_workspace_add and decides what to do with it.
 CALL_SITES = [
     ROOT / "src" / "server" / "server_runner_endpoints.c",
-    ROOT / "src" / "cmd_infra.c",
 ]
 
 

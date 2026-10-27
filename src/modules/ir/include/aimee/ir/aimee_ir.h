@@ -157,8 +157,9 @@ typedef struct
    char *role; /* opaque: "user" / "assistant" / "system" / "tool" / ... */
    aimee_block_t *blocks;
    int n_blocks;
-   int content_scalar; /* observed scalar-text form; retained as transport provenance */
-   struct cJSON *raw;  /* sidecar */
+   int content_scalar;      /* observed scalar-text form; retained as transport provenance */
+   struct cJSON *raw;       /* sidecar */
+   int compaction_boundary; /* canonical history marker; never provider content */
 } aimee_message_t;
 
 typedef enum
@@ -257,6 +258,7 @@ typedef struct
    aimee_cache_policy_t cache_policy;
    aimee_block_t *system; /* system as ORDERED BLOCKS, not a flat string */
    int n_system;
+   int system_scalar; /* prefer scalar transport for one uncached TEXT block; otherwise blocks */
    aimee_message_t *messages;
    int n_messages;
    aimee_tool_t *tools;
@@ -330,6 +332,23 @@ typedef enum
    AIMEE_STOP_ERROR
 } aimee_stop_reason_t;
 
+/* Optional terminal diagnostics, never message content or execution authority.
+ * NULL fields are meaningful; unknown categories remain bounded inert data. */
+#define AIMEE_REFUSAL_CATEGORY_MAX    64u
+#define AIMEE_REFUSAL_EXPLANATION_MAX 4096u
+typedef struct
+{
+   char *category;
+   char *explanation;
+} aimee_refusal_details_t;
+int aimee_refusal_details_valid(const aimee_refusal_details_t *details);
+aimee_refusal_details_t *aimee_refusal_details_clone(const aimee_refusal_details_t *details);
+void aimee_refusal_details_free(aimee_refusal_details_t *details);
+/* Neutral JSON uses exactly nullable category/explanation. NULL represents no
+ * details. Decode replaces initialized owned storage only after validation. */
+struct cJSON *aimee_refusal_details_json(const aimee_refusal_details_t *details);
+int aimee_refusal_details_parse(const struct cJSON *json, aimee_refusal_details_t **out);
+
 typedef struct aimee_response
 {
    char *id;
@@ -345,7 +364,9 @@ typedef struct aimee_response
    long usage_cache_read;
    long usage_cache_write;
    long usage_reasoning;
-   struct cJSON *raw; /* sidecar */
+   struct cJSON *raw;                /* sidecar */
+   aimee_refusal_details_t *refusal; /* owned terminal diagnostic; NULL when absent */
+   int usage_unobserved; /* No provider usage observation; numeric storage must be zero. */
 } aimee_response_t;
 
 /* ---- streaming: a SEPARATE IR surface (event stream, not one object) ----
@@ -391,7 +412,9 @@ typedef struct
    const char *raw_stop_reason;     /* native terminal spelling, borrowed */
    long usage_in, usage_out;        /* TURN_STOP */
    long usage_cache_read, usage_cache_write, usage_reasoning;
-   const char *error_message; /* ERROR */
+   const char *error_message;              /* ERROR */
+   const aimee_refusal_details_t *refusal; /* TURN_STOP diagnostic, borrowed */
+   int usage_unobserved; /* TURN_STOP: omit unknown usage rather than report zero. */
 } aimee_delta_t;
 
 /* Bounded owned model-delta assembly for canonical persistence/replay. This
@@ -415,6 +438,10 @@ void aimee_message_free(aimee_message_t *message);
  * out must be zero-initialized or owned; success atomically replaces it and
  * failure leaves it intact. source == out is supported. No wire translation. */
 int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out);
+/* Canonical working-history projection and atomic owned replacement. Provider
+ * import is not accepted here; original system/control fields remain intact. */
+struct cJSON *aimee_ir_request_history_json(const aimee_request_t *request);
+int aimee_ir_request_history_replace(aimee_request_t *request, const struct cJSON *history);
 /* Exact owned response snapshot. Source and existing output are unchanged on
  * failure; context metadata and opaque numeric/reasoning values stay exact. */
 int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out);
@@ -445,7 +472,22 @@ void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t ori
                                 const char *revision_domain, const char *revision_scope,
                                 unsigned long long revision_epoch);
 
-/* Apply conservative defaults to blocks whose origin is still UNKNOWN. This is
+/* Egress-only owned projection: exclude hidden/restricted content and move
+ * unverified system evidence to user role. Source history/profile stay exact.
+ * Source and output must be distinct. The preflight preserves untouched native-byte
+ * replay when no projection is needed. */
+/* Visibility for model-derived views; unclassified legacy blocks remain visible. */
+int aimee_ir_block_model_visible(const aimee_block_t *block);
+/* Public ingress trust attenuation, preserving content and effective model
+ * visibility/privacy. mode0 is user content; mode1 is the explicit legacy
+ * request.system policy setting; mode2 is an untrusted system/developer message.
+ * No caller capability grants platform origin or verified revision custody. */
+void aimee_ir_block_attenuate_public(aimee_block_t *block, int system_mode);
+int aimee_ir_request_needs_model_projection(const aimee_request_t *request);
+int aimee_ir_request_project_model(const aimee_request_t *request, aimee_request_t *out);
+
+/* Apply conservative defaults only to unspecified provenance. Explicit partial
+ * context metadata remains unchanged. This is
  * metadata-only and does not dirty provider payload bytes. Returns the number
  * of blocks classified. */
 int aimee_ir_classify_context(aimee_request_t *request);
@@ -457,17 +499,18 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
                                        aimee_context_authority_t from,
                                        aimee_context_authority_t to);
 
-/* Build a canonical assistant response carrying a single TEXT block for a
- * genuinely text-only source. Native model/harness adapters retain their typed
- * blocks instead; terminal screens cannot supply structured model history. `model` may be
- * NULL/empty. stop_reason is END_TURN. Fills caller-provided `out` (stack-ok); free with
- * aimee_response_free. Returns 0 on success, -1 on allocation failure (out is left freed/zeroed).
- */
-int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
+/* Genuinely text-only request origin; structured callers retain their existing
+ * IR instead. out is owned/zeroed, replaced atomically, and freed normally. */
+int aimee_ir_request_from_message(aimee_request_t *out, const char *system,
+                                  const aimee_message_t *message, int max_tokens,
+                                  double temperature);
+int aimee_ir_request_from_text(aimee_request_t *out, const char *system, const char *user,
+                               int max_tokens, double temperature);
 
 /* ---- accessors used by the core stages / KB ----
- * Concatenate the text of the LAST user-role message's TEXT blocks into `buf`
- * (truncating to n). This is the ONE shape-agnostic query extractor that replaces
+ * Concatenate model-visible text of the LAST user-role message into `buf`
+ * (truncating to n). Hidden/restricted blocks never enter derived query views.
+ * This is the ONE shape-agnostic query extractor that replaces
  * ingress_preinject_query_from_messages' per-shape arms (which dropped non-text
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
@@ -476,6 +519,13 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 int aimee_ir_tool_paths_valid(const aimee_request_t *request, const struct cJSON *paths);
 int aimee_ir_remove_tool_paths(aimee_request_t *request, const struct cJSON *paths);
 
+/* Pure response validation: 0 valid, -1 malformed; never changes source IR. */
+/* A completed authored answer may contain IMAGE/DOCUMENT and inert THINKING
+ * or opaque sidecars on admitted blocks. No pending tools/errors/refusal. */
+int aimee_ir_response_complete_valid(const aimee_response_t *response);
+/* Business-answer projection requires a successful complete text turn. */
+int aimee_ir_response_complete_text_valid(const aimee_response_t *response);
+int aimee_ir_response_valid(const aimee_response_t *response);
 /* Admit a completed API model response, rejecting forged results/roles, duplicate
  * tool IDs, malformed blocks and invalid function arguments. Classifies provenance. */
 int aimee_ir_response_admit(aimee_response_t *response);
@@ -483,16 +533,10 @@ int aimee_ir_response_admit(aimee_response_t *response);
  * inexact/unrepresentable values return -1 before any integer conversion. */
 int aimee_ir_read_usage(const struct cJSON *usage, const char *name, long *out);
 
-/* ---- response-side accessors (delegate/core stages read these) ----
- *
- * The request side has had aimee_ir_last_user_text since slice 0; the response
- * side had nothing, which is why every consumer still reaches for
- * parsed_response_t. These are the shape-agnostic reads that replace its
- * `content` / `is_tool_call` / `calls[]` fields.
- *
- * All three iterate blocks and are deliberately type-strict: THINKING is NEVER
- * treated as answer text, and only TEXT blocks are concatenated. That structural
- * separation is what removes the need to regex reasoning out of the text at all. */
+/* ---- response-side accessors ----
+ * Read canonical typed blocks without changing their ownership. Answer text
+ * includes TEXT only; THINKING remains separate, and tool accessors select
+ * TOOL_USE blocks by their canonical type. */
 
 /* Concatenate the response's TEXT blocks into `buf` (truncating to n). THINKING
  * blocks are skipped: reasoning is not the answer. Returns chars written
@@ -572,8 +616,6 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled);
 /* Prepend persona instructions to the first user message, once per conversation.
  * Returns 1 when placed, 0 otherwise. */
 int aimee_ir_prepend_persona_instructions(aimee_request_t *request, const char *instructions);
-
-char *aimee_ir_prepend_persona_text(const char *text, const char *instructions);
 
 int aimee_ir_stage_session_assist(aimee_request_t *request, void *unused);
 

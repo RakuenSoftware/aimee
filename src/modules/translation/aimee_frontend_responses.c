@@ -107,6 +107,20 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       aimee_request_free(out);
       return -1;
    }
+   const cJSON *tier = cJSON_GetObjectItemCaseSensitive(req, "service_tier");
+   if (tier && !cJSON_IsNull(tier))
+   {
+      if (!cJSON_IsString(tier) || !tier->valuestring || !tier->valuestring[0])
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid service_tier");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->service_tier = strdup(tier->valuestring);
+      if (!out->service_tier)
+         goto oom;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);
@@ -376,9 +390,10 @@ oom:
    return -1;
 }
 
+/* This wire has no representation for typed provider refusal diagnostics. */
 cJSON *responses_frontend_render(const aimee_response_t *r)
 {
-   if (!r)
+   if (!r || r->refusal)
       return NULL;
    if (r->error_message)
    {
@@ -467,6 +482,15 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
          cJSON_Delete(out);
          return NULL;
       }
+   }
+   if (r->usage_unobserved)
+   {
+      if (!cJSON_AddNullToObject(out, "usage"))
+      {
+         cJSON_Delete(out);
+         return NULL;
+      }
+      return out;
    }
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);

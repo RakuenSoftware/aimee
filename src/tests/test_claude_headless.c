@@ -77,13 +77,15 @@ static int bind_session(const char *id, void *context)
    binds++;
    return reject_bind || strcmp(id, "native-one") ? -1 : 0;
 }
-static int spawn_fixture(const provider_cli_cfg_t *cfg, const char *prompt, int *input, int *output,
-                         pid_t *pid)
+static int spawn_calls;
+int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *output, pid_t *pid)
 {
+   spawn_calls++;
+   assert(cfg->claude_host);
    assert(!strcmp(cfg->home, "/runtime/credential-home"));
    assert(!strcmp(cfg->resume_id, "resume-one"));
    assert(!strcmp(cfg->session_id, "aimee-one"));
-   assert(cfg->primary == 1 && !strcmp(prompt, "hello"));
+   assert(cfg->primary == 1 && !strcmp(cfg->user_prompt, "hello"));
    int in[2], out[2];
    assert(pipe(in) == 0 && pipe(out) == 0);
    child = fork();
@@ -107,11 +109,15 @@ static int spawn_fixture(const provider_cli_cfg_t *cfg, const char *prompt, int 
    *pid = child;
    return 0;
 }
-const provider_cli_adapter_t claude_provider_cli_adapter = {.spawn = spawn_fixture};
+static int profile_init(const cJSON *frame, void *context);
+static int prime_profile = 1;
+static const char *owned_init =
+    "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"native-one\","
+    "\"cwd\":\"/approved\",\"apiKeySource\":\"ANTHROPIC_API_KEY\",\"permissionMode\":\"default\","
+    "\"tools\":[],\"mcp_servers\":[],\"plugins\":[]}";
 static const char *success_frames =
     "printf '%s\\n' 'diagnostic, never conversation content'\n"
     "cat <<'FRAMES'\n"
-    "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"native-one\"}\n"
     "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{\"id\":\"m1\","
     "\"role\":\"assistant\"}}}\n"
     "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_"
@@ -131,6 +137,8 @@ static void script(const char *path, const char *body)
    FILE *f = fopen(path, "w");
    assert(f);
    fputs("#!/bin/sh\npayload=$(cat)\n[ \"$payload\" = hello ] || exit 9\n", f);
+   if (prime_profile)
+      fprintf(f, "printf '%%s\\n' '%s'\n", owned_init);
    fputs(body, f);
    assert(!fclose(f));
    assert(!chmod(path, 0700));
@@ -144,6 +152,12 @@ static void binary_script(const char *path, const unsigned char *bytes, size_t s
    fputs("#!/usr/bin/python3\nimport sys,os\nassert "
          "sys.stdin.buffer.read()==b'hello'\npayload=bytes.fromhex('",
          f);
+   if (prime_profile)
+   {
+      for (size_t i = 0; i < strlen(owned_init); i++)
+         fprintf(f, "%02x", (unsigned char)owned_init[i]);
+      fputs("0a", f);
+   }
    for (size_t i = 0; i < size; i++)
       fprintf(f, "%02x", bytes[i]);
    fputs("')\n", f);
@@ -176,7 +190,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
       binary_script(path, (const unsigned char *)cases[i].bytes, cases[i].length, i % 2);
       agent_result_t out = {0};
       assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-      assert(!out.success && !out.response && !events && !binds);
+      assert(!out.success && !out.canonical_response.n_content && !events && binds == 1);
       assert(!strcmp(out.error, "invalid Claude JSON frame"));
       assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
    }
@@ -194,7 +208,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    binary_script(path, payload, prefix + extra, 0);
    agent_result_t out = {0};
    assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-   assert(!out.success && !out.response && events == 6 && binds == 1);
+   assert(!out.success && !out.canonical_response.n_content && events == 0 && binds == 1);
    assert(!strcmp(out.error, "invalid Claude JSON frame"));
    /* Exact valid EOF framing remains accepted, with arbitrary read fragmentation. */
    events = binds = 0;
@@ -202,14 +216,14 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    assert(prefix && payload[prefix - 1] == '\n');
    binary_script(path, payload, prefix - 1, 1);
    assert(!claude_headless_run(cfg, bind_session, &binds, &out) && out.success);
-   assert(events == 6 && binds == 1 && out.response && !strcmp(out.response, "reply"));
+   assert(events == 0 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    free(payload);
 }
 static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
 {
-   /* Pinned print-mode stdout uses snake case; the internal log uses camel case.
-    * Arbitrary diagnostic text must never be copied. */
+   /* Newer print serializers mark diagnostics with snake case; SDK 2.1.177
+    * omits that flag. Internal logs use camel case. Never copy diagnostic text. */
    const char *codes[] = {"rate_limit", "invalid_request"};
    const char *messages[] = {"Claude request was rate limited by the provider.",
                              "Claude provider rejected the request."};
@@ -232,7 +246,7 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       agent_result_t out = {0};
       assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
       assert(!strcmp(out.error, messages[category]));
-      assert(!events && !out.response && !out.canonical_response.n_content);
+      assert(!events && !out.canonical_response.n_content);
       agent_result_clear_response(&out);
 
       /* A diagnostic from a refused native session cannot label this execution. */
@@ -247,7 +261,7 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
       binds = events = 0;
       assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
-      assert(!out.success && binds == 1 && !events && strcmp(out.error, messages[category]));
+      assert(!out.success && binds == 2 && !events && strcmp(out.error, messages[category]));
       agent_result_clear_response(&out);
 
       /* Missing terminal/cancellation never borrows a terminal failure category. */
@@ -269,9 +283,65 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       script(path, script_body);
       events = 0;
       assert(!claude_headless_run(cfg, NULL, NULL, &out) && out.success);
-      assert(!out.error[0] && out.response && !strcmp(out.response, "reply") && events == 6);
+      assert(!out.error[0] && !out.canonical_response.n_content && events == 0);
       agent_result_clear_response(&out);
    }
+}
+static void legacy_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
+{
+   /* Exact legacy envelope shape, synthetic unknown diagnostic; no text authority. */
+   const char *assistant =
+       "{\"type\":\"assistant\",\"error\":\"unknown\",\"session_id\":\"native-one\","
+       "\"uuid\":\"sdk-uuid\",\"parent_tool_use_id\":null,\"message\":{\"id\":\"diag\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_DIAGNOSTIC\"}]}}"
+       "\n";
+   char frames[2048];
+   snprintf(frames, sizeof frames, "%s%s", assistant,
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true}\n");
+   binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+   agent_result_t out = {0};
+   binds = events = 0;
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude structured turn failed"));
+   assert(binds == 1 && !events && !out.canonical_response.n_content);
+   agent_result_clear_response(&out);
+   binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude structured turn failed") && !events);
+   agent_result_clear_response(&out);
+
+   /* Constructed known-code legacy envelopes exercise the source contract;
+    * they are not captured wire evidence for the failed live turn. */
+   const char *codes[] = {"rate_limit", "invalid_request"};
+   const char *errors[] = {"Claude request was rate limited by the provider.",
+                           "Claude provider rejected the request."};
+   for (size_t i = 0; i < 2; i++)
+   {
+      cJSON *legacy = cJSON_Parse(assistant);
+      assert(legacy &&
+             cJSON_ReplaceItemInObjectCaseSensitive(legacy, "error", cJSON_CreateString(codes[i])));
+      char *raw = cJSON_PrintUnformatted(legacy);
+      assert(raw);
+      snprintf(frames, sizeof frames, "%s\n{\"type\":\"result\",\"is_error\":true}\n", raw);
+      free(raw);
+      cJSON_Delete(legacy);
+      binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+      events = binds = 0;
+      assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+      assert(!strcmp(out.error, errors[i]) && binds == 1 && !events &&
+             !out.canonical_response.n_content);
+      agent_result_clear_response(&out);
+   }
+
+   /* A foreign ordinary assistant must be refused before any observation. */
+   const char *foreign =
+       "{\"type\":\"assistant\",\"session_id\":\"foreign-one\",\"message\":{\"id\":\"foreign\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"FOREIGN_TEXT\"}]}}\n";
+   binary_script(path, (const unsigned char *)foreign, strlen(foreign), 0);
+   events = binds = 0;
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(binds == 2 && !events && !out.canonical_response.n_content);
+   agent_result_clear_response(&out);
 }
 static void interactive_script(const char *path)
 {
@@ -290,6 +360,12 @@ static void interactive_script(const char *path)
          "assert reply['request_id']=='permission' and reply['response']['behavior']=='allow'\n"
          "assert reply['response']['updatedInput']=={'path':'source.c'}\n",
          f);
+   cJSON *init_value = cJSON_CreateString(owned_init);
+   char *init_literal = cJSON_PrintUnformatted(init_value);
+   assert(init_literal);
+   fprintf(f, "print(%s,flush=True)\n", init_literal);
+   free(init_literal);
+   cJSON_Delete(init_value);
    const char *line = strchr(success_frames, '{');
    while (line && line[0] == '{')
    {
@@ -317,8 +393,143 @@ static int profile_init(const cJSON *frame, void *context)
    init_calls++;
    return init_refused;
 }
+/* The SDK must never receive user input while its required MCP server is
+ * pending. Control-plane metadata is not conversation history. */
+static void native_readiness(const char *path, const provider_cli_cfg_t *cfg)
+{
+   aimee_request_t catalog = {0};
+   catalog.tools = calloc(1, sizeof *catalog.tools);
+   assert(catalog.tools);
+   catalog.tools[0].name = "read_file";
+   cli_claude_host_launch_t host = {.cwd = "/approved", .catalog = &catalog, .init = profile_init};
+   provider_cli_cfg_t owned = *cfg;
+   agent_t agent = *cfg->agent;
+   owned.agent = &agent;
+   owned.control_channel = 1;
+   owned.claude_host = &host;
+   char trace[4096];
+   assert(snprintf(trace, sizeof trace, "%s.input", path) < (int)sizeof trace);
+   for (int mode = 0; mode <= 19; mode++)
+   {
+      catalog.n_tools = mode == 17 ? 0 : 1;
+      agent.cli_idle_timeout_ms = 120000;
+      server_control_scope_t *scope = server_control_scope_open("aimee-one", "readiness", "alice");
+      assert(scope);
+      server_control_scope_bind(scope);
+      unlink(trace);
+      cJSON *trace_value = cJSON_CreateString(trace);
+      char *literal = cJSON_PrintUnformatted(trace_value);
+      assert(literal);
+      FILE *f = fopen(path, "w");
+      assert(f);
+      fprintf(f, "#!/usr/bin/python3\nimport sys,json,select,time\nmode=%d\ntrace=%s\n", mode,
+              literal);
+      free(literal);
+      cJSON_Delete(trace_value);
+      fputs("def read():\n"
+            " q=json.loads(sys.stdin.readline())\n"
+            " if q['type']=='user':\n"
+            "  with open(trace,'a') as f: f.write('user\\n')\n"
+            " return q\n"
+            "def reply(q,servers):\n"
+            " r={'type':'control_response','response':{'subtype':'success','request_id':q['request_"
+            "id'],'response':{'mcpServers':servers}}}\n"
+            " if "
+            "mode==8:r['response']['subtype']='error';r['response']['error']='PRIVATE_RESPONSE_"
+            "ERROR'\n"
+            " if mode==9:r['response']['request_id']='stale-request'\n"
+            " print(json.dumps(r),flush=True)\n"
+            " if mode==10:print(json.dumps(r),flush=True)\n"
+            "q=read();assert q['request']['subtype']=='initialize'\n"
+            "ack={'type':'control_response','response':{'subtype':'success','request_id':q['"
+            "request_id'],'response':{}}}\n"
+            "if mode==15:ack['response']['request_id']='unowned-init'\n"
+            "print(json.dumps(ack),flush=True)\n"
+            "if mode==16:print(json.dumps(ack),flush=True)\n"
+            "if mode==18:\n"
+            " print(json.dumps({'type':'system','subtype':'init','session_id':'native-one','cwd':'/"
+            "approved','apiKeySource':'ANTHROPIC_API_KEY','permissionMode':'default','tools':['"
+            "read_file'],'mcp_servers':[{'name':'aimee','status':'connected'}],'plugins':[]}),"
+            "flush=True)\n"
+            "ids=set()\n"
+            "if mode!=17:\n"
+            " for state in ['pending','pending','connected']:\n"
+            "  q=read();assert q['type']=='control_request' and "
+            "q['request']['subtype']=='mcp_status'\n"
+            "  assert q['request_id'] not in ids;ids.add(q['request_id'])\n"
+            "  if mode==13:time.sleep(65)\n"
+            "  if mode==14:time.sleep(5)\n"
+            "  if mode==11:\n"
+            "   "
+            "print(json.dumps({'type':'control_request','request_id':'unowned-permission','request'"
+            ":{'subtype':'can_use_tool','tool_name':'Read','input':{}}}),flush=True)\n"
+            "  if mode in "
+            "[1,2,3,4]:state={1:'failed',2:'needs-auth',3:'disabled',4:'PRIVATE_UNKNOWN_STATUS'}["
+            "mode]\n"
+            "  "
+            "servers=[{'name':'aimee','status':state,'error':'PRIVATE_STATUS_ERROR','config':{'"
+            "headers':{'Authorization':'PRIVATE_STATUS_TOKEN'}}}]\n"
+            "  if mode==5:servers=[]\n"
+            "  if mode==6:servers=servers*2\n"
+            "  if mode==7:servers='PRIVATE_NOT_ARRAY'\n"
+            "  reply(q,servers)\n"
+            "  if state=='pending': assert not select.select([sys.stdin],[],[],0.08)[0]\n"
+            "u=read();assert u['type']=='user' and u['message']['content']=='hello'\n"
+            "if mode==19:print(json.dumps(ack),flush=True)\n"
+            "tools=[] if mode in [12,17] else ['read_file']\n"
+            "servers=[] if mode==17 else [{'name':'aimee','status':'connected'}]\n"
+            "print(json.dumps({'type':'system','subtype':'init','session_id':'native-one','cwd':'/"
+            "approved','apiKeySource':'ANTHROPIC_API_KEY','permissionMode':'default','tools':tools,"
+            "'mcp_servers':servers,'plugins':[]}),flush=True)\n"
+            "print(json.dumps({'type':'result','is_error':False}),flush=True)\n"
+            "assert not sys.stdin.read()\n",
+            f);
+      assert(!fclose(f) && !chmod(path, 0700));
+      aimee_ir_session_set_sink(capture, NULL);
+      init_calls = init_refused = events = profile_logs = 0;
+      cancel_at = mode == 14 ? now_ms() + 350 : 0;
+      long long start = now_ms();
+      agent_result_t out = {0};
+      int rc = claude_headless_run(&owned, NULL, NULL, &out);
+      if (mode == 0 || mode == 17)
+         assert(!rc && out.success && init_calls == 1 && !profile_logs);
+      else
+         assert(rc < 0 && !out.success && !init_calls);
+      assert(!events && !out.canonical_response.n_content);
+      if (mode == 12)
+         assert(profile_logs == 1 &&
+                !strcmp(out.error, "Claude native launch profile was refused (tool count)"));
+      else
+         assert(!profile_logs);
+      if (mode == 13)
+         assert(!strcmp(out.error, "Claude control initialization timed out") &&
+                now_ms() - start >= 60000 && now_ms() - start < 65000);
+      if (mode == 14)
+         assert(!strcmp(out.error, "Claude turn interrupted") && now_ms() - start < 4000);
+      FILE *input = fopen(trace, "r");
+      int users = 0;
+      if (input)
+      {
+         char line[32];
+         while (fgets(line, sizeof line, input))
+         {
+            assert(!strcmp(line, "user\n"));
+            users++;
+         }
+         fclose(input);
+      }
+      assert(users == (mode == 0 || mode == 12 || mode == 17 || mode == 19));
+      assert(!strstr(out.error, "PRIVATE_"));
+      agent_result_clear_response(&out);
+      cancel_at = 0;
+      server_control_scope_close(scope);
+   }
+   unlink(trace);
+   free(catalog.tools);
+}
 static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
 {
+   prime_profile = 0;
    const char *init =
        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"native-one\","
        "\"cwd\":\"/approved\",\"apiKeySource\":\"ANTHROPIC_API_KEY\","
@@ -350,12 +561,39 @@ static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
       assert(!strcmp(out.error, error));
       assert(init_calls == (i == 1 || i == 2));
       assert(profile_logs == 1);
-      assert(!strcmp(
-          profile_metadata,
-          "init profile mismatch: expected_tools=0 reported_tools=0 mcp_servers=0 "
-          "aimee_connected=0 plugins=0 missing_owned_sha256=- unexpected_reported_sha256=-"));
+      assert(!strcmp(profile_metadata,
+                     "init profile mismatch: expected_tools=0 reported_tools=0 mcp_servers=0 "
+                     "aimee_connected=0 aimee_status=unknown plugins=0 missing_owned_sha256=- "
+                     "unexpected_reported_sha256=-"));
       assert(events == 0);
    }
+   /* Unknown state and nested SDK error text must not be copied into the
+    * single profile diagnostic or canonical history. */
+   cJSON *private_frame = cJSON_Parse(init);
+   cJSON *private_server = cJSON_CreateObject();
+   assert(private_frame && private_server);
+   cJSON_AddStringToObject(private_server, "name", "aimee");
+   cJSON_AddStringToObject(private_server, "status", "PRIVATE_STATUS_DIAGNOSTIC");
+   cJSON_AddStringToObject(private_server, "error", "PRIVATE_MCP_ERROR_TEXT");
+   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(private_frame, "mcp_servers"),
+                        private_server);
+   char *private_json = cJSON_PrintUnformatted(private_frame);
+   assert(private_json);
+   char body[4096];
+   snprintf(body, sizeof body, "printf '%%s\\n' '%s'\n", private_json);
+   free(private_json);
+   cJSON_Delete(private_frame);
+   script(path, body);
+   host.cwd = "/approved";
+   host.init = profile_init;
+   profile_logs = init_calls = events = 0;
+   agent_result_t out = {0};
+   assert(claude_headless_run(&owned, NULL, NULL, &out) < 0 && !out.success);
+   assert(profile_logs == 1 && !init_calls && !events && !out.canonical_response.n_content);
+   assert(strstr(profile_metadata, "aimee_status=unknown") &&
+          !strstr(profile_metadata, "PRIVATE_STATUS_DIAGNOSTIC") &&
+          !strstr(profile_metadata, "PRIVATE_MCP_ERROR_TEXT"));
+   agent_result_clear_response(&out);
    init_refused = 0;
 }
 int main(void)
@@ -375,31 +613,30 @@ int main(void)
                              .primary = 1,
                              .resume_id = "resume-one",
                              .session_id = "aimee-one"};
+   aimee_request_t catalog = {0};
+   cli_claude_host_launch_t host = {.cwd = "/approved", .catalog = &catalog, .init = profile_init};
    agent_result_t out = {0};
-   aimee_ir_session_set_sink(capture, NULL);
    script(path, success_frames);
-   assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
-   assert(events == 6 && binds == 1 && !strcmp(out.response, "reply"));
+   int spawned = spawn_calls;
+   assert(claude_headless_run(&cfg, bind_session, &binds, &out) == AGENT_RC_CONTEXT_REFUSED);
+   assert(spawn_calls == spawned && !out.success && !out.canonical_response.n_content);
+   assert(strstr(out.error, "canonical Claude execution owner unavailable"));
+   cfg.claude_host = &host;
+   aimee_ir_session_set_sink(capture, NULL);
+   assert(!claude_headless_run(&cfg, bind_session, &binds, &out) && out.success);
+   assert(events == 0 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
-
-   events = 0;
-   binds = 0;
-   reject_after = 2;
-   assert(claude_headless_run(&cfg, bind_session, &binds, &out) < 0 && !out.success);
-   assert(events == 2);
-   reject_after = 0;
    reject_bind = 1;
-   events = 0;
-   assert(claude_headless_run(&cfg, bind_session, &binds, &out) < 0 && !out.success && !events);
+   binds = events = 0;
+   aimee_ir_session_set_sink(capture, NULL);
+   assert(claude_headless_run(&cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(!out.success && !events && binds == 1);
    reject_bind = 0;
-
+   aimee_ir_session_set_sink(capture, NULL);
+   legacy_diagnostic(path, &cfg);
    api_failure_diagnostic(path, &cfg);
    script(path, "printf '%s\\n' '{\"type\":\"result\",\"is_error\":true}'\n");
-   assert(claude_headless_run(&cfg, NULL, NULL, &out) < 0 && !out.success);
-   script(path, "printf '%s\\n' "
-                "'{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":"
-                "0,\"delta\":{\"type\":\"text_delta\",\"text\":\"invalid\"}}}'\n");
    assert(claude_headless_run(&cfg, NULL, NULL, &out) < 0 && !out.success);
    script(path, "sleep 30\n");
    cancel_at = now_ms() + 100;
@@ -417,7 +654,7 @@ int main(void)
    cfg.control_channel = 1;
    interactive_script(path);
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
-   assert(events == 8 && binds == 1 && out.response && !strcmp(out.response, "reply"));
+   assert(events == 2 && binds == 1 && !out.canonical_response.n_content);
    agent_result_clear_response(&out);
    server_control_scope_close(scope);
    scope = server_control_scope_open("aimee-one", "test-turn", "alice");
@@ -444,10 +681,11 @@ int main(void)
    cfg.control_channel = 0;
    script(path,
           "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"unobserved\"}'\n");
-   assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
-   assert(!out.success && !out.response);
+   assert(!claude_headless_run(&cfg, NULL, NULL, &out) && out.success);
+   assert(!out.canonical_response.n_content);
    strict_frames(path, &cfg);
    profile_refusals(path, &cfg);
+   native_readiness(path, &cfg);
    aimee_ir_session_set_sink(NULL, NULL);
    unlink(path);
    puts("Claude headless lifecycle and strict byte-frame tests passed");

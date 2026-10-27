@@ -24,16 +24,22 @@ Current contracts include delegate ensemble execution, preset seat resolution,
 Roundtable-specific composition must preserve attributed panel evidence and verdict semantics before
 handing the result to general response composition or a consuming workflow.
 
-Provider-neutral output layouts live in the required IR module's `aimee/ir/panel_result.h`.
-Provider-neutral request/options and aggregate-result types, registration and invocation facades, and
-release dispatch live in the required delegates module's `panel_provider.h`. Required consumers use those
-facades and never include optional roundtable execution headers. The private `roundtable_types.h` provides
-compatibility aliases, while the private `delegate_ensemble.h` declares optional implementation entry
-points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects new private-header
-consumers and exact-ratchets the remaining provider/roster and composition migration debt. Removing an
-existing consumer also fails until the ratchet is reduced in the same change.
-Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
-`AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
+Provider-neutral panel domain layouts live in `aimee/core/types/panel_result.h`.
+The private `roundtable_types.h` provides aliases; `delegate_ensemble.h` declares
+optional execution entry points. Callers release owned results through the
+matching implementation's free function. The unused provider facade has been
+retired. `scripts/check_panel_contract_boundary.py` rejects new private-header
+consumers and ratchets the remaining composition dependencies.
+
+The aggregate entry point accepts a canonical request. Reference seats receive
+owned IR clones; synthesis extends the original task instead of rebuilding it
+from a text projection. Text/image blocks, context metadata, opaque sidecars and
+explicit sampling controls remain intact. Participant replies travel as ordered
+assistant blocks, including private reasoning metadata; labels and generated
+instructions occupy separate user blocks. Selected and summarized carryover stays
+canonical across sequential turns, scoring, repair, chair and synthesis. Text
+projections are local to deterministic review/scoring and final domain output;
+there is no execution-result display cache.
 
 ## Dependencies and consumers
 
@@ -58,13 +64,11 @@ Make and CMake until descriptor-driven generation lands.
 
 ## Providers and readiness
 
-The required delegates roster applies common eligibility, authorization, random-seat, and availability
-policy. Roundtable adds named presets and deliberation-specific seat/persona policy; chair and verifier
-calls use delegate providers. The required delegates owner's `panel_provider.c` implements
-registration and the `aimee_panel_aggregate` and `aimee_panel_run` facades. The optional
-`delegate_ensemble.c` retains `delegate_ensemble_run` and `delegate_roundtable_run` execution;
-`roundtable_activation.c` owns activation and surface classification. A declaration of
-`roundtable_provider_configure` alone does not establish a registered provider. Readiness must
+Delegate routing applies eligibility, authorization and availability policy.
+Roundtable adds named presets and deliberation-specific seat/persona policy;
+chair and verifier calls use delegate providers. `delegate_ensemble.c` owns
+`delegate_ensemble_run` and `delegate_roundtable_run` execution;
+`roundtable_activation.c` owns activation and surface classification. Readiness must
 separate activation, usable seats, provider credentials/health, budget, preset validity, capture store,
 and pipeline state. A compiled route or saved preset is not proof of an executable panel.
 
@@ -94,18 +98,12 @@ The server resolves activation once at startup because administrative hot toggli
 Changing `modules.roundtable` or its environment fallback therefore requires a server restart. While
 disabled, roundtable-owned raw methods are absent from `server.info`, HTTP operation routes return 404,
 and MCP tools are absent from `tools/list`, `find_tools`, and `describe_tool`; direct raw method or MCP
-calls return unknown-method/tool semantics. The delegates registry reports an explicit conflict
-when another provider is registered. Current source has no startup call that registers the declared
-roundtable adapter, so registration and executable panel availability require separate evidence.
+calls return unknown-method/tool semantics. Executable panel availability also requires enabled
+seats and working model connections.
 
-Build selection is separate from runtime activation. `AIMEE_WITH_ROUNDTABLE=0` for Make omits the owner
-implementation, its private include root, and the listed server/workflow/database composition objects.
-`-DAIMEE_WITH_ROUNDTABLE=OFF` for CMake omits the roundtable provider and private include root from the
-supported thin-client target; CMake rejects that option for a non-thin configuration rather than implying
-unsupported full-stack omission. Both build systems select roundtable by default for compatibility, while
-a selected module remains runtime-disabled unless explicitly activated. In the validated omitted Make
-profile, the legacy activation key is accepted with a warning, but no roundtable operation, route, CLI
-command, MCP tool, provider, or workflow implementation is exposed.
+The current Make build includes roundtable execution. Runtime activation remains
+separate: an included module is disabled unless explicitly activated. There is
+no supported roundtable-omitted Make or CMake profile in this checkout.
 
 ## Surfaces
 
@@ -118,9 +116,8 @@ As of slice 28, `roundtable_activation.c` is the single owner of roundtable oper
 classification. Disabled server operations are `delegate.aggregate`, `delegate.roundtable`, and
 `pipeline.*`; disabled MCP surfaces are `ensemble_review`, the collapsed `pipeline` family, and direct
 `pipeline_*` aliases. HTTP `POST /v1/delegate/aggregate` and
-`POST /v1/delegate/roundtable` are absent at the route matcher. In a selected but runtime-disabled build,
-workflow roundtable gates remain valid schema and fail permanently without panel work. In an omitted
-build, their implementation and live registration are absent. Static documentation remains available;
+`POST /v1/delegate/roundtable` are absent at the route matcher. When runtime-disabled, workflow roundtable gates remain valid schema and fail permanently without
+panel work. Static documentation remains available;
 executable discovery surfaces do not advertise unavailable functionality.
 
 ## Data and migrations
@@ -129,20 +126,12 @@ State includes named JSON presets, DB1 ensemble/session records, panel assignmen
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
 
-Omitted Make builds retain the historical roundtable table declarations in the shared DB1 schema solely
-to preserve schema initialization, migration, and downgrade compatibility for existing databases. The
-declarations are dormant: the roundtable persistence implementation is not compiled and no live
-roundtable data provider is created. Removing those declarations requires a separate, versioned
-data-migration decision.
-
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
 
-The roundtable provider allocates the `aimee_panel_result_t.artifact` returned by a successful call and
-supplies the matching release callback. The caller must release the result exactly once through the
-delegates-owned `aimee_panel_result_release` facade, which dispatches that callback, before the provider is
-unregistered; shallow result copies are non-owning views and must not be released independently. IR owns
-the message layout, while delegates core owns registration, facade invocation, and release dispatch.
-Registration and unregistration occur only during startup, with no concurrent hot unload.
+Successful roundtable results own their artifact; callers release it through
+`delegate_roundtable_result_free`. Aggregate results own a canonical response,
+released by `delegate_ensemble_result_free`. Shallow copies are non-owning views.
+Core owns the shared domain layout; each implementation owns execution and release.
 
 ## Security and privacy
 
@@ -166,10 +155,6 @@ workflow-gate suites cover current behavior. No eligible/available seats, provid
 invalid model output, budget/turn exhaustion, failed quorum, capture failure, or non-convergence must
 produce a typed incomplete/failure result rather than invented consensus.
 
-The omitted Make profile also runs positive delegate routing, IR, ACP, MCP native-surface,
-response-pipeline, raw server-dispatch, and HTTP route tests. Those tests prove required core still
-operates; the separate binary/object inspection proves the optional implementation stayed absent.
-
 ## Operational diagnostics
 
 Report `roundtable` mode, preset, seat/provider identity, eligibility/availability reason, round/pass,
@@ -179,7 +164,7 @@ distinguish startup-config-disabled, provider-unready, non-converged, and workfl
 
 ## Compatibility
 
-Tool/API names, preset shapes, seat aliases, IR-owned `aimee/ir/panel_result.h` result/finding schemas,
+Tool/API names, preset shapes, seat aliases, core-owned `aimee/core/types/panel_result.h` result/finding schemas,
 quorum and verification semantics, chair contracts, pipeline state, attribution, and workflow provider
 results are compatibility contracts. `scripts/check_panel_contract_boundary.py` prevents required-side
 private-header dependencies. Roundtable-specific result composition

@@ -235,7 +235,6 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/windows/history.c
         ${AIMEE_SRC_DIR}/windows/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -245,7 +244,6 @@ if(WIN32)
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/windows/cmd_infra.c
-        ${AIMEE_SRC_DIR}/windows/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/windows/cmd_hooks.c
     )
     if(WITH_UI)
@@ -278,7 +276,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -301,7 +298,6 @@ elseif(APPLE)
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
-        ${AIMEE_SRC_DIR}/posix/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
@@ -334,7 +330,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -357,7 +352,6 @@ else()
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
-        ${AIMEE_SRC_DIR}/posix/cmd_agent_delegate.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
@@ -385,7 +379,6 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/windows/platform_random.c
-        ${AIMEE_SRC_DIR}/windows/history.c
         ${AIMEE_SRC_DIR}/windows/cli_client.c
         ${AIMEE_SRC_DIR}/windows/cli_main.c
         ${AIMEE_SRC_DIR}/windows/util.c
@@ -411,7 +404,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/mac/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
         ${AIMEE_SRC_DIR}/posix/util.c
@@ -433,7 +425,6 @@ else()
         ${AIMEE_SRC_DIR}/linux/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
-        ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
         ${AIMEE_SRC_DIR}/posix/util.c
@@ -548,6 +539,7 @@ set(KB_STORE_HOST_ADAPTER_SRCS
 set(IR_BASE_SRCS
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/session_event.c
+    ${AIMEE_SRC_DIR}/modules/ir/request_codec.c
     ${AIMEE_SRC_DIR}/modules/ir/response_codec.c
 )
 set(HOOK_IR_SRCS
@@ -575,7 +567,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/delivery_target.c
     ${AIMEE_SRC_DIR}/text.c
     ${AIMEE_SRC_DIR}/render.c
-    ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/json_fluent.c
     ${AIMEE_SRC_DIR}/log.c
     ${AIMEE_SRC_DIR}/shutdown_forensics.c
@@ -660,6 +651,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/payload_rewrite.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_semantic.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     # THE session worktree/branch key, shared with the thin client.
     ${AIMEE_SRC_DIR}/session_worktree_key.c
@@ -669,11 +661,9 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
-    ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
     ${AIMEE_SRC_DIR}/modules/skills/skill.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_rollback.c
-    ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c
     ${AIMEE_SRC_DIR}/trajectory_batch.c
     ${AIMEE_SRC_DIR}/wiki_render.c
@@ -696,7 +686,10 @@ set(DATA_SRCS
 )
 
 set(AGENT_SRCS
+    ${AIMEE_SRC_DIR}/server/request_context.c
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
+    ${AIMEE_SRC_DIR}/server/agent_request_build.c
+    ${AIMEE_SRC_DIR}/server/server_model_execution.c
     ${AIMEE_SRC_DIR}/server/agent_result_cache.c
     ${AIMEE_SRC_DIR}/server/agent_parallel.c
     ${AIMEE_SRC_DIR}/server/agent_runtime_liveness.c
@@ -733,7 +726,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/middleware.c
     ${AIMEE_SRC_DIR}/server/agent_pipeline.c
     ${AIMEE_SRC_DIR}/server/process_mgr.c
-    ${AIMEE_SRC_DIR}/server/agent_loop.c
     ${AIMEE_SRC_DIR}/server/liveness.c
     ${AIMEE_SRC_DIR}/server/cli_session.c
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
@@ -749,10 +741,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_response_projection.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
-    ${AIMEE_SRC_DIR}/server/cli_acp.c
     ${AIMEE_SRC_DIR}/server/session_compact.c
-    ${AIMEE_SRC_DIR}/server/compact_prune.c
-    ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c
@@ -787,6 +776,7 @@ set(GIT_SRCS
     ${AIMEE_SRC_DIR}/modules/git/git_verify_step.c
 )
 
+set(CLIENT_TRANSPORT_SRCS ${AIMEE_SRC_DIR}/cli_client.c)
 set(CLI_SRCS
     ${HOOK_IR_SRCS}
     ${IR_BASE_SRCS}
@@ -821,7 +811,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_chat_stream.c
-    ${AIMEE_SRC_DIR}/cli_client.c
+    ${CLIENT_TRANSPORT_SRCS}
     ${AIMEE_SRC_DIR}/cli_kb_smoke.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
@@ -871,6 +861,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
     ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
+    ${AIMEE_SRC_DIR}/modules/translation/codec_stdio.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
@@ -934,8 +925,8 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_delegate_input.c
     ${AIMEE_SRC_DIR}/server/server_chat_ir.c
-    ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c
     ${AIMEE_SRC_DIR}/server/server_delegate_ondemand.c
@@ -958,7 +949,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c
     ${AIMEE_SRC_DIR}/server/compute_pool.c
-    ${AIMEE_SRC_DIR}/cli_client.c
+    ${CLIENT_TRANSPORT_SRCS}
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
     ${AIMEE_SRC_DIR}/cli_native_bridge.c
@@ -1023,6 +1014,7 @@ set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/request_context.c
     ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
     ${AIMEE_SRC_DIR}/server/server_native_history.c
@@ -1137,6 +1129,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_gate.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/wiki_render.c
@@ -1386,8 +1379,6 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/codex_auth.c
     ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/dstr.c
-    ${AIMEE_SRC_DIR}/history.c
-    ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_iface.c
@@ -1405,6 +1396,13 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
 )
+if(NOT WIN32)
+    target_sources(aimee PRIVATE
+        ${AIMEE_SRC_DIR}/modules/workspace/workspace_identity.c
+        ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
+        ${AIMEE_SRC_DIR}/report_enrichment.c
+        ${AIMEE_SRC_DIR}/util_url.c)
+endif()
 target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
@@ -1528,21 +1526,10 @@ endif()
 # components built EXCLUSIVELY via `make -C src` (see src/Makefile); their CMake
 # targets were removed because CMake's source lists are not maintained for the
 # full server build (they drifted ~188 files behind src/Makefile) and no CI gate
-# ever built them. The block below is the agent tool-prompt / DB schema codegen
+# ever built them. The block below is the DB schema codegen
 # and the unit-test suite, which the thin-client-only profile
 # (-DAIMEE_THIN_CLIENT=ON) skips.
 if(NOT AIMEE_THIN_CLIENT)
-
-set(TOOL_PROMPTS_HEADER "${AIMEE_SRC_DIR}/tool_prompts_data.h")
-file(GLOB TOOL_PROMPT_FILES CONFIGURE_DEPENDS "${AIMEE_SRC_DIR}/tool_prompts/*.md")
-add_custom_command(
-    OUTPUT "${TOOL_PROMPTS_HEADER}"
-    COMMAND "${Python3_EXECUTABLE}" "${AIMEE_SRC_DIR}/gen_tool_prompts.py" "${TOOL_PROMPTS_HEADER}"
-    DEPENDS "${AIMEE_SRC_DIR}/gen_tool_prompts.py" ${TOOL_PROMPT_FILES}
-    COMMENT "Generating tool_prompts_data.h from src/tool_prompts"
-)
-add_custom_target(tool_prompts_header DEPENDS "${TOOL_PROMPTS_HEADER}")
-add_dependencies(aimee-agent tool_prompts_header)
 
 # Generate schema_data.h from tier schema SQL. modules/db1/db_schema.c and
 # modules/kb/c/db_schema.c includes this header to embed its tier schemas as C
@@ -1616,3 +1603,37 @@ add_test(NAME kb_container_packaging_plant
 add_subdirectory(src/tests)
 
 endif() # NOT AIMEE_THIN_CLIENT
+
+# One thinclient transport implementation, linked by the CLI and consumed by
+# in-process browser/Discord language bindings. No server/domain dependencies.
+if(NOT AIMEE_USE_INSTALLED_CORE)
+    set_target_properties(aimee-core-connection PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+add_library(aimee-client SHARED
+    ${CLIENT_TRANSPORT_SRCS}
+    ${AIMEE_SRC_DIR}/cli_chat_stream.c
+    ${AIMEE_SRC_DIR}/aimee_home.c
+    ${AIMEE_SRC_DIR}/aimee_sha256.c
+    ${AIMEE_SRC_DIR}/vendor/cJSON.c
+    ${IR_BASE_SRCS})
+target_include_directories(aimee-client PUBLIC ${AIMEE_SRC_DIR}/headers
+    PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/vendor/headers)
+if(NOT WIN32)
+    target_compile_options(aimee-client PRIVATE -fPIC)
+    if(NOT AIMEE_USE_INSTALLED_CORE)
+        target_compile_options(aimee-core-connection PRIVATE -fPIC)
+    endif()
+endif()
+target_link_libraries(aimee-client PRIVATE aimee-core-connection Threads::Threads OpenSSL::Crypto)
+target_compile_definitions(aimee-client PRIVATE AIMEE_CLIENT_LIBRARY)
+if(WITH_TLS)
+    target_compile_definitions(aimee-client PRIVATE WITH_TLS)
+endif()
+set_target_properties(aimee-client PROPERTIES OUTPUT_NAME aimee-client)
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/pkgconfig/aimee-client.pc" CONTENT
+"prefix=${CMAKE_BINARY_DIR}\nlibdir=\${prefix}\nincludedir=${AIMEE_SRC_DIR}/headers\n\nName: aimee-client\nDescription: Shared Aimee thinclient transport\nVersion: 1.0.0\nLibs: -L\${libdir} -laimee-client\nCflags: -I\${includedir}\n")
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/aimee-client-install.pc" CONTENT
+"prefix=\${pcfiledir}/../..\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include/aimee-client\n\nName: aimee-client\nDescription: Shared Aimee thinclient transport\nVersion: 1.0.0\nLibs: -L\${libdir} -laimee-client\nCflags: -I\${includedir}\n")
+install(TARGETS aimee-client LIBRARY DESTINATION lib COMPONENT ThinClientSDK RUNTIME DESTINATION bin COMPONENT ThinClientSDK)
+install(FILES ${AIMEE_SRC_DIR}/headers/cli_client.h DESTINATION include/aimee-client COMPONENT ThinClientSDK)
+install(FILES "${CMAKE_BINARY_DIR}/aimee-client-install.pc" DESTINATION lib/pkgconfig RENAME aimee-client.pc COMPONENT ThinClientSDK)

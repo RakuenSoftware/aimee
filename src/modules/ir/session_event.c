@@ -105,12 +105,15 @@ cJSON *aimee_ir_message_json(const aimee_message_t *message)
    if (!message || !message->role || !message->role[0] || message->n_blocks < 0 ||
        message->n_blocks > 4096 || (message->n_blocks && !message->blocks))
       return NULL;
-   if (message->content_scalar != 0 && message->content_scalar != 1)
+   if ((message->content_scalar != 0 && message->content_scalar != 1) ||
+       (message->compaction_boundary != 0 && message->compaction_boundary != 1))
       return NULL;
    cJSON *out = cJSON_CreateObject(), *blocks = cJSON_CreateArray();
    if (!out || !blocks || !add_string(out, "role", message->role))
       goto fail;
    if (message->content_scalar && !cJSON_AddBoolToObject(out, "content_scalar", 1))
+      goto fail;
+   if (message->compaction_boundary && !cJSON_AddBoolToObject(out, "_compaction_boundary", 1))
       goto fail;
    for (int i = 0; i < message->n_blocks; i++)
    {
@@ -274,6 +277,10 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
    if (scalar && !cJSON_IsBool(scalar))
       goto fail;
    out->content_scalar = cJSON_IsTrue(scalar);
+   const cJSON *boundary = cJSON_GetObjectItemCaseSensitive(json, "_compaction_boundary");
+   if (boundary && !cJSON_IsBool(boundary))
+      goto fail;
+   out->compaction_boundary = cJSON_IsTrue(boundary);
    int count = cJSON_GetArraySize(blocks);
    if (count)
    {
@@ -291,6 +298,33 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
 fail:
    aimee_message_free(out);
    return -1;
+}
+
+cJSON *aimee_ir_history_clone(const cJSON *messages)
+{
+   if (messages && !cJSON_IsArray(messages))
+      return NULL;
+   cJSON *out = cJSON_CreateArray();
+   if (!out)
+      return NULL;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, messages)
+   {
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(item, &message))
+         goto fail;
+      cJSON *copy = aimee_ir_message_json(&message);
+      aimee_message_free(&message);
+      if (!copy || !cJSON_AddItemToArray(out, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
 }
 
 static _Atomic(aimee_ir_host_history_admission_fn) host_history_admission;
@@ -540,6 +574,8 @@ cJSON *aimee_ir_request_json(const aimee_request_t *request)
        !add_string(out, "cache_policy",
                    request->cache_policy == AIMEE_CACHE_STABLE_PREFIX ? "stable_prefix" : "native"))
       goto fail;
+   if (request->system_scalar && !cJSON_AddBoolToObject(out, "system_scalar", 1))
+      goto fail;
    cJSON *system = cJSON_AddArrayToObject(out, "system"),
          *messages = cJSON_AddArrayToObject(out, "messages"),
          *tools = cJSON_AddArrayToObject(out, "tools");
@@ -707,7 +743,15 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    if (!delta || delta->type < AIMEE_DELTA_TURN_START || delta->type > AIMEE_DELTA_ERROR ||
        (delta->type == AIMEE_DELTA_TURN_STOP &&
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
-         delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
+         delta->usage_cache_write < 0 || delta->usage_reasoning < 0 ||
+         (delta->usage_unobserved != 0 && delta->usage_unobserved != 1) ||
+         (delta->usage_unobserved &&
+          (delta->usage_in || delta->usage_out || delta->usage_cache_read ||
+           delta->usage_cache_write || delta->usage_reasoning)))))
+      return NULL;
+   if (delta->refusal &&
+       (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(delta->refusal)))
       return NULL;
    if (delta->message_group &&
        (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
@@ -767,12 +811,24 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
               add_string(out, "tool_args_delta", delta->tool_args_delta);
    }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
-      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason)) &&
-           cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
-           cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   {
+      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason));
+      if (!delta->usage_unobserved)
+         ok = ok && cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
+              cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
    {
       ok = ok && add_string(out, "raw_stop_reason", delta->raw_stop_reason);
+      if (delta->refusal)
+      {
+         cJSON *details = aimee_refusal_details_json(delta->refusal);
+         if (!details || !cJSON_AddItemToObject(out, "refusal", details))
+         {
+            cJSON_Delete(details);
+            ok = 0;
+         }
+      }
       if (delta->usage_cache_read)
          ok = ok &&
               cJSON_AddNumberToObject(out, "usage_cache_read", delta->usage_cache_read) != NULL;
@@ -1030,7 +1086,21 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
-          (!event->projection_reasoning && !event->projection_cache_controls) ||
+          event->projection_empty_messages < 0 ||
+          event->projection_empty_messages > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_request_controls < 0 ||
+          event->projection_request_controls > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_history_messages_as_text < 0 ||
+          event->projection_history_messages_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_host_context_blocks_as_text < 0 ||
+          event->projection_host_context_blocks_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_unverified_external_tool_reports < 0 ||
+          event->projection_unverified_external_tool_reports > AIMEE_IR_MAX_BLOCKS ||
+          (!event->projection_reasoning && !event->projection_cache_controls &&
+           !event->projection_request_controls && !event->projection_empty_messages &&
+           !event->projection_history_messages_as_text &&
+           !event->projection_host_context_blocks_as_text &&
+           !event->projection_unverified_external_tool_reports) ||
           event->projection_opaque < 0 || event->projection_opaque > event->projection_reasoning ||
           !event->projection_boundary ||
           (strcmp(event->projection_boundary, "request") &&
@@ -1046,7 +1116,22 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
                                    event->projection_opaque) ||
           (event->projection_cache_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
-                                    event->projection_cache_controls)))
+                                    event->projection_cache_controls)) ||
+          (event->projection_empty_messages &&
+           !cJSON_AddNumberToObject(payload, "omitted_empty_messages",
+                                    event->projection_empty_messages)) ||
+          (event->projection_request_controls &&
+           !cJSON_AddNumberToObject(payload, "omitted_request_controls",
+                                    event->projection_request_controls)) ||
+          (event->projection_host_context_blocks_as_text &&
+           !cJSON_AddNumberToObject(payload, "host_context_blocks_as_text",
+                                    event->projection_host_context_blocks_as_text)) ||
+          (event->projection_history_messages_as_text &&
+           !cJSON_AddNumberToObject(payload, "history_messages_as_text",
+                                    event->projection_history_messages_as_text)) ||
+          (event->projection_unverified_external_tool_reports &&
+           !cJSON_AddNumberToObject(payload, "unverified_external_tool_reports",
+                                    event->projection_unverified_external_tool_reports)))
          goto fail;
       break;
    case AIMEE_SESSION_CHILD_EXECUTION:
@@ -1224,11 +1309,13 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
    delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
                            .stop_reason = response->stop_reason,
                            .raw_stop_reason = response->raw_stop_reason,
+                           .refusal = response->refusal,
                            .usage_in = response->usage_in,
                            .usage_out = response->usage_out,
                            .usage_cache_read = response->usage_cache_read,
                            .usage_cache_write = response->usage_cache_write,
                            .usage_reasoning = response->usage_reasoning};
+   delta.usage_unobserved = response->usage_unobserved;
    return aimee_ir_session_emit(&event);
 }
 
@@ -1437,13 +1524,22 @@ int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaqu
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary)
 {
-   if (!reasoning && !opaque && !cache_controls)
+   return aimee_ir_session_emit_projection_full(model, reasoning, opaque, cache_controls, 0,
+                                                boundary);
+}
+
+int aimee_ir_session_emit_projection_full(const char *model, int reasoning, int opaque,
+                                          int cache_controls, int empty_messages,
+                                          const char *boundary)
+{
+   if (!reasoning && !opaque && !cache_controls && !empty_messages)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = model && model[0] ? model : "selected model",
                                   .projection_boundary = boundary,
                                   .projection_reasoning = reasoning,
                                   .projection_opaque = opaque,
-                                  .projection_cache_controls = cache_controls};
+                                  .projection_cache_controls = cache_controls,
+                                  .projection_empty_messages = empty_messages};
    return aimee_ir_session_emit(&event);
 }

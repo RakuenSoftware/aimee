@@ -1,6 +1,8 @@
 /* cli_index_bootstrap.c: make a thin client's canonical repository visible to
  * the remote code index before session isolation enters a hidden worktree. */
 #include "cli_client.h"
+#include "cli_v1_routes_internal.h"
+#include <aimee/workspace/identity.h>
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -21,8 +23,12 @@ int cli_index_ensure_remote(const char *root)
       fprintf(stderr, "aimee: index bootstrap: cannot resolve repository '%s'\n", root);
       return 1;
    }
-   const char *base = strrchr(abs, '/');
-   base = (base && base[1]) ? base + 1 : abs;
+   char identity[128];
+   if (workspace_repo_identity(abs, identity, sizeof identity, NULL, 0))
+   {
+      free(abs);
+      return 1;
+   }
 
    char *remote = cli_v1_client_endpoint();
    char *bearer = cli_v1_client_bearer();
@@ -52,7 +58,7 @@ int cli_index_ensure_remote(const char *root)
       const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
       const char *indexed_root =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (name && indexed_root && strcmp(name, base) == 0 && strcmp(indexed_root, abs) == 0)
+      if (name && indexed_root && strcmp(name, identity) == 0 && strcmp(indexed_root, abs) == 0)
       {
          present = 1;
          break;
@@ -73,7 +79,9 @@ int cli_index_ensure_remote(const char *root)
     * /v1/index/ingest. It records the canonical root/project rather than the
     * hidden per-session worktree the MCP proxy enters later. */
    char *scan_argv[] = {abs};
+   int previous = cli_ws_output_quiet_bind(1);
    int rc = cli_index_scan_remote(1, scan_argv);
+   (void)cli_ws_output_quiet_bind(previous);
    free(abs);
    return rc;
 }

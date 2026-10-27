@@ -35,9 +35,6 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
 /* Attach a bounded additional quiescent observer without replacing the primary
  * resource action (for example, native replay/cache custody). The same join,
  * transfer and failure rules apply. A resource cannot be transferred twice. */
-int server_session_capture_observe_terminal(server_session_capture_t *owner,
-                                            server_session_terminal_action_fn action,
-                                            void *resource);
 /* A quiescent verifier may prepare one typed receipt immediately before a
  * completed terminal is serialized. Preparation runs under the writer lock:
  * never re-enter capture APIs. NULL omits an unavailable receipt. The host
@@ -53,6 +50,16 @@ int server_session_capture_observe_verification(server_session_capture_t *owner,
 int server_session_capture_retain_current(const char *execution_session, const char *principal,
                                           server_session_capture_t **out);
 void server_session_capture_release(server_session_capture_t *owner);
+/* Normal browser operator cancellation is committed by the durable owner.
+ * 0 acknowledges that exact cancelled terminal, 1 refuses, 2 classifies an
+ * exact active native owner (no writes), -1 is unavailable. Native2 never seals
+ * this capture or claims process quiescence. No model/client flag enters here. */
+typedef int (*server_session_operator_cancel_fn)(const char *actor, const char *session,
+                                                 const char *turn, char sequence[32]);
+int server_session_capture_cancel_owned(const char *actor, const char *session, const char *turn,
+                                        char sequence[32],
+                                        server_session_operator_cancel_fn commit);
+int server_session_capture_operator_cancelled(const server_session_capture_t *owner);
 void server_session_capture_close(server_session_capture_t *owner);
 void server_session_capture_fail(server_session_capture_t *owner);
 int server_session_capture_failed(const server_session_capture_t *owner);

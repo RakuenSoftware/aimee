@@ -452,6 +452,14 @@ typedef struct
    int primary_only;
 } agent_t;
 
+/* Transient producer-selected routing namespace, never configuration or authority.
+ * CONTAINER eligibility still requires the actual container owner before execution. */
+typedef enum
+{
+   AGENT_ROUTE_EXECUTION_HOST = 0,
+   AGENT_ROUTE_EXECUTION_CONTAINER = 1
+} agent_route_execution_t;
+
 typedef struct
 {
    char revision[65]; /* opaque Go roster revision for compare-and-swap saves */
@@ -468,6 +476,9 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* Runtime-only; only a delegate producer planning mandatory container binding
+    * sets this. Never serialized, persisted, or accepted from a request body. */
+   agent_route_execution_t route_execution;
    /* Initial dispatch cost estimate and qualified learning preference. Runtime only. */
    int route_input_tokens;
    int route_output_tokens;
@@ -485,10 +496,8 @@ typedef struct
 typedef struct
 {
    const char *role;
-   const char *system_prompt;
-   const char *user_prompt;
-   int max_tokens;
-   double temperature;
+   /* Owned by the producer until the synchronous fan-out has joined all workers. */
+   aimee_request_t request;
    /* Optional per-task participant selector. When set, this task runs on the
     * named configured agent (resolved like aux_router does), bypassing
     * role-based routing — so a fan-out (e.g. the MoA ensemble) reaches N
@@ -533,11 +542,10 @@ typedef struct
    /* Owner-checked canonical history source for this actual execution. Empty
     * for non-session internal work; never a borrowed connection or parent log. */
    char canonical_session_id[128];
-   /* The complete owned response survives execution and internal consumers.
-    * response is a cached text/display projection, never conversation history. */
+   /* The complete owned model observation. Text is projected only at its consumer. */
    aimee_response_t canonical_response;
-   char *response;
-   int cache_hit; /* No new provider work, health success or outcome evidence. */
+   int cache_hit;        /* No new provider work, health success or outcome evidence. */
+   int usage_unobserved; /* Any actual provider attempt lacked complete usage. */
    int prompt_tokens;
    int completion_tokens;
    int cache_write_tokens; /* Anthropic: cache_creation_input_tokens */
@@ -554,28 +562,30 @@ typedef struct
    char abstain_reason[512];
 } agent_result_t;
 
+/* A direct factory output may still own the canonical observation. */
+static inline int agent_result_usage_is_unobserved(const agent_result_t *result)
+{
+   return result && (result->usage_unobserved || result->canonical_response.usage_unobserved);
+}
+
 /* Metadata stays available for accounting after content is released. */
 static inline void agent_result_clear_response(agent_result_t *result)
 {
    if (!result)
       return;
-   free(result->response);
-   result->response = NULL;
+   result->usage_unobserved |= result->canonical_response.usage_unobserved;
    aimee_response_free(&result->canonical_response);
 }
 
-/* Both public output views own their storage. No source mutation on failure. */
+/* Move the complete observation without manufacturing a second representation. */
 static inline int agent_result_adopt_response(agent_result_t *result, aimee_response_t *owned)
 {
    if (!result || !owned || owned == &result->canonical_response)
       return -1;
-   char *text = aimee_ir_response_text_alloc(owned);
-   if (!text)
-      return -1;
    agent_result_clear_response(result);
+   result->usage_unobserved |= owned->usage_unobserved;
    result->canonical_response = *owned;
    *owned = (aimee_response_t){0};
-   result->response = text;
    return 0;
 }
 
@@ -585,8 +595,9 @@ static inline void agent_result_move_response(agent_result_t *destination, agent
    if (!destination || !source || destination == source)
       return;
    agent_result_clear_response(destination);
+   destination->usage_unobserved |=
+       source->usage_unobserved | source->canonical_response.usage_unobserved;
    destination->canonical_response = source->canonical_response;
-   destination->response = source->response;
    memcpy(destination->agent_name, source->agent_name, sizeof destination->agent_name);
    memcpy(destination->model, source->model, sizeof destination->model);
    memcpy(destination->served_model, source->served_model, sizeof destination->served_model);
@@ -597,39 +608,18 @@ static inline void agent_result_move_response(agent_result_t *destination, agent
    memcpy(destination->stop_reason, source->stop_reason, sizeof destination->stop_reason);
    destination->cache_hit = source->cache_hit;
    source->canonical_response = (aimee_response_t){0};
-   source->response = NULL;
 }
 
-/* A display annotation is not a mutation of the original model observation. */
-static inline void agent_result_replace_display_text(agent_result_t *result, char *owned)
-{
-   free(result->response);
-   result->response = owned;
-}
-
-/* Explicit host composition boundary; never use this to flatten native output. */
-static inline int agent_result_from_host_text(agent_result_t *result, const char *text)
-{
-   aimee_response_t response = {0};
-   if (!result || aimee_ir_response_from_text(&response, text, NULL))
-      return -1;
-   for (int i = 0; i < response.n_content; i++)
-      aimee_ir_block_set_context(&response.content[i], AIMEE_CTX_ORIGIN_PLATFORM,
-                                 AIMEE_CTX_AUTH_DIAGNOSTIC, AIMEE_CTX_TRUST_UNVERIFIED,
-                                 AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
-   int rc = agent_result_adopt_response(result, &response);
-   aimee_response_free(&response);
-   return rc;
-}
-
-/* Text-only output boundary: relinquish typed storage only on extraction. */
+/* Consume a complete successful observation at an explicit business-text boundary. */
 static inline char *agent_result_take_text(agent_result_t *result)
 {
    if (!result)
       return NULL;
-   char *text = result->response;
-   result->response = NULL;
-   aimee_response_free(&result->canonical_response);
+   char *text =
+       !result->success || aimee_ir_response_complete_text_valid(&result->canonical_response)
+           ? NULL
+           : aimee_ir_response_text_alloc(&result->canonical_response);
+   agent_result_clear_response(result);
    return text;
 }
 

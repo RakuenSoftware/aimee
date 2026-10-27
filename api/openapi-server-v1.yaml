@@ -22,6 +22,35 @@ components:
         Required for `/v1/*` over TCP. Unix-domain-socket access is
         authorised by filesystem permissions and needs no token.
   schemas:
+    ProposalDraftRequest:
+      type: object
+      description: >
+        Internal clients supply message as canonical IR. Legacy external text
+        imports once at this public endpoint. Supplying both forms is refused.
+        The host assigns context authority and the proposal drafting policy.
+      oneOf:
+        - required: [message]
+          not: { required: [prompt] }
+        - required: [prompt]
+          not: { required: [message] }
+      properties:
+        message:
+          type: object
+          required: [role, blocks]
+          properties:
+            role: { type: string, enum: [user] }
+            blocks:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items:
+                type: object
+                required: [type, text]
+                properties:
+                  type: { type: string, enum: [text] }
+                  text: { type: string, minLength: 1, description: At least 8 UTF-8 bytes }
+        model: { type: string, description: Optional configured HTTP delegate name }
+        prompt: { type: string, minLength: 1, deprecated: true, description: Legacy external text import only; at least 8 UTF-8 bytes }
     HealthResponse:
       type: object
       properties:
@@ -2626,9 +2655,15 @@ paths:
         "503": { description: Management control plane is not configured }
   /delegate/reply:
     post:
-      summary: Reply to a delegate
+      deprecated: true
+      summary: Refuse the retired delegate reply protocol
+      description: >
+        Compatibility endpoint only; no reply is delivered or acknowledged.
+        Canonical pending questions are answered by an authenticated browser
+        operator through /chat/control-reply using the exact session_id and
+        turn-qualified request_id. Delegation IDs do not authorize answers.
       requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Reply accepted, content: { application/json: { schema: { type: object } } } } }
+      responses: { "502": { description: Retired reply protocol is unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } }
   /delegate/launch:
     post:
       summary: Launch a delegate job (async, returns job_id)
@@ -2742,7 +2777,8 @@ paths:
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
   /model/set:
     post:
-      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
+      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, inject-respond-tool, roles, personas, enabled, key)
+      description: CLI-style args accept --inject-respond-tool on|off to explicitly set respond-tool injection independently of tools. This explicit value overrides coupling from a simultaneous --tools toggle. Without it, unchanged tools preserves the existing injection policy; an actual tools toggle retains legacy coupling.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
   /model/probe:
@@ -2761,8 +2797,19 @@ paths:
   /model/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
+  /model/generate:
+    post:
+      summary: One-shot tool-free canonical text completion for evaluation
+      description: >
+        Accepts {ir} with an aimee.request.v1 request containing one caller system
+        text block and one user text block, explicit max_tokens and temperature,
+        no tools, and tool_choice none. Caller instructions and retrieved evidence
+        must retain unverified provenance. Other controls are refused. Selects the
+        configured default HTTP delegate without hints, tool execution or feedback.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [ir], properties: { ir: { type: object } } } } } }
+      responses: { "200": { description: "{status, ir}; ir is a complete aimee.response.v1 text answer", content: { application/json: { schema: { type: object } } } } }
   /model/setup:
     post:
       summary: Set up an agent (async)
@@ -2848,7 +2895,7 @@ paths:
   /agent/draft:
     post:
       summary: Roster draft (deprecated alias of /model/draft)
-      requestBody: { content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDraftRequest' } } } }
       responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /agent/setup:
     post:
@@ -2901,8 +2948,8 @@ paths:
   /provider/save_connection:
     post:
       summary: Create or edit a saved provider connection
-      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, create: { type: boolean, default: false } } } } } }
+      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models. A connection also owns its execution transport. Choose backend provider-cli with cli_kind codex to use the Codex agent, or backend http for the direct model API. Switching to http clears native execution settings.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, backend: { type: string, enum: [http, provider-cli] }, cli_kind: { type: string }, cli_cmd: { type: string }, session_reuse: { type: boolean }, create: { type: boolean, default: false } } } } } }
       responses: { "200": { description: Saved connection or typed error, content: { application/json: { schema: { type: object } } } } }
   /provider/remove_connection:
     post:
@@ -5191,10 +5238,32 @@ paths:
               required: [message]
               properties:
                 ir_version: { type: integer, enum: [1], description: Select the canonical durable session stream }
+                control_replies:
+                  type: boolean
+                  default: true
+                  description: >
+                    Set false for a caller without an interactive reply subscriber.
+                    Questions and permission requests then refuse instead of waiting.
+                    This only restricts existing capabilities; it grants no authority.
                 attach_id: { type: string, description: Server-minted presence attachment }
                 queue: { type: boolean, description: Wait for the session turn lock }
                 queue_wait_ms: { type: integer, minimum: 0, maximum: 120000 }
-                message: { type: string }
+                message:
+                  description: >
+                    Canonical user message retained through queue, capture and execution.
+                    Legacy external strings convert once at ingress. The host assigns
+                    context authority. User blocks are text, image or document.
+                  oneOf:
+                    - type: string
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object }
                 aimee_session_id: { type: string, description: Required stable session identity for ir_version=1 }
                 claude_session_id: { type: string }
                 cwd: { type: string }
@@ -5272,7 +5341,8 @@ paths:
         the server auto-continues as the next, server-initiated turn (streamed
         to the session's /events presence stream). Owner-authorized like
         chat.graceful_cancel. When no turn is in flight, nothing is queued and
-        `interrupted` is false. Requires CAP_CHAT.
+        `interrupted` is false. Internal clients send canonical IR. Legacy external text imports once
+        at this public endpoint. The host assigns context authority. Requires CAP_CHAT.
       requestBody:
         required: true
         content:
@@ -5282,7 +5352,20 @@ paths:
               required: [aimee_session_id, message]
               properties:
                 aimee_session_id: { type: string }
-                message: { type: string }
+                message:
+                  oneOf:
+                    - type: string
+                      minLength: 1
+                      description: Legacy external text import only
+                    - type: object
+                      required: [role, blocks]
+                      properties:
+                        role: { type: string, enum: [user] }
+                        blocks:
+                          type: array
+                          minItems: 1
+                          maxItems: 4096
+                          items: { type: object, description: Canonical text, image or document block }
       responses:
         "200":
           description: Interrupt accepted

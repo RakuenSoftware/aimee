@@ -10,7 +10,6 @@ import re
 import time
 from pathlib import Path
 
-import aiohttp
 from aiohttp import web
 
 class AssessmentError(RuntimeError):
@@ -50,18 +49,12 @@ def input_text(request):
 
 
 class WorkflowClient:
-    def __init__(self, socket):
-        self.socket = socket
+    def __init__(self, client):
+        self.client = client
 
     async def call(self, method, path, body=None, *, idempotency=None):
-        headers = {"Idempotency-Key": idempotency} if idempotency else {}
-        async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=str(self.socket)), trust_env=False) as session:
-            async with session.request(method, "http://127.0.0.1:19852" + path, json=body,
-                                       headers=headers, allow_redirects=False,
-                                       timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status >= 300:
-                    raise RuntimeError(f"Workflow API rejected {method} ({response.status})")
-                return await response.json()
+        headers = {"Idempotency-Key": idempotency} if idempotency else None
+        return await self.client.request(method, path, body, headers=headers, timeout=30)
 
     async def item(self, run):
         if not re.fullmatch(r"wi_[A-Za-z0-9_-]+", run):
@@ -78,7 +71,8 @@ class WorkflowClient:
 class ChatWorkflow:
     def __init__(self, bot):
         self.bot, self.store = bot, bot.behavior_store
-        self.client = WorkflowClient(bot.config.aimee_socket)
+        from model_client import ThinClient
+        self.client = WorkflowClient(ThinClient(bot.config))
         self.socket = self.store.path.parent / "runner.sock"
         self.locks = {}
         self.app_runner = None
@@ -418,24 +412,24 @@ class ChatWorkflow:
 
     async def infer(self, instructions, prompt, *, max_tokens=512):
         """Task inference: no ordinary chat style, factual recall or peer persona."""
-        from bridge import ModelClient
+        from model_client import ThinClient
+        from model_ir import chat_message, chat_turn, display_text
         if len((instructions + prompt).encode()) > 4800:
             raise AssessmentError("inference_context_budget")
-        body = {"model": self.bot.config.model, "messages": [
-            {"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
-            "temperature": 0.1, "max_tokens": max_tokens, "stream": False}
-        async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=str(self.bot.config.aimee_socket)), trust_env=False) as session:
-            async with session.post(self.bot.config.endpoint, json=body, allow_redirects=False,
-                                    timeout=aiohttp.ClientTimeout(total=120, connect=5)) as response:
-                value = await ModelClient.read_response(response, "Workflow inference")
+        # A fresh local client creates a server-issued session for this single
+        # assessment. It never shares ordinary Discord persona or memory history.
+        # Generation controls belong to the configured registered alias; max_tokens
+        # remains a requested answer length, not a per-call provider control.
+        task = chat_message(instructions,
+                            prompt + f"\nKeep the answer within {max_tokens} tokens.")
         try:
-            choice = value["choices"][0]
-            text = choice["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            raise AssessmentError("inference_response_shape") from None
-        if choice.get("finish_reason") == "length":
-            raise AssessmentError("inference_output_truncated")
-        if not isinstance(text, str) or not text.strip() or len(text) > 16000:
+            messages = await ThinClient(self.bot.config).chat(task, "workflow-task", self.bot.config.model)
+            text = display_text(chat_turn(messages))
+        except (RuntimeError, ValueError):
+            # The host owns refusal/truncation admission. The shared collector
+            # returns Messages or fails, without a provider stop classification.
+            raise AssessmentError("inference_incomplete_or_refused") from None
+        if not text.strip() or len(text) > 16000:
             raise AssessmentError("inference_empty_or_oversized")
         return text
 

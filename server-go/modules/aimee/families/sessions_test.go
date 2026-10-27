@@ -76,10 +76,10 @@ type sessDB struct {
 	// ownership probe; those have their own fields so a test can set them
 	// independently.
 	row          []any
+	primaryRow   []any
 	receiptRow   []any
 	rows         [][]any
 	personaState *int
-	ownedByOther bool
 	scanErr      error
 	execRows     int
 
@@ -117,6 +117,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case sql == primaryGetLatestSQL && d.primaryRow != nil:
+		return sessRow{db: d, sql: sql, values: d.primaryRow}
 	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
 		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
 	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
@@ -126,11 +128,6 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 			return sessRow{db: d, sql: sql}
 		}
 		return sessRow{db: d, sql: sql, values: []any{*d.personaState}}
-	case strings.Contains(sql, "SELECT 1 FROM webchat_claude_sessions"):
-		if !d.ownedByOther {
-			return sessRow{db: d, sql: sql}
-		}
-		return sessRow{db: d, sql: sql, values: []any{1}}
 	}
 	return sessRow{db: d, sql: sql, values: d.row}
 }
@@ -165,6 +162,36 @@ func ran(db *sessDB, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// Retired private transcript/binding op numbers are never reused or served.
+// The real wire handler must refuse before any read, write, or transaction.
+func TestRetiredLegacySessionOperationsRefuseBeforeStorage(t *testing.T) {
+	cases := []struct {
+		id     uint32
+		fields []string
+	}{
+		{10, []string{"legacy", "agent", "provider", "[]"}},
+		{11, []string{"legacy", "agent", "provider"}},
+		{12, []string{"legacy", "agent", "provider"}},
+		{13, []string{"2"}}, {14, []string{"legacy", "2"}},
+		{18, []string{"actor", "legacy"}},
+		{19, []string{"actor", "legacy", "sdk-id"}},
+		{20, []string{"actor", "legacy", "sdk-id"}},
+	}
+	for _, test := range cases {
+		for _, principal := range []uint32{0, 7} {
+			db := newSessDB()
+			frame, err := wire.EncodeFields(test.id, test.fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: principal}, frame)
+			if status != ring.ModuleStatusInvalidRequest || len(reply) != 0 || len(db.executed) != 0 {
+				t.Fatalf("retired op %d principal %d reached storage or acquired a reply: status=%d reply=%x statements=%v", test.id, principal, status, reply, db.executed)
+			}
+		}
+	}
 }
 
 // --- persona delivery: the part that must be race-free ------------------------
@@ -433,97 +460,6 @@ func TestTitleSearchIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// The transcript search's wire carries a RAW query, not a pattern: the C wrapped
-// it in %...%, and this must too, or a caller searching for a word gets an exact
-// comparison and no results.
-func TestTranscriptSearchWrapsTheRawQuery(t *testing.T) {
-	db := newSessDB()
-	sessCall(t, db, opPrimarySessionAllocSearch, []string{"deploy", "10"})
-	if bound := db.args[0][0].(string); bound != "%deploy%" {
-		t.Fatalf("bound %q, want the query wrapped as a substring pattern", bound)
-	}
-	// And it covers every column a person might recognise a transcript by.
-	sql := db.executed[0]
-	for _, column := range []string{"messages_json", "session_id", "agent_name", "provider"} {
-		if !strings.Contains(sql, column) {
-			t.Fatalf("the transcript search does not cover %s: %s", column, sql)
-		}
-	}
-	if !strings.Contains(sql, "ILIKE") {
-		t.Fatalf("the transcript search is case-sensitive: %s", sql)
-	}
-}
-
-// --- webchat bindings -----------------------------------------------------------
-
-// A binding is never hijacked. If another tab already owns the id the bind is
-// refused rather than repointing it.
-func TestBindRefusesToHijackAnotherTabsSession(t *testing.T) {
-	db := newSessDB()
-	db.ownedByOther = true
-	status, _ := sessCall(t, db, opWebchatClaudeSessionBind,
-		[]string{"webuser:a", "aimee-1", "claude-1"})
-	if status != store.StatusFailed {
-		t.Fatalf("status = %d, want %d (failed)", status, store.StatusFailed)
-	}
-	if ran(db, "UPDATE webchat_claude_sessions") || ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("a hijacking bind wrote anyway")
-	}
-}
-
-// Existing databases can hold one tab under several historical principals, so
-// the update touches every copy: principal is attribution, not a namespace.
-func TestBindUpdatesEveryCopyAndInsertsOnlyWhenNoneExist(t *testing.T) {
-	db := newSessDB()
-	status, _ := sessCall(t, db, opWebchatClaudeSessionBind,
-		[]string{"webuser:a", "aimee-1", "claude-1"})
-	if status != store.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
-	if !ran(db, "UPDATE webchat_claude_sessions") {
-		t.Fatalf("the bind did not update")
-	}
-	if ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("the bind inserted despite an existing row")
-	}
-	// The update is keyed on the tab alone.
-	for i, sql := range db.executed {
-		if strings.Contains(sql, "UPDATE webchat_claude_sessions") {
-			if strings.Contains(sql, "principal") {
-				t.Fatalf("the update is namespaced by principal: %s", sql)
-			}
-			if db.args[i][1].(string) != "aimee-1" {
-				t.Fatalf("the update is keyed on %v", db.args[i][1])
-			}
-		}
-	}
-
-	db = newSessDB()
-	db.execRows = 0 // nothing to update
-	sessCall(t, db, opWebchatClaudeSessionBind, []string{"webuser:a", "aimee-1", "claude-1"})
-	if !ran(db, "INSERT INTO webchat_claude_sessions") {
-		t.Fatalf("a new tab was not inserted")
-	}
-}
-
-// A row with no binding reads the same as no row: the caller has nothing to
-// resume either way.
-func TestWebchatGetTreatsAnEmptyBindingAsMissing(t *testing.T) {
-	db := newSessDB()
-	db.row = []any{""}
-	status, _ := sessCall(t, db, opWebchatClaudeSessionGet, []string{"webuser:a", "aimee-1"})
-	if status != store.StatusMissing {
-		t.Fatalf("status = %d, want %d (missing)", status, store.StatusMissing)
-	}
-
-	db = newSessDB()
-	db.row = []any{"claude-1"}
-	status, cells := sessCall(t, db, opWebchatClaudeSessionGet, []string{"webuser:a", "aimee-1"})
-	if status != store.StatusOK || cells[0] != "claude-1" {
-		t.Fatalf("status = %d, cells = %v", status, cells)
-	}
-}
-
 // --- the live turn ----------------------------------------------------------------
 
 // rev advances on every write so a poller can tell the row moved without
@@ -592,13 +528,10 @@ func TestSessionsValidateTheirArguments(t *testing.T) {
 		{"list max too large", opServerSessionListRecent, []string{"99999"}},
 		{"search max not a number", opServerSessionSearchByTitle, []string{"x", "all"}},
 		{"expired negative threshold", opServerSessionListExpired, []string{"-1", "10"}},
-		{"primary save without agent", opPrimarySessionSave, []string{"s", "", "p", "[]"}},
-		{"primary load without provider", opPrimarySessionLoad, []string{"s", "a", ""}},
 		{"write path with no path", opSessionWritePathRecord, []string{"sess", ""}},
 		{"stale reads without child", opSessionStaleReads, []string{"parent", "", "10"}},
 		{"live set with no session", opWebchatLiveSet, []string{"", "t", "x", "idle"}},
 		{"live get with a bad revision", opWebchatLiveGet, []string{"sess", "soon"}},
-		{"bind with no claude id", opWebchatClaudeSessionBind, []string{"p", "aimee-1", ""}},
 		{"persona finish with a bad flag", opPersonaDeliveryFinish, []string{"sess", "maybe"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -642,7 +575,6 @@ func TestReadsDistinguishMissingFromFailed(t *testing.T) {
 		fields []string
 	}{
 		{"server session get", opServerSessionGet, []string{"sess"}},
-		{"primary load", opPrimarySessionLoad, []string{"s", "a", "p"}},
 		{"primary latest", opPrimarySessionGetLatest, []string{"s"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -667,8 +599,6 @@ func TestListReadsAreTotallyOrdered(t *testing.T) {
 		{opServerSessionListRecent, []string{"10"}},
 		{opServerSessionSearchByTitle, []string{"x", "10"}},
 		{opServerSessionListExpired, []string{"60", "10"}},
-		{opPrimarySessionAllocRecent, []string{"10"}},
-		{opPrimarySessionAllocSearch, []string{"x", "10"}},
 	} {
 		db := newSessDB()
 		sessCall(t, db, test.op, test.fields)

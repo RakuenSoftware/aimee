@@ -88,39 +88,20 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
    if (!cwd || !cwd[0] || !out || outlen == 0)
       return -1;
 
-   /* Co-located caller: the working tree is readable here, so prefer the durable
-    * repo identity. */
+   /* A readable repository's manifest/forge/persisted UUID is its owner.
+    * An old index label at this path must not substitute another identity. */
    char identity[MAX_PATH_LEN] = "";
-   int have_identity =
-       workspace_repo_identity(cwd, identity, sizeof(identity), NULL, 0) == 0 && identity[0];
-
-   project_info_t projects[128];
-   int count = kb_client_index_list(projects, (int)(sizeof(projects) / sizeof(projects[0])));
-
-   /* An indexed display label may differ from the repository's durable
-    * identity. Preserve that existing lookup contract when either the name or
-    * a registered root matches. An unrelated indexed repository, however, must
-    * not erase the caller's active identity before its own first scan. */
-   if (have_identity && count > 0)
+   if (workspace_repo_identity(cwd, identity, sizeof identity, NULL, 0) == 0 && identity[0])
    {
-      for (int i = 0; i < count; i++)
-      {
-         if (strcmp(projects[i].name, identity) != 0)
-            continue;
-         snprintf(out, outlen, "%s", identity);
-         return 0;
-      }
-   }
-   if (count > 0 && server_active_project_match(cwd, projects, count, out, outlen) == 0)
-      return 0;
-   if (have_identity)
-   {
-      /* Index availability and other projects' scan state do not determine
-       * whether this working tree has a stable active project. Retrieval can
-       * report missing evidence separately, without broadening its scope. */
       snprintf(out, outlen, "%s", identity);
       return 0;
    }
+   /* A remote thin-client path may be unreadable here. Only then may the
+    * existing registry root supply its recorded identity. */
+   project_info_t projects[128];
+   int count = kb_client_index_list(projects, (int)(sizeof projects / sizeof projects[0]));
+   if (count > 0 && server_active_project_match(cwd, projects, count, out, outlen) == 0)
+      return 0;
    out[0] = '\0';
    return -1;
 }

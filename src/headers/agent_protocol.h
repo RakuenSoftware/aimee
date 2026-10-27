@@ -9,47 +9,19 @@ struct cJSON;
 
 /* --- Request builders --- */
 
-struct cJSON *agent_build_request_openai(const agent_t *agent, struct cJSON *messages,
-                                         struct cJSON *tools, int max_tokens, double temperature);
-
-struct cJSON *agent_build_request_responses(const agent_t *agent, struct cJSON *input,
-                                            struct cJSON *tools, const char *system_prompt);
-
-struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *messages,
-                                            struct cJSON *tools, const char *system_prompt,
-                                            int max_tokens, double temperature);
-
-/* Prepare the complete owned host request, after profile shaping and delegate
- * policy, without provider rendering or projection events. Inputs are borrowed;
- * out must be zero-initialized or an owned request. Success atomically replaces
- * it; failure leaves it unchanged. Native producers consume this typed context
- * rather than recover host authority from SDK-generated native requests. */
-int agent_prepare_request_ir(const agent_t *agent, const struct cJSON *messages,
-                             struct cJSON *tools, const char *system_prompt, int max_tokens,
-                             double temperature, aimee_wire_t wire, int is_delegate,
-                             aimee_request_t *out);
-
-/* The runtime stores canonical {role,blocks} messages. Native history is accepted
- * only by this migration adapter, and native requests are built only at egress.
- * Optional dispatch_catalog receives the owned, post-policy function catalog on
- * success, replacing its previous owned value. It never contains conversation
- * content. Pass NULL at output-only boundaries. */
-struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *messages,
-                                     struct cJSON *tools, const char *system_prompt, int max_tokens,
-                                     double temperature, aimee_wire_t wire, int is_delegate,
-                                     aimee_request_t *dispatch_catalog);
-
-/* Set the Anthropic `system` field on an outbound request (§3 cache-aware
- * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
- * the volatile per-turn <aimee-context> envelope) is emitted as a cache_control
- * content block while the volatile context is left uncached; otherwise a plain
- * string is emitted. The min_chars floor is applied to the actual cacheable
- * STABLE prefix (not the whole prompt): when that prefix is shorter than
- * min_chars (>0), the request is left uncached. Adds nothing when system_prompt
- * is empty. Anthropic-only: callers build Anthropic-format requests, so this
- * never reaches a non-Anthropic provider. */
-void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, int cache_marking,
-                                int min_chars);
+/* Preserve the canonical seed while attaching separate host policy/catalog
+ * and current canonical history. Inputs borrowed, output owned. */
+int agent_prepare_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                    const struct cJSON *messages, const aimee_request_t *catalog,
+                                    const aimee_message_t *host_context, int max_tokens,
+                                    double temperature, aimee_wire_t wire, int is_delegate,
+                                    aimee_request_t *out);
+struct cJSON *agent_build_seeded_request_ir(const agent_t *agent, const aimee_request_t *seed,
+                                            const struct cJSON *messages,
+                                            const aimee_request_t *catalog,
+                                            const aimee_message_t *host_context, int max_tokens,
+                                            double temperature, aimee_wire_t wire, int is_delegate,
+                                            int host_profile, aimee_request_t *dispatch_catalog);
 
 /* Resolve the output-token cap for an outbound request: an explicit caller
  * `requested` (>0) wins, else the agent's pinned max_tokens (>0), else the
@@ -58,11 +30,6 @@ void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, in
 int agent_request_max_tokens(const agent_t *agent, int requested);
 
 /* --- Response parsers --- */
-
-/* Extract the Responses (codex) response object (the one with the `output` array)
- * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
- * cJSON the caller owns, or NULL. */
-struct cJSON *agent_responses_sse_response_object(const char *body);
 
 /* Native response entry adapters. The caller owns the full typed response until
  * tool dispatch and history append finish. No text/tool projection occurs here.
@@ -74,21 +41,7 @@ int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic,
                                         int *n_rescued,
                                         const struct aimee_anthropic_replay *request,
                                         aimee_response_t *out);
-int agent_ir_decode_json_response(const struct cJSON *root, int anthropic, int rescue_mode,
-                                  int *n_rescued, aimee_response_t *out);
 int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
                               aimee_response_t *out);
-
-/* Legacy output-only compatibility values are released here while their
- * remaining native emitters are retired. Execution never constructs them. */
-
-/* --- Message utilities --- */
-
-/* Repair a canonical working-history view. Missing results become explicit
- * unknown-outcome diagnostics; orphaned results are removed in causal order.
- * Native/mixed/malformed history refuses atomically; import belongs at translation.
- * This never admits a repaired view as authoritative persisted history.
- * Returns repairs, or -1 on refusal. NULL/empty input performs no repairs. */
-int message_history_repair(struct cJSON *messages);
 
 #endif /* DEC_AGENT_PROTOCOL_H */

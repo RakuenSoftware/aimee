@@ -26,6 +26,7 @@
     "src/modules/kb-synthesis/kb_curator_judge.c",
     "src/modules/kb-synthesis/kb_curator_link_artifacts.c",
     "src/modules/kb-synthesis/kb_curator_llm.c",
+    "src/modules/kb-synthesis/kb_curator_llm_contract.c",
     "src/modules/kb-synthesis/kb_curator_notify.c",
     "src/modules/kb-synthesis/kb_curator_pipeline.c",
     "src/modules/kb-synthesis/kb_curator_promote.c",

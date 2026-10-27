@@ -47,6 +47,13 @@ CALL = re.compile(
     re.S,
 )
 
+# The owned session facade carries its checked request and row widths explicitly.
+# Its decoder uses these values to reject partial/extra rows before moving cells.
+OWNED_SESSION_CALL = re.compile(
+    r"session_record_read\(\s*AIMEE_DB1_OP_(?P<op>[A-Z0-9_]+)\s*,"
+    r"\s*[^,]+\s*,\s*(?P<count>[^,]+)\s*,\s*(?P<slots>[^,]+)\s*,"
+)
+
 # A list's slot count: max_rows * row_width, however the cast is spelled.
 LIST_SLOTS = re.compile(r"\*\s*(\d+)\s*\)?\s*$")
 KIND_DEFINE = re.compile(r"^#define AIMEE_DB1_EVENT_([A-Z0-9_]+)\s+(\d+)u", re.M)
@@ -129,7 +136,7 @@ def main() -> int:
 
     for path in sources:
         text = path.read_text(errors="ignore")
-        for m in CALL.finditer(text):
+        for m in [*CALL.finditer(text), *OWNED_SESSION_CALL.finditer(text)]:
             name = m.group("op").lower()
             spec = ops.get(name)
             if spec is None:

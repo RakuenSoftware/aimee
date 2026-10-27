@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from behavior import BehaviorStore, conversational_goal
 from workflow_chat import ChatWorkflow, YAML, input_text, result
 
@@ -14,7 +14,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = BehaviorStore(Path(self.tmp.name) / "behavior.sqlite")
         self.snapshot = self.store.edit("123:456", "goal", conversational_goal("Write a paper on losing at chess with Samy"))
-        self.bot = SimpleNamespace(behavior_store=self.store, config=SimpleNamespace(aimee_socket="/unused", workflow_peer_bot_ids=(999,)), send_chat_reply=AsyncMock(), send_paper=AsyncMock())
+        self.bot = SimpleNamespace(behavior_store=self.store, config=SimpleNamespace(aimee_socket="/unused", aimee_library="/unused", aimee_profile=None, model="registered-writer", workflow_peer_bot_ids=(999,)), send_chat_reply=AsyncMock(), send_paper=AsyncMock())
         self.runner = ChatWorkflow(self.bot)
         self.item = {"id": "wi_test", "stage": "candidates", "state": "active", "pause_reason": "", "workflow": "discord-paper", "version": "v1"}
         self.runner.client = SimpleNamespace(item=AsyncMock(side_effect=lambda run: self.item.copy()), call=AsyncMock(return_value={"work_item_id": "wi_test"}), control=AsyncMock())
@@ -160,26 +160,17 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.runner.step(self.request("discuss", "Candidates")))["status"], "pending")
         self.assertEqual(self.bot.send_chat_reply.await_count, 2)
 
-    async def test_typing_client_uses_private_unix_transport(self):
-        from aiohttp import web
+    async def test_workflow_domain_calls_use_shared_thinclient(self):
         from workflow_chat import WorkflowClient
-        calls = []
-        async def endpoint(request):
-            calls.append((request.method, request.headers.get("Idempotency-Key"), await request.json()))
-            return web.json_response({"work_item_id": "wi_test"})
-        app = web.Application(); app.router.add_post("/v1/dev/submit", endpoint)
-        runner = web.AppRunner(app); await runner.setup()
-        socket = Path(self.tmp.name) / "api.sock"
-        await web.UnixSite(runner, str(socket)).start()
-        try:
-            client = WorkflowClient(socket)
-            answer = await client.call("POST", "/v1/dev/submit", {"workflow": "discord-paper"}, idempotency="stable")
-            self.assertEqual(answer["work_item_id"], "wi_test")
-            self.assertEqual(calls, [("POST", "stable", {"workflow": "discord-paper"})])
-            with self.assertRaises(ValueError):
-                await client.control("../other", "stop")
-        finally:
-            await runner.cleanup()
+        raw = SimpleNamespace(request=AsyncMock(return_value={"work_item_id": "wi_test"}))
+        client = WorkflowClient(raw)
+        answer = await client.call("POST", "/v1/dev/submit", {"workflow": "discord-paper"}, idempotency="stable")
+        self.assertEqual(answer["work_item_id"], "wi_test")
+        raw.request.assert_awaited_once_with("POST", "/v1/dev/submit", {"workflow": "discord-paper"},
+                                            headers={"Idempotency-Key": "stable"}, timeout=30)
+        with self.assertRaises(ValueError):
+            await client.control("../other", "stop")
+        self.assertEqual(raw.request.await_count, 1)
 
     async def test_paper_delivery_recovers_lost_ack_from_bot_history(self):
         from bridge import ChatBot
@@ -308,21 +299,36 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Chan",reply)
         self.assertNotIn("wireframes",reply)
 
-    async def test_workflow_inference_does_not_use_ordinary_chat_or_memory(self):
-        from aiohttp import web
-        calls=[]
-        async def endpoint(request):
-            calls.append(await request.json())
-            return web.json_response({"choices":[{"message":{"content":"Task result"},"finish_reason":"stop"}]})
-        app=web.Application();app.router.add_post("/v1/chat/completions",endpoint)
-        runner=web.AppRunner(app);await runner.setup();socket=Path(self.tmp.name)/"model.sock"
-        await web.UnixSite(runner,str(socket)).start()
-        self.bot.config=SimpleNamespace(aimee_socket=socket,endpoint="http://127.0.0.1:19852/v1/chat/completions",model="fixture")
-        try:
-            self.assertEqual(await self.runner.infer("Academic writer","Write a section"),"Task result")
-            self.assertEqual(calls[0]["messages"],[{"role":"system","content":"Academic writer"},{"role":"user","content":"Write a section"}])
-            self.assertEqual(calls[0]["max_tokens"],512)
-        finally:await runner.cleanup()
+    async def test_workflow_inference_uses_canonical_isolated_task_without_persona_or_memory(self):
+        from workflow_chat import AssessmentError
+        answer = [{"role": "assistant", "blocks": [{"type": "text", "text": "Task result"}]}]
+        calls = []
+        async def chat(task, channel, alias):
+            calls.append((task, channel, alias))
+            return answer
+        factory = lambda config: SimpleNamespace(chat=chat)
+        with patch("model_client.ThinClient", side_effect=factory) as constructor:
+            self.assertEqual(await self.runner.infer("Academic writer", "Write a section"), "Task result")
+            self.assertEqual(await self.runner.infer("Assessor", "Choose an index", max_tokens=64), "Task result")
+            self.assertEqual(constructor.call_count, 2)  # Each task gets a fresh client/session mapping.
+            for (task, channel, alias), policy in zip(calls, ["Academic writer", "Assessor"]):
+                self.assertEqual(task["role"], "user")
+                self.assertEqual(task["blocks"][0]["text"], policy)
+                self.assertEqual(task["blocks"][0]["context"]["origin"], 2)
+                self.assertEqual(alias, "registered-writer")
+                self.assertEqual(channel, "workflow-task")
+                self.assertNotIn("messages", task)
+            self.assertIn("64 tokens", calls[1][0]["blocks"][1]["text"])
+        cases = [[], [{"role": "assistant", "blocks": [{"type": "tool_use", "id": "x", "name": "unsafe"}]}],
+                 [{"role": "assistant", "blocks": [{"type": "text", "text": "secret", "context": {"model_visible": False}}]}],
+                 [{"role": "assistant", "blocks": [{"type": "text", "text": "x" * 16001}]}]]
+        for value in cases:
+            with self.subTest(value=str(value)[:50]), patch("model_client.ThinClient", return_value=SimpleNamespace(chat=AsyncMock(return_value=value))):
+                with self.assertRaises(AssessmentError):
+                    await self.runner.infer("Academic writer", "Write a section")
+        with patch("model_client.ThinClient", return_value=SimpleNamespace(chat=AsyncMock(side_effect=RuntimeError("incomplete")))):
+            with self.assertRaisesRegex(AssessmentError, "incomplete_or_refused"):
+                await self.runner.infer("Academic writer", "Write a section")
 
     async def test_paper_sections_keep_agreed_critique_when_outline_is_large(self):
         self.runner.write=ChatWorkflow.write.__get__(self.runner)

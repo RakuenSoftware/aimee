@@ -76,18 +76,6 @@ void server_ir_plan_refuse(const char *kind, void *context)
    if (request_context_refuse_assembly)
       (void)request_context_refuse_assembly(kind);
 }
-char *server_ir_plan_text(const char *method, const char *operation, const char *phase,
-                          const char *query)
-{
-   const aimee_ir_module_plan_t config = {.method = method,
-                                          .operation = operation,
-                                          .phase = phase,
-                                          .provided_query = query,
-                                          .bindings = server_ir_plan_bindings,
-                                          .refuse = server_ir_plan_refuse,
-                                          .resources = server_ir_plan_resources};
-   return aimee_ir_module_plan_text(&config);
-}
 int server_ir_plan_enabled(const char *method, const char *operation, const char *value)
 {
    cJSON *args = cJSON_CreateObject(), *reply = NULL;

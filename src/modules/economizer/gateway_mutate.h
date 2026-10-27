@@ -61,7 +61,7 @@ extern "C"
       GW_BYPASS_REDUCE_FORMAT_UNSUPPORTED,
       /* gateway-side outcomes */
       GW_BYPASS_NO_OP,                /* nothing changed / not a net shrink / not REDUCED */
-      GW_BYPASS_STRUCTURAL_VIOLATION, /* message_history_repair found an orphaned tool pair */
+      GW_BYPASS_STRUCTURAL_VIOLATION, /* canonical validation found an orphaned tool pair */
       GW_BYPASS_SNAPSHOT_OOM,         /* a required deep copy failed */
       GW_BYPASS_REPLACE_FAILED,       /* installing the reduced array into the request failed */
       GW_BYPASS_CONSTRUCT_FAILED, /* a post-should_apply construction step failed pre-dispatch */

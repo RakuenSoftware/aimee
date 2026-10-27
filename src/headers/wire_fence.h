@@ -51,11 +51,36 @@ extern "C"
    /* Relay the source owner's current admission before resending frozen bytes. */
    int wire_fence_revalidate_sources(void);
 
+   /* Lexical consumer of actual HTTP transport outcomes, never SDK generations.
+    * The binding is producer-thread-local; owners retain/rebind its context for
+    * joined callbacks and restore the returned previous binding. */
+   typedef struct
+   {
+      void (*completed)(void *context, int status);
+      void *context;
+   } wire_fence_transport_observer_t;
+   wire_fence_transport_observer_t
+   wire_fence_transport_observer_bind(wire_fence_transport_observer_t observer);
+
+   typedef struct
+   {
+      /* Transport invocations with uncertain deliveries, not verified model
+       * generations or billed calls. Explicit no-send admission refusals excluded. */
+      int transport_attempts;
+   } wire_fence_observation_t;
+
    /* Buffered provider transport with one durable admission per actual attempt. */
    int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
                        char **response_buf, int timeout_ms, const char *extra_headers,
                        int max_attempts, int base_ms, int max_ms, const char *provider,
                        const char *model, const char *session_id, wire_fence_route_t route);
+
+   int wire_fence_post_observed(const char *url, const char *auth_header, const void *body,
+                                size_t body_len, char **response_buf, int timeout_ms,
+                                const char *extra_headers, int max_attempts, int base_ms,
+                                int max_ms, const char *provider, const char *model,
+                                const char *session_id, wire_fence_route_t route,
+                                wire_fence_observation_t *observation);
 
    typedef int (*wire_fence_stream_cb)(const char *data, size_t len, void *userdata);
    int wire_fence_post_stream(const char *url, const char *auth_header, const void *body,

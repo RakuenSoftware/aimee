@@ -1,3 +1,5 @@
+#include <aimee/ir/session_event.h>
+#include "dstr.h"
 /* server_mcp_ensemble.c: MCP ensemble (multi-agent session) tool handlers */
 #include "server_mcp_ensemble.h"
 #include "aimee.h"
@@ -145,6 +147,14 @@ int server_mcp_is_ensemble_tool(const char *tool)
           strcmp(t, "ensemble_list") == 0;
 }
 
+/* The dispatcher stops on nonzero. A successful error write returns zero from
+ * server_send_error, so preserve an explicit handled verdict after sending it. */
+static int ensemble_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   int rc = server_send_error(conn, message, request_id);
+   return rc ? rc : 1;
+}
+
 int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON *args,
                                     cJSON **content_out, cJSON **structured_out)
 {
@@ -156,6 +166,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
        strcmp(t, "ensemble_pause") == 0 || strcmp(t, "ensemble_advance") == 0)
    {
       ensemble_info_t info;
+      aimee_request_t request = {0};
       char *prompt = NULL;
       char *context = NULL;
       char errbuf[256] = "";
@@ -194,7 +205,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
                   free(assignments_json);
                }
                if (rc == 0)
-                  rc = db1_ensemble_get(id, &info, &prompt, &context, errbuf, sizeof(errbuf));
+                  rc = db1_ensemble_get(id, &info, &request, &context, errbuf, sizeof(errbuf));
             }
          }
       }
@@ -204,7 +215,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
          if (!cJSON_IsNumber(jid))
             snprintf(errbuf, sizeof(errbuf), "missing 'id' parameter");
          else
-            rc = db1_ensemble_get(jid->valueint, &info, &prompt, &context, errbuf, sizeof(errbuf));
+            rc = db1_ensemble_get(jid->valueint, &info, &request, &context, errbuf, sizeof(errbuf));
       }
       else if (strcmp(t, "ensemble_pause") == 0)
       {
@@ -216,7 +227,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
                                      (cJSON_IsString(jr) && jr->valuestring[0]) ? jr->valuestring
                                                                                 : "manual",
                                      errbuf, sizeof(errbuf)) == 0)
-            rc = db1_ensemble_get(jid->valueint, &info, &prompt, &context, errbuf, sizeof(errbuf));
+            rc = db1_ensemble_get(jid->valueint, &info, &request, &context, errbuf, sizeof(errbuf));
       }
       else
       {
@@ -227,29 +238,53 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
             snprintf(errbuf, sizeof(errbuf), "missing 'id' parameter");
          else if (!cJSON_IsString(js) || !js->valuestring[0])
             snprintf(errbuf, sizeof(errbuf), "missing 'speaker' parameter");
-         else if (db1_ensemble_advance(jid->valueint, js->valuestring,
-                                       cJSON_IsString(jm) ? jm->valuestring : "", &info, &prompt,
-                                       errbuf, sizeof(errbuf)) == 0)
+         else
          {
-            free(context);
-            context = NULL;
-            rc = db1_ensemble_get(jid->valueint, &info, NULL, &context, errbuf, sizeof(errbuf));
+            aimee_block_t block = {.type = AIMEE_BLK_TEXT,
+                                   .text = cJSON_IsString(jm) ? jm->valuestring : ""};
+            aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE,
+                                       AIMEE_CTX_TRUST_UNTRUSTED, AIMEE_CTX_SENS_INTERNAL, 1, NULL,
+                                       NULL, 0);
+            aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+            rc = db1_ensemble_advance(jid->valueint, js->valuestring, &message, &info, &request,
+                                      errbuf, sizeof(errbuf));
+            if (rc == 0)
+            {
+               free(context);
+               context = NULL;
+               rc = db1_ensemble_get(jid->valueint, &info, NULL, &context, errbuf, sizeof(errbuf));
+            }
          }
       }
 
       if (rc != 0)
       {
+         aimee_request_free(&request);
          free(prompt);
          free(context);
-         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble operation failed", NULL);
+         return ensemble_send_error(conn, errbuf[0] ? errbuf : "ensemble operation failed", NULL);
       }
 
+      /* This MCP response is the explicit text-preview boundary. */
+      dstr_t preview;
+      dstr_init(&preview);
+      for (int i = 0; i < request.n_system; ++i)
+         if (request.system[i].text)
+            dstr_appendf(&preview, "%s\n", request.system[i].text);
+      for (int i = 0; i < request.n_messages; ++i)
+         for (int j = 0; j < request.messages[i].n_blocks; ++j)
+            if (request.messages[i].blocks[j].text)
+               dstr_appendf(&preview, "%s\n", request.messages[i].blocks[j].text);
+      prompt = dstr_steal(&preview);
       content = ensemble_summary_content(&info, prompt, context);
       structured = db1_ensemble_info_to_json(&info, prompt, context);
+      if (structured && request.n_messages)
+         cJSON_AddItemToObject(structured, "next_request", aimee_ir_request_json(&request));
+      aimee_request_free(&request);
       free(prompt);
       free(context);
       if (!structured)
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
    }
    else if (strcmp(t, "ensemble_list") == 0)
    {
@@ -259,7 +294,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
       ensemble_info_t *rows = NULL;
       int n = 0;
       if (db1_ensemble_list(&rows, &n, errbuf, sizeof(errbuf)) != 0)
-         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble list failed", NULL);
+         return ensemble_send_error(conn, errbuf[0] ? errbuf : "ensemble list failed", NULL);
       if (limit < 0)
          limit = 0;
       if (limit > 100)
@@ -270,14 +305,14 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
       if (!structured)
       {
          free(rows);
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
       }
       cJSON *sessions = cJSON_AddArrayToObject(structured, "sessions");
       if (!sessions)
       {
          free(rows);
          cJSON_Delete(structured);
-         return server_send_error(conn, "ensemble serialization failed", NULL);
+         return ensemble_send_error(conn, "ensemble serialization failed", NULL);
       }
       for (int i = 0; i < limit; i++)
       {
@@ -286,7 +321,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
          {
             free(rows);
             cJSON_Delete(structured);
-            return server_send_error(conn, "ensemble serialization failed", NULL);
+            return ensemble_send_error(conn, "ensemble serialization failed", NULL);
          }
          cJSON_AddItemToArray(sessions, item);
       }
@@ -298,7 +333,7 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
    }
 
    if (!content)
-      return server_send_error(conn, "ensemble operation failed", NULL);
+      return ensemble_send_error(conn, "ensemble operation failed", NULL);
 
    *content_out = content;
    *structured_out = structured;
