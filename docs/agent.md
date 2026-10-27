@@ -211,6 +211,11 @@ aimee git pr checks number=123 wait=true
 aimee git pr merge number=123
 ```
 
+`aimee git pr` actions: create, view, list, edit, checks, watch, failures,
+merge_status, update_branch, ready, merge. Keys: `number=N`, `title=`, `body=`,
+`base=BRANCH`, `merge_method=merge|squash|rebase`, `expected_head_sha=SHA`,
+`wait=true`, `path=DIR`. `failures` prints the failing jobs' log tails.
+
 `pr create` opens the PR for the checkout's current branch; there is no `head=`
 key, so switch that checkout to the branch first. Run a command that needs its
 first word (`pr`, `branch`, `commit`, `clone`, `switch`) with no arguments to see

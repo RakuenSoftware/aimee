@@ -1169,6 +1169,9 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	@# printed "Unit test failures:" followed by NOTHING, which is the least
 	@# useful possible output: a red suite that will not say what went red, so the
 	@# whole run has to be repeated serially just to recover the name.
+	@# Each marker also carries the tail of that test's own output: in a
+	@# parallel run its full log is interleaved far above the summary, and
+	@# the summary is what the end of a CI log shows.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	fd="$$(mktemp -d /tmp/autf.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
@@ -1196,7 +1199,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	  done; \
 	else \
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
-	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; rm -f "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
+	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; { printf "FAILED: %s (exit %s), last lines:\\n" "$$t" "$$rc"; tail -n 40 "$$log" | sed "s/^/    /"; } >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; rm -f "$$log"; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
 	    if ! cat "$$fd"/failure.* >&2 2>/dev/null; then \
 	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \

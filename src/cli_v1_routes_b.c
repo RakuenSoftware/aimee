@@ -597,29 +597,20 @@ static const struct
    const char *first;  /* what a bare first word means, NULL if none */
    const char *second; /* what a bare second word means, NULL if none */
    int rest_files;     /* remaining bare words accumulate into `files` */
-   /* Printed instead of calling the server when the command needs its first
-    * word and got no arguments at all. NULL when a bare call is valid. */
-   const char *usage;
+   const char *usage;  /* printed for a bare call when the first word is required */
 } GIT_CLI[] = {
     {"status", "git_status", NULL, NULL, 0, NULL},
-    {"commit", "git_commit", "message", NULL, 1,
-     "usage: aimee git commit <message> [files...] [path=DIR]\n"},
+    {"commit", "git_commit", "message", NULL, 1, "usage: aimee git commit <message> [files...]\n"},
     {"push", "git_push", NULL, NULL, 0, NULL},
     {"pull", "git_pull", NULL, NULL, 0, NULL},
     {"fetch", "git_fetch", "remote", NULL, 0, NULL},
     {"branch", "git_branch", "action", "name", 0,
-     "usage: aimee git branch <list|create|switch|claim|delete|orphan> [name]\n"
-     "                        [base=REF] [remote=NAME] [force=true] [path=DIR]\n"},
+     "usage: aimee git branch <list|create|switch|claim|delete|orphan> [name] [key=value ...]\n"},
     {"log", "git_log", NULL, NULL, 0, NULL},
     {"diff", "git_diff_summary", "ref", NULL, 1, NULL},
     {"diff_summary", "git_diff_summary", "ref", NULL, 1, NULL},
     {"pr", "git_pr", "action", NULL, 0,
-     "usage: aimee git pr <create|view|list|edit|checks|watch|failures|merge_status|\n"
-     "                     update_branch|ready|merge> [key=value ...]\n"
-     "  keys: number=N title=... body=... base=BRANCH merge_method=merge|squash|rebase\n"
-     "        expected_head_sha=SHA wait=true path=DIR\n"
-     "  create opens a PR for the current branch of the checkout at path= (default:\n"
-     "  this directory); there is no head= key, so switch that checkout first.\n"},
+     "usage: aimee git pr <action> [key=value ...]; actions and keys: aimee get-help git\n"},
     {"issue", "git_issue", "action", NULL, 0, NULL},
     {"clone", "git_clone", "url", "path", 0, "usage: aimee git clone <url> [path]\n"},
     {"stash", "git_stash", "action", NULL, 0, NULL},
@@ -710,9 +701,6 @@ static cJSON *marshal_git_cli(int argc, char **argv)
               sub);
       return NULL;
    }
-   /* Answer a bare call to a command that cannot run without its first word
-    * here: on the server it would fail on whichever check runs first, which
-    * from an unregistered checkout is the workspace check, not this. */
    if (argc == 1 && GIT_CLI[row].usage)
    {
       fputs(GIT_CLI[row].usage, stderr);
