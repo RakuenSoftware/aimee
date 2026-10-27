@@ -3,6 +3,7 @@ package attribution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -280,5 +281,215 @@ func TestRejectedPRWith322CommitsUsesCompleteComparison(t *testing.T) {
 	}()...)})
 	if err := checker(t, data).rejectedPull(context.Background(), 2997, map[string]bool{head: true}, reason); err == nil || !strings.Contains(err.Error(), "rejected PR #2997") {
 		t.Fatalf("commit past 250 escaped: %v", err)
+	}
+}
+
+func TestNewBranchUsesImmutableDefaultMergeBase(t *testing.T) {
+	data := fixture()
+	defaultHead := strings.Repeat("c", 40)
+	data["commits/main"] = encoded(map[string]any{"sha": defaultHead})
+	data["compare/"+defaultHead+"..."+head] = encoded(map[string]any{"merge_base_commit": map[string]string{"sha": base}})
+	c := checker(t, data)
+	got, err := c.PushBase(context.Background(), strings.Repeat("0", 40), head, "main", "refs/heads/new", true)
+	if err != nil || got != base {
+		t.Fatalf("base=%q error=%v", got, err)
+	}
+	if err := c.CheckRange(context.Background(), got, head); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		before, ref string
+		created     bool
+	}{{"bad", "refs/heads/new", true}, {strings.Repeat("0", 40), "refs/heads/main", true}, {strings.Repeat("0", 40), "refs/heads/new", false}, {strings.Repeat("0", 40), "", true}, {strings.Repeat("0", 40), "refs/tags/new", true}} {
+		if _, err := c.PushBase(context.Background(), tc.before, head, "main", tc.ref, tc.created); err == nil {
+			t.Fatal("unverifiable creation admitted", tc)
+		}
+	}
+	got, err = c.PushBase(context.Background(), base, head, "", "", false)
+	if err != nil || got != base {
+		t.Fatalf("ordinary push changed: %q %v", got, err)
+	}
+	data["commits/main"] = []byte(`{"sha":"main"}`)
+	if _, err := c.PushBase(context.Background(), strings.Repeat("0", 40), head, "main", "refs/heads/new", true); err == nil {
+		t.Fatal("mutable default ref accepted")
+	}
+}
+func executionFixture() map[string][]byte {
+	data := fixture()
+	data["commits/"+head+"/check-runs?filter=all&per_page=100&page=1"] = []byte(`{"total_count":1,"check_runs":[{"id":77,"name":"no-coauthor-trailers","status":"completed","conclusion":"failure"}]}`)
+	data["check-runs/77"] = encoded(map[string]any{"id": 77, "head_sha": head, "name": "no-coauthor-trailers", "app": map[string]string{"slug": "github-actions"}})
+	data["actions/jobs/77"] = encoded(map[string]any{"id": 77, "run_id": 88, "run_attempt": 1, "head_sha": head, "check_run_url": "https://api.github.com/repos/owner/repo/check-runs/77", "name": "no-coauthor-trailers", "status": "completed", "conclusion": "failure"})
+	data["actions/runs/88"] = encoded(map[string]any{"id": 88, "head_sha": head, "event": "push", "path": ".github/workflows/attribution.yml", "repository": map[string]string{"full_name": "owner/repo"}})
+	data["check-runs/77/annotations?per_page=100&page=1"] = []byte(`[]`)
+	data["actions/jobs/77/logs"] = []byte("2026-10-27T19:23:01.8923689Z attribution denied after 0s : attribution requires full nonzero base/head SHAs\n")
+	return data
+}
+func TestHistoricalInputFailureIsNotContentDenial(t *testing.T) {
+	data := executionFixture()
+	c := checker(t, data)
+	c.Repository = "owner/repo"
+	if err := c.CheckRange(context.Background(), base, head); err != nil {
+		t.Fatal(err)
+	}
+	data["actions/jobs/77/logs"] = []byte("2026-10-26T16:29:16.5758459Z attribution denied after 14.557s : PR #3030 carries GitHub app attribution: chatgpt-codex-connector\n")
+	if err := c.CheckRange(context.Background(), base, head); err == nil {
+		t.Fatal("actual historical app denial erased")
+	}
+}
+func TestHistoricalExecutionEvidenceFailsClosed(t *testing.T) {
+	for _, key := range []string{"check-runs/77", "actions/jobs/77", "actions/runs/88", "check-runs/77/annotations?per_page=100&page=1", "actions/jobs/77/logs"} {
+		t.Run(key, func(t *testing.T) {
+			data := executionFixture()
+			data[key] = []byte(`{}`)
+			c := checker(t, data)
+			c.Repository = "owner/repo"
+			if err := c.CheckRange(context.Background(), base, head); err == nil {
+				t.Fatal("incomplete evidence ignored")
+			}
+		})
+	}
+	for _, change := range []struct {
+		key, field string
+		value      any
+	}{{"actions/jobs/77", "head_sha", base}, {"actions/jobs/77", "check_run_url", "https://api.github.com/repos/other/repo/check-runs/77"}, {"actions/runs/88", "event", "pull_request"}, {"check-runs/77", "app", map[string]string{"slug": "other"}}} {
+		data := executionFixture()
+		var obj map[string]any
+		json.Unmarshal(data[change.key], &obj)
+		obj[change.field] = change.value
+		data[change.key] = encoded(obj)
+		c := checker(t, data)
+		c.Repository = "owner/repo"
+		if err := c.CheckRange(context.Background(), base, head); err == nil {
+			t.Fatal("mismatched identity ignored", change)
+		}
+	}
+}
+func TestVersionedExecutionVerdictRequiresExactBinding(t *testing.T) {
+	v := Verdict{Version: 1, Repository: "owner/repo", HeadSHA: head, BaseSHA: base, RunID: 88, RunAttempt: 1, Event: "push", Outcome: "execution_error", Code: "api_read"}
+	for _, mutate := range []func(*Verdict){func(*Verdict) {}, func(v *Verdict) { v.HeadSHA = base }, func(v *Verdict) { v.RunID = 99 }, func(v *Verdict) { v.Outcome = "denied" }, func(v *Verdict) { v.Code = "unknown" }} {
+		data := executionFixture()
+		copy := v
+		mutate(&copy)
+		data["check-runs/77/annotations?per_page=100&page=1"] = encoded([]any{map[string]any{"title": VerdictTitle, "message": string(encoded(copy))}})
+		delete(data, "actions/jobs/77/logs")
+		c := checker(t, data)
+		c.Repository = "owner/repo"
+		err := c.CheckRange(context.Background(), base, head)
+		if (err == nil) != (copy == v) {
+			t.Fatalf("verdict=%+v error=%v", copy, err)
+		}
+	}
+}
+
+func TestExplicitHistoricalSubjectAlreadyInAcceptedBase(t *testing.T) {
+	data := executionFixture()
+	oldHead := strings.Repeat("c", 40)
+	merge := strings.Repeat("d", 40)
+	oldBase := strings.Repeat("e", 40)
+	data["actions/jobs/77/logs"] = []byte("2026-10-26T16:29:16.5758459Z attribution denied after 14.557s : PR #3030 carries GitHub app attribution: chatgpt-codex-connector\n")
+	data["issues/3030"] = encoded(issue(3030, map[string]any{"id": 123, "slug": "chatgpt-codex-connector"}))
+	data["pulls/3030"] = encoded(map[string]any{"number": 3030, "merged": true, "state": "closed", "commits": 1, "merge_commit_sha": merge, "base": map[string]string{"sha": oldBase}, "head": map[string]string{"sha": oldHead}})
+	data["issues?state=all&filter=all&sort=created&direction=asc&per_page=100&page=1"] = encoded([]any{issue(3054, nil), issue(3030, map[string]any{"id": 123, "slug": "chatgpt-codex-connector"})})
+	data["compare/"+oldBase+"..."+oldHead+"?per_page=100&page=1"] = encoded(map[string]any{"total_commits": 1, "commits": []any{map[string]string{"sha": oldHead}}})
+	keys := []string{}
+	for _, pair := range [][2]string{{oldHead, merge}, {merge, head}, {oldHead, base}, {merge, base}} {
+		key := "compare/" + pair[0] + "..." + pair[1]
+		keys = append(keys, key)
+		data[key] = encoded(map[string]any{"status": "ahead", "base_commit": map[string]string{"sha": pair[0]}, "merge_base_commit": map[string]string{"sha": pair[0]}})
+	}
+	c := checker(t, data)
+	c.Repository = "owner/repo"
+	if err := c.CheckRange(context.Background(), base, head); err != nil {
+		t.Fatal("clean new range still tainted", err)
+	}
+	// Preserve the actual denial; it was not relabelled a policy success.
+	if err := CheckIssue(data["issues/3030"], 3030); err == nil {
+		t.Fatal("original denial erased")
+	}
+	for _, key := range keys {
+		saved := data[key]
+		data[key] = []byte(`{"status":"diverged"}`)
+		if err := c.CheckRange(context.Background(), base, head); err == nil {
+			t.Fatal("incomplete ancestry admitted", key)
+		}
+		data[key] = saved
+	}
+	// Moving the denied subject into the current range must still be rejected.
+	data["compare/"+base+"..."+head+"?per_page=100&page=1"] = encoded(map[string]any{"total_commits": 2, "commits": []any{humanCommit(oldHead), humanCommit(head)}})
+	data["commits/"+oldHead+"/pulls?per_page=100&page=1"] = []byte(`[{"number":3030}]`)
+	if err := c.CheckRange(context.Background(), base, head); err == nil {
+		t.Fatal("actual incoming denied subject admitted")
+	}
+}
+func TestVerdictRejectsAmbiguousSchema(t *testing.T) {
+	v := Verdict{Version: 1, Repository: "owner/repo", HeadSHA: head, BaseSHA: base, RunID: 88, RunAttempt: 1, Event: "push", Outcome: "execution_error", Code: "api_read"}
+	good := string(encoded(v))
+	for _, bad := range []string{strings.TrimSuffix(good, "}") + `,"code":"api_read"}`, strings.TrimSuffix(good, "}") + `,"unknown":true}`, good + good, `{"version":1}`, strings.Replace(good, `"run_id":88`, `"run_id":"88"`, 1)} {
+		if decodeVerdict(bad, new(Verdict)) {
+			t.Fatal("ambiguous verdict accepted", bad)
+		}
+	}
+}
+
+func TestHistoricalEvidenceTransportErrorIsNotContentVerdict(t *testing.T) {
+	data := executionFixture()
+	c := checker(t, data)
+	c.Repository = "owner/repo"
+	read := c.Get
+	c.Get = func(ctx context.Context, path string) ([]byte, error) {
+		if path == "check-runs/77" {
+			return nil, &ExecutionError{Code: "api_read", Message: "temporary unavailable"}
+		}
+		return read(ctx, path)
+	}
+	err := c.CheckRange(context.Background(), base, head)
+	var execution *ExecutionError
+	if err == nil || !errors.As(err, &execution) || execution.Code != "api_read" {
+		t.Fatalf("evidence read failure tainted content: %v", err)
+	}
+}
+
+func TestRecordedFailureChainRetainsOriginalSubjectAndRejectsCycles(t *testing.T) {
+	data := executionFixture()
+	for _, pair := range [][2]string{{"check-runs/77", "check-runs/66"}, {"actions/jobs/77", "actions/jobs/66"}, {"actions/runs/88", "actions/runs/89"}} {
+		data[pair[1]] = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data[pair[0]]), "77", "66"), "88", "89"))
+	}
+	data["check-runs/66/annotations?per_page=100&page=1"] = []byte(`[]`)
+	data["actions/jobs/66/logs"] = data["actions/jobs/77/logs"]
+	data["actions/jobs/77/logs"] = []byte("2026-10-27T19:24:42.5655881Z attribution denied after 1.927s : commit " + head + " has a recorded attribution rejection (check 66)\n")
+	data["commits/"+head+"/check-runs?filter=all&per_page=100&page=1"] = []byte(`{"total_count":2,"check_runs":[{"id":77,"name":"no-coauthor-trailers","status":"completed","conclusion":"failure"},{"id":66,"name":"no-coauthor-trailers","status":"completed","conclusion":"failure"}]}`)
+	c := checker(t, data)
+	c.Repository = "owner/repo"
+	if err := c.CheckRange(context.Background(), base, head); err != nil {
+		t.Fatal("input failure cascade became content deny", err)
+	}
+	data["actions/jobs/66/logs"] = []byte("2026-10-27T19:24:42.5655881Z attribution denied after 1.927s : commit " + head + " has a recorded attribution rejection (check 77)\n")
+	if err := c.CheckRange(context.Background(), base, head); err == nil {
+		t.Fatal("evidence cycle admitted")
+	}
+	data["actions/jobs/66/logs"] = []byte("2026-10-26T16:29:16.5758459Z attribution denied after 14.557s : PR #3030 carries GitHub app attribution: chatgpt-codex-connector\n")
+	if err := c.CheckRange(context.Background(), base, head); err == nil {
+		t.Fatal("genuine unknown-scope rejection erased by cascade")
+	}
+}
+
+func TestConcurrentEvidenceNeverRelabelsObservedDenialAsExecution(t *testing.T) {
+	transient := &ExecutionError{Code: "api_read", Message: "temporary unavailable"}
+	denied := fmt.Errorf("incoming commit belongs to rejected PR #3030")
+	for _, observed := range [][]error{{transient, denied}, {denied, transient}} {
+		failures := make(chan error, len(observed))
+		for _, err := range observed {
+			failures <- err
+		}
+		close(failures)
+		if got := catalogFailure(failures); got != denied {
+			t.Fatalf("observed violation was hidden by execution race: %v", got)
+		}
+	}
+	failures := make(chan error, 1)
+	failures <- transient
+	close(failures)
+	if got := catalogFailure(failures); got != transient {
+		t.Fatalf("execution-only failure changed: %v", got)
 	}
 }

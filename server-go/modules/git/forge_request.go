@@ -372,14 +372,14 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method != "merge" && method != "squash" && method != "rebase" {
 			return ForgeResponse{Error: "pr merge: unsupported merge method"}
 		}
-		checker := attribution.Checker{Get: func(ctx context.Context, path string) ([]byte, error) {
+		checker := attribution.Checker{Repository: request.Owner + "/" + request.Repo, Get: func(ctx context.Context, path string) ([]byte, error) {
 			status, payload, err := forgeCall(ctx, traceID, executor, methodGet,
 				repo+"/"+path, request.Op, resource, request.Credential, nil)
 			if err != nil {
-				return nil, err
+				return nil, &attribution.ExecutionError{Code: "api_read", Message: err.Error()}
 			}
 			if status != 200 {
-				return nil, fmt.Errorf("attribution API returned HTTP %d", status)
+				return nil, &attribution.ExecutionError{Code: "api_read", Message: fmt.Sprintf("attribution API returned HTTP %d", status)}
 			}
 			return payload, nil
 		}}

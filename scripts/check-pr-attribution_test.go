@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -80,5 +84,57 @@ func TestAttributionRetryCancellation(t *testing.T) {
 	_, err := readAttributionAPI(ctx, server.Client(), server.URL, "fixture")
 	if !errors.Is(err, context.Canceled) || time.Since(started) > time.Second {
 		t.Fatalf("retry ignored cancellation: %v", err)
+	}
+}
+
+type attributionTransport func(*http.Request) (*http.Response, error)
+
+func (f attributionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestGitHubJobLogDownloadDropsIdentityAndRejectsSecondRedirect(t *testing.T) {
+	for _, secondRedirect := range []bool{false, true} {
+		calls := 0
+		client := &http.Client{Transport: attributionTransport(func(r *http.Request) (*http.Response, error) {
+			calls++
+			header := make(http.Header)
+			status := 200
+			body := "exact log bytes"
+			if calls == 1 {
+				if r.URL.String() != "https://api.github.com/repos/owner/repo/actions/jobs/77/logs" || r.Header.Get("Authorization") != "Bearer fixture" {
+					t.Error("first-hop binding/auth changed")
+				}
+				status = 302
+				header.Set("Location", "https://logs.example.net/signed?sig=fixture")
+				body = ""
+			} else {
+				if calls != 2 || r.URL.String() != "https://logs.example.net/signed?sig=fixture" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Accept") != "text/plain" {
+					t.Error("signed download forwarded identity or escaped exact target")
+				}
+				if secondRedirect {
+					status = 302
+					header.Set("Location", "https://other.example.net/")
+				}
+			}
+			return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		}), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		jar, _ := cookiejar.New(nil)
+		signed, _ := url.Parse("https://logs.example.net/")
+		jar.SetCookies(signed, []*http.Cookie{{Name: "private-fixture", Value: "must-not-forward"}})
+		client.Jar = jar
+		raw, err := readAttributionAPI(context.Background(), client, "https://api.github.com/repos/owner/repo/actions/jobs/77/logs", "fixture")
+		if calls != 2 || (err != nil) != secondRedirect || !secondRedirect && string(raw) != "exact log bytes" {
+			t.Fatalf("calls=%d raw=%q error=%v", calls, raw, err)
+		}
+	}
+}
+func TestLogRedirectRequiresExactTrustedFirstHopAndHTTPS(t *testing.T) {
+	for _, tc := range []struct{ source, target string }{{"https://api.github.com/repos/owner/repo/issues/1", "https://logs.example.net/"}, {"https://elsewhere.example/repos/owner/repo/actions/jobs/77/logs", "https://logs.example.net/"}, {"https://api.github.com/repos/owner/repo/actions/jobs/77/logs", "http://logs.example.net/"}, {"https://api.github.com/repos/owner/repo/actions/jobs/77/logs", "https://user@logs.example.net/"}, {"https://api.github.com/repos/owner/repo/actions/jobs/77/logs", "https://logs.example.net:8443/"}} {
+		calls := 0
+		client := &http.Client{Transport: attributionTransport(func(r *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{tc.target}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		}), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		if _, err := readAttributionAPI(context.Background(), client, tc.source, "fixture"); err == nil || calls != 1 {
+			t.Fatal("untrusted redirect followed", tc, calls, err)
+		}
 	}
 }
