@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,7 +72,7 @@ func sharedTestDatabase(t *testing.T) *pgxpool.Pool {
 
 // Only the bus boundary is in-process. Both sides of the production binary SQL
 // wire, the provider's transaction/ledger code, and PostgreSQL itself are real.
-type sharedStoreCaller struct{ handler bus.ModuleHandler }
+type sharedStoreCaller struct{ handler ring.ModuleHandler }
 
 func (c sharedStoreCaller) Call(ctx context.Context, kind, stage uint32, _ uint64,
 	_ time.Duration, request []byte) ([]byte, error) {
@@ -82,8 +82,8 @@ func (c sharedStoreCaller) Call(ctx context.Context, kind, stage uint32, _ uint6
 	if kind != db.EventPostgresSQL || stage != db.StagePostgresSQL {
 		return nil, fmt.Errorf("unexpected database route %d/%d", kind, stage)
 	}
-	body, status := c.handler(bus.ModuleInvocation{StageID: stage}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := c.handler(ring.ModuleInvocation{StageID: stage}, request)
+	if status != ring.ModuleStatusOK {
 		return nil, fmt.Errorf("database transport status %d", status)
 	}
 	return body, nil
@@ -238,9 +238,9 @@ func TestSharedDatabaseBothDomainSchemas(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				raw, status := handler(bus.ModuleInvocation{StageID: memory.StageData}, request)
+				raw, status := handler(ring.ModuleInvocation{StageID: memory.StageData}, request)
 				var reply memory.DataResponse
-				if status != bus.ModuleStatusOK || json.Unmarshal(raw, &reply) != nil || len(reply.Records) != 1 {
+				if status != ring.ModuleStatusOK || json.Unmarshal(raw, &reply) != nil || len(reply.Records) != 1 {
 					t.Fatalf("memory owner mutation failed: %s %d %s", placement, status, raw)
 				}
 				dataStores = append(dataStores, data)

@@ -28,6 +28,8 @@ on:
       - "config/**"
       - "deploy/container/**"
       - "scripts/**"
+      # The pinned ouroboros ring is compiled into the server and KB images.
+      - "dependencies/ouroboros-ring.lock.json"
       # The images bundle the webchat UI (frontend/ SPA + webchat/ Go server) —
       # see the frontend-build/webchat-build stages in Dockerfile.server.
       - "frontend/**"

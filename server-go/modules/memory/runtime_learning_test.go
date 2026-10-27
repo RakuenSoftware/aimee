@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestLearningMutationHostBoundary(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, peer := range []uint32{1, 23, 200} {
-		if _, status := invokeContextCommand(t, handler, peer, bus.CommandContext{}, "runtime", `{"operation":"learning-apply","sink":"reranker","action":{}}`); status != bus.ModuleStatusInvalidRequest {
+		if _, status := invokeContextCommand(t, handler, peer, ring.CommandContext{}, "runtime", `{"operation":"learning-apply","sink":"reranker","action":{}}`); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(peer, status)
 		}
 	}
@@ -22,13 +22,13 @@ func TestLearningMutationHostBoundary(t *testing.T) {
 		json.Unmarshal([]byte(args), &input)
 		input["operation"] = "learning-apply"
 		body, _ := json.Marshal(input)
-		if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", string(body)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", string(body)); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(args, status)
 		}
 	}
 }
 
-func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	execSQL := func(sql string, args ...any) {
 		t.Helper()
@@ -50,8 +50,8 @@ func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 			args[k] = v
 		}
 		raw, _ := json.Marshal(args)
-		result, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", string(raw))
-		if status != bus.ModuleStatusOK || result["status"] != "ok" {
+		result, status := invokeContextCommand(t, handler, 0, ring.CommandContext{}, "runtime", string(raw))
+		if status != ring.ModuleStatusOK || result["status"] != "ok" {
 			t.Fatal(result, status)
 		}
 		return result

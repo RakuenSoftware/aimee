@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestNetworkSSEOwnsStreamPostAndBearer(t *testing.T) {
@@ -47,7 +47,7 @@ func TestNetworkSSEOwnsStreamPostAndBearer(t *testing.T) {
 	policy := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, allowPrivateMCP: true}
 	service := newStreamService(policy, staticCredentialResolver([]byte("secret")))
 	request := SSERequest{URL: server.URL + "/sse", CredentialHandle: "mcp:712", TimeoutMS: 1000, Limits: DefaultSSELimits()}
-	stream, err := service.open(bus.ModuleInvocation{PrincipalClass: 1,
+	stream, err := service.open(ring.ModuleInvocation{PrincipalClass: 1,
 		PrincipalRef: 200 + PluginClientOffset, StageID: StageSSEOpen}, request)
 	if err != nil {
 		t.Fatal(err)

@@ -320,10 +320,13 @@ class CProcessBuildTests(unittest.TestCase):
                 exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor),
                 encoding="utf-8",
             )
-            (prefix / "aimee-coreConfig.cmake").write_text(
-                "add_library(aimee-core-event-bus-client INTERFACE IMPORTED)\n"
-                "add_library(aimee::aimee-core-event-bus-client ALIAS "
-                "aimee-core-event-bus-client)\n",
+            (prefix / "aimee-coreConfig.cmake").write_text("", encoding="utf-8")
+            ring = root / "prefix/lib/cmake/ouroboros-ring"
+            ring.mkdir(parents=True)
+            (ring / "ouroboros-ringConfig.cmake").write_text(
+                "add_library(ouroboros-ring-client INTERFACE IMPORTED)\n"
+                "add_library(ouroboros::ouroboros-ring-client ALIAS "
+                "ouroboros-ring-client)\n",
                 encoding="utf-8",
             )
             (prefix / "aimee-coreConfigVersion.cmake").write_text(
@@ -536,7 +539,7 @@ class CProcessBuildTests(unittest.TestCase):
                 "sources": self.descriptor()["sources"],
             }])
             main = (bundle / "src/aimee-module-kb.c").read_text(encoding="utf-8")
-            self.assertIn("extern aimee_module_status_t aimee_module_handler", main)
+            self.assertIn("extern ouro_module_status_t aimee_module_handler", main)
             self.assertNotIn("kb_store_init", main)
             self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))

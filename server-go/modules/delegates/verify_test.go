@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Linux's ceiling, 128+SIGRTMAX. The tests that care about the platform pass
@@ -112,9 +112,9 @@ func verifyRequestBytes(execRC, delegateRC, maxSignal int32) []byte {
 }
 
 func TestVerifyStageRoundTrip(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageVerify},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageVerify},
 		verifyRequestBytes(1, 0, linuxMaxSignalStatus))
-	if status != bus.ModuleStatusOK || len(response) != verifyResponseLen ||
+	if status != ring.ModuleStatusOK || len(response) != verifyResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != verifyResponseMagic {
 		t.Fatalf("status %d, %d bytes", status, len(response))
 	}
@@ -126,7 +126,7 @@ func TestVerifyStageRoundTrip(t *testing.T) {
 	}
 
 	// A killed verifier is infrastructure, and carries no escalation.
-	response, _ = Handle(bus.ModuleInvocation{StageID: StageVerify},
+	response, _ = Handle(ring.ModuleInvocation{StageID: StageVerify},
 		verifyRequestBytes(137, 0, linuxMaxSignalStatus))
 	if VerifyOutcome(binary.LittleEndian.Uint32(response[4:8])) != VerifyInfraError ||
 		binary.LittleEndian.Uint32(response[8:12]) != 0 {
@@ -136,17 +136,17 @@ func TestVerifyStageRoundTrip(t *testing.T) {
 
 func TestVerifyStageRejectsInvalidEnvelope(t *testing.T) {
 	short := verifyRequestBytes(0, 0, linuxMaxSignalStatus)[:verifyRequestLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageVerify}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageVerify}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("truncated status = %d", status)
 	}
 	// A ceiling below 128 cannot be a signal status; taking it would silently
 	// reclassify every killed verifier as a work-product failure.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageVerify},
-		verifyRequestBytes(137, 0, 12)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageVerify},
+		verifyRequestBytes(137, 0, 12)); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("nonsense ceiling status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageVerify, DeadlineNS: 1},
-		verifyRequestBytes(0, 0, linuxMaxSignalStatus)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageVerify, DeadlineNS: 1},
+		verifyRequestBytes(0, 0, linuxMaxSignalStatus)); status != ring.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
 	}
 }

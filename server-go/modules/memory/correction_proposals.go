@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Drafts are deliberately not Records: neither recall nor extraction accepts one.
@@ -157,7 +157,7 @@ func (r *correctionReviewRequest) valid() bool {
 
 var errCorrectionReviewConflict = errors.New("memory: correction review no longer matches the draft, target or decision")
 
-func (s *postgresDataStore) reviewKBCorrection(ctx context.Context, r correctionReviewRequest, caller *bus.CommandContext) (correctionProposal, error) {
+func (s *postgresDataStore) reviewKBCorrection(ctx context.Context, r correctionReviewRequest, caller *ring.CommandContext) (correctionProposal, error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !r.valid() || !verifiedRetryCaller(caller) || !caller.UserAuthority {
 		return correctionProposal{}, errors.New("memory: authenticated user review transaction required")
 	}

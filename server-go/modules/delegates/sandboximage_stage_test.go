@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func imageSpecRequest(base string, packages []string, verbatim string) []byte {
@@ -27,11 +27,11 @@ func imageSpecRequest(base string, packages []string, verbatim string) []byte {
 	return out
 }
 
-func callImageSpec(t *testing.T, base string, packages []string) (string, string, bus.ModuleStatus) {
+func callImageSpec(t *testing.T, base string, packages []string) (string, string, ring.ModuleStatus) {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageImageSpec},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageImageSpec},
 		imageSpecRequest(base, packages, ""))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return "", "", status
 	}
 	if len(response) < 12 || binary.LittleEndian.Uint32(response[0:4]) != imageSpecResponseMagic {
@@ -47,7 +47,7 @@ func callImageSpec(t *testing.T, base string, packages []string) (string, string
 
 func TestImageSpecRendersPackages(t *testing.T) {
 	tag, df, status := callImageSpec(t, "ubuntu:22.04", []string{"git", "curl", "build-essential"})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if !strings.HasPrefix(df, "FROM ubuntu:22.04\n") {
@@ -69,7 +69,7 @@ func TestImageSpecRendersPackages(t *testing.T) {
 // still pays for a network round trip on every build.
 func TestImageSpecWithNoPackagesIsJustTheBase(t *testing.T) {
 	_, df, status := callImageSpec(t, "alpine:3", nil)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if df != "FROM alpine:3\n" {
@@ -113,14 +113,14 @@ func TestImageSpecRefusesInjection(t *testing.T) {
 		{""},
 	}
 	for _, pkgs := range bad {
-		if _, _, status := callImageSpec(t, "ubuntu:22.04", pkgs); status != bus.ModuleStatusInvalidRequest {
+		if _, _, status := callImageSpec(t, "ubuntu:22.04", pkgs); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("packages %q: status = %v, want InvalidRequest", pkgs, status)
 		}
 	}
 	for _, base := range []string{
 		"", "ubuntu:22.04; rm -rf /", "ubuntu$(id)", "ubuntu:22.04\nRUN evil",
 	} {
-		if _, _, status := callImageSpec(t, base, nil); status != bus.ModuleStatusInvalidRequest {
+		if _, _, status := callImageSpec(t, base, nil); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("base %q: status = %v, want InvalidRequest", base, status)
 		}
 	}
@@ -130,14 +130,14 @@ func TestImageSpecAcceptsRealNames(t *testing.T) {
 	for _, pkgs := range [][]string{
 		{"build-essential"}, {"python3.11"}, {"lib32z1"}, {"g++"}, {"ca-certificates"},
 	} {
-		if _, _, status := callImageSpec(t, "ubuntu:22.04", pkgs); status != bus.ModuleStatusOK {
+		if _, _, status := callImageSpec(t, "ubuntu:22.04", pkgs); status != ring.ModuleStatusOK {
 			t.Errorf("packages %q were refused", pkgs)
 		}
 	}
 	for _, base := range []string{
 		"ubuntu:22.04", "docker.io/library/ubuntu:22.04", "ghcr.io/org/img:v1.2.3",
 	} {
-		if _, _, status := callImageSpec(t, base, nil); status != bus.ModuleStatusOK {
+		if _, _, status := callImageSpec(t, base, nil); status != ring.ModuleStatusOK {
 			t.Errorf("base %q was refused", base)
 		}
 	}
@@ -169,15 +169,15 @@ func TestImageSpecRejectsMalformedRequests(t *testing.T) {
 	cases["base length overruns"] = overrun
 
 	for name, request := range cases {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageImageSpec}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageImageSpec}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestImageSpecHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageImageSpec, DeadlineNS: 1}
-	if _, status := Handle(invocation, imageSpecRequest("ubuntu:22.04", nil, "")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageImageSpec, DeadlineNS: 1}
+	if _, status := Handle(invocation, imageSpecRequest("ubuntu:22.04", nil, "")); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }
@@ -187,9 +187,9 @@ func TestImageSpecHonoursCancellation(t *testing.T) {
 // content would resolve to two names -- so nothing would ever be reused.
 func TestImageSpecTagsAVerbatimDockerfile(t *testing.T) {
 	df := "FROM ubuntu:22.04\nRUN echo hand-written\n"
-	response, status := Handle(bus.ModuleInvocation{StageID: StageImageSpec},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageImageSpec},
 		imageSpecRequest("", nil, df))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	tagLen := int(binary.LittleEndian.Uint32(response[4:8]))
@@ -206,9 +206,9 @@ func TestImageSpecTagsAVerbatimDockerfile(t *testing.T) {
 // Two descriptions of one image is a question with no right answer, so it is
 // refused rather than resolved in favour of either.
 func TestImageSpecRefusesBothFormsAtOnce(t *testing.T) {
-	_, status := Handle(bus.ModuleInvocation{StageID: StageImageSpec},
+	_, status := Handle(ring.ModuleInvocation{StageID: StageImageSpec},
 		imageSpecRequest("ubuntu:22.04", []string{"git"}, "FROM alpine:3\n"))
-	if status != bus.ModuleStatusInvalidRequest {
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("status = %v, want InvalidRequest", status)
 	}
 }

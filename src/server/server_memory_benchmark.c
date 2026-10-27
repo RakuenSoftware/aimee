@@ -4,7 +4,7 @@
 #include "server_state_internal.h"
 #include "json_fluent.h"
 #include "kb_client.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -28,7 +28,7 @@ int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    kb_client_memory_scope_context_apply(request);
    char *raw = kb_client_memory_benchmark_json(request, path);
    kb_client_memory_scope_context_clear();
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    const char *status = jo_cstr(parsed, "status");

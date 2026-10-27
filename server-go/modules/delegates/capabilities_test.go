@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func capRequest(prompt string, tools bool) []byte {
@@ -22,9 +22,9 @@ func capRequest(prompt string, tools bool) []byte {
 
 func capCall(t *testing.T, prompt string, tools bool) (uint32, int) {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageCapabilities},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageCapabilities},
 		capRequest(prompt, tools))
-	if status != bus.ModuleStatusOK || len(response) != capResponseLen ||
+	if status != ring.ModuleStatusOK || len(response) != capResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != capResponseMagic {
 		t.Fatalf("response = %x, status = %d", response, status)
 	}
@@ -108,24 +108,24 @@ func TestMarkdownImageSyntaxIsNotAVisionTrigger(t *testing.T) {
 
 func TestCapabilitiesRejectsInvalidEnvelope(t *testing.T) {
 	short := capRequest("x", false)[:capHeaderLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCapabilities}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCapabilities}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated-header status = %d", status)
 	}
 
 	lying := capRequest("x", false)
 	binary.LittleEndian.PutUint32(lying[8:12], 64)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCapabilities}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCapabilities}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("length-mismatch status = %d", status)
 	}
 
 	badTools := capRequest("x", false)
 	badTools[5] = 2
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCapabilities}, badTools); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCapabilities}, badTools); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("out-of-range tools flag status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageCapabilities, DeadlineNS: 1},
-		capRequest("x", false)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageCapabilities, DeadlineNS: 1},
+		capRequest("x", false)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired status = %d", status)
 	}
 }

@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
-func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:delete-retry-fixture", TransportIdentity: "cert:delete-fixture"}
+	caller := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "user:delete-retry-fixture", TransportIdentity: "cert:delete-fixture"}
 	invoke := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		raw, err := json.Marshal(args)
@@ -21,7 +21,7 @@ func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal(err)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status, out)
 		}
 		return out

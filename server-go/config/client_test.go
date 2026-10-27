@@ -8,11 +8,11 @@ import (
 	"time"
 
 	contract "github.com/JBailes/aimee/server-go/config"
-	"github.com/RakuenSoftware/aimee-module-config/server-go/bus"
 	moduleconfig "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-type handlerCaller struct{ handler bus.ModuleHandler }
+type handlerCaller struct{ handler ring.ModuleHandler }
 type failureCaller struct{ err error }
 
 func (c handlerCaller) Call(_ context.Context, eventKind, stageID uint32, _ uint64,
@@ -20,8 +20,8 @@ func (c handlerCaller) Call(_ context.Context, eventKind, stageID uint32, _ uint
 	if eventKind != contract.EventConfig {
 		return nil, errors.New("wrong event kind")
 	}
-	response, status := c.handler(bus.ModuleInvocation{StageID: stageID}, body)
-	if status != bus.ModuleStatusOK {
+	response, status := c.handler(ring.ModuleInvocation{StageID: stageID}, body)
+	if status != ring.ModuleStatusOK {
 		return nil, errors.New("module refused request")
 	}
 	return response, nil

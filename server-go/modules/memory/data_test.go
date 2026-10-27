@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestRecallGatePolicyLivesInGo(t *testing.T) {
@@ -34,9 +34,9 @@ func TestRecallGatePolicyLivesInGo(t *testing.T) {
 func TestRecallGateDoesNotRequireADataStore(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_RECALL_GATE", "enforce")
 	handler := NewHandler(nil, WithDataStore(PlacementServer, nil))
-	response, status := handler(bus.ModuleInvocation{StageID: StageData},
+	response, status := handler(ring.ModuleInvocation{StageID: StageData},
 		dataRequest(t, DataRequest{Operation: "recall-gate", Query: "thanks"}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded DataResponse
@@ -50,11 +50,11 @@ func TestRecallGateDoesNotRequireADataStore(t *testing.T) {
 
 func TestRedirectPolicyDoesNotRequireADataStore(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementServer, nil))
-	response, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+	response, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 		Operation: "redirect-classify", Client: "claude", Tool: "Write", Home: "/home/u",
 		Path: "/home/u/.claude/projects/p/memory/note.md",
 	}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded DataResponse
@@ -65,11 +65,11 @@ func TestRedirectPolicyDoesNotRequireADataStore(t *testing.T) {
 		t.Fatalf("response = %#v", decoded)
 	}
 
-	response, status = handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+	response, status = handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 		Operation: "redirect-bash", Client: "claude", Home: "/home/u",
 		Command: "printf x > /home/u/.claude/projects/p/memory/note.md",
 	}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("bash status = %v", status)
 	}
 	if err := json.Unmarshal(response, &decoded); err != nil {
@@ -82,10 +82,10 @@ func TestRedirectPolicyDoesNotRequireADataStore(t *testing.T) {
 
 func TestContentGateDoesNotRequireADataStore(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementServer, nil))
-	response, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+	response, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 		Operation: "content-gate", Content: "token=abc", ContentCapacity: 128,
 	}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded DataResponse
@@ -103,10 +103,10 @@ func TestContentGateDoesNotRequireADataStore(t *testing.T) {
 func TestContentGateEmitsCleanVerdict(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 			Operation: "content-gate", Content: "shared release fixture", ContentCapacity: 128,
 		}))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("status = %v", status)
 		}
 		var wire map[string]json.RawMessage
@@ -179,8 +179,8 @@ func TestServerPlacementOwnsOnlyUserMemory(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementServer, backend))
 	request := DataRequest{Operation: "store", Kind: "preference", Key: "editor",
 		Content: "vim", Confidence: float64ptr(.9)}
-	response, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
-	if status != bus.ModuleStatusOK {
+	response, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if backend.scope != (Scope{Type: ScopeUser, Value: "_user"}) {
@@ -195,7 +195,7 @@ func TestServerPlacementOwnsOnlyUserMemory(t *testing.T) {
 	}
 
 	request.Scope = Scope{Type: ScopeProject, Value: "secret-project"}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("server accepted project memory: %v", status)
 	}
 }
@@ -213,7 +213,7 @@ func TestKBPlacementOwnsOnlyKBScopes(t *testing.T) {
 	backend := &recordingDataStore{}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	request := DataRequest{Operation: "search", Scope: Scope{Type: ScopeWorkspace, Value: "/srv/dev"}, Limit: 10}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusOK {
 		t.Fatalf("workspace status = %v", status)
 	}
 	if backend.scope != request.Scope {
@@ -221,7 +221,7 @@ func TestKBPlacementOwnsOnlyKBScopes(t *testing.T) {
 	}
 
 	request.Scope = Scope{Type: ScopeUser, Value: "alice"}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("kb accepted user memory: %v", status)
 	}
 }
@@ -231,7 +231,7 @@ func TestKBVisibleSearchExpandsScopeInGo(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	request := DataRequest{Operation: "visible-search", Query: "cache", Workspace: "/srv/dev",
 		Project: "aimee", Limit: 10}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	want := []Scope{{Type: ScopeProject, Value: "aimee"}, {Type: ScopeWorkspace, Value: "/srv/dev"},
@@ -251,7 +251,7 @@ func TestWorkflowIdentityIsConstructedInGo(t *testing.T) {
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	request := DataRequest{Operation: "upsert-workflow", Workspace: "/srv/dev", SignalType: "tests",
 		Rule: "run unit tests", Confidence: float64ptr(.8), SessionID: "session-1"}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, request)); status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if backend.scope != (Scope{Type: ScopeWorkspace, Value: "/srv/dev"}) ||
@@ -263,9 +263,9 @@ func TestWorkflowIdentityIsConstructedInGo(t *testing.T) {
 func TestProspectiveCountsAreKBOnly(t *testing.T) {
 	backend := &recordingDataStore{}
 	kbHandler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	response, status := kbHandler(bus.ModuleInvocation{StageID: StageData},
+	response, status := kbHandler(ring.ModuleInvocation{StageID: StageData},
 		dataRequest(t, DataRequest{Operation: "prospective-count"}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("kb status = %v", status)
 	}
 	var decoded DataResponse
@@ -277,8 +277,8 @@ func TestProspectiveCountsAreKBOnly(t *testing.T) {
 		t.Fatalf("response = %#v", decoded)
 	}
 	serverHandler := NewHandler(nil, WithDataStore(PlacementServer, backend))
-	if _, status = serverHandler(bus.ModuleInvocation{StageID: StageData},
-		dataRequest(t, DataRequest{Operation: "prospective-count"})); status != bus.ModuleStatusInvalidRequest {
+	if _, status = serverHandler(ring.ModuleInvocation{StageID: StageData},
+		dataRequest(t, DataRequest{Operation: "prospective-count"})); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("server accepted KB prospective count: %v", status)
 	}
 }
@@ -286,10 +286,10 @@ func TestProspectiveCountsAreKBOnly(t *testing.T) {
 func TestFactRecallIsImplementedByKBMemoryModule(t *testing.T) {
 	backend := &recordingDataStore{}
 	kbHandler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	response, status := kbHandler(bus.ModuleInvocation{StageID: StageData},
+	response, status := kbHandler(ring.ModuleInvocation{StageID: StageData},
 		dataRequest(t, DataRequest{Operation: "fact-recall", Entity: "Ada",
 			TurnRequestsSensitive: true, ContentCapacity: 128}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("kb status = %v", status)
 	}
 	var decoded DataResponse
@@ -302,9 +302,9 @@ func TestFactRecallIsImplementedByKBMemoryModule(t *testing.T) {
 	}
 
 	serverHandler := NewHandler(nil, WithDataStore(PlacementServer, backend))
-	if _, status = serverHandler(bus.ModuleInvocation{StageID: StageData},
+	if _, status = serverHandler(ring.ModuleInvocation{StageID: StageData},
 		dataRequest(t, DataRequest{Operation: "fact-recall", Entity: "Ada",
-			ContentCapacity: 128})); status != bus.ModuleStatusInvalidRequest {
+			ContentCapacity: 128})); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("server accepted KB fact recall: %v", status)
 	}
 }
@@ -312,10 +312,10 @@ func TestFactRecallIsImplementedByKBMemoryModule(t *testing.T) {
 func TestTemporalMemoryCheckIsImplementedByKBMemoryModule(t *testing.T) {
 	backend := &recordingDataStore{}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	response, status := handler(bus.ModuleInvocation{StageID: StageData},
+	response, status := handler(ring.ModuleInvocation{StageID: StageData},
 		dataRequest(t, DataRequest{Operation: "valid-at", ID: 41,
 			AsOf: "2026-06-12 00:00:00"}))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded DataResponse
@@ -349,9 +349,9 @@ func TestFusionIsInstanceWideAndDefaultsOn(t *testing.T) {
 			handler := NewHandler(nil, WithDataStore(placement, data))
 			for _, operation := range []string{"fusion-state-get", "fusion-state-set", "fusion-state-clear"} {
 				for _, override := range []string{"on", "off", "shadow", ""} {
-					raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: operation, State: override, GraphCodeFusionState: override}))
+					raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: operation, State: override, GraphCodeFusionState: override}))
 					var result DataResponse
-					if status != bus.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Allowed == nil || *result.Allowed != (setting != "off") {
+					if status != ring.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Allowed == nil || *result.Allowed != (setting != "off") {
 						t.Fatalf("%s setting=%q operation=%s override=%q: %s status=%v", placement, setting, operation, override, raw, status)
 					}
 				}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const ingressPacketFixture = `{"status":"ok","project":"active-project","generation":7,
@@ -30,8 +30,8 @@ func TestIngressTaskPacketGoldenBothPlacements(t *testing.T) {
 		if result["block"] != want || result["item_count"] != float64(2) || result["confidence"] != .95 {
 			t.Fatal(result)
 		}
-		frame, _ := bus.EncodeCommand("runtime", []byte(request))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(request))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("remote peer accepted", status)
 		}
 	}
@@ -135,8 +135,8 @@ func TestIngressTaskPacketInvalidRuntimeArguments(t *testing.T) {
 		_ = json.Unmarshal([]byte(args), &request)
 		request["operation"] = "ingress-task-packet"
 		raw, _ := json.Marshal(request)
-		frame, _ := bus.EncodeCommand("runtime", raw)
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", raw)
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(args, status)
 		}
 	}

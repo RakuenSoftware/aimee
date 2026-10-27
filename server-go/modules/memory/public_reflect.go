@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleReflectCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleReflectCommand(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	query, ok := args.stringValue("query")
 	format := args.stringOr("format", "")
 	if !ok || strings.TrimSpace(query) == "" || len(query) > 2047 || (format != "" && format != "json" && format != "text") {
@@ -33,8 +33,8 @@ func handleReflectCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	raw, _ := json.Marshal(request)
 	encoded, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory reflection unavailable"))
 		}
 		return nil, status
@@ -42,7 +42,7 @@ func handleReflectCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	var response DataResponse
 	var result reflectionResult
 	if json.Unmarshal(encoded, &response) != nil || json.Unmarshal(response.Payload, &result) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if format == "text" {
 		return commandResult(map[string]any{"status": "ok", "output": reflectionText(result)})

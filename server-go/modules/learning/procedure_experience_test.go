@@ -2,34 +2,34 @@ package learning
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 )
 
-func procedureFixture() (ProcedureEvent, ProcedureExposure, bus.CommandContext) {
+func procedureFixture() (ProcedureEvent, ProcedureExposure, ring.CommandContext) {
 	v := ProcedureVersion{Owner: "kb", ID: "procedure:1", Revision: "3"}
 	e := ProcedureEvent{SchemaVersion: 1, ID: "event-1", Trial: "trial-1", Task: "task", Attempt: "attempt-1", Procedure: v, Receipt: "receipt:1", State: "verified_success", Authority: "user_feedback", Actor: "alice", Environment: "linux", Model: "model", TaskClass: "navigation", Actions: []string{"action:1"}, Verifier: "explicit_user_evaluation", Verification: "feedback:1", ObservedAt: "2026-09-27T01:00:00Z"}
 	x := ProcedureExposure{Receipt: e.Receipt, Request: "request", Attempt: e.Attempt, Procedure: v, State: "delivered", Producer: "local_host_ledger"}
-	return e, x, bus.CommandContext{Authenticated: true, Principal: "alice", UserAuthority: true}
+	return e, x, ring.CommandContext{Authenticated: true, Principal: "alice", UserAuthority: true}
 }
 func TestProcedureAdmissionRejectsOmittedUnusedAndModelSuccess(t *testing.T) {
 	e, x, c := procedureFixture()
 	if err := ValidateProcedureEvent(e, x, c); err != nil {
 		t.Fatal(err)
 	}
-	for name, mutate := range map[string]func(*ProcedureEvent, *ProcedureExposure, *bus.CommandContext){
-		"omitted":             func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { x.State = "retrieved" },
-		"different version":   func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { x.Procedure.Revision = "4" },
-		"different attempt":   func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { x.Attempt = "retry" },
-		"different actor":     func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { e.Actor = "bob" },
-		"unused":              func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { e.Actions = nil },
-		"self reward":         func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { e.Authority = "model" },
-		"self signed receipt": func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { x.Producer = "model" },
-		"unbound tests": func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) {
+	for name, mutate := range map[string]func(*ProcedureEvent, *ProcedureExposure, *ring.CommandContext){
+		"omitted":             func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { x.State = "retrieved" },
+		"different version":   func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { x.Procedure.Revision = "4" },
+		"different attempt":   func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { x.Attempt = "retry" },
+		"different actor":     func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { e.Actor = "bob" },
+		"unused":              func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { e.Actions = nil },
+		"self reward":         func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { e.Authority = "model" },
+		"self signed receipt": func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { x.Producer = "model" },
+		"unbound tests": func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) {
 			e.Verifier = "tests_bound_revision"
 		},
-		"no user authority": func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { c.UserAuthority = false },
-		"forged host":       func(e *ProcedureEvent, x *ProcedureExposure, c *bus.CommandContext) { e.Authority = "host_execution" },
+		"no user authority": func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { c.UserAuthority = false },
+		"forged host":       func(e *ProcedureEvent, x *ProcedureExposure, c *ring.CommandContext) { e.Authority = "host_execution" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, x, c := procedureFixture()
@@ -91,15 +91,15 @@ func TestProcedureProjectionTrialsVersionsConflictAndRepair(t *testing.T) {
 func TestProcedureExperienceRequiresAuthenticatedHostStage(t *testing.T) {
 	e, x, c := procedureFixture()
 	args, _ := json.Marshal(map[string]any{"event": e, "exposure": x})
-	wire, _ := bus.EncodeCommandWithContext("admit", args, c)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExperience}, wire); status != bus.ModuleStatusOK {
+	wire, _ := ring.EncodeCommandWithContext("admit", args, c)
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExperience}, wire); status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExperience, PrincipalRef: 73}, wire); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExperience, PrincipalRef: 73}, wire); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("feature module forged host receipt")
 	}
-	wire, _ = bus.EncodeCommand("admit", args)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageExperience}, wire); status != bus.ModuleStatusInvalidRequest {
+	wire, _ = ring.EncodeCommand("admit", args)
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageExperience}, wire); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("missing authority accepted")
 	}
 }

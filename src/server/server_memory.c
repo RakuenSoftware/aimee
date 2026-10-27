@@ -12,7 +12,7 @@
 #include <aimee/workspace/workspace.h>
 #include <math.h>
 #include <errno.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 /* --- Memory handlers --- */
 
@@ -165,7 +165,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    kb_client_memory_scope_context_apply(request);
    char *raw = kb_v1_action_request(method, request);
    kb_client_memory_scope_context_clear();
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -203,7 +203,7 @@ cJSON *memory_hygiene_command(cJSON *req)
    cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
    cJSON_DeleteItemFromObjectCaseSensitive(request, "protocol_version");
    char *raw = kb_v1_action_request("memory.hygiene", request);
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -278,7 +278,7 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
       return transport;
    }
    const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(transport, "json"));
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    const char *status = jo_cstr(parsed, "status");
@@ -382,7 +382,7 @@ int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return send_and_free(conn, reply);
    }
    char *raw = kb_v1_action_request("memory.validity", request);
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -456,7 +456,7 @@ cJSON *memory_stats_command(const cJSON *req)
    if (!selection)
       return user_memory_owner_command("user-stats", req);
    char *raw = kb_v1_action_request("memory.stats", cJSON_CreateObject());
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;

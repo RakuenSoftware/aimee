@@ -32,7 +32,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         bundle = base / "bundle"
         output = base / "bin"
         files = [
-            *builder.CORE_EVENT_BUS_SOURCES,
+            *builder.OURO_RING_CLIENT_SOURCES,
             "src/modules/fixture/c/store.c",
             "src/modules/fixture/module_adapter.c",
         ]
@@ -40,7 +40,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("int aimee_fixture;\n", encoding="utf-8")
-        (root / "src/core/event_bus/include").mkdir(parents=True)
+        (root / builder.OURO_RING_INCLUDE).mkdir(parents=True)
         (root / "src/modules/fixture/include").mkdir(parents=True)
         main = bundle / "src/aimee-module-fixture.c"
         main.parent.mkdir(parents=True)
@@ -119,7 +119,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 bundle / "src/aimee-module-fixture.c",
                 root / "src/modules/fixture/c/store.c",
                 root / "src/modules/fixture/module_adapter.c",
-                *(root / relative for relative in builder.CORE_EVENT_BUS_SOURCES),
+                *(root / relative for relative in builder.OURO_RING_CLIENT_SOURCES),
             ]
             for source in expected_sources:
                 self.assertEqual(arguments.count(str(source)), 1)

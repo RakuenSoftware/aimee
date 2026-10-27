@@ -5,24 +5,24 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestFactMaintenanceHostBoundary(t *testing.T) {
 	for _, body := range []string{`{"operation":"fact-maintenance","action":"promote","value":0}`, `{"operation":"fact-maintenance","action":"erase","value":30}`} {
-		frame, _ := bus.EncodeCommand("runtime", []byte(body))
-		if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(body))
+		if _, status := NewHandler(nil, WithDataStore(PlacementKB, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}
-	frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"fact-maintenance","action":"expire","value":30}`))
+	frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"fact-maintenance","action":"expire","value":30}`))
 	for _, placement := range []Placement{PlacementKB, PlacementServer} {
-		if _, status := NewHandler(nil, WithDataStore(placement, nil))(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		if _, status := NewHandler(nil, WithDataStore(placement, nil))(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}
-	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := NewHandler(nil, WithDataStore(PlacementServer, nil))(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatal(status)
 	}
 }
@@ -203,10 +203,10 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	backend := *s
 	backend.db = runtimeRoleDB{evalQueryer{tx}, t}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &backend))
-	maintain := func(action string, value int, want bus.ModuleStatus) {
+	maintain := func(action string, value int, want ring.ModuleStatus) {
 		t.Helper()
-		frame, _ := bus.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":"fact-maintenance","action":%q,"value":%d,"actor":{"rank":40}}`, action, value)))
-		_, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+		frame, _ := ring.EncodeCommand("runtime", []byte(fmt.Sprintf(`{"operation":"fact-maintenance","action":%q,"value":%d,"actor":{"rank":40}}`, action, value)))
+		_, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
 		if status != want {
 			t.Fatal(action, status, want)
 		}
@@ -214,12 +214,12 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	// A late audit failure rolls back every candidate transition.
 	exec(`RESET ROLE; CREATE FUNCTION pg_temp.parity_fail_seal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.operation='fact.maintenance.promote' AND NEW.status='applied' THEN RAISE EXCEPTION 'maintenance seal failure'; END IF; RETURN NEW; END $$;
  CREATE TRIGGER parity_fail_seal BEFORE UPDATE ON fact_graph_commits FOR EACH ROW EXECUTE FUNCTION pg_temp.parity_fail_seal(); SET LOCAL ROLE aimee_store_runtime`)
-	maintain("promote", 3, bus.ModuleStatusInternal)
+	maintain("promote", 3, ring.ModuleStatusInternal)
 	if life, _, conf, _ := state(durable.AssertionID); life != "candidate" || conf != .6 {
 		t.Fatal(life, conf)
 	}
 	exec(`RESET ROLE; DROP TRIGGER parity_fail_seal ON fact_graph_commits; SET LOCAL ROLE aimee_store_runtime`)
-	maintain("promote", 3, bus.ModuleStatusOK)
+	maintain("promote", 3, ring.ModuleStatusOK)
 	if life, class, conf, rank := state(durable.AssertionID); life != "persistent" || class != "B" || conf != .8 || rank != 20 {
 		t.Fatal(life, class, conf, rank)
 	}
@@ -276,7 +276,7 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 			t.Fatal(err)
 		}
 	}
-	maintain("expire", 30, bus.ModuleStatusOK)
+	maintain("expire", 30, ring.ModuleStatusOK)
 	if life, _, _, _ := state(stale.AssertionID); life != "invalidated" {
 		t.Fatal(life)
 	}

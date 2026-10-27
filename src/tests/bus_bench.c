@@ -21,9 +21,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_host.h>
-#include <aimee/core/event_bus/bus_ring.h>
+#include <ouroboros/client.h>
+#include <ouroboros/host.h>
+#include <ouroboros/ring.h>
 
 static uint64_t now_ns(void)
 {
@@ -34,16 +34,16 @@ static uint64_t now_ns(void)
 
 struct serve_arg
 {
-   bus_host_t *h;
+   ouro_host_t *h;
    int fd;
 };
 static void *serve_thread(void *p)
 {
    struct serve_arg *a = p;
-   bus_host_serve_attach(a->h, a->fd);
+   ouro_host_serve_attach(a->h, a->fd);
    return NULL;
 }
-static void attach_client(bus_host_t *h, bus_client_t *c)
+static void attach_client(ouro_host_t *h, ouro_client_t *c)
 {
    int sv[2];
    if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
@@ -51,7 +51,7 @@ static void attach_client(bus_host_t *h, bus_client_t *c)
    struct serve_arg a = {.h = h, .fd = sv[1]};
    pthread_t t;
    pthread_create(&t, NULL, serve_thread, &a);
-   if (bus_client_attach(sv[0], c) != BUS_CLIENT_OK)
+   if (ouro_client_attach(sv[0], c) != OURO_CLIENT_OK)
       abort();
    pthread_join(t, NULL);
    close(sv[0]);
@@ -70,7 +70,7 @@ int main(int argc, char **argv)
 {
    uint64_t total = (argc > 1) ? strtoull(argv[1], NULL, 10) : 2000000;
 
-   bus_host_config_t cfg;
+   ouro_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
    cfg.max_slots = 4;
    cfg.slot_size = 256;
@@ -78,13 +78,13 @@ int main(int argc, char **argv)
    cfg.queue_capacity = 64;
    cfg.arena_size = 256 * 1024;
 
-   bus_host_t h;
-   if (bus_host_create(&h, &cfg, NULL, NULL) != BUS_HOST_OK)
+   ouro_host_t h;
+   if (ouro_host_create(&h, &cfg, NULL, NULL) != OURO_HOST_OK)
       abort();
-   bus_client_t pub, sub;
+   ouro_client_t pub, sub;
    attach_client(&h, &pub);
    attach_client(&h, &sub);
-   bus_host_subscribe(&h, sub.reply.handle_id, KIND);
+   ouro_host_subscribe(&h, sub.reply.handle_id, KIND);
 
    /* One event's dispatch = publish (producer enqueue) + host pump (route) +
     * poll (consumer dequeue). Batched to the ring's data capacity so timer
@@ -107,10 +107,10 @@ int main(int argc, char **argv)
    for (int w = 0; w < 1000; w++)
    {
       for (uint32_t i = 0; i < batch; i++)
-         bus_client_publish(&pub, KIND, payload, plen);
-      bus_host_pump(&h);
-      bus_event_t ev;
-      while (bus_client_poll(&sub, &ev) == BUS_CLIENT_OK)
+         ouro_client_publish(&pub, KIND, payload, plen);
+      ouro_host_pump(&h);
+      ouro_event_t ev;
+      while (ouro_client_poll(&sub, &ev) == OURO_CLIENT_OK)
          ;
    }
 
@@ -118,11 +118,11 @@ int main(int argc, char **argv)
    {
       uint64_t t0 = now_ns();
       for (uint32_t i = 0; i < batch; i++)
-         bus_client_publish(&pub, KIND, payload, plen);
-      bus_host_pump(&h);
-      bus_event_t ev;
+         ouro_client_publish(&pub, KIND, payload, plen);
+      ouro_host_pump(&h);
+      ouro_event_t ev;
       uint32_t got = 0;
-      while (bus_client_poll(&sub, &ev) == BUS_CLIENT_OK)
+      while (ouro_client_poll(&sub, &ev) == OURO_CLIENT_OK)
          got++;
       uint64_t t1 = now_ns();
       if (got != batch)
@@ -143,8 +143,8 @@ int main(int argc, char **argv)
            (unsigned long long)batches, batch, (unsigned long long)median, (unsigned long long)p99);
 
    free(samples);
-   bus_client_detach(&pub);
-   bus_client_detach(&sub);
-   bus_host_destroy(&h);
+   ouro_client_detach(&pub);
+   ouro_client_detach(&sub);
+   ouro_host_destroy(&h);
    return 0;
 }

@@ -81,7 +81,7 @@ static void test_chunk_plan_fallback(void)
    assert(rtp_chunk_plan(FOUR_LINES, 10, &p) == 0);
    assert(p.count == 1 && p.chunks[0].len == 20);
 
-   module_bus_stub_fail(AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   module_bus_stub_fail(OURO_MODULE_CALL_DEADLINE_EXCEEDED);
    assert(rtp_chunk_plan(FOUR_LINES, 10, &p) == 0);
    assert(p.count == 1 && p.chunks[0].len == 20);
    assert(rtp_chunk_verify(FOUR_LINES, &p) == 1);

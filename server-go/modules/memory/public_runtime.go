@@ -2,14 +2,14 @@ package memory
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 )
 
-func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRuntimeCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	scoped := false
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	if _, present := args["budget_bytes"]; present {
@@ -170,25 +170,25 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 		request.Operation, request.Path, request.Command = "check-drift", args.stringOr("file_path", ""), args.stringOr("command", "")
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if verb == "facts" && request.Query == "" {
 		return commandResult(map[string]any{"status": "ok", "facts": "", "active_context_missing": request.Workspace == "" && request.Project == ""})
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInternal || status == ring.ModuleStatusCapabilityAbsent {
 			return commandResult(commandError("unavailable", "memory module unavailable"))
 		}
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
@@ -200,7 +200,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	switch verb {
 	case "fold_session":
 		if response.Count == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if *response.Count < 0 {
 			result["status"], result["count"], result["message"] = "error", 0, "session fold was refused or incomplete"
@@ -209,7 +209,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 	case "episode_cards":
 		if json.Unmarshal(response.Payload, &result) != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["status"] = "ok"
 	case "episode_card_generate":
@@ -226,12 +226,12 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return commandResult(commandError("not_found", "episode card generation produced no row"))
 		}
 		if len(response.IDs) != 1 || response.IDs[0] <= 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["memory_unit_id"] = response.IDs[0]
 	case "export_jsonl", "decisions_export_jsonl", "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
 		if response.Count == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["count"] = *response.Count
 	case "search":
@@ -254,19 +254,19 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 	case "briefing", "alerts":
 		if len(response.Payload) == 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if args.stringOr("format", "") != "" {
 			output, err := memoryBundleOutput(verb, response.Payload, args, scoped && !request.IncludeAll && request.Project == "" && request.Workspace == "")
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			return commandResult(map[string]any{"status": "ok", "output": output})
 		}
 		result[verb] = response.Payload
 	case "context_block", "facts":
 		if response.Block == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		field := "block"
 		if verb == "facts" {
@@ -281,7 +281,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 	case "assemble_context":
 		if response.Block == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["context"] = *response.Block
 		if request.AssemblyBudgetBytes != nil {
@@ -290,7 +290,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 		if request.Detail {
 			if response.ContextAssembly == nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			result["budget"] = response.ContextAssembly.Budget
 			result["candidates"] = response.ContextAssembly.Candidates

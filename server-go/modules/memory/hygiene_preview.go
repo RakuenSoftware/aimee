@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const hygieneDuplicatePolicy = "exact-content-duplicates-v1"
@@ -246,12 +246,12 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 	return out, nil
 }
 
-func handleHygienePreview(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	invalid := func() ([]byte, bus.ModuleStatus) {
+func handleHygienePreview(options handlerOptions, invocation ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
+	invalid := func() ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", "hygiene requires one explicit shared scope and bounded proposal-only limits"))
 	}
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	var ok bool
 	args, ok = commandDomainArgs(args, "memory.hygiene")
@@ -306,12 +306,12 @@ func handleHygienePreview(options handlerOptions, invocation bus.ModuleInvocatio
 	request := DataRequest{Operation: "hygiene-preview", Scope: scope, HygienePreview: &budget}
 	raw, _ := json.Marshal(request)
 	result, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "hygiene preview unavailable; no coverage result"))
 	}
 	var response DataResponse
 	if json.Unmarshal(result, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

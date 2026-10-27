@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	configclient "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/providers/vaultresource"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func NewProcessHandler(ctx context.Context, socket, home string) (bus.ModuleHandler, error) {
+func NewProcessHandler(ctx context.Context, socket, home string) (ring.ModuleHandler, error) {
 	store, err := NewStore(home)
 	if err != nil {
 		return nil, err
@@ -20,11 +20,11 @@ func NewProcessHandler(ctx context.Context, socket, home string) (bus.ModuleHand
 	if socket == "" {
 		return NewManager(store, nil).Handle, nil
 	}
-	client, err := bus.ConnectClient(ctx, socket, 1, egress.ProvidersClientRef)
+	client, err := ring.ConnectClient(ctx, socket, 1, egress.ProvidersClientRef)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		client.Detach()
 		return nil, err
@@ -52,7 +52,7 @@ func NewProcessHandler(ctx context.Context, socket, home string) (bus.ModuleHand
 	manager.SetConfig(config)
 	return manager.Handle, nil
 }
-func NewDefaultHandler() (bus.ModuleHandler, error) {
+func NewDefaultHandler() (ring.ModuleHandler, error) {
 	if len(os.Args) != 2 {
 		return nil, errors.New("module bus socket required")
 	}

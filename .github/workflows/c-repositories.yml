@@ -27,7 +27,6 @@ on:
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
-      - "server-go/bus/**"
       - "server-go/modules/**"
       - "server-go/cmd/aimee-module/**"
       - "Dockerfile"
@@ -53,7 +52,6 @@ on:
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
-      - "server-go/bus/**"
       - "server-go/modules/**"
       - "server-go/cmd/aimee-module/**"
       - "Dockerfile"
@@ -93,7 +91,7 @@ jobs:
       # ever the last one standing, replace it with `./...` rather than adding
       # an entry: an enumerated gate needs its own completeness check, and this
       # one has never had it.
-      - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
+      - run: cd server-go && CGO_ENABLED=0 go test ./modules/... ./cmd/aimee-module
       - name: Export standalone repositories
         run: |
           set -euo pipefail

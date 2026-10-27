@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const assertionPointOffset int64 = 2000000000000
@@ -92,49 +92,49 @@ func assertionTimestamp(value string) bool {
 
 // Public evidence routes share the same scoped data operations as host runtime
 // calls. Preserve raw JSON fields so large assertion IDs never pass through floats.
-func handleEvidenceCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleEvidenceCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	// Public RPC discovery does not grant plugins the host's data authority.
 	if invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if verb == "assemble_typed_context" {
 		return handleTypedContextResult(options, invocation, args, false)
 	}
 	raw, status := handleAssertionSearch(options, invocation, args)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
-	body, err := bus.DecodeCommandResult(raw)
+	body, err := ring.DecodeCommandResult(raw)
 	var result map[string]json.RawMessage
 	if err != nil || json.Unmarshal(body, &result) != nil || result == nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result["active_context_missing"], _ = json.Marshal(args.stringOr("project", "") == "" && args.stringOr("workspace", "") == "")
 	return commandResult(result)
 }
 
-func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleAssertionSearch(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	query, ok := args.stringValue("query")
 	if !ok || strings.TrimSpace(query) == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{Operation: "assertion-search", Query: query, Limit: args.limit("limit", 10, 64), Assertions: &assertionSearchRequest{}}
 	for name, target := range map[string]*string{"valid_at": &request.Assertions.ValidAt, "believed_at": &request.Assertions.BelievedAt} {
 		if raw, present := args[name]; present && (string(raw) == "null" || json.Unmarshal(raw, target) != nil) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if raw, present := args["include_historical"]; present && (string(raw) == "null" || json.Unmarshal(raw, &request.Assertions.Historical) != nil) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if raw, present := args["max_hops"]; present && (string(raw) == "null" || json.Unmarshal(raw, &request.Assertions.Hops) != nil) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.Assertions.Hops < 0 || request.Assertions.Hops > 2 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if !assertionTimestamp(request.Assertions.ValidAt) || !assertionTimestamp(request.Assertions.BelievedAt) {
 		return commandResult(map[string]any{"status": "error", "error_type": "invalid_timestamp", "message": "timestamps must be second-precision UTC date-times", "assertions": []assertionHit{}})
@@ -143,19 +143,19 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 	request.Project, request.Workspace = args.stringOr("project", ""), args.stringOr("workspace", "")
 	request.IncludeAll = args.boolean("include_all")
 	if raw, present := args["scope"]; present && json.Unmarshal(raw, &request.Scope) != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
-		if status == bus.ModuleStatusInvalidRequest || status == bus.ModuleStatusCancelled {
+	if status != ring.ModuleStatusOK {
+		if status == ring.ModuleStatusInvalidRequest || status == ring.ModuleStatusCancelled {
 			return nil, status
 		}
 		return commandResult(map[string]any{"status": "degraded", "channel": "semantic_assertion", "reason": "semantic retrieval unavailable", "assertions": []assertionHit{}})
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

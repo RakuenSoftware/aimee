@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Runtime views are available only to the embedding host, never to a public
 // RPC principal. All rendering and policy stays with the shared Go owner.
-func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRuntimeView(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
 	if _, exists := args["native_context_bytes"]; exists {
@@ -44,13 +44,13 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleRuleView(options, invocation, args)
 	case "user-validity":
 		if options.placement != PlacementServer {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		delete(args, "operation")
 		return runtimeJSONText(handleValidityCommand(options, invocation, "validity", args))
 	case "user-correction-proposals", "user-correction-review":
 		if options.placement != PlacementServer {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		verb := "correction_proposals"
 		if operation == "user-correction-review" {
@@ -66,15 +66,15 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			options.gateway.releases.captureHealthQueryToken(args)
 		}
 		if options.placement != PlacementServer {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		encoded, status := handleRecallCommand(options, invocation, args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
-		raw, err := bus.DecodeCommandResult(encoded)
+		raw, err := ring.DecodeCommandResult(encoded)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return nativeRecallText(raw, args)
 	case "compose-recall":
@@ -152,7 +152,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return runtimeJSONText(handleLineageCommand(options, invocation, "evidence", args))
 	case "user-review-list":
 		encoded, status := handleUserCommand(options, invocation, "review-list", args)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		return runtimeJSONText(encoded, status)
@@ -160,7 +160,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return runtimeJSONText(handleUserCommand(options, invocation, operation[len("user-"):], args))
 	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch operation {
 		case "prospective-dashboard":
@@ -186,36 +186,36 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	switch operation {
 	case "trace-state", "trace-apply":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		request.Operation, request.SessionID = operation, args.stringOr("session_id", "")
 		if operation == "trace-apply" && (json.Unmarshal(args["batch"], &request.TraceBatch) != nil || !validTraceBatch(request.TraceBatch)) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "hybrid-context":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		request.Operation, request.Query, request.Entity = operation, args.stringOr("query", ""), args.stringOr("symbol", "")
 		if request.Query == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "convention-extract":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		request.Operation = operation
 	case "fidelity-read":
 		request.Operation, request.Key = operation, args.stringOr("turn_id", "")
 		if request.Key == "" || len(request.Key) > 128 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "demotion-run", "demotion-check":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if json.Unmarshal(args["config"], &request.Demotion) != nil || request.Demotion == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if operation == "demotion-run" && request.Demotion.Enabled == 0 {
 			return commandResult(demotionSummary{Status: "ok"})
@@ -224,7 +224,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "confidence":
 		score, ok := args.number("score")
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		// Compare the fixed-point scale in Go. This preserves the legacy
 		// threshold rounding and avoids undefined native float-to-int casts.
@@ -234,11 +234,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 
 	case "fact-maintenance":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		request.Operation, request.State, request.Days = operation, args.stringOr("action", ""), args.integer("value", 0)
 		if (request.State != "promote" && request.State != "expire") || request.Days <= 0 || request.Days > 36500 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "fact-review":
 		caller := options.commandContext
@@ -256,14 +256,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.Operation = operation
 		request.Success = args.boolean("success")
 		if json.Unmarshal(args["path"], &request.GraphPath) != nil || len(request.GraphPath) == 0 || len(request.GraphPath) > 32 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "record":
 		request.Operation = "get"
 		var valid bool
 		request.ID, valid = args.positiveID("id")
 		if !valid {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case "directive-create":
 		request.Operation = "directive-create"
@@ -276,7 +276,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.RecordType = args.stringOr("record_type", "")
 		request.MaxResults = args.limit("max_results", 16, 256)
 		if json.Unmarshal(args["vector"], &request.Vector) != nil || len(request.Vector) == 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
 	case "episode-list", "entity-profile", "fact-candidates":
@@ -292,31 +292,31 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "recall-dashboard":
 		request.Operation, request.SessionStart = "recall-bundle", true
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	commandScope(args, &request)
 	if operation == "trace-state" || operation == "trace-apply" {
 		request.IncludeAll = args.boolean("include_all")
 		request.Project, request.Workspace = args.stringOr("project", ""), args.stringOr("workspace", "")
 		if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	body, _ := json.Marshal(request)
 	encoded, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(encoded, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	switch operation {
 	case "hybrid-context", "trace-state", "trace-apply":
 		return commandResult(response.Payload)
 	case "convention-extract":
 		if response.Count == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "emitted": *response.Count})
 	case "fact-maintenance", "fact-review", "fact-candidates", "demotion-run", "demotion-check", "fidelity-read":
@@ -328,12 +328,12 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return commandResult(commandError("not_found", "memory not found"))
 		}
 		if len(response.Records) != 1 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "memory": response.Records[0]})
 	case "directive-create":
 		if len(response.Directives) != 1 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "directive": response.Directives[0], "dedup": response.Deduplicated})
 	case "vector-search":
@@ -353,7 +353,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return commandResult(map[string]any{"status": "ok", "profile": response.EntityProfile})
 	case "fusion-state":
 		if response.Allowed == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"enabled": *response.Allowed})
 	case "recall-metrics":
@@ -363,13 +363,13 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "recall-dashboard":
 		var bundle map[string]any
 		if json.Unmarshal(response.Payload, &bundle) != nil || bundle == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		m := recallMetrics()
 		bundle["metrics"] = map[string]any{"calls_total": m.Calls, "population": "process_recall_bundle_completions", "assemblies_total": m.Assemblies, "session_start_assemblies": m.Starts, "ms_avg": m.AverageMS, "ms_max": m.MaximumMS, "answer_counters": m.AnswerCounters}
 		return commandResult(bundle)
 	}
-	return nil, bus.ModuleStatusInvalidRequest
+	return nil, ring.ModuleStatusInvalidRequest
 }
 
 func (s *postgresDataStore) maintenanceDashboard(ctx context.Context) (json.RawMessage, error) {
@@ -424,13 +424,13 @@ func (s *postgresDataStore) maintenanceDashboard(ctx context.Context) (json.RawM
 
 // Native serialization-only callers receive JSON text, preserving exact owner
 // integer tokens rather than parsing and rebuilding their nested payload.
-func runtimeJSONText(encoded []byte, status bus.ModuleStatus) ([]byte, bus.ModuleStatus) {
-	if status != bus.ModuleStatusOK {
+func runtimeJSONText(encoded []byte, status ring.ModuleStatus) ([]byte, ring.ModuleStatus) {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
-	body, err := bus.DecodeCommandResult(encoded)
+	body, err := ring.DecodeCommandResult(encoded)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(map[string]any{"status": "ok", "json": string(body)})
 }

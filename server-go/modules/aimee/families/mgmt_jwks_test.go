@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a cache-shaped fake -----------------------------------------------------
@@ -116,8 +116,8 @@ func jwksCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []
 		t.Fatalf("encode: %v", err)
 	}
 	response, status := MgmtJWKS.Handler(db)(
-		bus.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
-	if status != bus.ModuleStatusOK {
+		ring.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)
@@ -333,8 +333,8 @@ func TestInstallRefusesMalformedInput(t *testing.T) {
 func TestInstallArityIsEnforced(t *testing.T) {
 	frame, _ := wire.EncodeFields(opMgmtJWKSInstall, make([]string, 7))
 	response, status := MgmtJWKS.Handler(&jwksDB{})(
-		bus.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
-	if status != bus.ModuleStatusOK {
+		ring.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if got, _, _ := wire.DecodeFields(response); got != store.StatusInvalid {
@@ -348,8 +348,8 @@ func TestReadAndGenerationTakeNoArguments(t *testing.T) {
 	for _, op := range []uint32{opMgmtJWKSRead, opMgmtJWKSGeneration} {
 		frame, _ := wire.EncodeFields(op, []string{"unexpected"})
 		response, status := MgmtJWKS.Handler(&jwksDB{row: fullRow()})(
-			bus.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
-		if status != bus.ModuleStatusOK {
+			ring.ModuleInvocation{StageID: StageMgmtJWKS}, frame)
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("op %d: status = %v", op, status)
 		}
 		if got, _, _ := wire.DecodeFields(response); got != store.StatusInvalid {

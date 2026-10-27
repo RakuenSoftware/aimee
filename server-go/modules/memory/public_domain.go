@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // commandLimit preserves the public API's integer conversion and bounded defaults.
@@ -72,10 +72,10 @@ func commandScope(args commandArgs, request *DataRequest) bool {
 	return scoped
 }
 
-func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleDomainCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	scoped := false
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	consoleLinks := args.stringOr("view", "") == "console" &&
@@ -177,19 +177,19 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.Operation = "stats"
 		scoped = commandScope(args, &request)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
@@ -238,7 +238,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 			output, err := json.Marshal(map[string]any{"status": status, "count": len(rows), "provenance": rows})
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			return commandResult(map[string]any{"status": "ok", "output": string(output)})
 		}
@@ -282,12 +282,12 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		result["conflicts"] = rows
 	case "query_health":
 		if response.Health == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		health, _ := json.Marshal(response.Health)
 		var fields map[string]any
 		if json.Unmarshal(health, &fields) != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		fields["write_to_readable_lag"] = map[string]any{"samples": 0, "state": "unmeasured"}
 		result["health"] = fields
@@ -304,13 +304,13 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 	case "stats_dashboard":
 		if len(response.Payload) == 0 {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		result["dashboard"] = response.Payload
 	case "stats":
 		s := response.Stats
 		if s == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		tiers := make([]int, 6)
 		for i := range tiers {
@@ -336,7 +336,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 				encoded, _ := json.Marshal(extraRequest)
 				data, status := handleData(options, invocation, encoded)
 				var extra DataResponse
-				if status == bus.ModuleStatusOK && json.Unmarshal(data, &extra) == nil && extra.Effectiveness != nil {
+				if status == ring.ModuleStatusOK && json.Unmarshal(data, &extra) == nil && extra.Effectiveness != nil {
 					e := extra.Effectiveness
 					result["display"].(map[string]any)["effectiveness"] = map[string]any{
 						"avg_effectiveness": e.Average, "low_effectiveness": e.LowCount,

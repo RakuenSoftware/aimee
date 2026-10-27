@@ -5,7 +5,7 @@ import (
 	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func rubricRequest(status uint32, factual bool, severity string) []byte {
@@ -56,9 +56,9 @@ func TestVerificationRubricParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageDeliberate},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageDeliberate},
 				rubricRequest(test.status, test.factual, test.claimed))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			action, severity := decodeRubricResponse(t, response)
@@ -83,22 +83,22 @@ func TestRoundtableRejectsMalformedWire(t *testing.T) {
 	padding[requestSeverityOff+len("nit")] = 1
 	tests = append(tests, padding)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageDeliberate}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageDeliberate}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageDeliberate + 1},
-		rubricRequest(ReplayMatch, true, "blocking")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageDeliberate + 1},
+		rubricRequest(ReplayMatch, true, "blocking")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
 
 func TestRoundtableHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageDeliberate, DeadlineNS: 1}
-	if _, status := Handle(invocation, rubricRequest(ReplayMatch, true, "blocking")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageDeliberate, DeadlineNS: 1}
+	if _, status := Handle(invocation, rubricRequest(ReplayMatch, true, "blocking")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type cognifyRelation struct {
@@ -315,7 +315,7 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
 	return out, nil
 }
 
-func handleCognifyCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleCognifyCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: strings.ReplaceAll(verb, "_", "-"), IncludeAll: true, Limit: args.limit("limit", 16, 64)}
 	if verb == "cognify" {
 		var ok bool
@@ -330,12 +330,12 @@ func handleCognifyCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	commandScope(args, &request)
 	raw, _ := json.Marshal(request)
 	data, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "cognification unavailable or refused"))
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil || response.Payload == nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

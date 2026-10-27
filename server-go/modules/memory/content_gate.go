@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -82,7 +82,7 @@ func scanContent(content string, capacity int) contentGateResult {
 
 // Screening is stateless and shared by both placements. Callers consume this
 // command through generic routing; they do not implement a native gate.
-func handleScreenCommand(_ handlerOptions, _ bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleScreenCommand(_ handlerOptions, _ ring.ModuleInvocation, _ string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	content, ok := args.stringValue("content")
 	if !ok {
 		return commandResult(commandError("invalid_argument", "content must be a string"))

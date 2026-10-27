@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type testEgress struct{}
@@ -449,8 +449,8 @@ func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 		t.Fatalf("forge bus request exposed a legacy token field: %s", request)
 	}
 	handler := NewHandler(allowEgress)
-	body, status := handler(bus.ModuleInvocation{StageID: StageForgeRequest}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{StageID: StageForgeRequest}, request)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	var decoded ForgeResponse
@@ -460,7 +460,7 @@ func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 	if decoded.DefaultBranch != "testing" {
 		t.Fatalf("decoded = %+v", decoded)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageForgeRequest}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageForgeRequest}, []byte("{")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }
@@ -587,10 +587,10 @@ func TestCancelledAdmissionCannotReachEgress(t *testing.T) {
 	cancel()
 	for _, tc := range []struct {
 		ctx context.Context
-		inv bus.ModuleInvocation
+		inv ring.ModuleInvocation
 	}{
-		{ctx, bus.ModuleInvocation{}},
-		{context.Background(), bus.ModuleInvocation{DeadlineNS: 1}},
+		{ctx, ring.ModuleInvocation{}},
+		{context.Background(), ring.ModuleInvocation{DeadlineNS: 1}},
 	} {
 		executor := forgeInvocationExecutor{allowEgress, tc.inv}
 		out := PerformForge(tc.ctx, 0, executor, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Number: 3, Credential: forgeCredential("t")})

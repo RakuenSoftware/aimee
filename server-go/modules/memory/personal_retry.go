@@ -6,14 +6,14 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Only keyed calls take the extra lock and receipt reads. Unkeyed mutations
 // retain their existing cost. The receipt is a durable transaction identity,
 // not a cached response or a claim that downstream consumers have caught up.
-func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext) (Record, *MemoryMutationReceipt, error) {
+func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r DataRequest, caller *ring.CommandContext) (Record, *MemoryMutationReceipt, error) {
 	creating := r.Operation == "store"
 	if s.placement != PlacementServer || (!creating && r.Operation != "supersede" && r.Operation != "delete") ||
 		!verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) ||

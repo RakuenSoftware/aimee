@@ -42,7 +42,7 @@ static const char *g_reply = "{\"ok\":true}";
 static const void *g_reply_frame;
 static size_t g_reply_frame_len;
 static uint32_t g_event, g_stage, g_request_len;
-static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t g_result = OURO_MODULE_CALL_OK;
 
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
@@ -57,11 +57,11 @@ int obs_bus_module_available(uint32_t event_kind)
    return g_available;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)event_kind, (void)stage_id, (void)trace_id, (void)cancelled, (void)cancel_context;
    g_calls++;
@@ -73,14 +73,14 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    memcpy(g_body, request_body, request_len);
    g_body[request_len] = '\0';
    if (g_required_budget_ms && deadline_ns < aimee_module_call_deadline_ns(g_required_budget_ms))
-      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
-   if (g_result != AIMEE_MODULE_CALL_OK)
+      return OURO_MODULE_CALL_DEADLINE_EXCEEDED;
+   if (g_result != OURO_MODULE_CALL_OK)
       return g_result;
    size_t n = g_reply_frame ? g_reply_frame_len : strlen(g_reply);
    assert(n <= response_capacity);
    memcpy(response_body, g_reply_frame ? g_reply_frame : g_reply, n);
    *response_len = (uint32_t)n;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static cJSON *req(void)
@@ -115,14 +115,14 @@ static void test_memory_reset_backend(const char *engine, int from_snapshot)
          assert(strstr(g_body, "\"scope\":{\"type\":\"user\"}"));
          g_reply = "{\"records\":[],\"deleted\":false}";
          assert(server_module_memory_reset_derived() == -1);
-         g_result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+         g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
          assert(server_module_memory_reset_derived() == -1);
       }
       /* Later saves and environment edits cannot reroute the running owner. */
       g_saved_backend = native ? "hillock" : "native";
       assert(setenv("AIMEE_MEMORY_BACKEND", g_saved_backend, 1) == 0);
       assert(strcmp(config_memory_backend_current(), engine) == 0);
-      g_result = AIMEE_MODULE_CALL_OK;
+      g_result = OURO_MODULE_CALL_OK;
       g_reply = "{\"records\":[],\"deleted\":true}";
       g_calls = 0;
       assert(server_module_memory_reset_derived() == 0);
@@ -143,7 +143,7 @@ int main(void)
    printf("  ok    startup-selected erasure verifies cleanup and remains stable until restart\n");
    assert(unsetenv("AIMEE_MEMORY_BACKEND") == 0);
 
-   aimee_module_call_result_t result;
+   ouro_module_call_result_t result;
 
    /* Deadline arithmetic: no timeout means no deadline, and a real timeout must
     * produce a future stamp -- a past one would fail every call instantly. */
@@ -155,9 +155,9 @@ int main(void)
    /* Happy path: the reply parses and the module saw our body. */
    g_available = 1;
    g_calls = 0;
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
    cJSON *reply = aimee_module_json_call(1, 1, req(), 4096, 1000, &result);
-   assert(reply && result == AIMEE_MODULE_CALL_OK);
+   assert(reply && result == OURO_MODULE_CALL_OK);
    assert(g_calls == 1);
    assert(strstr(g_body, "\"k\":\"v\""));
    assert(g_deadline != 0);
@@ -172,7 +172,7 @@ int main(void)
    g_calls = 0;
    reply = aimee_module_json_call(1, 1, req(), 4096, 1000, &result);
    assert(!reply);
-   assert(result == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(result == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    assert(g_calls == 0);
    printf("  ok    unattached module short-circuits and is named\n");
 
@@ -180,24 +180,24 @@ int main(void)
     * that distinction is the whole reason callers get a result pointer. */
    g_available = 1;
    g_calls = 0;
-   g_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   g_result = OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    reply = aimee_module_json_call(1, 1, req(), 4096, 1000, &result);
-   assert(!reply && result == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED && g_calls == 1);
+   assert(!reply && result == OURO_MODULE_CALL_DEADLINE_EXCEEDED && g_calls == 1);
    printf("  ok    transport failure keeps its own outcome\n");
 
    /* A body over the cap fails without touching the bus. */
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
    g_calls = 0;
    reply = aimee_module_json_call(1, 1, req(), 4, 1000, &result);
-   assert(!reply && result == AIMEE_MODULE_CALL_INVALID_REQUEST && g_calls == 0);
+   assert(!reply && result == OURO_MODULE_CALL_INVALID_REQUEST && g_calls == 0);
    printf("  ok    oversized request never reaches the bus\n");
 
    /* Bad arguments are refused, and a NULL tree must not crash. */
    g_calls = 0;
    reply = aimee_module_json_call(1, 1, NULL, 4096, 1000, &result);
-   assert(!reply && result == AIMEE_MODULE_CALL_INVALID_ARGUMENT && g_calls == 0);
+   assert(!reply && result == OURO_MODULE_CALL_INVALID_ARGUMENT && g_calls == 0);
    reply = aimee_module_json_call(1, 1, req(), 0, 1000, &result);
-   assert(!reply && result == AIMEE_MODULE_CALL_INVALID_ARGUMENT && g_calls == 0);
+   assert(!reply && result == OURO_MODULE_CALL_INVALID_ARGUMENT && g_calls == 0);
    printf("  ok    invalid arguments refused\n");
 
    /* An answering module with an unparseable payload is NOT a transport error:
@@ -206,7 +206,7 @@ int main(void)
    g_calls = 0;
    g_reply = "not json";
    reply = aimee_module_json_call(1, 1, req(), 4096, 1000, &result);
-   assert(!reply && result == AIMEE_MODULE_CALL_OK && g_calls == 1);
+   assert(!reply && result == OURO_MODULE_CALL_OK && g_calls == 1);
    g_reply = "{\"ok\":true}";
    printf("  ok    unparseable reply is distinguishable from a failed call\n");
 
@@ -215,7 +215,7 @@ int main(void)
    g_calls = 0;
    const char *body = "{\"a\":1}";
    reply = aimee_module_json_call_raw(1, 1, body, strlen(body), 4096, 1000, &result);
-   assert(reply && result == AIMEE_MODULE_CALL_OK && g_calls == 1);
+   assert(reply && result == OURO_MODULE_CALL_OK && g_calls == 1);
    assert(strcmp(g_body, body) == 0);
    assert(strcmp(body, "{\"a\":1}") == 0); /* still ours, untouched */
    cJSON_Delete(reply);
@@ -245,13 +245,13 @@ int main(void)
    reply = server_module_memory_data(memory_request);
    assert(!reply);
    g_required_budget_ms = 0;
-   g_result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+   g_result = OURO_MODULE_CALL_CAPABILITY_ABSENT;
    reply = server_module_memory_data(memory_request);
    assert(!reply);
    cJSON_Delete(memory_request);
    printf("  ok    expired or unavailable memory does not fabricate success\n");
 
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
    memory_request = cJSON_CreateObject();
    cJSON_AddStringToObject(memory_request, "operation", "code-index");
    cJSON *index = cJSON_AddObjectToObject(memory_request, "code_index");

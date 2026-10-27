@@ -24,7 +24,7 @@
  * transport, and the grading rules are proven in Go. */
 static int g_available = 1;
 static const char *g_reply = "{\"verdict\":\"success\"}";
-static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
+static ouro_module_call_result_t g_result = OURO_MODULE_CALL_OK;
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -32,27 +32,27 @@ int obs_bus_module_available(uint32_t event_kind)
    return g_available;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)event_kind, (void)stage_id, (void)trace_id, (void)deadline_ns, (void)request_body,
        (void)request_len, (void)cancelled, (void)cancel_context;
-   if (g_result != AIMEE_MODULE_CALL_OK)
+   if (g_result != OURO_MODULE_CALL_OK)
       return g_result;
    size_t n = strlen(g_reply);
    assert(n <= response_capacity);
    memcpy(response_body, g_reply, n);
    *response_len = (uint32_t)n;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static git_pr_ci_t grade_with(const char *reply)
 {
    g_available = 1;
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
    g_reply = reply;
    return git_pr_ci_grade_json("{\"check_runs\":[]}", NULL);
 }
@@ -92,9 +92,9 @@ int main(void)
    g_available = 0; /* module not attached */
    assert(git_pr_ci_grade_json("{\"check_runs\":[]}", NULL) == GIT_PR_CI_ERROR);
    g_available = 1;
-   g_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED; /* module too slow */
+   g_result = OURO_MODULE_CALL_DEADLINE_EXCEEDED; /* module too slow */
    assert(git_pr_ci_grade_json("{\"check_runs\":[]}", NULL) == GIT_PR_CI_ERROR);
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
 
    /* --- the merge ruling: only green, or genuinely no CI at all --- */
    assert(git_pr_ci_permits_merge(GIT_PR_CI_SUCCESS));

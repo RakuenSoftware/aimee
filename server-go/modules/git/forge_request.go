@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/git/attribution"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Forge operations. Named rather than numbered on the wire for the same reason
@@ -165,7 +165,7 @@ func forgeCall(ctx context.Context, traceID uint64, executor egress.Executor,
 		CredentialPresent: credential != nil}, Headers: headers, Body: encoded,
 		CredentialHandle: "forge", CredentialScope: operation, CredentialResource: resource,
 		Credential:       credential,
-		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: forgeTimeoutMS})
+		MaxResponseBytes: int64(ring.ModuleMessageMaxBody) - 12, TimeoutMS: forgeTimeoutMS})
 	if err != nil {
 		return 0, nil, err
 	}
@@ -432,7 +432,7 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 // forgeInvocationExecutor checks cancellation before every evidence read and write.
 type forgeInvocationExecutor struct {
 	egress.Executor
-	invocation bus.ModuleInvocation
+	invocation ring.ModuleInvocation
 }
 
 func (e forgeInvocationExecutor) Do(ctx context.Context, traceID uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
@@ -449,13 +449,13 @@ func (e forgeInvocationExecutor) Do(ctx context.Context, traceID uint64, request
 }
 
 // handleForgeRequest serves git-forge-request (stage 4).
-func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleForgeRequest(executor egress.Executor, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ForgeRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	// Evidence traversal must stop at the caller's deadline. Otherwise a timed-out
 	// admission could keep running and submit a merge after reporting failure.
@@ -466,8 +466,8 @@ func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocatio
 	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(limit))
 	defer cancel()
 	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, forgeInvocationExecutor{executor, invocation}, decoded))
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

@@ -46,11 +46,11 @@ extern int handle_get_code_context(const char *query_string, char *out_buf, int 
 #include "runtime_secret.h"
 
 #include <aimee/control-web/module_api.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 
-extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
-                                                              const uint8_t *, uint32_t, uint8_t *,
-                                                              uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_control_web_module_handler(const ouro_module_invocation_t *,
+                                                             const uint8_t *, uint32_t, uint8_t *,
+                                                             uint32_t, uint32_t *, void *);
 
 static int self_signed_ec_cert(char *out, size_t cap)
 {
@@ -84,7 +84,7 @@ static int self_signed_ec_cert(char *out, size_t cap)
    return ok ? 0 : -1;
 }
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -95,12 +95,12 @@ static int control_web_module_provider(const char *method, const char *path, int
    uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
    uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
    if (aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, method, path,
                                         request, sizeof(request)) != 0 ||
        aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
                                         sizeof(response), &response_len,
-                                        NULL) != AIMEE_MODULE_STATUS_OK)
+                                        NULL) != OURO_MODULE_STATUS_OK)
       return -1;
    return aimee_control_web_response_decode(response, response_len, allowed);
 }

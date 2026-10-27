@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // How deep a delegation chain may go, and when an inherited depth is stale.
@@ -61,23 +61,23 @@ func boolByte(v bool) byte {
 	return 0
 }
 
-func handleChain(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleChain(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != chainRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != chainRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	op := request[5]
 	if op != ChainOpShouldClear && op != ChainOpCheckDepth {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	for _, flag := range request[6:10] {
 		if flag > 1 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	response := make([]byte, chainResponseLen)
@@ -94,5 +94,5 @@ func handleChain(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 		response[4] = boolByte(allowed)
 		binary.LittleEndian.PutUint32(response[8:12], uint32(current))
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

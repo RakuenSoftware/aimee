@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func advanceWire(bound, workItem, observed, actualStage, actualState, nonce, lastNonce string) []byte {
@@ -58,10 +58,10 @@ func TestAdvanceDecisionParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageAdvance},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageAdvance},
 				advanceWire(test.bound, test.workItem, test.observed, test.actual, test.state,
 					test.nonce, test.lastNonce))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			if got := outcome(t, response); got != test.want {
@@ -105,11 +105,11 @@ func TestAdvanceRejectsMalformedWire(t *testing.T) {
 	copy(nonceWithoutFlag[requestNonceOff:], "n1")
 	tests = append(tests, nonceWithoutFlag)
 	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageAdvance}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageAdvance}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed request %d status = %d", index, status)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAdvance + 1}, valid()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAdvance + 1}, valid()); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
 }
@@ -120,18 +120,18 @@ func TestAdvanceWireBounds(t *testing.T) {
 	maxState := strings.Repeat("a", stateMax)
 	maxNonce := strings.Repeat("n", nonceMax)
 	request := advanceWire(maxWork, maxWork, maxStage, maxStage, maxState, maxNonce, maxNonce)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAdvance}, request); status != bus.ModuleStatusOK {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAdvance}, request); status != ring.ModuleStatusOK {
 		t.Fatalf("maximum canonical wire status = %d", status)
 	}
 }
 
 func TestAdvanceHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageAdvance, DeadlineNS: 1}
+	invocation := ring.ModuleInvocation{StageID: StageAdvance, DeadlineNS: 1}
 	valid := advanceWire("wi_1", "wi_1", "understand", "understand", "active", "", "")
-	if _, status := Handle(invocation, valid); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, valid); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

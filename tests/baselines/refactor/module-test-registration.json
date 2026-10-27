@@ -28,6 +28,12 @@
     {
       "ctest": false,
       "make": true,
+      "module": "audit",
+      "test": "src/tests/test_instance_identity.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "delegates",
       "test": "src/tests/test_aimee_ir_rescue.c"
     },

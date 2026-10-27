@@ -2,7 +2,7 @@ package providers
 
 import (
 	"encoding/binary"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 )
 
@@ -25,8 +25,8 @@ func TestDeclarationRulesPreserveZeroAndRejectMismatchedModels(t *testing.T) {
 	binary.LittleEndian.PutUint32(decl[236:], priceIn|contextWindow)
 	binary.LittleEndian.PutUint32(fetched[224:], 32768)
 	binary.LittleEndian.PutUint32(fetched[228:], 4096)
-	reply, status := Rules(bus.ModuleInvocation{StageID: StageResolve}, b)
-	if status != bus.ModuleStatusOK {
+	reply, status := Rules(ring.ModuleInvocation{StageID: StageResolve}, b)
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	out := reply[16:]
@@ -34,8 +34,8 @@ func TestDeclarationRulesPreserveZeroAndRejectMismatchedModels(t *testing.T) {
 		t.Fatal("resolution lost unknown-capacity or declared-free distinction")
 	}
 	copy(fetched[32:], "other")
-	reply, status = Rules(bus.ModuleInvocation{StageID: StageResolve}, b)
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(reply[8:]) != 2 || binary.LittleEndian.Uint32(reply[12:]) != 0 {
+	reply, status = Rules(ring.ModuleInvocation{StageID: StageResolve}, b)
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(reply[8:]) != 2 || binary.LittleEndian.Uint32(reply[12:]) != 0 {
 		t.Fatal("cross-model limits accepted")
 	}
 }
@@ -44,17 +44,17 @@ func TestDeclarationValidationAndMalformedWire(t *testing.T) {
 	record := b[8:]
 	binary.LittleEndian.PutUint32(record[236:], contextWindow|maxOutput|priceOut)
 	binary.LittleEndian.PutUint32(record[228:], 4096)
-	reply, status := Rules(bus.ModuleInvocation{StageID: StageValidate}, b)
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(reply[16+236:])&contextWindow != 0 {
+	reply, status := Rules(ring.ModuleInvocation{StageID: StageValidate}, b)
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(reply[16+236:])&contextWindow != 0 {
 		t.Fatal("zero capacity remained declared")
 	}
 	binary.LittleEndian.PutUint32(record[224:], 1024)
-	reply, status = Rules(bus.ModuleInvocation{StageID: StageValidate}, b)
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(reply[8:]) != 3 {
+	reply, status = Rules(ring.ModuleInvocation{StageID: StageValidate}, b)
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(reply[8:]) != 3 {
 		t.Fatal("output above context accepted")
 	}
 	for _, bad := range [][]byte{nil, b[:7], append(b, 0)} {
-		if _, status := Rules(bus.ModuleInvocation{StageID: StageValidate}, bad); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Rules(ring.ModuleInvocation{StageID: StageValidate}, bad); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("malformed request accepted")
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -74,16 +74,16 @@ func decodeRequest(request []byte) ([fieldCount][]byte, bool, bool) {
 }
 
 // Handle creates the deterministic response deduplication key.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID != StageCompose {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	fields, stream, ok := decodeRequest(request)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	hashes := fmt.Sprintf("%016x%016x%016x", fnv1a(fields[6]), fnv1a(fields[7]), fnv1a(fields[8]))
@@ -112,10 +112,10 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	}
 	key := fmt.Sprintf("%s|%016x%016x", principal, first, second)
 	if len(key) > keyMax {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	response := make([]byte, 4+len(key))
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	copy(response[4:], key)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

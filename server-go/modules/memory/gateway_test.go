@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestGatewayPlanSessionAndTools(t *testing.T) {
@@ -30,14 +30,14 @@ func TestGatewayPlanSessionAndTools(t *testing.T) {
 		}
 	}
 	for _, raw := range []string{`{"operation":"gateway-plan"}`, `{"operation":"gateway-plan","roles":null,"tools":[]}`, `{"operation":"gateway-plan","roles":[],"tools":[1]}`, `{"operation":"gateway-recall","query":null}`, `{"operation":"gateway-outcome","predicted_skip":true,"retrieval_needed":null}`} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(raw))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
 		}
 	}
 	for _, op := range []string{"gateway-plan", "gateway-recall", "gateway-outcome", "gateway-metrics", "gateway-enabled"} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+op+`"}`))
-		if _, status := h(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+op+`"}`))
+		if _, status := h(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(op, status)
 		}
 	}

@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func executionFixture() (ExecutionRecord, bus.CommandContext) {
-	return ExecutionRecord{Version: 1, Session: "private-session", Turn: "turn", Sequence: "9007199254740993", EventID: "turn:9", Actor: "alice", Event: json.RawMessage(`{"kind":"execution","payload":{"status":"completed"}}`)}, bus.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:canonical-execution"}
+func executionFixture() (ExecutionRecord, ring.CommandContext) {
+	return ExecutionRecord{Version: 1, Session: "private-session", Turn: "turn", Sequence: "9007199254740993", EventID: "turn:9", Actor: "alice", Event: json.RawMessage(`{"kind":"execution","payload":{"status":"completed"}}`)}, ring.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:canonical-execution"}
 }
 func TestExecutionObservationUsesCanonicalTerminalWithoutInventingVerification(t *testing.T) {
 	for _, status := range []string{"completed", "failed", "cancelled"} {
@@ -21,19 +21,19 @@ func TestExecutionObservationUsesCanonicalTerminalWithoutInventingVerification(t
 	}
 }
 func TestExecutionObservationRejectsUntrustedOrNonCanonicalSources(t *testing.T) {
-	for name, mutate := range map[string]func(*ExecutionRecord, *bus.CommandContext){
-		"different owner":       func(r *ExecutionRecord, c *bus.CommandContext) { r.Actor = "bob" },
-		"model caller":          func(r *ExecutionRecord, c *bus.CommandContext) { c.TransportIdentity = "model" },
-		"interactive feedback":  func(r *ExecutionRecord, c *bus.CommandContext) { c.UserAuthority = true },
-		"unauthenticated":       func(r *ExecutionRecord, c *bus.CommandContext) { c.Authenticated = false },
-		"noncanonical sequence": func(r *ExecutionRecord, c *bus.CommandContext) { r.Sequence = "01" },
-		"sequence overflow":     func(r *ExecutionRecord, c *bus.CommandContext) { r.Sequence = "9223372036854775808" },
-		"unknown version":       func(r *ExecutionRecord, c *bus.CommandContext) { r.Version = 2 },
-		"native output":         func(r *ExecutionRecord, c *bus.CommandContext) { r.Event = json.RawMessage(`{"choices":[]}`) },
-		"incomplete task": func(r *ExecutionRecord, c *bus.CommandContext) {
+	for name, mutate := range map[string]func(*ExecutionRecord, *ring.CommandContext){
+		"different owner":       func(r *ExecutionRecord, c *ring.CommandContext) { r.Actor = "bob" },
+		"model caller":          func(r *ExecutionRecord, c *ring.CommandContext) { c.TransportIdentity = "model" },
+		"interactive feedback":  func(r *ExecutionRecord, c *ring.CommandContext) { c.UserAuthority = true },
+		"unauthenticated":       func(r *ExecutionRecord, c *ring.CommandContext) { c.Authenticated = false },
+		"noncanonical sequence": func(r *ExecutionRecord, c *ring.CommandContext) { r.Sequence = "01" },
+		"sequence overflow":     func(r *ExecutionRecord, c *ring.CommandContext) { r.Sequence = "9223372036854775808" },
+		"unknown version":       func(r *ExecutionRecord, c *ring.CommandContext) { r.Version = 2 },
+		"native output":         func(r *ExecutionRecord, c *ring.CommandContext) { r.Event = json.RawMessage(`{"choices":[]}`) },
+		"incomplete task": func(r *ExecutionRecord, c *ring.CommandContext) {
 			r.Event = json.RawMessage(`{"kind":"execution","payload":{"status":"running"}}`)
 		},
-		"self grade": func(r *ExecutionRecord, c *bus.CommandContext) {
+		"self grade": func(r *ExecutionRecord, c *ring.CommandContext) {
 			r.Event = json.RawMessage(`{"kind":"execution","payload":{"status":"completed","verified":true}}`)
 		},
 	} {
@@ -49,17 +49,17 @@ func TestExecutionObservationRejectsUntrustedOrNonCanonicalSources(t *testing.T)
 func TestExecutionObservationProcessContract(t *testing.T) {
 	record, caller := executionFixture()
 	args, _ := json.Marshal(record)
-	wire, err := bus.EncodeCommandWithContext("observe", args, caller)
+	wire, err := ring.EncodeCommandWithContext("observe", args, caller)
 	if err != nil {
 		t.Fatal(err)
 	}
-	invocation := bus.ModuleInvocation{StageID: StageExecution, PrincipalRef: 0}
+	invocation := ring.ModuleInvocation{StageID: StageExecution, PrincipalRef: 0}
 	response, status := Handle(invocation, wire)
-	if status != bus.ModuleStatusOK || len(response) == 0 {
+	if status != ring.ModuleStatusOK || len(response) == 0 {
 		t.Fatal("host observation failed", status)
 	}
 	invocation.PrincipalRef = 8
-	if _, status := Handle(invocation, wire); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, wire); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("non-host observation accepted", status)
 	}
 }

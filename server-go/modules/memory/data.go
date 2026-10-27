@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -957,7 +957,7 @@ type handlerOptions struct {
 	executor       egress.Executor
 	placement      Placement
 	data           DataStore
-	commandContext *bus.CommandContext
+	commandContext *ring.CommandContext
 	publicWrite    bool
 }
 
@@ -1094,13 +1094,13 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	return request, nil
 }
 
-func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, request DataRequest, failure *error) (result []byte, status bus.ModuleStatus) {
+func handleDataAttempt(options handlerOptions, invocation ring.ModuleInvocation, request DataRequest, failure *error) (result []byte, status ring.ModuleStatus) {
 	if backend, ok := options.data.(*postgresDataStore); ok {
 		bound := *backend
 		bound.recallExecutor = options.executor
 		bound.pageRankSamples = &[]pageRankResult{}
 		defer func() {
-			if status == bus.ModuleStatusOK {
+			if status == ring.ModuleStatusOK {
 				for _, sample := range *bound.pageRankSamples {
 					pageRankMetricState.observe(sample)
 				}
@@ -1114,31 +1114,31 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	if request.Operation == "erase-backend" {
 		external, ok := options.data.(*externalDataStore)
 		if invocation.PrincipalRef != 0 || request.BackendSubject == "" {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if !ok {
-			return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
+			return []byte(`{"records":[],"deleted":true}`), ring.ModuleStatusOK
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(dataTimeout))
 		defer cancel()
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		if _, err := external.catalog.EraseSubjectRequest(ctx, request.BackendSubject, request.BackendSessions, request.BackendErasureID); err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if err := resetDerivedBackend(ctx, external); err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
+		return []byte(`{"records":[],"deleted":true}`), ring.ModuleStatusOK
 	}
 	if request.Operation == "reset-derived" {
 		if invocation.PrincipalRef != 0 || options.data == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		remaining := invocation.Remaining(dataTimeout)
 		if remaining <= 0 || invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		parent := options.dataContext
 		if parent == nil {
@@ -1148,45 +1148,45 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		defer cancel()
 		if err := resetDerivedBackend(ctx, options.data); err != nil {
 			if ctx.Err() != nil || invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
 			if errors.Is(err, memorycontract.ErrUnsupported) {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
+		return []byte(`{"records":[],"deleted":true}`), ring.ModuleStatusOK
 	}
 
 	if request.FilteredExport != nil && request.Operation != "export-filtered" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.ServedView != nil && request.Operation != "served-view" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.HygienePreview != nil && request.Operation != "hygiene-preview" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.Changes != nil && request.Operation != "change-feed" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.IncludeVersion && request.Operation != "get" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if request.IngressPreview && (!request.PublicView || (request.Operation != "diagnose" && request.Operation != "explain")) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	_, externalVersionStore := options.data.(*externalDataStore)
 	if request.AtVersion != nil && ((!externalVersionStore && options.placement != PlacementServer) || request.Operation != "get" || !request.AtVersion.ValidFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	versionedMutation := (options.placement == PlacementKB && (versionedCorrectionOperation(request.Operation) || request.Operation == "delete-as" || request.Operation == "reject" || request.Operation == "restore")) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
 	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.ValidFor(request.ID)) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	creation := (options.placement == PlacementServer && request.Operation == "store") || (options.placement == PlacementKB && request.Operation == "insert-epistemic")
 	if request.IdempotencyKey != "" && ((!creation && (!versionedMutation || request.ExpectedVersion == nil)) || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
 		bound := *backend
@@ -1203,9 +1203,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		if readResult.ErrorCode != "" {
 			encoded, encodeErr := json.Marshal(DataResponse{Read: readResult, Records: []Record{}})
 			if encodeErr != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
 	}
 	// Preserve the caller's query shape: an inherited credential restriction is
@@ -1217,9 +1217,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 			if request.Operation == "validity" {
 				payload, _ := json.Marshal(commandError("unauthorized", "diagnostic scope exceeds authenticated scope"))
 				encoded, _ := json.Marshal(DataResponse{Payload: payload})
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if options.placement == PlacementKB && !explicitScope {
@@ -1231,21 +1231,21 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	scope, err := normalizeScope(options.placement, request.Scope)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if request.Operation == "fact-write-decision" {
 		if request.FactWrite == nil || len(request.FactWrite.Relation) > relTypeMax {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		decision := DecideFactWrite(*request.FactWrite)
 		encoded, err := json.Marshal(DataResponse{FactWrite: &decision})
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "recall-gate" {
 		enabled, enforce := recallGateMode()
@@ -1255,15 +1255,15 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 			response.Enforced = response.Skip && enforce
 			encoded, marshalErr := json.Marshal(response)
 			if marshalErr != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
 		encoded, marshalErr := json.Marshal(DataResponse{})
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "redirect-classify" {
 		verdict := classifyRedirect(request.Client, request.Tool, request.Path, request.Home,
@@ -1271,9 +1271,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		encoded, marshalErr := json.Marshal(DataResponse{Verdict: verdict.Verdict,
 			Name: verdict.Name, Reason: verdict.Reason})
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "redirect-bash" {
 		verdict := "allow"
@@ -1283,9 +1283,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		encoded, marshalErr := json.Marshal(DataResponse{Verdict: verdict})
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "content-gate" {
 		gate := scanContent(request.Content, request.ContentCapacity)
@@ -1297,9 +1297,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 			Classification:  gate.Classification,
 		})
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "fusion-state-set" || request.Operation == "fusion-state-clear" || request.Operation == "fusion-state-get" {
 		// Legacy set/clear calls are read-only. They cannot mutate instance policy.
@@ -1311,13 +1311,13 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 			enabled, err = instanceGraphFusion()
 		}
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		encoded, err := json.Marshal(DataResponse{Allowed: &enabled})
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 
 	if request.Operation == "directive-metrics" || request.Operation == "prospective-metrics" ||
@@ -1333,9 +1333,9 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		encoded, marshalErr := json.Marshal(DataResponse{Metrics: &metrics})
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if request.Operation == "tier-name" || request.Operation == "scope-level-name" ||
 		request.Operation == "ontology-relation-name" || request.Operation == "ontology-relation-code" ||
@@ -1365,12 +1365,12 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		encoded, marshalErr := json.Marshal(response)
 		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	if options.data == nil {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
 	if request.Operation == "demotion-run" || request.Operation == "demotion-check" {
@@ -1387,7 +1387,7 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	timeout := invocation.Remaining(budget)
 	if timeout <= 0 {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	parent := options.dataContext
 	if parent == nil {
@@ -1396,7 +1396,7 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	defer func() {
-		if status != bus.ModuleStatusInternal && status != bus.ModuleStatusCancelled {
+		if status != ring.ModuleStatusInternal && status != ring.ModuleStatusCancelled {
 			return
 		}
 		cause := err
@@ -1413,29 +1413,29 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)
 		if !ok || request.CodeIndex == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		payload, err := code.CodeIndex(ctx, *request.CodeIndex)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		encoded, err := json.Marshal(DataResponse{Payload: payload})
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 
 	if external, ok := options.data.(*externalDataStore); ok {
 		if request.AsOf != "" {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if (request.Operation == "personal-source-revalidate" || request.Operation == "source-revalidate" || request.Operation == "compose-recall") && invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response, resultStatus := external.execute(ctx, request, scope, options, explicitScope)
 		publishMutationAudit(external.auditAction, request, response, resultStatus)
-		if request.PublicView && resultStatus == bus.ModuleStatusOK {
+		if request.PublicView && resultStatus == ring.ModuleStatusOK {
 			response.PublicRecords = []publicMemoryRecord{}
 			for _, r := range response.Records {
 				category := ""
@@ -1457,7 +1457,7 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		raw, encodeErr := json.Marshal(response)
 		if encodeErr != nil || len(raw) > maxDataBody {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return raw, resultStatus
 	}
@@ -1481,7 +1481,7 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 				publishMutationAudit(bound.auditAction, request, response, status)
 				return
 			}
-			if status == bus.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
+			if status == ring.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
 				bound.auditBatch.flush(bound.auditAction)
 			} else {
 				publishMutationAudit(bound.auditAction, request, response, status)
@@ -1498,12 +1498,12 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			if request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || (request.Operation == "typed-context" && request.TypedContext != nil && request.TypedContext.Requirements.needsOriginGroups()) {
 				if _, err = transaction.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
 					_ = transaction.Rollback(context.Background())
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
 			}
 			transaction = backend.auditTransaction(transaction)
@@ -1534,7 +1534,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				eligibility.Principal, eligibility.Authority, eligibility.TransportIdentity, strconv.FormatUint(invocation.TraceID, 10),
 				eligibility.Purpose, eligibility.PolicyVersion, eligibility.QueryMode, eligibility.ValidAt, eligibility.BelievedAt)
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			bound := *backend
 			bound.backendRequest = request
@@ -1552,7 +1552,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			break
 		}
 		if request.ID <= 0 || readResult == nil || request.IncludeAll {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		// The verified service identity spans the deployment data plane, as
 		// kb_scope_authorized specifies. It still needs authenticated user
@@ -1568,7 +1568,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var decision EligibilityDecision
 		decision, err = backend.validity(ctx, request.ID, readResult)
@@ -1578,10 +1578,10 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "css-convention-sync", "css-conventions":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Project == "" || len(request.Project) > 4096 || scope.Type != ScopeProject || scope.Value != request.Project {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		result := map[string]any{"status": "ok", "project": request.Project}
 		if request.Operation == "css-convention-sync" {
@@ -1602,7 +1602,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "task-projection-propose":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementServer || invocation.PrincipalRef != 0 || !request.TaskPromotion.valid() || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var result map[string]any
 		result, err = backend.proposeTaskProjection(ctx, request.TaskPromotion, options.commandContext)
@@ -1612,11 +1612,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "hygiene-preview":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil || !explicitScope || request.IncludeAll || !request.HygienePreview.valid() {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var preview hygienePreview
 		if !request.HygienePreview.DryRun && (invocation.PrincipalRef != 0 || !verifiedRetryCaller(options.commandContext)) {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		preview, err = backend.hygieneWithWorker(ctx, scope, request.HygienePreview)
 		if err == nil {
@@ -1626,12 +1626,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		backend, ok := options.data.(*postgresDataStore)
 		private := request.Operation == "personal-source-revalidate"
 		if !private && request.Revalidation != nil && request.Revalidation.SendGuard != "" && !sourceSendGuardAllowed(options.commandContext) {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if invocation.PrincipalRef != 0 || !ok || !request.Revalidation.valid() ||
 			(private && options.placement != PlacementServer) || (!private && options.placement != PlacementKB) ||
 			((!private || request.Revalidation.SendGuard != "") && transaction == nil) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		exact := Scope{}
 		if explicitScope {
@@ -1648,24 +1648,24 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "typed-context":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.TypedContext == nil || request.Assertions == nil || request.Query == "" || request.Limit != 32 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if p := request.TypedContext.Requirements; p != nil && !p.valid() {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		for name := range typedBudgetDefaults {
 			n, ok := request.TypedContext.Budgets[name]
 			if !ok || n < 0 || n > 4096 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 		}
 		if _, budgetErr := request.TypedContext.ContextLimits.byteLimit(maxDataBody); budgetErr != nil {
 			var refusal *contextBudgetError
 			if !errors.As(budgetErr, &refusal) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Payload, err = json.Marshal(commandError(refusal.kind, refusal.message))
 			break
@@ -1676,7 +1676,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		if request.TypedContext.ExecuteRecovery {
 			caller := options.commandContext
 			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" || request.TypedContext.Requirements == nil || request.TypedContext.Requirements.Recovery == nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			request.recoveryActor = caller.Principal
 		}
@@ -1691,10 +1691,10 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "assertion-search":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Assertions == nil || request.Query == "" || request.Limit < 1 || request.Limit > 64 || request.Assertions.Hops < 0 || request.Assertions.Hops > 2 || !assertionTimestamp(request.Assertions.ValidAt) || !assertionTimestamp(request.Assertions.BelievedAt) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if explicitScope {
 			request.Scope = scope
@@ -1709,11 +1709,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "pagerank":
 		if invocation.PrincipalRef != 0 || !validPageRankRequest(request.PageRank) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var ranked pageRankResult
 		ranked, err = backend.pageRank(ctx, request, explicitScope)
@@ -1724,10 +1724,10 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "trace-state", "trace-apply":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var result map[string]any
 		if request.Operation == "trace-state" {
@@ -1736,7 +1736,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			result = map[string]any{"status": "ok", "last_id": strconv.FormatInt(id, 10)}
 		} else {
 			if !validTraceBatch(request.TraceBatch) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			request.Scope = scope
 			result, err = backend.applyTraceBatch(ctx, request)
@@ -1747,16 +1747,16 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "wiki-bundle":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.wiki(ctx, request)
 	case "reflect":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Reflection == nil || request.Query == "" || len(request.Query) > 2047 || request.Limit < 1 || request.Limit > 32 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var result reflectionResult
 		result, err = backend.reflectMemories(ctx, request, explicitScope)
@@ -1766,7 +1766,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "hybrid-context":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var result hybridMemoryResult
 		result, err = backend.hybridContext(ctx, request)
@@ -1776,7 +1776,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "convention-extract":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var count int
 		count, err = backend.extractConventions(ctx, request)
@@ -1784,14 +1784,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "ontology-walk":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Entity == "" || len(request.Entity) > 1024 || request.Hops < 0 || request.Hops > 128 || len(request.Relations) > 32 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		for _, name := range request.Relations {
 			if name == "" || len(name) > 128 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 		}
 		var entries []ontologyWalkEntry
@@ -1802,14 +1802,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "fidelity-read":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || request.Key == "" || len(request.Key) > 128 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		response.Payload, err = backend.fidelityRead(ctx, request.Key)
 
 	case "demotion-run", "demotion-check":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var summary any
 		if request.Operation == "demotion-check" {
@@ -1824,7 +1824,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "fact-retract":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		actor := modelFactActor()
 		if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
@@ -1841,7 +1841,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "entity-conflicts":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var result map[string]any
 		result, err = backend.entityConflicts(ctx, request)
@@ -1851,13 +1851,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "entity-review", "entity-mutate":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		actor := FactActor{Principal: "system:kb-maintenance", TransportIdentity: "internal", Role: "system", Rank: 20}
 		if request.Operation == "entity-review" {
 			caller := options.commandContext
 			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			actor = FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
 			if actor.TransportIdentity == "" {
@@ -1873,13 +1873,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "ontology-dashboard", "ontology-review":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var result map[string]any
 		if request.Operation == "ontology-review" {
 			caller := options.commandContext
 			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
 			if actor.TransportIdentity == "" {
@@ -1898,7 +1898,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "fact-maintenance":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var count int
 		count, err = backend.maintainFacts(ctx, request.State, request.Days)
@@ -1908,7 +1908,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "fact-candidates":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var candidates []map[string]any
 		candidates, err = backend.factCandidates(ctx, request.Limit)
@@ -1918,12 +1918,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "correction-proposals", "correction-review":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || (options.placement == PlacementKB && transaction == nil) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var result any
 		if request.Operation == "correction-proposals" {
 			if request.ProposalID != "" && !validProposalID(request.ProposalID) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var proposals []correctionProposal
 			if options.placement == PlacementServer {
@@ -1935,7 +1935,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		} else {
 			caller := options.commandContext
 			if !verifiedRetryCaller(caller) || !caller.UserAuthority || !request.CorrectionReview.valid() {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var proposal correctionProposal
 			if options.placement == PlacementServer {
@@ -1966,7 +1966,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		backend, ok := options.data.(*postgresDataStore)
 		caller := options.commandContext
 		if !ok || invocation.PrincipalRef != 0 || caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
 		if actor.TransportIdentity == "" {
@@ -1980,22 +1980,22 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "cognify", "cognify-drain", "cognify-status":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.cognifyData(ctx, request)
 	case "reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.reembedData(ctx, invocation.TraceID, options.executor, request)
 	case "episode-cards":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.SessionID == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var cards []string
 		cards, err = backend.episodeCards(ctx, request.SessionID, request.Limit)
@@ -2006,14 +2006,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "vector-verify":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.verifyVectors(ctx, invocation.TraceID, options.executor, request)
 
 	case "vector-repair-prepare", "vector-embed-prepare":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "vector-embed-prepare" {
 			response, err = backend.prepareVectorEmbed(ctx, request)
@@ -2022,7 +2022,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "vector-repair-record":
 		if options.placement != PlacementKB || request.ID <= 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		embedded := EmbedRecord(ctx, invocation.TraceID, options.executor, options.data, request.ID, request.Command, request.Dimension)
 		response.Embedding = &embedded
@@ -2030,30 +2030,30 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "rules-view":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.ruleView(ctx, request)
 
 	case "maintenance-dashboard":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = backend.maintenanceDashboard(ctx)
 
 	case "memory-facts-claim", "memory-facts-complete":
 		if options.placement != PlacementKB || invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		facts, ok := options.data.(memoryFactDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "memory-facts-claim" {
 			response.FactWork, err = facts.ClaimMemoryFact(ctx)
 		} else {
 			if request.FactWork == nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = facts.CompleteMemoryFact(ctx, *request.FactWork, request.Content, request.Success, request.Reason)
 		}
@@ -2062,11 +2062,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		"episode-card-generate", "vector-collection-exists", "vector-collection-recreate",
 		"vector-search", "vector-rebuild":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		legacy, ok := options.data.(legacyDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "rebuild-derived":
@@ -2083,7 +2083,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Count = &count
 		case "check-drift":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var drift DriftResult
 			drift, err = legacy.CheckDrift(ctx, request.ID, request.Path, request.Command)
@@ -2111,7 +2111,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		case "episode-card-generate":
 			var id int64
 			if options.publicWrite && transaction == nil {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			id, err = legacy.GenerateEpisodeCard(ctx, request.SessionID)
 			switch {
@@ -2150,10 +2150,10 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if request.Version == "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				if err := backend.db.QueryRow(ctx, `SELECT version FROM memory_active_embedder WHERE id=1`).Scan(&request.Version); err != nil || request.Version == "" {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 			}
 			response.Version = request.Version
@@ -2162,11 +2162,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "fold-session":
 		if options.placement != PlacementKB || request.SessionID == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		sessions, ok := options.data.(sessionDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var count int
 		var block string
@@ -2175,25 +2175,25 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "export-filtered":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.FilteredExport == nil || len(request.FilteredExport.Workspace) > 1024 || len(request.FilteredExport.Kind) > 64 || len(request.FilteredExport.Since) > 64 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		response.Payload, err = backend.exportFiltered(ctx, *request.FilteredExport)
 	case "export-records", "export-decisions-jsonl", "export-jsonl":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		exporter, ok := options.data.(exportDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "export-records" {
 			response.ExportRecords, err = exporter.ExportRecords(ctx, request.AfterID, request.Limit)
 		} else {
 			if request.Path == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var count int
 			count, err = exporter.ExportJSONL(ctx, request.Path, request.Operation == "export-decisions-jsonl")
@@ -2201,11 +2201,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "effectiveness-stats", "lint", "scheduled-maintenance":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		maintenance, ok := options.data.(maintenanceDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "effectiveness-stats":
@@ -2221,27 +2221,27 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "insert-epistemic", "update-as", "delete-as":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		mutations, ok := options.data.(mutationDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "insert-epistemic":
 			if request.Tier == "" || request.Kind == "" || request.Key == "" || request.Content == "" ||
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if options.publicWrite && transaction == nil {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			request.Scope = scope
 			var record Record
 			if request.IdempotencyKey != "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				record, response.MutationReceipt, err = backend.storeKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
 				rollbackOnly = err != nil
@@ -2251,7 +2251,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if err == nil && options.publicWrite && request.IdempotencyKey == "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext, request.SourceOnly)
 			}
@@ -2259,17 +2259,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		case "update-as":
 			if request.ID <= 0 || request.Content == "" ||
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if options.publicWrite && transaction == nil {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			var code int
 			var newID int64
 			if request.ExpectedVersion != nil || request.IdempotencyKey != "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				authority := AuthorityModel
 				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
@@ -2301,12 +2301,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.IDs = []int64{newID}
 		case "delete-as":
 			if request.ID <= 0 || (request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if request.ExpectedVersion != nil {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				authority := AuthorityModel
 				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
@@ -2330,7 +2330,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "pii-inject":
 		if request.Sensitivity < int(SensNormal) || request.Sensitivity > int(SensSecret) ||
 			request.Confidence == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		allowed := ShouldInject(RelSensitivity(request.Sensitivity), *request.Confidence,
 			request.TurnRequestsSensitive)
@@ -2338,11 +2338,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "served-view", "claim-card":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "claim-card" {
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var result map[string]any
 			cardScope := Scope{}
@@ -2365,11 +2365,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "evidence":
 		if request.ID <= 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var result map[string]any
 		result, err = backend.memoryEvidence(ctx, request.ID)
@@ -2394,16 +2394,16 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		// The feed carries private record identities. Only the embedding host
 		// may consume it; it is not an advertised model/public diagnostic tool.
 		if invocation.PrincipalRef != 0 || request.Changes == nil || !request.Changes.valid() {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var page MemoryChangePage
 		if options.placement == PlacementKB {
 			if request.IncludeAll {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			page, err = backend.sharedChanges(ctx, scope, *request.Changes)
 		} else {
@@ -2412,23 +2412,23 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		response.Changes = &page
 	case "get":
 		if request.ID <= 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var record Record
 		var getErr error
 		if request.AtVersion != nil {
 			backend, ok := options.data.(*postgresDataStore)
 			if !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			record, getErr = backend.personalVersion(ctx, scope, *request.AtVersion)
 		} else if request.AsOf != "" || (request.ReadPolicy != nil && request.ReadPolicy.Mode == "historical") {
 			if options.placement != PlacementKB {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			backend, ok := options.data.(*postgresDataStore)
 			if !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			when := ""
 			if readResult != nil {
@@ -2438,7 +2438,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		} else if request.IncludeVersion {
 			backend, ok := options.data.(*postgresDataStore)
 			if !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			record, getErr = backend.getAtVersioned(ctx, scope, request.ID, false, "", true)
 		} else {
@@ -2464,7 +2464,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "adaptive-search", "server-search":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Records, err = backend.adaptiveSearch(ctx, request)
 		if err == nil && request.Operation == "server-search" {
@@ -2472,7 +2472,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "visible-search":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if backend, ok := options.data.(*postgresDataStore); ok {
 			response.Records, err = backend.SearchVisible(ctx, request)
@@ -2503,7 +2503,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "upsert-workflow":
 		if options.placement != PlacementKB || request.Workspace == "" || request.SignalType == "" || request.Rule == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if backend, ok := options.data.(*postgresDataStore); ok {
 			var record Record
@@ -2523,7 +2523,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		response.Records = []Record{record}
 	case "store":
 		if request.Key == "" || request.Kind == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		confidence := 1.0
 		if request.Confidence != nil {
@@ -2533,7 +2533,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		if request.IdempotencyKey != "" {
 			backend, ok := options.data.(*postgresDataStore)
 			if !ok || options.placement != PlacementServer {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			request.Scope, request.Confidence = scope, &confidence
 			record, response.MutationReceipt, err = backend.mutatePersonalIdempotent(ctx, request, options.commandContext)
@@ -2545,18 +2545,18 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		response.Records = []Record{record}
 	case "supersede":
 		if request.ID <= 0 || request.Content == "" || request.Confidence == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		advanced, ok := options.data.(dataAdvancedStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if options.publicWrite && transaction == nil {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.ExpectedVersion != nil {
 			if _, ok := options.data.(*postgresDataStore); !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 		}
 		var record Record
@@ -2567,7 +2567,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 			if request.IdempotencyKey != "" {
 				if transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				request.Scope = scope
 				record, response.MutationReceipt, err = backend.replaceKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
@@ -2605,39 +2605,39 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "feedback-path":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		err = backend.feedbackPath(ctx, request)
 		response.Updated = err == nil
 	case "feedback":
 		if len(request.IDs) == 0 || len(request.IDs) > 64 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		advanced, ok := options.data.(dataAdvancedStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		err = advanced.Feedback(ctx, scope, request.IDs, request.Success)
 	case "maintenance":
 		advanced, ok := options.data.(dataAdvancedStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Promoted, response.Demoted, response.Expired, err = advanced.Maintenance(ctx, scope)
 	case "prospective-count":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		prospective, ok := options.data.(prospectiveStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Armed, response.Triggered, response.Completed, response.ProspectiveExpired, err =
 			prospective.ProspectiveCounts(ctx)
 	case "prospective-current", "directive-current":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "prospective-current" {
 			response.Prospectives, err = backend.prospectiveCurrent(ctx, request.Limit)
@@ -2647,16 +2647,16 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "prospective-create", "prospective-list", "prospective-get", "prospective-complete",
 		"prospective-sweep", "prospective-match", "prospective-mark-triggered":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		prospective, ok := options.data.(prospectiveDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "prospective-create":
 			if request.TriggerText == "" || request.ActionText == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Prospective
 			item, err = prospective.ProspectiveCreate(ctx, request)
@@ -2665,14 +2665,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Prospectives, err = prospective.ProspectiveList(ctx, request.State, request.Limit)
 		case "prospective-get":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Prospective
 			item, err = prospective.ProspectiveGet(ctx, request.ID)
 			response.Prospectives = []Prospective{item}
 		case "prospective-complete":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = prospective.ProspectiveComplete(ctx, request.ID)
 		case "prospective-sweep":
@@ -2682,17 +2682,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				request.AnchorEntity, request.AnchorFile, request.Limit)
 		case "prospective-mark-triggered":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = prospective.ProspectiveMarkTriggered(ctx, request.ID)
 		}
 	case "fact-recall":
 		if options.placement != PlacementKB || request.ContentCapacity < 1 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		recall, ok := options.data.(factRecallStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var block string
 		var count int
@@ -2701,7 +2701,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				RecallFactProjection(context.Context, string, string, bool, int) (string, int, *factProjection, error)
 			})
 			if !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			block, count, response.FactProjection, err = projection.RecallFactProjection(ctx, request.Entity, request.Query, request.TurnRequestsSensitive, request.ContentCapacity)
 		} else {
@@ -2712,16 +2712,16 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "directive-create", "directive-list", "directive-get", "directive-resolve", "directive-suppress",
 		"directive-sweep", "directive-match", "directive-mark-surfaced", "directive-count":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		directives, ok := options.data.(directiveDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "directive-create":
 			if request.Question == "" || request.Cause == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Directive
 			if creator, ok := directives.(interface {
@@ -2736,20 +2736,20 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Directives, err = directives.DirectiveList(ctx, request.State, request.Cause, request.Limit)
 		case "directive-get":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Directive
 			item, err = directives.DirectiveGet(ctx, request.ID)
 			response.Directives = []Directive{item}
 		case "directive-resolve":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = directives.DirectiveResolve(ctx, request.ID,
 				request.ResolutionMemoryID, request.Note)
 		case "directive-suppress":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = directives.DirectiveSuppress(ctx, request.ID)
 		case "directive-sweep":
@@ -2759,7 +2759,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				request.AnchorEntity, request.AnchorFile, request.Limit)
 		case "directive-mark-surfaced":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = directives.DirectiveMarkSurfaced(ctx, request.ID)
 		case "directive-count":
@@ -2774,11 +2774,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		"lifecycle-count", "episode-list", "episode-get", "relation-search", "entity-edges",
 		"entity-profile", "fact-history":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		domain, ok := options.data.(domainDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "touch":
@@ -2787,14 +2787,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				ids = append(ids, request.ID)
 			}
 			if len(ids) == 0 || len(ids) > 256 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var count int
 			count, err = domain.Touch(ctx, ids)
 			response.Count = &count
 		case "update-content":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var id int64
 			id, err = domain.UpdateContent(ctx, request.ID, request.Content)
@@ -2804,12 +2804,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 		case "reject":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if request.IdempotencyKey != "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				response.MutationReceipt, err = backend.lifecycleKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
 				response.Updated = err == nil
@@ -2817,7 +2817,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			} else if request.ExpectedVersion != nil {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				err = backend.lockKBLifecycleVersion(ctx, request.ID, request.ExpectedVersion)
 			}
@@ -2829,29 +2829,29 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 		case "link-create":
 			if request.SourceID <= 0 || request.TargetID <= 0 || request.SourceID == request.TargetID || request.Relation == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item MemoryLink
 			item, err = domain.LinkCreate(ctx, request.SourceID, request.TargetID, request.Relation)
 			response.Links = []MemoryLink{item}
 		case "link-query":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Links, err = domain.LinkQuery(ctx, request.ID, request.Limit)
 		case "link-delete":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Deleted, err = domain.LinkDelete(ctx, request.ID)
 		case "provenance-list":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Provenance, err = domain.ProvenanceList(ctx, request.ID, request.Limit)
 		case "provenance-add":
 			if request.ID <= 0 || request.ActionText == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Provenance
 			item, err = domain.ProvenanceAdd(ctx, request.ID, request.SessionID, request.ActionText, request.Details)
@@ -2860,14 +2860,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Conflicts, err = domain.ConflictList(ctx, request.Limit)
 		case "conflict-record":
 			if request.SourceID <= 0 || request.TargetID <= 0 || request.SourceID == request.TargetID {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Conflict
 			item, err = domain.ConflictRecord(ctx, request.SourceID, request.TargetID)
 			response.Conflicts = []Conflict{item}
 		case "conflict-resolve":
 			if request.ID <= 0 || request.Resolution == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = domain.ConflictResolve(ctx, request.ID, request.Resolution)
 		case "scope-tag":
@@ -2875,21 +2875,21 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if request.TagScope != nil {
 				target, err = normalizeScope(options.placement, *request.TagScope)
 				if err != nil {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 			}
 			if request.ID <= 0 || (request.TagScope == nil && request.Scope.Type == "") {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = domain.ScopeTag(ctx, request.ID, target)
 		case "scope-collect":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Scopes, err = domain.ScopeCollect(ctx, request.ID)
 		case "scope-primary":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var primary ScopeTag
 			primary, err = domain.PrimaryScope(ctx, request.ID)
@@ -2900,7 +2900,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				ids = append(ids, request.ID)
 			}
 			if len(ids) == 0 || len(ids) > 256 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.ScopeRanks, err = domain.ScopeRanks(ctx, ids, request.Workspace, request.Project, request.IncludeAll)
 		case "health":
@@ -2909,17 +2909,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Health = &health
 		case "lifecycle-get":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.LifecycleState, err = domain.LifecycleGet(ctx, request.ID)
 		case "lifecycle-transition":
 			if request.ID <= 0 || request.LifecycleState == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = domain.LifecycleTransition(ctx, request.ID, request.LifecycleState, request.ArchiveReason)
 		case "lifecycle-pending":
 			if request.ID <= 0 || request.TTLDays <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = domain.LifecyclePending(ctx, request.ID, request.TTLDays)
 		case "lifecycle-sweep":
@@ -2934,7 +2934,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Episodes, err = domain.EpisodeList(ctx, request.Query, request.Limit)
 		case "episode-get":
 			if request.Key == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var item Episode
 			item, err = domain.EpisodeGet(ctx, request.Key)
@@ -2948,12 +2948,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Relations, err = domain.RelationSearch(ctx, request.Query, request.AsOf, request.Limit)
 		case "entity-edges":
 			if request.Entity == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Relations, err = domain.EntityEdges(ctx, request.Entity, request.Limit)
 		case "entity-profile":
 			if request.Entity == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var profile EntityProfile
 			profile, err = domain.EntityProfile(ctx, request.Entity)
@@ -2964,17 +2964,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 		case "fact-history":
 			if request.Key == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Records, err = domain.FactHistory(ctx, request.Key, request.Limit)
 		}
 	case "valid-at":
 		if options.placement != PlacementKB || request.ID <= 0 || request.AsOf == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		temporal, ok := options.data.(temporalStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var valid bool
 		valid, err = temporal.ValidAt(ctx, request.ID, request.AsOf)
@@ -2984,13 +2984,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			DashboardStats(context.Context) (json.RawMessage, error)
 		})
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Payload, err = dashboard.DashboardStats(ctx)
 	case "stats":
 		domain, ok := options.data.(domainDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		var stats MemoryStats
 		stats, err = domain.Stats(ctx)
@@ -2998,30 +2998,30 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "review-list":
 		queries, ok := options.data.(queryDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		response.Reviews, err = queries.ReviewList(ctx, request.State, request.Limit)
 	case "key-exists", "find-id", "query-records", "low-effectiveness", "unused-l2",
 		"superseded-keys", "restore", "set-artifact", "summaries", "scenes",
 		"scene-members", "all-ids", "epistemic-kind", "demote-confidence", "tier-kind-counts":
 		if options.placement != PlacementKB {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		queries, ok := options.data.(queryDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "key-exists":
 			if request.Key == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var exists bool
 			exists, err = queries.KeyExists(ctx, request.Key)
 			response.Allowed = &exists
 		case "find-id":
 			if request.Key == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var id int64
 			id, err = queries.FindID(ctx, request.Key, request.Kind)
@@ -3040,12 +3040,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.SupersededKeys, err = queries.SupersededKeys(ctx, request.MinVersions, request.Limit)
 		case "restore":
 			if request.ID <= 0 || request.Actor == "" {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			if request.IdempotencyKey != "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				response.MutationReceipt, err = backend.lifecycleKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
 				response.Updated = err == nil
@@ -3053,7 +3053,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			} else if request.ExpectedVersion != nil {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				err = backend.lockKBLifecycleVersion(ctx, request.ID, request.ExpectedVersion)
 			}
@@ -3065,31 +3065,31 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 		case "set-artifact":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = queries.SetArtifact(ctx, request.ID, request.ArtifactType, request.ArtifactRef, request.ArtifactHash)
 		case "summaries":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Summaries, err = queries.Summaries(ctx, request.ID, request.Limit)
 		case "scenes":
 			response.Scenes, err = queries.Scenes(ctx, request.Limit)
 		case "scene-members":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.SceneMembers, err = queries.SceneMembers(ctx, request.ID, request.Limit)
 		case "all-ids":
 			response.IDs, err = queries.AllIDs(ctx)
 		case "epistemic-kind":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Name, err = queries.EpistemicKind(ctx, request.ID)
 		case "demote-confidence":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Updated, err = queries.DemoteConfidence(ctx, request.ID)
 		case "tier-kind-counts":
@@ -3098,17 +3098,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	case "compose-recall":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementServer || invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		response.Payload, err = backend.ComposeRecall(ctx, request.SharedRecall, request.LimitTokens, request.SessionStart)
 	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block", "context-ingress",
 		"diagnose", "explain", "ask":
 		if options.placement != PlacementKB && request.Operation != "recall-bundle" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		retrieval, ok := options.data.(retrievalDataStore)
 		if !ok {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		switch request.Operation {
 		case "recall-bundle":
@@ -3121,7 +3121,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				response.Payload, err = activated.RecallBundleWithActivation(ctx, request.Query, request.LimitTokens, request.SessionStart, request.Activation)
 			} else {
 				if options.placement == PlacementKB && parseActivation(request.Activation) != nil {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
 			}
@@ -3137,7 +3137,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if request.Operation == "context-ingress" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil {
-					return nil, bus.ModuleStatusCapabilityAbsent
+					return nil, ring.ModuleStatusCapabilityAbsent
 				}
 				response.Reason, err = backend.retractContextQuery(ctx, request.Query)
 				if err != nil {
@@ -3197,7 +3197,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.RankingTrace = finishRankingCapture(ctx, selected)
 		case "explain":
 			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var diagnostic Diagnostic
 			diagnostic, err = retrieval.Explain(ctx, scope, request.Query, request.ID)
@@ -3216,12 +3216,12 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 	case "delete":
 		if request.ID <= 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if options.placement == PlacementServer && request.ExpectedVersion != nil {
 			backend, ok := options.data.(*postgresDataStore)
 			if !ok {
-				return nil, bus.ModuleStatusCapabilityAbsent
+				return nil, ring.ModuleStatusCapabilityAbsent
 			}
 			if request.IdempotencyKey != "" {
 				request.Scope = scope
@@ -3238,7 +3238,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.Deleted, err = options.data.Delete(ctx, scope, request.ID)
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
 		if code == MutationInstructionRefused {
@@ -3256,17 +3256,17 @@ set_config('aimee.memory_believed_at',$14,true)`,
 
 	if err != nil {
 		if errors.Is(err, memorycontract.ErrUnsupported) {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if invocation.Cancelled() || ctx.Err() != nil {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 
 		var budgetRefusal *contextBudgetError
 		if (request.Operation == "recall-bundle" || request.Operation == "compose-recall") && errors.As(err, &budgetRefusal) {
 			payload, _ := json.Marshal(commandError(budgetRefusal.kind, budgetRefusal.message))
 			raw, _ := json.Marshal(DataResponse{Payload: payload})
-			return raw, bus.ModuleStatusOK // transaction rolls back; no surfaced counters
+			return raw, ring.ModuleStatusOK // transaction rolls back; no surfaced counters
 		}
 
 		if request.Operation == "fact-retract" {
@@ -3282,7 +3282,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if reason != "" {
 				payload, _ := json.Marshal(map[string]any{"status": "error", "kind": "conflict", "reason": reason, "message": message})
 				raw, _ := json.Marshal(DataResponse{Payload: payload})
-				return raw, bus.ModuleStatusOK
+				return raw, ring.ModuleStatusOK
 			}
 		}
 		if (request.Operation == "entity-review" || request.Operation == "entity-mutate") && errors.Is(err, errEntityTransition) {
@@ -3292,7 +3292,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 			payload, _ := json.Marshal(commandError(kind, "entity transition refused: unknown, inactive, already undone, or no longer current"))
 			raw, _ := json.Marshal(DataResponse{Payload: payload})
-			return raw, bus.ModuleStatusOK
+			return raw, ring.ModuleStatusOK
 		}
 		if request.Operation == "fact-review" {
 			kind := ""
@@ -3304,15 +3304,15 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if kind != "" {
 				payload, _ := json.Marshal(commandError(kind, "fact review transition refused"))
 				raw, _ := json.Marshal(DataResponse{Payload: payload})
-				return raw, bus.ModuleStatusOK
+				return raw, ring.ModuleStatusOK
 			}
 		}
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if request.PublicView {
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
-			return nil, bus.ModuleStatusCapabilityAbsent
+			return nil, ring.ModuleStatusCapabilityAbsent
 		}
 		if request.Operation == "diagnose" || request.Operation == "explain" {
 			for i := range response.Diagnostics {
@@ -3323,7 +3323,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				}
 				d.EpistemicKind, err = backend.EpistemicKind(ctx, d.Memory.ID)
 				if err != nil {
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
 			}
 		}
@@ -3337,7 +3337,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
 		}
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		if request.Operation == "get" && request.AsOf != "" && len(response.Records) > 0 {
 			valid, validErr := backend.ValidAt(ctx, request.ID, request.AsOf)
@@ -3349,14 +3349,14 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	response.RetrievalCapabilities = observedRetrievalCapabilities(ctx)
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if transaction != nil && !rollbackOnly {
 		if err = transaction.Commit(ctx); err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
 // Only fixed categories and validated SQLSTATEs may cross the diagnostic boundary.

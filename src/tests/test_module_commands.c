@@ -33,10 +33,10 @@ int obs_bus_module_available(uint32_t kind)
 {
    return (fixed_present && kind == 6143) || kind == AIMEE_PLUGIN_KIND(201, 2);
 }
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t deadline,
                     const void *body, uint32_t body_len, void *result, uint32_t capacity,
-                    uint32_t *result_len, aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    uint32_t *result_len, ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)trace;
    (void)deadline;
@@ -61,7 +61,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
       if (version == 2 && empty)
       {
          *result_len = offset;
-         return AIMEE_MODULE_CALL_OK;
+         return OURO_MODULE_CALL_OK;
       }
       put32(out + offset, AIMEE_SURFACE_RPC);
       put32(out + offset + 4, AIMEE_MCP_DISCOVERABLE);
@@ -89,7 +89,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
       }
       if (version == 2 && malformed == 1)
          --*result_len;
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    assert(get32(req) == 0x51504d43u && get32(req + 4) == (expect_context ? 2u : 1u));
    unsigned header = expect_context ? 20 : 16;
@@ -116,13 +116,13 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
    if (embedded_nul)
       memcpy(out + 12 + strlen(json), "\0junk", 5);
    *result_len = 12 + json_len;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 uint64_t aimee_module_call_deadline_ns(int timeout_ms)
 {
    return (uint64_t)timeout_ms;
 }
-const char *aimee_module_call_result_name(aimee_module_call_result_t result)
+const char *ouro_module_call_result_name(ouro_module_call_result_t result)
 {
    (void)result;
    return "test";

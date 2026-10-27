@@ -4,18 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "response_dedup.h"
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/response-composition/module_api.h>
 
 #define PASS(name) printf("  %s: ok\n", name)
 
-extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
-                                                  const uint8_t *request_body, uint32_t request_len,
-                                                  uint8_t *response_body,
-                                                  uint32_t response_capacity,
-                                                  uint32_t *response_len, void *user_data);
+extern ouro_module_status_t aimee_module_handler(const ouro_module_invocation_t *invocation,
+                                                 const uint8_t *request_body, uint32_t request_len,
+                                                 uint8_t *response_body, uint32_t response_capacity,
+                                                 uint32_t *response_len, void *user_data);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -27,17 +26,17 @@ static int module_key_provider(const response_dedup_key_inputs_t *in, char *out,
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_RESPONSE_KEY_MAX + 4u];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_RESPONSE_STAGE_COMPOSE};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_RESPONSE_STAGE_COMPOSE};
    if (!request || aimee_response_request_encode(in, request, request_len) != 0)
    {
       free(request);
       return -1;
    }
-   aimee_module_status_t status =
+   ouro_module_status_t status =
        aimee_module_handler(&invocation, request, (uint32_t)request_len, response, sizeof(response),
                             &response_len, NULL);
    free(request);
-   return status == AIMEE_MODULE_STATUS_OK
+   return status == OURO_MODULE_STATUS_OK
               ? aimee_response_response_decode(response, response_len, out, out_cap)
               : -1;
 }

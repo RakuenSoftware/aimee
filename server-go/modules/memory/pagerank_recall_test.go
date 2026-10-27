@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -128,37 +128,37 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	bound.settings = func() (map[string]any, error) { return values, nil }
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &bound))
 	req := DataRequest{Operation: "search", Query: "rankneedle", Project: "pagerank-recall-local", Kind: "fact", Tier: "L2", Limit: 1}
-	call := func(h bus.ModuleHandler) (DataResponse, bus.ModuleStatus) {
+	call := func(h ring.ModuleHandler) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		raw, _ := json.Marshal(req)
-		reply, status := h(bus.ModuleInvocation{StageID: StageData}, raw)
+		reply, status := h(ring.ModuleInvocation{StageID: StageData}, raw)
 		var result DataResponse
-		if status == bus.ModuleStatusOK && json.Unmarshal(reply, &result) != nil {
+		if status == ring.ModuleStatusOK && json.Unmarshal(reply, &result) != nil {
 			t.Fatal(string(reply))
 		}
 		return result, status
 	}
 	before := pageRankMetricState.snapshot()
 	got, status := call(handler)
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["tail"] || pageRankMetricState.snapshot() != before {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["tail"] || pageRankMetricState.snapshot() != before {
 		t.Fatal("default ordering/metrics changed", got, status)
 	}
 	// Caller-supplied scorer parameters cannot enable or reconfigure retrieval.
 	req.PageRank = &pageRankRequest{IDs: []int64{ids["hub"]}, Iterations: 16, Weight: 10}
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || got.Records[0].ID != ids["tail"] {
+	if status != ring.ModuleStatusOK || got.Records[0].ID != ids["tail"] {
 		t.Fatal("caller changed ranking", got, status)
 	}
 	req.PageRank = nil
 	values["memory_pagerank_enabled"] = true
 	got, status = call(handler)
 	after := pageRankMetricState.snapshot()
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["hub"] || after.RecallSamples != before.RecallSamples+1 || after.Candidates != 6 || after.Edges != 10 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["hub"] || after.RecallSamples != before.RecallSamples+1 || after.Candidates != 6 || after.Edges != 10 {
 		t.Fatal("PageRank did not reach pre-limit candidates", got, status, after)
 	}
 	req.Limit = 20
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || len(got.Records) != 6 || got.Records[len(got.Records)-1].ID != ids["global"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 6 || got.Records[len(got.Records)-1].ID != ids["global"] {
 		t.Fatal("scope priority or graph neighbor lost", got, status)
 	}
 	found := false
@@ -179,7 +179,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	exec("SAVEPOINT pagerank_neighbor_version")
 	exec("UPDATE memories SET content='revised unrelated payload' WHERE id=$1", ids["neighbor"])
 	revised, revisedStatus := call(handler)
-	if revisedStatus != bus.ModuleStatusOK {
+	if revisedStatus != ring.ModuleStatusOK {
 		t.Fatal(revisedStatus)
 	}
 	found = false
@@ -197,7 +197,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	exec("ROLLBACK TO SAVEPOINT pagerank_neighbor_version; RELEASE SAVEPOINT pagerank_neighbor_version")
 	req.Operation = "diagnose"
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || len(got.Diagnostics) != 6 {
+	if status != ring.ModuleStatusOK || len(got.Diagnostics) != 6 {
 		t.Fatal(got, status)
 	}
 	if got.RankingTrace == nil || len(got.RankingTrace.Candidates) < 6 {
@@ -228,7 +228,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	values["memory_abstain_enabled"] = true
 	values["memory_chunk_min_confidence"] = .5
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || got.Answer == nil || got.Answer.Evidence.Reason == "chunk_floor" {
+	if status != ring.ModuleStatusOK || got.Answer == nil || got.Answer.Evidence.Reason == "chunk_floor" {
 		t.Fatal("PageRank units contaminated answer support", got, status)
 	}
 	delete(values, "memory_abstain_enabled")
@@ -237,14 +237,14 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	req.Scope = Scope{Type: ScopeProject, Value: "pagerank-recall-local"}
 	req.IncludeAll = true
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || len(got.Records) != 5 {
+	if status != ring.ModuleStatusOK || len(got.Records) != 5 {
 		t.Fatal("exact scope widened", got, status)
 	}
 	req.IncludeAll = false
 	req.Scope = Scope{}
 	req.Project = ""
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["global"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["global"] {
 		t.Fatal("request scope leaked", got, status)
 	}
 	req.Project = "pagerank-recall-local"
@@ -265,7 +265,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 			}
 		}
 	}
-	if status != bus.ModuleStatusOK || !admittedNeighbor || len(got.Diagnostics) > 100 || got.RetrievalCapabilities == nil {
+	if status != ring.ModuleStatusOK || !admittedNeighbor || len(got.Diagnostics) > 100 || got.RetrievalCapabilities == nil {
 		t.Fatal("full lexical pool vetoed graph or exceeded caller cap", status, got)
 	}
 	exec("ROLLBACK TO SAVEPOINT full_initial_pool; RELEASE SAVEPOINT full_initial_pool")
@@ -274,16 +274,16 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	failing := bound
 	failing.db = pageRankFailCommitDB{runtimeRoleDB{evalQueryer{tx}, t}}
 	before = pageRankMetricState.snapshot()
-	if _, status := call(NewHandler(nil, WithDataStore(PlacementKB, &failing))); status != bus.ModuleStatusInternal || pageRankMetricState.snapshot() != before {
+	if _, status := call(NewHandler(nil, WithDataStore(PlacementKB, &failing))); status != ring.ModuleStatusInternal || pageRankMetricState.snapshot() != before {
 		t.Fatal("failed commit recorded", status)
 	}
 	// Visible graph overflow and SQL refusal must not become healthy fallback.
 	exec(`RESET ROLE; INSERT INTO memory_links(source_id,target_id,relation) SELECT 9007199254744800,9007199254744801,'depends_on' FROM generate_series(1,8200); SET LOCAL ROLE aimee_store_runtime`)
-	if _, status := call(handler); status != bus.ModuleStatusInternal {
+	if _, status := call(handler); status != ring.ModuleStatusInternal {
 		t.Fatal("overflow silently degraded", status)
 	}
 	exec(`RESET ROLE; REVOKE SELECT ON memory_links FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	if _, status := call(handler); status != bus.ModuleStatusInternal {
+	if _, status := call(handler); status != ring.ModuleStatusInternal {
 		t.Fatal("graph refusal ignored", status)
 	}
 	if pageRankMetricState.snapshot() != before {
@@ -292,7 +292,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	values["memory_pagerank_enabled"] = false
 	req.Limit = 1
 	got, status = call(handler)
-	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["tail"] {
+	if status != ring.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["tail"] {
 		t.Fatal("disabled PageRank still accessed graph", got, status)
 	}
 }

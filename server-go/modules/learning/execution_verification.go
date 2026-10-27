@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Wire ownership lives in canonical IR; qualification remains this module’s policy.
@@ -34,24 +34,24 @@ type ExecutionTestGradeRequest struct {
 	Proof  ExecutionTestProof `json:"proof"`
 }
 
-func handleExecutionTestGrade(args []byte, caller bus.CommandContext) ([]byte, bus.ModuleStatus) {
+func handleExecutionTestGrade(args []byte, caller ring.CommandContext) ([]byte, ring.ModuleStatus) {
 	var request ExecutionTestGradeRequest
 	if !canonical.Decode(args, &request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	grade, ok := executionTestGrade(request.Record, request.Proof, caller)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(map[string]any{"status": "ok", "grade": grade})
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	framed, err := bus.EncodeCommandResult(body)
+	framed, err := ring.EncodeCommandResult(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return framed, bus.ModuleStatusOK
+	return framed, ring.ModuleStatusOK
 }
 
 func lowercaseHex(value string, lengths ...int) bool {
@@ -70,7 +70,7 @@ func lowercaseHex(value string, lengths ...int) bool {
 	return true
 }
 
-func executionTestGrade(record ExecutionRecord, proof ExecutionTestProof, caller bus.CommandContext) (ExecutionTestGrade, bool) {
+func executionTestGrade(record ExecutionRecord, proof ExecutionTestProof, caller ring.CommandContext) (ExecutionTestGrade, bool) {
 	var empty ExecutionTestGrade
 	if caller.TransportIdentity != "host:isolated-project-verification" {
 		return empty, false

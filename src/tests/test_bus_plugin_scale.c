@@ -5,7 +5,7 @@
  *
  *   1. TEN instances at once, each with its own plugin, grant, and event pair --
  *      the stated target shape (~10 MCP + ~5 pluggy).
- *   2. Two instances provisioned the SAME event base. bus_host_serve_kind()
+ *   2. Two instances provisioned the SAME event base. ouro_host_serve_kind()
  *      binds one kind to one slot, so the second MUST be refused. This is the
  *      constraint the whole per-instance allocation exists for, asserted rather
  *      than assumed.
@@ -18,12 +18,12 @@
  */
 #define _GNU_SOURCE
 
-#include <aimee/core/event_bus/bus_attach.h>
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_endpoint.h>
-#include <aimee/core/event_bus/bus_host.h>
-#include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/attach.h>
+#include <ouroboros/client.h>
+#include <ouroboros/endpoint.h>
+#include <ouroboros/host.h>
+#include <ouroboros/runtime.h>
+#include <ouroboros/module_client.h>
 
 #include "aimee_sha256.h"
 #include "platform_test_util.h"
@@ -94,7 +94,7 @@ static const char *GARBAGE_PLUGIN =
 
 typedef struct
 {
-   bus_host_t *host;
+   ouro_host_t *host;
    pthread_mutex_t *lock;
    atomic_int stop;
 } pump_t;
@@ -106,7 +106,7 @@ static void *run_pump(void *a)
    while (!atomic_load_explicit(&s->stop, memory_order_acquire))
    {
       pthread_mutex_lock(s->lock);
-      (void)bus_host_pump(s->host);
+      (void)ouro_host_pump(s->host);
       pthread_mutex_unlock(s->lock);
       nanosleep(&pause, NULL);
    }
@@ -186,7 +186,7 @@ static pid_t start_instance(const char *exe, const char *dir, const char *name, 
  * with DCMP ("I want to run this argv"), and only starts its plugin once a
  * verdict bound to a hash of exactly those bytes comes back. Returns 1 when a
  * verdict was delivered, 0 when the module was not waiting for one. */
-static int admit_instance(aimee_module_client_t *client, uint32_t event_base, uint32_t verdict)
+static int admit_instance(ouro_module_client_t *client, uint32_t event_base, uint32_t verdict)
 {
    unsigned char request[8];
    wr_u32(request, DECL_REQ_MAGIC);
@@ -197,9 +197,9 @@ static int admit_instance(aimee_module_client_t *client, uint32_t event_base, ui
    for (int attempt = 0; attempt < 400; ++attempt)
    {
       response_len = 0;
-      if (aimee_module_client_call(client, event_base + 1, STAGE_DECLARE, 0, 0, request,
-                                   sizeof(request), response, sizeof(response), &response_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK &&
+      if (ouro_module_client_call(client, event_base + 1, STAGE_DECLARE, 0, 0, request,
+                                  sizeof(request), response, sizeof(response), &response_len, NULL,
+                                  NULL) == OURO_MODULE_CALL_OK &&
           response_len >= DECL_HEADER_LEN && rd_u32(response) == DECL_PENDING_MAGIC)
       {
          uint32_t argv_len = rd_u32(response + 8);
@@ -215,9 +215,9 @@ static int admit_instance(aimee_module_client_t *client, uint32_t event_base, ui
 
          unsigned char ack[65536];
          uint32_t ack_len = 0;
-         assert(aimee_module_client_call(client, event_base + 1, STAGE_DECLARE, 0, 0, admit,
-                                         sizeof(admit), ack, sizeof(ack), &ack_len, NULL,
-                                         NULL) == AIMEE_MODULE_CALL_OK);
+         assert(ouro_module_client_call(client, event_base + 1, STAGE_DECLARE, 0, 0, admit,
+                                        sizeof(admit), ack, sizeof(ack), &ack_len, NULL,
+                                        NULL) == OURO_MODULE_CALL_OK);
          return 1;
       }
       const struct timespec pause = {.tv_sec = 0, .tv_nsec = 25000000};
@@ -228,15 +228,15 @@ static int admit_instance(aimee_module_client_t *client, uint32_t event_base, ui
 
 /* Declare against one instance. Returns the command count, or -1 if the call
  * itself failed. `verb0` receives the first verb when there is one. */
-static int declare_once(aimee_module_client_t *c, uint32_t base, char *verb0, size_t verb0_len)
+static int declare_once(ouro_module_client_t *c, uint32_t base, char *verb0, size_t verb0_len)
 {
    unsigned char req[8];
    wr_u32(req, DECL_REQ_MAGIC);
    wr_u32(req + 4, WIRE_VERSION);
    unsigned char resp[65536];
    uint32_t n = 0;
-   if (aimee_module_client_call(c, base + 1, STAGE_DECLARE, 0, 0, req, sizeof(req), resp,
-                                sizeof(resp), &n, NULL, NULL) != AIMEE_MODULE_CALL_OK)
+   if (ouro_module_client_call(c, base + 1, STAGE_DECLARE, 0, 0, req, sizeof(req), resp,
+                               sizeof(resp), &n, NULL, NULL) != OURO_MODULE_CALL_OK)
       return -1;
    if (n < DECL_HEADER_LEN || rd_u32(resp) != DECL_RESP_MAGIC)
       return -1;
@@ -252,7 +252,7 @@ static int declare_once(aimee_module_client_t *c, uint32_t base, char *verb0, si
 }
 
 /* Poll an instance until it declares `want` commands, or give up. */
-static int declare_until(aimee_module_client_t *c, uint32_t base, int want, char *verb0,
+static int declare_until(ouro_module_client_t *c, uint32_t base, int want, char *verb0,
                          size_t verb0_len)
 {
    for (int attempt = 0; attempt < 400; ++attempt)
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
     * so a process cannot be pointed at someone else's kinds through its
     * environment any more. Sharing a ref -- a copied .grant, the same instance
     * started twice -- is the remaining way two modules can claim one kind, and
-    * bus_host_serve_kind() must still refuse the second. */
+    * ouro_host_serve_kind() must still refuse the second. */
    const int total = INSTANCES + 3;
    uint32_t bases[INSTANCES + 3];
    for (int i = 0; i < INSTANCES; i++)
@@ -312,44 +312,44 @@ int main(int argc, char **argv)
 
    static uint32_t serve_pairs[INSTANCES + 3][2];
    static uint32_t all_kinds[(INSTANCES + 3) * 2];
-   bus_runtime_grant_t grants[INSTANCES + 4];
+   ouro_runtime_grant_t grants[INSTANCES + 4];
    int nk = 0;
    for (int i = 0; i < total; i++)
    {
       serve_pairs[i][0] = bases[i];
       serve_pairs[i][1] = bases[i] + 1;
-      grants[i] = (bus_runtime_grant_t){.principal_class = 1,
-                                        .principal_ref = FIRST_REF + (uint32_t)i,
-                                        .uid = BUS_RUNTIME_SELF_UID,
-                                        .executable = exe,
-                                        .serve = serve_pairs[i],
-                                        .serve_count = 2};
+      grants[i] = (ouro_runtime_grant_t){.principal_class = 1,
+                                         .principal_ref = FIRST_REF + (uint32_t)i,
+                                         .uid = OURO_RUNTIME_SELF_UID,
+                                         .executable = exe,
+                                         .serve = serve_pairs[i],
+                                         .serve_count = 2};
       all_kinds[nk++] = bases[i];
       all_kinds[nk++] = bases[i] + 1;
    }
-   grants[total] = (bus_runtime_grant_t){.principal_class = 1,
-                                         .principal_ref = CALLER_REF,
-                                         .uid = BUS_RUNTIME_SELF_UID,
-                                         .executable = caller_exe,
-                                         .request = all_kinds,
-                                         .request_count = (size_t)nk};
+   grants[total] = (ouro_runtime_grant_t){.principal_class = 1,
+                                          .principal_ref = CALLER_REF,
+                                          .uid = OURO_RUNTIME_SELF_UID,
+                                          .executable = caller_exe,
+                                          .request = all_kinds,
+                                          .request_count = (size_t)nk};
 
    /* Slot and kind budgets sized like the real daemon's (obs_bus uses 64 slots). */
-   bus_host_config_t hc = {.max_slots = 64,
-                           .slot_size = 4096,
-                           .inline_budget = 3800,
-                           .queue_capacity = 64,
-                           .arena_size = 512 * 1024};
-   bus_host_t host;
-   assert(bus_host_create(&host, &hc, NULL, NULL) == BUS_HOST_OK);
+   ouro_host_config_t hc = {.max_slots = 64,
+                            .slot_size = 4096,
+                            .inline_budget = 3800,
+                            .queue_capacity = 64,
+                            .arena_size = 512 * 1024};
+   ouro_host_t host;
+   assert(ouro_host_create(&host, &hc, NULL, NULL) == OURO_HOST_OK);
    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-   bus_runtime_config_t rc = {.socket_path = sock,
-                              .socket_mode = 0600,
-                              .backlog = 32,
-                              .stale_after_ns = 30000000000ULL,
-                              .grants = grants,
-                              .grant_count = (size_t)total + 1};
-   bus_runtime_t *runtime = bus_runtime_start(&host, &lock, &rc);
+   ouro_runtime_config_t rc = {.socket_path = sock,
+                               .socket_mode = 0600,
+                               .backlog = 32,
+                               .stale_after_ns = 30000000000ULL,
+                               .grants = grants,
+                               .grant_count = (size_t)total + 1};
+   ouro_runtime_t *runtime = ouro_runtime_start(&host, &lock, &rc);
    assert(runtime != NULL);
 
    pid_t pids[INSTANCES + 3];
@@ -371,18 +371,18 @@ int main(int argc, char **argv)
        start_instance(exe, dir, "collider", sock, FIRST_REF, bases[0], good_argv, "collide");
 
    int caller_fd = -1;
-   bus_client_t caller;
-   assert(bus_endpoint_connect(sock, &caller_fd) == 0);
-   assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
-   assert(bus_endpoint_close(&caller_fd) == 0);
+   ouro_client_t caller;
+   assert(ouro_endpoint_connect(sock, &caller_fd) == 0);
+   assert(ouro_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == OURO_CLIENT_OK);
+   assert(ouro_endpoint_close(&caller_fd) == 0);
 
    pump_t ps = {.host = &host, .lock = &lock};
    atomic_init(&ps.stop, 0);
    pthread_t pt;
    assert(pthread_create(&pt, NULL, run_pump, &ps) == 0);
 
-   aimee_module_client_t client;
-   assert(aimee_module_client_init(&client, &caller) == 0);
+   ouro_module_client_t client;
+   assert(ouro_module_client_init(&client, &caller) == 0);
 
    /* Admit every instance that is waiting on a verdict. Nothing has spawned
     * before this point -- that is the gate doing its job. */
@@ -422,9 +422,9 @@ int main(int argc, char **argv)
          memcpy(req + INVOKE_REQ_HEADER, verb, vl);
          unsigned char resp[4096];
          uint32_t rn = 0;
-         assert(aimee_module_client_call(&client, bases[i], STAGE_INVOKE, 0, 0, req,
-                                         (uint32_t)(INVOKE_REQ_HEADER + vl), resp, sizeof(resp),
-                                         &rn, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+         assert(ouro_module_client_call(&client, bases[i], STAGE_INVOKE, 0, 0, req,
+                                        (uint32_t)(INVOKE_REQ_HEADER + vl), resp, sizeof(resp), &rn,
+                                        NULL, NULL) == OURO_MODULE_CALL_OK);
          resp[rn] = '\0';
          /* Match the quoted tag alone: the plugin's json.dumps puts a space
           * after the colon, and tags are unique per instance, so the tag is
@@ -459,7 +459,7 @@ int main(int argc, char **argv)
    {
       /* instance 0 owns bases[0]; the collider derives the same pair from the
        * same ref.
-       * bus_host_serve_kind() refuses the second, so instance 0 must still be
+       * ouro_host_serve_kind() refuses the second, so instance 0 must still be
        * the one answering -- if the collider had won, the tool name would be
        * "do_collide". */
       char verb[64] = "";
@@ -474,10 +474,10 @@ int main(int argc, char **argv)
 
    atomic_store_explicit(&ps.stop, 1, memory_order_release);
    pthread_join(pt, NULL);
-   aimee_module_client_destroy(&client);
-   bus_client_detach(&caller);
-   bus_runtime_stop(&runtime);
-   bus_host_destroy(&host);
+   ouro_module_client_destroy(&client);
+   ouro_client_detach(&caller);
+   ouro_runtime_stop(&runtime);
+   ouro_host_destroy(&host);
 
    for (int i = 0; i < total; i++)
    {

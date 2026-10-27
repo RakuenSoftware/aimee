@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func ioRequest(op byte, id string, payload []byte) []byte {
@@ -22,16 +22,16 @@ func ioRequest(op byte, id string, payload []byte) []byte {
 	return request
 }
 
-func io(op byte, id string, payload []byte) ([]byte, bus.ModuleStatus) {
+func io(op byte, id string, payload []byte) ([]byte, ring.ModuleStatus) {
 	body, _, status := ioFull(op, id, payload)
 	return body, status
 }
 
 // ioFull also reports whether more chunks of this result are still coming.
-func ioFull(op byte, id string, payload []byte) ([]byte, bool, bus.ModuleStatus) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
+func ioFull(op byte, id string, payload []byte) ([]byte, bool, ring.ModuleStatus) {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO},
 		ioRequest(op, id, payload))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, false, status
 	}
 	more := binary.LittleEndian.Uint32(response[4:8])&ioMore != 0
@@ -49,7 +49,7 @@ func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	var got []byte
-	var status bus.ModuleStatus
+	var status ring.ModuleStatus
 	go func() {
 		defer wg.Done()
 		got, status = io(IOOpSubmit, "/srv/repo", []byte("rev-parse"))
@@ -60,7 +60,7 @@ func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		next, pollStatus := io(IOOpPoll, "/srv/repo", nil)
-		if pollStatus == bus.ModuleStatusOK && len(next) > 0 {
+		if pollStatus == ring.ModuleStatusOK && len(next) > 0 {
 			claimed = next
 			break
 		}
@@ -68,12 +68,12 @@ func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 	if string(claimed) != "rev-parse" {
 		t.Fatalf("client claimed %q, want the submitted op", claimed)
 	}
-	if _, respondStatus := io(IOOpRespond, "/srv/repo", []byte("/srv/repo")); respondStatus != bus.ModuleStatusOK {
+	if _, respondStatus := io(IOOpRespond, "/srv/repo", []byte("/srv/repo")); respondStatus != ring.ModuleStatusOK {
 		t.Fatalf("respond status = %d", respondStatus)
 	}
 
 	wg.Wait()
-	if status != bus.ModuleStatusOK || string(got) != "/srv/repo" {
+	if status != ring.ModuleStatusOK || string(got) != "/srv/repo" {
 		t.Fatalf("submitter got %q status %d", got, status)
 	}
 }
@@ -89,16 +89,16 @@ func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 // identical log lines in 25 minutes, ~440/second, drowning every other line.
 func TestRunnerIORefusesATreeNobodyIsServing(t *testing.T) {
 	reset()
-	if _, status := io(IOOpSubmit, "/srv/unserved", []byte("op")); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := io(IOOpSubmit, "/srv/unserved", []byte("op")); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("submit to an unserved tree status = %d, want CapabilityAbsent", status)
 	}
-	if _, status := io(IOOpPoll, "/srv/unserved", nil); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := io(IOOpPoll, "/srv/unserved", nil); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("poll on an unserved tree status = %d, want CapabilityAbsent", status)
 	}
 	// A genuinely malformed request must still be INVALID_REQUEST, or the new
 	// signal is useless — both cases would collapse again, the other way.
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
-		[]byte("not a runner-io frame")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO},
+		[]byte("not a runner-io frame")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed frame status = %d, want InvalidRequest", status)
 	}
 }
@@ -110,7 +110,7 @@ func TestRunnerIOReleasesASubmitterWhenTheClientLeaves(t *testing.T) {
 	call(t, RunnerOpRegister, "/srv/repo")
 	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
-	done := make(chan bus.ModuleStatus, 1)
+	done := make(chan ring.ModuleStatus, 1)
 	go func() {
 		_, status := io(IOOpSubmit, "/srv/repo", []byte("op"))
 		done <- status
@@ -122,7 +122,7 @@ func TestRunnerIOReleasesASubmitterWhenTheClientLeaves(t *testing.T) {
 
 	select {
 	case status := <-done:
-		if status == bus.ModuleStatusOK {
+		if status == ring.ModuleStatusOK {
 			t.Fatalf("submitter reported OK after its client left")
 		}
 	case <-time.After(2 * time.Second):
@@ -140,9 +140,9 @@ func TestRunnerIOElapsedPollReportsCancelledSoTheClientRepolls(t *testing.T) {
 	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	// DeadlineNS 1 is already past, so the wait ends immediately.
-	_, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO, DeadlineNS: 1},
+	_, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO, DeadlineNS: 1},
 		ioRequest(IOOpPoll, "/srv/repo", nil))
-	if status != bus.ModuleStatusCancelled {
+	if status != ring.ModuleStatusCancelled {
 		t.Fatalf("elapsed poll status = %d, want cancelled", status)
 	}
 }
@@ -163,14 +163,14 @@ func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
 	go func() {
 		var chunks []string
 		body, more, status := ioFull(IOOpSubmit, "/srv/repo", []byte("run agent"))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			got <- outcome{nil, false}
 			return
 		}
 		chunks = append(chunks, string(body))
 		for more {
 			body, more, status = ioFull(IOOpDrain, "/srv/repo", nil)
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				got <- outcome{nil, false}
 				return
 			}
@@ -182,16 +182,16 @@ func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
 	// Client side: claim the op, then emit two partials and a final.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if next, status := io(IOOpPoll, "/srv/repo", nil); status == bus.ModuleStatusOK && len(next) > 0 {
+		if next, status := io(IOOpPoll, "/srv/repo", nil); status == ring.ModuleStatusOK && len(next) > 0 {
 			break
 		}
 	}
 	for _, part := range []string{"tok1", "tok2"} {
-		if _, status := io(IOOpRespondPartial, "/srv/repo", []byte(part)); status != bus.ModuleStatusOK {
+		if _, status := io(IOOpRespondPartial, "/srv/repo", []byte(part)); status != ring.ModuleStatusOK {
 			t.Fatalf("partial %q status = %d", part, status)
 		}
 	}
-	if _, status := io(IOOpRespond, "/srv/repo", []byte("done")); status != bus.ModuleStatusOK {
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("done")); status != ring.ModuleStatusOK {
 		t.Fatalf("final status = %d", status)
 	}
 
@@ -214,7 +214,7 @@ func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
 	}
 
 	// The stream is over, so there is nothing left to pull.
-	if _, _, status := ioFull(IOOpDrain, "/srv/repo", nil); status == bus.ModuleStatusOK {
+	if _, _, status := ioFull(IOOpDrain, "/srv/repo", nil); status == ring.ModuleStatusOK {
 		t.Fatal("drain after the final chunk succeeded")
 	}
 }
@@ -230,22 +230,22 @@ func TestRunnerIOPartialKeepsTheClaimAndFinalReleasesIt(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if next, status := io(IOOpPoll, "/srv/repo", nil); status == bus.ModuleStatusOK && len(next) > 0 {
+		if next, status := io(IOOpPoll, "/srv/repo", nil); status == ring.ModuleStatusOK && len(next) > 0 {
 			break
 		}
 	}
-	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("a")); status != bus.ModuleStatusOK {
+	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("a")); status != ring.ModuleStatusOK {
 		t.Fatalf("first partial status = %d", status)
 	}
 	// Still claimed, so a second partial is accepted.
-	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("b")); status != bus.ModuleStatusOK {
+	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("b")); status != ring.ModuleStatusOK {
 		t.Fatalf("second partial status = %d", status)
 	}
-	if _, status := io(IOOpRespond, "/srv/repo", []byte("z")); status != bus.ModuleStatusOK {
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("z")); status != ring.ModuleStatusOK {
 		t.Fatalf("final status = %d", status)
 	}
 	// Released: a further response belongs to no claim.
-	if _, status := io(IOOpRespond, "/srv/repo", []byte("extra")); status == bus.ModuleStatusOK {
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("extra")); status == ring.ModuleStatusOK {
 		t.Fatal("a response after the final one was accepted")
 	}
 }
@@ -256,7 +256,7 @@ func TestRunnerIORejectsAnUnclaimedResponse(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
 	runnerFor("/srv/repo").markServing() // model a client that has already polled
-	if _, status := io(IOOpRespond, "/srv/repo", []byte("result")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("result")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unclaimed respond status = %d", status)
 	}
 }
@@ -267,24 +267,24 @@ func TestRunnerIORejectsInvalidEnvelope(t *testing.T) {
 	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	short := ioRequest(IOOpPoll, "/srv/repo", nil)[:ioHeaderLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated-header status = %d", status)
 	}
 
 	// A length field that disagrees with the body it describes.
 	lying := ioRequest(IOOpPoll, "/srv/repo", nil)
 	binary.LittleEndian.PutUint32(lying[8:12], 64)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("payload-length-mismatch status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
-		ioRequest(9, "/srv/repo", nil)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO},
+		ioRequest(9, "/srv/repo", nil)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown-op status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
-		ioRequest(IOOpPoll, strings.Repeat("a", runnerIDMax+1), nil)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO},
+		ioRequest(IOOpPoll, strings.Repeat("a", runnerIDMax+1), nil)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("oversized-id status = %d", status)
 	}
 }
@@ -293,7 +293,7 @@ func TestRegisteredWorkspaceWithoutPollerFailsPromptly(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/offline")
 	started := time.Now()
-	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("offline runner status: %v", status)
 	}
 	if time.Since(started) > time.Second {
@@ -301,7 +301,7 @@ func TestRegisteredWorkspaceWithoutPollerFailsPromptly(t *testing.T) {
 	}
 	point := runnerFor("/srv/offline")
 	point.lastPoll = time.Now().Add(-2 * time.Minute)
-	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("stale runner status: %v", status)
 	}
 }

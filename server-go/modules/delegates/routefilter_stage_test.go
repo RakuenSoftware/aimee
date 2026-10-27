@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func routeFilterRequest(agents []RouteAgent, caps uint32, minContext int, drop bool) []byte {
@@ -48,9 +48,9 @@ func routeFilterRequest(agents []RouteAgent, caps uint32, minContext int, drop b
 func callRouteFilter(t *testing.T, agents []RouteAgent, caps uint32, minContext int,
 	drop bool) RouteFilterResult {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRouteFilter},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRouteFilter},
 		routeFilterRequest(agents, caps, minContext, drop))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if len(response) != 16+len(agents)*4 ||
@@ -155,16 +155,16 @@ func TestRouteFilterStageRejectsMalformedRequests(t *testing.T) {
 	cases["agent count over the bound"] = tooMany
 
 	for name, request := range cases {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageRouteFilter}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageRouteFilter}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v, want InvalidRequest", name, status)
 		}
 	}
 }
 
 func TestRouteFilterStageHonoursCancellation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageRouteFilter, DeadlineNS: 1}
+	invocation := ring.ModuleInvocation{StageID: StageRouteFilter, DeadlineNS: 1}
 	request := routeFilterRequest([]RouteAgent{capableAgent()}, ModelCapTools, 0, false)
-	if _, status := Handle(invocation, request); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, request); status != ring.ModuleStatusCancelled {
 		t.Errorf("status = %v, want Cancelled", status)
 	}
 }

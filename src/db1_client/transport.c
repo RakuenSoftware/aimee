@@ -2,8 +2,8 @@
 #include "transport.h"
 #include "db1_module_api.h"
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 #include <stdlib.h>
@@ -38,7 +38,7 @@ int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *ne
       if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
-      if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
+      if (n > OURO_MODULE_MESSAGE_MAX_BODY - need - 4u)
          return -1;
       need += 4u + n;
    }
@@ -85,7 +85,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
       call to make, and saying so beats waiting out a deadline. */
    if (!obs_bus_module_available(family->event_kind))
    {
-      warn_unreachable(family, AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      warn_unreachable(family, OURO_MODULE_CALL_CAPABILITY_ABSENT);
       return -1;
    }
 
@@ -109,13 +109,13 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
 
    uint32_t response_len = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(family->timeout_ms);
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        family->event_kind, family->stage_id, 0, deadline, request, (uint32_t)request_len, response,
        (uint32_t)response_cap, &response_len, NULL, NULL);
    free(request);
 
    int result = -1;
-   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
+   if (rc != OURO_MODULE_CALL_OK || response_len < 8u)
       warn_unreachable(family, (int)rc);
    else
    {
