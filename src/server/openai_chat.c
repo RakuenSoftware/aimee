@@ -1527,7 +1527,8 @@ static int runs_handler(const char *body, char *resp, int cap)
       job->request.has_max_tokens = 1;
       job->request.max_tokens = (int)alias;
    }
-   if (!agent_request_with_tools_supported(&job->request))
+   /* This endpoint owns its executable catalog; caller tools are not grants. */
+   if (job->request.n_tools || !agent_request_with_tools_supported(&job->request))
    {
       snprintf(error, sizeof error, "run request contains unsupported execution controls");
       goto invalid;

@@ -611,8 +611,14 @@ static void explicit_control_reply_capability(void)
    {
       compute_ctx_t c = context();
       c.req = cJSON_Parse(valid[i]);
+      request_context_t parent = {.control_reply_capability = i == 2};
+      request_context_set(&parent);
+      c.request_context.active = 1;
+      c.request_context.value = parent;
       assert(!begin_text(&c, "session-one", "source owned headless capability"));
       assert(server_control_scope_can_reply(c.ir_controls) == (i != 2));
+      assert(request_context_get()->control_reply_capability == (i != 2));
+      assert(c.request_context.value.control_reply_capability == (i != 2));
       assert(c.ir_capture && !server_session_capture_failed(c.ir_capture));
       server_control_scope_t *lease = NULL;
       assert(!server_control_scope_capture("session-one", "alice", &lease) &&
@@ -625,6 +631,7 @@ static void explicit_control_reply_capability(void)
       cJSON_Delete(c.req);
       c.req = NULL;
       cleanup(&c);
+      request_context_clear();
    }
    const char *invalid[] = {"null", "0", "1", "\"false\"", "[]", "{}"};
    for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++)

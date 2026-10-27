@@ -10,6 +10,7 @@
 #include "agent_config.h" /* agent_request_creds_t: inherit per-turn creds */
 #include "agent_exec.h"
 #include "request_context.h"
+#include "server_session_control.h"
 #include "config.h" /* aimee_resolve_compute_threads */
 #include "log.h"
 
@@ -173,6 +174,11 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    agent_request_creds_snapshot(&creds);
    request_context_snapshot_t request_context;
    request_context_snapshot(&request_context);
+   server_control_scope_t *controls = server_control_scope_current();
+   if (request_context.active && controls)
+      request_context.value.control_reply_capability =
+          request_context.value.control_reply_capability &&
+          server_control_scope_can_reply(controls);
    /* Parallel seats inherit the worktree that was active when this fan-out was
     * invoked. Later parent-thread changes are intentionally not observed. */
    const char *parent_cwd = run_cmd_get_cwd();
@@ -300,6 +306,11 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
    agent_request_creds_snapshot(&creds);
    request_context_snapshot_t request_context;
    request_context_snapshot(&request_context);
+   server_control_scope_t *controls = server_control_scope_current();
+   if (request_context.active && controls)
+      request_context.value.control_reply_capability =
+          request_context.value.control_reply_capability &&
+          server_control_scope_can_reply(controls);
    /* Capture-at-call-time, matching the deadline path above. */
    const char *parent_cwd = run_cmd_get_cwd();
 

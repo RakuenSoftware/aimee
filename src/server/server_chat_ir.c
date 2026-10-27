@@ -385,6 +385,14 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const aimee_mess
    if (cJSON_IsFalse(replies))
       server_control_scope_disable_replies(c->ir_controls);
    c->ir_previous_controls = server_control_scope_bind(c->ir_controls);
+   const request_context_t *owner = request_context_get();
+   if (owner)
+   {
+      request_context_t headed = *owner;
+      headed.control_reply_capability = server_control_scope_can_reply(c->ir_controls);
+      request_context_set(&headed);
+      c->request_context.value.control_reply_capability = headed.control_reply_capability;
+   }
    c->ir_capture =
        server_session_capture_open(c->ir_session, c->ir_turn, c->vault_principal, c->ir_session);
    if (!c->ir_capture)

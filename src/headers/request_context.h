@@ -53,6 +53,9 @@ typedef struct
    /* Host-owned execution intent, never read from transport/model arguments.
     * A delegated model retains its actor's data access, not human attribution. */
    int model_execution;
+   /* Host-only operator reply capability from an admitted chat control scope.
+    * Async snapshots may retain or restrict it; identity alone never grants it. */
+   int control_reply_capability;
    /* Host-only provenance of an authenticated direct operator's script. Its
     * worker is still untrusted/model execution; this permits only the existing
     * unbound action path. Actual model entry clears it; canonical captures and

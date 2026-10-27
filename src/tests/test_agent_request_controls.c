@@ -47,6 +47,14 @@ static void typed_controls(void)
    request.stream = 1;
    assert(!agent_request_with_tools_supported(&request));
    request.stream = 0;
+   aimee_block_t empty = {.type = AIMEE_BLK_TEXT, .text = ""};
+   aimee_message_t empty_message = {.role = "user", .blocks = &empty, .n_blocks = 1};
+   aimee_request_t empty_request = {.messages = &empty_message, .n_messages = 1};
+   assert(!agent_request_with_tools_supported(&empty_request));
+   empty.type = AIMEE_BLK_IMAGE;
+   empty.media_type = "image/png";
+   empty.media_ref = "https://example.invalid/image.png";
+   assert(agent_request_with_tools_supported(&empty_request));
    aimee_tool_t custom = {.name = "unregistered", .schema = cJSON_CreateObject()};
    request.tools = &custom;
    request.n_tools = 1;

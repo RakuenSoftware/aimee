@@ -164,8 +164,12 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
    /* Structural admission is independent of later host catalog/grant checks.
     * Retain valid controls and content rather than imposing text adapter shape. */
    for (int i = 0; i < request->n_messages; ++i)
-      if (request->messages[i].n_blocks)
-         return 1;
+      for (int j = 0; j < request->messages[i].n_blocks; ++j)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
+            return 1;
+      }
    return 0;
 }
 

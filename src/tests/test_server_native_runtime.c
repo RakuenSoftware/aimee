@@ -419,6 +419,7 @@ static atomic_int execution_mode, dispatch_count, mcp_execution, cli_shell_probe
 static char revoked_cli_token[65], revoked_cli_url[64], outer_cli_attempt[128];
 static void exercise_nested_cli(void);
 static _Thread_local char execution_attempt[128];
+static int expected_control_reply_capability = 1;
 static void check_execution_owner(const char *name)
 {
    assert(current_mirror == &fixture_mirror);
@@ -427,6 +428,7 @@ static void check_execution_owner(const char *name)
        (!strcmp(name, "read_file") || (atomic_load(&cli_shell_probe) && !strcmp(name, "bash"))) &&
        owner && owner->model_execution);
    assert(!strcmp(owner->vault_principal, "webuser:alice") && !strcmp(identity, "webuser:alice"));
+   assert(owner->control_reply_capability == expected_control_reply_capability);
    if (atomic_load(&cli_shell_probe) && !strcmp(owner->path, "/v1/native/cli"))
       assert(!strcmp(owner->method, "POST"));
    else
@@ -742,7 +744,8 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
       assert(!owner->trusted && owner->model_execution == 1 && !owner->operator_script_origin);
       request_context_snapshot_t saved;
       request_context_snapshot(&saved);
-      for (int field = 0; field < 8; field++)
+      assert(!owner->control_reply_capability);
+      for (int field = 0; field < 9; field++)
       {
          request_context_t changed = *owner;
          if (field == 0)
@@ -761,6 +764,8 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
             changed.model_execution = 0;
          if (field == 7)
             changed.operator_script_origin = 1;
+         if (field == 8)
+            changed.control_reply_capability = 1;
          request_context_set(&changed);
          assert(!server_native_runtime_forward_service_admitted());
          request_context_restore(&saved);
@@ -3061,7 +3066,8 @@ int main(void)
    strcpy(selected.auth_type, "codex-oauth");
    test_private_service_forward_callback(&selected);
    request_context_t a = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
-                          .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE};
+                          .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE,
+                          .control_reply_capability = 1};
    strcpy(a.vault_principal, "webuser:alice");
    strcpy(a.principal, "alice");
    strcpy(a.idempotency_key, "browser-turn-only");
@@ -3145,6 +3151,11 @@ int main(void)
    test_native_supervised_execution(&selected, &a);
    test_native_large_mcp_catalog(&selected, &a);
    test_native_bound_mcp(&selected, &a);
+   request_context_t no_replies = a;
+   no_replies.control_reply_capability = 0;
+   expected_control_reply_capability = 0;
+   test_native_bound_mcp(&selected, &no_replies);
+   expected_control_reply_capability = 1;
    test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
    /* Same actual runtime/history owner with a synthetic container provider:

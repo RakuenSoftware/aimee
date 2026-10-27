@@ -7,6 +7,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "request_context.h"
+#include "server_session_control.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdarg.h>
@@ -16,6 +17,19 @@
 #include <time.h>
 
 /* --- stubs for agent_parallel.o's dependencies --- */
+/* The caller snapshots this scope before workers start; no worker borrows it. */
+static int fixture_control_capability = -1;
+server_control_scope_t *server_control_scope_current(void)
+{
+   return fixture_control_capability < 0 ? NULL
+                                         : (server_control_scope_t *)&fixture_control_capability;
+}
+int server_control_scope_can_reply(const server_control_scope_t *scope)
+{
+   assert(scope == (server_control_scope_t *)&fixture_control_capability);
+   return fixture_control_capability;
+}
+
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
    if (out)
@@ -102,6 +116,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
       assert(!strcmp(owner->caller_authorization, "test-only-owner-proof"));
       assert(owner->request_budget_present == 1 &&
              !strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
+      assert(owner->control_reply_capability == owner->peer_uid);
       assert(!owner->context_refused);
       assert(!request_context_refuse_assembly("worker-only-refusal"));
    }
@@ -437,31 +452,40 @@ static void test_parallel_preserves_owner_and_limits(void)
 {
    agent_config_t cfg = {0};
    for (int deadline = 0; deadline < 2; deadline++)
-   {
-      request_context_t owner = {0};
-      snprintf(owner.principal, sizeof owner.principal, "owner-%d", deadline);
-      snprintf(owner.caller_authorization, sizeof owner.caller_authorization,
-               "test-only-owner-proof");
-      owner.capabilities = 7;
-      owner.transport = REQ_TRANSPORT_TCP;
-      owner.request_budget_present = 1;
-      snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
-               "{\"max_tokens\":1234}");
-      request_context_set(&owner);
-      agent_task_t tasks[2] = {0};
-      agent_result_t results[2] = {0};
-      for (int i = 0; i < 2; i++)
-      {
-         tasks[i].agent = "context-owner";
-         assert(!aimee_ir_request_from_text(&tasks[i].request, NULL, owner.principal, 0, 0.3));
-      }
-      assert(fixture_run_parallel(&cfg, tasks, 2, results, deadline ? 1000 : 0) == 2);
-      assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
-      for (int i = 0; i < 2; i++)
-         agent_result_clear_response(&results[i]);
-      request_context_clear();
-   }
-   puts("  parallel owner proof, capability scope, limits and local refusal isolation: ok");
+      for (int saved = 0; saved <= 1; saved++)
+         for (int capability = -1; capability <= 1; capability++)
+         {
+            fixture_control_capability = capability;
+            request_context_t owner = {0};
+            /* A disabled live scope restricts a saved headed owner; a fresh headless
+             * owner stays denied even under a headed scope. No snapshot grants. */
+            owner.control_reply_capability = saved;
+            owner.peer_uid = saved && capability != 0;
+            snprintf(owner.principal, sizeof owner.principal, "owner-%d", deadline);
+            snprintf(owner.caller_authorization, sizeof owner.caller_authorization,
+                     "test-only-owner-proof");
+            owner.capabilities = 7;
+            owner.transport = REQ_TRANSPORT_TCP;
+            owner.request_budget_present = 1;
+            snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
+                     "{\"max_tokens\":1234}");
+            request_context_set(&owner);
+            agent_task_t tasks[2] = {0};
+            agent_result_t results[2] = {0};
+            for (int i = 0; i < 2; i++)
+            {
+               tasks[i].agent = "context-owner";
+               assert(
+                   !aimee_ir_request_from_text(&tasks[i].request, NULL, owner.principal, 0, 0.3));
+            }
+            assert(fixture_run_parallel(&cfg, tasks, 2, results, deadline ? 1000 : 0) == 2);
+            assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
+            for (int i = 0; i < 2; i++)
+               agent_result_clear_response(&results[i]);
+            request_context_clear();
+         }
+   fixture_control_capability = -1;
+   puts("  parallel owner proof, reply capability, limits and local refusal isolation: ok");
 }
 
 static void test_parallel_preserves_structured_ir(void)

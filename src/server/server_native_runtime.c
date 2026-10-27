@@ -100,6 +100,7 @@ int server_native_runtime_forward_service_admitted(void)
           !aimee_ir_request_admit(&runtime->request_profile) && owner &&
           owner->vault_transport == ATTEST_NONE && !owner->trusted && owner->model_execution == 1 &&
           !owner->operator_script_origin && owner->capabilities == runtime->owner.capabilities &&
+          owner->control_reply_capability == runtime->owner.control_reply_capability &&
           !strcmp(owner->principal, runtime->owner.principal) &&
           !strcmp(owner->vault_principal, runtime->owner.vault_principal) &&
           !strcmp(owner->session_key, runtime->session) &&

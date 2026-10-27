@@ -6844,7 +6844,7 @@ $(TESTPREFIX)/unit-test-claude-headless: $(OBJDIR)/tests/test_claude_headless.o 
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-chat-ir: $(OBJDIR)/server/server_session_control.o $(OBJDIR)/tests/test_server_chat_ir.o \
-    $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_learning_outcome.o \
+    $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_chat_ir.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_learning_outcome.o \
     $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o

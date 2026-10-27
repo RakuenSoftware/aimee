@@ -3413,9 +3413,34 @@ int main(void)
       snprintf(op_owner.request_budget_limits, sizeof op_owner.request_budget_limits,
                "{\"max_tokens\":1234}");
       compute_ctx_t inherited = {0};
+      for (int saved = 0; saved <= 1; ++saved)
+         for (int allowed = 0; allowed <= 1; ++allowed)
+         {
+            request_context_t headed = op_owner;
+            headed.control_reply_capability = saved;
+            request_context_set(&headed);
+            server_control_scope_t *controls = server_control_scope_open(
+                "snapshot-chat", "snapshot-turn", op_owner.vault_principal);
+            assert(controls);
+            if (!allowed)
+               server_control_scope_disable_replies(controls);
+            server_control_scope_t *previous = server_control_scope_bind(controls);
+            compute_ctx_capture_request_context(&inherited, NULL);
+            assert(inherited.request_context.active &&
+                   inherited.request_context.value.control_reply_capability == (saved && allowed));
+            server_control_scope_bind(previous);
+            server_control_scope_close(controls);
+            request_context_restore(&inherited.request_context);
+            /* A detached worker retains both the headed grant and explicit denial
+             * after the launching scope ends; no ambient scope is fabricated. */
+            compute_ctx_capture_request_context(&inherited, NULL);
+            assert(inherited.request_context.value.control_reply_capability == (saved && allowed));
+            request_context_snapshot_clear(&inherited.request_context);
+         }
       request_context_set(&op_owner);
       compute_ctx_capture_request_context(&inherited, NULL);
       assert(inherited.conn_caps == CAP_DELEGATE);
+      assert(!inherited.request_context.value.control_reply_capability);
       assert(inherited.attested_transport == ATTEST_WEBCHAT_TRUSTED);
       assert(!strcmp(inherited.vault_principal, "webuser:op-owner"));
       request_context_clear();

@@ -287,8 +287,8 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    server_session_log_t *log_scope = NULL;
-   /* Internal attempts have no reply subscriber. An existing headed primary
-    * capture is preserved by begin_selected rather than restricted in place. */
+   /* Only an admitted chat owner can grant replies to a private child capture.
+    * Headless internal attempts retain the default-denied owner snapshot. */
    int capture = -1, rc;
    const request_context_t *owner = request_context_get();
    if (agent_request_cancelled() || admission_cancel_poll(admit_deleg) ||
@@ -299,9 +299,9 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    }
    else
    {
-      capture =
-          server_session_log_begin_selected(role, host_text_profile ? &request->messages[0] : NULL,
-                                            ag->name, ag->provider, ag->model, 0, &log_scope);
+      capture = server_session_log_begin_selected(
+          role, host_text_profile ? &request->messages[0] : NULL, ag->name, ag->provider, ag->model,
+          owner && owner->control_reply_capability, &log_scope);
       if (capture < 0)
       {
          rc = AGENT_RC_CAPTURE_FAILED;
