@@ -23,10 +23,9 @@ class FrontendReleaseGateTests(unittest.TestCase):
         script = "\n".join(line[10:] for line in run.splitlines() if line.startswith("          "))
         env = dict(os.environ, CHANGE_SCOPE_RESULT="success", DOCS_ONLY="false",
                    SHARDS_RESULT="success", SHARDS_PG_RESULT="success", POSTGRES_REPLAY_RESULT="success",
-                   P1_RESULT="success", GO_RESULT="success", MEMORY_BACKENDS_RESULT="success", LSP_REAL_RESULT="success",
-                   RUST_BUS_RESULT="success")
-        self.assertIn("RUST_BUS_RESULT: ${{ needs.rust-bus-tests.result }}", aggregate)
-        for lane in ("FRONTEND_RESULT", "MEMORY_BACKENDS_RESULT", "RUST_BUS_RESULT"):
+                   P1_RESULT="success", GO_RESULT="success", MEMORY_BACKENDS_RESULT="success", LSP_REAL_RESULT="success")
+        self.assertNotIn("rust-bus-tests", aggregate)
+        for lane in ("FRONTEND_RESULT", "MEMORY_BACKENDS_RESULT"):
             for result in ("success", "failure", "cancelled", "skipped"):
                 with self.subTest(lane=lane, result=result):
                     trial = dict(env, FRONTEND_RESULT="success")

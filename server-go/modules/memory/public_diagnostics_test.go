@@ -7,7 +7,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -51,17 +51,17 @@ func TestDiagnosticPublicValidation(t *testing.T) {
 	}
 }
 
-func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:diagnostic", TransportIdentity: "cert:diagnostic", ScopeKind: "project", ScopeID: "runtime-project-b"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:diagnostic", TransportIdentity: "cert:diagnostic", ScopeKind: "project", ScopeID: "runtime-project-b"}
 	run := func(args string, verified bool) map[string]any {
 		t.Helper()
-		c := bus.CommandContext{}
+		c := ring.CommandContext{}
 		if verified {
 			c = caller
 		}
 		r, status := invokeContextCommand(t, handler, 0, c, "diagnose_scoped", args)
-		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		if status != ring.ModuleStatusOK || r["status"] != "ok" {
 			t.Fatal(status, r)
 		}
 		return r
@@ -69,7 +69,7 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	base := `"query":"runtime-role-probe","scope_type":"project","scope_value":"runtime-project-b"`
 	foreign := caller
 	foreign.ScopeID = "verified-other-scope"
-	if result, status := invokeContextCommand(t, handler, 0, foreign, "diagnose_scoped", `{`+base+`}`); status == bus.ModuleStatusOK && result["status"] == "ok" {
+	if result, status := invokeContextCommand(t, handler, 0, foreign, "diagnose_scoped", `{`+base+`}`); status == ring.ModuleStatusOK && result["status"] == "ok" {
 		t.Fatal("diagnostic admitted scope beyond verified credential", result)
 	}
 	plain := run(`{`+base+`}`, true)

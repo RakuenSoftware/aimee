@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -39,26 +39,26 @@ var aliases = map[string]string{
 // NewHandler adds real execution to the delegates module while preserving the
 // fixed v1 role-canonicalization request used by older C callers. V2 is JSON
 // because prompts and responses are variable-sized bus messages.
-func NewHandler(executor Executor) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewHandler(executor Executor) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID == StageGroupPlan {
 			planner, ok := executor.(interface {
 				PlanGroup(context.Context, []delegatecontract.GroupPlanSeat) ([]string, error)
 			})
 			if !ok {
 				log.Print("delegates: group plan requested but this executor cannot plan groups")
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			decoder := json.NewDecoder(bytes.NewReader(request))
 			decoder.DisallowUnknownFields()
 			var decoded delegatecontract.GroupPlan
 			if decoder.Decode(&decoded) != nil || decoded.Version != delegatecontract.WireVersion ||
 				len(decoded.Seats) == 0 || len(decoded.Seats) > 64 {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			var trailing any
 			if err := decoder.Decode(&trailing); err != io.EOF {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			for i := range decoded.Seats {
 				if canonical, exists := aliases[decoded.Seats[i].Role]; exists {
@@ -66,7 +66,7 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 				}
 				if strings.TrimSpace(decoded.Seats[i].Role) == "" ||
 					strings.TrimSpace(decoded.Seats[i].Persona) == "" {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 			}
 			ctx, cancel := cancelledContext(invocation.Cancelled)
@@ -84,33 +84,33 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 					// this branch now records its own rather than discarding it.
 					log.Printf("delegates: group plan failed for %d seat(s): %s",
 						len(decoded.Seats), delegatecontract.SafeDiagnostic(err.Error()))
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
 				response, marshalErr := json.Marshal(delegatecontract.GroupPlanResult{
 					Version: delegatecontract.WireVersion,
 					Error:   delegatecontract.SafeDiagnostic(err.Error()),
 				})
 				if marshalErr != nil {
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
-				return response, bus.ModuleStatusOK
+				return response, ring.ModuleStatusOK
 			}
 			if len(models) != len(decoded.Seats) {
 				log.Printf("delegates: group plan returned %d model(s) for %d seat(s)",
 					len(models), len(decoded.Seats))
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			for _, model := range models {
 				if strings.TrimSpace(model) == "" {
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
 			}
 			response, err := json.Marshal(delegatecontract.GroupPlanResult{
 				Version: delegatecontract.WireVersion, Models: models})
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
-			return response, bus.ModuleStatusOK
+			return response, ring.ModuleStatusOK
 		}
 		if invocation.StageID != StageInvoke {
 			return Handle(invocation, request)
@@ -121,16 +121,16 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			return Handle(invocation, request)
 		}
 		if len(bytes.TrimSpace(request)) == 0 || bytes.TrimSpace(request)[0] != '{' {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if executor == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		decoder := json.NewDecoder(bytes.NewReader(request))
 		decoder.DisallowUnknownFields()
 		var decoded delegatecontract.Invocation
 		if err := decoder.Decode(&decoded); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var trailing any
 		if err := decoder.Decode(&trailing); err != io.EOF ||
@@ -138,10 +138,10 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			strings.TrimSpace(decoded.Role) == "" || strings.TrimSpace(decoded.Persona) == "" ||
 			strings.TrimSpace(decoded.Prompt) == "" || decoded.MaxTurns < 0 ||
 			decoded.ExecutionTimeoutMS < 0 || decoded.ExecutionTimeoutMS > int64((24*time.Hour)/time.Millisecond) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		if canonical, ok := aliases[decoded.Role]; ok {
 			decoded.Role = canonical
@@ -161,19 +161,19 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			(result.Termination != nil &&
 				(!delegatecontract.ValidTerminationDiagnostic(result.Termination) ||
 					result.Termination.ExecutionTimeoutMS != decoded.ExecutionTimeoutMS)) {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return response, bus.ModuleStatusOK
+		return response, ring.ModuleStatusOK
 	}
 }
 
 // Handle canonicalizes a delegate role, or infers what a prompt needs of a
 // model, without invoking a delegate.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StageCapabilities {
 		return handleCapabilities(invocation, request)
 	}
@@ -237,10 +237,10 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID != StageInvoke || len(request) != messageLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > roleMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	role := string(request[8 : 8+int(request[6])])
 	if canonical, ok := aliases[role]; ok {
@@ -251,5 +251,5 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	response[4] = wireVersion
 	response[6] = byte(len(role))
 	copy(response[8:], role)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

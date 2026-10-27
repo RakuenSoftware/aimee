@@ -2,7 +2,7 @@ package routing
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"math"
 	"testing"
 )
@@ -75,16 +75,16 @@ func TestPlanDeterministicFallbackAndWire(t *testing.T) {
 		t.Fatal("fallback depends on roster ordering")
 	}
 	raw, _ := json.Marshal(req)
-	reply, status := Handle(bus.ModuleInvocation{StageID: StagePlan}, raw)
-	if status != bus.ModuleStatusOK || string(reply) != `{"selected":0}` {
+	reply, status := Handle(ring.ModuleInvocation{StageID: StagePlan}, raw)
+	if status != ring.ModuleStatusOK || string(reply) != `{"selected":0}` {
 		t.Fatalf("wire: %s %v", reply, status)
 	}
 	for _, raw := range []string{`{}`, `{"version":2}`, `{"version":1,"candidates":[]}`, `{"version":1,"candidates":[{"name":"a"},{"name":"a"}]}`} {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StagePlan}, []byte(raw)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StagePlan}, []byte(raw)); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("accepted malformed plan", raw)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePlan, DeadlineNS: 1}, []byte("bad")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePlan, DeadlineNS: 1}, []byte("bad")); status != ring.ModuleStatusCancelled {
 		t.Fatal("cancellation must precede parsing")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -77,7 +77,7 @@ func TestRecallBudget(t *testing.T) {
 
 // Exercise the packaged runtime role and RLS, with enough unrelated rows to
 // crowd out a project unless scoping and priority happen before section LIMITs.
-func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()

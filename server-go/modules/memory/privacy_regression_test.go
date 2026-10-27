@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -75,16 +75,16 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixtu
 			t.Fatal(err)
 		}
 	}
-	call := func(placement Placement, req DataRequest) (DataResponse, bus.ModuleStatus) {
+	call := func(placement Placement, req DataRequest) (DataResponse, ring.ModuleStatus) {
 		t.Helper()
 		backend, err := NewPostgresDataStore(evalQueryer{tx}, placement)
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Authority = AuthorityUser
-		raw, status := handleData(handlerOptions{placement: placement, data: backend, commandContext: &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user"}}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		raw, status := handleData(handlerOptions{placement: placement, data: backend, commandContext: &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user"}}, ring.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var reply DataResponse
-		if status == bus.ModuleStatusOK {
+		if status == ring.ModuleStatusOK {
 			if err := json.Unmarshal(raw, &reply); err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixtu
 	check := func(place Placement, want string) {
 		t.Helper()
 		r, s := call(place, DataRequest{Operation: "get", ID: 42})
-		if s != bus.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].Content != want {
+		if s != ring.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].Content != want {
 			t.Fatalf("%s get: %+v status=%v", place, r, s)
 		}
 	}
@@ -112,7 +112,7 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixtu
 	localRecall, recallStatus := call(PlacementServer, DataRequest{
 		Operation: "recall-bundle", Query: "private-fixture", LimitTokens: 1024,
 	})
-	if recallStatus != bus.ModuleStatusOK {
+	if recallStatus != ring.ModuleStatusOK {
 		t.Fatalf("local recall unavailable: %v", recallStatus)
 	}
 	var bundle recallBundle
@@ -134,7 +134,7 @@ INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES
 		t.Fatal(err)
 	}
 	withoutKB, statusWithoutKB := call(PlacementServer, DataRequest{Operation: "recall-bundle", SessionStart: true})
-	if statusWithoutKB != bus.ModuleStatusOK {
+	if statusWithoutKB != ring.ModuleStatusOK {
 		t.Fatalf("recall requires shared schema: %v", statusWithoutKB)
 	}
 	if err := json.Unmarshal(withoutKB.Payload, &bundle); err != nil {
@@ -145,7 +145,7 @@ INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES
 	}
 	for _, id := range []int64{42, 90, 91} {
 		result, status := call(PlacementServer, DataRequest{Operation: "get", ID: id, ReadPolicy: &MemoryReadPolicy{SchemaVersion: 1, Mode: "current"}})
-		if status != bus.ModuleStatusOK || result.Read == nil || result.Read.ErrorCode != "" || result.Read.Mode != "current" || (len(result.Records) == 1) != (id == 42) {
+		if status != ring.ModuleStatusOK || result.Read == nil || result.Read.ErrorCode != "" || result.Read.Mode != "current" || (len(result.Records) == 1) != (id == 42) {
 			t.Fatalf("versioned personal get with KB absent: id=%d status=%v result=%+v", id, status, result)
 		}
 	}
@@ -168,7 +168,7 @@ DELETE FROM user_memories WHERE id IN (90,91);`); err != nil {
 		scope     string
 	}{{PlacementServer, "global"}, {PlacementKB, "user"}} {
 		_, status := call(p.placement, DataRequest{Operation: "get", ID: 42, Scope: Scope{Type: p.scope}})
-		if status != bus.ModuleStatusInvalidRequest {
+		if status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("cross-placement scope accepted: %s %s", p.placement, p.scope)
 		}
 	}
@@ -190,7 +190,7 @@ INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,
 			if all {
 				want = append(want, 45)
 			}
-			if status != bus.ModuleStatusOK || len(reply.Records) != len(want) {
+			if status != ring.ModuleStatusOK || len(reply.Records) != len(want) {
 				t.Fatalf("%s all=%v: %+v status=%v", op, all, reply, status)
 			}
 			for i, id := range want {
@@ -201,27 +201,27 @@ INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,
 		}
 	}
 	exact, exactStatus := call(PlacementKB, DataRequest{Operation: "search", Scope: Scope{Type: ScopeProject, Value: "project-b"}, IncludeAll: true, Limit: 10})
-	if exactStatus != bus.ModuleStatusOK || len(exact.Records) != 1 || exact.Records[0].ID != 45 {
+	if exactStatus != ring.ModuleStatusOK || len(exact.Records) != 1 || exact.Records[0].ID != 45 {
 		t.Fatalf("exact query widened: %+v status=%v", exact, exactStatus)
 	}
 	confidence := 0.8
 	r, status := call(PlacementServer, DataRequest{Operation: "supersede", ID: 42, Content: "corrected private fixture", Confidence: &confidence})
-	if status != bus.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].ID != 42 {
+	if status != ring.ModuleStatusOK || len(r.Records) != 1 || r.Records[0].ID != 42 {
 		t.Fatalf("replace: %+v status=%v", r, status)
 	}
 	check(PlacementServer, "corrected private fixture")
 	check(PlacementKB, "shared knowledge")
 	r, status = call(PlacementServer, DataRequest{Operation: "delete", ID: 42})
-	if status != bus.ModuleStatusOK || !r.Deleted {
+	if status != ring.ModuleStatusOK || !r.Deleted {
 		t.Fatalf("delete: %+v status=%v", r, status)
 	}
 	r, status = call(PlacementServer, DataRequest{Operation: "get", ID: 42})
-	if status != bus.ModuleStatusOK || len(r.Records) != 0 {
+	if status != ring.ModuleStatusOK || len(r.Records) != 0 {
 		t.Fatalf("retired local lookup: %+v %v", r, status)
 	}
 	check(PlacementKB, "shared knowledge")
 	r, status = call(PlacementServer, DataRequest{Operation: "review-list", State: "retired", Limit: 10})
-	if status != bus.ModuleStatusOK || len(r.Reviews) != 1 || r.Reviews[0].ScopeType != "user" {
+	if status != ring.ModuleStatusOK || len(r.Reviews) != 1 || r.Reviews[0].ScopeType != "user" {
 		t.Fatalf("local review: %+v %v", r, status)
 	}
 	// Historical KB handles remain readable after retirement, independently of
@@ -230,15 +230,15 @@ INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,
 		t.Fatal(err)
 	}
 	retired, retiredStatus := call(PlacementKB, DataRequest{Operation: "get", ID: 42})
-	if retiredStatus != bus.ModuleStatusOK || len(retired.Records) != 0 {
+	if retiredStatus != ring.ModuleStatusOK || len(retired.Records) != 0 {
 		t.Fatalf("ordinary lookup exposed retired KB record: %+v %v", retired, retiredStatus)
 	}
 	historical, historicalStatus := call(PlacementKB, DataRequest{Operation: "get", ID: 42, AsOf: "2020-01-01T00:00:00Z"})
-	if historicalStatus != bus.ModuleStatusOK || len(historical.Records) != 1 || historical.Records[0].Content != "shared knowledge" {
+	if historicalStatus != ring.ModuleStatusOK || len(historical.Records) != 1 || historical.Records[0].Content != "shared knowledge" {
 		t.Fatalf("historical lookup: %+v %v", historical, historicalStatus)
 	}
 	_, userHistoryStatus := call(PlacementServer, DataRequest{Operation: "get", ID: 42, AsOf: "2020-01-01T00:00:00Z"})
-	if userHistoryStatus != bus.ModuleStatusInvalidRequest {
+	if userHistoryStatus != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("personal history accepted: %v", userHistoryStatus)
 	}
 }

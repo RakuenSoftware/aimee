@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestEvaluationTransportRefusesMalformedFrames(t *testing.T) {
@@ -22,9 +22,9 @@ func TestEvaluationTransportRefusesMalformedFrames(t *testing.T) {
 		strings.Repeat("x", maxEvaluationLine+1),
 	} {
 		called := false
-		err := serve(context.Background(), strings.NewReader(input), &bytes.Buffer{}, func(bus.ModuleInvocation, []byte) ([]byte, bus.ModuleStatus) {
+		err := serve(context.Background(), strings.NewReader(input), &bytes.Buffer{}, func(ring.ModuleInvocation, []byte) ([]byte, ring.ModuleStatus) {
 			called = true
-			return nil, bus.ModuleStatusOK
+			return nil, ring.ModuleStatusOK
 		})
 		if err == nil || called {
 			t.Fatal("malformed frame reached memory owner", err, called)
@@ -35,17 +35,17 @@ func TestEvaluationTransportRefusesMalformedFrames(t *testing.T) {
 func TestEvaluationTransportPreservesOwnerFailure(t *testing.T) {
 	var output bytes.Buffer
 	err := serve(context.Background(), strings.NewReader(`{"stage":"data","body":{"operation":"get","id":1}}`), &output,
-		func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+		func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 			if invocation.StageID != memory.StageData || invocation.PrincipalRef != 0 {
 				t.Fatal(invocation)
 			}
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var reply evaluationReply
-	if err := json.Unmarshal(output.Bytes(), &reply); err != nil || reply.Status != bus.ModuleStatusInternal || string(reply.Body) != "null" {
+	if err := json.Unmarshal(output.Bytes(), &reply); err != nil || reply.Status != ring.ModuleStatusInternal || string(reply.Body) != "null" {
 		t.Fatal(output.String(), err)
 	}
 }
@@ -70,7 +70,7 @@ func TestEvaluationSharedOwnerReplay(t *testing.T) {
 	decoder := json.NewDecoder(&output)
 	for i := 0; i < 3; i++ {
 		var reply evaluationReply
-		if err := decoder.Decode(&reply); err != nil || reply.Status != bus.ModuleStatusOK {
+		if err := decoder.Decode(&reply); err != nil || reply.Status != ring.ModuleStatusOK {
 			t.Fatalf("reply %d: %s status %d: %v", i, reply.Body, reply.Status, err)
 		}
 		if i < 2 {
@@ -94,14 +94,14 @@ func TestEvaluationSharedOwnerReplay(t *testing.T) {
 	}
 	decoder = json.NewDecoder(&output)
 	var reply evaluationReply
-	if err := decoder.Decode(&reply); err != nil || reply.Status != bus.ModuleStatusOK {
+	if err := decoder.Decode(&reply); err != nil || reply.Status != ring.ModuleStatusOK {
 		t.Fatal(reply, err)
 	}
 	var data memory.DataResponse
 	if err := json.Unmarshal(reply.Body, &data); err != nil || len(data.Records) != 0 {
 		t.Fatal("fresh run reused earlier corpus", string(reply.Body), err)
 	}
-	if err := decoder.Decode(&reply); err != nil || reply.Status != bus.ModuleStatusOK {
+	if err := decoder.Decode(&reply); err != nil || reply.Status != ring.ModuleStatusOK {
 		t.Fatal(reply, err)
 	}
 	var result struct {

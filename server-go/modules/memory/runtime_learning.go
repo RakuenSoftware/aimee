@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Accepted learning proposals use the same memory mutations as public commands.
 // Only the host can reach this path; proposal text cannot grant user authority.
-func handleLearningMutation(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleLearningMutation(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	var action commandArgs
 	if json.Unmarshal(args["action"], &action) != nil || action == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	request := DataRequest{IncludeAll: true, SessionID: args.stringOr("session_id", "")}
 	commandScope(args, &request)
@@ -50,27 +50,27 @@ func handleLearningMutation(options handlerOptions, invocation bus.ModuleInvocat
 		request.ID, ok = action.positiveID("old_memory_id")
 		request.Content = action.stringOr("new_content", "")
 		if !ok || request.Content == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		request.Operation, request.Confidence = "supersede", &confidence
 		options.publicWrite = options.placement == PlacementKB
 	case "workflow":
 		request.Operation, request.Workspace, request.SignalType, request.Rule = "upsert-workflow", action.stringOr("project", ""), action.stringOr("signal_type", ""), action.stringOr("rule", "")
 		if request.Workspace == "" || request.SignalType == "" || request.Rule == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		request.Confidence = &confidence
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if request.Operation != "feedback" {
 		if response.Code != nil || len(response.Records) != 1 || response.Records[0].ID <= 0 {

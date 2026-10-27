@@ -2,7 +2,7 @@ package economizer
 
 import (
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -108,7 +108,7 @@ func TestDelegateReductionAdmission(t *testing.T) {
 			}
 		}
 		response, status := invoke(t, ReduceRequest{Messages: json.RawMessage(PrintJSONUnformatted(messages)), Seam: "delegate", HistoryFold: true})
-		if status != bus.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
+		if status != ring.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
 			t.Fatalf("unadmitted native candidate exposed: orphan=%v status=%v reason=%s", orphan, status, response.Reason)
 		}
 	}

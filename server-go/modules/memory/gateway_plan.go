@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type gatewayStep struct {
@@ -52,42 +52,42 @@ func gatewayNativeShell(tool canonical.PolicyTool, namespace string) bool {
 	return false
 }
 
-func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, ring.ModuleStatus) {
 	phase := "preview"
 	if _, exists := args["phase"]; exists {
 		var ok bool
 		phase, ok = gatewayOptionalString(args, "phase")
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if phase != "preview" && phase != "context" && phase != "tools" && phase != "text" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	// These are host assembly facts, not labels parsed from user/model text.
 	// In particular a host-composed persona already contains standing guidance.
 	provided := []string{}
 	if raw, exists := args["provided_resources"]; exists {
 		if json.Unmarshal(raw, &provided) != nil || provided == nil || len(provided) > 64 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	guidanceProvided := false
 	for _, name := range provided {
 		if name == "" || len(name) > 64 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		guidanceProvided = guidanceProvided || name == "guidance"
 	}
 	var request *canonical.PolicyView
 	if phase != "text" {
 		if args["roles"] != nil || args["tools"] != nil || args["last_user_text"] != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var err error
 		request, err = canonical.DecodePolicyView(args["request"])
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	start := true
@@ -124,14 +124,14 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 	} else if phase == "context" || phase == "text" {
 		provided, ok := gatewayOptionalString(args, "provided_query")
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		fallback, ok := gatewayOptionalString(args, "last_user_text")
 		if request != nil {
 			fallback = request.LastUserText
 		}
 		if !ok {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		query := provided
 		if query == "" {

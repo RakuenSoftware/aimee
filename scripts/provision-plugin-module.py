@@ -10,7 +10,7 @@ it, and both are authorization decisions:
 That is the ONLY allocation. The instance's event kinds are DERIVED from the ref
 by the canonical module rule, kind = 4096 + ref*256 + stage
 (docs/modules/README.md), the same rule db1, git, roundtable and economizer
-assert in their tests. bus_host_serve_kind() (core/event_bus/bus_route.c:109)
+assert in their tests. ouro_host_serve_kind() (ouroboros-ring c/src/route.c)
 binds one kind to exactly ONE serving slot, so a duplicated kind means a module
 is denied at attach with nothing in its own log to say why -- and deriving kinds
 from an already-unique ref makes that impossible by construction.
@@ -57,7 +57,7 @@ MCP_CREDENTIAL_RE = re.compile(
 # (tests/baselines/modules/canonical-inventory.yaml) and are handed out in order,
 # so this band leaves ample room before it is reached; the reservation is recorded
 # in that file so no future module is assigned into it. The band is wider than the
-# real ceiling -- BUS_HOST_MAX_KINDS is 256 kinds per host, shared with every other
+# real ceiling -- OURO_HOST_MAX_KINDS is 256 kinds per host, shared with every other
 # module -- so the band is never what binds.
 # The band MUST match tests/baselines/modules/canonical-inventory.yaml, which
 # enforces that no module ref falls inside it.

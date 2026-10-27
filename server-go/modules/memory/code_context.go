@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const codeContextMaxItems = 4
@@ -58,16 +58,16 @@ func decodeCodeContext(args commandArgs) (codeContextRequest, bool) {
 // fetches memory from this same Go owner; caller-supplied memory is never used.
 // The plan operation lets native compatibility tests execute the identical
 // packet policy with deterministic evidence snapshots.
-func handleCodeContext(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleCodeContext(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request, ok := decodeCodeContext(args)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if args.stringOr("operation", "") == "code-context-plan" {
 		return codeContextCommandResult(buildCodeContext(request))
 	}
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	request.Memories = nil
 	initial := buildCodeContext(request)
@@ -81,7 +81,7 @@ func handleCodeContext(options handlerOptions, invocation bus.ModuleInvocation, 
 		// independently accepted code or leave a failed store transaction open.
 		raw, _ := json.Marshal(DataRequest{Operation: "visible-search", Query: request.Query, Project: request.Project, Limit: 8, PublicView: true})
 		encoded, status := handleData(options, invocation, raw)
-		if status == bus.ModuleStatusOK {
+		if status == ring.ModuleStatusOK {
 			var response DataResponse
 			if json.Unmarshal(encoded, &response) == nil {
 				scopes := map[int64]Scope{}
@@ -321,10 +321,10 @@ func buildCodeContext(request codeContextRequest) codeContextResult {
 
 // Keep the complete packet as text through native cJSON transport so exact
 // int64 generations and memory IDs are never round-tripped through doubles.
-func codeContextCommandResult(result codeContextResult) ([]byte, bus.ModuleStatus) {
+func codeContextCommandResult(result codeContextResult) ([]byte, ring.ModuleStatus) {
 	raw, err := json.Marshal(result.Packet)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(map[string]any{"status": "ok", "http_status": result.HTTPStatus, "packet_json": string(raw)})
 }

@@ -23,11 +23,11 @@ int obs_bus_module_available(uint32_t event_kind)
    return 0;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)event_kind;
    (void)stage_id;
@@ -40,7 +40,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    (void)response_len;
    (void)cancelled;
    (void)cancel_context;
-   return AIMEE_MODULE_CALL_TRANSPORT;
+   return OURO_MODULE_CALL_TRANSPORT;
 }
 
 /* Resolver precedence: repo .aimee/project.yaml > per-workspace override > global. */

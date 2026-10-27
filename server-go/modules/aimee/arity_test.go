@@ -3,9 +3,9 @@ package aimee
 import (
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Every operation's field count is CHECKED, and this is what makes that true of
@@ -102,8 +102,8 @@ func TestEveryOperationChecksItsFieldCount(t *testing.T) {
 					t.Fatalf("encode: %v", err)
 				}
 				sent++
-				body, transport := m.Handle(bus.ModuleInvocation{StageID: stage}, frame)
-				if transport != bus.ModuleStatusOK {
+				body, transport := m.Handle(ring.ModuleInvocation{StageID: stage}, frame)
+				if transport != ring.ModuleStatusOK {
 					continue // refused at the transport level, which is a refusal
 				}
 				status, _, err := peerwire.DecodeResponse(body)

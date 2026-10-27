@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	domain "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
 	"testing"
@@ -57,8 +57,8 @@ func TestSharedLargeLegacySourceReadsAndImport(t *testing.T) {
 		if err != nil {
 			return 0, nil, err
 		}
-		reply, status := families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
-		if status != bus.ModuleStatusOK {
+		reply, status := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
+		if status != ring.ModuleStatusOK {
 			return 0, nil, fmt.Errorf("transport=%d", status)
 		}
 		return wire.DecodeFields(reply)
@@ -230,10 +230,10 @@ func TestSharedLegacyGetterExactReplyEnvelopeBoundary(t *testing.T) {
 	for _, op := range []uint32{11, 15} {
 		for _, excess := range []int{0, 1} {
 			t.Run(fmt.Sprintf("operation%d/extra%d", op, excess), func(t *testing.T) {
-				capacity := int(bus.ModuleMessageMaxBody) - 12
+				capacity := int(ring.ModuleMessageMaxBody) - 12
 				fields := []string{session, agent, provider}
 				if op == 15 {
-					capacity = int(bus.ModuleMessageMaxBody) - 8 - 4*6 - len(session) - len(agent) - len(provider) - 2*19
+					capacity = int(ring.ModuleMessageMaxBody) - 8 - 4*6 - len(session) - len(agent) - len(provider) - 2*19
 					fields = []string{session}
 				}
 				size := capacity + excess
@@ -245,9 +245,9 @@ func TestSharedLegacyGetterExactReplyEnvelopeBoundary(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				reply, transport := families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
+				reply, transport := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
 				status, cells, err := wire.DecodeFields(reply)
-				if transport != bus.ModuleStatusOK || err != nil || len(reply) > int(bus.ModuleMessageMaxBody) {
+				if transport != ring.ModuleStatusOK || err != nil || len(reply) > int(ring.ModuleMessageMaxBody) {
 					t.Fatal("invalid envelope", transport, status, len(reply), err)
 				}
 				if excess == 0 {
@@ -255,7 +255,7 @@ func TestSharedLegacyGetterExactReplyEnvelopeBoundary(t *testing.T) {
 					if op == 15 {
 						index = 3
 					}
-					if status != domain.StatusOK || len(cells) <= index || cells[index] != raw || len(reply) != int(bus.ModuleMessageMaxBody) {
+					if status != domain.StatusOK || len(cells) <= index || cells[index] != raw || len(reply) != int(ring.ModuleMessageMaxBody) {
 						t.Fatal("exact-boundary UTF8 source changed", status, len(cells), len(reply))
 					}
 				} else if status != domain.StatusTooLong || len(cells) != 0 || len(reply) != 8 {

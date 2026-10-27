@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestIngressBlockNativeGoldens(t *testing.T) {
@@ -73,8 +73,8 @@ func TestIngressAssemblyBothPlacementsAndExactIDs(t *testing.T) {
 			r["headline_missing_count"] != float64(1) || r["facts_unavailable"] != false {
 			t.Fatal(r)
 		}
-		frame, _ := bus.EncodeCommand("runtime", []byte(request))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(request))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 	}
@@ -172,8 +172,8 @@ func TestVersionedIngressByteBudget(t *testing.T) {
 				t.Fatal("unsupported or invalid budget silently accepted", tt, r)
 			}
 		}
-		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"ingress-assemble","context_limits":{"schema_version":1,"max_context_byte":0}}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"ingress-assemble","context_limits":{"schema_version":1,"max_context_byte":0}}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("unknown limit silently ignored", status)
 		}
 	}
@@ -244,11 +244,11 @@ func TestMemoryLimitsRejectAmbiguousWireValues(t *testing.T) {
 		}
 		for _, operation := range operations {
 			for _, raw := range malformed {
-				frame, err := bus.EncodeCommand("runtime", []byte(`{"operation":"`+operation+`","query":"fixture","project":"p","active_scope":true,"preview_enabled":true,"context_limits":`+raw+`}`))
+				frame, err := ring.EncodeCommand("runtime", []byte(`{"operation":"`+operation+`","query":"fixture","project":"p","active_scope":true,"preview_enabled":true,"context_limits":`+raw+`}`))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+				if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 					t.Fatalf("%s/%s accepted ambiguous limit %s: %v", placement, operation, raw, status)
 				}
 			}

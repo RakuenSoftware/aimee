@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // The wire for the launch decision.
@@ -107,13 +107,13 @@ func (w *wireWriter) strings(items []string) {
 
 // handleLaunchPlan reads a plan and returns the steps, tasks, repairs and
 // warnings it becomes -- or the reason it must not launch.
-func handleLaunchPlan(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleLaunchPlan(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	r := &wireReader{buf: request}
 	// Same header bytes as every other delegate stage: magic, then the version
 	// in byte 4. The three bytes above it are reserved and must be zero, so a
 	// future field cannot be introduced without this module noticing.
 	if r.u32() != launchPlanRequestMagic || r.u32() != uint32(wireVersion) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	maxConcurrent := int(int32(r.u32()))
@@ -142,10 +142,10 @@ func handleLaunchPlan(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	// A request with bytes left over is one this module read differently from
 	// how the caller wrote it. Refuse rather than launch part of a plan.
 	if !r.done() {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	d := PlanLaunch(plan, maxConcurrent)
@@ -177,5 +177,5 @@ func handleLaunchPlan(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	}
 
 	w.strings(d.Warnings)
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }

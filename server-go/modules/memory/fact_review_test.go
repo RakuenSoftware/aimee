@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -27,24 +27,24 @@ func exerciseFactReviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s *p
 		t.Fatal(candidate)
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
-	operator := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:review", TransportIdentity: "verified:console"}
-	call := func(id int64, action string, peer uint32, actor bus.CommandContext) map[string]any {
+	operator := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:review", TransportIdentity: "verified:console"}
+	call := func(id int64, action string, peer uint32, actor ring.CommandContext) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"operation": "fact-review", "id": id, "action": action, "actor": "forged"})
 		result, status := invokeContextCommand(t, handler, peer, actor, "runtime", string(raw))
 		if peer != 0 {
-			if status != bus.ModuleStatusInvalidRequest {
+			if status != ring.ModuleStatusInvalidRequest {
 				t.Fatal("remote review accepted", result, status)
 			}
 			return nil
 		}
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(result, status)
 		}
 		return result
 	}
 	call(candidate.AssertionID, "approve", 200, operator)
-	if r := call(candidate.AssertionID, "approve", 0, bus.CommandContext{}); r["kind"] != "unauthorized" {
+	if r := call(candidate.AssertionID, "approve", 0, ring.CommandContext{}); r["kind"] != "unauthorized" {
 		t.Fatal(r)
 	}
 	if r := call(candidate.AssertionID, "approve", 0, operator); r["status"] != "ok" || r["lifecycle"] != "promoted" {
@@ -132,7 +132,7 @@ func exerciseFactReviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s *p
 	}
 	raw, _ := json.Marshal(map[string]any{"operation": "fact-review", "id": private.AssertionID, "action": "approve", "scope_context": true})
 	r, status := invokeContextCommand(t, handler, 0, operator, "runtime", string(raw))
-	if status != bus.ModuleStatusOK || r["kind"] != "not_found" {
+	if status != ring.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal("private assertion reviewed outside scope", r, status)
 	}
 	sql(`SELECT set_config('aimee.memory_scope_all','1',true)`)

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Accept integral JSON numbers such as 7, 7.0 and 7e0, while rejecting
@@ -181,10 +181,10 @@ func ingressTaskContext(raw json.RawMessage, project string) (string, int, float
 	return block.String(), kept, top
 }
 
-func handleIngressTaskPacket(args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleIngressTaskPacket(args commandArgs) ([]byte, ring.ModuleStatus) {
 	var project *string
 	if json.Unmarshal(args["project"], &project) != nil || project == nil || args["packet"] == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	block, count, confidence := ingressTaskContext(args["packet"], *project)
 	return commandResult(map[string]any{"status": "ok", "block": block, "item_count": count, "confidence": confidence})

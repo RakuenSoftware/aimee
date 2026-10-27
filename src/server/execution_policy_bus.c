@@ -2,7 +2,7 @@
 #include "agent_exec.h"
 
 #include <aimee/execution-policy/module_api.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include "computer_use.h"
 #include "headers/module_json_call.h"
@@ -352,15 +352,15 @@ static int policy_baseline(const char *tool_name, const char *side_effect, const
    cJSON_AddItemToObject(computer, "allowed_domains", domains);
    cJSON_AddItemToObject(request, "computer_use", computer);
 
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response = aimee_module_json_call(
        AIMEE_EXECUTION_POLICY_EVENT_TOOL, AIMEE_EXECUTION_POLICY_STAGE_TOOL, request,
-       AIMEE_MODULE_MESSAGE_MAX_BODY, EXECUTION_POLICY_TIMEOUT_MS, &result);
+       OURO_MODULE_MESSAGE_MAX_BODY, EXECUTION_POLICY_TIMEOUT_MS, &result);
    if (!response)
    {
       char failure[160];
       snprintf(failure, sizeof failure, "execution-policy module failed: %s",
-               aimee_module_call_result_name(result));
+               ouro_module_call_result_name(result));
       set_reason(reason_out, reason_len, failure);
       return -1; /* required authorization is fail-closed */
    }

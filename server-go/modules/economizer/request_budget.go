@@ -8,7 +8,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // RequestAdmissionPollInterval keeps the final provider gate responsive after
@@ -126,10 +126,10 @@ func admitRequestBudgetPolicy(raw, policy []byte, requestBytes uint64) uint16 {
 // provider body. Only this bounded metadata crosses the bus: prompt content is
 // neither duplicated nor captured by the admission call. The response commitment
 // binds route, body digest, byte length and the exact requested limits together.
-func handleRequestBudget(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRequestBudget(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < requestBudgetHeader || len(request) > requestBudgetPolicyHeader+2*requestBudgetLimitsMax ||
 		binary.LittleEndian.Uint32(request[:4]) != requestBudgetMagic {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	route := binary.LittleEndian.Uint16(request[6:8])
 	length := uint64(binary.LittleEndian.Uint32(request[48:52]))
@@ -137,27 +137,27 @@ func handleRequestBudget(invocation bus.ModuleInvocation, request []byte) ([]byt
 	switch binary.LittleEndian.Uint16(request[4:6]) {
 	case auxWireVersion:
 		if length == 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case 2:
 		if len(request) < requestBudgetPolicyHeader {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		header = requestBudgetPolicyHeader
 		policyLength = uint64(binary.LittleEndian.Uint32(request[52:56]))
 		if policyLength == 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if route < 1 || route > 3 || length > requestBudgetLimitsMax || policyLength > requestBudgetLimitsMax || length+policyLength != uint64(len(request)-header) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	result := admitRequestBudgetPolicy(request[header:uint64(header)+length], request[uint64(header)+length:], binary.LittleEndian.Uint64(request[8:16]))
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	commitment := sha256.Sum256(request)
-	return auxResponse(requestBudgetMagic, result, commitment[:]), bus.ModuleStatusOK
+	return auxResponse(requestBudgetMagic, result, commitment[:]), ring.ModuleStatusOK
 }

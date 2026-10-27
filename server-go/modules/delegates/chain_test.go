@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func chainRequest(op byte, flags [4]bool, parent, max int32) []byte {
@@ -22,8 +22,8 @@ func chainRequest(op byte, flags [4]bool, parent, max int32) []byte {
 
 func chainCall(t *testing.T, request []byte) (bool, int32) {
 	t.Helper()
-	response, status := Handle(bus.ModuleInvocation{StageID: StageChain}, request)
-	if status != bus.ModuleStatusOK || len(response) != chainResponseLen ||
+	response, status := Handle(ring.ModuleInvocation{StageID: StageChain}, request)
+	if status != ring.ModuleStatusOK || len(response) != chainResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != chainResponseMagic {
 		t.Fatalf("response = %x, status = %d", response, status)
 	}
@@ -80,12 +80,12 @@ func TestDepthIsCheckedAgainstTheChildNotTheParent(t *testing.T) {
 
 func TestChainRejectsInvalidEnvelope(t *testing.T) {
 	short := chainRequest(ChainOpCheckDepth, [4]bool{}, 0, 1)[:chainRequestLen-1]
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageChain}, short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageChain}, short); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("truncated status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageChain},
-		chainRequest(9, [4]bool{}, 0, 1)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageChain},
+		chainRequest(9, [4]bool{}, 0, 1)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown-op status = %d", status)
 	}
 
@@ -93,12 +93,12 @@ func TestChainRejectsInvalidEnvelope(t *testing.T) {
 	// coerce it, since coercion would silently pick an answer.
 	bad := chainRequest(ChainOpShouldClear, [4]bool{}, 0, 0)
 	bad[7] = 2
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageChain}, bad); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageChain}, bad); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("non-boolean flag status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageChain, DeadlineNS: 1},
-		chainRequest(ChainOpCheckDepth, [4]bool{}, 0, 1)); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageChain, DeadlineNS: 1},
+		chainRequest(ChainOpCheckDepth, [4]bool{}, 0, 1)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired status = %d", status)
 	}
 }

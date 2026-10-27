@@ -3,7 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 )
 
@@ -11,8 +11,8 @@ func TestRuntimeCommandHostOnly(t *testing.T) {
 	for _, placement := range []Placement{PlacementKB, PlacementServer} {
 		backend := &postgresDataStore{placement: placement, fusionEnabled: true}
 		handler := NewHandler(nil, WithDataStore(placement, backend))
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fusion-state","state":"off"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"fusion-state","state":"off"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		state := runHostRuntime(t, handler, `{"operation":"fusion-state","state":"off"}`)
@@ -23,8 +23,8 @@ func TestRuntimeCommandHostOnly(t *testing.T) {
 		if _, ok := metrics["answer_counters"].(map[string]any); !ok {
 			t.Fatal(metrics)
 		}
-		frame, _ = bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"scheduled-maintenance"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ = ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"scheduled-maintenance"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
 		if placement == PlacementServer {
@@ -36,17 +36,17 @@ func TestRuntimeCommandHostOnly(t *testing.T) {
 	}
 }
 
-func runHostRuntime(t *testing.T, handler bus.ModuleHandler, args string) map[string]any {
+func runHostRuntime(t *testing.T, handler ring.ModuleHandler, args string) map[string]any {
 	t.Helper()
-	frame, err := bus.EncodeCommand("runtime", json.RawMessage(args))
+	frame, err := ring.EncodeCommand("runtime", json.RawMessage(args))
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-	if status != bus.ModuleStatusOK {
+	encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
-	body, err := bus.DecodeCommandResult(encoded)
+	body, err := ring.DecodeCommandResult(encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +70,8 @@ func TestRuntimeConfidenceBothPlacements(t *testing.T) {
 			}
 		}
 		for _, raw := range []string{`{"operation":"confidence"}`, `{"operation":"confidence","score":null}`, `{"operation":"confidence","score":"high"}`} {
-			frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", json.RawMessage(raw))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(raw, status)
 			}
 		}
@@ -84,14 +84,14 @@ func TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer(t *testing.T)
 		if len(operation) >= 5 && operation[:5] == "user-" {
 			placement = PlacementKB
 		}
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(fmt.Sprintf(`{"operation":%q}`, operation)))
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(fmt.Sprintf(`{"operation":%q}`, operation)))
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(operation, status)
 		}
 		for _, p := range []Placement{PlacementServer, PlacementKB} {
 			handler = NewHandler(nil, WithDataStore(p, nil))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(operation, p, status)
 			}
 		}

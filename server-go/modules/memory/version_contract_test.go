@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -71,9 +71,9 @@ func TestExpectedVersionValidation(t *testing.T) {
 }
 
 // Run through the real non-owner handler, with shipping revision and scope guards.
-func exerciseExpectedVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseExpectedVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:version-fixture", UserAuthority: true, TransportIdentity: "cert:fixture"}
+	caller := ring.CommandContext{Authenticated: true, Principal: "user:version-fixture", UserAuthority: true, TransportIdentity: "cert:fixture"}
 	invoke := func(verb string, args any) map[string]any {
 		t.Helper()
 		raw, err := json.Marshal(args)
@@ -81,7 +81,7 @@ func exerciseExpectedVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 			t.Fatal(err)
 		}
 		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatal(status, out)
 		}
 		return out

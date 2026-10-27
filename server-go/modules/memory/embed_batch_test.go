@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type batchExecutor struct {
@@ -87,14 +87,14 @@ func TestEmbedCommandIsHostOnly(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		executor := &batchExecutor{reply: `[1,2,3]`}
 		handler := NewHandler(executor, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("embed_text", json.RawMessage(`{"base_url":"http://embedder","text":"probe","max_dim":3}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 99}, frame); status != bus.ModuleStatusInvalidRequest || executor.calls != 0 {
+		frame, _ := ring.EncodeCommand("embed_text", json.RawMessage(`{"base_url":"http://embedder","text":"probe","max_dim":3}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 99}, frame); status != ring.ModuleStatusInvalidRequest || executor.calls != 0 {
 			t.Fatal("untrusted embed accepted")
 		}
-		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
-		body, err := bus.DecodeCommandResult(encoded)
+		encoded, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame)
+		body, err := ring.DecodeCommandResult(encoded)
 		var response EmbedResponse
-		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(body, &response) != nil || response.Dim != 3 {
+		if status != ring.ModuleStatusOK || err != nil || json.Unmarshal(body, &response) != nil || response.Dim != 3 {
 			t.Fatalf("%s %d %v", encoded, status, err)
 		}
 	}

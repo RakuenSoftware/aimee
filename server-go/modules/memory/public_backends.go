@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var backendCommandRoutes = []commandRoute{
@@ -14,7 +14,7 @@ var backendCommandRoutes = []commandRoute{
 	{"memory", "backend_import", "Import an exported scope into an empty backend catalog.", handleBackendCommand, true},
 }
 
-func handleBackendCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleBackendCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: strings.ReplaceAll(verb, "_", "-"), Limit: args.limit("limit", 100, 1000)}
 	commandScope(args, &request)
 	if raw, exists := args["after_id"]; exists {
@@ -31,15 +31,15 @@ func handleBackendCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if response.Failure != nil {
 		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))

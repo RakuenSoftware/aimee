@@ -12,7 +12,7 @@
         "server-go/modules/memory/memory.go",
         "server-go/modules/memory/client_test.go",
         "server-go/modules/memory/runtime_role_test.go",
-        "scripts/test_bus_conformance.sh"
+        "scripts/fetch_ouroboros_ring.py"
       ],
       "cutover_dependency": "Completed: Go owner registered in both placements; the production and fixture callers use its declared stages."
     },
@@ -24,7 +24,7 @@
         "src/tests/test_server_memory_get.c",
         "src/tests/test_module_json_call.c",
         "src/tests/test_mcp_memory_answer.c",
-        "scripts/test_bus_conformance.sh",
+        "scripts/fetch_ouroboros_ring.py",
         "server-go/cmd/aimee-module/main_test.go",
         "src/tests/test_module_runtime.c"
       ],
@@ -96,7 +96,7 @@
       "reason": "C tests exercise external C owners. Native memory domain parity is tested in Go. Test-only stubs supply protocol replies, not a shipping fallback.",
       "evidence": [
         "scripts/check_tests_are_run.py",
-        "scripts/test_bus_conformance.sh",
+        "scripts/fetch_ouroboros_ring.py",
         "server-go/modules/memory/public_records_test.go"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
@@ -1878,12 +1878,13 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "ba7f0a60514c63d5058b6e31fd7583b4ba7d06ad175682562f9a7b1b740c1c5a",
+      "sha256": "761c8d09d9b2f3519db4c608cdffe0a6bddf16b735e45be65cfea20826c3c568",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
@@ -1915,7 +1916,8 @@
         "memory_insert_epistemic_ex",
         "memory_insert_ex"
       ],
-      "sha256": "092c35cde685ac1430e4dcacc178d9ee4e345de61f2f50cdcb6e2220f7ec053b"
+      "sha256": "3f18ccfbe932655bc936c4b59398f67e03d31a188fa72051359f2a7aef04bc45",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/modules/kb/include/aimee/kb/graph_kinds.h": {
       "disposition": "storage-protocol",
@@ -2148,13 +2150,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "2e78687c674ee2725269c3f0e47fb22f5fff19b2a1f66c0132ffc4fab2d5a814",
+      "sha256": "d43626077e090476c6cc2235bf5a87be6aea24736bba4ff82a1c8af81d80a64a",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
-      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval.",
       "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval."
     },
     "src/server/server.c": {
@@ -2248,7 +2250,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "6a7c329b0f92a1c27efa12769608cd2dc006a8a98188f23f66c6a4230b045f09"
+      "sha256": "36f44a44e3432ea83c99dbf575a3a66231a3388e88726ec7329e23e99f0f1ea6",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2257,7 +2260,8 @@
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear"
       ],
-      "sha256": "0eafc391b60698590d469375334aa8b0a840c646c89b0234116a3cb15d309651"
+      "sha256": "3c6346b78f2c9c71dea77b5bd6a14d52b835eb4d0b914693284b0b1086d31881",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_memory_review.c": {
       "disposition": "host-transport",
@@ -2266,7 +2270,8 @@
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear"
       ],
-      "sha256": "39653be23e3896eb0f1394d620e74bb9685870400a1a7c3e6194a3b506315adf"
+      "sha256": "27e57f1881b4e70ed4c4933142ca94c7c830bbe13f4d2185692acc0470354145",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_ready.c": {
       "disposition": "host-transport",
@@ -2516,7 +2521,8 @@
         "server_module_memory_data",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "f8076b8da80ee143adb7ffe6afb84541a8eaba855fc2589c6da6435d76a847e6"
+      "sha256": "26bdcd85d3657dd75d46bd2c995e3a362d8ab960ebd0d4a0c84cf3ce7aadedf8",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/tests/test_pgvec_neardup.c": {
       "disposition": "legacy-fixture",
@@ -2666,12 +2672,13 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
+      "sha256": "bdc6987b6c6e7b37aa073c467f7c5aa373b30d8d975cdd7070b66271733800e4",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go.",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/tests/test_server_erasure_protocol.c": {
       "disposition": "host-fixture",
@@ -2691,7 +2698,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "ae5c617ecfd2da7d308f4420faaf654899723014def3f05eb8da6818aa0c5671"
+      "sha256": "19ce816317b816d60385dfc33263d8421f88ca20bab4ec8f90751e8b0322a456",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/config_client_contract.c": {
       "disposition": "host-transport",

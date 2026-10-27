@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
-func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
 		t.Fatal(err)
@@ -21,18 +21,18 @@ func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
  VALUES('L2','fact','runtime-record',$1,$2,'project','record-private','2026-09-17T23:45:00Z') RETURNING id`, content, source).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	call := func(extra map[string]any, peer uint32) (map[string]any, bus.ModuleStatus) {
+	call := func(extra map[string]any, peer uint32) (map[string]any, ring.ModuleStatus) {
 		t.Helper()
 		args := map[string]any{"operation": "record", "id": id}
 		for k, v := range extra {
 			args[k] = v
 		}
 		raw, _ := json.Marshal(args)
-		return invokeContextCommand(t, handler, peer, bus.CommandContext{}, "runtime", string(raw))
+		return invokeContextCommand(t, handler, peer, ring.CommandContext{}, "runtime", string(raw))
 	}
 	for _, extra := range []map[string]any{nil, {"scope_context": true, "project": "record-private"}} {
 		result, status := call(extra, 0)
-		if status != bus.ModuleStatusOK || result["status"] != "ok" {
+		if status != ring.ModuleStatusOK || result["status"] != "ok" {
 			t.Fatal(result, status)
 		}
 		record := result["memory"].(map[string]any)
@@ -40,13 +40,13 @@ func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal(record)
 		}
 	}
-	if r, status := call(map[string]any{"scope_context": true, "project": "other"}, 0); status != bus.ModuleStatusOK || r["kind"] != "not_found" {
+	if r, status := call(map[string]any{"scope_context": true, "project": "other"}, 0); status != ring.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal(r, status)
 	}
-	if _, status := call(nil, 200); status != bus.ModuleStatusInvalidRequest {
+	if _, status := call(nil, 200); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal(status)
 	}
-	if r, status := call(map[string]any{"id": 999999999}, 0); status != bus.ModuleStatusOK || r["kind"] != "not_found" {
+	if r, status := call(map[string]any{"id": 999999999}, 0); status != ring.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal(r, status)
 	}
 	if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
@@ -67,7 +67,7 @@ func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 	for _, operation := range []string{"episode-list", "entity-profile"} {
 		for _, project := range []string{"record-private", "other"} {
 			got, status := call(map[string]any{"operation": operation, "query": "runtime-episode", "entity": "runtime-profile", "scope_context": true, "project": project}, 0)
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatal(got, status)
 			}
 			if operation == "episode-list" {

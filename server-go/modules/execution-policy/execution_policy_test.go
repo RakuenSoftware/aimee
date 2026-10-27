@@ -5,17 +5,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func invoke(t *testing.T, handler bus.ModuleHandler, body map[string]any) response {
+func invoke(t *testing.T, handler ring.ModuleHandler, body map[string]any) response {
 	t.Helper()
 	wire, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, status := handler(bus.ModuleInvocation{StageID: StageTool}, wire)
-	if status != bus.ModuleStatusOK {
+	result, status := handler(ring.ModuleInvocation{StageID: StageTool}, wire)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
 	var decision response
@@ -151,13 +151,13 @@ func TestPolicyLoadFailureAndMalformedInputFailClosed(t *testing.T) {
 	if invoke(t, handler, base("read_file", map[string]any{"path": "/x"})).Allowed {
 		t.Fatal("unreadable policy allowed action")
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageTool}, []byte(`{"tool":"bash"}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageTool}, []byte(`{"tool":"bash"}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed status = %d", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageTool + 1}, []byte(`{}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageTool + 1}, []byte(`{}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong-stage status = %d", status)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageTool}, []byte(`{"tool":"bash","arguments":{}} {}`)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageTool}, []byte(`{"tool":"bash","arguments":{}} {}`)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("trailing-json status = %d", status)
 	}
 	invalidArguments := base("read_file", map[string]any{"path": "/x"})

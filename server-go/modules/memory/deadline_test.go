@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 // Both fixtures call this against their production methods and public/host
 // routes. The transaction clock remains fixed while the session timezone varies.
-func exerciseDeadlineReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler, kind string) {
+func exerciseDeadlineReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler, kind string) {
 	t.Helper()
 	exec := func(query string, args ...any) {
 		t.Helper()
@@ -99,8 +99,8 @@ func exerciseDeadlineReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		exec(`UPDATE `+table+` SET valid_until=$1 WHERE id=$2`, bad, good)
 		for _, operation := range []string{kind + "-current", kind + "-match", kind + "-sweep"} {
 			raw, _ := json.Marshal(DataRequest{Operation: operation, Query: "deadline", Limit: 1})
-			_, status := handler(bus.ModuleInvocation{StageID: StageData}, raw)
-			if status == bus.ModuleStatusOK {
+			_, status := handler(ring.ModuleInvocation{StageID: StageData}, raw)
+			if status == ring.ModuleStatusOK {
 				t.Fatal("malformed deadline accepted", operation, bad)
 			}
 		}

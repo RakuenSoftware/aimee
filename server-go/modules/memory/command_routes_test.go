@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestPublicCommandDiscovery(t *testing.T) {
 	request := []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0}
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		handler := NewHandler(nil, WithDataStore(placement, nil))
-		response, status := handler(bus.ModuleInvocation{StageID: bus.StageDescribeCommands}, request)
-		if status != bus.ModuleStatusOK || len(response) < 16 {
+		response, status := handler(ring.ModuleInvocation{StageID: ring.StageDescribeCommands}, request)
+		if status != ring.ModuleStatusOK || len(response) < 16 {
 			t.Fatalf("%s: %d %x", placement, status, response)
 		}
 		if stage := binary.LittleEndian.Uint32(response[12:]); stage != StageCommand {
@@ -109,9 +109,9 @@ func TestPublicEnforcedOntology(t *testing.T) {
 	}{
 		{5, 2, 4, true}, {0, 12, 8, true}, {0, 99, 3, true}, {1, 2, 4, false},
 	} {
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "ontology-validate", SubjectKind: tt.subject, RelationCode: tt.relation, ObjectKind: tt.object}))
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "ontology-validate", SubjectKind: tt.subject, RelationCode: tt.relation, ObjectKind: tt.object}))
 		var response DataResponse
-		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Allowed == nil || *response.Allowed != tt.allowed {
+		if status != ring.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Allowed == nil || *response.Allowed != tt.allowed {
 			t.Fatal(tt, string(raw), status)
 		}
 	}

@@ -11,19 +11,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func invoke(t *testing.T, req ReduceRequest) (ReduceResponse, bus.ModuleStatus) {
+func invoke(t *testing.T, req ReduceRequest) (ReduceResponse, ring.ModuleStatus) {
 	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, status := NewHandler()(bus.ModuleInvocation{StageID: StageReduce}, body)
+	out, status := NewHandler()(ring.ModuleInvocation{StageID: StageReduce}, body)
 	var resp ReduceResponse
-	if status == bus.ModuleStatusOK {
+	if status == ring.ModuleStatusOK {
 		if err := json.Unmarshal(out, &resp); err != nil {
 			t.Fatalf("response is not JSON: %v", err)
 		}
@@ -62,15 +62,15 @@ func (m *memStore) SaveState(_ context.Context, key, blob string) error {
 	return nil
 }
 
-func invokeWithStore(t *testing.T, store StateStore, req ReduceRequest) (ReduceResponse, bus.ModuleStatus) {
+func invokeWithStore(t *testing.T, store StateStore, req ReduceRequest) (ReduceResponse, ring.ModuleStatus) {
 	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, status := NewHandlerWithStore(store)(bus.ModuleInvocation{StageID: StageReduce}, body)
+	out, status := NewHandlerWithStore(store)(ring.ModuleInvocation{StageID: StageReduce}, body)
 	var resp ReduceResponse
-	if status == bus.ModuleStatusOK {
+	if status == ring.ModuleStatusOK {
 		if err := json.Unmarshal(out, &resp); err != nil {
 			t.Fatalf("response is not JSON: %v", err)
 		}
@@ -93,7 +93,7 @@ func TestModuleReduceStage(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if !resp.Mutated || resp.Reason != "reduced" || len(resp.Messages) == 0 {
@@ -121,7 +121,7 @@ func TestModuleNoMutationOmitsMessages(t *testing.T) {
 		HistoryFold: true,
 		MeasureOnly: true,
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if resp.Mutated || len(resp.Messages) != 0 {
@@ -146,7 +146,7 @@ func TestModuleStateRoundTrip(t *testing.T) {
 			StateKey:      "conv-1",
 		}
 	}
-	if _, status := invokeWithStore(t, store, turn()); status != bus.ModuleStatusOK {
+	if _, status := invokeWithStore(t, store, turn()); status != ring.ModuleStatusOK {
 		t.Fatalf("first turn status = %v", status)
 	}
 	first, ok := store.blobs["conv-1"]
@@ -154,7 +154,7 @@ func TestModuleStateRoundTrip(t *testing.T) {
 		t.Fatalf("the module must persist its own state, store = %+v", store.blobs)
 	}
 
-	if _, status := invokeWithStore(t, store, turn()); status != bus.ModuleStatusOK {
+	if _, status := invokeWithStore(t, store, turn()); status != ring.ModuleStatusOK {
 		t.Fatalf("second turn status = %v", status)
 	}
 	if store.blobs["conv-1"] == "" {
@@ -180,7 +180,7 @@ func TestModuleWithoutAStateKeyNeverPersists(t *testing.T) {
 		HistoryFold:   true,
 		ClosetEnabled: true,
 	})
-	if status != bus.ModuleStatusOK || !resp.Mutated {
+	if status != ring.ModuleStatusOK || !resp.Mutated {
 		t.Fatalf("the reduction should still run: status=%v resp=%+v", status, resp)
 	}
 	if store.loads != 0 || store.saves != 0 {
@@ -204,7 +204,7 @@ func TestModuleStoreFailuresAreNotFatal(t *testing.T) {
 				ClosetEnabled: true,
 				StateKey:      "conv-1",
 			})
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("a store failure must not fail the reduction: %v", status)
 			}
 			if !resp.Mutated {
@@ -229,11 +229,11 @@ func TestAMissingStoreIsCountedWhenAConversationWasNamed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, status := handler(bus.ModuleInvocation{StageID: StageReduce}, body); status != bus.ModuleStatusOK {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageReduce}, body); status != ring.ModuleStatusOK {
 		t.Fatalf("a storeless module must still reduce: %v", status)
 	}
-	out, status := handler(bus.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
-	if status != bus.ModuleStatusOK {
+	out, status := handler(ring.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("stats stage status = %v", status)
 	}
 	var raw map[string]any
@@ -269,11 +269,11 @@ func TestStoreDegradationIsCounted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, status := handler(bus.ModuleInvocation{StageID: StageReduce}, body); status != bus.ModuleStatusOK {
+			if _, status := handler(ring.ModuleInvocation{StageID: StageReduce}, body); status != ring.ModuleStatusOK {
 				t.Fatalf("degradation must not fail the reduction: %v", status)
 			}
-			out, status := handler(bus.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
-			if status != bus.ModuleStatusOK {
+			out, status := handler(ring.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("stats stage status = %v", status)
 			}
 			var raw map[string]any
@@ -302,7 +302,7 @@ func TestModuleBadStateIsNotFatal(t *testing.T) {
 		ClosetEnabled: true,
 		StateKey:      "conv-1",
 	})
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("a bad state blob must not fail the request: %v", status)
 	}
 	if !resp.Mutated {
@@ -313,22 +313,22 @@ func TestModuleBadStateIsNotFatal(t *testing.T) {
 func TestModuleRejectsBadRequests(t *testing.T) {
 	h := NewHandler()
 	// Wrong stage.
-	if _, st := h(bus.ModuleInvocation{StageID: 99}, []byte(`{}`)); st != bus.ModuleStatusInvalidRequest {
+	if _, st := h(ring.ModuleInvocation{StageID: 99}, []byte(`{}`)); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("unknown stage: %v", st)
 	}
 	// Not JSON.
-	if _, st := h(bus.ModuleInvocation{StageID: StageReduce}, []byte(`nope`)); st != bus.ModuleStatusInvalidRequest {
+	if _, st := h(ring.ModuleInvocation{StageID: StageReduce}, []byte(`nope`)); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("bad body: %v", st)
 	}
 	// Messages that are not an array.
 	body, _ := json.Marshal(ReduceRequest{Messages: json.RawMessage(`{"a":1}`), Seam: "delegate"})
-	if _, st := h(bus.ModuleInvocation{StageID: StageReduce}, body); st != bus.ModuleStatusInvalidRequest {
+	if _, st := h(ring.ModuleInvocation{StageID: StageReduce}, body); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("non-array messages: %v", st)
 	}
 	// An unknown seam is refused rather than defaulted, so a caller typo cannot
 	// silently reduce at the wrong seam.
 	body, _ = json.Marshal(ReduceRequest{Messages: rawMessages(t, 4), Seam: "elsewhere"})
-	if _, st := h(bus.ModuleInvocation{StageID: StageReduce}, body); st != bus.ModuleStatusInvalidRequest {
+	if _, st := h(ring.ModuleInvocation{StageID: StageReduce}, body); st != ring.ModuleStatusInvalidRequest {
 		t.Errorf("unknown seam: %v", st)
 	}
 }
@@ -336,8 +336,8 @@ func TestModuleRejectsBadRequests(t *testing.T) {
 func TestModuleJSONCompactStagePreservesBytes(t *testing.T) {
 	h := NewHandler()
 	source := []byte(" \n { \"a\" : [ 1.2300e+02, \" x \\u0061 \" ] } \r\n")
-	out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, source)
-	if status != bus.ModuleStatusOK || len(out) < auxHeaderLen {
+	out, status := h(ring.ModuleInvocation{StageID: StageJSONCompact}, source)
+	if status != ring.ModuleStatusOK || len(out) < auxHeaderLen {
 		t.Fatalf("status=%v response=%x", status, out)
 	}
 	if binary.LittleEndian.Uint32(out[0:4]) != compactMagic ||
@@ -351,8 +351,8 @@ func TestModuleJSONCompactStagePreservesBytes(t *testing.T) {
 	}
 
 	invalidUTF8 := []byte{'[', ' ', '"', 0xc0, 0x80, '"', ' ', ']'}
-	out, status = h(bus.ModuleInvocation{StageID: StageJSONCompact}, invalidUTF8)
-	if status != bus.ModuleStatusOK ||
+	out, status = h(ring.ModuleInvocation{StageID: StageJSONCompact}, invalidUTF8)
+	if status != ring.ModuleStatusOK ||
 		binary.LittleEndian.Uint16(out[6:8]) != uint16(JSONInvalidUTF8) {
 		t.Fatalf("invalid UTF-8 response=%x status=%v", out, status)
 	}
@@ -371,16 +371,16 @@ func TestModuleJSONCompactStageRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, tc.in)
-			if status != bus.ModuleStatusOK || len(out) < auxHeaderLen ||
+			out, status := h(ring.ModuleInvocation{StageID: StageJSONCompact}, tc.in)
+			if status != ring.ModuleStatusOK || len(out) < auxHeaderLen ||
 				JSONResult(binary.LittleEndian.Uint16(out[6:8])) != tc.want {
 				t.Fatalf("response=%x status=%v want=%v", out, status, tc.want)
 			}
 		})
 	}
 	oversize := make([]byte, JSONMaxInput+1)
-	out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, oversize)
-	if status != bus.ModuleStatusOK || JSONResult(binary.LittleEndian.Uint16(out[6:8])) != JSONTooLarge {
+	out, status := h(ring.ModuleInvocation{StageID: StageJSONCompact}, oversize)
+	if status != ring.ModuleStatusOK || JSONResult(binary.LittleEndian.Uint16(out[6:8])) != JSONTooLarge {
 		t.Fatalf("oversize response=%x status=%v", out, status)
 	}
 }
@@ -404,20 +404,20 @@ func TestModuleToolRecallAndStatsStages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ref+".out"), want, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, ref))
-	if status != bus.ModuleStatusOK || len(out) < auxHeaderLen ||
+	out, status := h(ring.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, ref))
+	if status != ring.ModuleStatusOK || len(out) < auxHeaderLen ||
 		binary.LittleEndian.Uint16(out[6:8]) != recallOK ||
 		string(out[auxHeaderLen:]) != string(want) {
 		t.Fatalf("recall response=%x status=%v", out, status)
 	}
 
-	out, status = h(bus.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, "../bad"))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint16(out[6:8]) != recallInvalidRef {
+	out, status = h(ring.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, "../bad"))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint16(out[6:8]) != recallInvalidRef {
 		t.Fatalf("invalid ref response=%x status=%v", out, status)
 	}
 
-	out, status = h(bus.ModuleInvocation{StageID: StageToolStats}, nil)
-	if status != bus.ModuleStatusOK || len(out) != statsResponseLen ||
+	out, status = h(ring.ModuleInvocation{StageID: StageToolStats}, nil)
+	if status != ring.ModuleStatusOK || len(out) != statsResponseLen ||
 		binary.LittleEndian.Uint32(out[0:4]) != statsMagic {
 		t.Fatalf("stats response=%x status=%v", out, status)
 	}
@@ -435,13 +435,13 @@ func TestModuleToolRecallRejectsMalformedFramesAndDirectories(t *testing.T) {
 		recallRequest("/tmp/../etc", ref),
 		recallRequest("/tmp/\x00hidden", ref),
 	} {
-		if _, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, req); status != bus.ModuleStatusInvalidRequest {
+		if _, status := h(ring.ModuleInvocation{StageID: StageToolRecall}, req); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("request %q: status=%v", req, status)
 		}
 	}
 	badVersion := recallRequest(t.TempDir(), ref)
 	binary.LittleEndian.PutUint16(badVersion[4:6], auxWireVersion+1)
-	if _, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, badVersion); status != bus.ModuleStatusInvalidRequest {
+	if _, status := h(ring.ModuleInvocation{StageID: StageToolRecall}, badVersion); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("bad version: status=%v", status)
 	}
 }
@@ -463,8 +463,8 @@ func TestModuleRecordBuildStage(t *testing.T) {
 		End:      3,
 	}
 	body, _ := json.Marshal(req)
-	out, status := h(bus.ModuleInvocation{StageID: StageRecordBuild}, body)
-	if status != bus.ModuleStatusOK {
+	out, status := h(ring.ModuleInvocation{StageID: StageRecordBuild}, body)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status=%v body=%s", status, out)
 	}
 	var got recordBuildResponse
@@ -479,7 +479,7 @@ func TestModuleRecordBuildStage(t *testing.T) {
 
 	req.End = 4
 	body, _ = json.Marshal(req)
-	if _, status = h(bus.ModuleInvocation{StageID: StageRecordBuild}, body); status != bus.ModuleStatusInvalidRequest {
+	if _, status = h(ring.ModuleInvocation{StageID: StageRecordBuild}, body); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("bad range status=%v", status)
 	}
 }
@@ -544,7 +544,7 @@ func TestModuleHistoryRejectsNativeAndAmbiguousIngress(t *testing.T) {
 	} {
 		for _, stage := range []uint32{StageReduce, StageRecordBuild} {
 			body := []byte(`{"messages":` + raw + `}`)
-			if _, status := NewHandler()(bus.ModuleInvocation{StageID: stage}, body); status != bus.ModuleStatusInvalidRequest {
+			if _, status := NewHandler()(ring.ModuleInvocation{StageID: stage}, body); status != ring.ModuleStatusInvalidRequest {
 				t.Fatalf("stage=%d accepted noncanonical history: %s", stage, raw)
 			}
 		}

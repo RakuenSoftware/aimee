@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Rule collections are global; hidden project activity never changes this proof.
@@ -180,26 +180,26 @@ func (s *postgresDataStore) ruleView(ctx context.Context, request DataRequest) (
 	return json.Marshal(map[string]any{"status": "ok", "rules": rules})
 }
 
-func handleRuleView(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRuleView(options handlerOptions, invocation ring.ModuleInvocation, args commandArgs) ([]byte, ring.ModuleStatus) {
 	if options.placement != PlacementKB {
-		return nil, bus.ModuleStatusCapabilityAbsent
+		return nil, ring.ModuleStatusCapabilityAbsent
 	}
 	kind := strings.TrimPrefix(args.stringOr("operation", ""), "rules-")
 	request := DataRequest{Operation: "rules-view", Kind: kind, Scope: Scope{Type: ScopeGlobal, Value: "_global"}, Limit: args.limit("limit", 128, 1024), Path: args.stringOr("path", "")}
 	if kind != "list" && kind != "generate" && kind != "export" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if kind == "export" && request.Path == "" {
 		return runtimeJSONText(commandResult(commandError("invalid_argument", "rules export requires a path")))
 	}
 	body, _ := json.Marshal(request)
 	raw, status := handleData(options, invocation, body)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return runtimeJSONText(commandResult(response.Payload))
 }

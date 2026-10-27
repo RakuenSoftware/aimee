@@ -7,7 +7,7 @@
 #include "agent_exec.h"
 #include "computer_use.h"
 #include "request_context.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include "headers/module_json_call.h"
 #include "modules/workspace/workspace_provider.h"
 #include <stdlib.h>
@@ -24,7 +24,7 @@ int policy_action_inherit(const char *session)
 
 static int g_available;
 static const char *g_reply;
-static aimee_module_call_result_t g_result;
+static ouro_module_call_result_t g_result;
 static int g_calls;
 static uint32_t expected_categories;
 static void check_categories(const cJSON *request)
@@ -57,7 +57,7 @@ int obs_bus_module_available(uint32_t event_kind)
    return g_available;
 }
 
-const char *aimee_module_call_result_name(aimee_module_call_result_t result)
+const char *ouro_module_call_result_name(ouro_module_call_result_t result)
 {
    (void)result;
    return "test_result";
@@ -73,10 +73,10 @@ void computer_use_policy_from_config(computer_use_policy_t *policy)
 }
 
 cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
-                              size_t max_body, int timeout_ms, aimee_module_call_result_t *result)
+                              size_t max_body, int timeout_ms, ouro_module_call_result_t *result)
 {
    assert(event_kind == 8449u && stage_id == 1u);
-   assert(max_body == AIMEE_MODULE_MESSAGE_MAX_BODY && timeout_ms == 5000);
+   assert(max_body == OURO_MODULE_MESSAGE_MAX_BODY && timeout_ms == 5000);
    check_categories(request);
    assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(request, "tool")));
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "arguments")));
@@ -234,12 +234,12 @@ int main(void)
    assert(policy_check_tool(NULL, "none", "{}", reason, sizeof reason) == -1);
    assert(g_calls == 0 && strstr(reason, "invalid"));
 
-   g_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   g_result = OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    g_reply = NULL;
    assert(policy_check_tool("read_file", "filesystem", "{}", reason, sizeof reason) == -1);
    assert(strstr(reason, "test_result"));
 
-   g_result = AIMEE_MODULE_CALL_OK;
+   g_result = OURO_MODULE_CALL_OK;
    g_reply = "{\"allowed\":true,\"reason\":\"policy permits\"}";
    assert(policy_check_tool("read_file", "filesystem", "{}", reason, sizeof reason) == 0);
    assert(strcmp(reason, "policy permits") == 0);

@@ -8,8 +8,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -143,10 +143,10 @@ INSERT INTO user_memories(id,scope_type,scope_value,tier,kind,key,content,confid
 				if len(relevant) == 0 {
 					t.Fatalf("%s: no relevance labels", test.ID)
 				}
-				raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+				raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 					Operation: "search", Query: test.Query, Limit: 10,
 				}))
-				if status != bus.ModuleStatusOK {
+				if status != ring.ModuleStatusOK {
 					t.Fatalf("%s: status %v", test.ID, status)
 				}
 				var response DataResponse
@@ -223,14 +223,14 @@ INSERT INTO user_memories (id,key,content,kind,tier,confidence,lifecycle_state,v
 			t.Fatal(err)
 		}
 		handler := NewHandler(nil, WithDataStore(test.placement, backend))
-		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+		raw, status := handler(ring.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
 			Operation: "search", Scope: test.scope, Query: "terms boundary", Limit: 10,
 		}))
 		var response DataResponse
 		if err := json.Unmarshal(raw, &response); err != nil {
 			t.Fatal(err)
 		}
-		if status != bus.ModuleStatusOK || len(response.Records) != 1 || response.Records[0].ID != test.id {
+		if status != ring.ModuleStatusOK || len(response.Records) != 1 || response.Records[0].ID != test.id {
 			t.Fatalf("placement=%s scope=%+v: status=%v records=%+v", test.placement, test.scope, status, response.Records)
 		}
 	}

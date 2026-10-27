@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -32,10 +32,10 @@ func TestNativeInheritedSourceTicketRequiresExplicitBindingTransfer(t *testing.T
 func sourceForkCall(t *testing.T, state *sourceReleaseState, args commandArgs) map[string]any {
 	t.Helper()
 	raw, status := handleSourceReleaseFork(state, args)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
-	body, err := bus.DecodeCommandResult(raw)
+	body, err := ring.DecodeCommandResult(raw)
 	var result map[string]any
 	if err != nil || json.Unmarshal(body, &result) != nil {
 		t.Fatal(err)
@@ -210,8 +210,8 @@ func TestSourceReleaseForkRefusesChangedOwnerSourceExpiryAndReplay(t *testing.T)
 func TestSourceReleaseForkRuntimeRemainsHostOnly(t *testing.T) {
 	handler := NewHandler(nil)
 	for _, operation := range []string{"source-release-fork-plan", "source-release-fork-result"} {
-		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+operation+`"}`))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		frame, _ := ring.EncodeCommand("runtime", json.RawMessage(`{"operation":"`+operation+`"}`))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("model principal forked authority", status)
 		}
 	}

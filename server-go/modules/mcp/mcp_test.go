@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- a fake plugin, so the module is testable without a real MCP server ---
@@ -136,8 +136,8 @@ func attached(t *testing.T, group string, plugin *fakePlugin) *Module {
 
 const defaultTestTimeout = 2 * time.Second
 
-func invocation(stage uint32) bus.ModuleInvocation {
-	return bus.ModuleInvocation{StageID: stage}
+func invocation(stage uint32) ring.ModuleInvocation {
+	return ring.ModuleInvocation{StageID: stage}
 }
 
 // --- name normalization ---
@@ -316,7 +316,7 @@ func TestDeclareCommandsRoundTrips(t *testing.T) {
 	m := attached(t, "github", plugin)
 
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	commands := decodeCommands(t, payload)
@@ -338,7 +338,7 @@ func TestDeclareCommandsRefusesAMalformedRequest(t *testing.T) {
 		{1, 2, 3},
 		append([]byte{0xff, 0xff, 0xff, 0xff}, 0, 0, 0, 1),
 	} {
-		if _, status := m.Handle(invocation(StageDeclareCommands), bad); status != bus.ModuleStatusInvalidRequest {
+		if _, status := m.Handle(invocation(StageDeclareCommands), bad); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("status for %v = %v, want InvalidRequest", bad, status)
 		}
 	}
@@ -351,7 +351,7 @@ func TestDeclareCommandsIsEmptyWithNoPluginAttached(t *testing.T) {
 	// drop them rather than keep stale entries.
 	m := New("github", PermDangerous)
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if got := decodeCommands(t, payload); len(got) != 0 {
@@ -367,7 +367,7 @@ func TestDetachWithdrawsCommands(t *testing.T) {
 	}
 	m.Detach()
 	payload, status := m.Handle(invocation(StageDeclareCommands), EncodeDeclareRequest())
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if got := decodeCommands(t, payload); len(got) != 0 {
@@ -386,7 +386,7 @@ func TestInvokeAddressesThePluginByItsOriginalName(t *testing.T) {
 
 	body, status := m.Handle(invocation(StageInvoke),
 		EncodeInvokeRequest("search_issues", []byte(`{"q":"bug"}`)))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	if binary.LittleEndian.Uint32(body[0:4]) != invokeResponseMagic {
@@ -407,7 +407,7 @@ func TestInvokeAddressesThePluginByItsOriginalName(t *testing.T) {
 func TestInvokeRefusesAnUndeclaredVerb(t *testing.T) {
 	plugin := &fakePlugin{tools: []Tool{{Name: "ok"}}}
 	m := attached(t, "github", plugin)
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("nope", nil)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("nope", nil)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest", status)
 	}
 	if got := plugin.callNames(); len(got) != 0 {
@@ -420,7 +420,7 @@ func TestInvokeRefusesAVerbThatCollidedDuringProjection(t *testing.T) {
 	// callable through the invoke path either.
 	plugin := &fakePlugin{tools: []Tool{{Name: "search-issues"}, {Name: "search.issues"}}}
 	m := attached(t, "github", plugin)
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("search_issues", nil)); status != bus.ModuleStatusOK {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("search_issues", nil)); status != ring.ModuleStatusOK {
 		t.Fatalf("the surviving tool must still be callable, got %v", status)
 	}
 	if got := plugin.callNames(); len(got) != 1 || got[0] != "search-issues" {
@@ -430,7 +430,7 @@ func TestInvokeRefusesAVerbThatCollidedDuringProjection(t *testing.T) {
 
 func TestInvokeWithNoPluginIsCapabilityAbsent(t *testing.T) {
 	m := New("github", PermDangerous)
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("x", nil)); status != bus.ModuleStatusCapabilityAbsent {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("x", nil)); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("status = %v, want CapabilityAbsent", status)
 	}
 }
@@ -440,7 +440,7 @@ func TestInvokePluginErrorIsInternalNotCapabilityAbsent(t *testing.T) {
 	// CapabilityAbsent would tell the caller to stop trying.
 	plugin := &fakePlugin{tools: []Tool{{Name: "ok"}}, failCall: true}
 	m := attached(t, "github", plugin)
-	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("ok", nil)); status != bus.ModuleStatusInternal {
+	if _, status := m.Handle(invocation(StageInvoke), EncodeInvokeRequest("ok", nil)); status != ring.ModuleStatusInternal {
 		t.Fatalf("status = %v, want Internal", status)
 	}
 }
@@ -449,7 +449,7 @@ func TestInvokeRefusesMalformedRequests(t *testing.T) {
 	m := attached(t, "github", &fakePlugin{tools: []Tool{{Name: "ok"}}})
 
 	short := EncodeInvokeRequest("ok", nil)[:8]
-	if _, status := m.Handle(invocation(StageInvoke), short); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), short); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("short request accepted")
 	}
 
@@ -457,26 +457,26 @@ func TestInvokeRefusesMalformedRequests(t *testing.T) {
 	// than read past.
 	bad := EncodeInvokeRequest("ok", []byte(`{}`))
 	binary.LittleEndian.PutUint32(bad[12:16], 4096)
-	if _, status := m.Handle(invocation(StageInvoke), bad); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), bad); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("length-mismatched request accepted")
 	}
 
 	// Empty verb.
 	empty := EncodeInvokeRequest("", nil)
-	if _, status := m.Handle(invocation(StageInvoke), empty); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), empty); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("empty verb accepted")
 	}
 
 	// Non-JSON arguments never reach the plugin.
 	junk := EncodeInvokeRequest("ok", []byte(`not json`))
-	if _, status := m.Handle(invocation(StageInvoke), junk); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(StageInvoke), junk); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("non-JSON arguments accepted")
 	}
 }
 
 func TestUnknownStageIsRefused(t *testing.T) {
 	m := attached(t, "github", &fakePlugin{})
-	if _, status := m.Handle(invocation(99), EncodeDeclareRequest()); status != bus.ModuleStatusInvalidRequest {
+	if _, status := m.Handle(invocation(99), EncodeDeclareRequest()); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("status = %v, want InvalidRequest", status)
 	}
 }
@@ -511,7 +511,7 @@ func TestConcurrentCallsDoNotStealEachOthersResponses(t *testing.T) {
 
 	const n = 8
 	var wg sync.WaitGroup
-	errs := make(chan bus.ModuleStatus, n)
+	errs := make(chan ring.ModuleStatus, n)
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
@@ -523,7 +523,7 @@ func TestConcurrentCallsDoNotStealEachOthersResponses(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for status := range errs {
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("concurrent call returned %v", status)
 		}
 	}
@@ -537,8 +537,8 @@ func TestCancelledInvocationDoesNotReachThePlugin(t *testing.T) {
 	m := attached(t, "github", plugin)
 
 	// A deadline already in the past is the cancellation the transport owns.
-	inv := bus.ModuleInvocation{StageID: StageInvoke, DeadlineNS: 1}
-	if _, status := m.Handle(inv, EncodeInvokeRequest("ok", nil)); status != bus.ModuleStatusCancelled {
+	inv := ring.ModuleInvocation{StageID: StageInvoke, DeadlineNS: 1}
+	if _, status := m.Handle(inv, EncodeInvokeRequest("ok", nil)); status != ring.ModuleStatusCancelled {
 		t.Fatalf("status = %v, want Cancelled", status)
 	}
 	if got := plugin.callNames(); len(got) != 0 {

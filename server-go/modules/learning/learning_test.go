@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func learningRequest(signal string) []byte {
@@ -27,8 +27,8 @@ func TestLearningSignalParity(t *testing.T) {
 		"unknown":              0,
 	}
 	for signal, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageObserve}, learningRequest(signal))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageObserve}, learningRequest(signal))
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != want {
 			t.Errorf("%q response = %x, status = %d, want mask %d", signal, response, status, want)
@@ -39,11 +39,11 @@ func TestLearningSignalParity(t *testing.T) {
 func TestLearningRejectsInvalidWire(t *testing.T) {
 	request := learningRequest("thumb_up")
 	request[5] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageObserve}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageObserve}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("reserved-byte status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageObserve, DeadlineNS: 1},
-		learningRequest("thumb_up")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageObserve, DeadlineNS: 1},
+		learningRequest("thumb_up")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }

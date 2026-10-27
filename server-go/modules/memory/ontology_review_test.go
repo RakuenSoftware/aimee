@@ -8,38 +8,38 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestOntologyConsoleBoundary(t *testing.T) {
-	operator := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:test"}
+	operator := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:test"}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, op := range []string{"ontology-dashboard", "ontology-review"} {
 		args := `{"operation":"` + op + `"}`
-		if _, status := invokeContextCommand(t, handler, 73, operator, "runtime", args); status != bus.ModuleStatusInvalidRequest {
+		if _, status := invokeContextCommand(t, handler, 73, operator, "runtime", args); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal(status)
 		}
-		if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, operator, "runtime", args); status != bus.ModuleStatusCapabilityAbsent {
+		if _, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementServer, nil)), 0, operator, "runtime", args); status != ring.ModuleStatusCapabilityAbsent {
 			t.Fatal(status)
 		}
 	}
-	for _, caller := range []bus.CommandContext{{}, {Authenticated: true, Principal: "user"}} {
+	for _, caller := range []ring.CommandContext{{}, {Authenticated: true, Principal: "user"}} {
 		r, status := invokeContextCommand(t, handler, 0, caller, "runtime", `{"operation":"ontology-review","action":"approve","relation":"works_for","actor":{"rank":40}}`)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(403) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(403) {
 			t.Fatal(r, status)
 		}
 	}
 	for _, name := range []string{"", "Upper", "has space", "has-dash", strings.Repeat("a", 64), "界"} {
 		args, _ := json.Marshal(map[string]any{"operation": "ontology-review", "action": "approve", "relation": name})
 		r, status := invokeContextCommand(t, handler, 0, operator, "runtime", string(args))
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(400) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(400) {
 			t.Fatal(r, status)
 		}
 	}
 	for _, args := range []string{`{"operation":"ontology-review","relation":"valid","action":"unknown"}`, `{"operation":"ontology-review","relation":"valid","action":"map"}`} {
 		r, status := invokeContextCommand(t, handler, 0, operator, "runtime", args)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(400) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(400) {
 			t.Fatal(r, status)
 		}
 	}
@@ -75,11 +75,11 @@ func exerciseOntologyReviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		return map[string]any{"kb_typed_facts_promote_threshold": 0, "kb_typed_facts_auto_promote_enabled": true}, nil
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &bound))
-	operator := bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:ontology", TransportIdentity: "verified:console"}
+	operator := ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "operator:ontology", TransportIdentity: "verified:console"}
 	call := func(args string, want int) map[string]json.RawMessage {
 		t.Helper()
 		r, status := invokeContextCommand(t, handler, 0, operator, "runtime", args)
-		if status != bus.ModuleStatusOK || r["http_status"] != float64(want) {
+		if status != ring.ModuleStatusOK || r["http_status"] != float64(want) {
 			t.Fatalf("%s: %v status=%v", args, r, status)
 		}
 		body, ok := r["json"].(string)

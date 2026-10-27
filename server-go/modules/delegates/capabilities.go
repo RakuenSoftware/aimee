@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // What a prompt implies a model must be able to do.
@@ -83,21 +83,21 @@ func InferCapabilities(prompt string, toolsEnabled bool) (required uint32, minCo
 	return required, minContext
 }
 
-func handleCapabilities(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleCapabilities(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < capHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != capRequestMagic || request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	tools := request[5]
 	if tools > 1 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	length := int(binary.LittleEndian.Uint32(request[8:12]))
 	if length > capPromptMax || len(request) != capHeaderLen+length {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	required, minContext := InferCapabilities(string(request[capHeaderLen:]), tools == 1)
@@ -105,5 +105,5 @@ func handleCapabilities(invocation bus.ModuleInvocation, request []byte) ([]byte
 	binary.LittleEndian.PutUint32(response[0:4], capResponseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], required)
 	binary.LittleEndian.PutUint32(response[8:12], uint32(minContext))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

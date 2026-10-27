@@ -22,7 +22,7 @@
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/benchmarks/module_api.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_launch_args.h>
@@ -103,12 +103,12 @@ cJSON *server_module_memory_data(const cJSON *request)
    if (!encoded)
       return NULL;
    size_t request_len = strlen(encoded);
-   if (request_len == 0 || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (request_len == 0 || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
    {
       free(encoded);
       return NULL;
    }
-   uint8_t *response = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   uint8_t *response = malloc(OURO_MODULE_MESSAGE_MAX_BODY);
    uint32_t response_len = 0;
    if (!response)
    {
@@ -134,7 +134,7 @@ cJSON *server_module_memory_data(const cJSON *request)
                    : 30ULL * 1000000000ULL;
    }
    int rc = call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
-                                    (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                                    (uint32_t)request_len, response, OURO_MODULE_MESSAGE_MAX_BODY,
                                     &response_len, budget);
    free(encoded);
    cJSON *decoded = NULL;
@@ -314,7 +314,7 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
    for (int i = 0; i < count; i++)
    {
       size_t n = strlen(names[i]);
-      if (n > 65535 || capacity > AIMEE_MODULE_MESSAGE_MAX_BODY - 2 - n)
+      if (n > 65535 || capacity > OURO_MODULE_MESSAGE_MAX_BODY - 2 - n)
          return -1;
       capacity += 2 + n;
    }
@@ -331,8 +331,8 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
       return -1;
    }
    size_t response_capacity = length * 6 + 4096u * 128u + 1024u;
-   if (response_capacity > AIMEE_MODULE_MESSAGE_MAX_BODY)
-      response_capacity = AIMEE_MODULE_MESSAGE_MAX_BODY;
+   if (response_capacity > OURO_MODULE_MESSAGE_MAX_BODY)
+      response_capacity = OURO_MODULE_MESSAGE_MAX_BODY;
    char *response = malloc(response_capacity);
    if (!response)
    {
@@ -343,10 +343,10 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
    int rc = call_module(AIMEE_DELEGATES_EVENT_RESCUE, AIMEE_DELEGATES_STAGE_RESCUE, request,
                         (uint32_t)used, response, (uint32_t)response_capacity, &response_length);
    free(request);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       free(response);
-      return rc == AIMEE_MODULE_CALL_CAPABILITY_ABSENT ? 0 : -1;
+      return rc == OURO_MODULE_CALL_CAPABILITY_ABSENT ? 0 : -1;
    }
    const char *end = NULL;
    cJSON *root = cJSON_ParseWithLengthOpts(response, response_length, &end, 0);
@@ -924,7 +924,7 @@ static int git_validate_ref(const char *ref, int *allowed)
       return -1;
    int result = call_module(AIMEE_GIT_EVENT_REF_VALIDATE, AIMEE_GIT_STAGE_REF_VALIDATE, request,
                             sizeof(request), response, sizeof(response), &response_len);
-   return result == AIMEE_MODULE_CALL_OK
+   return result == OURO_MODULE_CALL_OK
               ? aimee_git_ref_response_decode(response, response_len, allowed)
               : result;
 }
@@ -966,7 +966,7 @@ static int governance_evaluate(int policy_active, const aimee_tool_identity_view
    uint8_t response[AIMEE_GOVERNANCE_RESPONSE_LEN];
    uint32_t response_len = 0;
    int result = -1;
-   if (request_len && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY && request_len <= UINT32_MAX &&
+   if (request_len && request_len <= OURO_MODULE_MESSAGE_MAX_BODY && request_len <= UINT32_MAX &&
        call_module(AIMEE_GOVERNANCE_EVENT_EVALUATE, AIMEE_GOVERNANCE_STAGE_EVALUATE, encoded,
                    (uint32_t)request_len, response, sizeof(response), &response_len) == 0)
       result = aimee_governance_response_decode(response, response_len, tool_count, decision);
@@ -1016,7 +1016,7 @@ static int skill_trigger_match(const char *content, const char *tool_name, const
    if (!match)
       return -1;
    size_t request_len = aimee_skills_trigger_request_size(content, tool_name, subject);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (!request_len || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_SKILLS_TRIGGER_RESPONSE_LEN];
@@ -1083,7 +1083,7 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    if (!in || !out || out_cap == 0)
       return -1;
    size_t request_len = aimee_response_request_size(in);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (!request_len || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_RESPONSE_KEY_MAX + 4u];

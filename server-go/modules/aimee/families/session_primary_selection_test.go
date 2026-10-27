@@ -3,8 +3,8 @@ package families
 import (
 	"context"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -20,8 +20,8 @@ func TestSessionPrimaryRequiresHostOwnerAndValidMetadata(t *testing.T) {
 			t.Fatal(e)
 		}
 		db := newSessDB()
-		_, s := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-		if !Sessions.Ops[op].HostOnly || s != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, s := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+		if !Sessions.Ops[op].HostOnly || s != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal(op, s)
 		}
 	}

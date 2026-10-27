@@ -3,9 +3,9 @@ package aimee
 import (
 	"errors"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // DirectorySource answers WHO EXISTS, against the owner of that fact: db1's
@@ -143,14 +143,14 @@ func NewPeer(registry *peer.Registry, dir DirectorySource) (*PeerCapability, err
 
 // Stages are the peer stages. Event kinds are derived from the bus formula
 // rather than written out, so identity and advertisement cannot drift.
-func (c *PeerCapability) Stages() []bus.ModuleStage {
+func (c *PeerCapability) Stages() []ring.ModuleStage {
 	stages := []uint32{
 		peerwire.StageDelivery, peerwire.StageInbox,
 		peerwire.StageGrant, peerwire.StageChannel,
 	}
-	out := make([]bus.ModuleStage, 0, len(stages))
+	out := make([]ring.ModuleStage, 0, len(stages))
 	for _, stage := range stages {
-		out = append(out, bus.ModuleStage{
+		out = append(out, ring.ModuleStage{
 			EventKind: peerwire.EventKind(PrincipalRef, stage),
 			StageID:   stage,
 		})
@@ -159,10 +159,10 @@ func (c *PeerCapability) Stages() []bus.ModuleStage {
 }
 
 // Handle serves one peer invocation.
-func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func (c *PeerCapability) Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	op, cells, err := peerwire.DecodeRequest(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	// A module with no directory cannot answer anything about a session, so it
@@ -177,9 +177,9 @@ func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte)
 	if c.unwired && invocation.StageID != peerwire.StageGrant {
 		body, err := refuse(peerwire.StatusNoDirectory)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return body, bus.ModuleStatusOK
+		return body, ring.ModuleStatusOK
 	}
 
 	var body []byte
@@ -194,15 +194,15 @@ func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte)
 	case peerwire.StageChannel:
 		body, encErr = c.channel(op, cells)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if encErr != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if body == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }
 
 // refuse builds a domain refusal. It is a SUCCESSFUL invocation: the module was

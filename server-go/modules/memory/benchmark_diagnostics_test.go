@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -64,8 +64,8 @@ func TestBenchmarkHardNegativeArtifact(t *testing.T) {
 		}
 		s.searchErr = nil
 		s.rows[0].Content = strings.Repeat("x", benchmarkReportLimit)
-		frame, _ := bus.EncodeCommand("runtime", []byte(args))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", []byte(args))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("oversize artifact truncated or accepted")
 		}
 	}
@@ -97,18 +97,18 @@ func TestBenchmarkMissRankAndFailures(t *testing.T) {
 			t.Fatal("absent record rendered", result)
 		}
 		s.getErr = errors.New("read unavailable")
-		frame, _ := bus.EncodeCommand("runtime", []byte(args))
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		frame, _ := ring.EncodeCommand("runtime", []byte(args))
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("get failure became missing")
 		}
 		s.getErr = nil
 		s.searchErr = errors.New("search unavailable")
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("search failure became miss")
 		}
 		s.searchErr = nil
 		s.record.Content = strings.Repeat("x", benchmarkReportLimit)
-		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 			t.Fatal("oversize report accepted")
 		}
 	}
@@ -122,14 +122,14 @@ func TestBenchmarkDiagnosticBoundaries(t *testing.T) {
 			`{"operation":"benchmark-hard-negative","suite":"s","task":"t","query":"q","expected":"","got":"","error":""}`,
 			`{"operation":"benchmark-miss","query":"q","expected_ids":[],"render":true}`,
 		} {
-			frame, _ := bus.EncodeCommand("runtime", []byte(args))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", []byte(args))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand, PrincipalRef: 9}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(status)
 			}
 		}
 		for _, ids := range []string{`null`, `[9007199254740993]`, `["9007199254740993.0"]`, `["9223372036854775808"]`, `["0"]`, `["-1"]`, `["01"]`, `["+1"]`, `[` + strings.Repeat(`"1",`, 128) + `"1"]`} {
-			frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"benchmark-miss","query":"q","expected_ids":`+ids+`}`))
-			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			frame, _ := ring.EncodeCommand("runtime", []byte(`{"operation":"benchmark-miss","query":"q","expected_ids":`+ids+`}`))
+			if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status != ring.ModuleStatusInvalidRequest {
 				t.Fatal(ids, status)
 			}
 		}
@@ -176,7 +176,7 @@ func TestBenchmarkFailureBuckets(t *testing.T) {
 	}
 }
 
-func exerciseBenchmarkDiagnosticsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+func exerciseBenchmarkDiagnosticsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler ring.ModuleHandler) {
 	t.Helper()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -246,8 +246,8 @@ func exerciseBenchmarkDiagnosticsReplay(t *testing.T, ctx context.Context, tx pg
 	}
 	args["operation"] = "benchmark-miss"
 	raw, _ := json.Marshal(args)
-	frame, _ := bus.EncodeCommand("runtime", raw)
-	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+	frame, _ := ring.EncodeCommand("runtime", raw)
+	if _, status := handler(ring.ModuleInvocation{StageID: StageCommand}, frame); status == ring.ModuleStatusOK {
 		t.Fatal("revoked read became a miss")
 	}
 }

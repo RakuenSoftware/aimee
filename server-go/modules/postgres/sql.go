@@ -34,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -464,23 +464,23 @@ type sqlHandler struct {
 }
 
 // NewSQLHandler builds the stage's bus handler against the module's pool.
-func NewSQLHandler() bus.ModuleHandler {
+func NewSQLHandler() ring.ModuleHandler {
 	return (&sqlHandler{txs: newTxRegistry(), poolFn: SQLPool,
 		migrationPoolFn: MigrationPool}).handle
 }
 
-func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) handle(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 	return h.handleContext(context.Background(), invocation, frame)
 }
 
-func (h *sqlHandler) handleContext(parent context.Context, invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) handleContext(parent context.Context, invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID != StageSQL {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	r := &reader{buf: frame}
 	op, err := r.u32()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	poolFn := h.poolFn
 	if op == opMigrate || op == opCurrentVersion {
@@ -493,7 +493,7 @@ func (h *sqlHandler) handleContext(parent context.Context, invocation bus.Module
 		// can act on it, where a bare transport failure says only that something
 		// went wrong somewhere.
 		return refuse(statusFailed, "",
-			fmt.Sprintf("the SQL stage has no database: %v", err)), bus.ModuleStatusOK
+			fmt.Sprintf("the SQL stage has no database: %v", err)), ring.ModuleStatusOK
 	}
 
 	// The caller's remaining time bounds the statement, so a query cannot
@@ -512,7 +512,7 @@ func (h *sqlHandler) handleContext(parent context.Context, invocation bus.Module
 		// Already expired in flight. Refusing costs nothing; running the
 		// statement would spend a connection on an answer nobody can receive.
 		return refuse(statusFailed, "", "the request's deadline passed before the "+
-			"store could run it"), bus.ModuleStatusOK
+			"store could run it"), ring.ModuleStatusOK
 	}
 	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
@@ -529,45 +529,45 @@ func (h *sqlHandler) handleContext(parent context.Context, invocation bus.Module
 	case opCurrentVersion:
 		return h.currentVersion(ctx, pool, r)
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 }
 
 // statement runs one EXEC or QUERY, on the pool or inside a named transaction.
-func (h *sqlHandler) statement(ctx context.Context, pool *pgxpool.Pool, op uint32, r *reader) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) statement(ctx context.Context, pool *pgxpool.Pool, op uint32, r *reader) ([]byte, ring.ModuleStatus) {
 	statementID, err := r.str()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if len(statementID) > maxStatementID {
 		return refuse(statusLimitExceeded, "",
 			fmt.Sprintf("statement id of %d bytes exceeds %d",
-				len(statementID), maxStatementID)), bus.ModuleStatusOK
+				len(statementID), maxStatementID)), ring.ModuleStatusOK
 	}
 	handle, err := r.u64()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	sql, err := r.str()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if len(sql) > maxStatementBytes {
 		return refuse(statusLimitExceeded, "",
 				fmt.Sprintf("statement of %d bytes exceeds %d", len(sql), maxStatementBytes)),
-			bus.ModuleStatusOK
+			ring.ModuleStatusOK
 	}
 	args, err := r.args()
 	if err != nil {
 		if errors.Is(err, errTooManyArgs) {
-			return refuse(statusLimitExceeded, "", err.Error()), bus.ModuleStatusOK
+			return refuse(statusLimitExceeded, "", err.Error()), ring.ModuleStatusOK
 		}
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	q, release, status := h.queryer(pool, handle)
 	if status != nil {
-		return status, bus.ModuleStatusOK
+		return status, ring.ModuleStatusOK
 	}
 	if release != nil {
 		defer release()
@@ -576,26 +576,26 @@ func (h *sqlHandler) statement(ctx context.Context, pool *pgxpool.Pool, op uint3
 	if op == opExec {
 		tag, err := q.Exec(ctx, sql, args...)
 		if err != nil {
-			return failure(err, statementID), bus.ModuleStatusOK
+			return failure(err, statementID), ring.ModuleStatusOK
 		}
 		w := &writer{}
 		w.header(statusOK, "", "")
 		w.u64(uint64(tag.RowsAffected()))
-		return w.buf, bus.ModuleStatusOK
+		return w.buf, ring.ModuleStatusOK
 	}
 
 	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
-		return failure(err, statementID), bus.ModuleStatusOK
+		return failure(err, statementID), ring.ModuleStatusOK
 	}
 	body, err := encodeRows(rows)
 	if err != nil {
 		if errors.Is(err, errResultTooLarge) {
-			return refuse(statusLimitExceeded, "", err.Error()), bus.ModuleStatusOK
+			return refuse(statusLimitExceeded, "", err.Error()), ring.ModuleStatusOK
 		}
-		return failure(err, statementID), bus.ModuleStatusOK
+		return failure(err, statementID), ring.ModuleStatusOK
 	}
-	return body, bus.ModuleStatusOK
+	return body, ring.ModuleStatusOK
 }
 
 // queryer picks the pool or a transaction. A handle naming no live transaction
@@ -617,53 +617,53 @@ func (h *sqlHandler) queryer(pool *pgxpool.Pool, handle uint64) (interface {
 	return t.tx, nil, nil
 }
 
-func (h *sqlHandler) begin(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) begin(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, ring.ModuleStatus) {
 	// BEGIN arrives in the statement frame, so the fields are read and ignored
 	// rather than assumed absent.
 	if _, err := r.str(); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if _, err := r.u64(); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if _, err := r.str(); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return failure(err, "begin"), bus.ModuleStatusOK
+		return failure(err, "begin"), ring.ModuleStatusOK
 	}
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		conn.Release()
-		return failure(err, "begin"), bus.ModuleStatusOK
+		return failure(err, "begin"), ring.ModuleStatusOK
 	}
 	handle, err := h.txs.add(tx, conn)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		conn.Release()
-		return refuse(statusFailed, "", err.Error()), bus.ModuleStatusOK
+		return refuse(statusFailed, "", err.Error()), ring.ModuleStatusOK
 	}
 	w := &writer{}
 	w.header(statusOK, "", "")
 	w.u64(handle)
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 
 // finish commits or rolls back, and releases the connection either way.
-func (h *sqlHandler) finish(ctx context.Context, op uint32, r *reader) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) finish(ctx context.Context, op uint32, r *reader) ([]byte, ring.ModuleStatus) {
 	if _, err := r.str(); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	handle, err := r.u64()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	t, ok := h.txs.remove(handle)
 	if !ok {
 		return refuse(statusFailed, sqlStateNoActiveTransaction,
-			fmt.Sprintf("no open transaction %d to finish", handle)), bus.ModuleStatusOK
+			fmt.Sprintf("no open transaction %d to finish", handle)), ring.ModuleStatusOK
 	}
 	// The connection goes back to the pool whatever the outcome. Leaking it on
 	// a failed commit would remove one connection per failure until there were
@@ -676,11 +676,11 @@ func (h *sqlHandler) finish(ctx context.Context, op uint32, r *reader) ([]byte, 
 		err = t.tx.Rollback(ctx)
 	}
 	if err != nil {
-		return failure(err, "finish"), bus.ModuleStatusOK
+		return failure(err, "finish"), ring.ModuleStatusOK
 	}
 	w := &writer{}
 	w.header(statusOK, "", "")
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 
 // --- schema history ----------------------------------------------------------
@@ -756,14 +756,14 @@ func beginSchemaTransaction(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, er
 	return tx, nil
 }
 
-func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, ring.ModuleStatus) {
 	owner, err := r.str()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	tx, err := beginSchemaTransaction(ctx, pool)
 	if err != nil {
-		return failure(err, "current_version"), bus.ModuleStatusOK
+		return failure(err, "current_version"), ring.ModuleStatusOK
 	}
 	defer rollbackSchemaTransaction(tx)
 	var version int64
@@ -773,10 +773,10 @@ func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1`, owner).
 		Scan(&version, &checksum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return failure(err, "current_version"), bus.ModuleStatusOK
+		return failure(err, "current_version"), ring.ModuleStatusOK
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return failure(err, "current_version"), bus.ModuleStatusOK
+		return failure(err, "current_version"), ring.ModuleStatusOK
 	}
 	// No rows is a fresh database, which answers 0 rather than failing. That is
 	// the ordinary first start, not an error.
@@ -784,7 +784,7 @@ func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *
 	w.header(statusOK, "", "")
 	w.u64(uint64(version))
 	w.str(checksum)
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 
 // migrate applies one versioned change and records it, in ONE transaction.
@@ -793,37 +793,37 @@ func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *
 // again on the next start and fails on an object that already exists; a ledger
 // row without its schema silently claims work that never happened, which is the
 // worse of the two because nothing ever retries it.
-func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, bus.ModuleStatus) {
+func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, ring.ModuleStatus) {
 	owner, err := r.str()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	version, err := r.u64()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	claimed, err := r.str()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count, err := r.u32()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if count > maxArgs {
 		return refuse(statusLimitExceeded, "",
-			fmt.Sprintf("%d statements exceeds %d", count, maxArgs)), bus.ModuleStatusOK
+			fmt.Sprintf("%d statements exceeds %d", count, maxArgs)), ring.ModuleStatusOK
 	}
 	statements := make([]string, 0, count)
 	for i := uint32(0); i < count; i++ {
 		s, err := r.str()
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if len(s) > maxStatementBytes {
 			return refuse(statusLimitExceeded, "",
 				fmt.Sprintf("migration statement of %d bytes exceeds %d",
-					len(s), maxStatementBytes)), bus.ModuleStatusOK
+					len(s), maxStatementBytes)), ring.ModuleStatusOK
 		}
 		statements = append(statements, s)
 	}
@@ -837,12 +837,12 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 		return refuse(statusFailed, "",
 				fmt.Sprintf("migration %s v%d: the checksum does not match the statements "+
 					"sent (recomputed %s, was told %s)", owner, version, sum, claimed)),
-			bus.ModuleStatusOK
+			ring.ModuleStatusOK
 	}
 
 	tx, err := beginSchemaTransaction(ctx, pool)
 	if err != nil {
-		return failure(err, "migrate"), bus.ModuleStatusOK
+		return failure(err, "migrate"), ring.ModuleStatusOK
 	}
 	defer rollbackSchemaTransaction(tx)
 
@@ -855,7 +855,7 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE`, owner).
 		Scan(&applied, &appliedSum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return failure(err, "migrate"), bus.ModuleStatusOK
+		return failure(err, "migrate"), ring.ModuleStatusOK
 	}
 
 	var recordedSum string
@@ -871,43 +871,43 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 			return refuse(statusFailed, "",
 				fmt.Sprintf("migration %s v%d was applied with checksum %s and now "+
 					"hashes to %s: an applied migration may not be edited",
-					owner, version, recordedSum, sum)), bus.ModuleStatusOK
+					owner, version, recordedSum, sum)), ring.ModuleStatusOK
 		}
 		// A replay executes no domain DDL, but bootstrap may have repaired
 		// legacy ledger grants. Do not roll that repair back on success.
 		if err := tx.Commit(ctx); err != nil {
-			return failure(err, "migrate"), bus.ModuleStatusOK
+			return failure(err, "migrate"), ring.ModuleStatusOK
 		}
 		w := &writer{}
 		w.header(statusOK, "", "")
-		return w.buf, bus.ModuleStatusOK
+		return w.buf, ring.ModuleStatusOK
 	case !errors.Is(err, pgx.ErrNoRows):
-		return failure(err, "migrate"), bus.ModuleStatusOK
+		return failure(err, "migrate"), ring.ModuleStatusOK
 	}
 
 	if int64(version) != applied+1 {
 		return refuse(statusFailed, "",
 			fmt.Sprintf("migration %s v%d cannot apply at version %d: the history is "+
-				"append-only and has no gaps", owner, version, applied)), bus.ModuleStatusOK
+				"append-only and has no gaps", owner, version, applied)), ring.ModuleStatusOK
 	}
 
 	for i, s := range statements {
 		if _, err := tx.Exec(ctx, s); err != nil {
 			return failure(fmt.Errorf("statement %d of %d: %w", i+1, len(statements), err),
-				"migrate"), bus.ModuleStatusOK
+				"migrate"), ring.ModuleStatusOK
 		}
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO schema_migrations (owner, version, checksum) VALUES ($1, $2, $3)`,
 		owner, int64(version), sum); err != nil {
-		return failure(err, "migrate"), bus.ModuleStatusOK
+		return failure(err, "migrate"), ring.ModuleStatusOK
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return failure(err, "migrate"), bus.ModuleStatusOK
+		return failure(err, "migrate"), ring.ModuleStatusOK
 	}
 	w := &writer{}
 	w.header(statusOK, "", "")
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 
 // --- replies -----------------------------------------------------------------

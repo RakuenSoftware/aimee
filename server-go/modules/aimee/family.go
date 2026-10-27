@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // DefaultTimeout bounds one operation's database work when the invocation
@@ -84,33 +84,33 @@ type Family struct {
 }
 
 // Handler builds the bus handler for this family against a database.
-func (f Family) Handler(db DB) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+func (f Family) Handler(db DB) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != f.Stage {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if db == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		op, fields, ok := DecodeRequest(frame)
 		if !ok {
 			// A malformed frame is not a question, so it is refused at the bus
 			// level. Everything the module can actually answer is answered
 			// in-band, below, with a status.
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		spec, known := f.Ops[op]
 		if !known || (spec.HostOnly && invocation.PrincipalRef != 0) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if !ValidFields(fields) {
-			return Status(StatusInvalid), bus.ModuleStatusOK
+			return Status(StatusInvalid), ring.ModuleStatusOK
 		}
 		if spec.Args >= 0 && len(fields) != spec.Args {
-			return Status(StatusInvalid), bus.ModuleStatusOK
+			return Status(StatusInvalid), ring.ModuleStatusOK
 		}
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		limit := spec.Timeout
 		if limit <= 0 {
@@ -118,14 +118,14 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 		}
 		timeout := invocation.Remaining(limit)
 		if timeout <= 0 {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		status, reply, err := f.run(ctx, db, spec, fields)
 		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+			return nil, ring.ModuleStatusCancelled
 		}
 		if err != nil {
 			// The error text is for this process's log, never the wire: a driver
@@ -156,9 +156,9 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 			// -- and it costs C callers nothing, since call_stage returns -1
 			// for a transport failure and for a refused status alike.
 			if errors.Is(err, ErrStoreUnavailable) {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
-			return Status(StatusFailed), bus.ModuleStatusOK
+			return Status(StatusFailed), ring.ModuleStatusOK
 		}
 		// A reply that is not a whole number of rows is a contract break, and
 		// the client end of it is unreadable: call_stage treats an OK reply
@@ -171,9 +171,9 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 		if status == StatusOK && spec.Cells > 0 && len(reply)%spec.Cells != 0 {
 			log.Printf("aimee: %s/%s answered with %d cells, not a multiple of the %d it declares",
 				f.Name, spec.Name, len(reply), spec.Cells)
-			return Status(StatusFailed), bus.ModuleStatusOK
+			return Status(StatusFailed), ring.ModuleStatusOK
 		}
-		return EncodeReply(status, reply), bus.ModuleStatusOK
+		return EncodeReply(status, reply), ring.ModuleStatusOK
 	}
 }
 

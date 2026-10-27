@@ -26,16 +26,15 @@ MODULE_KEYS = {
     "id", "binary", "main", "sources", "include_roots", "pkg_config", "system_libraries",
 }
 MODULE_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "header_dependencies"}
-CORE_EVENT_BUS_SOURCES = [
-    "src/core/event_bus/bus_attach.c",
-    "src/core/event_bus/bus_client.c",
-    "src/core/event_bus/bus_endpoint.c",
-    "src/core/event_bus/bus_region.c",
-    "src/core/event_bus/bus_ring.c",
-    "src/core/event_bus/bus_wire.c",
-    "src/core/event_bus/module_protocol.c",
-    "src/core/event_bus/module_runtime.c",
+# The ouroboros ring's client side, from the pinned checkout
+# scripts/fetch_ouroboros_ring.py places in the build tree.
+OURO_RING_DIR = "src/build/deps/ouroboros-ring"
+OURO_RING_CLIENT_SOURCES = [
+    f"{OURO_RING_DIR}/c/src/{name}.c"
+    for name in ("attach", "client", "endpoint", "region", "ring", "wire",
+                 "module_protocol", "module_runtime")
 ]
+OURO_RING_INCLUDE = f"{OURO_RING_DIR}/c/include"
 IMPORTED_TARGET_FLAGS = {
     "OpenSSL::Crypto": "-lcrypto",
     "OpenSSL::SSL": "-lssl",
@@ -281,9 +280,9 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     owned_sources = [real_file(root, item, f"{identifier}.sources") for item in sources]
     for dependency in module.get("header_dependencies", []):
         real_file(root, dependency, f"{identifier}.header_dependencies")
-    core_sources = [real_file(root, item, "event-bus source")
-                    for item in CORE_EVENT_BUS_SOURCES]
-    include_paths = [real_directory(root, "src/core/event_bus/include", "event-bus include")]
+    core_sources = [real_file(root, item, "ring source")
+                    for item in OURO_RING_CLIENT_SOURCES]
+    include_paths = [real_directory(root, OURO_RING_INCLUDE, "ring include")]
     if module.get("generated_headers"):
         if generated_include is None:
             fail(f"{identifier}: generated header directory was not materialized")
@@ -384,6 +383,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--placement",
                         help="build only the C processes this placement runs")
     args = parser.parse_args(argv)
+    lock = args.root.resolve() / "dependencies/ouroboros-ring.lock.json"
+    if lock.is_file():
+        # Provide the pinned ring before compiling against it; a tree without the
+        # lock (a test fixture) supplies its own ring sources.
+        fetched = subprocess.run([sys.executable, str(ROOT / "scripts/fetch_ouroboros_ring.py"),
+                                  str(args.root.resolve() / OURO_RING_DIR)])
+        if fetched.returncode != 0:
+            print("build_c_module_runtime_bundle: error: the pinned ouroboros ring is unavailable",
+                  file=sys.stderr)
+            return 1
     try:
         count = build(args.bundle.resolve(), args.output.resolve(), args.root.resolve(),
                       args.cc, args.pkg_config, args.placement)

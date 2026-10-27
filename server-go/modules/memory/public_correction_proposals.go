@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleCorrectionProposalCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleCorrectionProposalCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: "correction-proposals", IncludeAll: true, Limit: 50}
 	if verb == "review_correction" {
 		if !verifiedRetryCaller(options.commandContext) || !options.commandContext.UserAuthority {
@@ -43,21 +43,21 @@ func handleCorrectionProposalCommand(options handlerOptions, invocation bus.Modu
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	raw, status := handleData(options, invocation, raw)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return commandResult(commandError("unavailable", "memory correction review unavailable"))
 	}
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	if len(response.Payload) == 0 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
 }

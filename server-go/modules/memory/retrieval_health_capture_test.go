@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func TestHealthQueryTokenIsBoundedSingleUseAndDoesNotExposeQuery(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHealthQueryCaptureUsesPrivateScopeKeyAndFailsOpen(t *testing.T) {
 	args := sourceReleaseArgs(map[string]any{"principal": "alice", "project": "p", "workspace": "w"})
 	cacheKey := releaseDigest([]string{"alice", "p", "w"})
 	s.health.keys[cacheKey] = healthKeyCacheEntry{Namespace: "owner", Key: []byte(strings.Repeat("a", 32)), Expires: time.Now().Add(time.Minute)}
-	result := captureHealthQuery(options, bus.ModuleInvocation{}, args, "yes", "ingress_query")
+	result := captureHealthQuery(options, ring.ModuleInvocation{}, args, "yes", "ingress_query")
 	if result == nil || !receiptDigestValid(result.Fingerprint) || result.Project != "p" || result.Workspace != "w" {
 		t.Fatal(result)
 	}
@@ -66,15 +66,15 @@ func TestHealthQueryCaptureUsesPrivateScopeKeyAndFailsOpen(t *testing.T) {
 	if strings.Contains(string(raw), "yes") || strings.Contains(string(raw), strings.Repeat("a", 32)) {
 		t.Fatal("query or key escaped capture")
 	}
-	if captureHealthQuery(options, bus.ModuleInvocation{PrincipalRef: 1}, args, "yes", "ingress_query") != nil {
+	if captureHealthQuery(options, ring.ModuleInvocation{PrincipalRef: 1}, args, "yes", "ingress_query") != nil {
 		t.Fatal("module caller captured host scope")
 	}
-	options.commandContext = &bus.CommandContext{Authenticated: true, Principal: "bob"}
-	if captureHealthQuery(options, bus.ModuleInvocation{}, args, "yes", "ingress_query") != nil {
+	options.commandContext = &ring.CommandContext{Authenticated: true, Principal: "bob"}
+	if captureHealthQuery(options, ring.ModuleInvocation{}, args, "yes", "ingress_query") != nil {
 		t.Fatal("foreign caller used cached key")
 	}
 	options = handlerOptions{placement: PlacementServer}
-	if captureHealthQuery(options, bus.ModuleInvocation{}, args, "yes", "ingress_query") != nil {
+	if captureHealthQuery(options, ring.ModuleInvocation{}, args, "yes", "ingress_query") != nil {
 		t.Fatal("missing optional store invented capture")
 	}
 }
@@ -216,7 +216,7 @@ func BenchmarkHealthWarmQueryCapture(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if captureHealthQuery(options, bus.ModuleInvocation{}, args, "yes", "ingress_query") == nil {
+		if captureHealthQuery(options, ring.ModuleInvocation{}, args, "yes", "ingress_query") == nil {
 			b.Fatal("capture unavailable")
 		}
 	}

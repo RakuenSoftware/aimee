@@ -1,6 +1,6 @@
 /* test_plugin_grant_provisioning.c: what the provisioner writes, the daemon reads.
  *
- * scripts/provision-plugin-module.py emits a .grant file, and bus_runtime.c
+ * scripts/provision-plugin-module.py emits a .grant file, and ouro_runtime.c
  * parses it. Nothing checked that those two agree. A format the daemon silently
  * rejects is the worst shape this can fail in: the policy loads as "empty", the
  * listener runs and denies everything, and the module's own logs say only
@@ -12,7 +12,7 @@
  */
 #define _GNU_SOURCE
 
-#include <aimee/core/event_bus/bus_runtime.h>
+#include <ouroboros/runtime.h>
 
 #include "platform_test_util.h"
 
@@ -80,19 +80,19 @@ int main(int argc, char **argv)
    char policy_dir[512];
    snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/server", cfg);
 
-   bus_runtime_policy_t *policy = NULL;
-   assert(bus_runtime_policy_load_dir(policy_dir, &policy) == 0 &&
+   ouro_runtime_policy_t *policy = NULL;
+   assert(ouro_runtime_policy_load_dir(policy_dir, &policy) == 0 &&
           "the daemon's parser must accept what the provisioner wrote");
    assert(policy != NULL);
 
    size_t count = 0;
-   const bus_runtime_grant_t *grants = bus_runtime_policy_grants(policy, &count);
+   const ouro_runtime_grant_t *grants = ouro_runtime_policy_grants(policy, &count);
    assert(grants != NULL);
    assert(count == 4 && "each provisioned instance must load serving and egress grants");
 
    /* Every instance must be a DISTINCT identity: a shared principal_ref means a
     * shared grant, and a shared event kind means the second module is denied at
-    * attach by bus_host_serve_kind(). */
+    * attach by ouro_host_serve_kind(). */
    for (size_t i = 0; i < count; i++)
    {
       assert(grants[i].principal_class == 1);
@@ -142,7 +142,7 @@ int main(int argc, char **argv)
       }
    }
 
-   bus_runtime_policy_free(&policy);
+   ouro_runtime_policy_free(&policy);
    assert(policy == NULL);
 
    char rm[512];

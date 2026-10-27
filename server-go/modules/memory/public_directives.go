@@ -6,12 +6,12 @@ import (
 	"math"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
-func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleDirectiveCommand(options handlerOptions, invocation ring.ModuleInvocation, verb string, args commandArgs) ([]byte, ring.ModuleStatus) {
 	request := DataRequest{Operation: strings.ReplaceAll(verb, "_", "-"), IncludeAll: true}
-	invalid := func(message string) ([]byte, bus.ModuleStatus) {
+	invalid := func(message string) ([]byte, ring.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
@@ -66,19 +66,19 @@ func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocat
 			request.Limit = int(math.Min(32, n))
 		}
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	data, status := handleData(options, invocation, encoded)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		return nil, status
 	}
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
@@ -88,7 +88,7 @@ func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocat
 			encoded, _ := json.Marshal(item)
 			var row map[string]any
 			if json.Unmarshal(encoded, &row) != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			delete(row, "source_session")
 			delete(row, "updated_at")
@@ -100,7 +100,7 @@ func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocat
 			result["dedup"] = response.Deduplicated
 			if !response.Deduplicated {
 				if len(rows) != 1 {
-					return nil, bus.ModuleStatusInternal
+					return nil, ring.ModuleStatusInternal
 				}
 				result["directive"] = rows[0]
 			}
@@ -132,12 +132,12 @@ func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocat
 		result["block"] = block.String()
 	case "directive_dashboard":
 		data, status := handleData(options, invocation, []byte(`{"operation":"directive-count","include_all":true}`))
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			return nil, status
 		}
 		var counts DataResponse
 		if json.Unmarshal(data, &counts) != nil || counts.DirectiveCounts == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		c := counts.DirectiveCounts
 		recent := make([]map[string]any, 0, len(response.Directives))
