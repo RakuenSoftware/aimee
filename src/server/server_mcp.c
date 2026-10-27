@@ -1845,6 +1845,21 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
       return text_content("error: session worktree is unavailable (chdir failed). Refusing to run "
                           "git operation on the main repository.");
    }
+   /* A clone runs in its cwd, which is not a repository yet, so the resolver above
+    * found no root there and left no directory bound. The command then reached
+    * the detached runner with the server's own home as its directory
+    * ("cd: /var/lib/aimee: No such file or directory") and cloned into whatever
+    * directory the runner happened to start in (2026-10-27). */
+   if (strcmp(tool, "git_clone") == 0 && mcp_git_bind_clone_cwd(args) < 0)
+   {
+      run_cmd_set_cwd(NULL);
+      (void)workspace_turn_scope_end(workspace_scope);
+      if (sid && sid[0])
+         session_id_clear_override();
+      free(mismatch_err);
+      return text_content("error: clone cwd is outside every registered workspace; register it "
+                          "first (`aimee workspace add <dir>`), or let `aimee git clone` do so");
+   }
    /* Resolve the handler + mutating-ness from the one git-tool table. git_verify
     * is not in the table (different handler signature); it is dispatched below. */
    git_tool_fn git_fn = NULL;
