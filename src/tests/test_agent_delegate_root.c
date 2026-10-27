@@ -607,6 +607,27 @@ static char *sandbox_capture_exec_shell_timeout(const workspace_provider_t *p, c
    return sandbox_capture_exec_shell(p, cmd, exit_code);
 }
 
+static int scoped_progress_calls;
+static int test_scope_progress(void *context)
+{
+   assert(context == &scoped_progress_calls);
+   scoped_progress_calls++;
+   return 0;
+}
+static char *sandbox_capture_exec_shell_scoped(const workspace_provider_t *p, const char *cmd,
+                                               int timeout_ms, const delegate_exec_scope_t *scope,
+                                               int *exit_code)
+{
+   assert(scope && scope->progress);
+   if (scope->environment)
+      assert(scope->replace_environment == 1 &&
+             !strcmp(scope->environment[0], "SCOPED_CONTAINER=owned"));
+   else
+      assert(scope->replace_environment == 0); /* Ordinary container Bash: no lexical overlay. */
+   assert(!scope->progress(scope->context));
+   return sandbox_capture_exec_shell_timeout(p, cmd, timeout_ms, exit_code);
+}
+
 void test_container_bash_runs_in_sandbox(void)
 {
    workspace_provider_t mock;
@@ -614,13 +635,23 @@ void test_container_bash_runs_in_sandbox(void)
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
    mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
+   mock.exec_shell_scoped = sandbox_capture_exec_shell_scoped;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
    g_sbx_timeout_ms = -1;
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
+   char *environment[] = {"SCOPED_CONTAINER=owned", NULL};
+   agent_tools_bash_scope_t scope = {.environment = environment,
+                                     .replace_environment = 1,
+                                     .progress = test_scope_progress,
+                                     .context = &scoped_progress_calls};
+   agent_tools_bash_scope_t previous = agent_tools_bind_bash_scope(&scope);
+   scoped_progress_calls = 0;
    char *result = tool_bash("echo hi", 5000);
+   (void)agent_tools_bind_bash_scope(&previous);
+   assert(scoped_progress_calls == 1);
    workspace_provider_clear_active();
 
    /* Routed INTO the container (spy hit), carrying our command. */
@@ -635,6 +666,23 @@ void test_container_bash_runs_in_sandbox(void)
    free(result);
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
+   mock.exec_shell_scoped = NULL;
+   workspace_provider_set_active(&mock);
+   g_sbx_exec_called = 0;
+   previous = agent_tools_bind_bash_scope(&scope);
+   result = tool_bash("must-not-run", 5000);
+   (void)agent_tools_bind_bash_scope(&previous);
+   workspace_provider_clear_active();
+   assert(g_sbx_exec_called == 0 && result && strstr(result, "effects_unknown"));
+   free(result);
+   mock.exec_shell = NULL;
+   mock.exec_shell_timeout = NULL;
+   workspace_provider_set_active(&mock);
+   result = tool_bash("printf HOST-FALLBACK-MUST-NOT-RUN", 5000);
+   workspace_provider_clear_active();
+   assert(result && strstr(result, "effects_unknown") &&
+          !strstr(result, "HOST-FALLBACK-MUST-NOT-RUN"));
+   free(result);
    printf("  PASS: test_container_bash_runs_in_sandbox\n");
 }
 
@@ -645,6 +693,7 @@ void test_container_execute_script_runs_in_sandbox(void)
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
    mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
+   mock.exec_shell_scoped = sandbox_capture_exec_shell_scoped;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
    g_sbx_timeout_ms = -1;
@@ -685,4 +734,75 @@ void test_container_execute_script_runs_in_sandbox(void)
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
    printf("  PASS: test_container_execute_script_runs_in_sandbox\n");
+}
+
+/* Only the backend failure is injected: real container provider, native tool,
+ * shared dispatch and effect owner must retain uncertainty without retrying. */
+static int uncertain_write_calls, uncertain_effect_completed;
+static int uncertain_stat(delegate_backend_t *self, void *state, const char *command,
+                          int timeout_ms, delegate_exec_result_t *result)
+{
+   (void)self;
+   (void)state;
+   (void)command;
+   (void)timeout_ms;
+   result->exit_code = 1;
+   return 0;
+}
+static int uncertain_write(delegate_backend_t *self, void *state, const char *path,
+                           const char *content)
+{
+   (void)self;
+   (void)state;
+   assert(strstr(path, "uncertain.txt") && !strcmp(content, "new"));
+   uncertain_write_calls++;
+   return SCOPED_WRITE_OUTCOME_UNKNOWN;
+}
+static void capture_uncertain_effect(const ti_event_t *event, void *context)
+{
+   (void)context;
+   if (!strcmp(event->event, "effect.completed") &&
+       strstr(event->detail, "state=unknown_outcome") &&
+       strstr(event->detail, "reason=effects_unknown"))
+      uncertain_effect_completed++;
+}
+void test_container_write_retains_unknown_effect(void)
+{
+   char root[512], worktree[768];
+   snprintf(root, sizeof root, "%s/aimee-unknown-write-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root));
+   snprintf(worktree, sizeof worktree, "%s/.aimee/worktrees/unknown/main", root);
+   assert(!platform_mkdir_p(worktree, 0700));
+   delegate_backend_t backend = {
+       .name = "uncertain-resource-peer", .exec = uncertain_stat, .write_file = uncertain_write};
+   ws_container_provider_t provider;
+   int state = 1;
+   assert(!ws_container_provider_init(&provider, &backend, &state));
+   workspace_provider_set_active(&provider.base);
+   agent_tools_parent_write_guard_clear();
+   run_cmd_set_cwd(worktree);
+   ti_set_event_callback(capture_uncertain_effect, NULL);
+   for (int enforce = 0; enforce < 2; enforce++)
+   {
+      uncertain_write_calls = uncertain_effect_completed = 0;
+      assert(!platform_setenv("AIMEE_EFFECT_CONTRACT_MODE", enforce ? "enforce" : "shadow"));
+      agent_tools_set_effect_authorized(
+          1); /* Explicit test effect-owner grant, not source proof. */
+      char *result = fixture_dispatch_tool(
+          "write_file", "{\"path\":\"uncertain.txt\",\"content\":\"new\"}", 1000);
+      agent_tools_set_effect_authorized(0);
+      assert(result);
+      cJSON *reply = cJSON_Parse(result);
+      assert(reply && cJSON_IsTrue(cJSON_GetObjectItem(reply, "effects_unknown")));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "failed"));
+      assert(uncertain_write_calls == 1 && uncertain_effect_completed == 1);
+      cJSON_Delete(reply);
+      free(result);
+   }
+   assert(!platform_unsetenv("AIMEE_EFFECT_CONTRACT_MODE"));
+   ti_set_event_callback(NULL, NULL);
+   workspace_provider_clear_active();
+   run_cmd_set_cwd(NULL);
+   platform_test_rmrf(root);
+   printf("  PASS: container write unknown survives provider/tool/effect owners\n");
 }

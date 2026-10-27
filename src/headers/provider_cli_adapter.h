@@ -66,6 +66,7 @@ extern "C"
       const char *home;      /* parent-materialized runtime credential HOME */
       int (*native_progress)(void *context);
       void *native_progress_context;
+      const struct cli_acp_host_launch *acp_host; /* creator-owned external ACP process */
       const struct cli_claude_host_launch *claude_host;
       const struct cli_codex_host_launch *codex_host; /* host-owned native resources */
       const char *session_id;                         /* host-owned Aimee identity for MCP/hooks */

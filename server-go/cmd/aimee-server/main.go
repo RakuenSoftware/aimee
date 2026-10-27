@@ -180,6 +180,7 @@ func main() {
 		if clientErr != nil {
 			log.Fatal(clientErr)
 		}
+		handler.SetTriggerExecutionScopeResolver(agents.ResolveTriggerExecutionScope)
 		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
 		if worktreeErr != nil {
 			log.Fatal(worktreeErr)

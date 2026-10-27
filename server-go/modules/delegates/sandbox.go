@@ -58,12 +58,15 @@ const (
 	SandboxGitMetadata
 	// SandboxControlSocket is the single outward channel to the parent.
 	SandboxControlSocket
+	// SandboxOwnerHelper is the owner-measured, read-only startup and file resource.
+	SandboxOwnerHelper
 )
 
 const (
 	ControlSocketBasename = "aimee-http.sock"
 	ControlSocketTarget   = "/run/aimee/aimee-http.sock"
 	ControlEndpoint       = "unix:" + ControlSocketTarget
+	OwnerHelperTarget     = "/run/aimee/owner-io"
 )
 
 // SandboxMount is one bind mount in the container specification.
@@ -128,6 +131,7 @@ type SandboxRequest struct {
 // caller can set: it is always none.
 type SandboxSpec struct {
 	// privateTest has no parent control channel and is constructed only by the verifier.
+	ownerHelper bool
 	privateTest bool
 	Mounts      []SandboxMount
 	Env         []SandboxEnv
@@ -249,6 +253,25 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 	return spec, nil
 }
 
+// BuildOwnerSandboxSpec adds only the trusted owner's fixed read-only helper.
+// File identity and measurement belong to the acquiring owner, not agent input.
+func BuildOwnerSandboxSpec(req SandboxRequest, helperSource string) (SandboxSpec, error) {
+	spec, err := BuildSandboxSpec(req)
+	if err != nil {
+		return SandboxSpec{}, err
+	}
+	source, ok := cleanAbs(helperSource)
+	if !ok || source != helperSource || path.Base(source) != "owner-io" ||
+		path.Dir(source) != path.Dir(req.ParentSocketHost) ||
+		path.Base(path.Dir(path.Dir(source))) != "acp-owners" ||
+		len(path.Base(path.Dir(source))) != 64 || strings.Trim(path.Base(path.Dir(source)), "0123456789abcdef") != "" {
+		return SandboxSpec{}, fmt.Errorf("owner helper must share the private control scope")
+	}
+	spec.ownerHelper = true
+	spec.Mounts = append(spec.Mounts, SandboxMount{Source: source, Target: OwnerHelperTarget, ReadOnly: true, Kind: SandboxOwnerHelper})
+	return spec, ValidateSandboxSpec(spec)
+}
+
 // attachSandboxChannel adds everything that is true of EVERY delegate container
 // regardless of what it mounts: the one outward channel, the environment that
 // makes it usable, and the user it runs as.
@@ -306,6 +329,8 @@ func attachSandboxChannel(spec *SandboxSpec, req SandboxRequest) error {
 func ValidateSandboxSpec(spec SandboxSpec) error {
 	controlMounts := 0
 	controlEnv := 0
+	helpers := 0
+	helperSource, controlSource := "", ""
 	for _, m := range spec.Mounts {
 		if isDockerSocket(m.Source) {
 			return fmt.Errorf("refusing to mount a container runtime socket: %s", m.Source)
@@ -322,8 +347,16 @@ func ValidateSandboxSpec(spec SandboxSpec) error {
 		if spec.ReadOnly && m.Kind != SandboxControlSocket && !m.ReadOnly {
 			return fmt.Errorf("read-only delegate given a writable filesystem mount: %s", m.Target)
 		}
+		if m.Kind == SandboxOwnerHelper {
+			helpers++
+			helperSource = m.Source
+			if !spec.ownerHelper || !m.ReadOnly || m.Target != OwnerHelperTarget || path.Base(m.Source) != "owner-io" {
+				return fmt.Errorf("invalid owner helper mount")
+			}
+		}
 		if m.Kind == SandboxControlSocket {
 			controlMounts++
+			controlSource = m.Source
 			if path.Base(m.Source) != ControlSocketBasename || m.Target != ControlSocketTarget || m.ReadOnly {
 				return fmt.Errorf("control socket mount must be writable and target exactly %s", ControlSocketTarget)
 			}
@@ -339,6 +372,9 @@ func ValidateSandboxSpec(spec SandboxSpec) error {
 				return fmt.Errorf("AIMEE_API_ENDPOINT must be exactly %s", ControlEndpoint)
 			}
 		}
+	}
+	if (spec.ownerHelper && (helpers != 1 || path.Dir(helperSource) != path.Dir(controlSource))) || (!spec.ownerHelper && helpers != 0) {
+		return fmt.Errorf("owner helper mount count differs")
 	}
 	if spec.privateTest {
 		if controlMounts != 0 || controlEnv != 0 || len(spec.Mounts) != 1 || spec.Mounts[0].Kind != SandboxWorkspace {

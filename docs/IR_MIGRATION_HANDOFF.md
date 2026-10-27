@@ -67,7 +67,7 @@ protocols belong to the translation or external adapter boundaries.
 | HTTP model execution | Agent profiles, policy, tools and history retain IR; translation renders the upstream body and admits the upstream Response/deltas. |
 | Browser primary sessions | Browser Message, runtime-web admission, canonical session history and one live/replay reducer; legacy display archives do not feed execution. |
 | Claude/Codex SDK execution | Source-bound canonical profile/history and captured upstream IR own model observations; SDK frame decoders handle external controls/lifecycle. |
-| CLI and IDEs | Canonical model messages use the shared thinclient; external adapters own protocol projections. Incoming ACP server support remains; outgoing ACP execution is deferred. |
+| ACP, CLI and IDEs | Canonical request/result through the host; the ACP/CLI boundary owns its declared text/content projections. |
 | Roundtable, delegates, workflow model steps and repairs | Canonical Request/Response through delegate invocation; structured repair retains prior typed output. Business artifacts remain domain records. |
 | Memory/router/economizer stages | Typed IR or strictly admitted canonical history; policy views and retrieval records remain domain metadata. |
 | KB curator and Bedrock egress | Canonical requests/results; existing translation adapters own native provider bodies. |

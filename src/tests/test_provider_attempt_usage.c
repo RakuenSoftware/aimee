@@ -23,6 +23,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "agent_admission.h"
 #include "provider_cli_adapter.h"
 
 #include "agent_tasks.h"
@@ -128,12 +129,85 @@ static void test_progress_lifetime(void)
    (void)wire_fence_transport_observer_bind(outer_observer);
 }
 
-/* This HTTP-only fixture must never launch a native provider. */
+/* This peer refuses execution. It observes the real guarded dispatcher's live
+ * admission slot; it never affirms a source/host/model or starts a child. */
+static int admission_probe_active, admission_probe_calls;
+static const char *admission_probe_model;
 int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   (void)cfg;
-   (void)out;
-   abort();
+   assert(admission_probe_active && cfg && cfg->agent);
+   assert(agent_admission_agent_active(cfg->agent->name) == 1);
+   assert(!strcmp(cfg->agent->model, admission_probe_model));
+   assert(!strcmp(out->model, admission_probe_model) &&
+          !strcmp(out->served_model, admission_probe_model));
+   admission_probe_calls++;
+   snprintf(out->error, sizeof out->error, "fixture refuses native execution after admission");
+   return AGENT_RC_CONTEXT_REFUSED;
+}
+static int guarded_admission_probe(agent_t *agent)
+{
+   agent_network_t network = {0};
+   agent_result_t result = {0};
+   admission_probe_active = 1;
+   admission_probe_model = agent->model;
+   request_context_clear();
+   int rc =
+       fixture_agent_dispatch_text(agent, &network, NULL, "system", "task", 128, 0, 1, &result);
+   admission_probe_active = 0;
+   assert(!result.success && !result.canonical_response.n_content);
+   assert(!agent->model[0] || !strcmp(result.model, agent->model));
+   agent_result_clear_response(&result);
+   return rc;
+}
+static void test_actual_acp_admission_unknown_model_bucket(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "acp-admission-a");
+   strcpy(agent.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(agent.cli_kind, "acp");
+   agent.max_parallel = 1;
+   agent_dispatch_set_fail_fast(1);
+   admission_probe_calls = 0;
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   /* The admitted slot is released when the canonical source gate refuses;
+    * this fixture never fabricates a capture/source owner to reach a host. */
+   assert(admission_probe_calls == 0 && !agent.model[0]);
+   assert(agent_admission_global_active() == 0);
+
+   agent_admission_configure(16, 1, NULL, 0);
+   agent_admit_req_t held = {.ctx_handle = "fixture-held",
+                             .agent = "other-acp-alias",
+                             .model = "acp:unknown-model",
+                             .per_agent_max = 1,
+                             .flags = AGENT_ADMIT_NONBLOCKING};
+   agent_slot_t *slot = agent_admission_acquire(&held, NULL);
+   assert(slot);
+   strcpy(agent.name, "acp-admission-b");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 0); /* Distinct aliases share the unknown model cap. */
+   strcpy(agent.model, "declared-model");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   assert(admission_probe_calls == 0); /* A real model reaches the source refusal through its own bucket. */
+   agent_admission_release(slot);
+
+   held.agent = agent.name;
+   held.model = "different-model";
+   slot = agent_admission_acquire(&held, NULL);
+   assert(slot);
+   agent.model[0] = 0;
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 0); /* Per-agent cap is still enforced. */
+   agent_admission_release(slot);
+   assert(guarded_admission_probe(&agent) == AGENT_RC_CONTEXT_REFUSED);
+   assert(admission_probe_calls == 0 && !agent.model[0]);
+
+   strcpy(agent.cli_kind, "claude");
+   assert(guarded_admission_probe(&agent) == AGENT_RC_AT_LIMIT);
+   assert(admission_probe_calls == 0); /* No generic model-less bypass. */
+   assert(agent_admission_global_active() == 0);
+   agent_dispatch_set_fail_fast(0);
+   puts("ACP actual dispatcher: unknown admission bucket bounded; metadata stays unknown; no "
+        "execution");
 }
 
 /* No operator role definition and an empty permission response from the
@@ -562,13 +636,124 @@ static void test_dispatch_resource_refusal(void)
    assert(agent_dispatch_scope_current() == previous);
 }
 
+/* Exercise the real routing owner, configured fallback chain and same-tier
+ * selection. Only the HTTP endpoints and existing external module peers are
+ * fixtures; dispatcher admission/health/IR parsing remain production code. */
+static void test_actual_routing_retry_usage(void)
+{
+   const char *first_bodies[] = {"{\"error\":{\"message\":\"invalid_api_key\"}}",
+                                 "{\"error\":{\"message\":\"invalid_api_key\"},"
+                                 "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}"};
+   for (int route = 0; route < 3; route++)
+      for (int known = 0; known < (route ? 1 : 2); known++)
+      {
+         agent_config_t *cfg = calloc(1, sizeof *cfg);
+         assert(cfg);
+         cfg->agent_count = 2;
+         int listeners[2];
+         pid_t children[2];
+         for (int a = 0; a < 2; a++)
+         {
+            agent_t *agent = &cfg->agents[a];
+            snprintf(agent->name, sizeof agent->name, "retry-%d-%d-%d", route, known, a);
+            snprintf(agent->model, sizeof agent->model, "fixture-model-%d", a);
+            strcpy(agent->provider, "openai");
+            strcpy(agent->auth_type, "none");
+            strcpy(agent->roles[0], "review");
+            agent->role_count = 1;
+            agent->enabled = 1;
+            agent->max_parallel = 1;
+            agent->max_turns = 2;
+            agent->timeout_ms = 10000;
+            char url[128];
+            listeners[a] = listening_peer(url);
+            strcpy(agent->endpoint, url);
+            int status = a || known ? 200 : 401;
+            const char *body = a ? known_zero : first_bodies[known];
+            children[a] = serve_peer(listeners[a], &status, &body, 1);
+         }
+         strcpy(cfg->default_delegate, cfg->agents[0].name);
+         if (route == 1)
+         {
+            cfg->fallback_count = 1;
+            strcpy(cfg->fallback_chain[0], cfg->agents[1].name);
+         }
+         fixture_dispatch_lifetime_t resources = {0};
+         agent_dispatch_scope_t scope = {
+             .begin = fixture_dispatch_begin, .end = fixture_dispatch_end, .context = &resources};
+         const agent_dispatch_scope_t *previous = agent_dispatch_scope_bind(&scope);
+         agent_result_t result = {0};
+         aimee_request_t request = {0};
+         assert(!aimee_ir_request_from_text(&request, "system", "task", 128, route == 0 ? 0 : 0.3));
+         int rc = route == 0 ? agent_run(cfg, "review", &request, &result)
+                             : agent_run_with_tools(cfg, "review", &request, &result);
+         aimee_request_free(&request);
+         agent_dispatch_scope_bind(previous);
+         assert(resources.begins == 2 && resources.ends == 2 && !resources.active);
+         assert(!strcmp(resources.selected[0], cfg->agents[0].name));
+         assert(!strcmp(resources.selected[1], cfg->agents[1].name));
+         if (rc || !result.success)
+            fprintf(stderr, "route %d known %d failed rc=%d: %s\n", route, known, rc, result.error);
+         assert(!rc && result.success);
+         assert(!strcmp(result.agent_name, cfg->agents[1].name));
+         assert(agent_result_usage_is_unobserved(&result));
+         assert(result.canonical_response.usage_unobserved);
+         assert(!result.canonical_response.usage_in && !result.canonical_response.usage_out);
+         assert(!aimee_ir_response_admit(&result.canonical_response));
+         agent_result_clear_response(&result);
+         for (int a = 0; a < 2; a++)
+            join_peer(children[a], listeners[a]);
+         free(cfg);
+      }
+   puts("provider retry owners: actual plain route/configured chain/same-tier retain unknown or "
+        "prior paid usage");
+}
+
+static void test_retry_owner_known_usage_boundaries(void)
+{
+   for (int prior = 0; prior < 4; prior++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.name, sizeof agent.name, "retry-boundary-%d", prior);
+      strcpy(agent.model, "gpt-4o");
+      strcpy(agent.provider, "openai");
+      strcpy(agent.auth_type, "none");
+      agent.max_parallel = 1;
+      agent.timeout_ms = 10000;
+      char url[128];
+      int listener = listening_peer(url), status = 200;
+      strcpy(agent.endpoint, url);
+      const char *body = known_zero;
+      pid_t child = serve_peer(listener, &status, &body, 1);
+      /* An initialized owned diagnostic result, not a fabricated source receipt.
+       * Primary, cached and reasoning counters all prevent latest-model pricing. */
+      agent_result_t out = {0};
+      if (prior == 1)
+         out.prompt_tokens = 7;
+      if (prior == 2)
+         out.canonical_response.usage_cache_read = 3;
+      if (prior == 3)
+         out.canonical_response.usage_reasoning = 2;
+      assert(!fixture_agent_retry_text(&agent, NULL, NULL, "system", "task", 128, 0, 0, &out));
+      assert(out.success && agent_result_usage_is_unobserved(&out) == (prior != 0));
+      assert(out.canonical_response.usage_unobserved == (prior != 0));
+      assert(!aimee_ir_response_admit(&out.canonical_response));
+      agent_result_clear_response(&out);
+      join_peer(child, listener);
+   }
+   puts("provider retry owner: observed zero preserved; prior primary/cache/reasoning work cannot "
+        "price at final model");
+}
+
 int main(int argc, char **argv)
 {
    int only_mode = -1;
    int progress_only = argc == 2 && !strcmp(argv[1], "progress-buffered");
+   int lifecycle_only = argc == 2 && !strcmp(argv[1], "dispatch-lifecycle");
    if (argc == 2)
    {
-      assert(progress_only || !strcmp(argv[1], "bad-json") || !strcmp(argv[1], "retry-only"));
+      assert(progress_only || lifecycle_only || !strcmp(argv[1], "bad-json") ||
+             !strcmp(argv[1], "retry-only"));
       only_mode = !strcmp(argv[1], "bad-json") ? 0 : 3;
    }
    else
@@ -589,12 +774,20 @@ int main(int argc, char **argv)
       test_actual_executor_observations(4);
       return 0;
    }
+   if (lifecycle_only)
+   {
+      test_actual_routing_retry_usage();
+      return 0;
+   }
    test_progress_lifetime();
    test_actual_stream_progress();
    test_cached_result_no_transport();
    test_plain_refusal_clears_phase();
    test_dispatch_resource_refusal();
+   test_actual_routing_retry_usage();
+   test_retry_owner_known_usage_boundaries();
    test_actual_executor_observations(only_mode);
    test_actual_retry_observer_and_no_send();
+   test_actual_acp_admission_unknown_model_bucket();
    return 0;
 }

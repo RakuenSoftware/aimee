@@ -11,9 +11,10 @@ import (
 // to key durable delegate slots, bound spend and reach the worktree; it needs
 // nothing else about the workflow item that may own the review.
 type Run struct {
-	Focus   string
-	Brief   json.RawMessage
-	Request *canonical.Request
+	Focus          string
+	Brief          json.RawMessage
+	Request        *canonical.Request
+	ExecutionScope string
 	// ID is the review identity. It is echoed by every seat and checked, so a
 	// report about a different run is detectable.
 	ID string

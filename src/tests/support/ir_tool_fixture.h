@@ -13,6 +13,16 @@ static inline char *fixture_dispatch_ir_text(const aimee_tool_t *definition, con
    cJSON_Delete(arguments);
    return result;
 }
+static inline char *fixture_dispatch_file_text(const aimee_tool_t *definition, const char *text,
+                                               int timeout, agent_tool_file_resource_fn execute,
+                                               void *context, int *failed)
+{
+   cJSON *arguments = text ? aimee_ir_json_parse_frame(text, strlen(text)) : NULL;
+   char *result = dispatch_tool_file_resource_ctx_status(definition, arguments, timeout, execute,
+                                                         context, failed);
+   cJSON_Delete(arguments);
+   return result;
+}
 /* Text fixture origins for built-in execution tests. The fixture's current
  * schema supplies the same inputs those tests previously authored as strings. */
 static inline char *fixture_dispatch_tool_status(const char *name, const char *text, int timeout,

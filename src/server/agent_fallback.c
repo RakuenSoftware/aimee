@@ -1,11 +1,26 @@
 /* agent_fallback.c: Delegate fallback classification and retry helpers. */
 #include "aimee.h"
 #include "agent.h"
+#include "agent_retry_usage.h"
 #include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "provider_catalog.h"
 #include <stdlib.h>
 #include <string.h>
+
+/* Retry owners pass an initialized, owned result. The guarded dispatcher still
+ * accepts an uninitialized output; only this lexical owner reads the old value.
+ * Nonzero prior work cannot be priced at the final peer's model tariff. Its
+ * per-attempt canonical capture remains intact, while the aggregate is unknown. */
+int agent_retry_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
+                             const aimee_request_t *request, int use_tools, agent_result_t *out)
+{
+   int unknown = agent_retry_usage_tainted(out);
+   agent_result_clear_response(out);
+   int rc = agent_dispatch_one(agent, network, role, request, use_tools, out);
+   agent_retry_usage_apply(out, unknown);
+   return rc;
+}
 
 /* Classify transient provider errors where a different fallback may succeed. */
 int agent_error_is_retryable(const char *error)
@@ -161,8 +176,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
          /* Through the single guarded executor: enforces peer->max_parallel and
           * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
           * non-zero so the loop simply moves to the next same-tier peer. */
-         agent_result_clear_response(out);
-         rc = agent_dispatch_one(peer, &cfg->network, role, request, 1 /* use_tools */, out);
+         rc = agent_retry_dispatch_one(peer, &cfg->network, role, request, 1 /* use_tools */, out);
          if (rc == 0)
          {
             ag = peer;

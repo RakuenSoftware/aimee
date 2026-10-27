@@ -51,8 +51,6 @@ static void test_registry_and_caps(void)
    assert(provider_cli_adapter_get("vibe") == mistral);
    assert(provider_cli_adapter_get("vibe-plan") == mistral);
    assert(provider_cli_adapter_get("missing") == NULL);
-   const provider_cli_adapter_t *acp = provider_cli_adapter_get("acp");
-   assert(acp && acp->execute == NULL); /* Existing config metadata only. */
 
    assert(strcmp(codex->cli_kind, "codex") == 0);
    assert(codex->execute != NULL);

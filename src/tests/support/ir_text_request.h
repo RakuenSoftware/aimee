@@ -41,4 +41,14 @@ static inline int fixture_agent_dispatch_text(const agent_t *agent, const agent_
    aimee_request_free(&request);
    return rc;
 }
+static inline int fixture_agent_retry_text(const agent_t *agent, const agent_network_t *network,
+                                           const char *role, const char *system, const char *user,
+                                           int max, double temp, int tools, agent_result_t *out)
+{
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_text(&request, system, user, max, temp));
+   int rc = agent_retry_dispatch_one(agent, network, role, &request, tools, out);
+   aimee_request_free(&request);
+   return rc;
+}
 #endif

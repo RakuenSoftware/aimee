@@ -536,8 +536,8 @@ $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/i
 AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c server/script_tool_execution.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
-             server/process_mgr.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/cli_codex_profile.c server/provider_cli_adapter.c server/cli_claude.c server/cli_claude_native.c server/claude_headless.c server/server_session_control.c server/server_session_capture.c server/server_session_question.c server/server_session_log.c server/agent_response_projection.c  server/cli_mistral.c server/session_compact.c server/rounds_to_resume.c server/context_engine.c \
-             modules/delegates/delegate_backend.c modules/delegates/delegate_backend_docker.c modules/delegates/delegate_launch_args.c modules/delegates/delegate_driver.c modules/delegates/delegate_openai.c  modules/delegates/delegate_xml_fallback.c modules/delegates/delegate_verify.c \
+             server/process_mgr.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/cli_codex_profile.c server/provider_cli_adapter.c server/cli_claude.c server/cli_claude_native.c server/claude_headless.c server/server_session_control.c server/server_session_capture.c server/server_session_question.c server/server_session_log.c server/agent_response_projection.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/rounds_to_resume.c server/context_engine.c \
+             modules/delegates/delegate_backend.c modules/delegates/delegate_backend_docker.c modules/delegates/delegate_docker_lease.c modules/delegates/delegate_launch_args.c modules/delegates/delegate_driver.c modules/delegates/delegate_openai.c  modules/delegates/delegate_xml_fallback.c modules/delegates/delegate_verify.c \
              server/model_provider.c server/model_sampling.c  server/aux_router.c \
              server/otel.c server/oauth_pkce.c server/oauth_tokens.c modules/protocols/mcp/mcp_client.c modules/protocols/mcp/mcp_client_registry.c modules/protocols/mcp/mcp_osv_gate.c
 AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
@@ -621,7 +621,7 @@ SERVER_SRCS += server/provider_settable.c
 SERVER_SRCS += server/module_routing_adapter.c
 SERVER_SRCS += server/module_stage_adapters.c
 SERVER_SRCS += modules/benchmarks/agent_eval_memory_transport.c
-SERVER_SRCS += server/server_native_delegate.c server/server_native_history.c server/server_unknown_effect_policy.c server/server_native_execution.c server/server_native_cache_lease.c server/server_native_containment.c server/server_native_launch.c cli_proxy.c server/server_native_runtime.c server/server_native_cli.c server/server_native_tool_source.c server/server_native_replay.c server/server_native_tool_admission.c
+SERVER_SRCS += server/server_provider_cli_execute.c server/server_acp_execution.c server/server_acp_resources.c server/server_native_delegate.c server/server_native_delegate_source.c server/server_native_history.c server/server_unknown_effect_policy.c server/server_native_execution.c server/server_native_cache_lease.c server/server_native_containment.c server/server_native_launch.c cli_proxy.c server/server_native_runtime.c server/server_native_cli.c server/server_native_tool_source.c server/server_native_replay.c server/server_native_tool_admission.c
 SERVER_SRCS += $(MODEL_WIRE_SRCS)
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
@@ -988,7 +988,7 @@ all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
-$(FORWARDER): aimee_forwarder.c
+$(FORWARDER): aimee_forwarder.c headers/scoped_file_io.h
 	$(CC) -static -O2 -Wall -Wextra -Werror -o $@ $<
 ifneq ($(HAVE_GO),1)
 	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-runtime-web (browser UI)."

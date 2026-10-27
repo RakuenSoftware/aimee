@@ -20,15 +20,16 @@ type panelDelegates struct{ runner *NativeRunner }
 
 func (p panelDelegates) request(run roundtablecfg.Run, seat roundtablecfg.SeatRequest) DelegateRequest {
 	return DelegateRequest{
-		Role:        seat.Role,
-		Persona:     seat.Persona,
-		Delegate:    seat.Selector,
-		Participant: seat.Participant,
-		Input:       seat.Input,
-		Workdir:     run.Workdir,
-		Tools:       seat.Tools,
-		MaxTurnsCap: seat.MaxTurnsCap,
-		DurableSlot: seat.DurableSlot,
+		ExecutionScope: run.ExecutionScope,
+		Role:           seat.Role,
+		Persona:        seat.Persona,
+		Delegate:       seat.Selector,
+		Participant:    seat.Participant,
+		Input:          seat.Input,
+		Workdir:        run.Workdir,
+		Tools:          seat.Tools,
+		MaxTurnsCap:    seat.MaxTurnsCap,
+		DurableSlot:    seat.DurableSlot,
 		// The seat prompt already carries the complete artifact, so unrelated
 		// worktree-diff evidence would only compete with it for attention.
 		ProvidedTarget:   true,

@@ -226,6 +226,8 @@ int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddNumberToObject(o, "cache_write_tokens", stats[i].total_cache_write_tokens);
       cJSON_AddNumberToObject(o, "cache_read_tokens", stats[i].total_cache_read_tokens);
       cJSON_AddNumberToObject(o, "estimated_cost_usd", stats[i].total_estimated_cost_usd);
+      cJSON_AddNumberToObject(o, "unknown_usage_calls", stats[i].unknown_usage_calls);
+      cJSON_AddBoolToObject(o, "usage_complete", stats[i].unknown_usage_calls == 0);
       cJSON_AddItemToArray(arr, o);
    }
    cJSON_AddItemToObject(resp, "stats", arr);

@@ -726,10 +726,12 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_response_projection.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
+    ${AIMEE_SRC_DIR}/server/cli_acp.c
     ${AIMEE_SRC_DIR}/server/session_compact.c
     ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_docker_lease.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_openai.c
 
@@ -1007,6 +1009,9 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
     ${AIMEE_SRC_DIR}/server/server_native_cli.c
     ${AIMEE_SRC_DIR}/server/server_native_execution.c
+    ${AIMEE_SRC_DIR}/server/server_provider_cli_execute.c
+    ${AIMEE_SRC_DIR}/server/server_acp_execution.c
+    ${AIMEE_SRC_DIR}/server/server_acp_resources.c
     ${AIMEE_SRC_DIR}/server/server_native_cache_lease.c
     ${AIMEE_SRC_DIR}/server/server_native_containment.c
     ${AIMEE_SRC_DIR}/server/server_native_launch.c

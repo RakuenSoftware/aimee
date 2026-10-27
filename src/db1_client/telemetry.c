@@ -433,9 +433,9 @@ int db1_token_audit_list_dashboard(db1_token_audit_dashboard_row_t *out, int max
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", max);
    const char *fields[] = {arg0};
-   char **wire_values = malloc((size_t)max * 9u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 9u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 6u * sizeof *wire_scratch);
+   char **wire_values = malloc((size_t)max * 10u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 10u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 7u * sizeof *wire_scratch);
    if (!wire_values || !wire_caps || !wire_scratch)
    {
       free(wire_values);
@@ -446,44 +446,47 @@ int db1_token_audit_list_dashboard(db1_token_audit_dashboard_row_t *out, int max
    memset(out, 0, (size_t)max * sizeof *out);
    for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      wire_values[wire_row * 9u + 0u] = out[wire_row].tool_name;
-      wire_caps[wire_row * 9u + 0u] = sizeof out[wire_row].tool_name;
-      wire_values[wire_row * 9u + 1u] = out[wire_row].role;
-      wire_caps[wire_row * 9u + 1u] = sizeof out[wire_row].role;
-      wire_values[wire_row * 9u + 2u] = wire_scratch[wire_row * 6u + 0u];
-      wire_caps[wire_row * 9u + 2u] = sizeof wire_scratch[wire_row * 6u + 0u];
-      wire_values[wire_row * 9u + 3u] = wire_scratch[wire_row * 6u + 1u];
-      wire_caps[wire_row * 9u + 3u] = sizeof wire_scratch[wire_row * 6u + 1u];
-      wire_values[wire_row * 9u + 4u] = wire_scratch[wire_row * 6u + 2u];
-      wire_caps[wire_row * 9u + 4u] = sizeof wire_scratch[wire_row * 6u + 2u];
-      wire_values[wire_row * 9u + 5u] = wire_scratch[wire_row * 6u + 3u];
-      wire_caps[wire_row * 9u + 5u] = sizeof wire_scratch[wire_row * 6u + 3u];
-      wire_values[wire_row * 9u + 6u] = wire_scratch[wire_row * 6u + 4u];
-      wire_caps[wire_row * 9u + 6u] = sizeof wire_scratch[wire_row * 6u + 4u];
-      wire_values[wire_row * 9u + 7u] = wire_scratch[wire_row * 6u + 5u];
-      wire_caps[wire_row * 9u + 7u] = sizeof wire_scratch[wire_row * 6u + 5u];
-      wire_values[wire_row * 9u + 8u] = out[wire_row].last_seen;
-      wire_caps[wire_row * 9u + 8u] = sizeof out[wire_row].last_seen;
+      wire_values[wire_row * 10u + 0u] = out[wire_row].tool_name;
+      wire_caps[wire_row * 10u + 0u] = sizeof out[wire_row].tool_name;
+      wire_values[wire_row * 10u + 1u] = out[wire_row].role;
+      wire_caps[wire_row * 10u + 1u] = sizeof out[wire_row].role;
+      wire_values[wire_row * 10u + 2u] = wire_scratch[wire_row * 7u + 0u];
+      wire_caps[wire_row * 10u + 2u] = sizeof wire_scratch[wire_row * 7u + 0u];
+      wire_values[wire_row * 10u + 3u] = wire_scratch[wire_row * 7u + 1u];
+      wire_caps[wire_row * 10u + 3u] = sizeof wire_scratch[wire_row * 7u + 1u];
+      wire_values[wire_row * 10u + 4u] = wire_scratch[wire_row * 7u + 2u];
+      wire_caps[wire_row * 10u + 4u] = sizeof wire_scratch[wire_row * 7u + 2u];
+      wire_values[wire_row * 10u + 5u] = wire_scratch[wire_row * 7u + 3u];
+      wire_caps[wire_row * 10u + 5u] = sizeof wire_scratch[wire_row * 7u + 3u];
+      wire_values[wire_row * 10u + 6u] = wire_scratch[wire_row * 7u + 4u];
+      wire_caps[wire_row * 10u + 6u] = sizeof wire_scratch[wire_row * 7u + 4u];
+      wire_values[wire_row * 10u + 7u] = wire_scratch[wire_row * 7u + 5u];
+      wire_caps[wire_row * 10u + 7u] = sizeof wire_scratch[wire_row * 7u + 5u];
+      wire_values[wire_row * 10u + 8u] = out[wire_row].last_seen;
+      wire_caps[wire_row * 10u + 8u] = sizeof out[wire_row].last_seen;
+      wire_values[wire_row * 10u + 9u] = wire_scratch[wire_row * 7u + 6u];
+      wire_caps[wire_row * 10u + 9u] = sizeof wire_scratch[wire_row * 7u + 6u];
    }
    uint32_t wire_filled = 0;
    int wire_status = db1_call(&family, AIMEE_DB1_OP_TOKEN_AUDIT_LIST_DASHBOARD, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 9), &wire_filled);
+                           (uint32_t)(max * 10), &wire_filled);
    free(wire_values);
    free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 9u != 0u)
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 10u != 0u)
    {
       free(wire_scratch);
       return -1;
    }
-   int wire_rows = (int)(wire_filled / 9u);
+   int wire_rows = (int)(wire_filled / 10u);
    for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[wire_row].prompt_tokens = (int64_t)strtoll(wire_scratch[wire_row * 6u + 0u], NULL, 10);
-      out[wire_row].completion_tokens = (int64_t)strtoll(wire_scratch[wire_row * 6u + 1u], NULL, 10);
-      out[wire_row].cache_write_tokens = (int64_t)strtoll(wire_scratch[wire_row * 6u + 2u], NULL, 10);
-      out[wire_row].cache_read_tokens = (int64_t)strtoll(wire_scratch[wire_row * 6u + 3u], NULL, 10);
-      out[wire_row].estimated_cost_usd = strtod(wire_scratch[wire_row * 6u + 4u], NULL);
-      out[wire_row].call_count = (int)strtol(wire_scratch[wire_row * 6u + 5u], NULL, 10);
+      out[wire_row].prompt_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 0u], NULL, 10);
+      out[wire_row].completion_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 1u], NULL, 10);
+      out[wire_row].cache_write_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 2u], NULL, 10);
+      out[wire_row].cache_read_tokens = (int64_t)strtoll(wire_scratch[wire_row * 7u + 3u], NULL, 10);
+      out[wire_row].estimated_cost_usd = strtod(wire_scratch[wire_row * 7u + 4u], NULL);
+      out[wire_row].call_count = (int)strtol(wire_scratch[wire_row * 7u + 5u], NULL, 10);
+      out[wire_row].unknown_usage_calls = (int)strtol(wire_scratch[wire_row * 7u + 6u], NULL, 10);
    }
    free(wire_scratch);
    return wire_rows;

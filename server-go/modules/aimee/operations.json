@@ -4421,6 +4421,10 @@
           {
             "name": "estimated_cost_usd",
             "type": "double"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 4096
@@ -4503,6 +4507,10 @@
           {
             "name": "total_estimated_cost_usd",
             "type": "double"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 4096
@@ -13510,6 +13518,10 @@
           {
             "name": "last_seen",
             "type": "text"
+          },
+          {
+            "name": "unknown_usage_calls",
+            "type": "int"
           }
         ],
         "max_bytes": 524288
@@ -22930,6 +22942,10 @@
           {
             "name": "updated_at",
             "type": "text"
+          },
+          {
+            "name": "execution_scope",
+            "type": "text"
           }
         ],
         "max_bytes": 8192
@@ -23391,7 +23407,8 @@
         "submitter",
         "max_active",
         "rate_max",
-        "rate_secs"
+        "rate_secs",
+        "execution_scope"
       ],
       "transaction": "single",
       "idempotency": "unsafe",
@@ -23452,6 +23469,11 @@
           {
             "name": "rate_secs",
             "type": "int",
+            "required": false
+          },
+          {
+            "name": "execution_scope",
+            "type": "text",
             "required": false
           }
         ]
@@ -23991,6 +24013,10 @@
           {
             "name": "updated_at",
             "type": "text"
+          },
+          {
+            "name": "execution_scope",
+            "type": "text"
           }
         ],
         "max_bytes": 1048576
@@ -24118,6 +24144,10 @@
           },
           {
             "name": "updated_at",
+            "type": "text"
+          },
+          {
+            "name": "execution_scope",
             "type": "text"
           }
         ],
@@ -26187,7 +26217,8 @@
         "parent_id",
         "source_path",
         "max_cost_usd",
-        "root_cap"
+        "root_cap",
+        "execution_scope"
       ],
       "c_returns": "int64",
       "wire_format": "db1-fields-v2",
@@ -26259,6 +26290,11 @@
           {
             "name": "root_cap",
             "type": "int",
+            "required": false
+          },
+          {
+            "name": "execution_scope",
+            "type": "text",
             "required": false
           }
         ]

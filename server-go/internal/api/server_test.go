@@ -621,9 +621,6 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 		t.Fatal(err)
 	}
 	proposal := "# Automatically discovered\n\ncomplete content\n"
-	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/auto.md"), []byte(proposal), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/.gitkeep"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +642,27 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 		t.Fatal(err)
 	}
 	setExternalConfig(server, configStore)
+	resolverCalls := 0
+	server.SetTriggerExecutionScopeResolver(func(_ context.Context, request TriggerExecutionScopeRequest) (string, error) {
+		resolverCalls++
+		if request.Registration.Origin != "config" || request.Registration.Workspace != repo {
+			t.Fatal("not the owner registry descriptor")
+		}
+		return strings.Repeat("a", 64), nil
+	})
 	server.ScanTriggers(context.Background())
+	if resolverCalls != 0 {
+		t.Fatal("idle scanner invoked credential/source issuer")
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/auto.md"), []byte(proposal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "new proposal")
+	server.ScanTriggers(context.Background())
+	if resolverCalls != 1 {
+		t.Fatalf("new candidate source calls=%d", resolverCalls)
+	}
 	items, err := store.WorkItems(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%v err=%v", items, err)
@@ -655,6 +672,9 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 		t.Fatalf("proposal=%q err=%v", got, err)
 	}
 	server.ScanTriggers(context.Background())
+	if resolverCalls != 1 {
+		t.Fatal("already-filed proposal invoked credential/source issuer")
+	}
 	items, _ = store.WorkItems(context.Background())
 	if len(items) != 1 {
 		t.Fatalf("scanner duplicated proposal: %d items", len(items))

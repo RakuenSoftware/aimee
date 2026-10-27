@@ -9,8 +9,10 @@
 #include "json_fluent.h" /* jo_ok */
 #include "db1_client/db1.h"
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
+#include "server_acp_execution.h"
 #include "server_compute_impl.h"
 #include "agent_config.h"
+#include "agent_retry_usage.h"
 #include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
@@ -595,6 +597,14 @@ static int delegate_project_completed_result(agent_result_t *result, int handoff
    return 0;
 }
 
+/* Admission of the repair body and accounting for its execution are distinct. */
+static int delegate_merge_handoff_repair(agent_result_t *result, agent_result_t *repair, int rc)
+{
+   int admitted = rc == 0 && repair->success && agent_result_project_complete_text(repair) == 0;
+   agent_retry_merge_attempt(result, repair, admitted);
+   return admitted;
+}
+
 static cJSON *delegate_build_result_response(
     const char *deleg_id, int rc, const agent_result_t *result, const agent_config_t *acfg,
     const char *role, const agent_t *target_agent, int applied_changes, int handoff_checked,
@@ -777,7 +787,8 @@ static void delegate_worker_run(void *arg)
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
    char turn_root[MAX_PATH_LEN] = "", source_cwd[MAX_PATH_LEN] = "";
    workspace_turn_scope_t *source_workspace = NULL;
-   int container_bound = 0;
+   server_delegate_container_plan_t *execution_plan = NULL;
+   int container_quiescent = 1;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -1690,17 +1701,15 @@ static void delegate_worker_run(void *arg)
     * not the requested subject, and no delegate is exempt from the container path.
     * A WFE implement slice normally owns a dedicated per-slice worktree, so
     * container_ws points at that tree read-write. */
-   if (!cost_limit_failed)
-      container_bound = detached_bound
-                            ? -1
-                            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws,
-                                                            container_ws_ro);
+   if (!cost_limit_failed && !detached_bound)
+      execution_plan = server_delegate_container_plan_open(deleg_id, sbx_image_arg, container_ws,
+                                                           container_ws_ro);
 
    if (cost_limit_failed)
    {
       /* Result error was populated before any provider dispatch. */
    }
-   else if (container_bound < 0)
+   else if (!execution_plan)
    {
       /* The delegate could not be given a container: no worktree of its own to
        * mount, no docker backend, or a runtime that would not isolate it. There is
@@ -1806,13 +1815,8 @@ static void delegate_worker_run(void *arg)
                                                        delegate_allows_writes, &repaired);
             aimee_request_free(&repair_request);
             free(repair_prompt);
-            if (repair_rc == 0 && repaired.success &&
-                agent_result_project_complete_text(&repaired) == 0)
+            if (delegate_merge_handoff_repair(&result, &repaired, repair_rc))
             {
-               agent_result_move_response(&result, &repaired);
-               result.usage_unobserved = repaired.usage_unobserved;
-               result.turns += repaired.turns;
-               result.tool_calls += repaired.tool_calls;
                (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
                handoff_validation.repair_attempted = 1;
             }
@@ -1826,9 +1830,21 @@ static void delegate_worker_run(void *arg)
                   handoff_validation.error[0] ? handoff_validation.error : "validation failed");
       }
    }
-   if (detached_bound || container_bound > 0)
+   /* Every model attempt and repair has joined and retired its resources before
+    * any parent-worktree application. Retain delegate/source attribution until
+    * this boundary; never repair as a host primary after restoring the caller. */
+   if (server_delegate_container_plan_close(execution_plan))
+   {
+      container_quiescent = 0;
+      rc = AGENT_RC_CAPTURE_FAILED;
+      result.success = 0;
+      if (!result.error[0])
+         snprintf(result.error, sizeof result.error,
+                  "delegate container quiescence was not verified");
+   }
+   execution_plan = NULL;
+   if (detached_bound)
       workspace_turn_unbind_active();
-   container_bound = 0;
    delegate_run_ctx_restore(&run_ctx);
    (void)db1_delegation_spawn_complete(deleg_id);
    /* Clear unconditionally: this thread is going back to the pool, and a leftover
@@ -1984,8 +2000,13 @@ static void delegate_worker_run(void *arg)
    }
 
    /* Clean up delegate worktree if we created one. */
-   if (delegate_worktree_path[0] && delegate_git_root[0])
+   if (container_quiescent && delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
+   else if (!container_quiescent)
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "delegate %s: retaining worktree until container "
+                "quiescence is confirmed",
+                deleg_id);
 
    /* Release the credential lease so siblings can pick it up. If the
     * delegate failed with a rate-limit / 429 / overloaded error, cool
@@ -2019,15 +2040,15 @@ static void delegate_worker_run(void *arg)
     * the exit has already sent its own error response; the success path returns
     * above and never falls through. */
 delegate_fail:
-   if (container_bound > 0)
-      workspace_turn_unbind_active();
+   if (server_delegate_container_plan_close(execution_plan))
+      container_quiescent = 0;
    run_cmd_set_cwd(NULL);
    aimee_request_free(&request);
    free(resolved_prompt);
    aimee_block_free_contents(&delegate_policy);
    if (target_agent && leased_cred_name[0])
       delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
-   if (delegate_worktree_path[0] && delegate_git_root[0])
+   if (container_quiescent && delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
    (void)workspace_turn_scope_end(source_workspace);
    compute_ctx_free(cctx);

@@ -66,6 +66,19 @@ extern "C"
                                           const char *action, const char *subject,
                                           const char *verdict, const char *detail, void *ctx);
 
+   /* Optional storage-neutral atomic batch for already queued records. The
+    * callback borrows these views only for its duration and returns 0 only
+    * after ALL rows are durably accepted. No partial-success return exists. */
+#define OBS_BUS_DURABLE_BATCH_MAX 64u
+   typedef struct
+   {
+      const char *action, *subject, *verdict, *detail;
+   } obs_bus_durable_record_t;
+   typedef int (*obs_bus_durable_batch_sink_fn)(const obs_bus_durable_record_t *records,
+                                                size_t count, void *ctx);
+   int obs_bus_set_durable_batch_sink(obs_bus_durable_sink_fn single,
+                                      obs_bus_durable_batch_sink_fn batch, void *ctx);
+
    typedef struct
    {
       int capture_ok;

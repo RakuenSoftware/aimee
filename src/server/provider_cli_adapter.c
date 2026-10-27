@@ -189,16 +189,7 @@ int provider_cli_check_available(const char *cli_cmd, const char *cli_kind)
    return available;
 }
 
-/* Retain configured ACP names/capabilities without an outgoing executor.
- * Incoming ACP editor sessions use the protocols module's server edge. */
-static const provider_cli_adapter_t acp_provider_cli_adapter = {
-    .cli_kind = "acp",
-    .display_name = "ACP agent transport",
-    .caps = {.max_context_tokens = 0,
-             .supports_tool_use = 1,
-             .proto_stability = PROVIDER_CLI_PROTO_STABLE,
-             .write_confidence = 0.85f},
-};
+extern const provider_cli_adapter_t acp_provider_cli_adapter;
 
 const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
 {

@@ -472,7 +472,7 @@ func TestRegistryExecutorPreservesHostTurnCap(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			result := executor.Execute(t.Context(), delegatecontract.Invocation{
-				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
 				Input: canonical.TaskRequest("fixture", "exceed the cap"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			assertTurnCapResult(t, result)
@@ -488,7 +488,7 @@ func TestExecutionStagePreservesHostTurnCapWire(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			request, _ := json.Marshal(delegatecontract.Invocation{
-				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
 				Input: canonical.TaskRequest("fixture", "cross the wire"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
@@ -564,8 +564,8 @@ func TestRegistryExecutorFirstBootFindsNormalModelRegistration(t *testing.T) {
 		if err := json.Unmarshal(body, &request); err != nil {
 			t.Fatal(err)
 		}
-		if request.Input == nil || !request.Input.Valid() {
-			t.Fatal("canonical input lost")
+		if request.ExecutionScope != strings.Repeat("a", 64) {
+			t.Fatal("source scope lost", request.ExecutionScope)
 		}
 		return json.Marshal(hostResult("actual owner answer"))
 	}))
@@ -581,10 +581,10 @@ func TestRegistryExecutorFirstBootFindsNormalModelRegistration(t *testing.T) {
 		t.Fatal("normal first-boot registration unavailable", result, calls)
 	}
 	request := nativeInvocation()
-	request.Input = nil
+	request.ExecutionScope = ""
 	result = executor.Execute(t.Context(), request)
 	if result.Status != "failed" || calls != 1 {
-		t.Fatal("registry discovery bypassed canonical input validation", result, calls)
+		t.Fatal("registry discovery bypassed source scope", result, calls)
 	}
 }
 func TestRegistryExecutorCanonicalReplacesLegacyAtSameTimestamp(t *testing.T) {

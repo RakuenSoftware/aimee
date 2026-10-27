@@ -18,6 +18,7 @@
  * transport's __run_id -- because that is contract, not transport.
  */
 #include "roundtable_review_bus.h"
+#include "server_native_delegate_source.h"
 
 #include "cJSON.h"
 #include "config.h"
@@ -38,7 +39,8 @@
 
 /* Build the review body. Identical JSON to what the HTTP route carried: the
  * transport changed, the contract did not. */
-static char *build_review_body(const cJSON *request, const char *resolved_panel)
+static char *build_review_body(const cJSON *request, const char *resolved_panel,
+                               const char *execution_scope, const char *workspace)
 {
    cJSON *payload = cJSON_CreateObject();
    if (!payload)
@@ -108,12 +110,9 @@ static char *build_review_body(const cJSON *request, const char *resolved_panel)
       cJSON_AddStringToObject(payload, "run_id", requested_run_id->valuestring);
    else if (cJSON_IsString(transport_run_id))
       cJSON_AddStringToObject(payload, "run_id", transport_run_id->valuestring);
-   const cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
-   const char *cwd =
-       cJSON_IsString(requested_workdir) ? requested_workdir->valuestring : run_cmd_get_cwd();
-   if (cwd && cwd[0])
-      cJSON_AddStringToObject(payload, "workdir", cwd);
+   cJSON_AddStringToObject(payload, "workdir", workspace);
 
+   cJSON_AddStringToObject(payload, "execution_scope", execution_scope);
    char *wire = cJSON_PrintUnformatted(payload);
    cJSON_Delete(payload);
    return wire;
@@ -154,14 +153,32 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
    roundtable_review_resolve_panel(cJSON_IsString(preset) ? preset->valuestring : NULL, resolved,
                                    sizeof(resolved), &timeout_ms);
 
-   char *wire = build_review_body(request, resolved);
+   const cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
+   const char *workdir =
+       cJSON_IsString(requested_workdir) ? requested_workdir->valuestring : run_cmd_get_cwd();
+   /* Resolve once in the authenticated host's namespace. The same approved
+    * value must be minted and dispatched, irrespective of the Go worker cwd. */
+   char *workspace = workdir && workdir[0] ? realpath(workdir, NULL) : NULL;
+   char execution_scope[SERVER_NATIVE_DELEGATE_SCOPE_LEN], error[256];
+   if (!workspace || server_native_delegate_source_mint_for_workspace(
+                         "roundtable", workspace, execution_scope, error, sizeof error))
+   {
+      free(workspace);
+      return server_send_error(conn, "roundtable source custody unavailable", NULL);
+   }
+   char *wire = build_review_body(request, resolved, execution_scope, workspace);
+   free(workspace);
    if (!wire)
+   {
+      (void)server_native_delegate_source_revoke(execution_scope);
       return server_send_error(conn, "roundtable artifact is required", NULL);
+   }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
    cJSON *parsed = aimee_module_json_call_raw(AIMEE_ROUNDTABLE_EVENT_REVIEW,
                                               AIMEE_ROUNDTABLE_STAGE_REVIEW, wire, strlen(wire),
                                               ROUNDTABLE_REVIEW_MAX_BODY, timeout_ms, &result);
    free(wire);
+   (void)server_native_delegate_source_revoke(execution_scope);
 
    if (result != AIMEE_MODULE_CALL_OK)
    {

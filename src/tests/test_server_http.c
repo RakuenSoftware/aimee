@@ -18,6 +18,7 @@
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
 #include "server/workflow_control_bus.h"
+#include "server_native_delegate_source.h"
 #include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
@@ -56,12 +57,30 @@ int server_native_runtime_forward_service_admitted(void)
 }
 
 static int history_open_effects;
+static int native_source_mint_calls, native_source_revoke_calls;
 
 /* This is a route-only fixture, without a source/Vault/workspace owner. Never
  * invent delegated execution authority merely to satisfy the link. Actual
  * issuer success and refusal paths are covered by native-source-issuers and
  * the HMAC/TLS owner fixture, both using the same production issuer code. */
-
+int server_native_delegate_source_mint_for_workspace(const char *purpose, const char *workspace,
+                                                     char handle[65], char *error, size_t cap)
+{
+   (void)purpose;
+   (void)workspace;
+   native_source_mint_calls++;
+   if (handle)
+      handle[0] = 0;
+   if (error && cap)
+      snprintf(error, cap, "source custody unavailable in route-only fixture");
+   return -1;
+}
+int server_native_delegate_source_revoke(const char *handle)
+{
+   (void)handle;
+   native_source_revoke_calls++;
+   return -1; /* This fixture owns no issued capability. */
+}
 static char *kb_agent_surfaces_stub(void)
 {
    return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
@@ -841,11 +860,13 @@ static void test_workflow_control_reports_an_unattached_module(void)
    char response[256];
    const char *body = "{\"proposal_md\":\"test\",\"repo\":\"/route-fixture-unowned\","
                       "\"execution_scope\":\"caller-cannot-supply-authority\"}";
+   int mints_before = native_source_mint_calls, revokes_before = native_source_revoke_calls;
    int status = workflow_control_request("POST", "/v1/dev/submit", "source=release-test", body,
                                          (int)strlen(body), "webuser:release-test", 1, response,
                                          sizeof(response));
    assert(status == 503);
    assert(strstr(response, "not attached to the event bus") != NULL);
+   assert(native_source_mint_calls == mints_before && native_source_revoke_calls == revokes_before);
 }
 
 /* `aimee roles show` has to answer the question a log line was answering: what

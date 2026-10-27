@@ -120,6 +120,7 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	run := panel.Run{
 		Request:          source,
 		Brief:            request.Brief,
+		ExecutionScope:   request.ExecutionScope,
 		ID:               id,
 		Stage:            request.Stage,
 		ExecutionVersion: request.ExecutionVersion,
@@ -156,15 +157,16 @@ type seatBus struct{ client *delegate.BusClient }
 
 func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.DelegateRequest {
 	return delegate.DelegateRequest{
-		Role:        seat.Role,
-		Persona:     seat.Persona,
-		Delegate:    seat.Selector,
-		Participant: seat.Participant,
-		Input:       seat.Input,
-		Workdir:     run.Workdir,
-		Tools:       seat.Tools,
-		MaxTurnsCap: seat.MaxTurnsCap,
-		DurableSlot: seat.DurableSlot,
+		ExecutionScope: run.ExecutionScope,
+		Role:           seat.Role,
+		Persona:        seat.Persona,
+		Delegate:       seat.Selector,
+		Participant:    seat.Participant,
+		Input:          seat.Input,
+		Workdir:        run.Workdir,
+		Tools:          seat.Tools,
+		MaxTurnsCap:    seat.MaxTurnsCap,
+		DurableSlot:    seat.DurableSlot,
 		// The seat prompt already carries the complete artifact, so unrelated
 		// worktree-diff evidence would only compete with it for attention.
 		ProvidedTarget:   true,

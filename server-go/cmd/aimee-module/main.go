@@ -258,6 +258,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: delegates.EventReviewEvidence, StageID: delegates.StageReviewEvidence},
 			{EventKind: delegates.EventNamedFileDrift, StageID: delegates.StageNamedFileDrift},
 			{EventKind: delegates.EventGroupPlan, StageID: delegates.StageGroupPlan},
+			{EventKind: delegatecontract.EventTriggerScope, StageID: delegatecontract.StageTriggerScope},
 		}
 		hostHandler, err := delegates.NewProcessHandler(ctx, moduleBusSocket)
 		if err != nil {

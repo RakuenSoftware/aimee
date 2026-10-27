@@ -229,6 +229,16 @@ text = 'ordinary \"quoted\" data'
                 checker.check(self.root)
             path.unlink()
 
+    def test_renamed_acp_worker_cannot_restore_ambient_launch(self):
+        for invocation in ('execvp(command, arguments)', 'execlp("agent", "agent", 0)',
+                           'setenv("HOME", borrowed, 1)', 'unsetenv("AIMEE_VAULT_TOKEN")'):
+            path = self.source("src/server/cli_acp.c", "void renamed(void) { " + invocation + "; }")
+            with self.subTest(invocation=invocation), self.assertRaisesRegex(ValueError, "acp-ambient-launch"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/server/cli_acp.c", "void owned(void) { fexecve(fd, argv, environment); }")
+        checker.check(self.root)
+
     def test_native_control_adapter_cannot_reparse_model_history(self):
         for call in ('anthropic_backend_parse(frame, response, error, size)',
                      'anthropic_frontend_parse(frame, request, error, size)',
@@ -521,7 +531,7 @@ text = 'ordinary \"quoted\" data'
     def test_migrated_dispatch_consumers_require_owner_status(self):
         for relative in ("src/posix/agent_runtime.c", "src/server/server_compute_async.c",
                          "src/server/script_rpc.c", "src/server/script_tool_execution.c",
-                         "src/server/server_native_runtime.c",
+                         "src/server/server_native_runtime.c", "src/server/server_acp_resources.c",
                          "src/other_module/new_consumer.c"):
             for name in ("dispatch_tool_call", "dispatch_tool_call_ctx"):
                 path = self.source(relative, name + '(tool, args, timeout);')

@@ -35,6 +35,7 @@ const (
 )
 
 type DelegateRequest struct {
+	ExecutionScope       string
 	Role                 string
 	Persona              string
 	Delegate             string
@@ -197,15 +198,16 @@ func (e *DelegateExecutionError) Unwrap() error { return e.Err }
 // Invocation is the complete delegate-owned wire request. Workflow replay,
 // durable-slot, work-item and retry fields intentionally have no JSON mapping.
 type Invocation struct {
-	Operation string             `json:"operation"`
-	Version   int                `json:"version"`
-	Role      string             `json:"role"`
-	Persona   string             `json:"persona"`
-	Model     string             `json:"model,omitempty"`
-	Input     *canonical.Request `json:"ir"`
-	Workdir   string             `json:"workdir,omitempty"`
-	Tools     bool               `json:"tools"`
-	MaxTurns  int                `json:"max_turns,omitempty"`
+	Operation      string             `json:"operation"`
+	ExecutionScope string             `json:"execution_scope"`
+	Version        int                `json:"version"`
+	Role           string             `json:"role"`
+	Persona        string             `json:"persona"`
+	Model          string             `json:"model,omitempty"`
+	Input          *canonical.Request `json:"ir"`
+	Workdir        string             `json:"workdir,omitempty"`
+	Tools          bool               `json:"tools"`
+	MaxTurns       int                `json:"max_turns,omitempty"`
 	// ExecutionTimeoutMS is a delegate-owned run bound, not workflow state. It
 	// lets the producer terminate work at the same boundary as the bus caller.
 	ExecutionTimeoutMS int64 `json:"execution_timeout_ms,omitempty"`
@@ -356,7 +358,7 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 			deadline = cap
 		}
 	}
-	wire := Invocation{Version: WireVersion, Operation: request.WorkItemID, Role: request.Role, Persona: request.Persona,
+	wire := Invocation{Version: WireVersion, Operation: request.WorkItemID, ExecutionScope: request.ExecutionScope, Role: request.Role, Persona: request.Persona,
 		Model: request.Delegate, Input: request.Input, Workdir: request.Workdir,
 		Tools: request.Tools, MaxTurns: request.MaxTurnsCap,
 		ExecutionTimeoutMS: max(1, deadline.Milliseconds())}

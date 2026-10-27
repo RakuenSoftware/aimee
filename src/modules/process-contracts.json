@@ -395,7 +395,15 @@
           "event_kind": 6679,
           "hosted_by": "server-core",
           "durability": "ledger",
-          "durability_reason": "host-owned canonical native execution admission and lifecycle require durable execution receipts",
+          "durability_reason": "host-owned canonical native execution admission and lifecycle require durable source-bound receipts",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 24,
+          "name": "trigger-source-scope",
+          "event_kind": 6680,
+          "durability": "ledger",
+          "durability_reason": "private workflow service source lookup requires authenticated registered-trigger admission",
           "emitter": "obs_bus_emit_durable_event"
         }
       ]

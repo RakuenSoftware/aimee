@@ -43,6 +43,7 @@
     "src/modules/delegates/aimee_ir_rescue.c",
     "src/modules/delegates/delegate_backend.c",
     "src/modules/delegates/delegate_backend_docker.c",
+    "src/modules/delegates/delegate_docker_lease.c",
     "src/modules/delegates/delegate_checkout.c",
     "src/modules/delegates/delegate_credential_retry.c",
     "src/modules/delegates/delegate_credentials.c",
@@ -107,8 +108,11 @@
     "server-go/modules/delegates/sandboximage_stage.go",
     "server-go/modules/delegates/dockerargs.go",
     "server-go/modules/delegates/container.go",
+    "server-go/modules/delegates/container_cleanup.go",
     "server-go/modules/delegates/posture.go",
     "server-go/modules/delegates/cmd/aimee-delegate-egress/main.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_control.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_lease.go",
     "server-go/modules/delegates/worktreeplan.go",
     "server-go/modules/delegates/worktreeplan_stage.go",
     "server-go/modules/delegates/launchargs_stage.go",
@@ -117,7 +121,9 @@
     "server-go/modules/delegates/verification_profile.go",
     "server-go/modules/delegates/verification_executor.go",
     "server-go/modules/delegates/verification_owner_linux.go",
-    "server-go/modules/delegates/verification_owner_unsupported.go"
+    "server-go/modules/delegates/verification_owner_unsupported.go",
+    "server-go/modules/delegates/ordinary_resource.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_source.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -161,8 +167,11 @@
     "server-go/modules/delegates/sandboximage_stage_test.go",
     "server-go/modules/delegates/dockerargs_test.go",
     "server-go/modules/delegates/container_test.go",
+    "server-go/modules/delegates/container_cleanup_test.go",
     "server-go/modules/delegates/posture_test.go",
     "server-go/modules/delegates/cmd/aimee-delegate-egress/main_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_control_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_lease_test.go",
     "server-go/modules/delegates/worktreeplan_test.go",
     "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/launchargs_stage_test.go",
@@ -172,7 +181,11 @@
     "server-go/modules/delegates/verification_executor_contract_linux_test.go",
     "server-go/modules/delegates/verification_executor_linux_test.go",
     "server-go/modules/delegates/verification_executor_docker_linux_test.go",
-    "server-go/modules/delegates/cmd/aimee-delegate-egress/parent_lifetime_linux_test.go"
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/parent_lifetime_linux_test.go",
+    "server-go/modules/delegates/ordinary_resource_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/ordinary_resource_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_source_linux_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/owner_recovery_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
@@ -194,5 +207,7 @@
   "docs": [
     "docs/modules/delegates.md"
   ],
-  "private_headers": []
+  "private_headers": [
+    "src/modules/delegates/delegate_docker_internal.h"
+  ]
 }

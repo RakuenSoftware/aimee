@@ -18,6 +18,13 @@ include them as `aimee/audit/<header>.h`. `audit_action.h` owns bounded governed
 `audit_worm_chain.h` owns the engine-independent canonical row-hash and checkpoint-MAC primitives.
 The KB PostgreSQL store consumes `audit_worm_row_hash` at the shared canonical row-hash boundary.
 
+Queued server WORM records may use `audit_worm_append_batch` through the optional storage-neutral
+bus batch sink. Each immediately available FIFO group contains at most 64 records and commits in one
+SQLite `synchronous=FULL` transaction. Invalid records or an insert/commit failure fail the whole group;
+the bus retains its queued prefix until the sink reports complete acceptance. The existing synchronous
+action append and idempotent outbox APIs keep their per-call durability and timestamp contracts; the
+KB adapter retains its single-record sink. No batching delay or reduced synchronization mode is used.
+
 `src/modules/audit/module.yaml` declares ownership of four production sources, four canonical public
 headers, four direct unit tests, and this document; the module has no private headers. Its
 `ownership_complete: true` latch exhaustively checks module-local C and private-header files and requires

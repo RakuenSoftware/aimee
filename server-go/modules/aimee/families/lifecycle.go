@@ -75,7 +75,7 @@ var reapableParkReasons = []string{
 	"stuck", "wall_cap_exceeded", "turn_cap_exceeded", "budget_exceeded",
 }
 
-// workItemCols is the twenty-two-cell row a work-item read answers with, in the
+// workItemCols is the twenty-three-cell row a work-item read answers with, in the
 // order the C's WI_COLS macro fixed.
 var workItemCols = []col{
 	text("work_item_id", false), text("repo", false), text("proposal_path", false),
@@ -86,7 +86,7 @@ var workItemCols = []col{
 	real_("cum_cost_usd", false), real_("work_item_max_cost_usd", false),
 	num("override_count", false), real_("reserved_cost_usd", false),
 	text("reservation_state", false),
-	text("source_path", false), {name: "updated_at", kind: kStamp},
+	text("source_path", false), {name: "updated_at", kind: kStamp}, text("execution_scope", false),
 }
 
 // lifecycleEventCols is the eight-cell audit row.
@@ -404,7 +404,8 @@ func workItemSubmitCapped(ctx context.Context, db store.DB, f []string) (uint32,
 	maxActive, okMax := store.Atoi(f[7])
 	rateMax, okRate := store.Atoi(f[8])
 	rateSecs, okSecs := store.Atoi(f[9])
-	if workItemID == "" || submitter == "" || !okMax || !okRate || !okSecs {
+	scope := f[10]
+	if workItemID == "" || submitter == "" || !okMax || !okRate || !okSecs || !validExecutionScope(scope) {
 		return store.StatusInvalid, nil, nil
 	}
 	if startStage == "" {
@@ -446,8 +447,10 @@ func workItemSubmitCapped(ctx context.Context, db store.DB, f []string) (uint32,
 	if workflow == "" {
 		workflow = "build"
 	}
-	if _, err := tx.Exec(ctx, workItemCreateSQL, workItemID, repo, proposalPath,
-		workflow, workflowVersion, startStage, "autonomous"); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO lifecycle_work_item
+ (work_item_id, repo, proposal_path, workflow_name, workflow_version,current_stage,mode,execution_scope)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, workItemID, repo, proposalPath,
+		workflow, workflowVersion, startStage, "autonomous", scope); err != nil {
 		return 0, nil, err
 	}
 	tag, err := tx.Exec(ctx, workItemSetSubmitterSQL, workItemID, submitter)

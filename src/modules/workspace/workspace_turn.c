@@ -72,6 +72,7 @@ struct workspace_turn_scope
    ws_detached_provider_t detached;
    int bound;
    int mirror_fd, created_fd;
+   int owned_source;
    char created_cwd[MAX_PATH_LEN];
    char epoch[65];
    char cwd[MAX_PATH_LEN], drift[256];
@@ -442,6 +443,7 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
 }
 
 static int active_mirror_lease(const char *real);
+static int owned_source_replaced(void);
 
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
                             int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
@@ -451,6 +453,8 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
    *mirror_fd = -1;
    resolved[0] = '\0';
    drift[0] = '\0';
+   if (owned_source_replaced())
+      return -1;
    if (!cwd || !cwd[0])
       return 0;
    /* Nested foreground hooks/tools and background workers retain the same
@@ -613,6 +617,64 @@ static int mirror_lease_matches(const char *real, const char *path, int fd)
           !strcmp(real, bound) && !fstat(fd, &held) && !stat(bound, &current) &&
           S_ISDIR(held.st_mode) && held.st_dev == current.st_dev && held.st_ino == current.st_ino;
 }
+static int owned_source_replaced(void)
+{
+   for (const workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+      if (scope->owned_source && !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd))
+         return 1;
+   return 0;
+}
+int workspace_turn_scope_begin_owned_source(const char *cwd, int held_fd,
+                                            workspace_turn_scope_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   char actual[MAX_PATH_LEN];
+   const workspace_provider_t *active = workspace_provider_active();
+   if (!cwd || !cwd[0] || held_fd < 0 || !realpath(cwd, actual) || !strcmp(actual, "/") ||
+       strcmp(cwd, actual) || active != workspace_provider_shared() || t_turn_bound ||
+       t_turn_container_state || t_turn_mirror_fd >= 0 || t_callback_mirror ||
+       owned_source_replaced())
+      return -1;
+   for (const workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+      if ((scope->bound && !scope->owned_source) ||
+          scope->previous_provider != workspace_provider_shared())
+         return -1;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      char root[MAX_PATH_LEN], resolved[MAX_PATH_LEN], provider[32];
+      snprintf(root, sizeof root, "%s", config_workspaces(i));
+      snprintf(provider, sizeof provider, "%s", config_workspace_providers(i));
+      if ((cwd_in_workspace(actual, root) ||
+           (realpath(root, resolved) && cwd_in_workspace(actual, resolved))) &&
+          provider[0] && strcmp(provider, "shared"))
+         return -1;
+   }
+   int duplicate = fcntl(held_fd, F_DUPFD_CLOEXEC, 3);
+   if (duplicate < 0)
+      return -1;
+   if (!mirror_lease_matches(actual, actual, duplicate))
+   {
+      close(duplicate);
+      return -1;
+   }
+   workspace_turn_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+   {
+      close(duplicate);
+      return -1;
+   }
+   scope->created_fd = -1;
+   scope->mirror_fd = duplicate;
+   scope->owned_source = scope->bound = 1;
+   snprintf(scope->cwd, sizeof scope->cwd, "%s", actual);
+   scope->previous_provider = active;
+   scope->previous = t_nested_scope;
+   t_nested_scope = scope;
+   *out = scope;
+   return 1;
+}
 static int active_mirror_lease(const char *real)
 {
    if (t_callback_mirror &&
@@ -693,6 +755,8 @@ int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t
    if (!out)
       return -1;
    *out = NULL;
+   if (owned_source_replaced())
+      return -1;
    char actual[MAX_PATH_LEN];
    if (!cwd || !cwd[0] || !realpath(cwd, actual))
       return 0;
@@ -758,6 +822,8 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
                 strerror(errno));
       return 0;
    }
+   if (owned_source_replaced())
+      return 0; /* A held service source cannot downgrade to a configured pathname. */
    if (active_mirror_lease(real) >= 0)
    {
       snprintf(out, out_cap, "%s", real);
@@ -840,8 +906,10 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
    return 0;
 }
 
-int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
-                                  int workspace_read_only)
+int workspace_turn_bind_container_scoped(const char *task_id, const char *image,
+                                         const char *workspace, int workspace_read_only,
+                                         const char *control_socket,
+                                         const char *control_helper_sha256, int package_proxy)
 {
    if (!task_id || !task_id[0])
       return 0;
@@ -894,10 +962,15 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        .image = (image && image[0]) ? image : NULL,
        .host = NULL,
        .hibernate_on_exit = 0,
+       .checked_resource = 1,
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
-       .pkg_proxy = (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
-       .require_isolation = 1};
+       .pkg_proxy = control_socket
+                        ? package_proxy
+                        : (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
+       .require_isolation = 1,
+       .control_socket = control_socket,
+       .control_helper_sha256 = control_helper_sha256};
    void *state = NULL;
    int arc = b->acquire(b, task_id, &bcfg, &state);
    if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
@@ -951,6 +1024,13 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    return 1;
 }
 
+int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
+                                  int workspace_read_only)
+{
+   return workspace_turn_bind_container_scoped(task_id, image, workspace, workspace_read_only, NULL,
+                                               NULL, 0);
+}
+
 void workspace_turn_set_default_workspace_for_test(const char *workspace)
 {
    snprintf(t_test_default_workspace, sizeof(t_test_default_workspace), "%s",
@@ -970,6 +1050,68 @@ int workspace_turn_container_bound(void)
    if (s_container_bound_test_override >= 0)
       return s_container_bound_test_override;
    return t_turn_container_backend != NULL && workspace_provider_active() == &t_turn_container.base;
+}
+
+static int owned_docker_container(void)
+{
+   return workspace_provider_active() == &t_turn_container.base && t_turn_container_backend &&
+          t_turn_container_backend->owned_resources &&
+          t_turn_container_backend->owned_resources->identity &&
+          t_turn_container_backend->owned_resources->retire &&
+          t_turn_container_backend->owned_resources->forwarder &&
+          t_turn_container_backend->owned_resources->transport &&
+          t_turn_container_backend->owned_resources->file_owner_start &&
+          t_turn_container_backend->owned_resources->prepared &&
+          t_turn_container_backend->owned_resources->file && t_turn_container_state &&
+          t_turn_container_epoch[0];
+}
+int workspace_turn_container_identity(char container_id[65], char image_id[72])
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->identity(
+                                         t_turn_container_state, container_id, image_id)
+                                   : -1;
+}
+int workspace_turn_container_retire(void)
+{
+   return owned_docker_container()
+              ? t_turn_container_backend->owned_resources->retire(t_turn_container_state)
+              : -1;
+}
+int workspace_turn_container_forwarder(unsigned port)
+{
+   return owned_docker_container()
+              ? t_turn_container_backend->owned_resources->forwarder(t_turn_container_state, port)
+              : -1;
+}
+int workspace_turn_container_transport(const char **binary, const char **engine_endpoint)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->transport(
+                                         t_turn_container_state, binary, engine_endpoint)
+                                   : -1;
+}
+int workspace_turn_container_file_owner_start(int executable_fd, int cwd_fd,
+                                              const char *selected_command, int (*validate)(void *),
+                                              void *context, long long deadline_ms)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->file_owner_start(
+                                         t_turn_container_state, executable_fd, cwd_fd,
+                                         selected_command, validate, context, deadline_ms)
+                                   : -1;
+}
+int workspace_turn_container_prepared(const char **command, const char **home,
+                                      const char **mcp_command)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->prepared(
+                                         t_turn_container_state, command, home, mcp_command)
+                                   : -1;
+}
+int workspace_turn_container_file(const char *path, int writing, const char *content, size_t length,
+                                  int timeout_ms, char **out, size_t *out_length, int *unknown)
+{
+   return owned_docker_container() ? t_turn_container_backend->owned_resources->file(
+                                         t_turn_container_state, path, writing, content, length,
+                                         timeout_ms, out, out_length, unknown)
+                                   : -1;
 }
 
 void workspace_turn_unbind_active(void)
@@ -1046,7 +1188,7 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
       *directory_fd = -1;
    if (digest)
       digest[0] = 0;
-   if (!cwd || !cwd[0] || !directory_fd || !digest)
+   if (!cwd || !cwd[0] || !directory_fd || !digest || owned_source_replaced())
       return -1;
    const workspace_provider_t *provider = workspace_provider_active();
    if (!provider)
@@ -1075,7 +1217,9 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
       char actual[MAX_PATH_LEN];
       int mirror = -1;
       if (realpath(cwd, actual))
+      {
          mirror = active_mirror_lease(actual);
+      }
       if (mirror >= 0)
          fd = fcntl(mirror, F_DUPFD_CLOEXEC, 3);
       else if (project_owner && (fd = project_owner(cwd)) >= 0)

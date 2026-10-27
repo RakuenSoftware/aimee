@@ -1,12 +1,10 @@
-/* Canonical delegate execution under the authenticated module service identity. */
+/* Authenticated internal native execution. The bus identity and sealed source
+ * owner are authority; the body contains only canonical task data and a handle. */
 #include "server_native_delegate.h"
+#include "server_native_delegate_source.h"
 #include "server_native_history.h"
 #include "agent_exec.h"
 #include "request_context.h"
-#include "server.h"
-#include "vault_service.h"
-#include "db1_client/server_sessions.h"
-#include <openssl/rand.h>
 #include "persona.h"
 #include "cmd_agent_delegate_impl.h"
 #include "server_delegate_input.h"
@@ -66,8 +64,8 @@ static int integer(const cJSON *j, const char *key, int *value)
 static int fields(const cJSON *j)
 {
    static const char *const keys[] = {
-       "version", "operation", "role",  "persona",   "model",
-       "ir",      "workdir",   "tools", "max_turns", "execution_timeout_ms"};
+       "version", "operation", "execution_scope",     "role", "persona", "model", "ir", "workdir",
+       "tools",   "max_turns", "execution_timeout_ms"};
    const cJSON *f;
    cJSON_ArrayForEach(f, j)
    {
@@ -79,6 +77,42 @@ static int fields(const cJSON *j)
          return -1;
    }
    return 0;
+}
+static aimee_module_status_t trigger_scope(const cJSON *json, uint8_t *output, uint32_t capacity,
+                                           uint32_t *length)
+{
+   if (cJSON_GetArraySize(json) != 4)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   const cJSON *version = get(json, "version");
+   const char *digest = text(json, "configuration_sha256");
+   const cJSON *registration = get(json, "registration");
+   if (!cJSON_IsNumber(version) || version->valuedouble != 3 || !text(json, "action") ||
+       strcmp(text(json, "action"), "trigger_scope") || !cJSON_IsObject(registration) || !digest ||
+       strlen(digest) != 64 || strspn(digest, "0123456789abcdef") != 64)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   char handle[65] = "", error[512] = "";
+   if (server_native_delegate_source_trigger(registration, digest, handle, error, sizeof error))
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   cJSON *reply = cJSON_CreateObject();
+   if (!reply || !cJSON_AddStringToObject(reply, "execution_scope", handle))
+   {
+      cJSON_Delete(reply);
+      return AIMEE_MODULE_STATUS_INTERNAL;
+   }
+   char *wire = cJSON_PrintUnformatted(reply);
+   cJSON_Delete(reply);
+   if (!wire)
+      return AIMEE_MODULE_STATUS_INTERNAL;
+   size_t bytes = strlen(wire);
+   aimee_module_status_t status = AIMEE_MODULE_STATUS_INTERNAL;
+   if (bytes <= capacity)
+   {
+      memcpy(output, wire, bytes);
+      *length = (uint32_t)bytes;
+      status = AIMEE_MODULE_STATUS_OK;
+   }
+   cJSON_free(wire);
+   return status;
 }
 static int remaining_ms(const aimee_module_invocation_t *invocation)
 {
@@ -106,18 +140,28 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
    cJSON *json = aimee_ir_json_parse_frame((const char *)body, length);
+   if (cJSON_IsObject(json) && get(json, "action"))
+   {
+      aimee_module_status_t result = trigger_scope(json, output, capacity, output_length);
+      cJSON_Delete(json);
+      return result;
+   }
    aimee_request_t request = {0}, effective = {0};
    aimee_block_t policy = {0};
    aimee_response_t response = {0};
    agent_result_t result = {0};
    agent_config_t *config = NULL;
+   server_native_delegate_source_scope_t *scope = NULL;
    cJSON *history = NULL, *receipts = NULL, *reply = NULL;
    aimee_module_status_t status = AIMEE_MODULE_STATUS_INVALID_REQUEST;
    const cJSON *version = get(json, "version"), *tools = get(json, "tools");
+   const char *handle = text(json, "execution_scope");
    int turns = 0, timeout = 0;
    if (!cJSON_IsObject(json) || fields(json) || !cJSON_IsNumber(version) ||
        version->valuedouble != 3 || !field_string(json, "operation", 256, 1) ||
-       !field_string(json, "role", 127, 1) || !field_string(json, "model", MAX_AGENT_NAME - 1, 1) ||
+       !field_string(json, "execution_scope", 64, 1) || !handle || strlen(handle) != 64 ||
+       strspn(handle, "0123456789abcdef") != 64 || !field_string(json, "role", 127, 1) ||
+       !field_string(json, "model", MAX_AGENT_NAME - 1, 1) ||
        !field_string(json, "workdir", 4095, 1) || !field_string(json, "persona", 127, 0) ||
        !cJSON_IsBool(tools) || integer(json, "max_turns", &turns) ||
        integer(json, "execution_timeout_ms", &timeout) ||
@@ -137,22 +181,17 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
       goto done;
    config = calloc(1, sizeof *config);
    agent_t selected = {0};
+   char error[512] = "";
    if (!config)
    {
       status = AIMEE_MODULE_STATUS_INTERNAL;
       goto done;
    }
-   if (agent_load_config(config))
+   if (server_native_delegate_source_bind(
+           handle, invocation->source_principal_ref, text(json, "operation"), text(json, "role"),
+           text(json, "model"), text(json, "workdir"), &request, cJSON_IsTrue(tools), turns,
+           timeout, &scope, config, &selected, error, sizeof error))
       goto done;
-   agent_t *registered = agent_find(config, text(json, "model"));
-   if (!registered || !registered->enabled || registered->primary_only ||
-       !agent_has_role(registered, text(json, "role")) ||
-       (request.model && strcmp(request.model, registered->model)))
-      goto done;
-   selected = *registered;
-   if (turns > 0 && (selected.max_turns <= 0 || turns < selected.max_turns))
-      selected.max_turns = turns;
-   run_cmd_set_cwd(text(json, "workdir"));
    const char *persona = text(json, "persona");
    if ((persona && persona[0] && !persona_exists(text(json, "workdir"), persona)) ||
        delegate_assemble_policy_ir(server_delegate_input_has_policy(&request), text(json, "role"),
@@ -160,9 +199,11 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
                                    &policy) ||
        server_delegate_request_prepare(&request, &policy, 0, &effective))
       goto done;
-   if (aimee_ir_request_admit(&effective))
+   if (aimee_ir_request_admit(&effective) ||
+       server_native_delegate_source_admit(scope, persona, &effective, error, sizeof error))
       goto done;
-   /* The existing invocation deadline can only tighten the execution bound. */
+   /* The sealed operation claim binds the requested bound, not a changing bus
+    * deadline. Execution can only tighten that admitted request afterward. */
    remaining = remaining_ms(invocation);
    if (remaining <= 0)
    {
@@ -179,22 +220,6 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
       goto done;
    int64_t execution_started_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
    config->tool_loop_deadline_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 + timeout;
-   agent_request_creds_t credentials = {0};
-   snprintf(credentials.vault_principal, sizeof credentials.vault_principal, "%s",
-            VAULT_SERVER_PRINCIPAL);
-   unsigned char random[16];
-   if (RAND_bytes(random, sizeof random) != 1)
-   {
-      goto done;
-   }
-   memcpy(credentials.session_id, "delegate-", 9);
-   for (size_t i = 0; i < sizeof random; i++)
-      snprintf(credentials.session_id + 9 + 2 * i, 3, "%02x", random[i]);
-   if (db1_server_session_create(credentials.session_id, "delegate", VAULT_SERVER_PRINCIPAL))
-   {
-      goto done;
-   }
-   agent_request_creds_restore(&credentials);
    int rc = agent_run_native_request_for_role(config, &selected, text(json, "role"),
                                               cJSON_IsTrue(tools), &effective, &response, &result);
    const request_context_t *context = request_context_get();
@@ -263,6 +288,7 @@ native_delegate_handle_impl(const aimee_module_invocation_t *invocation, const u
    cJSON_free(wire);
 done:
    aimee_block_free_contents(&policy);
+   server_native_delegate_source_unbind(scope);
    free(config);
    cJSON_Delete(json);
    cJSON_Delete(history);
@@ -275,49 +301,18 @@ done:
    return status;
 }
 
-/* Only this authenticated callback can activate the service-native constructor.
- * The marker is thread-local, nonpersistent, and has no wire setter. */
-static _Thread_local int active_delegate;
-int server_native_delegate_active(void)
-{
-   return active_delegate;
-}
-
-/* Preserve the caller's context around one ordinary configured delegate. */
+/* One borrowed AMOD cancellation boundary covers source queries/issuance,
+ * workspace binding, host composition and native execution alike. */
 aimee_module_status_t server_native_delegate_handle(const aimee_module_invocation_t *invocation,
                                                     const uint8_t *body, uint32_t length,
                                                     uint8_t *output, uint32_t capacity,
                                                     uint32_t *output_length, void *context)
 {
-   if (!invocation || invocation->stage_id != SERVER_NATIVE_DELEGATE_STAGE ||
-       invocation->source_principal_ref != SERVER_NATIVE_DELEGATE_PRINCIPAL ||
-       !invocation->source_handle)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   request_context_snapshot_t previous_context;
-   request_context_snapshot(&previous_context);
-   agent_request_creds_t previous_credentials;
-   agent_request_creds_snapshot(&previous_credentials);
-   char previous_cwd[MAX_PATH_LEN];
-   snprintf(previous_cwd, sizeof previous_cwd, "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
-   request_context_t owner = {0};
-   snprintf(owner.principal, sizeof owner.principal, "%s", VAULT_SERVER_PRINCIPAL);
-   snprintf(owner.vault_principal, sizeof owner.vault_principal, "%s", VAULT_SERVER_PRINCIPAL);
-   owner.peer_uid = -1;
-   owner.model_execution = 1;
-   owner.capabilities = CAPS_READ_ONLY | CAP_DELEGATE | CAP_TOOL_EXECUTE | CAP_TOOL_BASH |
-                        CAP_TOOL_WRITE | CAP_MEMORY_WRITE;
-   request_context_set(&owner);
-   int previous_active = active_delegate;
-   active_delegate = 1;
    agent_request_cancel_scope_t cancel = {.flag = aimee_module_invocation_cancel_flag(invocation),
                                           .parent = agent_request_cancel_scope_current()};
    const agent_request_cancel_scope_t *previous = agent_request_cancel_scope_bind(&cancel);
    aimee_module_status_t status = native_delegate_handle_impl(invocation, body, length, output,
                                                               capacity, output_length, context);
    agent_request_cancel_scope_bind(previous);
-   active_delegate = previous_active;
-   run_cmd_set_cwd(previous_cwd[0] ? previous_cwd : NULL);
-   agent_request_creds_restore(&previous_credentials);
-   request_context_restore(&previous_context);
    return status;
 }

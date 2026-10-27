@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/delegate"
 	"golang.org/x/sys/unix"
 )
 
@@ -223,20 +224,45 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 	}
 }
 
+func TestExecutionScopeComesOnlyFromTrustedOuterControl(t *testing.T) {
+	scope := strings.Repeat("a", 64)
+	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := delegate.ExecutionScopeFromContext(r.Context()); got != scope {
+			t.Fatalf("lost host-issued scope: %q", got)
+		}
+		if r.Header.Get("X-Aimee-Execution-Scope") != "" {
+			t.Fatal("authorization handle exposed as HTTP header")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	response := controlCall(t, mux, ControlRequest{Method: "POST", Path: "/v1/dev/submit", ExecutionScope: scope, Body: `{"execution_scope":"forged"}`})
+	if response.Status != http.StatusNoContent {
+		t.Fatalf("outer context status%d", response.Status)
+	}
+	denied := controlCall(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid scope reached mux") }), ControlRequest{Method: "GET", Path: "/v1/health", ExecutionScope: strings.Repeat("A", 64)})
+	if denied.Status != http.StatusBadRequest {
+		t.Fatalf("invalid scope status%d", denied.Status)
+	}
+}
+
 func TestControlLifecycleCancellationDrainsActiveMux(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	entered, finished := make(chan struct{}), make(chan struct{})
 	fallback := make(chan struct{})
 	defer close(fallback)
+	scope := strings.Repeat("b", 64)
+	var scopeBefore, scopeAfter string
 	handler := NewHandlerContext(ctx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		scopeBefore = delegate.ExecutionScopeFromContext(r.Context())
 		close(entered)
 		select {
 		case <-r.Context().Done():
 		case <-fallback:
 		}
+		scopeAfter = delegate.ExecutionScopeFromContext(r.Context())
 	}))
-	request, err := json.Marshal(ControlRequest{Method: "POST", Path: "/v1/dev/submit"})
+	request, err := json.Marshal(ControlRequest{Method: "POST", Path: "/v1/dev/submit", ExecutionScope: scope})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +282,9 @@ func TestControlLifecycleCancellationDrainsActiveMux(t *testing.T) {
 	}
 	if status != bus.ModuleStatusCancelled || len(body) != 0 {
 		t.Fatalf("cancelled mux returned body/status %q/%v", body, status)
+	}
+	if scopeBefore != scope || scopeAfter != scope {
+		t.Fatal("lifecycle context lost private execution scope")
 	}
 }
 

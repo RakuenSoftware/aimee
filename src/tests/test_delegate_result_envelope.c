@@ -338,6 +338,102 @@ static void test_worker_projection(void)
    worker_projection(&ir, 1, 0, 0, NULL);
    cJSON_Delete(tool.tool_input);
 }
+/* Exercise the same admission/whole-attempt merge used by delegate_worker,
+ * then the shipping envelope builder. No provider, source or repair executor
+ * is replaced with an affirmative execution receipt. */
+static void test_handoff_repair_accounting(void)
+{
+   const struct
+   {
+      int prior_in, repair_in, prior_unknown, repair_unknown, rc, partial;
+      int admitted, unknown;
+   } cases[] = {
+       {0, 7, 0, 0, 0, 0, 1, 0},  {7, 0, 0, 0, 0, 0, 1, 1},  {0, 0, 1, 0, 0, 0, 1, 1},
+       {0, 7, 0, 0, -1, 0, 0, 1}, {0, 0, 0, 1, -1, 0, 0, 1}, {7, 0, 0, 0, -1, 0, 0, 0},
+       {0, 7, 0, 0, 0, 1, 0, 1},  {0, 0, 0, 0, 0, 0, 1, 0},
+   };
+   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
+   {
+      agent_result_t result = {0}, repair = {0};
+      assert(agent_result_from_host_text(&result, "original invalid handoff") == 0);
+      assert(agent_result_from_host_text(&repair, "admitted repaired handoff") == 0);
+      result.success = repair.success = 1;
+      snprintf(result.model, sizeof result.model, "original-model");
+      snprintf(repair.model, sizeof repair.model, "repair-model");
+      result.prompt_tokens = result.canonical_response.usage_in = cases[i].prior_in;
+      repair.prompt_tokens = repair.canonical_response.usage_in = cases[i].repair_in;
+      result.completion_tokens = result.canonical_response.usage_out = cases[i].prior_in;
+      repair.completion_tokens = repair.canonical_response.usage_out = cases[i].repair_in;
+      repair.canonical_response.raw = cJSON_Parse("{\"repair_observation\":7}");
+      assert(repair.canonical_response.raw);
+      result.usage_unobserved = result.canonical_response.usage_unobserved = cases[i].prior_unknown;
+      repair.usage_unobserved = repair.canonical_response.usage_unobserved =
+          cases[i].repair_unknown;
+      result.turns = 1;
+      repair.turns = 2;
+      result.tool_calls = 2;
+      repair.tool_calls = 3;
+      result.successful_tool_calls = 1;
+      repair.successful_tool_calls = 2;
+      result.rescue_recoveries = 1;
+      repair.rescue_recoveries = 2;
+      result.latency_ms = 11;
+      repair.latency_ms = 19;
+      if (cases[i].partial)
+         repair.canonical_response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+      assert(delegate_merge_handoff_repair(&result, &repair, cases[i].rc) == cases[i].admitted);
+      assert(result.success == 1);
+      assert(!strcmp(result.response,
+                     cases[i].admitted ? "admitted repaired handoff" : "original invalid handoff"));
+      assert(!strcmp(result.model, cases[i].admitted ? "repair-model" : "original-model"));
+      assert(result.prompt_tokens == cases[i].prior_in + cases[i].repair_in);
+      assert(result.completion_tokens == cases[i].prior_in + cases[i].repair_in);
+      assert(cJSON_GetObjectItemCaseSensitive(cases[i].admitted ? result.canonical_response.raw
+                                                                : repair.canonical_response.raw,
+                                              "repair_observation")
+                 ->valueint == 7);
+      assert(result.turns == 3 && result.tool_calls == 5 && result.successful_tool_calls == 3);
+      assert(result.latency_ms == 30 && result.rescue_recoveries == 3);
+      assert(agent_result_usage_is_unobserved(&result) == cases[i].unknown);
+      assert(result.canonical_response.usage_unobserved == cases[i].unknown);
+      assert(result.canonical_response.usage_in == (cases[i].unknown    ? 0
+                                                    : cases[i].admitted ? cases[i].repair_in
+                                                                        : cases[i].prior_in));
+      cJSON *wire = delegate_build_result_response("owned-repair", cases[i].admitted ? 0 : 2,
+                                                   &result, NULL, "reviewer", NULL, 0, 0, NULL, "");
+      assert(wire);
+      assert(cJSON_GetObjectItemCaseSensitive(wire, "prompt_tokens")->valueint ==
+             result.prompt_tokens);
+      assert(cJSON_GetObjectItemCaseSensitive(wire, "turns")->valueint == 3);
+      assert(cJSON_GetObjectItemCaseSensitive(wire, "tool_calls")->valueint == 5);
+      assert(cJSON_GetObjectItemCaseSensitive(wire, "latency_ms")->valueint == 30);
+      aimee_response_t decoded = {0};
+      assert(aimee_ir_response_parse(cJSON_GetObjectItemCaseSensitive(wire, "ir"), &decoded) == 0);
+      assert(decoded.usage_unobserved == cases[i].unknown);
+      aimee_response_free(&decoded);
+      cJSON_Delete(wire);
+      agent_result_clear_response(&result);
+      agent_result_clear_response(&repair);
+   }
+   /* Cache/reasoning-only prior work must also invalidate latest-model pricing.
+    * A failed attempt is accounted without replacing its parent's body. */
+   agent_result_t result = {0}, repair = {0};
+   assert(agent_result_from_host_text(&result, "original") == 0);
+   assert(agent_result_from_host_text(&repair, "repair") == 0);
+   result.success = repair.success = 1;
+   result.cache_hit = 1;
+   repair.cache_read_tokens = 4;
+   repair.cache_write_tokens = 5;
+   repair.canonical_response.usage_reasoning = 6;
+   repair.success = 0;
+   assert(delegate_merge_handoff_repair(&result, &repair, 0) == 0);
+   assert(result.cache_read_tokens == 4 && result.cache_write_tokens == 5);
+   assert(!result.cache_hit && result.canonical_response.usage_unobserved);
+   assert(!strcmp(result.response, "original"));
+   agent_result_clear_response(&result);
+   agent_result_clear_response(&repair);
+}
+
 static void test_delegate_queue_input_is_ir(void)
 {
    compute_ctx_t context = {0};
@@ -487,6 +583,7 @@ int main(void)
 {
    test_delegate_queue_input_is_ir();
    test_delegate_public_policy_admission();
+   test_handoff_repair_accounting();
    test_terminal_consumers();
    test_worker_projection();
    aimee_block_t blocks[] = {

@@ -104,6 +104,7 @@ type CreateWorkItem struct {
 	ParentID        string
 	SourcePath      string
 	MaxCostUSD      float64
+	ExecutionScope  string
 }
 
 var ErrAdmissionFull = errors.New("trigger admission full")
@@ -130,6 +131,7 @@ type WorkItem struct {
 	Worktree          string  `json:"worktree,omitempty"`
 	SourcePath        string  `json:"-"`
 	UpdatedAt         string  `json:"updated_at"`
+	ExecutionScope    string  `json:"-"`
 }
 
 type Event struct {
@@ -185,6 +187,7 @@ func workItemFromRow(row wire.WorkItemGet) WorkItem {
 		ParentID:          row.ParentID,
 		Worktree:          row.Worktree,
 		SourcePath:        row.SourcePath,
+		ExecutionScope:    row.ExecutionScope,
 		UpdatedAt:         row.UpdatedAt,
 	}
 }
@@ -216,7 +219,7 @@ func (s *Store) createWorkItem(ctx context.Context, in CreateWorkItem, cap int) 
 	}
 	outcome, err := s.client.WfeCreateWorkItem(ctx, in.ID, in.Repo, in.ProposalPath, in.WorkflowName,
 		in.WorkflowVersion, in.StartStage, in.Mode, in.Submitter, in.ParentID, in.SourcePath,
-		in.MaxCostUSD, cap)
+		in.MaxCostUSD, cap, in.ExecutionScope)
 	if err != nil {
 		return fmt.Errorf("create work item: %w", err)
 	}

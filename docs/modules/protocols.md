@@ -33,10 +33,9 @@ different on the path that runs third-party code.
 
 Canonical module source includes the MCP client, registry, tool-table/profile, gateway bridge, and
 skill-tool code plus server-direction ACP in `src/modules/protocols/acp/acp_server.c`. Significant MCP server
-dispatch remains under root and `src/server`, including `server_mcp_*` and `cli_mcp_serve`;
-those are physical-ownership debt to inventory rather than evidence of a second protocol module.
-The unreachable outgoing ACP agent client is retired; configured ACP adapter metadata does not
-provide an executor. Incoming ACP editor/OpenCode sessions remain supported.
+dispatch and ACP client/CLI integration remain under root and `src/server`, including `server_mcp_*`,
+`cli_mcp_serve`, and `cli_acp`; those are physical-ownership debt to inventory rather than evidence of a
+second protocol module.
 
 `src/modules/protocols/module.yaml` is the complete checked inventory for module-local sources and
 private headers. Its `ownership_complete` latch means an undeclared owner-local translation unit or
@@ -56,11 +55,11 @@ actions but do not replace protocol parsing or capability negotiation.
 
 ## Providers and readiness
 
-MCP `stdio`/SSE client transports, the Aimee MCP server/proxy, and the inbound ACP server are
-distinct adapters beneath one required module. Each reports handshake, transport, capability, and
+MCP `stdio`/SSE client transports, the Aimee MCP server/proxy, inbound ACP server, and outbound ACP client
+are distinct adapters beneath one required module. Each reports handshake, transport, capability, and
 tool readiness independently. Required-core acceptance keeps Aimee's inbound MCP server/proxy and ACP
-server present with handshake, transport, and capability diagnostics. Remote MCP clients may remain
-unconfigured; that absence is normal and not a core readiness failure.
+server present with handshake, transport, and capability diagnostics. Only remote MCP clients and outbound
+ACP clients may remain unconfigured; that absence is normal and not a core readiness failure.
 
 ## Configuration and activation
 
@@ -95,14 +94,14 @@ private content while preserving method, correlation, transport, and bounded err
 ## Supported journeys
 
 Aimee can serve its tool catalog to an `MCP` client, connect to configured external MCP servers and merge
-their tools under controlled profiles, or accept an ACP editor session and stream typed updates.
-Each adapter converts at the IR/tool boundary so gateway, routing, and delegates use
+their tools under controlled profiles, accept an ACP editor session and stream typed updates, or drive an
+outbound ACP agent. Each adapter converts at the IR/tool boundary so gateway, routing, and delegates use
 the same core journeys rather than protocol-specific execution loops.
 
 ## Tests and failure behavior
 
 `test_mcp_client.c`, registry/SSE/integration tests, `test_mcp_native_surface.c`,
-`test_cli_mcp_serve.c`, `test_acp_server.c`, `test_cli_acp_projection.c`, gateway-tool tests, and native-dispatch tests
+`test_cli_mcp_serve.c`, `test_acp_server.c`, `test_cli_acp.c`, gateway-tool tests, and native-dispatch tests
 cover framing and bridges. Malformed JSON, handshake mismatch, unavailable transport, unsafe package, or
 unknown tool fails with a protocol error and must not dispatch a partial or unauthorized action.
 
@@ -130,6 +129,6 @@ and Make/CMake object membership; it changes only header ownership and include s
 ## Extension and removal
 
 Add protocols as `adapter` implementations around IR, tools, policy, and gateway rather than cloning routing or execution.
-Consolidate MCP tables only after verifying direction-specific semantics;
+Consolidate MCP tables and ACP client/server framing only after verifying direction-specific semantics;
 same acronym does not imply duplicate code. MCP and ACP are required core adapters and cannot be extracted
 as optional plugins, though individual remote endpoints can remain unconfigured.

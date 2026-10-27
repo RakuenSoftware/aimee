@@ -2,12 +2,16 @@ package delegates
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/delegate"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,7 +44,7 @@ func hostResult(text string) contract.InvocationResult {
 	return contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "done", Output: output, History: []canonical.Message{{Role: "assistant", Blocks: []canonical.Block{output.Blocks[0].Block}}}}
 }
 func nativeInvocation() contract.Invocation {
-	return contract.Invocation{Version: contract.WireVersion, Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("reviewer", "review"), Tools: true, MaxTurns: 2, ExecutionTimeoutMS: 5000}
+	return contract.Invocation{Version: contract.WireVersion, Operation: "fixture-operation", Role: "review", Persona: "reviewer", Input: canonical.TaskRequest("reviewer", "review"), ExecutionScope: strings.Repeat("a", 64), Tools: true, MaxTurns: 2, ExecutionTimeoutMS: 5000}
 }
 func TestAllNativeAliasesUseCanonicalHostWithoutDirectSDKFallback(t *testing.T) {
 	for _, kind := range []string{"claude", "claude-code", "codex"} {
@@ -53,7 +57,7 @@ func TestAllNativeAliasesUseCanonicalHostWithoutDirectSDKFallback(t *testing.T) 
 						t.Fatal("wrong host capability")
 					}
 					var request contract.Invocation
-					if !canonical.Decode(body, &request) || request.Model != "native" || request.MaxTurns != 2 || !request.Tools || request.Input == nil || !request.Input.Valid() {
+					if !canonical.Decode(body, &request) || request.Model != "native" || request.ExecutionScope != strings.Repeat("a", 64) || request.MaxTurns != 2 || !request.Tools || request.Input == nil || !request.Input.Valid() {
 						t.Fatalf("lost source/IR/limits: %s", body)
 					}
 					if failed {
@@ -87,8 +91,8 @@ func TestNativeRefusalCannotBecomeSuccessfulDelegateArtifact(t *testing.T) {
 		t.Fatalf("lost typed refusal: %+v", result)
 	}
 }
-func TestNativeOwnerMissingCanonicalDataFailsClosed(t *testing.T) {
-	for _, mode := range []string{"no-owner", "no-input", "display-only"} {
+func TestNativeOwnerMissingSourceOrCanonicalDataFailsClosed(t *testing.T) {
+	for _, mode := range []string{"no-owner", "no-scope", "display-only"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			var host contract.StageCaller = hostCallFunc(func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error) {
@@ -100,8 +104,8 @@ func TestNativeOwnerMissingCanonicalDataFailsClosed(t *testing.T) {
 			}
 			executor, marker := hostFixture(t, "claude", host)
 			request := nativeInvocation()
-			if mode == "no-input" {
-				request.Input = nil
+			if mode == "no-scope" {
+				request.ExecutionScope = ""
 			}
 			result := executor.Execute(t.Context(), request)
 			if result.Status != "failed" {
@@ -155,5 +159,96 @@ func TestFreshEmptyRegistryLoadsNormallyRegisteredNativeLater(t *testing.T) {
 	result = executor.Execute(t.Context(), request)
 	if result.Status != "done" || calls != 1 {
 		t.Fatalf("normal registration did not activate owner: %+v calls%d", result, calls)
+	}
+}
+func TestPrivateTriggerScopeRequiresStampedWorkflowCaller(t *testing.T) {
+	request := contract.TriggerExecutionScopeRequest{Version: contract.WireVersion, Registration: contract.TriggerExecutionRegistration{Origin: "config", Source: "watch-dir", Workspace: "/approved", Pipeline: "build"}}
+	registration, _ := json.Marshal(request.Registration)
+	sum := sha256.Sum256(registration)
+	request.ConfigurationSHA256 = hex.EncodeToString(sum[:])
+	wire, _ := json.Marshal(request)
+	calls := 0
+	executor, _ := hostFixture(t, "claude", hostCallFunc(func(_ context.Context, event, stage uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+		calls++
+		var fields map[string]json.RawMessage
+		if !canonical.Decode(body, &fields) || event != HostExecuteEvent || stage != HostExecuteStage || string(fields["action"]) != `"trigger_scope"` {
+			t.Fatal("wrong private host request")
+		}
+		return json.Marshal(contract.TriggerExecutionScopeReply{ExecutionScope: strings.Repeat("b", 64)})
+	}))
+	handler := NewHandler(executor)
+	for _, principal := range []uint32{0, 1, 65, 76} {
+		if _, status := handler(bus.ModuleInvocation{StageID: contract.StageTriggerScope, PrincipalClass: 1, PrincipalRef: principal}, wire); status != bus.ModuleStatusInvalidRequest {
+			t.Fatalf("principal%d acquired sourceissuer", principal)
+		}
+	}
+	reply, status := handler(bus.ModuleInvocation{StageID: contract.StageTriggerScope, PrincipalClass: 1, PrincipalRef: contract.WorkflowPrincipal}, wire)
+	if status != bus.ModuleStatusOK || calls != 1 || !strings.Contains(string(reply), strings.Repeat("b", 64)) {
+		t.Fatalf("private source lookup failed status%d calls%d", status, calls)
+	}
+	spoof := strings.TrimSuffix(string(wire), "}") + `,"actor":"alice"}`
+	if _, status := handler(bus.ModuleInvocation{StageID: contract.StageTriggerScope, PrincipalClass: 1, PrincipalRef: contract.WorkflowPrincipal}, []byte(spoof)); status != bus.ModuleStatusInvalidRequest || calls != 1 {
+		t.Fatal("claimed actor bypassed strict private source contract")
+	}
+}
+
+// The bus peer is explicit: this qualifies the real Go selector/transport and
+// canonical result admission, not an actual ACP process or durable C source.
+func TestACPUsesCanonicalHostAndPreservesUnknownUsage(t *testing.T) {
+	for _, mode := range []string{"complete", "no-source", "host-failure", "display-only", "turn-bound-refused"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			executor, marker := hostFixture(t, "acp", hostCallFunc(func(_ context.Context, event, stage uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+				calls++
+				var request contract.Invocation
+				if event != HostExecuteEvent || stage != HostExecuteStage || !canonical.Decode(body, &request) || request.Model != "native" || request.ExecutionScope != strings.Repeat("a", 64) || request.Input == nil || !request.Input.Valid() || !request.Tools {
+					t.Fatalf("lost admitted ACP source/input: %s", body)
+				}
+				if mode == "host-failure" {
+					return nil, errors.New("host unavailable")
+				}
+				if mode == "turn-bound-refused" {
+					if request.MaxTurns != 2 {
+						t.Fatal("generation bound dropped before owner")
+					}
+					return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "failed", Error: "ACP generation bound unsupported"})
+				}
+				if request.MaxTurns != 0 {
+					t.Fatal("injected generation bound")
+				}
+				if mode == "display-only" {
+					return json.Marshal(contract.InvocationResult{Version: contract.WireVersion, Agent: "native", Status: "done", Response: "unadmitted display text"})
+				}
+				result := hostResult("canonical ACP answer")
+				result.Output.Usage = canonical.ResponseUsage{Unobserved: true}
+				return json.Marshal(result)
+			}))
+			request := nativeInvocation()
+			request.MaxTurns = 0
+			if mode == "no-source" {
+				request.ExecutionScope = ""
+			}
+			if mode == "turn-bound-refused" {
+				request.MaxTurns = 2
+			}
+			result := executor.Execute(t.Context(), request)
+			expectedCalls := 1
+			if mode == "no-source" {
+				expectedCalls = 0
+			}
+			if calls != expectedCalls {
+				t.Fatalf("host calls=%d", calls)
+			}
+			if mode == "complete" {
+				if result.Status != "done" || result.Output == nil || !result.Output.Usage.Unobserved || result.Output.Usage.Input != "" || result.Response != "canonical ACP answer" || len(result.History) != 1 {
+					t.Fatalf("lost canonical ACP result: %+v", result)
+				}
+			} else if result.Status != "failed" || result.Response != "" {
+				t.Fatalf("unadmitted ACP success: %+v", result)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("ACP command executed outside canonical host")
+			}
+		})
 	}
 }

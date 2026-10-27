@@ -48,9 +48,10 @@ func Hash(content []byte) string {
 }
 
 type ReviewRequest struct {
-	Brief    json.RawMessage    `json:"brief,omitempty"`
-	Request  *canonical.Request `json:"request,omitempty"`
-	Artifact string             `json:"artifact"`
+	Brief          json.RawMessage    `json:"brief,omitempty"`
+	Request        *canonical.Request `json:"request,omitempty"`
+	ExecutionScope string             `json:"execution_scope,omitempty"`
+	Artifact       string             `json:"artifact"`
 	// External legacy ingress only; internal callers carry Request.
 	OriginalRequest string `json:"original_request,omitempty"`
 	ArtifactStage   string `json:"artifact_stage"`

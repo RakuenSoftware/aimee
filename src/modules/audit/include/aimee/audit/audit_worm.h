@@ -53,6 +53,16 @@ extern "C"
    int audit_worm_append(const char *actor_role, const char *actor_principal, const char *action,
                          const char *subject, const char *verdict, const char *detail);
 
+   /* Server queued records only: one FULL transaction, no partial acceptance.
+    * Single/action/outbox append contracts remain synchronous and unchanged. */
+#define AUDIT_WORM_BATCH_MAX       64u
+#define AUDIT_WORM_BATCH_FIELD_MAX 1024u
+   typedef struct
+   {
+      const char *actor_role, *actor_principal, *action, *subject, *verdict, *detail;
+   } audit_worm_record_t;
+   int audit_worm_append_batch(const audit_worm_record_t *records, size_t count);
+
    /* Append one event from a durable producer outbox. event_id must be stable
     * across retries and ts is the producer's original timestamp. Repeating an
     * event_id with byte-identical fields returns the original sequence without

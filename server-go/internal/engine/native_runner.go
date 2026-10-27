@@ -258,6 +258,7 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
 		return DelegateResult{}, err
 	}
+	request.ExecutionScope = step.WorkItem.ExecutionScope
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
@@ -291,6 +292,7 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 			}
 			return out
 		}
+		requests[i].ExecutionScope = step.WorkItem.ExecutionScope
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
@@ -1503,6 +1505,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		reviewInput = workflowRequest("", workflowHostTask("Review the supplied artifact for correctness, completeness, security, and test quality."))
 	}
 	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
+		ExecutionScope:   req.WorkItem.ExecutionScope,
 		Artifact:         string(reviewed.Content),
 		Request:          reviewInput,
 		ArtifactStage:    reviewed.Type,
@@ -1666,7 +1669,7 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 		// row and wedged the parent in slices. The content hash stays appended
 		// for operator diagnosis. Same-generation retries still deduplicate on
 		// the id above, before this insert is reached.
-		if err := r.db.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
+		if err := r.db.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID, ExecutionScope: req.WorkItem.ExecutionScope}); err != nil {
 			r.rollbackChildren(ctx, created)
 			return StepResult{}, err
 		}

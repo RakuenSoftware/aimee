@@ -23,6 +23,7 @@
 #define DEC_DELEGATE_BACKEND_H 1
 
 #include <stddef.h>
+#include "scoped_execution.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -44,8 +45,10 @@ extern "C"
     * use (e.g., `image` is meaningless to the local backend). */
    typedef struct delegate_backend_config
    {
-      const char *image;     /* docker image hint, NULL for default */
-      const char *host;      /* ssh target host, NULL for local */
+      const char *image; /* docker image hint, NULL for default */
+      const char *host;  /* ssh target host, NULL for local */
+      /* Internal actual-dispatch requirement, never a wire/user setting. */
+      int checked_resource;
       int hibernate_on_exit; /* if 1, release() preserves workspace state */
       /* Host directory to expose AS the workspace. Required: an empty scratch
        * checkout is not a source tree and is refused. Pointing this at the tree
@@ -69,6 +72,10 @@ extern "C"
       /* Deprecated compatibility field. Enabled sandboxes always verify and
        * fail closed; no caller value can weaken that invariant. */
       int require_isolation;
+      /* Private producer-owned sole-egress listener. NULL preserves the normal
+       * server socket. This is never populated from a request/config value. */
+      const char *control_socket;
+      const char *control_helper_sha256; /* Measured by the retained producer. */
    } delegate_backend_config_t;
 
    /* Result of an `exec` call. `stdout_buf` and `stderr_buf` are
@@ -86,18 +93,40 @@ extern "C"
       size_t stderr_cap;
    } delegate_exec_result_t;
 
+   /* Optional strict resource lease. Every callback acts only on the acquired
+    * opaque state; no caller-supplied engine or container identity is accepted. */
+   typedef struct delegate_owned_resources
+   {
+      int (*identity)(void *state, char container_id[65], char image_id[72]);
+      int (*retire)(void *state);
+      int (*forwarder)(void *state, unsigned port);
+      int (*transport)(void *state, const char **binary, const char **engine_endpoint);
+      int (*file_owner_start)(void *state, int executable_fd, int cwd_fd,
+                              const char *selected_command, int (*validate)(void *), void *context,
+                              long long deadline_ms);
+      int (*prepared)(void *state, const char **command, const char **home,
+                      const char **mcp_command);
+      int (*file)(void *state, const char *path, int writing, const char *content, size_t length,
+                  int timeout_ms, char **out, size_t *out_length, int *unknown);
+   } delegate_owned_resources_t;
+
    /* The backend vtable. All function pointers must be set; a backend
     * that does not support a given op returns -1 with a sensible
     * errno-equivalent in its implementation rather than leaving the
     * slot NULL. */
    typedef struct delegate_backend
    {
-      const char *name;        /* canonical key, e.g. "local", "docker" */
-      const char *description; /* one-line human-readable */
+      const delegate_owned_resources_t *owned_resources; /* Optional strict lease. */
+      const char *name;                                  /* canonical key, e.g. "local", "docker" */
+      const char *description;                           /* one-line human-readable */
 
       int (*acquire)(struct delegate_backend *self, const char *task_id,
                      const delegate_backend_config_t *cfg, void **state_out);
       void (*release)(struct delegate_backend *self, void *state, int hibernate);
+      /* Optional; a nonempty scoped request must refuse if unavailable. */
+      int (*exec_scoped)(struct delegate_backend *self, void *state, const char *command,
+                         int timeout_ms, const delegate_exec_scope_t *scope,
+                         delegate_exec_result_t *result_out);
 
       int (*exec)(struct delegate_backend *self, void *state, const char *command, int timeout_ms,
                   delegate_exec_result_t *result_out);
