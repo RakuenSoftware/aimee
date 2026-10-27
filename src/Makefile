@@ -110,7 +110,12 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
 
-C_FLAGS = -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/types/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+# GCC 15.2 IPA bit-CP proves a live int parameter constant zero across -Os
+# -flto (kb_insights_util.c group_array: n>0 arrives as 0, by_* come back
+# empty). Disable the pass for GCC at compile and LTO link; clang lacks it.
+IPA_BIT_CP_FIX := $(if $(findstring clang,$(shell $(CC) --version 2>/dev/null)),,-fno-ipa-bit-cp)
+
+C_FLAGS = -Os -g -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/types/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # KB_STORE client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -248,8 +253,8 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
 	$(AR) rcs $@ $^
 
 # Linker flag sets (layered -- each level adds to the previous)
-L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
-L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
+L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
+L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
 L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
@@ -258,8 +263,8 @@ L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
-L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
+L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
+L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
     L_KB += -ladvapi32
@@ -1837,7 +1842,7 @@ $(OBJDIR)/server/server.o: server/server.c server_provider.c server_insights.c s
 
 $(OBJDIR)/cJSON.o: vendor/cJSON.c
 	@mkdir -p $(OBJDIR)
-	$(CC) -c -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -w -Ivendor/headers -o $@ $<
+	$(CC) -c -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections -s -w -Ivendor/headers -o $@ $<
 
 PREFIX ?= /usr/local
 DATADIR ?= $(PREFIX)/share/aimee
