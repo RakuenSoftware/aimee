@@ -227,6 +227,143 @@ static void test_detached_authorization_only_probes_target_roots(void)
    assert(rmdir(unrelated) == 0);
 }
 
+static int linked_runner_stat(const workspace_provider_t *ws, const char *path, ws_stat_t *st)
+{
+   return workspace_provider_shared()->stat(ws, path, st);
+}
+static int linked_runner_exec(const workspace_provider_t *ws, const char *const argv[], char **out,
+                              size_t max_out)
+{
+   (void)ws;
+   return workspace_provider_shared()->exec(workspace_provider_shared(), argv, out, max_out);
+}
+static char *linked_runner_shell(const workspace_provider_t *ws, const char *cmd, int *rc)
+{
+   (void)ws;
+   return workspace_provider_shared()->exec_shell(workspace_provider_shared(), cmd, rc);
+}
+
+extern __thread char git_cred_test_repo[4096];
+extern __thread char git_cred_test_remote[4096];
+extern __thread int git_cred_test_calls;
+
+static void test_external_registered_worktree(int detached)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   assert(config_workspace_remove(g_tmpdir) == 0);
+   assert(config_workspace_add(g_tmpdir, "shared", "https://example.test/registered.git", NULL) ==
+          0);
+   char outside[MAX_PATH_LEN], linked[MAX_PATH_LEN], sub[MAX_PATH_LEN];
+   char fake[MAX_PATH_LEN], foreign[MAX_PATH_LEN], cmd[8 * MAX_PATH_LEN];
+   snprintf(outside, sizeof(outside), "%s/aimee-linked-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(outside));
+   snprintf(linked, sizeof(linked), "%s/linked checkout", outside);
+   snprintf(sub, sizeof(sub), "%s/sub", linked);
+   snprintf(fake, sizeof(fake), "%s/fake", outside);
+   snprintf(foreign, sizeof(foreign), "%s/foreign", outside);
+   snprintf(cmd, sizeof(cmd), "git worktree add -q -b external-linked '%s' && mkdir '%s' '%s'",
+            linked, sub, fake);
+   assert(system(cmd) == 0);
+   init_nested_git_repo(foreign, "foreign");
+   workspace_provider_t runner = {0};
+   if (detached)
+   {
+      runner.kind = WS_PROVIDER_DETACHED;
+      runner.stat = linked_runner_stat;
+      runner.exec = linked_runner_exec;
+      runner.exec_shell = linked_runner_shell;
+      workspace_provider_set_active(&runner);
+   }
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", sub);
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   assert(!strcmp(run_cmd_get_cwd(), linked));
+   int rc = -1;
+   git_cred_test_calls = 0;
+   char *output = mcp_git_run("git branch --show-current", &rc);
+   assert(rc == 0 && output && strstr(output, "external-linked"));
+   free(output);
+   if (detached)
+      assert(git_cred_test_calls == 0);
+   else
+   {
+      assert(git_cred_test_calls == 1);
+      assert(!strcmp(git_cred_test_repo, linked));
+      assert(!strcmp(git_cred_test_remote, "https://example.test/registered.git"));
+   }
+
+   /* A foreign repository, copied gitfile, or symlink to another checkout's
+    * gitfile cannot manufacture the reciprocal Git worktree registration. */
+   const char *bad[] = {foreign, fake, fake, fake};
+   for (int i = 0; i < 4; i++)
+   {
+      if (i == 1)
+         snprintf(cmd, sizeof(cmd), "cp '%s/.git' '%s/.git'", linked, fake);
+      else if (i == 2)
+         snprintf(cmd, sizeof(cmd), "rm '%s/.git' && ln -s '%s/.git' '%s/.git'", fake, linked,
+                  fake);
+      else if (i == 3)
+         snprintf(cmd, sizeof(cmd), "rm '%s/.git' && printf 'gitdir: %s/.git\\n' > '%s/.git'", fake,
+                  g_tmpdir, fake);
+      if (i)
+         assert(system(cmd) == 0);
+      cJSON_ReplaceItemInObject(args, "path", cJSON_CreateString(bad[i]));
+      assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+      assert(run_cmd_get_cwd() == NULL);
+   }
+   /* Even a real admin directory must point back to this exact gitfile. */
+   char admin_marker[MAX_PATH_LEN];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --absolute-git-dir", linked);
+   FILE *admin = popen(cmd, "r");
+   assert(admin && fgets(admin_marker, sizeof(admin_marker), admin));
+   assert(pclose(admin) == 0);
+   admin_marker[strcspn(admin_marker, "\n")] = '\0';
+   assert(strlen(admin_marker) + strlen("/gitdir") < sizeof(admin_marker));
+   strcat(admin_marker, "/gitdir");
+   FILE *marker = fopen(admin_marker, "w");
+   assert(marker);
+   fprintf(marker, "%s/.git\n", fake);
+   assert(fclose(marker) == 0);
+   cJSON_ReplaceItemInObject(args, "path", cJSON_CreateString(linked));
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+   marker = fopen(admin_marker, "w");
+   assert(marker);
+   fprintf(marker, "%s/.git\n", linked);
+   assert(fclose(marker) == 0);
+
+   /* A registered linked checkout also owns its genuine sibling. */
+   char sibling[MAX_PATH_LEN];
+   snprintf(sibling, sizeof(sibling), "%s/sibling", outside);
+   snprintf(cmd, sizeof(cmd), "git worktree add -q -b sibling '%s'", sibling);
+   assert(system(cmd) == 0);
+   assert(config_workspace_remove(g_tmpdir) == 0);
+   assert(config_workspace_add(linked, "shared", NULL, NULL) == 0);
+   cJSON_ReplaceItemInObject(args, "path", cJSON_CreateString(sibling));
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   assert(!strcmp(run_cmd_get_cwd(), sibling));
+   assert(config_workspace_remove(linked) == 0);
+   assert(config_workspace_add(g_tmpdir, "shared", NULL, NULL) == 0);
+   snprintf(cmd, sizeof(cmd), "git worktree remove --force '%s'", sibling);
+   assert(system(cmd) == 0);
+
+   /* Existing registered prefix rules still reject a symlink escape. */
+   char escape[MAX_PATH_LEN];
+   snprintf(escape, sizeof(escape), "%s/escape", g_tmpdir);
+   assert(symlink(foreign, escape) == 0);
+   cJSON_ReplaceItemInObject(args, "path", cJSON_CreateString(escape));
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+   cJSON_Delete(args);
+   run_cmd_set_cwd(NULL);
+   workspace_provider_set_active(NULL);
+   teardown_ownership_db();
+   assert(chdir(g_tmpdir) == 0);
+   snprintf(cmd, sizeof(cmd), "git worktree remove --force '%s' && rm -rf '%s'", linked, outside);
+   assert(system(cmd) == 0);
+   teardown_git_repo();
+   printf("external_registered_worktree ");
+}
+
 static void test_explicit_path_is_authoritative_and_live(void)
 {
    setup_git_repo();
@@ -4108,6 +4245,8 @@ int main(void)
    test_mcp_chdir_uses_cwd_argument();
    test_mcp_chdir_session_cwd_precedes_proxy_cwd();
    test_detached_authorization_only_probes_target_roots();
+   test_external_registered_worktree(0);
+   test_external_registered_worktree(1);
    test_explicit_path_is_authoritative_and_live();
    test_mcp_chdir_repairs_stale_delegate_tracked_cwd();
    test_mcp_chdir_keeps_stale_delegate_cwd_when_repair_missing();
