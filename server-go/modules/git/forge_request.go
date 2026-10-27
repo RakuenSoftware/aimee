@@ -174,12 +174,32 @@ func forgeCall(ctx context.Context, traceID uint64, executor egress.Executor,
 
 // forgeError extracts the forge's own message. GitHub answers a rejected
 // operation with a JSON "message", and repeating it is far more useful to an
-// operator than the status alone.
+// operator than the status alone. A 422 says only "Validation Failed" at the top;
+// what failed ("A pull request already exists", "No commits between ...") is in
+// "errors", so every entry is carried too.
 func forgeError(status int, payload []byte, what string) string {
 	var decoded struct {
 		Message string `json:"message"`
+		Errors  []struct {
+			Message  string `json:"message"`
+			Code     string `json:"code"`
+			Field    string `json:"field"`
+			Resource string `json:"resource"`
+		} `json:"errors"`
 	}
 	if json.Unmarshal(payload, &decoded) == nil && decoded.Message != "" {
+		var details []string
+		for _, e := range decoded.Errors {
+			switch {
+			case e.Message != "":
+				details = append(details, e.Message)
+			case e.Code != "":
+				details = append(details, strings.TrimSpace(e.Resource+" "+e.Field+" "+e.Code))
+			}
+		}
+		if len(details) > 0 {
+			return fmt.Sprintf("%s: %s: %s (HTTP %d)", what, decoded.Message, strings.Join(details, "; "), status)
+		}
 		return fmt.Sprintf("%s: %s (HTTP %d)", what, decoded.Message, status)
 	}
 	return fmt.Sprintf("%s: HTTP %d", what, status)
