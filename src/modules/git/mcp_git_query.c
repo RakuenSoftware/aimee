@@ -189,6 +189,18 @@ static int git_registered_workspace_path(const char *path, char *out, size_t out
    return 0;
 }
 
+int mcp_git_bind_clone_cwd(cJSON *args)
+{
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "cwd"));
+   if (!cwd || !cwd[0])
+      return 0;
+   char dir[MAX_PATH_LEN];
+   if (!git_registered_workspace_path(cwd, dir, sizeof(dir)))
+      return -1;
+   run_cmd_set_cwd(dir);
+   return 1;
+}
+
 static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs_on_server,
                                    char *out, size_t outsz)
 {
@@ -1177,16 +1189,23 @@ int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args
          mcp_git_add_candidate(candidates, &candidate_count, 8, jcwd->valuestring);
    }
 
+   /* Priorities 4-6 name directories on THIS host: the server's environment, its
+    * cwd and its executable. A detached workspace's git runs on the client, so
+    * probing them there asked the client to `cd /var/lib/aimee` and printed
+    * "not a git repository" on every clone (2026-10-27). */
+   const workspace_provider_t *active = workspace_provider_active();
+   int host_local = !(active && active->kind == WS_PROVIDER_DETACHED);
+
    /* Priority 4: environment fallbacks. Some MCP hosts launch the stdio
     * wrapper from / but preserve a meaningful PWD or explicit override. */
-   if (!explicit_path)
+   if (!explicit_path && host_local)
    {
       mcp_git_add_candidate(candidates, &candidate_count, 8, getenv("AIMEE_MCP_CWD"));
       mcp_git_add_candidate(candidates, &candidate_count, 8, getenv("PWD"));
    }
 
    /* Priority 5: process CWD (racy in multi-session but useful as a fallback) */
-   if (!explicit_path)
+   if (!explicit_path && host_local)
    {
       char cwd_buf[MAX_PATH_LEN];
       if (getcwd(cwd_buf, sizeof(cwd_buf)))
@@ -1195,7 +1214,7 @@ int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args
 
    /* Priority 6: executable directory. This catches repo-local plugin/server
     * launches where the process cwd is not the checkout root. */
-   if (!explicit_path)
+   if (!explicit_path && host_local)
    {
       char exe[MAX_PATH_LEN];
       if (platform_get_exe_path(exe, sizeof(exe)) == 0)
