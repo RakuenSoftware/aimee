@@ -76,6 +76,28 @@ set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/types/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
 
+# The ouroboros ring is not in this repository; see src/Makefile. Its headers
+# come from the commit pinned in dependencies/ouroboros-ring.lock.json, fetched
+# and content-checked at configure time, or from a local ring checkout named by
+# OURO_RING_LOCAL. Nothing here links the ring: the CMake targets need only its
+# headers, and the server and KB that host it are built by src/Makefile.
+set(OURO_RING_LOCAL "$ENV{OURO_RING_LOCAL}" CACHE PATH
+    "Local ouroboros-ring checkout to build against instead of the pinned commit")
+if(OURO_RING_LOCAL)
+    get_filename_component(OURO_RING_DIR "${OURO_RING_LOCAL}" ABSOLUTE)
+else()
+    set(OURO_RING_DIR "${CMAKE_BINARY_DIR}/deps/ouroboros-ring")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_ouroboros_ring.py" "${OURO_RING_DIR}"
+        RESULT_VARIABLE OURO_RING_FETCH_RESULT)
+    if(NOT OURO_RING_FETCH_RESULT EQUAL 0)
+        message(FATAL_ERROR "could not provide the pinned ouroboros ring in ${OURO_RING_DIR}; see the message above")
+    endif()
+endif()
+set(AIMEE_OURO_RING_INCLUDE_DIR "${OURO_RING_DIR}/c/include")
+
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
 # mirror that globally for every CMake target (they were defined above but never
@@ -89,6 +111,7 @@ include_directories(
     ${AIMEE_DELEGATES_INCLUDE_DIR}
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
     ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
+    ${AIMEE_OURO_RING_INCLUDE_DIR}
     "${AIMEE_SRC_DIR}/modules/learning/include"
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
