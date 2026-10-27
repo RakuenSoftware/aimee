@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""check-sidecar-clients.py: contract test for the container LLM/embedder
-thin-client sidecars.
+"""Contract tests for the active embed-remote.py container client.
 
-The aimee-kb image popens stdlib HTTP clients that talk to the embedder service
-(embed-remote.py) and an OpenAI-compatible LLM (llm-chat.py). The heavy backends
-(sentence-transformers, llama.cpp) aren't available in CI, so this test stands
-up tiny stub servers that mimic their wire contracts and asserts the clients
-produce the expected stdout — i.e. the request/response/parse path the kb relies
-on is correct, without any model.
-
+Local stub servers cover embedding requests, managed authentication and serving
+identity without a model. The generic endpoint guard also applies to other scripts.
 Run: python3 scripts/check-sidecar-clients.py
 """
 
@@ -170,115 +164,10 @@ def check_embed_remote_serving_id() -> None:
     print("  embed-remote.py --serving-id: ok")
 
 
-def check_llm_chat() -> None:
-    class ChatStub(BaseHTTPRequestHandler):
-        def log_message(self, *a):  # quiet
-            pass
-
-        def do_POST(self):
-            assert self.path.rstrip("/") == "/v1/chat/completions", self.path
-            length = int(self.headers.get("content-length", "0") or "0")
-            self.rfile.read(length)
-            body = json.dumps(
-                {"choices": [{"message": {"content": "synthesised-ok"}}]}
-            ).encode()
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    server, url = _serve(ChatStub)
-    try:
-        out = _run(
-            "llm-chat.py",
-            {"SYNTHESIS_ENDPOINT": f"{url}/v1", "SYNTHESIS_MODEL": "gemma-4-e4b-it", "SYNTHESIS_API_KEY": ""},
-            "say something",
-        )
-        assert "synthesised-ok" in out, f"unexpected output: {out!r}"
-    finally:
-        server.shutdown()
-    print("  llm-chat.py: ok")
-
-
-def _chat_stub(message: dict):
-    """A stub /v1/chat/completions returning the given assistant message."""
-
-    class ChatStub(BaseHTTPRequestHandler):
-        def log_message(self, *a):  # quiet
-            pass
-
-        def do_POST(self):
-            assert self.path.rstrip("/") == "/v1/chat/completions", self.path
-            length = int(self.headers.get("content-length", "0") or "0")
-            self.rfile.read(length)
-            body = json.dumps({"choices": [{"message": message}]}).encode()
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    return ChatStub
-
-
-def _chat(message: dict, env_extra: dict | None = None) -> str:
-    server, url = _serve(_chat_stub(message))
-    try:
-        env = {"SYNTHESIS_ENDPOINT": f"{url}/v1", "SYNTHESIS_MODEL": "stub", "SYNTHESIS_API_KEY": ""}
-        env.update(env_extra or {})
-        return _run("llm-chat.py", env, "say something")
-    finally:
-        server.shutdown()
-
-
-def check_llm_chat_reasoning_split() -> None:
-    """THE CONTRACT: stdout carries the answer, never the reasoning.
-
-    llm-chat.py is the ONE wire boundary for every sidecar (curator-extract,
-    curator-synthesize, llm-rewrite, learning-synthesize). Consumers must never
-    re-derive this from text — doing so is what cut valid JSON mid-string when a
-    payload merely mentioned the tag.
-    """
-    # 1. Compliant server (llama.cpp --jinja): reasoning already separated.
-    out = _chat({"content": "the-answer", "reasoning_content": "my hidden reasoning"})
-    assert "the-answer" in out, f"answer missing: {out!r}"
-    assert "hidden reasoning" not in out, f"reasoning leaked to stdout: {out!r}"
-
-    # 2. Inlining server: a <think> PREFIX must be split off here, not downstream.
-    out = _chat({"content": "<think>deliberating {\"draft\":1}</think>\nthe-answer"})
-    assert "the-answer" in out, f"answer missing: {out!r}"
-    assert "deliberating" not in out, f"reasoning leaked to stdout: {out!r}"
-    assert "<think>" not in out, f"think tag leaked to stdout: {out!r}"
-
-    # 3. THE REGRESSION: a mention of the tag in the ANSWER must survive intact.
-    #    (A docstring about stripping think blocks is still an answer.)
-    answer = '{"summary":"drops the </think> tag if present"}'
-    out = _chat({"content": answer})
-    assert "</think>" in out, f"tag in content was eaten: {out!r}"
-    assert json.loads(out.strip())["summary"], f"answer corrupted: {out!r}"
-
-    # 4. Both together: prefix stripped, mention preserved.
-    out = _chat({"content": '<think>hmm</think>\n{"summary":"handles </think> tags"}'})
-    parsed = json.loads(out.strip())
-    assert parsed["summary"] == "handles </think> tags", f"got {parsed!r}"
-
-    print("  llm-chat.py reasoning split: ok")
-
-
 def check_no_baked_endpoint_defaults() -> None:
-    """No sidecar may carry a baked-in network address as its endpoint default.
+    """Reject baked-in remote defaults; endpoints must be configured or fail closed.
 
-    Three of them shipped `env.setdefault("SYNTHESIS_ENDPOINT", "http://<a LAN IP>")`.
-    Where nothing owned that address, every curator code-extraction job failed
-    `No route to host` and the queue never drained — silently, because doc
-    extraction used a different path and kept working. Where something DID own
-    it, the sidecar would post the user's code and prompts to a stranger's
-    machine. embed-remote.py had already removed its equivalent fallback; these
-    outlived that cleanup, so pin the rule down here.
-
-    An endpoint must come from the environment (SYNTHESIS_ENDPOINT) or
-    fail closed. Literal loopback is fine — it addresses only this host.
+    Literal loopback remains valid because it addresses only this host.
     """
     host_literal = re.compile(
         r"""setdefault\(\s*["'](?:SYNTHESIS_ENDPOINT|LLM_BASE_URL)["']\s*,\s*["']([^"']+)["']"""
@@ -312,8 +201,6 @@ def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
     check_embed_remote_serving_id()
-    check_llm_chat()
-    check_llm_chat_reasoning_split()
     check_no_baked_endpoint_defaults()
     print("sidecar-clients: ok")
     return 0

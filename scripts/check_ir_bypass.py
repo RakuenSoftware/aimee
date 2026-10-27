@@ -10,12 +10,16 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import io
+import tokenize
 from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
-RETIRED_OWNERS = ('src/modules/gateway/gateway_pipeline.c','src/modules/gateway/include/aimee/gateway/gateway_pipeline.h','src/pipeline/gw_stage_registry.c','src/pipeline/gw_stage_registry.h', 'integrations/discord/prompt_budget.py', 'integrations/discord/test_prompt_budget.py','src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h', 'src/server/aimee_ir_shadow.c', 'src/headers/aimee_ir_shadow.h', 'server-go/modules/economizer/gateway_wire.go', 'server-go/modules/economizer/planner_openai.go', 'server-go/modules/economizer/planner_anthropic.go', 'server-go/modules/economizer/proof.go')
+RETIRED_OWNERS = ('scripts/llm-chat.py', 'scripts/curator-extract.py',
+                  'scripts/curator-synthesize.py', 'scripts/learning-synthesize.py',
+                  'scripts/llm-rewrite.py', 'src/modules/gateway/gateway_pipeline.c','src/modules/gateway/include/aimee/gateway/gateway_pipeline.h','src/pipeline/gw_stage_registry.c','src/pipeline/gw_stage_registry.h', 'integrations/discord/prompt_budget.py', 'integrations/discord/test_prompt_budget.py','src/cmd_branch.c', 'src/cmd_core.c', 'src/cmd_data.c', 'src/cmd_doctor.c', 'src/cmd_infra.c', 'src/cmd_onboard.c', 'src/cmd_run.c', 'src/cmd_session_history.c', 'src/dashboard.c', 'src/headers/cmd_branch.h', 'src/headers/cmd_run.h', 'src/server/aimee_ir_shadow.c', 'src/headers/aimee_ir_shadow.h', 'server-go/modules/economizer/gateway_wire.go', 'server-go/modules/economizer/planner_openai.go', 'server-go/modules/economizer/planner_anthropic.go', 'server-go/modules/economizer/proof.go')
 RETIRED = (
     "probeParts", "probeUsage", "probeStop", "probeResponsesStream",
     "probeResponseOutput", "probeMetadata",
@@ -179,6 +183,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "discord-model-endpoint": re.compile(r"\bconfig\.endpoint\b|/v1/(?:chat/completions|responses|messages)\b"),
     "gateway-display-conversation": re.compile(r"\b(?:cli_chat_request_stream|cli_chat_stream|cli_ir_user_message)\s*\("),
     "public-context-reset": re.compile(
         r'\bmemset\s*\(\s*&[^,;\n]*\.context\s*,\s*0\s*,|'
@@ -190,7 +195,7 @@ RULES = {
     "acp-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "codex-ambient-launch": re.compile(r"\b(?:execlp|execvp|setenv|unsetenv)\s*\("),
     "delegate-model-bypass": re.compile(r"\b(?:exec\.Command(?:Context)?|[A-Za-z_]\w*\.TextResponse)\s*\("),
-    "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen)\s*\("),
+    "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen|subprocess\.(?:run|Popen|check_output)|asyncio\.create_subprocess_(?:exec|shell))\s*\("),
     "legacy-transcript-write": re.compile(r"\bdb1_primary_session_save\s*\("),
     "legacy-session-search": re.compile(r"\bdb1_primary_session_(?:alloc_search|alloc_recent|get_latest)\b|\b(?:FROM|JOIN)\s+primary_sessions\b", re.IGNORECASE),
     "unscoped-approach-prompt": re.compile(r"\bapproach_store_(?:retry_context|recall|render)\s*\("),
@@ -219,9 +224,18 @@ RULES = {
         r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
         r'call_id|choices|reasoning_content|input_text|output_text|input_schema)"'),
 }
+# Only these migrated model consumers join the guard, not Python fixtures,
+# Discord delivery, or the distinct KB/external service clients.
+DISCORD_MODEL_FILES = {
+    "integrations/discord/bridge.py", "integrations/discord/model_client.py",
+    "integrations/discord/model_ir.py", "integrations/discord/workflow_chat.py",
+}
+PYTHON_HISTORY_FIELD = re.compile('(?P<quote>["\'])' +
+    RULES["native-history-field"].pattern[1:-1] + r"(?P=quote)")
+
 # These consumers have completed their history/algorithm cutover. Provider
 # adapters are intentionally outside this set; newly migrated consumers join it.
-CANONICAL_FILES = {
+CANONICAL_FILES = DISCORD_MODEL_FILES | {
     "src/server/server_acp_execution.c", "src/server/server_acp_resources.c",
     "src/server/server_provider_cli_execute.c",
     "src/posix/agent_runtime.c", "src/posix/server_compute.c", "src/server/session_compact.c",
@@ -238,7 +252,7 @@ CANONICAL_FILES = {
 }
 # Business JSON is allowed after canonical terminal admission. These model
 # consumers cannot obtain model results from arbitrary command stdout.
-CANONICAL_MODEL_FILES = {
+CANONICAL_MODEL_FILES = DISCORD_MODEL_FILES | {
     "src/kb/kb_memory_facts.c", "src/kb/kb_reflection.c",
     "src/kb/kb_surprising_judge.c", "src/kb/kb_learning_synth.c",
     "src/modules/kb-synthesis/kb_curator_llm.c",
@@ -268,6 +282,22 @@ def without_comments(source: str) -> str:
         if match[0].startswith(("/*", "//")) else match[0], source)
 
 
+def without_python_comments(source: str) -> str:
+    # tokenize preserves single/double/triple-quoted literals, escaped quotes and
+    # URL comment markers. Mask comments without moving diagnostic line numbers.
+    lines = source.splitlines(keepends=True)
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                row, start = token.start
+                end = token.end[1]
+                line = lines[row - 1]
+                lines[row - 1] = line[:start] + " " * (end - start) + line[end:]
+    except (tokenize.TokenError, IndentationError) as error:
+        raise ValueError("invalid migrated Python source") from error
+    return "".join(lines)
+
+
 def profile_function_spans(source: str, names=None) -> list[tuple[int, int]]:
     # Ignore literal/comment braces when finding the already migrated function
     # bodies. Compatibility output APIs elsewhere in this file remain boundaries.
@@ -286,6 +316,10 @@ def profile_function_spans(source: str, names=None) -> list[tuple[int, int]]:
 
 
 def sources(root: Path):
+    for relative in sorted(DISCORD_MODEL_FILES):
+        path = root / relative
+        if path.is_file():
+            yield relative, path
     for tree in ("src", "server-go", "runtime-web", "frontend/src"):
         for path in sorted((root / tree).rglob("*")):
             relative = path.relative_to(root).as_posix()
@@ -302,7 +336,7 @@ def findings(root: Path) -> list[dict]:
               for path in RETIRED_OWNERS if (root / path).exists()]
     for relative, path in sources(root):
         original = path.read_text(encoding="utf-8")
-        source = without_comments(original)
+        source = without_python_comments(original) if relative in DISCORD_MODEL_FILES else without_comments(original)
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
         # Public delegate result/view metadata uses a numeric tool_calls counter,
@@ -315,6 +349,10 @@ def findings(root: Path) -> list[dict]:
             "aimee_claude_frame_ir", "aimee_codex_frame_ir", "aimee_codex_reply_ir"})
             if relative == "src/modules/translation/harness_ir.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "discord-model-endpoint" and relative not in DISCORD_MODEL_FILES:
+                continue
+            if rule == "native-history-field" and relative in DISCORD_MODEL_FILES:
+                pattern = PYTHON_HISTORY_FIELD
             if rule == "gateway-display-conversation" and not relative.startswith("src/gateway/"):
                 continue
             if rule == "public-context-reset" and relative not in {
@@ -424,7 +462,7 @@ def main() -> None:
         check(args.root)
     except (ValueError, KeyError, OSError) as error:
         raise SystemExit(f"ir-bypass: {error}") from error
-    print("ir-bypass: retired APIs and migrated C/Go consumers clean; no native fallback")
+    print("ir-bypass: retired APIs and migrated C/Go/Python consumers clean; no native fallback")
 
 
 if __name__ == "__main__":

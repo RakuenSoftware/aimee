@@ -28,6 +28,49 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_discord_model_consumers_cannot_parse_provider_fields(self):
+        for relative in checker.DISCORD_MODEL_FILES:
+            for quote in ("'", '"'):
+                path = self.source(relative, f"value[{quote}choices{quote}][0]\n")
+                with self.subTest(relative=relative, quote=quote), self.assertRaisesRegex(ValueError, "native-history-field"):
+                    checker.check(self.root)
+                path.unlink()
+        path = self.source("integrations/discord/workflow_chat.py",
+                           "await session.post(self.bot.config.endpoint, json=body)\n")
+        with self.assertRaisesRegex(ValueError, "discord-model-endpoint"):
+            checker.check(self.root)
+        path.unlink()
+        self.source("integrations/discord/model_client.py", "subprocess.run(command)\n")
+        with self.assertRaisesRegex(ValueError, "model-command-bypass"):
+            checker.check(self.root)
+
+    def test_discord_canonical_chat_and_domain_JSON_are_allowed(self):
+        self.source("integrations/discord/workflow_chat.py", """
+await client.chat(chat_message(instructions, prompt), "workflow-task", alias)
+await client.request("POST", "/v1/dev/submit", {"proposal_md": text, "workflow": name})
+""")
+        self.source("integrations/discord/bridge.py", """
+await client.request('POST', '/v1/memory/search', {'store': 'user', 'keywords': words})
+await session.post(config.knowledge_endpoint + '/memory.store', json=body)
+""")
+        self.source("integrations/discord/model_client.py", "result['messages']; lib.cli_chat_request_stream_json(handle, options, body)\n")
+        self.source("integrations/discord/model_ir.py", "{'role': 'user', 'blocks': [text_block(task)]}\n")
+        # Fixtures and genuine external clients are outside this bounded scope.
+        self.source("integrations/discord/test_model_client.py", "value['choices']\n")
+        self.source("integrations/other/provider_client.py", "value['choices']\n")
+        checker.check(self.root)
+
+    def test_discord_Python_comments_preserve_quote_and_URL_boundaries(self):
+        path = self.source("integrations/discord/workflow_chat.py", """
+# self.bot.config.endpoint; value['choices']
+url = "https://example.org/#fragment"
+text = 'ordinary \"quoted\" data'
+""")
+        checker.check(self.root)
+        path.write_text(path.read_text() + "value['choices']\n")
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
     def test_separate_provider_probe_codecs_stay_retired(self):
         for symbol in ("probeParts", "probeUsage", "probeStop", "probeResponsesStream",
                        "probeResponseOutput", "probeMetadata"):

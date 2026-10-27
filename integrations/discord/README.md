@@ -338,6 +338,21 @@ key, synchronous eager V1, prefix caching disabled, one GPU and zero CPU weight 
 The memory recipient and catalog are derived by the installed plugin from the enrolled identity.
 They are never supplied by Discord message authors.
 
+Workflow assessment and paper-writing tasks also use the shared thinclient's normal
+canonical chat path. Each assessment starts a separate server-issued session, without
+the bot's channel persona, recalled channel facts or prior assessment history.
+The configured registered alias owns temperature, token limits and tool policy;
+requested short answer lengths are task instructions, not enforced per-call
+generation controls. Deployments requiring inference-only assessments must select
+an alias configured without tools; a prompt is not a tool-capability restriction. The host's
+canonical final-completion policy rejects provider refusal and truncation. The
+bot receives canonical Messages and reports generic failure; it does not independently
+classify provider length or refusal reasons. Hidden-only, invalid or oversized
+results also fail the assessment without advancing the workflow. Workflow controls and native memory requests carry ordinary
+API JSON through that same enrolled C transport. The dedicated KB assertion API
+remains a separate loopback service with its existing KB credential; Discord
+webhook traffic and incoming WFE runner callbacks remain separate protocols.
+
 ## Start after configuring credentials and the inference host
 
 ```sh

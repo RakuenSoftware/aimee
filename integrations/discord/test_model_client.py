@@ -18,7 +18,7 @@ LIBRARY = os.environ.get("AIMEE_TEST_CLIENT_LIBRARY")
 MESSAGE = {"role": "user", "blocks": [{"type": "text", "text": "雪 {hi}"}]}
 ANSWER = {"role": "assistant", "blocks": [
     {"type": "thinking", "text": "private reasoning", "signature": "opaque-signature"},
-    {"type": "text", "text": "Hello World!"},
+    {"type": "text", "text": "Hello World!", "context": {"origin": 7, "authority": 1, "trust": 2, "sensitivity": 1, "model_visible": True, "revision_domain": "", "revision_scope": "", "revision_epoch": "0"}},
 ]}
 
 
@@ -100,10 +100,15 @@ class ThinClientTests(unittest.IsolatedAsyncioTestCase):
                     writer.write(raw[at:at + 17])
                     await writer.drain()
                 return
+            elif path == "/v1/memory/search":
+                response = {"facts": [{"key": "fact", "content": "domain data 雪"}]}
+            elif path == "/v1/dev/submit":
+                response = {"work_item_id": "wi_test"}
             else:
                 raise AssertionError(path)
             raw = json.dumps(response).encode()
-            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(raw)).encode()
+            status = b"503 Unavailable" if self.mode == "domain-refused" else b"200 OK"
+            writer.write(b"HTTP/1.1 " + status + b"\r\nContent-Length: " + str(len(raw)).encode()
                          + b"\r\nConnection: close\r\n\r\n" + raw)
             await writer.drain()
         finally:
@@ -132,6 +137,39 @@ class ThinClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.alias, "registered-bot")
         self.assertTrue(all(fields.get("Authorization") == "Bearer fixture-client-token"
                             for _, _, _, fields in self.requests))
+
+    async def test_domain_memory_and_workflow_use_same_actual_C_transport(self):
+        from workflow_chat import WorkflowClient
+        body = {"store": "user", "keywords": ["雪"], "limit": 4}
+        self.assertEqual((await self.client.request("POST", "/v1/memory/search", body))["facts"][0]["content"], "domain data 雪")
+        workflow = WorkflowClient(self.client)
+        self.assertEqual((await workflow.call("POST", "/v1/dev/submit", {"workflow": "discord-paper"}, idempotency="stable"))["work_item_id"], "wi_test")
+        self.assertEqual(self.requests[0][2], body)
+        self.assertEqual(self.requests[1][2], {"workflow": "discord-paper"})
+        self.assertEqual(self.requests[1][3]["Idempotency-Key"], "stable")
+        self.assertTrue(all(row[3]["Authorization"] == "Bearer fixture-client-token" for row in self.requests))
+        self.assertFalse(any("/sessions/" in row[1] for row in self.requests))
+        self.mode = "domain-refused"
+        with self.assertRaises(RuntimeError):
+            await workflow.call("POST", "/v1/dev/submit", {})
+
+    async def test_actual_workflow_inference_uses_canonical_collector_and_fresh_sessions(self):
+        from workflow_chat import ChatWorkflow
+        runner = ChatWorkflow.__new__(ChatWorkflow)
+        runner.bot = SimpleNamespace(config=SimpleNamespace(aimee_library=LIBRARY,
+            aimee_profile=None, aimee_socket=self.socket, model="registered-writer"))
+        self.assertEqual(await runner.infer("Assess only this task", "Choose a section", max_tokens=64), "Hello World!")
+        self.assertEqual(await runner.infer("Write this section", "Independent task"), "Hello World!")
+        self.assertEqual(sum(row[1] == "/v1/sessions/create" for row in self.requests), 2)
+        chats = [row[2] for row in self.requests if row[1] == "/v1/chat/stream"]
+        self.assertEqual(len(chats), 2)
+        self.assertEqual(chats[0]["message"]["blocks"][0]["text"], "Assess only this task")
+        self.assertIn("Choose a section", chats[0]["message"]["blocks"][1]["text"])
+        self.assertEqual(chats[0]["message"]["blocks"][0]["context"]["origin"], 2)
+        self.assertEqual(chats[1]["message"]["blocks"][0]["text"], "Write this section")
+        self.assertFalse(any("/v1/memory/" in row[1] or row[1].endswith("/completions") for row in self.requests))
+        self.assertNotIn("messages", chats[0])
+        self.assertEqual(self.alias, "registered-writer")
 
     async def test_actual_https_mtls_pin_and_identity_fail_closed(self):
         root = Path(self.directory.name)

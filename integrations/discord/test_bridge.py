@@ -32,17 +32,26 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        environment = dict(os.environ)
+        for key in ("AIMEE_API_ENDPOINT", "AIMEE_API_BEARER", "AIMEE_SERVER_URL",
+                    "AIMEE_SERVER_TOKEN", "AIMEE_PROFILE"):
+            environment.pop(key, None)
+        environment["AIMEE_HOME"] = str(self.root)
+        isolated = patch.dict(os.environ, environment, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.webhook = self.root / "webhook.url"
         self.key = self.root / "model.key"
         for path, value in ((self.webhook, FAKE_WEBHOOK), (self.key, "test-model-key")):
             path.write_text(value)
             path.chmod(0o600)
         self.chat = AsyncMock(return_value=response("A reply"))
-        self.thin_patch = patch("bridge.ThinClient", return_value=SimpleNamespace(chat=self.chat))
+        self.thin_patch = patch("bridge.ThinClient.chat", self.chat)
         self.thin_patch.start()
         self.addCleanup(self.thin_patch.stop)
         self.config = Config(self.webhook, self.root / "bot.token", GUILD, CHANNEL,
-                             system_context="You are Aimee. Answer directly using approved memory.")
+                             system_context="You are Aimee. Answer directly using approved memory.",
+                             aimee_library=os.environ.get("AIMEE_TEST_CLIENT_LIBRARY", Config.aimee_library))
 
     def message(self, **changes):
         value = SimpleNamespace(
@@ -138,7 +147,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER}>", "url": "https://discord.com/channels/1/2/3"}])
         for subject in ("Kibukx", f"<@{USER+1}>"):
             records[0]["subject"] = subject
-            context = await client.memory_context(None, f"Who told you {subject}'s height?", CHANNEL, provenance=True)
+            context = await client.memory_context(f"Who told you {subject}'s height?", CHANNEL, provenance=True)
             answer = client.provenance_reply(context)
             self.assertIn("69 cm", answer)
             self.assertIn(f"from <@{USER}>", answer)
@@ -295,7 +304,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for statement in ("Kibukx can lift 500 pounds.", "I'm telling you, Kibukx can lift 500 pounds."):
             answer = display_text(await client.reply([], statement, CHANNEL))
             self.assertIn("Recorded lifting capacity for Kibukx: 500 pounds", answer)
-        memory = await client.memory_context(None, "How much can Kibukx lift?", CHANNEL)
+        memory = await client.memory_context("How much can Kibukx lift?", CHANNEL)
         for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
             self.assertIsNone(client.confirmed_statement(memory, text))
 
@@ -327,12 +336,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             return {"assertions": []}
         client.knowledge_action = AsyncMock(side_effect=action)
         client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER+1}>"}])
-        context = await client.memory_context(None, f"How much can <@{USER}> lift?", CHANNEL)
+        context = await client.memory_context(f"How much can <@{USER}> lift?", CHANNEL)
         self.assertIn("500 pounds", context)
         self.assertIn(str(USER+1), context)
         self.assertNotIn("69 feet", context)
         self.assertIn(f"<@{USER}>", context)
-        self.assertEqual(await client.memory_context(None, f"How much can <@{USER+2}> lift?", CHANNEL), "")
+        self.assertEqual(await client.memory_context(f"How much can <@{USER+2}> lift?", CHANNEL), "")
 
     async def test_personal_correction_commits_before_model_can_reject_old_memory(self):
         bot = self.bot(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"))
@@ -368,7 +377,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.knowledge_action=AsyncMock(side_effect=action)
         client.fact_sources=AsyncMock(return_value=[{"author":f"<@{USER}>"}])
         for question in (f"How tall is <@{USER}> ?","How tall is Kibukx?"):
-            context=await client.memory_context(None,question,CHANNEL)
+            context=await client.memory_context(question,CHANNEL)
             self.assertIn("4 feet",context)
             self.assertNotIn("6 feet",context)
             answer=display_text(await client.reply([ir_message("assistant", "Source is benchmarks/fake.py")],question,CHANNEL))
@@ -932,10 +941,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                                       "That information is incorrect. The Andes are much taller.")
             await client.capture_turn(Turn(12, GUILD, CHANNEL, USER, "The Himalayas are 69 feet tall."),
                                       "That’s a common misconception. Their peaks are much taller.")
-            context = await client.memory_context(session, "How tall is Kibukx?", CHANNEL)
+            context = await client.memory_context("How tall is Kibukx?", CHANNEL)
             thread = CHANNEL + 1
-            await client.memory_context(session, "How tall is Kibukx?", thread)
-            correction = await client.memory_context(session, "But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.", CHANNEL)
+            await client.memory_context("How tall is Kibukx?", thread)
+            correction = await client.memory_context("But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.", CHANNEL)
             self.assertNotIn("Kibukx mountains", context)
             self.assertIn("Kibukx mountains", correction)
             self.assertEqual({p["query"] for p in projections[2:]}, {"kibukx"})
@@ -982,7 +991,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"Kibukx mountains: 69 feet — from <@{USER+1}>", answer)
             self.assertIn(f"https://discord.com/channels/{GUILD}/{CHANNEL}/{message_ids[0]}", answer)
             history += [ir_message("user", question), ir_message("assistant", answer)]
-        context = await client.memory_context(None, "How tall is Kibukx?", CHANNEL)
+        context = await client.memory_context("How tall is Kibukx?", CHANNEL)
         self.assertIn(str(USER), context)
         self.assertNotIn(str(USER+1), context)
         self.assertLess(len(context.encode()), 384)
@@ -1020,7 +1029,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]
             return {"assertions": assertions if body["query"] in ("car", "wash", "car wash") else assertions[:1] if "house" in body["query"] else []}
         client.knowledge_action = AsyncMock(side_effect=action)
-        context = await client.memory_context(None, "Where is <@333333333333333333>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
+        context = await client.memory_context("Where is <@333333333333333333>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
         self.assertIn("himalayas", queries)
         self.assertIn("car", queries)
         self.assertIn("house", queries)
@@ -1030,7 +1039,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("333333333333333333", distance["subject"])
         self.assertNotIn("Himalayas", distance["subject"])
         self.assertLess(len(context.encode()), 384)
-        house_context = await client.memory_context(None, "Where is <@333333333333333333>'s house?", CHANNEL)
+        house_context = await client.memory_context("Where is <@333333333333333333>'s house?", CHANNEL)
         self.assertIn("Kansas City, Kansas", house_context)
         self.assertIn("car wash", queries)
 
