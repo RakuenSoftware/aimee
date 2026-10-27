@@ -16,7 +16,12 @@ import (
 type Get func(context.Context, string) ([]byte, error)
 
 var shaPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-var attributionText = regexp.MustCompile(`(?im)^[\t >*_]*(co-authored-by\s*:|(claude|codex|chatgpt|copilot)-session\s*:|https?://\S*/(code/)?session[_/-]|generated\s+(with|by)\s+\[?(claude|codex|chatgpt|copilot|github copilot)\b)`)
+
+// A trailer or footer may follow any run of non-letter, non-digit characters --
+// the standard footer is "🤖 Generated with [Claude Code](...)", and an emoji,
+// bullet or markdown marker in front of it must not hide it. A session link is
+// refused wherever it appears, not only at the start of a line.
+var attributionText = regexp.MustCompile(`(?im)(^[^\p{L}\p{N}\n]*(co-authored-by\s*:|(claude|codex|chatgpt|copilot)-session\s*:|generated\s+(with|by)\s+\[?(claude|codex|chatgpt|copilot|github copilot)\b)|https?://\S*/(code/)?session[_/-])`)
 var assistantName = regexp.MustCompile(`(?i)^(claude( code)?|codex|chatgpt|(github )?copilot|copilot-swe-agent|aimee-wfe)(\[bot\]|[- ]bot|[- ]agent)?$`)
 var assistantEmail = regexp.MustCompile(`(?i)^((noreply|claude)@anthropic\.com|(codex|noreply)@openai\.com|wfe@aimee\.local|([0-9]+\+)?(claude|claude-code|codex|chatgpt|copilot|copilot-swe-agent)(\[bot\])?@users\.noreply\.github\.com)$`)
 
