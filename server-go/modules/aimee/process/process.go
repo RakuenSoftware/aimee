@@ -118,10 +118,11 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 // so rather than hang forever looking healthy. The ceiling is what separates
 // "not up yet" from "not coming".
 //
-// Retrying ONLY ErrStoreUnavailable, which is the transport reporting it could
-// not reach the module at all. A store that answers and refuses is a different
-// thing, and retrying that would turn one clear error into the same error
-// thirty times.
+// Retrying ONLY ErrStoreUnavailable: the transport could not reach the module,
+// or the module answered that it cannot reach its database yet (it registers
+// its stages before the database is reachable, by design). A store that
+// answers and refuses on the merits is a different thing, and retrying that
+// would turn one clear error into the same error thirty times.
 func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
 	const (
 		attempts = 30
