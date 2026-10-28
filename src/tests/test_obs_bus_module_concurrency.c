@@ -294,6 +294,14 @@ static int connect_owned_listener_fixture(const char *path, int *fd)
    *fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
    return *fd < 0 ? -1 : connect(*fd, (struct sockaddr *)&address, sizeof address);
 }
+
+/* The owned same-process seam, served as obs_bus serves it, so the test can
+ * attach with a claimed identity that ouro_host_attach_local never sends. */
+static void *owned_serve_thread(void *p)
+{
+   (void)ouro_host_serve_attach_owned(&g.host, *(int *)p);
+   return NULL;
+}
 static void test_owned_service_after_external_policy(void)
 {
    char home[256], socket[108], policy[300], grant[340], executable[4096];
@@ -325,13 +333,13 @@ static void test_owned_service_after_external_policy(void)
    /* Even a genuine private pair cannot mint an external requester identity. */
    int pair[2];
    assert(!socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair));
-   struct serve_arg argument = {.fd = pair[1], .owned = 1};
+   int owned_fd = pair[1];
    pthread_t thread;
    ouro_admit_fn admission = g.host.admit;
    ouro_attach_status_t (*hook)(void *, struct ouro_host *, uint32_t,
                                 const ouro_attach_request_t *) = g.host.attach_hook;
    pthread_mutex_lock(&g.host_lock);
-   assert(!pthread_create(&thread, NULL, serve_thread, &argument));
+   assert(!pthread_create(&thread, NULL, owned_serve_thread, &owned_fd));
    ouro_client_t impersonator;
    assert(ouro_client_attach_as(pair[0], &impersonator, 1, 76) == OURO_CLIENT_DENIED);
    assert(!pthread_join(thread, NULL));
