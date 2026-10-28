@@ -1237,6 +1237,13 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)
 	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \
 	      echo "   record itself, or xargs itself failed - re-run with TEST_RUN_JOBS=1)" >&2; \
 	    fi; \
+	    if [ -n "$${GITHUB_ACTIONS:-}" ]; then \
+	      for f in "$$fd"/failure.*; do \
+	        [ -f "$$f" ] || continue; \
+	        printf '::error title=unit test failed::%s\n' \
+	          "$$(sed 's/%/%25/g' "$$f" | awk 'BEGIN{ORS="%0A"}{print}')"; \
+	      done; \
+	    fi; \
 	    exit 1; \
 	  fi; \
 	  if [ -s "$$fd/timings" ]; then \
