@@ -86,7 +86,8 @@ func ConfigureBackendProcess(ctx context.Context, socket string, principal uint3
 	if err != nil {
 		return err
 	}
-	values, err := config.Snapshot()
+	// The config module starts with this process, not before it.
+	values, err := config.SnapshotWhenServed(ctx, 30*time.Second)
 	if err != nil {
 		return err
 	}

@@ -69,7 +69,7 @@ func init() {
 					includes = append(includes, directory)
 				}
 			}
-			for _, directory := range append(includes, filepath.Join(src, "db1_client"), filepath.Join(src, "modules/kb/c"), filepath.Join(src, "modules/config"), filepath.Join(src, "core/types/include"), filepath.Join(src, "core/event_bus/include")) {
+			for _, directory := range append(includes, filepath.Join(src, "db1_client"), filepath.Join(src, "modules/kb/c"), filepath.Join(src, "modules/config"), filepath.Join(src, "core/types/include")) {
 				args = append(args, "-I"+directory)
 			}
 			for _, file := range []string{"modules/translation/codec_stdio.c", "modules/translation/wire_codec.c", "modules/translation/aimee_backend_openai.c", "modules/translation/aimee_backend_anthropic.c", "modules/translation/aimee_backend_responses.c", "modules/translation/aimee_frontend_openai.c", "modules/translation/aimee_frontend_anthropic.c", "modules/translation/aimee_frontend_responses.c", "modules/translation/aimee_ir_stream.c", "modules/ir/aimee_ir.c", "modules/ir/session_event.c", "modules/ir/request_codec.c", "modules/ir/response_codec.c", "vendor/cJSON.c", "aimee_sha256.c", "text.c", "util.c"} {

@@ -58,9 +58,21 @@ class ProvideTests(unittest.TestCase):
             ("0.0.9", "0.1", False), ("1.4.2", "1", True), ("2.0.0", "1", False),
             # A Go pseudo-version names a commit, not a release.
             ("v0.0.0-20261027122832-35b033ec6ce8", "0.1", False), ("0.1", "0.1", False),
+            # A floor within the line: the release that added an API aimee uses.
+            ("0.1.2", "0.1.2", True), ("v0.1.7", "0.1.2", True), ("0.1.1", "0.1.2", False),
+            ("0.2.0", "0.1.2", False), ("1.4.0", "1.4", True), ("1.3.9", "1.4", False),
+            ("1.9.0", "1.4", True), ("2.0.0", "1.4", False),
         ]
         for version, compatible, expected in cases:
             self.assertEqual(provide.in_range(version, compatible), expected, (version, compatible))
+
+    def test_contract_range_must_name_a_line(self) -> None:
+        data = json.loads(self.contract.read_text())
+        for bad in ("0", "0.1.2.3", "^0.1", "x"):
+            data["compatible"] = bad
+            self.contract.write_text(json.dumps(data))
+            with self.assertRaisesRegex(SystemExit, "compatible must be"):
+                provide.contract()
 
     def test_contract_refuses_a_default_release_outside_its_own_range(self) -> None:
         data = json.loads(self.contract.read_text())

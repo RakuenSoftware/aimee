@@ -87,8 +87,9 @@ Architecture figures live in `docs/images/architecture/`. Regenerate their SVGs 
 - [Core C libraries](core/connection.md): [event bus](core/event-bus.md) and
   [repository extraction](core/repository-extraction.md)
 - [Turn integrity](architecture/turn-integrity.md)
-- [Event bus decisions](dev/EVENT_BUS_DECISIONS.md), [feature tree](dev/EVENT_BUS_FEATURE_TREE.md),
-  and [arena payloads](dev/EVENT_BUS_ARENA_GUIDE.md)
+- [Ring decisions](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md)
+  and [arena payloads](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/docs/arena-payloads.md),
+  in the ring's repository
 - [Fold pipeline order](dev/fold-pipeline-order.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)

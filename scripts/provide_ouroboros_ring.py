@@ -60,8 +60,10 @@ def contract() -> dict:
     for key in ("repository", "compatible", "release", "release_tree_sha256"):
         if not isinstance(data.get(key), str) or not data[key]:
             fail(f"{CONTRACT.relative_to(ROOT)}: missing {key}")
-    if not re.fullmatch(r"\d+(\.\d+)?", data["compatible"]):
-        fail(f"{CONTRACT.relative_to(ROOT)}: compatible must be MAJOR or 0.MINOR")
+    if not re.fullmatch(r"\d+(\.\d+){0,2}", data["compatible"]) or \
+            (data["compatible"].startswith("0") and "." not in data["compatible"]):
+        fail(f"{CONTRACT.relative_to(ROOT)}: compatible must be MAJOR[.MINOR[.PATCH]] "
+             "or 0.MINOR[.PATCH]")
     if not in_range(data["release"], data["compatible"]):
         fail(f"{CONTRACT.relative_to(ROOT)}: release {data['release']} is outside "
              f"compatible {data['compatible']}")
@@ -69,15 +71,22 @@ def contract() -> dict:
 
 
 def in_range(version: str, compatible: str) -> bool:
-    """Semver compatibility: 0.MINOR accepts 0.MINOR.*, MAJOR (>= 1) accepts MAJOR.*."""
+    """Semver compatibility, as a caret range: 0.MINOR accepts 0.MINOR.*, MAJOR
+    (>= 1) accepts MAJOR.*, and the further parts are a floor within that line,
+    so 0.1.2 accepts 0.1.2 and later 0.1 releases, 1.4 accepts 1.4.0 and later
+    1.x releases. The floor is how aimee says it needs an API a release added."""
     match = SEMVER.match(version.strip())
     if not match:
         return False
-    major, minor, _ = (int(part) for part in match.groups())
+    have = tuple(int(part) for part in match.groups())
     want = [int(part) for part in compatible.split(".")]
     if want[0] == 0:
-        return major == 0 and len(want) == 2 and minor == want[1]
-    return major == want[0]
+        if have[0] != 0 or len(want) < 2 or have[1] != want[1]:
+            return False
+    elif have[0] != want[0]:
+        return False
+    floor = tuple(want + [0] * (3 - len(want)))
+    return have >= floor
 
 
 def tree_digest(root: Path) -> str:

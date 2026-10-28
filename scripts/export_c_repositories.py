@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the versioned C core and language-specific module repositories.
+"""Materialize the language-specific module repositories.
 
 The monorepo remains a checked vendored mirror during the migration.  This
 export is deliberately fail-closed: it only writes into a new output directory,
@@ -156,74 +156,6 @@ def core_files() -> list[Path]:
     if not files:
         raise ExportError("src/core contains no files")
     return files
-
-
-def export_core(output_root: Path, timestamp: str) -> dict[str, object]:
-    repository = output_root / "aimee-core-c"
-    repository.mkdir()
-    shutil.copytree(ROOT / "src/core", repository, dirs_exist_ok=True)
-    shutil.copytree(ROOT / "examples/c-connection-client", repository / "examples/connection-client")
-    shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
-    shutil.copy2(ROOT / "NOTICE", repository / "NOTICE")
-    version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-    for example in ("connection-client",):
-        cmake_file = repository / "examples" / example / "CMakeLists.txt"
-        cmake_text = cmake_file.read_text(encoding="utf-8")
-        cmake_text = re.sub(
-            r"find_package\(aimee-core [^) ]+ EXACT CONFIG REQUIRED\)",
-            f"find_package(aimee-core {version} EXACT CONFIG REQUIRED)",
-            cmake_text,
-        )
-        write_text(cmake_file, cmake_text)
-    write_text(
-        repository / "README.md",
-        f"""# Aimee C core
-
-Version `{version}` is the single C implementation of connection, TLS/mTLS,
-Bearer authentication, deadlines/cancellation, and HTTP framing used by the
-thin client, server, and KB. The local shared-memory ring that server and KB
-host is the ouroboros ring (github.com/RakuenSoftware/ouroboros-ring).
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cmake --install build --prefix /opt/aimee-core
-```
-""",
-    )
-    write_text(
-        repository / ".github/workflows/ci.yml",
-        """name: core-c
-on: [push, pull_request]
-permissions:
-  contents: read
-jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PWD/prefix\"
-        shell: bash
-      - run: cmake --build build --config Release --parallel 2 && cmake --install build --config Release
-        shell: bash
-      - run: cmake -S examples/connection-client -B consumer -DCMAKE_PREFIX_PATH=\"$PWD/prefix\" && cmake --build consumer --config Release --parallel 2
-        shell: bash
-""",
-    )
-    remote = f"{REMOTE_ROOT}/aimee-core-c.git"
-    commit = initialize_repository(repository, remote, timestamp, version)
-    return {
-        "id": "aimee-core-c",
-        "repository": remote,
-        "ref": f"v{version}",
-        "version": version,
-        "commit": commit,
-        "source_sha256": digest_files(core_files()),
-    }
 
 
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
@@ -571,7 +503,6 @@ def c_process_cmake(module_id: str, binary: str, version: str,
 project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
 
 include(GNUInstallDirs)
-find_package(aimee-core {version} EXACT CONFIG REQUIRED)
 find_package(ouroboros-ring CONFIG REQUIRED)
 {discovery_text}{generated_setup}if(NOT TARGET ouroboros::ouroboros-ring-client)
     message(FATAL_ERROR "{binary} requires the ouroboros ring client")
@@ -975,14 +906,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: RakuenSoftware/aimee-core-c
-          ref: v{version}
-          path: _aimee-core
-      - run: cmake -S _aimee-core -B _core-build -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build _core-build --parallel 2
-      - run: cmake --install _core-build --prefix "$PWD/_prefix"
-      - uses: actions/checkout@v4
-        with:
           repository: RakuenSoftware/ouroboros-ring
           ref: {ouroboros_ring_release()}
           path: _ouroboros-ring
@@ -1301,9 +1224,8 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
     """Pin the lock to clean, tagged repositories updated from an export."""
     lock = load_json(LOCK)
     version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-    core = lock.get("core")
     modules = lock.get("modules")
-    if not isinstance(core, dict) or not isinstance(modules, list):
+    if "core" in lock or not isinstance(modules, list):
         raise ExportError(f"{LOCK}: invalid lock structure")
     inventory = load_json(INVENTORY)
     required = inventory.get("required")
@@ -1313,26 +1235,25 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
     required_ids = set(required)
     known_ids = required_ids | set(optional)
     contracts = process_contracts.validate()
-    entries = [core, *modules]
+    entries = modules
     for entry in entries:
         repository_id = entry.get("id")
         if not isinstance(repository_id, str):
             raise ExportError(f"{LOCK}: repository entry has no id")
-        if repository_id != "aimee-core-c":
-            if repository_id not in known_ids:
-                raise ExportError(f"{LOCK}: unknown module repository {repository_id}")
-            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            external_pin = external_module_pin(
-                repository_id,
-                "required" if repository_id in required_ids else "optional",
-                descriptor,
-                contracts[repository_id],
-            )
-            if external_pin is not None:
-                entry.clear()
-                entry.update(external_pin)
-                continue
-        directory_name = repository_id if repository_id == "aimee-core-c" else f"aimee-module-{repository_id}"
+        if repository_id not in known_ids:
+            raise ExportError(f"{LOCK}: unknown module repository {repository_id}")
+        descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
+        external_pin = external_module_pin(
+            repository_id,
+            "required" if repository_id in required_ids else "optional",
+            descriptor,
+            contracts[repository_id],
+        )
+        if external_pin is not None:
+            entry.clear()
+            entry.update(external_pin)
+            continue
+        directory_name = f"aimee-module-{repository_id}"
         repository = repository_root / directory_name
         if not (repository / ".git").is_dir():
             raise ExportError(f"missing Git repository: {repository}")
@@ -1347,14 +1268,10 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
         entry["version"] = version
         entry["ref"] = f"v{version}"
         entry["commit"] = head
-        if repository_id == "aimee-core-c":
-            entry["source_sha256"] = digest_files(core_files())
-        else:
-            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            repository_files = module_repository_files(repository_id, descriptor)
-            entry["source_sha256"] = digest_files(
-                [ROOT / relative for relative in repository_files]
-            )
+        repository_files = module_repository_files(repository_id, descriptor)
+        entry["source_sha256"] = digest_files(
+            [ROOT / relative for relative in repository_files]
+        )
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     return len(entries)
 
@@ -1413,7 +1330,6 @@ def main(argv: list[str] | None = None) -> int:
         contracts = process_contracts.validate()
         lock: dict[str, object] = {
             "schema_version": 1,
-            "core": export_core(output_root, timestamp),
             "modules": [],
         }
         modules: list[dict[str, object]] = []
@@ -1439,7 +1355,7 @@ def main(argv: list[str] | None = None) -> int:
     except ExportError as exc:
         print(f"export_c_repositories: error: {exc}", file=sys.stderr)
         return 1
-    print(f"export_c_repositories: wrote {1 + len(modules)} repositories to {output_root}")
+    print(f"export_c_repositories: wrote {len(modules)} repositories to {output_root}")
     print(f"export_c_repositories: wrote lock {LOCK}")
     return 0
 

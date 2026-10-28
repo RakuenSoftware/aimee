@@ -13,6 +13,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -195,6 +197,28 @@ func (c *Client) Snapshot() (map[string]any, error) {
 		return nil, ErrMalformed
 	}
 	return response.Values, nil
+}
+
+// SnapshotWhenServed is Snapshot for a process starting beside the config
+// module. A role's supervisor starts every module at once, so the first call
+// can reach the bus before config serves its stage; that answer means "not
+// yet", and it is retried every interval until config answers or within
+// passes. Any other failure is returned at once, so a malformed or refusing
+// config module still stops the caller.
+func (c *Client) SnapshotWhenServed(ctx context.Context, within time.Duration) (map[string]any, error) {
+	const interval = 100 * time.Millisecond
+	deadline := time.Now().Add(within)
+	for {
+		values, err := c.Snapshot()
+		if err == nil || !errors.Is(err, ring.ErrModuleCallCapabilityAbsent) || !time.Now().Before(deadline) {
+			return values, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %w", ErrUnavailable, ctx.Err())
+		case <-time.After(interval):
+		}
+	}
 }
 
 func (c *Client) Value(key string) (any, error) {

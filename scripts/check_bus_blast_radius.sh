@@ -129,11 +129,11 @@ fi
 while IFS= read -r hit; do
    file="${hit%%:*}"
    case "$file" in
-   src/build/*|src/modules/audit/obs_bus.c|src/modules/audit/audit_replay.c|src/tests/test_bus_*|src/tests/test_module_runtime.c|src/tests/bus_bench.c) continue ;;
+   src/build/*|src/modules/audit/obs_bus.c|src/modules/audit/audit_replay.c|src/tests/test_bus_*|src/tests/test_module_runtime.c) continue ;;
    esac
    printf 'FAIL: ring header escaped the local ring/adapter boundary: %s\n' "$hit" >&2
    fail=1
-done < <(grep -rnE '#include[[:space:]]*[<"]ouroboros/(attach|arena|capture|client|endpoint|host|region|ring|route|wire)\.h[">]' src 2>/dev/null || true)
+done < <(grep -rnE '#include[[:space:]]*[<"]ouroboros/(attach|arena|capture|client|endpoint|host|local_attach|region|ring|route|wire)\.h[">]' src 2>/dev/null || true)
 
 check_archive() {
    local archive="$1"

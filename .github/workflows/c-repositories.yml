@@ -101,11 +101,6 @@ jobs:
           cp dependencies/aimee-repositories.lock.json "$published_lock"
           trap 'cp "$published_lock" dependencies/aimee-repositories.lock.json' EXIT
           python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
-      - name: Install exported C core
-        run: |
-          cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$RUNNER_TEMP/core-build" --parallel 2
-          cmake --install "$RUNNER_TEMP/core-build" --prefix "$RUNNER_TEMP/prefix"
       - name: Build isolated role, memory, PostgreSQL and provider repositories
         run: |
           set -euo pipefail

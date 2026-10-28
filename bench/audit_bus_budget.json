@@ -1,0 +1,16 @@
+{
+  "description": "aimee's budget for the audit row on the ouroboros ring. Speed is a guardrail here, not the reason for the ring (auditability, record and replay are): the ceiling is absolute and exists to catch a gross regression, such as a per-emit syscall or the asynchronous publish becoming synchronous. Changing it is a reviewed change to this file. The ring's own dispatch budget lives in the ring (c/bench/baseline.json there). scripts/check_audit_bus_budget.sh enforces this file.",
+  "metrics": {
+    "audit_enqueue_overhead_ns": {
+      "description": "Caller-side cost of publishing one governed-action audit row over the ring (audit_bus_emit), excluding the ledger write, which runs on the consumer thread. Each test_bus_audit_durability run reports the median of 5,000 per-emit samples; observed_ns is the median of eight controlled per-run medians.",
+      "ceiling_ns": 1000,
+      "observed_ns": 117,
+      "observed_note": "2026-08-26 controlled reference on an Intel i7-14700K with the test pinned to CPU 1: eight per-run medians were 119, 121, 119, 115, 121, 115, 115, and 115 ns (range 115-121 ns; median 117 ns). The ceiling carries ~8x headroom while a gross regression still trips it."
+    },
+    "audit_durability": {
+      "invariant": "exactly-once",
+      "max_dropped": 0,
+      "description": "Every row the ring accepts reaches the ledger exactly once, and a graceful shutdown drains the rows in flight. test_bus_audit_durability asserts it on every unit-test run; this check reads the same run's count."
+    }
+  }
+}

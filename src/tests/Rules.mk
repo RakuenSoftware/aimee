@@ -3146,16 +3146,6 @@ unit-tests-pg:
 	$(MAKE) AIMEE_TEST_PG=1 kb-store-test-template
 	$(MAKE) AIMEE_TEST_PG=1 unit-tests
 
-# Event-bus dispatch benchmark (feature tree slice 12). Built -O2 for a realistic
-# measurement; a test binary, never linked into a shipping target.
-$(OBJDIR)/tests/bus_bench.o: C_FLAGS += -O2
-$(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
-                        $(OURO_RING_LIB)
-	$(TESTLINK_MIN) -o $@ $^ $(OURO_RING_LIB) $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: bus-bench
-bus-bench: $(TESTPREFIX)/bus-bench
-
 # The verify ledger across the real bus, against the real Go module.
 #
 # git_verify_state.c is now a seam: it asks the git module rather than touching
@@ -3377,10 +3367,6 @@ $(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o 
 unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
 	$<
 
-# NOT in TEST_TARGETS: like the other bus tests it needs a special bus link set
-# the standard unit-tests build does not assemble, so the bench gate
-# (check_bus_perf_gate.sh) force-builds + runs it via this .PHONY target instead.
-
 # Sandbox degraded-isolation audit, end-to-end through the REAL server bridge
 # (sandbox_audit_bridge.o) -> obs_bus -> ledger. Same bus link set as the audit
 # durability test, plus the bridge, posix/sandbox.o, and audit_action.o.
@@ -3462,10 +3448,9 @@ unit-test-bus-shutdown-race: $(TESTPREFIX)/unit-test-bus-shutdown-race
 unit-test-bus-flow: $(TESTPREFIX)/unit-test-bus-flow
 	$<
 
-# The bus tests are deliberately NOT in TEST_TARGETS -- each needs a special bus
-# link set the standard unit-tests build does not assemble, so the bench gate
-# (check_bus_perf_gate.sh) force-builds them via their .PHONY targets. That also
-# means none of them inherited the blanket `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
+# The bus tests link a special bus set rather than the standard unit-test objects,
+# and were once run only by a bench gate through their .PHONY targets; most are in
+# TEST_TARGETS now. Their link rules predate that, so none of them inherited the blanket `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # earlier in this file, so the ones that pull the archive through L_CORE died on a
 # clean tree with "cannot find build/obj/libaimee-core-connection.a" -- exactly the
 # gap already fixed for unit-test-code-treesitter below and for the auxiliary

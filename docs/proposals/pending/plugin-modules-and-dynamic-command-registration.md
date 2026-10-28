@@ -169,7 +169,7 @@ boundary, not a naming convenience.
 
 2. **[DONE] Instance identity, principal refs, and EVENT KINDS.**
    Two allocations, not one, and both are supplied rather than derived.
-   `bus_host_serve_kind()` (core/event_bus/bus_route.c:109) binds one event kind
+   `ouro_host_serve_kind()` (the ring's host API) binds one event kind
    to exactly ONE serving slot, so package-level event kinds would mean the first
    instance attaches and every other one is refused. Each instance is therefore
    allocated an aligned pair from a reserved range (`PluginEventBase` 11264), and
@@ -370,7 +370,8 @@ deriving a base by hashing the instance name would collide two plugins onto
   no pluggy-specific transport, dispatch, or audit code.
 - Module-hosted plugins pass the identical OSV, permission, and egress gates as
   `aimee.yaml`-declared MCP clients.
-- No new C is added outside `core/event_bus` and its communication surface.
+- No new C is added outside aimee's ring embedding (`src/modules/audit/obs_bus.c`) and its
+  communication surface.
 
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "cd server-go && go test ./modules/mcp/..."}

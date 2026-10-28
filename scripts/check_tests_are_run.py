@@ -84,7 +84,6 @@ INFRASTRUCTURE = {
     # program another script drives rather than a test that runs itself. The
     # script that drives it is named, so "who runs this" has an answer that can
     # be checked instead of assumed.
-    "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
     "kb-store-test-template": "builds the Postgres test template; unit-tests-pg drives it",
     "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",
     "aimee-witness-cadence-harness": "needs a live daemon; scripts/run-p7-witness-*.sh drive it",
