@@ -1,4 +1,4 @@
-# C core and module repository extraction
+# Module repository extraction
 
 The independently maintained source boundary is materialized with:
 
@@ -8,12 +8,15 @@ python3 scripts/export_c_repositories.py \
 ```
 
 The command refuses to overwrite an existing output directory. It creates one
-`aimee-core-c` Git repository and one `aimee-module-<id>` Git repository for
-every required and optional canonical module. Each repository receives an
+`aimee-module-<id>` Git repository for every required and optional canonical
+module. The C core (`src/core`: codec, connection, types) is not exported: it is
+built from this tree and bundled, and `core-c-package` CI proves it installs and
+builds a consumer on Linux, macOS and Windows. The local ring is the ouroboros
+ring, a repository of its own that modules link as a release. Each repository receives an
 `origin` URL under `RakuenSoftware`, a tag matching `src/core/VERSION`, and an exact commit
 pin. It does not push or create remote repositories.
 
-The core repository is a standalone installable CMake package. Every module
+Every module
 repository preserves its descriptor-owned sources, headers, tests, and docs,
 and builds its declared execution target. The current catalog has 26 Go process identities
 and no C process identities. Go processes use the shared module runtime and event-bus contract;
@@ -40,7 +43,7 @@ concatenated into the generated main.
 
 `dependencies/aimee-repositories.lock.json` records repository URLs, semantic
 versions, exact commits, stable principal identities, and source digests.
-`python3 scripts/check_c_repository_lock.py` fails when a vendored core/module
+`python3 scripts/check_c_repository_lock.py` fails when a vendored module
 mirror drifts from its external repository pin. The vendored mirrors remain in
 the main repository during behavioral migration so existing builds do not
 silently switch implementations.

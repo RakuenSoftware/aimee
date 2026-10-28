@@ -425,7 +425,8 @@ class CProcessBuildTests(unittest.TestCase):
         cmake = exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", self.descriptor())
         for source in self.descriptor()["sources"]:
             self.assertEqual(cmake.count(source), 1)
-        self.assertIn("find_package(aimee-core 1.2.3 EXACT CONFIG REQUIRED)", cmake)
+        # The C core is bundled, not a package a module repository installs.
+        self.assertNotIn("find_package(aimee-core", cmake)
         self.assertIn("find_package(OpenSSL REQUIRED)", cmake)
         self.assertIn("find_package(Threads REQUIRED)", cmake)
         self.assertIn("find_package(ZLIB REQUIRED)", cmake)

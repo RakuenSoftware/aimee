@@ -1,18 +1,11 @@
-/* test_bus_flow.c: slice 7 of the event-bus feature tree — flow control.
+/* test_bus_flow.c: the ring's loss facts reach aimee's WORM ledger.
  *
- * The properties that make backpressure safe, checked as outcomes:
- *
- *   - A BLOCK-policy event to a full destination is not lost: it is held at the
- *     producer's ring head and delivered once the destination drains. It is
- *     seq-stamped and tapped exactly once across the retries.
- *   - One slow consumer stalls only its own producer, never another.
- *   - A SHED-policy event to a full destination produces a typed overflow event
- *     naming the lost seq and kind — a consumer can enumerate its losses.
- *   - Overflow (a control-class event) is delivered from a reserve even when the
- *     data ring is full; when the reserve too is exhausted, a sticky
- *     control_lost flag is set — never a silent loss.
- *   - Reaping a producer that had a block-held event names the discarded seq to
- *     the tap as producer_reaped.
+ * The ring decides flow control and tests it (test_flow.c in the ring). What is
+ * aimee's is the record: a shed under SHED policy and the reap of a producer
+ * that held a blocked event each reach the host's loss sink, and
+ * obs_bus_record_loss turns them into one durable bus.overflow or
+ * bus.producer_reaped row, independent of capture, in a hash chain that
+ * verifies.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,150 +193,6 @@ static uint32_t data_limit(const client_t *c)
    return c->reply.queue_capacity - reserve;
 }
 
-static void test_block_holds_then_delivers(void)
-{
-   ouro_host_config_t c = cfg();
-   ouro_host_t h;
-   must(ouro_host_create(&h, &c, NULL, NULL) == OURO_HOST_OK, "host");
-   g_n = 0;
-   g_loss_n = 0;
-   ouro_host_set_tap(&h, tap, NULL);
-   ouro_host_set_loss_sink(&h, loss_sink, NULL);
-
-   client_t pub, obs;
-   attach(&h, 1, &pub);
-   attach(&h, 2, &obs);
-   must(ouro_host_subscribe(&h, obs.reply.handle_id, KIND_A) == OURO_HOST_OK, "subscribe");
-   /* KIND_A defaults to BLOCK. */
-
-   uint32_t lim = data_limit(&obs);
-   /* Emit one more than the data limit; the last one must block, not be lost. */
-   for (uint32_t i = 0; i <= lim; i++)
-      emit(&pub, OURO_F_NOTIFICATION, KIND_A, 4, (uint8_t)i);
-
-   /* First pump: lim events delivered, the (lim+1)th blocks at the producer. */
-   ouro_host_pump(&h);
-   must(h.slots[pub.reply.handle_id].blocked, "producer is blocked on the full destination");
-   uint32_t tap_after_first = tap_count_kind(KIND_A);
-   must(tap_after_first == lim + 1, "the blocked event was tapped once already");
-
-   /* The consumer drains one slot; next pump delivers the held event. */
-   ouro_frame_t f;
-   uint8_t buf[8];
-   must(recv_event(&obs, &f, buf, sizeof buf) == 1, "consumer drains one");
-   ouro_host_pump(&h);
-   must(!h.slots[pub.reply.handle_id].blocked, "producer unblocked once room appeared");
-
-   /* Drain everything and count: exactly lim+1 distinct events reached the
-    * consumer, none lost, none duplicated. */
-   uint32_t got = 1; /* already drained one above */
-   while (recv_event(&obs, &f, buf, sizeof buf))
-      got++;
-   must(got == lim + 1, "every blocked event was delivered exactly once");
-   /* And the tap still saw it exactly once (no re-tap across retries). */
-   must(tap_count_kind(KIND_A) == lim + 1, "no event tapped twice across retries");
-
-   detach(&pub);
-   detach(&obs);
-   ouro_host_destroy(&h);
-   printf("  block: a full destination holds the event, then delivers it once\n");
-}
-
-static void test_block_is_per_producer(void)
-{
-   ouro_host_config_t c = cfg();
-   ouro_host_t h;
-   must(ouro_host_create(&h, &c, NULL, NULL) == OURO_HOST_OK, "host");
-
-   client_t slow_pub, fast_pub, slow_obs, fast_obs;
-   attach(&h, 1, &slow_pub);
-   attach(&h, 2, &fast_pub);
-   attach(&h, 3, &slow_obs);
-   attach(&h, 4, &fast_obs);
-   must(ouro_host_subscribe(&h, slow_obs.reply.handle_id, KIND_A) == OURO_HOST_OK, "slow subs");
-   must(ouro_host_subscribe(&h, fast_obs.reply.handle_id, KIND_A + 1) == OURO_HOST_OK, "fast subs");
-
-   /* Overfill the slow observer's kind so slow_pub blocks; fast_pub targets a
-    * different kind/consumer that has room. */
-   uint32_t lim = data_limit(&slow_obs);
-   for (uint32_t i = 0; i <= lim; i++)
-      emit(&slow_pub, OURO_F_NOTIFICATION, KIND_A, 4, 0);
-   emit(&fast_pub, OURO_F_NOTIFICATION, KIND_A + 1, 4, 0);
-
-   ouro_host_pump(&h);
-   must(h.slots[slow_pub.reply.handle_id].blocked, "slow producer blocked");
-   must(!h.slots[fast_pub.reply.handle_id].blocked, "fast producer not blocked");
-
-   /* The fast observer got its event despite the slow producer being stuck. */
-   ouro_frame_t f;
-   must(recv_event(&fast_obs, &f, NULL, 0) == 1, "fast consumer served while slow is blocked");
-
-   detach(&slow_pub);
-   detach(&fast_pub);
-   detach(&slow_obs);
-   detach(&fast_obs);
-   ouro_host_destroy(&h);
-   printf("  block: one slow consumer stalls only its own producer\n");
-}
-
-/* A block-policy notification to two observers, one full and one with room: the
- * observer with room is served immediately and exactly once — it must not be
- * re-delivered when the blocked observer later drains. This exercises the
- * per-retry delivered-bitmap, the subtle part of block fan-out. */
-static void test_block_fanout_no_double_deliver(void)
-{
-   ouro_host_config_t c = cfg();
-   ouro_host_t h;
-   must(ouro_host_create(&h, &c, NULL, NULL) == OURO_HOST_OK, "host");
-
-   client_t pub, full_obs, roomy_obs;
-   attach(&h, 1, &pub);
-   attach(&h, 2, &full_obs);
-   attach(&h, 3, &roomy_obs);
-   must(ouro_host_subscribe(&h, full_obs.reply.handle_id, KIND_A) == OURO_HOST_OK, "full subs");
-   must(ouro_host_subscribe(&h, roomy_obs.reply.handle_id, KIND_A) == OURO_HOST_OK, "roomy subs");
-
-   /* Fill full_obs to its data limit with prior events, then emit one more that
-    * fans out to both. full_obs blocks; roomy_obs must get it once. */
-   uint32_t lim = data_limit(&full_obs);
-   for (uint32_t i = 0; i < lim; i++)
-   {
-      emit(&pub, OURO_F_NOTIFICATION, KIND_A, 4, 0);
-      ouro_host_pump(&h);
-      /* roomy_obs also receives these; drain it so only the final event matters. */
-      ouro_frame_t tmp;
-      recv_event(&roomy_obs, &tmp, NULL, 0);
-   }
-   /* full_obs is now at its data limit; roomy_obs is empty. */
-   emit(&pub, OURO_F_NOTIFICATION, KIND_A, 4, 0x77);
-   ouro_host_pump(&h);
-   must(h.slots[pub.reply.handle_id].blocked, "producer blocked on the full observer");
-
-   /* roomy_obs got the fan-out event exactly once already. */
-   ouro_frame_t f;
-   uint8_t buf[8];
-   must(recv_event(&roomy_obs, &f, buf, sizeof buf) == 1 && buf[0] == 0x77,
-        "roomy observer got the event");
-   must(recv_event(&roomy_obs, &f, buf, sizeof buf) == 0, "roomy observer got it only once");
-
-   /* Drain full_obs; the retry delivers the held copy to it, and must NOT
-    * re-deliver to roomy_obs. */
-   while (recv_event(&full_obs, &f, buf, sizeof buf))
-      ; /* drain all */
-   ouro_host_pump(&h);
-   must(!h.slots[pub.reply.handle_id].blocked, "producer unblocked");
-   must(recv_event(&full_obs, &f, buf, sizeof buf) == 1 && buf[0] == 0x77,
-        "full observer finally got the held event");
-   must(recv_event(&roomy_obs, &f, buf, sizeof buf) == 0,
-        "roomy observer was not re-delivered on the retry");
-
-   detach(&pub);
-   detach(&full_obs);
-   detach(&roomy_obs);
-   ouro_host_destroy(&h);
-   printf("  block fan-out: the served observer is not re-delivered on retry\n");
-}
-
 static void test_shed_emits_overflow(void)
 {
    int worm_before = worm_count("bus.overflow");
@@ -415,37 +264,6 @@ static void test_shed_emits_overflow(void)
    printf("  shed: a full destination gets a typed overflow naming the lost seq\n");
 }
 
-static void test_control_lost_when_reserve_exhausted(void)
-{
-   ouro_host_config_t c = cfg();
-   ouro_host_t h;
-   must(ouro_host_create(&h, &c, NULL, NULL) == OURO_HOST_OK, "host");
-
-   client_t pub, obs;
-   attach(&h, 1, &pub);
-   attach(&h, 2, &obs);
-   must(ouro_host_subscribe(&h, obs.reply.handle_id, KIND_A) == OURO_HOST_OK, "subscribe");
-   must(ouro_host_set_kind_policy(&h, KIND_A, OURO_KIND_SHED) == OURO_HOST_OK, "shed");
-
-   /* Fill the ENTIRE inbound ring (data allowance + the whole control reserve)
-    * by shedding far more than capacity, so even overflow events cannot fit.
-    * The consumer never drains, so the reserve fills and control_lost latches. */
-   uint32_t cap = obs.reply.queue_capacity;
-   for (uint32_t i = 0; i < cap * 3; i++)
-   {
-      /* Re-emit as the outbound ring drains via pump each time. */
-      emit(&pub, OURO_F_NOTIFICATION, KIND_A, 4, 0);
-      ouro_host_pump(&h);
-   }
-   must(atomic_load_explicit(&obs.qp.hdr->control_lost, memory_order_acquire) == 1,
-        "control_lost latched when even the reserve was exhausted");
-
-   detach(&pub);
-   detach(&obs);
-   ouro_host_destroy(&h);
-   printf("  control_lost: latches when the reserve itself is exhausted\n");
-}
-
 static void test_producer_reaped_tap_only(void)
 {
    int worm_before = worm_count("bus.producer_reaped");
@@ -512,11 +330,7 @@ int main(void)
    must(obs_bus_start() == 0, "start asynchronous durability writer");
    obs_bus_flush();
    printf("test_bus_flow:\n");
-   test_block_holds_then_delivers();
-   test_block_is_per_producer();
-   test_block_fanout_no_double_deliver();
    test_shed_emits_overflow();
-   test_control_lost_when_reserve_exhausted();
    test_producer_reaped_tap_only();
    must(audit_worm_verify_chain(NULL, 0) == 0, "loss ledger hash chain verifies");
    obs_bus_stop();

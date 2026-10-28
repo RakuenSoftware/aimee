@@ -1,11 +1,11 @@
 #define _GNU_SOURCE
 #include "cJSON.h"
-#include <sys/socket.h>
 
 #include <ouroboros/client.h>
 #include <aimee/audit/instance_identity.h>
 #include <ouroboros/endpoint.h>
 #include <ouroboros/host.h>
+#include <ouroboros/local_attach.h>
 #include <ouroboros/runtime.h>
 #include <ouroboros/module_client.h>
 #include <ouroboros/module_runtime.h>
@@ -1028,28 +1028,9 @@ static void smoke_production_module(ouro_module_client_t *client, const char *na
 
 /* Attach the trusted embedding host before opening the external admission
  * socket, matching the daemon's principal-zero in-process connection. */
-typedef struct
-{
-   ouro_host_t *host;
-   int socket;
-} trusted_attach_t;
-static void *trusted_attach(void *arg)
-{
-   trusted_attach_t *a = arg;
-   assert(ouro_host_serve_attach(a->host, a->socket) == OURO_HOST_OK);
-   return NULL;
-}
 static void trusted_client(ouro_host_t *host, ouro_client_t *client)
 {
-   int sockets[2];
-   assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0);
-   trusted_attach_t args = {host, sockets[1]};
-   pthread_t thread;
-   assert(pthread_create(&thread, NULL, trusted_attach, &args) == 0);
-   assert(ouro_client_attach(sockets[0], client) == OURO_CLIENT_OK);
-   assert(pthread_join(thread, NULL) == 0);
-   close(sockets[0]);
-   close(sockets[1]);
+   assert(ouro_host_attach_local(host, client, 0) == OURO_CLIENT_OK);
 }
 static void command_word(uint8_t *p, uint32_t value)
 {

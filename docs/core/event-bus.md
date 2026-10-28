@@ -11,7 +11,8 @@ implementation are all there (`spec/`, `vectors/`).
 What stays in aimee:
 
 - **The contract reference.** `dependencies/ouroboros-ring.json` names the
-  release range aimee accepts (`compatible`, semver) and the release builds use
+  release range aimee accepts (`compatible`, a semver caret range: `0.1.2` is any 0.1
+  release from 0.1.2, the first with `ouro_host_attach_local` and `ouro_capture_flush_fd`) and the release builds use
   by default with its content digest. aimee links an installed ring through the
   ring's own package (pkg-config / CMake `ouroboros-ring`) and never builds or
   reads the ring's sources: `scripts/provide_ouroboros_ring.py` takes
@@ -26,6 +27,9 @@ What stays in aimee:
   instance is, the reserved role identities (server 34, KB 35), and the
   first-boot identity latch.
 - **The link boundary.** `scripts/check_bus_blast_radius.sh`: only the server and
-  KB link `libouroboros-ring.a`.
+  KB link `libouroboros-ring.a` ([which binaries link the ring](../EVENT_BUS.md#which-binaries-link-the-ring)).
+- **aimee's own budgets.** `scripts/check_audit_bus_budget.sh` holds the audit
+  row's enqueue cost to `bench/audit_bus_budget.json`. The ring's dispatch
+  budget is the ring's (`scripts/check_perf_budget.sh` there).
 
 What aimee carries on the ring is described in [Event bus](../EVENT_BUS.md).

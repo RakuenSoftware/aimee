@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -27,6 +26,7 @@
 #include <aimee/audit/instance_identity.h>
 #include <ouroboros/client.h>
 #include <ouroboros/host.h>
+#include <ouroboros/local_attach.h>
 #include <ouroboros/region.h> /* ouro_control_epoch */
 #include <ouroboros/runtime.h>
 #include <ouroboros/module_client.h>
@@ -740,58 +740,37 @@ static void capture_mark_gap(capture_state_t state)
                                   detail);
 }
 
-/* Append the sink's bytes to the capture file and reset it to empty WITHOUT
- * re-emitting the file header (header_written stays set), so the file remains one
- * valid, seq-contiguous stream across many flushes. Runs only on the consumer
- * thread. On a short/failed write the capture file is abandoned (closed) rather
- * than left half-written — the audit LEDGER is the durable record; capture is the
- * replay layer on top, so losing it degrades replay, never the audit itself. */
+/* Append the sink's bytes to the capture file (ouro_capture_flush_fd keeps one
+ * header and one seq-contiguous stream across flushes). Runs only on the
+ * consumer thread. A broken sink, the size limit or a failed write abandons the
+ * file rather than leaving it half-written, and records the gap: the audit
+ * LEDGER is the durable record; capture is the replay layer on top, so losing it
+ * degrades replay, never the audit itself. */
 static void capture_flush(void)
 {
    if (g.cap_fd < 0)
       return;
-   if (g.capture.broken)
-   {
-      aimee_log(LOG_WARN, "obs_bus", "capture sink broke (alloc); replay stream abandoned");
-      close(g.cap_fd);
-      g.cap_fd = -1;
-      capture_mark_gap(CAPTURE_SINK_BROKEN);
-      return;
-   }
-   if (g.capture.len == 0)
-      return;
    /* File-count retention alone did not bound storage: one long-running
-    * session grew to 10 GB. Replay is losable; preserve the durable ledger
-    * and explicitly report the replay gap before exhausting its volume. */
-   if (g.capture.len > g.capture_limit - g.capture_bytes)
+    * session grew to 10 GB, hence the byte limit. The write_failed fault writes
+    * to an invalid descriptor so the ring reports a real failed write. */
+   int fd = strcmp(sinks.capture_fault, "write_failed") == 0 ? -1 : g.cap_fd;
+   ouro_capture_flush_t r =
+       ouro_capture_flush_fd(&g.capture, fd, &g.capture_bytes, g.capture_limit);
+   if (r == OURO_CAPTURE_FLUSHED)
    {
-      close(g.cap_fd);
-      g.cap_fd = -1;
-      g.capture.broken = 1;
-      g.capture.len = 0;
-      capture_mark_gap(CAPTURE_SIZE_LIMIT);
+      atomic_store_explicit(&g.capture_last_seq, g.capture.last_seq, memory_order_release);
       return;
    }
-   size_t off = 0;
-   while (off < g.capture.len)
-   {
-      ssize_t w = strcmp(sinks.capture_fault, "write_failed") == 0
-                      ? -1
-                      : write(g.cap_fd, g.capture.buf + off, g.capture.len - off);
-      if (w <= 0)
-      {
-         aimee_log(LOG_WARN, "obs_bus", "capture file write failed; replay stream abandoned");
-         close(g.cap_fd);
-         g.cap_fd = -1;
-         g.capture.broken = 1; /* stop the tap appending to a sink we can no longer drain */
-         capture_mark_gap(CAPTURE_WRITE_FAILED);
-         return;
-      }
-      off += (size_t)w;
-      g.capture_bytes += (uint64_t)w;
-   }
-   atomic_store_explicit(&g.capture_last_seq, g.capture.last_seq, memory_order_release);
-   g.capture.len = 0; /* keep header_written/first_seq: the header is already on disk */
+   static const capture_state_t gap[] = {
+       [OURO_CAPTURE_FLUSH_BROKEN] = CAPTURE_SINK_BROKEN,
+       [OURO_CAPTURE_FLUSH_LIMIT] = CAPTURE_SIZE_LIMIT,
+       [OURO_CAPTURE_FLUSH_WRITE_FAILED] = CAPTURE_WRITE_FAILED,
+   };
+   aimee_log(LOG_WARN, "obs_bus", "capture stream abandoned (%s); replay stops here",
+             ouro_capture_flush_name(r));
+   close(g.cap_fd);
+   g.cap_fd = -1;
+   capture_mark_gap(gap[r]);
 }
 
 /* One capture file per host SESSION: the reader requires seq-contiguity, which a
@@ -1035,24 +1014,6 @@ static void *consumer_main(void *arg)
 
 /* ------------------------------------------------------ attach helper ---- */
 
-struct serve_arg
-{
-   int fd;
-   int owned;
-};
-static void *serve_thread(void *p)
-{
-   struct serve_arg *argument = p;
-   if (argument->owned)
-      ouro_host_serve_attach_owned(&g.host, argument->fd);
-   else
-      ouro_host_serve_attach(&g.host, argument->fd);
-   return NULL;
-}
-
-/* Attach one client over a socketpair the host serves on a short-lived thread
- * (the attach handshake passes the region fds via SCM_RIGHTS; after that the
- * rings live in shared memory and the sockets are no longer needed). */
 static void module_clients_destroy(void)
 {
    for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
@@ -1116,43 +1077,12 @@ static void module_client_release(int index)
    pthread_mutex_unlock(&g.module_client_lock);
 }
 
+/* Attach one in-process client to this daemon's host. The ring does the
+ * socketpair handshake (ouro_host_attach_local); owned attaches use its
+ * same-process seam and require host_lock, which the one owned caller holds. */
 static int attach_mode(ouro_client_t *c, int owned)
 {
-   int sv[2];
-   int socket_type = SOCK_SEQPACKET;
-#ifdef SOCK_CLOEXEC
-   socket_type |= SOCK_CLOEXEC;
-#endif
-   if (socketpair(AF_UNIX, socket_type, 0, sv) != 0)
-   {
-#ifdef SOCK_CLOEXEC
-      if ((errno != EINVAL && errno != EPROTONOSUPPORT) ||
-          socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
-         return -1;
-#else
-      return -1;
-#endif
-   }
-   /* Retain close-on-exec on POSIX platforms without atomic socket flags. */
-   if (fcntl(sv[0], F_SETFD, FD_CLOEXEC) < 0 || fcntl(sv[1], F_SETFD, FD_CLOEXEC) < 0)
-   {
-      close(sv[0]);
-      close(sv[1]);
-      return -1;
-   }
-   struct serve_arg a = {.fd = sv[1], .owned = owned};
-   pthread_t t;
-   if (pthread_create(&t, NULL, serve_thread, &a) != 0)
-   {
-      close(sv[0]);
-      close(sv[1]);
-      return -1;
-   }
-   ouro_client_result_t rc = ouro_client_attach(sv[0], c);
-   pthread_join(t, NULL);
-   close(sv[0]);
-   close(sv[1]);
-   return rc == OURO_CLIENT_OK ? 0 : -1;
+   return ouro_host_attach_local(&g.host, c, owned) == OURO_CLIENT_OK ? 0 : -1;
 }
 
 static int attach(ouro_client_t *client)

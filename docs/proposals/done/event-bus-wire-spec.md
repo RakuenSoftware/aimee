@@ -13,11 +13,11 @@
 > unwritten. That proof was later
 > [rejected](../rejected/event-bus-third-language-conformance.md) under the Go-or-rejected policy.
 > On 2026-10-19 the owner directed a Rust reference client; `rust/aimee-bus` now provides it
-> ([D11](../../dev/EVENT_BUS_DECISIONS.md#d11-the-rust-reference-client-is-a-third-independent-client)).
+> ([D11](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md#d11-the-rust-reference-client-is-a-third-independent-client)).
 > Region, ring, attach and AMOD layouts, which this spec defers to code, are now frozen by a second
 > language-neutral table, `layout_vectors.tsv`, beside the wire vectors, and all three clients are
 > held to both. Cross-process arena reads were added as
-> [D12](../../dev/EVENT_BUS_DECISIONS.md#d12-cross-process-arena-reads-a-lease-view-and-a-release-message).
+> [D12](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md#d12-cross-process-arena-reads-a-lease-view-and-a-release-message).
 
 The v0 substrate this spec describes was written and green on the
   `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to
@@ -27,8 +27,8 @@ The v0 substrate this spec describes was written and green on the
 - **Owner:** `module-runtime` (per
   [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build-residual.md)).
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
-- **Decisions and feature tree:** [`docs/dev/EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
-  (D1–D10) and [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md) (the twelve
+- **Decisions and feature tree:** [the ring's `spec/decisions.md`](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md)
+  (D1–D10) and the event-bus feature tree (retired with the ring's move; in git history) (the twelve
   slices).
 - **Validated by:** the single in-source **C bus host**, the **C and Go reference clients**, and the
   cross-language conformance suite. Two independent client implementations, not one, keep this spec
@@ -77,7 +77,7 @@ use this segment; it leaves on the network transport carrying the same event enc
 > observer routing at the memory level, not only the API level" then holds only by the client
 > library's good manners. The revision below is what the layout has to be for that sentence to be a
 > guarantee. It changes no frame bytes, so the conformance vectors are untouched. Rationale and the
-> resulting v0 threat model are in [`EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
+> resulting v0 threat model are in [the ring's `spec/decisions.md`](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md)
 > (D1, D2). `module-runtime` owns this document; the feature tree's slice 3 is blocked until this
 > amendment is accepted or declined.
 >
@@ -295,7 +295,7 @@ The spec is validated, not defined, by its implementations. All of the following
 ## Open questions
 
 Answered in v0 (settled by the decisions in
-[`EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md) and the implementation):
+[the ring's `spec/decisions.md`](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md) and the implementation):
 
 - ~~Direct zero-copy vs host-mediated arena leases; arena allocation/fragmentation strategy.~~
   **Host-mediated leases** (D3): generation + consumer refcount, first-fit with coalescing, a

@@ -30,6 +30,11 @@ type processResources struct {
 func (r processResources) MemoryAuditAction(ctx context.Context, action audit.Action) error {
 	return audit.PublishAction(ctx, r.auditPublisher, action)
 }
+
+// configStartupWait bounds how long a starting module waits for the config
+// module, which its supervisor starts at the same moment, to serve.
+const configStartupWait = 30 * time.Second
+
 func (r processResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
 func (r processResources) EmbeddingEndpoint() (string, error) {
 	values, err := r.config.Snapshot()
@@ -108,7 +113,7 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (ring.
 	if err != nil {
 		return nil, fmt.Errorf("memory: config/storage/audit bus connection: %w", err)
 	}
-	settings, err := resources.MemorySettings()
+	settings, err := resources.config.SnapshotWhenServed(ctx, configStartupWait)
 	if err != nil {
 		closeConnection()
 		return nil, fmt.Errorf("memory: backend configuration: %w", err)

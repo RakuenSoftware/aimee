@@ -85,3 +85,64 @@ func TestClientClassifiesTransportFailuresAsUnavailable(t *testing.T) {
 		t.Fatalf("transport error = %v", err)
 	}
 }
+
+// lateCaller answers capability absent until it has been called `absent`
+// times, then forwards to the real config handler: config starting after the
+// module that asks it.
+type lateCaller struct {
+	absent int
+	calls  *int
+	inner  contract.StageCaller
+}
+
+func (c lateCaller) Call(ctx context.Context, eventKind, stageID uint32, trace uint64,
+	deadline time.Duration, body []byte) ([]byte, error) {
+	*c.calls++
+	if *c.calls <= c.absent {
+		return nil, ring.ErrModuleCallCapabilityAbsent
+	}
+	return c.inner.Call(ctx, eventKind, stageID, trace, deadline, body)
+}
+
+func TestSnapshotWhenServedWaitsOnlyForAbsence(t *testing.T) {
+	store, err := moduleconfig.NewStore(filepath.Join(t.TempDir(), "aimee.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	late, err := contract.NewClient(lateCaller{absent: 3, calls: &calls,
+		inner: handlerCaller{handler: moduleconfig.NewHandler(store)}}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := late.SnapshotWhenServed(context.Background(), 5*time.Second)
+	if err != nil || values == nil || calls != 4 {
+		t.Fatalf("a config module that starts late is waited for: calls=%d err=%v", calls, err)
+	}
+
+	calls = 0
+	never, _ := contract.NewClient(lateCaller{absent: 1 << 30, calls: &calls}, time.Second)
+	start := time.Now()
+	if _, err := never.SnapshotWhenServed(context.Background(), 300*time.Millisecond); !errors.Is(err, ring.ErrModuleCallCapabilityAbsent) {
+		t.Fatalf("absence past the wait is returned: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("the wait is bounded: %s", elapsed)
+	}
+
+	refused := errors.New("config refused")
+	broken, _ := contract.NewClient(failureCaller{err: refused}, time.Second)
+	start = time.Now()
+	if _, err := broken.SnapshotWhenServed(context.Background(), 5*time.Second); !errors.Is(err, refused) {
+		t.Fatalf("any other failure is returned: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("a real failure is not retried: %s", elapsed)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := never.SnapshotWhenServed(ctx, 5*time.Second); !errors.Is(err, contract.ErrUnavailable) {
+		t.Fatalf("a cancelled start stops waiting: %v", err)
+	}
+}
