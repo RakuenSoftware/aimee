@@ -33,6 +33,7 @@
     "server-go/modules/postgres/canonical_source_pages_test.go",
     "server-go/modules/postgres/checksum_test.go",
     "server-go/modules/postgres/health_test.go",
+    "server-go/modules/postgres/no_database_test.go",
     "server-go/modules/postgres/shared_database_test.go",
     "server-go/modules/postgres/shared_history_test.go",
     "server-go/modules/postgres/shared_legacy_history_test.go",

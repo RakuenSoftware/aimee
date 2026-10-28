@@ -108,6 +108,7 @@ const maxStatementTime = time.Minute
 // real codes.
 const (
 	sqlStateNoActiveTransaction = "25P01"
+	sqlStateUnableToConnect     = "08001"
 	sqlStateInFailedTransaction = "25P02"
 )
 
@@ -491,8 +492,12 @@ func (h *sqlHandler) handleContext(parent context.Context, invocation ring.Modul
 		// No database. Refused IN BAND with the reason rather than at the
 		// transport, because a caller that can read "AIMEE_STORE_URL is unset"
 		// can act on it, where a bare transport failure says only that something
-		// went wrong somewhere.
-		return refuse(statusFailed, "",
+		// went wrong somewhere. SQLSTATE 08001, as the session stage uses for the
+		// same condition: a connection failure, so a caller that is starting
+		// beside this module waits for it instead of reading a verdict. The
+		// stage registers before its database is reachable, and credentials can
+		// arrive after the first request.
+		return refuse(statusFailed, sqlStateUnableToConnect,
 			fmt.Sprintf("the SQL stage has no database: %v", err)), ring.ModuleStatusOK
 	}
 
