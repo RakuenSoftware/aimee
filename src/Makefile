@@ -512,8 +512,9 @@ ifeq ($(strip $(OURO_RING_INCLUDE)),)
 $(error could not provide the ouroboros ring headers in the range dependencies/ouroboros-ring.json names; see the message above)
 endif
 C_FLAGS += -I$(OURO_RING_INCLUDE)
-OURO_RING_LIB := build/deps/ouroboros-ring/unsupported-on-$(UNAME_S)
-$(OURO_RING_LIB):
+OURO_RING_UNSUPPORTED := build/deps/ouroboros-ring/unsupported-on-$(UNAME_S)
+OURO_RING_LIB := $(OURO_RING_UNSUPPORTED)
+$(OURO_RING_UNSUPPORTED):
 	@echo "the ouroboros ring is Linux-only; aimee-server and aimee-kb cannot be built on $(UNAME_S)" >&2; exit 1
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
