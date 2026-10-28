@@ -1,7 +1,7 @@
 github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157 h1:/1GtRNeTWpNva+L/P4F67QrikYaPk86sqeQp/6dvgks=
 github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157/go.mod h1:viX9M6fepRDBFpVrLwNsCuqttTwqwSWq4WsRJrIF/rw=
-github.com/RakuenSoftware/ouroboros-ring/go v0.1.1 h1:L3mymOefHj6hh3gggFvd3r52McO7wUaCwdZ7QsfYiFs=
-github.com/RakuenSoftware/ouroboros-ring/go v0.1.1/go.mod h1:EE0tgkv3osUZRi8/Ul1KGOCazyM82MuimSNslkCaSm0=
+github.com/RakuenSoftware/ouroboros-ring/go v0.1.2 h1:mYmJEg4uwuylbOgRAluWz7/ly8Ivhhx/47pad8FHDu8=
+github.com/RakuenSoftware/ouroboros-ring/go v0.1.2/go.mod h1:EE0tgkv3osUZRi8/Ul1KGOCazyM82MuimSNslkCaSm0=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
