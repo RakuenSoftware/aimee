@@ -984,6 +984,14 @@ $(OBJDIR)/tests/test_governance_bus_bridge.o: server/module_stage_adapters.c
 $(TESTPREFIX)/unit-test-governance-bus-bridge: $(OBJDIR)/tests/test_governance_bus_bridge.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
 
+# C stand-ins for five Go module handlers, so C core tests can exercise the code
+# that calls those modules without a ring and a module process. They are test
+# doubles: no binary ships them, and the Go modules' own tests hold the handlers'
+# behaviour.
+$(OBJDIR)/tests/module_handlers/%.o: tests/support/module_handlers/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -Daimee_module_handler=aimee_$*_module_handler -c -o $@ $<
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-module-wire-contracts
 $(TESTPREFIX)/unit-test-module-wire-contracts: $(OBJDIR)/tests/test_module_wire_contracts.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
