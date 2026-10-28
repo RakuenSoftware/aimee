@@ -742,13 +742,13 @@ func main() {{
 """
 
 
-def ouroboros_ring_commit() -> str:
-    """The ring commit aimee pins; exports build against the same one."""
-    lock = json.loads((ROOT / "dependencies/ouroboros-ring.lock.json").read_text(encoding="utf-8"))
-    commit = lock.get("commit")
-    if not isinstance(commit, str) or len(commit) != 40:
-        raise ExportError("dependencies/ouroboros-ring.lock.json: missing a full ring commit")
-    return commit
+def ouroboros_ring_release() -> str:
+    """The ring release aimee names; exports build against the same release."""
+    contract = json.loads((ROOT / "dependencies/ouroboros-ring.json").read_text(encoding="utf-8"))
+    release = contract.get("release")
+    if not isinstance(release, str) or not re.fullmatch(r"v\d+\.\d+\.\d+", release):
+        raise ExportError("dependencies/ouroboros-ring.json: missing a vMAJOR.MINOR.PATCH release")
+    return release
 
 
 # Shared contracts and pure helpers outside an implementation module, mapped to
@@ -984,7 +984,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: RakuenSoftware/ouroboros-ring
-          ref: {ouroboros_ring_commit()}
+          ref: {ouroboros_ring_release()}
           path: _ouroboros-ring
       - run: cmake -S _ouroboros-ring/c -B _ring-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
       - run: cmake --build _ring-build --parallel 2

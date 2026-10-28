@@ -76,31 +76,32 @@ set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/types/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
 
-# The ouroboros ring is not in this repository; see src/Makefile. Its headers
-# come from the commit pinned in dependencies/ouroboros-ring.lock.json, fetched
-# and content-checked at configure time, or from a local ring checkout named by
-# OURO_RING_LOCAL. Nothing here links the ring: the CMake targets need only its
-# headers, and the server and KB that host it are built by src/Makefile. The
-# thin client never touches the ring, so a thin-client build (the only build on
-# Windows and macOS) neither fetches nor sees it.
+# The ouroboros ring is not in this repository; see src/Makefile. aimee depends
+# on its contract through the release range in dependencies/ouroboros-ring.json
+# and consumes an installed ring through the ring's own CMake package, provided
+# at configure time by scripts/provide_ouroboros_ring.py (OURO_RING_PREFIX or
+# OURO_RING_SOURCE in the environment choose another installation). Nothing here
+# links the ring: the CMake targets need only its headers, and the server and KB
+# that host it are built by src/Makefile. The thin client never touches the
+# ring, so a thin-client build (the only build on Windows and macOS) neither
+# provides nor sees it.
 set(AIMEE_OURO_RING_INCLUDE_DIR "")
 if(NOT AIMEE_THIN_CLIENT)
-    set(OURO_RING_LOCAL "$ENV{OURO_RING_LOCAL}" CACHE PATH
-        "Local ouroboros-ring checkout to build against instead of the pinned commit")
-    if(OURO_RING_LOCAL)
-        get_filename_component(OURO_RING_DIR "${OURO_RING_LOCAL}" ABSOLUTE)
-    else()
-        set(OURO_RING_DIR "${CMAKE_BINARY_DIR}/deps/ouroboros-ring")
-        find_package(Python3 REQUIRED COMPONENTS Interpreter)
-        execute_process(
-            COMMAND "${Python3_EXECUTABLE}" -I
-                    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_ouroboros_ring.py" "${OURO_RING_DIR}"
-            RESULT_VARIABLE OURO_RING_FETCH_RESULT)
-        if(NOT OURO_RING_FETCH_RESULT EQUAL 0)
-            message(FATAL_ERROR "could not provide the pinned ouroboros ring in ${OURO_RING_DIR}; see the message above")
-        endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/provide_ouroboros_ring.py"
+                "${CMAKE_BINARY_DIR}/deps/ouroboros-ring"
+        OUTPUT_VARIABLE OURO_RING_PKGCONFIG OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE OURO_RING_PROVIDE_RESULT)
+    if(NOT OURO_RING_PROVIDE_RESULT EQUAL 0)
+        message(FATAL_ERROR "could not provide an ouroboros ring in the range "
+                            "dependencies/ouroboros-ring.json names; see the message above")
     endif()
-    set(AIMEE_OURO_RING_INCLUDE_DIR "${OURO_RING_DIR}/c/include")
+    get_filename_component(OURO_RING_PREFIX "${OURO_RING_PKGCONFIG}/../.." ABSOLUTE)
+    find_package(ouroboros-ring CONFIG REQUIRED PATHS "${OURO_RING_PREFIX}" NO_DEFAULT_PATH)
+    get_target_property(AIMEE_OURO_RING_INCLUDE_DIR ouroboros::ouroboros-ring
+                        INTERFACE_INCLUDE_DIRECTORIES)
 endif()
 
 # The core-modularization layout keeps each module's public headers under

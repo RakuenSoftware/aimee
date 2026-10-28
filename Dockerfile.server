@@ -53,6 +53,7 @@ RUN apt-get update \
         build-essential \
         cmake \
         ca-certificates \
+        cmake \
         libpq-dev \
         libp11-kit-dev \
         git \

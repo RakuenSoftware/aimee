@@ -336,8 +336,9 @@ publisher that needs a lease. Use the module request API for module calls; it se
 fragmentation when a request or reply exceeds the inline budget.
 
 The ring itself lives in
-[RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring), pinned in
-`dependencies/ouroboros-ring.lock.json`. The public C client is `<ouroboros/client.h>`; the pure-Go
+[RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring); aimee names the
+release range it accepts in `dependencies/ouroboros-ring.json` and links an installed ring through
+the ring's own package. The public C client is `<ouroboros/client.h>`; the pure-Go
 client and module process runtime are the `github.com/RakuenSoftware/ouroboros-ring/go/ring`
 package. Both implement the same AMOD envelope, fragmentation, deadline, cancellation, heartbeat,
 and host-epoch behavior, held to the ring's contract (`spec/`) and frozen vectors (`vectors/`).

@@ -10,10 +10,15 @@ implementation are all there (`spec/`, `vectors/`).
 
 What stays in aimee:
 
-- **The pin.** `dependencies/ouroboros-ring.lock.json` names the ring commit and a
-  digest of its content. `scripts/fetch_ouroboros_ring.py` fetches and checks it
-  before anything compiles, and `server-go/go.mod` requires the Go module at the
-  same commit (`make go-unit-tests` checks the two agree).
+- **The contract reference.** `dependencies/ouroboros-ring.json` names the
+  release range aimee accepts (`compatible`, semver) and the release builds use
+  by default with its content digest. aimee links an installed ring through the
+  ring's own package (pkg-config / CMake `ouroboros-ring`) and never builds or
+  reads the ring's sources: `scripts/provide_ouroboros_ring.py` takes
+  `OURO_RING_PREFIX` (an installed ring, any implementation of the C API),
+  `OURO_RING_SOURCE` (a ring checkout, built with the ring's own build) or, by
+  default, the named release. `server-go/go.mod` requires a tagged Go release in
+  the same range (`make go-unit-tests` checks it).
 - **The host's embedding.** `src/modules/audit/obs_bus.c` hosts the ring in each
   daemon: admission grants from `*.grant` files, the tap into audit and
   guardrail stores, capture, and the refused role refs of this instance.

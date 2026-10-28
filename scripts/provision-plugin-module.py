@@ -10,7 +10,7 @@ it, and both are authorization decisions:
 That is the ONLY allocation. The instance's event kinds are DERIVED from the ref
 by the canonical module rule, kind = 4096 + ref*256 + stage
 (docs/modules/README.md), the same rule db1, git, roundtable and economizer
-assert in their tests. ouro_host_serve_kind() (ouroboros-ring c/src/route.c)
+assert in their tests. ouro_host_serve_kind() (ouroboros-ring spec, routing)
 binds one kind to exactly ONE serving slot, so a duplicated kind means a module
 is denied at attach with nothing in its own log to say why -- and deriving kinds
 from an already-unique ref makes that impossible by construction.

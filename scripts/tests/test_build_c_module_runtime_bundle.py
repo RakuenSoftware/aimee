@@ -32,7 +32,6 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         bundle = base / "bundle"
         output = base / "bin"
         files = [
-            *builder.OURO_RING_CLIENT_SOURCES,
             "src/modules/fixture/c/store.c",
             "src/modules/fixture/module_adapter.c",
         ]
@@ -40,7 +39,6 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("int aimee_fixture;\n", encoding="utf-8")
-        (root / builder.OURO_RING_INCLUDE).mkdir(parents=True)
         (root / "src/modules/fixture/include").mkdir(parents=True)
         main = bundle / "src/aimee-module-fixture.c"
         main.parent.mkdir(parents=True)
@@ -83,6 +81,11 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | 0o111)
 
+    def quiet_pkg_config(self, directory: Path) -> str:
+        path = directory / "quiet-pkg-config"
+        self.executable(path, "#!/bin/sh\necho\n")
+        return str(path)
+
     def test_build_compiles_generated_main_all_sources_and_dependencies(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
@@ -99,16 +102,21 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             self.executable(
                 pkg_config,
                 "#!/usr/bin/env python3\n"
-                "import sys\n"
+                "import json, os, sys\n"
+                "with open(os.environ['FAKE_PKG_LOG'], 'a') as log:\n"
+                "    log.write(json.dumps([sys.argv[1:], os.environ.get('PKG_CONFIG_PATH', '')]) + '\\n')\n"
                 "print('-I/pkg/include' if sys.argv[1] == '--cflags' else '-L/pkg/lib -lssl')\n",
             )
+            pkg_log = Path(temporary.name) / "pkg-config-args.jsonl"
+            ring = Path(temporary.name) / "ring/lib/pkgconfig"
             environment = os.environ.copy()
             environment["FAKE_CC_LOG"] = str(log)
+            environment["FAKE_PKG_LOG"] = str(pkg_log)
             result = subprocess.run(
                 [sys.executable, "-I", "-S", str(BUILDER),
                  "--bundle", str(bundle), "--output", str(output),
                  "--root", str(root), "--cc", str(compiler),
-                 "--pkg-config", str(pkg_config)],
+                 "--pkg-config", str(pkg_config), "--ring-pkgconfig", str(ring)],
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 env=environment, check=False,
             )
@@ -119,10 +127,18 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 bundle / "src/aimee-module-fixture.c",
                 root / "src/modules/fixture/c/store.c",
                 root / "src/modules/fixture/module_adapter.c",
-                *(root / relative for relative in builder.OURO_RING_CLIENT_SOURCES),
             ]
             for source in expected_sources:
                 self.assertEqual(arguments.count(str(source)), 1)
+            # The ring comes only as its installed client package, searched in the
+            # provided installation first; no ring source is compiled here.
+            self.assertFalse(any("ouroboros-ring" in argument and argument.endswith(".c")
+                                 for argument in arguments))
+            calls = [json.loads(line) for line in pkg_log.read_text().splitlines()]
+            self.assertEqual(len(calls), 2)
+            for argv, search in calls:
+                self.assertEqual(argv[1:], ["libssl", "ouroboros-ring-client"])
+                self.assertEqual(search.split(os.pathsep)[0], str(ring))
             for flag in ("-I/pkg/include", "-L/pkg/lib", "-lssl", "-lcrypto",
                          "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
                          "-DAIMEE_DISABLE_KB_STORE_SQLITE_SHIM", "-Os",
@@ -203,7 +219,8 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 header.read_text(encoding="utf-8"),
             )
             command = builder.compiler_command(
-                module, root, bundle, output, "cc", "pkg-config", generated
+                module, root, bundle, output, "cc",
+                self.quiet_pkg_config(Path(temporary.name)), generated
             )
             self.assertIn(f"-I{generated}", command)
             self.assertNotIn(str(schema), command)
@@ -227,7 +244,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             dependency.parent.mkdir(parents=True)
             dependency.write_text("#pragma once\n", encoding="utf-8")
             command = builder.compiler_command(
-                module, root, bundle, output, "cc", "pkg-config"
+                module, root, bundle, output, "cc", self.quiet_pkg_config(Path(temporary.name))
             )
             self.assertNotIn(str(dependency), command)
         finally:
@@ -281,6 +298,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     "--bundle", str(bundle), "--output", str(output),
                     "--root", str(root), "--cc", str(compiler),
                     "--pkg-config", str(pkg_config), "--placement", placement,
+                    "--ring-pkgconfig", str(Path(temporary.name) / "ring"),
                 ])
                 self.assertEqual(code, 0, placement)
                 self.assertEqual(len(list(output.glob("*"))), expected, placement)
@@ -306,6 +324,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     code = builder.main([
                         "--bundle", str(bundle), "--output", str(output),
                         "--root", str(root), "--placement", placement,
+                        "--ring-pkgconfig", str(Path(temporary.name) / "ring"),
                     ])
                 self.assertEqual(code, 1, placement)
                 if placement == "stray":

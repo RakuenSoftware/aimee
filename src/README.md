@@ -66,11 +66,14 @@ work. Model-specific `aimee-llm-*` synthesis artifacts are separate from the ret
 The intra-daemon transport is the ouroboros ring, a contract with C, Go and Rust
 reference implementations in its own repository
 ([RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring)).
-aimee builds the C ring from the commit pinned in
-`dependencies/ouroboros-ring.lock.json` (fetched and content-checked by
-`scripts/fetch_ouroboros_ring.py` before anything compiles; `OURO_RING_LOCAL=`
-builds against a local checkout instead) and requires its Go module at the same
-commit in `server-go/go.mod`. Headers are `<ouroboros/*.h>` and every ring name
+aimee depends on the ring's contract, not its sources: it accepts the release
+range named in `dependencies/ouroboros-ring.json` and links an installed ring
+through the ring's own package (pkg-config `ouroboros-ring`), which
+`scripts/provide_ouroboros_ring.py` provides before anything compiles
+(`OURO_RING_PREFIX=` uses an installed ring, `OURO_RING_SOURCE=` builds a ring
+checkout, otherwise the named release is fetched, content-checked and built by
+the ring's own build). `server-go/go.mod` requires a tagged Go release in the
+same range. Headers are `<ouroboros/*.h>` and every ring name
 is prefixed `ouro_`.
 
 One host owns all `memfd` creation. An admitted client receives only its queue pair and shared arena.

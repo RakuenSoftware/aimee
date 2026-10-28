@@ -22,6 +22,10 @@ import sys
 import tempfile
 from typing import Any
 
+# The ring's include flag, relative or absolute, for any installation under the
+# build tree's deps/ouroboros-ring.
+RING_INCLUDE_FLAG = re.compile(r"-I\S*deps/ouroboros-ring/\S*")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BASE = "cccb1490560810a3da92691f381f9ab59040bb7c"
@@ -135,20 +139,20 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
                 candidate[file] = candidate[file].replace(old, replacement)
     frozen_plan = build_plan(*candidate)
     # Oct 27: the ring moved to github.com/RakuenSoftware/ouroboros-ring and is
-    # fetched into build/deps. Its include path replaced core/event_bus/include
-    # in C_FLAGS, and thin-client objects (platform, dstr) no longer carry it at
-    # all because CLIENT_C_FLAGS is fixed before the ring include is added. The
-    # probe's 42 sources include no ring header directly. Drop exactly those two
-    # include flags;
-    # every other flag, input and command must still match.
+    # linked as an installed package under build/deps/ouroboros-ring. Its include
+    # path replaced core/event_bus/include in C_FLAGS, and thin-client objects
+    # (platform, dstr) no longer carry it at all because CLIENT_C_FLAGS is fixed
+    # before the ring include is added. The probe's 42 sources include no ring
+    # header directly. Drop exactly the ring's include flag, wherever the
+    # installation it names lives, and the old core one.
     # Oct 27: GCC builds add -fno-ipa-bit-cp to compile and LTO link (GCC 15.2
     # miscompiles a live int parameter as constant 0). It disables one
     # optimization pass and adds no input; drop exactly that token.
+    # Every other flag, input and command must still match.
     def without_ring_include(plan: list[str]) -> list[str]:
         return [" ".join(token for token in line.split()
-                         if token not in ("-Icore/event_bus/include",
-                                          "-Ibuild/deps/ouroboros-ring/c/include",
-                                          "-fno-ipa-bit-cp"))
+                         if token not in ("-Icore/event_bus/include", "-fno-ipa-bit-cp")
+                         and not RING_INCLUDE_FLAG.fullmatch(token))
                 for line in plan]
     return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))
 # The proxy adds a thin-client source and a separate test prerequisite. Neither

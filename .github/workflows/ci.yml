@@ -1326,7 +1326,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive LC_ALL=C
           echo "memlock soft=$(ulimit -l) hard=$(ulimit -H -l)"
           apt-get update -q
-          apt-get install -y -q gcc make pkg-config \
+          apt-get install -y -q gcc make cmake pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3
           cd /src/src

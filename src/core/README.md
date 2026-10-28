@@ -15,8 +15,8 @@ separate libraries:
   deadline/cancellation, HTTP/1, and TLS/mTLS code.
 
 The local shared-memory ring that server and KB host is not part of this package:
-it is the ouroboros ring (github.com/RakuenSoftware/ouroboros-ring), pinned in
-`dependencies/ouroboros-ring.lock.json`.
+it is the ouroboros ring (github.com/RakuenSoftware/ouroboros-ring), an
+installed release in the range `dependencies/ouroboros-ring.json` names.
 
 Build this package independently with:
 
