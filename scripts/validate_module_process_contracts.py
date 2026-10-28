@@ -146,12 +146,14 @@ def validate() -> dict[str, dict[str, object]]:
             raise ContractError(f"{component_id}: required feature must be a process")
 
         descriptor = load(ROOT / f"src/modules/{component_id}/module.yaml")
+        # The C module-process build is retired: nothing reads c_build any more,
+        # so a descriptor declaring one describes a binary that is never built.
+        if "c_build" in descriptor or "c_init" in descriptor:
+            raise ContractError(f"{component_id}: c_build/c_init are retired; module processes are Go")
 
         if execution == "core":
             if set(raw) != {"id", "execution", "placements"}:
                 raise ContractError(f"{component_id}: core component has process fields")
-            if "c_build" in descriptor:
-                raise ContractError(f"{component_id}: core component must not declare c_build")
         else:
             keys = set(raw) - {"hosted_by", "durability_declarations"}
             if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
@@ -166,13 +168,11 @@ def validate() -> dict[str, dict[str, object]]:
                 raise ContractError(
                     f"{component_id}: hosted_by must be one of {sorted(HOSTED_BY)}")
             runtime = raw["runtime"]
-            if runtime not in {"c", "go"}:
-                raise ContractError(f"{component_id}: process runtime must be c or go")
-            if (component_id in GO_PROCESSES) != (runtime == "go"):
-                raise ContractError(f"{component_id}: runtime differs from the migration set")
-            if ("c_build" in descriptor) != (runtime == "c"):
-                raise ContractError(
-                    f"{component_id}: c_build must exist exactly for a C process runtime")
+            if runtime != "go":
+                raise ContractError(f"{component_id}: process runtime must be go; every module "
+                                    "process is Go and the C core is only their caller")
+            if component_id not in GO_PROCESSES:
+                raise ContractError(f"{component_id}: process is not in the Go process set")
             principal_ref = raw["principal_ref"]
             expected_ref = declared_refs[component_id]
             if type(principal_ref) is not int or principal_ref != expected_ref or principal_ref in refs:
@@ -364,9 +364,8 @@ def main() -> int:
         print(f"validate_module_process_contracts: error: {exc}", file=sys.stderr)
         return 1
     process_count = sum(item["execution"] == "process" for item in components.values())
-    go_count = sum(item.get("runtime") == "go" for item in components.values())
     print(f"validate_module_process_contracts: ok ({len(components)} components, "
-          f"{process_count} processes: {go_count} Go, {process_count - go_count} C)")
+          f"{process_count} Go processes)")
     return 0
 
 

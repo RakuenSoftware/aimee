@@ -448,7 +448,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-economizer-module-client \
                $(TESTPREFIX)/unit-test-delegate-egress-adapter \
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
-               $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-kb-store-code-audit \
                $(TESTPREFIX)/unit-test-bus-guardrail-durability \
@@ -985,47 +984,9 @@ $(OBJDIR)/tests/test_governance_bus_bridge.o: server/module_stage_adapters.c
 $(TESTPREFIX)/unit-test-governance-bus-bridge: $(OBJDIR)/tests/test_governance_bus_bridge.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
-
-MODULE_HANDLER_TEST_OBJS = \
-   $(OBJDIR)/tests/module_handlers/learning.o \
-   $(OBJDIR)/tests/module_handlers/delegates.o \
-   $(OBJDIR)/tests/module_handlers/tools.o \
-   $(OBJDIR)/tests/module_handlers/workspace.o \
-   $(OBJDIR)/tests/module_handlers/git.o \
-   $(OBJDIR)/tests/module_handlers/skills.o \
-   $(OBJDIR)/tests/module_handlers/workflows.o \
-   $(OBJDIR)/tests/module_handlers/roundtable.o \
-   $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
-   $(OBJDIR)/tests/module_handlers/runtime_web.o \
-   $(OBJDIR)/tests/module_handlers/control_web.o \
-   $(OBJDIR)/tests/module_handlers/benchmarks.o
-
-define module_handler_test_object
-$(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c \
-    $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
-    $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o
-	@mkdir -p $$(dir $$@)
-	$$(CC) $$(TEST_C_FLAGS) -Daimee_module_handler=aimee_$(1)_module_handler -c -o $$@ $$<
-endef
-$(eval $(call module_handler_test_object,learning,learning))
-$(eval $(call module_handler_test_object,delegates,delegates))
-$(eval $(call module_handler_test_object,tools,tools))
-$(eval $(call module_handler_test_object,workspace,workspace))
-$(eval $(call module_handler_test_object,git,git))
-$(eval $(call module_handler_test_object,skills,skills))
-$(eval $(call module_handler_test_object,workflows,workflows))
-$(eval $(call module_handler_test_object,roundtable,roundtable))
-$(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
-$(eval $(call module_handler_test_object,runtime_web,runtime-web))
-$(eval $(call module_handler_test_object,control_web,control-web))
-$(eval $(call module_handler_test_object,benchmarks,benchmarks))
-
-$(TESTPREFIX)/unit-test-process-module-handlers: \
-   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS) \
-   $(OBJDIR)/modules/skills/skill_trigger_policy.o \
-   $(OBJDIR)/modules/learning/learning_signal_policy.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+TEST_TARGETS += $(TESTPREFIX)/unit-test-module-wire-contracts
+$(TESTPREFIX)/unit-test-module-wire-contracts: $(OBJDIR)/tests/test_module_wire_contracts.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 # The shared connection archive is the only implementation of endpoint,
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,
@@ -3085,16 +3046,6 @@ unit-test-sandbox-learned-observe: $(TESTPREFIX)/unit-test-sandbox-learned-obser
 unit-test-module-runtime: $(TESTPREFIX)/unit-test-module-runtime
 	$<
 
-$(OBJDIR)/tests/test_routing_module.o: C_FLAGS += -Imodules/routing/include
-$(OBJDIR)/modules/routing/module_adapter.o: C_FLAGS += -Imodules/routing/include
-$(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
-                                        $(OBJDIR)/modules/routing/module_adapter.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-.PHONY: unit-test-routing-module
-unit-test-routing-module: $(TESTPREFIX)/unit-test-routing-module
-	$<
-
 .PHONY: postgres-knowledge-replay
 $(TESTPREFIX)/unit-test-server-prospective: $(OBJDIR)/tests/test_server_prospective.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
@@ -4052,8 +4003,7 @@ $(TESTPREFIX)/unit-test-role-templates: $(OBJDIR)/tests/test_role_templates.o \
 $(TESTPREFIX)/unit-test-skill: $(OBJDIR)/tests/test_skill.o \
                                $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                $(OBJDIR)/modules/skills/skill.o $(OBJDIR)/modules/skills/skill_rollback.o \
-                               $(OBJDIR)/modules/skills/skill_trigger_policy.o $(TEST_CORE_OBJS) \
-                               $(OBJDIR)/dstr.o
+                               $(TEST_CORE_OBJS) $(OBJDIR)/dstr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
@@ -4220,8 +4170,7 @@ $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-response-dedup: $(OBJDIR)/tests/test_response_dedup.o \
-                               $(OBJDIR)/server/response_dedup.o \
-                               $(OBJDIR)/modules/response-composition/module_adapter.o
+                               $(OBJDIR)/server/response_dedup.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o \
@@ -4548,26 +4497,12 @@ $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
 # DB1_CLIENT_OBJS and NOT the DB1 domain -- linking the domain would answer
 # every call in-process and prove nothing about the module.
 
-# The module binary is produced by the bundle exporter, not this Makefile: the
-# process contract owns which sources a module compiles, and duplicating that
-# list here would let the two drift.
-#
-# The prerequisites are deliberately a wildcard rather than the descriptor's
-# source list, for the same reason: naming the sources here is the duplication
-# the comment above refuses. A wildcard rebuilds more often than strictly
-# needed and never less, which is the safe direction. With no prerequisites at
-# all -- as this rule stood -- the binary was built once and never again, so
-# every later run of the fixture tested a stale module and reported PASS for
-# code that was not in it.
-# The module's schema is an input to the module, and leaving it out meant a
-# schema change rebuilt the daemon and not the process that actually applies it:
-# the store came up on the old tables and the only symptom was a column that was
-# not there.
-
-$(OBJDIR)/aimee-module-aimee:
-	@rm -rf $(OBJDIR)/module-bundle
-	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
-	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
+# The module binary is the Go multicall runtime under its attested name: the
+# same copy the image installs for every module in go.modules. The multicall
+# binary's own rule depends on every Go source and schema, so a change to the
+# module or its tables rebuilds what this fixture runs.
+$(OBJDIR)/aimee-module-aimee: $(OBJDIR)/aimee-module
+	install -m 0755 $< $@
 
 $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \

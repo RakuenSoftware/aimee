@@ -10,14 +10,12 @@ unbounded mechanism for downloaded text to bypass routing, policy, or user appro
 ## Public contracts
 
 The canonical contracts are `src/modules/skills/include/aimee/skills/skill.h` and the process wire API,
-implemented by `skill.c`, `skill_rollback.c`, and the process-only trigger policy in
-`skill_trigger_policy.c`, with CLI orchestration in `src/cmd_skill.c`. Consumers
+implemented by `skill.c` and `skill_rollback.c`, with CLI orchestration in `src/cmd_skill.c`. Consumers
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 
 The review-nudge and trigger-frontmatter decisions run in the supervised Go
-`aimee-module-skills` process from `server-go/modules/skills`. The C `module_adapter.c` and
-`skill_trigger_policy.c` remain wire/behavior parity fixtures. Production guardrails loads the bounded
+`aimee-module-skills` process from `server-go/modules/skills`. Production guardrails loads the bounded
 skill body through the filesystem resolver and requests its tool/subject trigger match through event
 `7682`; it has no local parser or fallback. An unavailable or malformed module reply produces the
 conservative advisory. Management, review orchestration, rollback, and injection continue through the
@@ -138,8 +136,8 @@ changes derived from learning or uncovered tools.
 ## Tests and failure behavior
 
 The descriptor owns `test_skill.c`, which covers discovery, loading, validation, management, injection,
-lifecycle, rollback, telemetry, poison checks, and trigger-policy fixtures. The shared C process-handler
-test and Go skills tests cover both event stages and malformed wire input. Invalid names, oversized
+lifecycle, rollback, telemetry, and poison checks, and the trigger provider wiring. The Go skills
+tests cover both event stages, the trigger frontmatter rules and malformed wire input. Invalid names, oversized
 content, unsafe support paths, failed lint/evaluation, and write errors fail closed; a missing requested
 skill leaves the base prompt usable rather than inventing instructions. Trigger transport/decode failure
 emits the conservative advisory instead of becoming a silent non-match.

@@ -20,10 +20,8 @@ on:
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
-      - "scripts/tests/test_export_c_process_build.py"
+      - "scripts/tests/test_export_module_repositories.py"
       - "scripts/export_c_repositories.py"
-      - "scripts/build_c_module_runtime_bundle.py"
-      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
@@ -45,10 +43,8 @@ on:
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
-      - "scripts/tests/test_export_c_process_build.py"
+      - "scripts/tests/test_export_module_repositories.py"
       - "scripts/export_c_repositories.py"
-      - "scripts/build_c_module_runtime_bundle.py"
-      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
@@ -69,9 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: python3 -I -S scripts/validate_module_process_contracts.py
-      - run: python3 -I scripts/tests/test_export_c_process_build.py -v
-      - run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
-      - run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
+      - run: python3 -I scripts/tests/test_export_module_repositories.py -v
       - run: python3 -I scripts/check_go_module_runtime_bundle.py
       # SCOPE, stated because the list reads like a Go gate and is not one.
       # These are the Go pieces that ship in the module runtime bundle this

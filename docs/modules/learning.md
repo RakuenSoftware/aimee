@@ -16,9 +16,8 @@ evidence assembly, and candidate generation, while KB_STORE persistence currentl
 
 The pointer-free learning-observation stage is now implemented by
 `server-go/modules/learning` and shipped as the supervised Go
-`aimee-module-learning` process. Its C `module_adapter.c` remains a parity
-fixture for the unchanged `module_api.h` wire contract, with the pure C parity
-policy isolated in `learning_signal_policy.c`. The production router has no
+`aimee-module-learning` process, which answers the unchanged `module_api.h`
+wire contract. The production router has no
 local signal-to-sink fallback: it requests the sink mask over event `6145` and
 aborts before signal persistence when the process is absent or its response is
 invalid. Proposal persistence, evidence assembly, and the broader learning

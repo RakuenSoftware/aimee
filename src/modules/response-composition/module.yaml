@@ -12,9 +12,7 @@
     "supported": false
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/response-composition/module_adapter.c"
-  ],
+  "sources": [],
   "go_sources": [
     "server-go/modules/response-composition/response_composition.go"
   ],
