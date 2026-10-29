@@ -96,6 +96,13 @@ def build_files_match(candidate_commit: str) -> bool:
     if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
         return False
     candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
+    # Oct 29: the dead roadmap dispatch loop and its module directory were
+    # removed; roadmap.h, its one header, moved to src/kb. The probe includes
+    # nothing from it. Remove only that obsolete flag, and only while the
+    # directory is truly gone.
+    if (ROOT / "src/modules/roadmap").exists():
+        return False
+    candidate[0] = candidate[0].replace(" -Imodules/roadmap", "")
     # KB_STORE retirement relocates the same knowledge headers and removes libpq
     # from native linking. This SQLite-backed probe has no PostgreSQL calls.
     # Normalize only those two reviewed changes; retain every other build input.
