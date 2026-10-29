@@ -75,6 +75,20 @@ PostgreSQL Vault migrate into the local instance Vault before the tenant backend
 verifies an existing local value, writes durably before deleting the old current record, and refuses
 conflicting or corrupt data. Tenant credentials retain their existing backend and scope.
 
+### Removed components and retired options
+
+- **Mac and Windows run the thin client only.** aimee proper (server, KB, CLI build) is Linux-only
+  and its build refuses other systems. Point Mac and Windows clients at a Linux server.
+- **`aimee-gateway` is gone,** with its systemd units and the `send_message` MCP tool. Stop and
+  disable `aimee-gateway.service` before upgrading, then remove its unit file and any installed
+  `aimee-gateway` binary; the build no longer produces it.
+- **Retired config options:** `cross_verify`, `verify_cmd`, `verify_role`, `verify_prompt`,
+  `skills_eval_gate_enabled`, `skills_eval_threshold` and `delegate_sandbox_require_isolation`.
+  Nothing read them: delegate cross-verification and the skill-change evaluation gate went with the
+  retired native layers, and delegate isolation is unconditional. An existing `aimee.yaml` that sets
+  them still loads; the values are ignored and no longer reported, and `aimee config set` refuses
+  them as retired. Remove them at your convenience.
+
 Historical upgrade instructions below describe the earlier 0.4.0 transition, including its former
 embedded-KB topology. For a current installation, use the topology and storage procedure above. The intended 0.3.0
 release was published between that historical comparison baseline and 0.4.0.
