@@ -516,12 +516,14 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             # Prove these exact changes restore the reviewed host source before
             # any pre-existing host or frozen memory normalization is applied.
             original = current
-            # Normalize the separately reviewed later native callback extraction
-            # and role membership first; search must still restore its own base.
+            # Normalize the separately reviewed later native callback extraction,
+            # role membership and gateway retirement first; search must still
+            # restore its own base.
             for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
                 if ("canonical-git-role-membership:" in block.get("review", "") or
                         "canonical-native-project-dispatch:" in block.get("review", "") or
-                        "retired-delegate-reply:" in block.get("review", "")):
+                        "retired-delegate-reply:" in block.get("review", "") or
+                        "gateway-retirement:" in block.get("review", "")):
                     self.assertEqual(original.count(block["release_text"]), 1)
                     original = original.replace(block["release_text"], block["frozen_text"], 1)
             for block in blocks:

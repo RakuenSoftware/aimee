@@ -15,11 +15,6 @@
   ],
   "src/tests/test_mcp_client_registry.c": [
     {
-      "release_text": "#define MCP_TOOLS_GOLDEN_COUNT 54",
-      "frozen_text": "#define MCP_TOOLS_GOLDEN_COUNT 55",
-      "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
-    },
-    {
       "release_text": "   \"search_memory {cwd,filter,project,query,scope,store,workspace} req:query\\n\"                    \\\n   \"session \"",
       "frozen_text": "   \"search_memory {cwd,filter,project,query,scope,store,workspace} req:query\\n\"                    \\\n   \"send_message {target,text} req:target,text\\n\"                                                  \\\n   \"session \"",
       "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
@@ -30,9 +25,9 @@
       "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
     },
     {
-      "release_text": "#define MCP_TOOLS_GOLDEN_COUNT 55",
+      "release_text": "#define MCP_TOOLS_GOLDEN_COUNT 54",
       "frozen_text": "#define MCP_TOOLS_GOLDEN_COUNT 56",
-      "review": "retired-delegate-reply: exact one-tool count change; no LSP catalog content exemption."
+      "review": "retired-delegate-reply: exact one-tool count change; no LSP catalog content exemption. gateway-retirement: send_message removed with aimee-gateway, one further tool."
     },
     {
       "release_text": "   \"delegate_status {job_id} req:job_id\\n\"                                                         \\\n",
