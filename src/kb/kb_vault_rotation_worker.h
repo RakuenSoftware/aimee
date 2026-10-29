@@ -8,13 +8,22 @@
 #ifndef AIMEE_KB_VAULT_ROTATION_WORKER_H
 #define AIMEE_KB_VAULT_ROTATION_WORKER_H 1
 
+#include "kb_vault_rotation_aws.h"
+
 /* Registers the AWS IAM provider and starts the loop thread. Returns 0, or -1
  * when the thread cannot start. Call once, after custody is selected. */
 int kb_vault_rotation_worker_start(void);
 void kb_vault_rotation_worker_stop(void);
 
-/* One pass: settle pending requests, then step every unclaimed rotation.
- * The loop thread runs this; tests call it directly. */
+/* One pass: file due schedules, settle pending requests, then step every
+ * unclaimed rotation. The loop thread runs this; tests call it directly. */
 void kb_vault_rotation_worker_tick(void);
+
+/* Test seams: the next tick checks schedules at once; the AWS context
+ * adoption uses (its transport and authorities); the provider registration
+ * that worker_start performs. */
+void kb_vault_rotation_worker_schedule_now(void);
+void kb_vault_rotation_worker_set_aws(const kb_vault_rotation_aws_t *aws);
+int kb_vault_rotation_worker_register_aws(void);
 
 #endif

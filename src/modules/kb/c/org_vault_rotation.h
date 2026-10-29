@@ -77,7 +77,8 @@ int kb_store_vault_rotation_remediate(const char *actor, int64_t rotation_id, co
                                       int64_t token, int64_t anchor_version, const char *evidence);
 
 /* Rotation requests: an admin files one; the KB daemon drives it. */
-#define KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN (-2)
+#define KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN  (-2)
+#define KB_STORE_VAULT_ROTATION_REQUEST_CONFLICT (-3)
 
 typedef struct
 {
@@ -112,7 +113,16 @@ typedef struct
    char rotation_state[16];
    char failure_phase[33];
    char last_error[1001];
+   char slot_principal[601];
 } kb_store_vault_rotation_request_row_t;
+
+typedef struct
+{
+   int64_t team_id;
+   char model_id[201];
+   int interval_days;
+   char last_retired_at[64];
+} kb_store_vault_rotation_schedule_t;
 
 /* Returns 0, KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN when the binding or the
  * rotation it names does not exist, or -1. Repeating a pending request returns
@@ -127,5 +137,18 @@ int kb_store_vault_rotation_request_settle(const char *actor, int64_t request_id
 int kb_store_vault_rotation_pending(const char *actor, kb_store_vault_rotation_ref_t *out, int cap);
 int kb_store_vault_rotation_request_list(const char *actor, int64_t team_id,
                                          kb_store_vault_rotation_request_row_t *out, int cap);
+/* Adopt a slot whose current version no rotation reached. 0, ..._UNKNOWN when the
+ * team has no such slot, ..._CONFLICT when it is already usable or rotating, -1. */
+int kb_store_vault_rotation_request_adopt(const char *actor, int64_t team_id, const char *key_id,
+                                          const char *principal, const char *agent,
+                                          const char *cred, int64_t *out_id);
+/* interval_days 0 removes the schedule. ..._UNKNOWN when the binding is missing. */
+int kb_store_vault_rotation_schedule_set(const char *actor, int64_t team_id, const char *model_id,
+                                         int interval_days);
+int kb_store_vault_rotation_schedule_list(const char *actor, int64_t team_id,
+                                          kb_store_vault_rotation_schedule_t *out, int cap);
+/* Due schedules (team_id, model_id); returns the count or -1. */
+int kb_store_vault_rotation_schedule_due(const char *actor, kb_store_vault_rotation_schedule_t *out,
+                                         int cap);
 
 #endif

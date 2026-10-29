@@ -55,6 +55,12 @@ void kb_vault_rotation_aws_defaults(kb_vault_rotation_aws_t *aws);
 /* The provider vtable; pass a kb_vault_rotation_aws_t as its context. */
 const kb_vault_rotation_provider_t *kb_vault_rotation_aws_provider(void);
 
+/* Adoption check: the IAM ARN a stored Bedrock credential authenticates as.
+ * KB_VAULT_OP_OK with arn set, KB_VAULT_OP_UNCERTAIN when STS could not answer,
+ * KB_VAULT_OP_DEFINITE_FAILURE when it is not a working key (or not one at all). */
+int kb_vault_rotation_aws_identity(const kb_vault_rotation_aws_t *aws, const unsigned char *secret,
+                                   size_t secret_len, char *arn, size_t arn_cap);
+
 /* The principal that steps a rotation, for the vault uses its callbacks make.
  * Set by the driver around each step on the calling thread; NULL clears it. */
 void kb_vault_rotation_aws_set_caller(const kb_principal_t *caller, int64_t team_id);

@@ -3,9 +3,13 @@
  *   aimee-kb vault rotate <team_id> <model_id> [--wait]
  *   aimee-kb vault remediate <team_id> <rotation_id> [--wait]
  *   aimee-kb vault rotations <team_id>
+ *   aimee-kb vault adopt <team_id> --key-id=K --principal=P --agent=A --cred=C [--wait]
+ *   aimee-kb vault bind <team_id> <model_id> --billable=M --pricing-version=N --key-id=K
+ *            --principal=P --agent=A --cred=C --max-input=N --max-output=N [--disabled]
+ *   aimee-kb vault schedule <team_id> [<model_id> <days>|off]
  *
- * Runs in-process against KB_STORE as the owner and only files or reads
- * requests; the running daemon performs the rotation (see
+ * Runs in-process against KB_STORE as the owner. rotate, remediate, adopt and
+ * schedule only file or read requests; the running daemon performs them (see
  * kb_vault_rotation_worker.h). --wait follows the request until the rotation
  * retires or fails. Output is JSON on stdout. */
 #ifndef AIMEE_KB_VAULT_ROTATION_CLI_H

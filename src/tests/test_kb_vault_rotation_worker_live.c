@@ -11,6 +11,7 @@
 #include "kb/kb_vault_rotation_cli.h"
 #include "kb/kb_vault_rotation_ops.h"
 #include "kb/kb_vault_rotation_worker.h"
+#include "modules/vault/vault_store.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/kb_store.h"
 #include "modules/kb/c/kb_store_internal.h"
@@ -29,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define TEAM  982370
 #define MODEL "rot-worker-model"
@@ -146,6 +148,35 @@ static int reconcile(void *ctx, const char *op, const kb_store_vault_rotation_ro
    return KB_VAULT_OP_OK;
 }
 
+/* The adoption check: STS GetCallerIdentity answers for any key it is shown. */
+static int g_sts_calls;
+
+static time_t fake_now(void)
+{
+   return time(NULL);
+}
+
+static int fake_sts(void *ctx, const char *authority, const char *const *names,
+                    const char *const *values, size_t n, const char *body, size_t body_len,
+                    int *status, char *response, size_t cap, size_t *response_len)
+{
+   (void)ctx;
+   (void)names;
+   (void)values;
+   (void)n;
+   (void)body_len;
+   assert(!strcmp(authority, "sts.test") && strstr(body, "Action=GetCallerIdentity"));
+   g_sts_calls++;
+   *status = 200;
+   int w = snprintf(response, cap,
+                    "<GetCallerIdentityResponse><GetCallerIdentityResult>"
+                    "<Arn>arn:aws:iam::123456789012:user/aimee-bedrock</Arn>"
+                    "</GetCallerIdentityResult></GetCallerIdentityResponse>");
+   assert(w > 0 && (size_t)w < cap);
+   *response_len = (size_t)w;
+   return 0;
+}
+
 static int file_request(const kb_principal_t *p, const char *kind, const char *model,
                         int64_t rotation, int64_t *id)
 {
@@ -202,53 +233,62 @@ int main(void)
    assert(vault_primary_epoch_initialize((uint64_t)epoch) == VAULT_MAINTENANCE_OK);
    assert(kb_vault_live_keys_allowed());
 
-   /* The binding names an activated slot version, so bootstrap 1 -> 2 by hand
-    * (as an operator's first provisioning does) and bind it. */
-   {
-      kb_principal_t admin = owner();
-      static const unsigned char plaintext[] =
-          "{\"access_key_id\":\"AKIAWORKER2\",\"secret_access_key\":\"s\"}";
-      uint8_t kek[VAULT_KEK_LEN], dek[VAULT_DEK_LEN], wrapped[VAULT_WRAPPED_DEK_LEN];
-      uint8_t nonce[VAULT_GCM_NONCE_LEN], ciphertext[sizeof(plaintext) - 1], tag[VAULT_GCM_TAG_LEN];
-      uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
-      size_t aad_len = 0;
-      assert(vault_server_kek(kek) == 0 && vault_crypto_random(dek, sizeof(dek)) == 0);
-      assert(vault_dek_wrap(kek, dek, wrapped) == 0);
-      assert(vault_aad_build_v2("team:982370:bedrock", "bedrock", "iam", 2, aad, sizeof(aad),
-                                &aad_len) == 0);
-      assert(vault_secret_encrypt(dek, aad, aad_len, plaintext, sizeof(plaintext) - 1, nonce,
-                                  ciphertext, tag) == 0);
-      uint8_t att[512];
-      size_t att_len = 0;
-      uint64_t anchor = 0;
-      assert(vault_hwm_read("rot-worker-key", &anchor, att, sizeof(att), &att_len) == 0 &&
-             anchor == 1);
-      int64_t boot = 0;
-      assert(kb_vault_rotation_start(&admin, TEAM, "rot-worker-key", "team:982370:bedrock",
-                                     "bedrock", "iam", 1, 0, &boot) == 0);
-      assert(kb_vault_rotation_stage(&admin, TEAM, boot, wrapped, sizeof(wrapped), nonce,
-                                     sizeof(nonce), ciphertext, sizeof(ciphertext), tag,
-                                     sizeof(tag)) == 0);
-      assert(kb_vault_rotation_mark_probed(&admin, TEAM, boot) == 0);
-      assert(kb_vault_rotation_activate_or_resume(&admin, TEAM, boot) ==
-             KB_VAULT_ROTATION_COMPLETE);
-      assert(scalar("SELECT org_egress_binding_set(982370,'rot-worker-model',"
-                    "'rot-worker-billable',1,'rot-worker-key','team:982370:bedrock','bedrock',"
-                    "'iam',1000,100,true)::int") == 1);
-      /* A hand bootstrap records no vendor references, so the driver cannot revoke
-       * its (nonexistent) predecessor; close it the way that operator would. */
-      char sql[160];
-      snprintf(sql, sizeof(sql),
-               "WITH u AS (UPDATE org_vault_rotation SET state='retired' WHERE id=%lld "
-               "RETURNING 1) SELECT count(*) FROM u",
-               (long long)boot);
-      assert(scalar(sql) == 1);
-   }
-
    const kb_vault_rotation_provider_t provider = {resolve_current, provision, probe, vendor_revoke,
                                                   reconcile};
    assert(kb_vault_rotation_ops_register(&provider, &g_vendor) == 0);
+   kb_vault_rotation_aws_t fake_aws = {
+       .send = fake_sts, .now = fake_now, .iam_authority = "iam.test", .sts_authority = "sts.test"};
+   kb_vault_rotation_worker_set_aws(&fake_aws);
    kb_principal_t o = owner();
+
+   /* First provisioning, the production way: an ordinary vault write puts the
+    * operator's key at version 1, which no rotation reached, so key use and
+    * binding refuse it until the daemon adopts it. */
+   {
+      uint8_t kek[VAULT_KEK_LEN];
+      assert(vault_server_kek(kek) == 0);
+      assert(kb_store_tenant_scope_begin(&o, TEAM) == 0);
+      assert(vault_store_set("team:982370:bedrock", kek, "bedrock", "iam",
+                             "{\"access_key_id\":\"AKIAADOPTED1\","
+                             "\"secret_access_key\":\"s\"}") == 0);
+      assert(kb_store_tenant_scope_commit() == 0);
+      memset(kek, 0, sizeof(kek));
+   }
+   char *bind_argv[] = {"aimee-kb",
+                        "vault",
+                        "bind",
+                        "982370",
+                        MODEL,
+                        "--billable=rot-worker-billable",
+                        "--pricing-version=1",
+                        "--key-id=rot-worker-key",
+                        "--principal=team:982370:bedrock",
+                        "--agent=bedrock",
+                        "--cred=iam",
+                        "--max-input=1000",
+                        "--max-output=100",
+                        NULL};
+   assert(kb_vault_rotation_cli(13, bind_argv, &o) == 1); /* nothing usable yet */
+   char *adopt_argv[] = {"aimee-kb",
+                         "vault",
+                         "adopt",
+                         "982370",
+                         "--key-id=rot-worker-key",
+                         "--principal=team:982370:bedrock",
+                         "--agent=bedrock",
+                         "--cred=iam",
+                         NULL};
+   assert(kb_vault_rotation_cli(8, adopt_argv, &o) == 0);
+   ticks(2);
+   assert(g_sts_calls == 1);
+   assert(scalar("SELECT org_vault_has('team:982370:bedrock','bedrock','iam')") == 2);
+   assert(scalar("SELECT count(*) FROM org_vault_rotation WHERE state='retired' AND "
+                 "revoke_receipt='no-predecessor' AND to_version=2") == 1);
+   assert(scalar("SELECT count(*) FROM org_rotation_request WHERE kind='adopt' AND "
+                 "state='accepted'") == 1);
+   assert(g_vendor.provisions == 0 && g_vendor.revokes == 0); /* nothing was vendored */
+   assert(kb_vault_rotation_cli(8, adopt_argv, &o) == 1);     /* already usable */
+   assert(kb_vault_rotation_cli(13, bind_argv, &o) == 0);
 
    /* Refusals: unknown model, and a team member who is not an admin. */
    int64_t id = 0;
@@ -271,7 +311,7 @@ int main(void)
    int64_t first = 0, again = 0;
    assert(file_request(&o, "rotate", MODEL, 0, &first) == 0);
    assert(file_request(&o, "rotate", MODEL, 0, &again) == 0 && again == first);
-   assert(scalar("SELECT count(*) FROM org_vault_rotation_request WHERE state='pending'") == 1);
+   assert(scalar("SELECT count(*) FROM org_rotation_request WHERE state='pending'") == 1);
 
    /* One tick takes the request and drives the rotation to retired. */
    ticks(3);
@@ -302,7 +342,7 @@ int main(void)
    ticks(1);
    assert(g_vendor.revokes == revokes_before + 1); /* the staged, never-active key */
    assert(scalar("SELECT count(*) FROM org_vault_rotation WHERE state='retired'") == 3);
-   assert(scalar("SELECT count(*) FROM org_vault_rotation_request WHERE kind='remediate' AND "
+   assert(scalar("SELECT count(*) FROM org_rotation_request WHERE kind='remediate' AND "
                  "state='accepted'") == 1);
    assert(scalar("SELECT org_vault_has('team:982370:bedrock','bedrock','iam')") == 3);
 
@@ -326,8 +366,28 @@ int main(void)
    assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'vault.rotation.%' AND "
                  "detail ILIKE '%secret_access_key%'") == 0);
 
+   /* A schedule files the rotation once the last one is older than its interval;
+    * age the slot's completed rotations by two days instead of waiting a day. */
+   char *sched_argv[] = {"aimee-kb", "vault", "schedule", "982370", MODEL, "1", NULL};
+   assert(kb_vault_rotation_cli(6, sched_argv, &o) == 0);
+   kb_vault_rotation_worker_schedule_now();
+   ticks(1);
+   assert(scalar("SELECT org_vault_has('team:982370:bedrock','bedrock','iam')") == 4);
+   assert(scalar("WITH u AS (UPDATE org_vault_rotation SET updated_at=to_char((now() AT TIME "
+                 "ZONE 'UTC') - interval '2 days','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') "
+                 "RETURNING 1) SELECT count(*) FROM u") >= 1);
+   kb_vault_rotation_worker_schedule_now();
+   ticks(2);
+   assert(scalar("SELECT org_vault_has('team:982370:bedrock','bedrock','iam')") == 5);
+   kb_vault_rotation_worker_schedule_now();
+   ticks(1); /* just rotated: not due again */
+   assert(scalar("SELECT org_vault_has('team:982370:bedrock','bedrock','iam')") == 5);
+   char *off_argv[] = {"aimee-kb", "vault", "schedule", "982370", MODEL, "off", NULL};
+   assert(kb_vault_rotation_cli(6, off_argv, &o) == 0);
+   assert(scalar("SELECT count(*) FROM org_rotation_schedule") == 0);
+
    assert(kb_vault_policy_select("file", err, sizeof(err)) == 0);
    kb_store_shutdown();
-   puts("PASS: rotation requests -> daemon worker -> retired; refusals; remediate gate");
+   puts("PASS: adopt -> bind -> rotate -> remediate -> scheduled rotation, through the worker");
    return 0;
 }

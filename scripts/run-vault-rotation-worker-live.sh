@@ -46,9 +46,6 @@ SELECT org_catalog_bedrock_upsert('rot-worker-model','Rotation Worker Model','co
   'anthropic','foundation','aws','us-east-1',NULL,ARRAY['us-east-1'],NULL,'',true);
 SELECT org_model_entitle('rot-worker-model',982370);
 SELECT org_pricing_add_version('bedrock','rot-worker-billable',1.0,2.0,0.5,0.75);
-SELECT org_vault_put('team:982370:bedrock',982370,'bedrock','iam',1,
-  decode(repeat('01',40),'hex'),decode(repeat('02',12),'hex'),decode('03','hex'),
-  decode(repeat('04',16),'hex'));
 COMMIT;
 SQL
 

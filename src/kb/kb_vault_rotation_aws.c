@@ -816,6 +816,21 @@ static int aws_reconcile(void *ctx, const char *op, const kb_store_vault_rotatio
    return with_current(row, op, "rotate-reconcile", reconcile_with, &s);
 }
 
+int kb_vault_rotation_aws_identity(const kb_vault_rotation_aws_t *aws, const unsigned char *secret,
+                                   size_t secret_len, char *arn, size_t arn_cap)
+{
+   if (arn && arn_cap)
+      arn[0] = '\0';
+   aws_cred_t cred;
+   if (!aws || !secret || !arn || arn_cap < 2 || cred_parse(secret, secret_len, &cred))
+      return KB_VAULT_OP_DEFINITE_FAILURE;
+   int rc = caller_arn(aws, &cred, arn, arn_cap);
+   cred_clear(&cred);
+   if (rc == 0)
+      return KB_VAULT_OP_OK;
+   return rc == -2 ? KB_VAULT_OP_UNCERTAIN : KB_VAULT_OP_DEFINITE_FAILURE;
+}
+
 static const kb_vault_rotation_provider_t g_provider = {aws_resolve, aws_provision, aws_probe,
                                                         aws_revoke, aws_reconcile};
 

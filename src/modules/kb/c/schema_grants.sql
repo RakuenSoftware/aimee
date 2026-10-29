@@ -225,7 +225,9 @@ BEGIN
   GRANT SELECT ON
     org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
   REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation FROM aimee_kb_runtime;
-  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation_request
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_rotation_request
+    FROM aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_rotation_schedule
     FROM aimee_kb_runtime;
   -- The vault definer functions are the ONLY write/read-through path; EXECUTE to
   -- runtime, never PUBLIC.
@@ -261,6 +263,10 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_rotation_request_settle(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_pending(TEXT,INTEGER) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_request_list(TEXT,BIGINT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_request_adopt(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_set(TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_list(TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_schedule_due(TEXT,INTEGER) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
@@ -294,6 +300,10 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_rotation_request_settle(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_pending(TEXT,INTEGER) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_request_list(TEXT,BIGINT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_request_adopt(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_set(TEXT,BIGINT,TEXT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_list(TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_schedule_due(TEXT,INTEGER) TO aimee_kb_runtime;
   REVOKE SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON org_vault_key_use_intent FROM aimee_kb_runtime;
   REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
