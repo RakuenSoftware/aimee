@@ -18,28 +18,21 @@ pin. It does not push or create remote repositories.
 
 Every module
 repository preserves its descriptor-owned sources, headers, tests, and docs,
-and builds its declared execution target. The current catalog has 26 Go process identities
-and no C process identities. Go processes use the shared module runtime and event-bus contract;
-retained native sources serve host adapters and standalone fixtures. Its generated grant is executable/UID/principal-bound and starts with no
+and builds its declared execution target. Every module process is Go: the catalog has 26 Go process identities and
+no C process identities, and the exporter refuses a contract naming any other
+runtime. Go processes use the shared module runtime and event-bus contract;
+retained native sources are the C core's caller-side clients and host
+adapters. Its generated grant is executable/UID/principal-bound and starts with no
 event capabilities; capabilities are added only with the corresponding stable
-event schema. A C module may also declare non-owned `header_dependencies` needed
-by a transitional standalone build. Those inputs must be sorted, normalized,
-real header files outside the module's own tree; the exporter copies them at
-canonical paths without adding them to `owned_files`, records the complete
-materialized set as `repository_files`, and includes that set in the source
-digest.
+event schema.
 
-Container builds use the same descriptor contract through a two-step runtime
-bundle. `export_c_repositories.py --runtime-bundle <directory>` writes generated
-process mains, grants, placement lists, and `c-build.json`. The current application compiles the generated Go entry points. The supported C execution path
-remains available to descriptors that declare it: `build_c_module_runtime_bundle.py` compiles each C process from its generated
-main, every descriptor-owned C source, the canonical event-bus client sources,
-and its declared include roots, header dependencies, pkg-config packages, and
-system libraries. Header dependencies are admitted as build inputs but never
-passed to the compiler as translation units. The
-manifest is data rather than a shell fragment: paths and dependency tokens are
-validated before they become compiler arguments, and no module source is
-concatenated into the generated main.
+Container builds use the same descriptor contract through the runtime bundle.
+`export_c_repositories.py --runtime-bundle <directory>` writes grants, placement
+lists, `go.modules` and the manifest; the image installs the static Go
+multicall runtime once per module named in `go.modules`, under that module's
+attested executable name. There is no C module-process build: the generated C
+process mains, `c-build.json` and `build_c_module_runtime_bundle.py` were
+retired with the last C module adapter.
 
 `dependencies/aimee-repositories.lock.json` records repository URLs, semantic
 versions, exact commits, stable principal identities, and source digests.

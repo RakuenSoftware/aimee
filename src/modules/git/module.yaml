@@ -42,8 +42,7 @@
     "src/modules/git/mcp_git_integrate.c",
     "src/modules/git/mcp_git_pr.c",
     "src/modules/git/mcp_git_query.c",
-    "src/modules/git/mcp_git_write.c",
-    "src/modules/git/module_adapter.c"
+    "src/modules/git/mcp_git_write.c"
   ],
   "go_sources": [
     "server-go/modules/git/attribution/check.go",

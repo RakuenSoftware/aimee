@@ -27,7 +27,6 @@
     "src/modules/roundtable/roundtable_seat_resolve.c",
     "src/modules/roundtable/roundtable_verify.c",
     "src/modules/roundtable/roundtable_review_panel.c",
-    "src/modules/roundtable/module_adapter.c",
     "src/modules/roundtable/ensemble_request.c"
   ],
   "go_sources": [

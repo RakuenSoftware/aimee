@@ -224,7 +224,6 @@ sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
 # and CRUD green while every real agent turn fails at its first module call.
 # Reproduce the packaged server's required module manifest here, then add the
 # optional modules exercised by this harness's turn-integrity probe.
-python3 scripts/build_c_module_runtime_bundle.py --bundle "$BUNDLE" --output "$MODULE_BIN_DIR"
 while IFS= read -r module_id; do
   if [[ "$module_id" == config ]]; then canonical_bin="$CONFIG_MODULE"; else canonical_bin="$REPO/src/build/obj/aimee-module"; fi
   install -m0755 "$canonical_bin" "$MODULE_BIN_DIR/aimee-module-$module_id"

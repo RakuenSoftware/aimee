@@ -1,3 +1,8 @@
+/* Test double: a C stand-in for the delegates module's Go handler
+ * (server-go/modules/delegates), so C core tests can exercise the code that calls
+ * the module without a ring and a module process. No shipped binary links it,
+ * and the Go module's own tests are what hold the handler's behaviour. Built
+ * with aimee_module_handler renamed to aimee_delegates_module_handler. */
 #include <ouroboros/module_runtime.h>
 #include <aimee/delegates/module_api.h>
 

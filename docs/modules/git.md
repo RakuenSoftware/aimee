@@ -15,7 +15,7 @@ the bounded operation, and marks operations that require credentials. The
 second owns the conservative branch/ref allowlist used before checkout and
 managed push. Both production decisions cross the local event bus and fail
 closed when the process is unavailable or returns malformed data; there is no
-server-local ref-policy fallback. The C adapter remains a wire-parity fixture.
+server-local ref-policy fallback.
 Repository execution, verification, OAuth, forge, SSH, and credential
 implementation units remain C relocation work.
 
@@ -226,7 +226,7 @@ tests are not claimed: `test_forge_app_token.c` exercises the root-level `src/fo
 git-module source, and `test_forge_credentials_live.c` is the `forge-cred-live` integration harness
 that needs a running forge. It provides supplementary coverage of `forge_credentials.c`, which already has a unit
 test. Together with guardrail Git tests and integration tool calls they cover current behavior.
-The Go handler, C parity fixture, and `test_git_ops` cover ref acceptance,
+The Go handler and `test_git_ops` cover ref acceptance,
 rejection, and missing-provider failure in addition to operation classification.
 Missing repository, denied mutation, dirty/conflicting state, invalid ref/path, failed
 signature/redaction, absent credential, forge error, or failed verify step must return typed failure;

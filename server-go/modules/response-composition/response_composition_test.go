@@ -60,6 +60,32 @@ func TestCompositionKeyVectorAndIsolation(t *testing.T) {
 	if got := responseKey(t, embeddedNUL, false); got != want {
 		t.Fatalf("C-string principal parity = %q, want %q", got, want)
 	}
+	// Every discriminator separates keys: a different principal must never read
+	// another account's entry, and a request resolved to a different provider,
+	// model or behaviour configuration must not collide with this one.
+	for _, discriminator := range []struct {
+		name  string
+		field int
+	}{{"principal", 0}, {"provider", 2}, {"model", 3}, {"context", 7}, {"behavior flags", 8}} {
+		varied := fields
+		varied[discriminator.field] += "-other"
+		if responseKey(t, varied, false) == want {
+			t.Fatalf("a different %s produced the same key", discriminator.name)
+		}
+	}
+	if got := responseKey(t, fields, false); got != want {
+		t.Fatalf("identical inputs gave %q, want %q", got, want)
+	}
+	// Long discriminators are digested to a fixed width, so the key still fits a
+	// cache slot and an identical retry derives the identical key.
+	long := fields
+	long[0] = strings.Repeat("P", 99)
+	long[3] = strings.Repeat("M", 199)
+	long[5] = strings.Repeat("K", 299)
+	first := responseKey(t, long, false)
+	if len(first) >= 192 || responseKey(t, long, false) != first {
+		t.Fatalf("long-input key = %q (len %d), not bounded and stable", first, len(first))
+	}
 	fields[0] = ""
 	if got := responseKey(t, fields, false); !strings.HasPrefix(got, "anon|") {
 		t.Fatalf("anonymous key = %q", got)

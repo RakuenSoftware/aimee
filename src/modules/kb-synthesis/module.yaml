@@ -35,8 +35,7 @@
     "src/modules/kb-synthesis/kb_curator_serve.c",
     "src/modules/kb-synthesis/kb_curator_sidecar.c",
     "src/modules/kb-synthesis/kb_curator_synthesize.c",
-    "src/modules/kb-synthesis/kb_curator_version.c",
-    "src/modules/kb-synthesis/module_adapter.c"
+    "src/modules/kb-synthesis/kb_curator_version.c"
   ],
   "go_sources": [
     "server-go/modules/kb-synthesis/kb_synthesis.go"

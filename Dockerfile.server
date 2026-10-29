@@ -87,12 +87,10 @@ RUN build_version="$AIMEE_VERSION" \
     && cmake --build /thinclient-build --target aimee-client -j"$(nproc)"
 
 # Build the independently supervised same-container module adapters from the
-# canonical contract. C processes link only the extracted event-bus client;
-# Go processes are copies of the static multicall runtime under attested names.
+# canonical contract. Every module process is Go: a copy of the static
+# multicall runtime under its attested name.
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && python3 scripts/build_c_module_runtime_bundle.py \
-         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          if [ "$module_id" = config ]; then module_bin=/tmp/aimee-module-config-go; \

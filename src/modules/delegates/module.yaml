@@ -61,8 +61,7 @@
     "src/modules/delegates/delegate_source_authority.c",
     "src/modules/delegates/delegate_verify.c",
     "src/modules/delegates/delegate_xml_fallback.c",
-    "src/modules/delegates/gw_orch_delegates.c",
-    "src/modules/delegates/module_adapter.c"
+    "src/modules/delegates/gw_orch_delegates.c"
   ],
   "go_sources": [
     "server-go/modules/delegates/delegates.go",

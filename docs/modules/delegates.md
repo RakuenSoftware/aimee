@@ -16,7 +16,7 @@ and roundtable. The latter selects a configured CLI agent and owns its bounded
 subprocess lifecycle entirely in Go; no agent-service HTTP call returns to the C
 daemon. Workflow lifecycle fields stay caller-side and never enter this wire.
 
-The C adapter remains a wire-parity fixture. The C daemon still hosts the event
+The C daemon still hosts the event
 bus and external control surfaces, but it is not the producer used by Go
 workflows or module-to-module delegation.
 
