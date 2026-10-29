@@ -146,17 +146,10 @@ static struct
     * review waits on its own callback and nothing moves until something times
     * out. Each concurrent call therefore gets its own client, which is what the
     * module client's "dedicated client" contract assumed all along. */
-   struct
-   {
-      ouro_client_t bus;
-      ouro_module_client_t client;
-      int attached;
-      int in_use;
-   } module_clients[OBS_BUS_MODULE_CLIENTS];
-   pthread_mutex_t module_client_lock;
-   pthread_cond_t module_client_free;
-   int module_in_flight;      /* calls currently holding a client */
-   int module_peak_in_flight; /* high-water mark, for diagnosing serialization */
+   ouro_client_t module_rings[OBS_BUS_MODULE_CLIENTS];
+   int module_rings_attached; /* how many of module_rings are attached */
+   ouro_module_client_pool_t module_pool;
+   int module_pool_ready;
    pthread_t thread;
    pthread_mutex_t pub_lock;  /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
@@ -938,9 +931,8 @@ static void *consumer_main(void *arg)
       uint64_t now = ouro_runtime_monotonic_ns();
       ouro_client_heartbeat(&g.producer, now);
       ouro_client_heartbeat(&g.consumer, now);
-      for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
-         if (g.module_clients[i].attached)
-            ouro_client_heartbeat(&g.module_clients[i].bus, now);
+      for (int i = 0; i < g.module_rings_attached; ++i)
+         ouro_client_heartbeat(&g.module_rings[i], now);
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
          (void)ouro_runtime_maintain(g.runtime, now);
@@ -1016,65 +1008,14 @@ static void *consumer_main(void *arg)
 
 static void module_clients_destroy(void)
 {
-   for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
+   if (g.module_pool_ready)
    {
-      if (!g.module_clients[i].attached)
-         continue;
-      ouro_module_client_destroy(&g.module_clients[i].client);
-      ouro_client_detach(&g.module_clients[i].bus);
-      g.module_clients[i].attached = 0;
+      ouro_module_client_pool_destroy(&g.module_pool);
+      g.module_pool_ready = 0;
    }
-}
-
-/* Check out a client for one call. A caller waits only within its own deadline:
- * blocking past it is what turned a busy pool into the hang this pool exists to
- * prevent, so exhaustion is reported as a deadline rather than absorbed. */
-static int module_client_acquire(uint64_t deadline_ns)
-{
-   pthread_mutex_lock(&g.module_client_lock);
-   for (;;)
-   {
-      for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
-      {
-         if (g.module_clients[i].attached && !g.module_clients[i].in_use)
-         {
-            g.module_clients[i].in_use = 1;
-            if (++g.module_in_flight > g.module_peak_in_flight)
-               g.module_peak_in_flight = g.module_in_flight;
-            pthread_mutex_unlock(&g.module_client_lock);
-            return i;
-         }
-      }
-      if (atomic_load(&g.module_stop))
-         break;
-      struct timespec wait;
-      if (deadline_ns)
-      {
-         wait.tv_sec = (time_t)(deadline_ns / 1000000000ULL);
-         wait.tv_nsec = (long)(deadline_ns % 1000000000ULL);
-      }
-      else
-      {
-         /* No caller deadline still gets a bound: an unbounded wait here is
-          * indistinguishable from the deadlock this replaced. */
-         if (clock_gettime(CLOCK_MONOTONIC, &wait) != 0)
-            break;
-         wait.tv_sec += 30;
-      }
-      if (pthread_cond_timedwait(&g.module_client_free, &g.module_client_lock, &wait) == ETIMEDOUT)
-         break;
-   }
-   pthread_mutex_unlock(&g.module_client_lock);
-   return -1;
-}
-
-static void module_client_release(int index)
-{
-   pthread_mutex_lock(&g.module_client_lock);
-   g.module_clients[index].in_use = 0;
-   g.module_in_flight--;
-   pthread_cond_signal(&g.module_client_free);
-   pthread_mutex_unlock(&g.module_client_lock);
+   for (int i = 0; i < g.module_rings_attached; ++i)
+      ouro_client_detach(&g.module_rings[i]);
+   g.module_rings_attached = 0;
 }
 
 /* Attach one in-process client to this daemon's host. The ring does the
@@ -1202,17 +1143,6 @@ static int start_locked(void)
    memset(&g, 0, sizeof g);
    pthread_mutex_init(&g.pub_lock, NULL);
    pthread_mutex_init(&g.host_lock, NULL);
-   pthread_mutex_init(&g.module_client_lock, NULL);
-   {
-      /* Module deadlines are CLOCK_MONOTONIC, so the wait for a free client must
-       * be too. A default condvar waits on CLOCK_REALTIME, which a clock step
-       * would make honour the wrong instant. */
-      pthread_condattr_t attr;
-      pthread_condattr_init(&attr);
-      pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-      pthread_cond_init(&g.module_client_free, &attr);
-      pthread_condattr_destroy(&attr);
-   }
 
    ouro_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
@@ -1230,15 +1160,25 @@ static int start_locked(void)
       return -1;
    }
    ouro_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
+   /* The ring's module client pool checks a client out per call and bounds the
+    * wait for one by the call's own deadline. */
    int module_clients_ready = 1;
+   ouro_client_t *module_rings[OBS_BUS_MODULE_CLIENTS];
    for (int i = 0; i < OBS_BUS_MODULE_CLIENTS && module_clients_ready; ++i)
    {
-      if (attach(&g.module_clients[i].bus) != 0 ||
-          ouro_module_client_init(&g.module_clients[i].client, &g.module_clients[i].bus) != 0)
+      if (attach(&g.module_rings[i]) != 0)
          module_clients_ready = 0;
       else
-         g.module_clients[i].attached = 1;
+      {
+         module_rings[i] = &g.module_rings[i];
+         g.module_rings_attached = i + 1;
+      }
    }
+   if (module_clients_ready &&
+       ouro_module_client_pool_init(&g.module_pool, module_rings, OBS_BUS_MODULE_CLIENTS) == 0)
+      g.module_pool_ready = 1;
+   else
+      module_clients_ready = 0;
    if (attach(&g.producer) != 0 || attach(&g.consumer) != 0 || !module_clients_ready)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
@@ -1677,18 +1617,10 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       obs_bus_log_module_call_failure(event_kind, stage_id, OURO_MODULE_CALL_TRANSPORT);
       return OURO_MODULE_CALL_TRANSPORT;
    }
-   int slot = module_client_acquire(deadline_ns);
-   if (slot < 0)
-   {
-      atomic_fetch_sub(&g.module_callers, 1);
-      obs_bus_log_module_call_failure(event_kind, stage_id, OURO_MODULE_CALL_DEADLINE_EXCEEDED);
-      return OURO_MODULE_CALL_DEADLINE_EXCEEDED;
-   }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   ouro_module_call_result_t result = ouro_module_client_call(
-       &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
-       request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
-   module_client_release(slot);
+   ouro_module_call_result_t result = ouro_module_client_pool_call(
+       &g.module_pool, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+       response_body, response_capacity, response_len, module_call_cancelled, &state);
    atomic_fetch_sub(&g.module_callers, 1);
    if (result != OURO_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
@@ -1697,10 +1629,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
 
 int obs_bus_module_peak_concurrency(void)
 {
-   pthread_mutex_lock(&g.module_client_lock);
-   int peak = g.module_peak_in_flight;
-   pthread_mutex_unlock(&g.module_client_lock);
-   return peak;
+   return ouro_module_client_pool_peak(&g.module_pool);
 }
 
 /* Is a kind served right now?
@@ -2157,6 +2086,10 @@ void obs_bus_stop(void)
    ouro_runtime_stop(&g.runtime);
    atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
    atomic_store_explicit(&g.module_stop, 1, memory_order_release);
+   /* Wake every caller still waiting for a pooled client, rather than letting
+    * each sit out its own deadline. */
+   if (g.module_pool_ready)
+      ouro_module_client_pool_stop(&g.module_pool);
    while (atomic_load(&g.module_callers) > 0)
       nanosleep(&nap, NULL);
 
