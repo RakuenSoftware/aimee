@@ -500,6 +500,22 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 OURO_RING_MAKE_LETTERS := $(filter-out -%,$(firstword $(MAKEFLAGS)))
 OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(OURO_RING_MAKE_LETTERS))
 ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
+else ifneq ($(UNAME_S),Linux)
+# The ring is Linux-only: its endpoints are SOCK_SEQPACKET sockets opened with
+# SOCK_CLOEXEC and accept4. Elsewhere this Makefile builds only test probes
+# that never link it. They still compile against its public headers (the
+# module-call API names ring result types), so only those are provided, from
+# the same release and checks; a product that does link the ring stops at the
+# rule below rather than in the ring's compiler.
+OURO_RING_INCLUDE := $(shell python3 ../scripts/provide_ouroboros_ring.py --headers build/deps/ouroboros-ring)
+ifeq ($(strip $(OURO_RING_INCLUDE)),)
+$(error could not provide the ouroboros ring headers in the range dependencies/ouroboros-ring.json names; see the message above)
+endif
+C_FLAGS += -I$(OURO_RING_INCLUDE)
+OURO_RING_UNSUPPORTED := build/deps/ouroboros-ring/unsupported-on-$(UNAME_S)
+OURO_RING_LIB := $(OURO_RING_UNSUPPORTED)
+$(OURO_RING_UNSUPPORTED):
+	@echo "the ouroboros ring is Linux-only; aimee-server and aimee-kb cannot be built on $(UNAME_S)" >&2; exit 1
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
