@@ -11,8 +11,8 @@ implementation are all there (`spec/`, `vectors/`).
 What stays in aimee:
 
 - **The contract reference.** `dependencies/ouroboros-ring.json` names the
-  release range aimee accepts (`compatible`, a semver caret range: `0.1.2` is any 0.1
-  release from 0.1.2, the first with `ouro_host_attach_local` and `ouro_capture_flush_fd`) and the release builds use
+  release range aimee accepts (`compatible`, a semver caret range: `0.1.3` is any 0.1
+  release from 0.1.3, the first with `ouro_module_client_pool_t`) and the release builds use
   by default with its content digest. aimee links an installed ring through the
   ring's own package (pkg-config / CMake `ouroboros-ring`) and never builds or
   reads the ring's sources: `scripts/provide_ouroboros_ring.py` takes
