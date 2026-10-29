@@ -51,6 +51,8 @@
 #include "kb/kb_management_runtime.h"
 #include "kb/kb_vault_operator_runtime.h"
 #include "kb_vault_operator_status.h"
+#include "kb/kb_vault_rotation_cli.h"
+#include "kb/kb_vault_rotation_worker.h"
 #include "kb_vault_tpm_runtime_lock.h"
 #include "modules/kb/c/kb_audit_worm.h"
 #include "modules/kb/c/vault_operator_status_runtime.h"
@@ -226,15 +228,37 @@ static int kb_vault_operator_status_equal(const kb_store_vault_operator_status_t
           kb_store_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
 }
 
+static int kb_cmd_tenancy_init_kb_store(void);
+
+/* Org-vault credential rotation requests: filed here, performed by the daemon. */
+static int kb_cmd_vault_rotation(int argc, char **argv)
+{
+   if (kb_cmd_tenancy_init_kb_store() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   int rc = kb_principal_from_verify(&ovr, "", &owner) == 0
+                ? kb_vault_rotation_cli(argc, argv, &owner)
+                : 1;
+   kb_store_shutdown();
+   return rc;
+}
+
 static int kb_cmd_vault(int argc, char **argv)
 {
+   if (argc > 2 && kb_vault_rotation_cli_handles(argv[2]))
+      return kb_cmd_vault_rotation(argc, argv);
    if (argc < 3)
    {
       fputs("Usage: aimee-kb vault status [--json]\n"
             "       aimee-kb vault start --request-id=<32-lowercase-hex> "
             "[--secret-stdin] [--json]\n"
             "       aimee-kb vault resume [--secret-stdin] [--json]\n"
-            "       aimee-kb vault unseal [--secret-stdin] [--json]\n",
+            "       aimee-kb vault unseal [--secret-stdin] [--json]\n"
+            "       aimee-kb vault rotate <team_id> <model_id> [--wait]\n"
+            "       aimee-kb vault remediate <team_id> <rotation_id> [--wait]\n"
+            "       aimee-kb vault rotations <team_id>\n",
             stderr);
       return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
    }
@@ -2111,6 +2135,11 @@ int main(int argc, char **argv)
       }
    }
 
+   /* Org-vault credential rotation: filed by `aimee-kb vault rotate`, driven
+    * here because only the daemon holds custody and the selected key policy. */
+   if (kb_vault_rotation_worker_start() != 0)
+      LOG_WARN("kb.vault.rotation", "failed to start the credential rotation worker");
+
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
    /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
@@ -2150,6 +2179,7 @@ int main(int argc, char **argv)
    mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
    obs_bus_stop();
    kb_management_runtime_stop();
+   kb_vault_rotation_worker_stop();
    kb_service_shutdown(&g_ctx);
    kb_vault_operator_service_stop(vault_operator_service);
    vault_operator_service = NULL;

@@ -707,7 +707,7 @@ KB_SRCS += kb/kb_document_inspector.c
 KB_SRCS += kb/http/kb_http_code_context.c
 KB_SRCS += kb/http/kb_http_code_lifecycle.c
 KB_SRCS += kb/kb_tenancy_cli.c
-KB_SRCS += kb/kb_bedrock_egress.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c 
+KB_SRCS += kb/kb_bedrock_egress.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_vault_rotation_aws.c kb/kb_vault_rotation_worker.c kb/kb_vault_rotation_cli.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c 
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
 KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \

@@ -76,4 +76,56 @@ int kb_store_vault_rotation_fail_claimed(const char *actor, int64_t rotation_id,
 int kb_store_vault_rotation_remediate(const char *actor, int64_t rotation_id, const char *owner,
                                       int64_t token, int64_t anchor_version, const char *evidence);
 
+/* Rotation requests: an admin files one; the KB daemon drives it. */
+#define KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN (-2)
+
+typedef struct
+{
+   int64_t id;
+   int64_t team_id;
+   char kind[16];
+   char model_id[201];
+   int64_t rotation_id;
+   int has_slot;
+   char key_id[601];
+   char principal[601];
+   char agent[256];
+   char cred[256];
+} kb_store_vault_rotation_request_t;
+
+typedef struct
+{
+   int64_t id;
+   int64_t team_id;
+} kb_store_vault_rotation_ref_t;
+
+typedef struct
+{
+   int64_t id;
+   int64_t team_id;
+   char kind[16];
+   char model_id[201];
+   int64_t rotation_id;
+   char state[16];
+   char detail[501];
+   char created_at[64];
+   char rotation_state[16];
+   char failure_phase[33];
+   char last_error[1001];
+} kb_store_vault_rotation_request_row_t;
+
+/* Returns 0, KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN when the binding or the
+ * rotation it names does not exist, or -1. Repeating a pending request returns
+ * its id. */
+int kb_store_vault_rotation_request_add(const char *actor, int64_t team_id, const char *kind,
+                                        const char *model_id, int64_t rotation_id, int64_t *out_id);
+/* 0 with the oldest pending request, 1 when none is pending, -1 on error. */
+int kb_store_vault_rotation_request_next(const char *actor, kb_store_vault_rotation_request_t *out);
+int kb_store_vault_rotation_request_settle(const char *actor, int64_t request_id, int accepted,
+                                           int64_t rotation_id, const char *detail);
+/* Unclaimed rotations short of retired or failed; returns the count or -1. */
+int kb_store_vault_rotation_pending(const char *actor, kb_store_vault_rotation_ref_t *out, int cap);
+int kb_store_vault_rotation_request_list(const char *actor, int64_t team_id,
+                                         kb_store_vault_rotation_request_row_t *out, int cap);
+
 #endif
