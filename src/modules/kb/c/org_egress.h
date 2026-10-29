@@ -27,6 +27,26 @@ typedef struct
    int64_t max_output_tokens;
 } kb_store_org_egress_admission_t;
 
+typedef struct
+{
+   int64_t team_id;
+   char model_id[201];
+   char billable_model[201];
+   int64_t pricing_version;
+   char key_id[601];
+   char vault_principal[601];
+   char vault_agent[256];
+   char vault_cred[256];
+   int64_t max_input_tokens;
+   int64_t max_output_tokens;
+   int enabled;
+} kb_store_org_egress_binding_t;
+
+/* Admin only. KB_STORE_EGRESS_ERR_DENIED when the slot has no usable version
+ * (adopt or rotate it first), the model or price is not current, or the caller
+ * is not an admin. */
+int kb_store_org_egress_binding_set(const kb_store_org_egress_binding_t *binding);
+
 int kb_store_org_egress_admit(const char *authority_id, const char *fingerprint, const char *issuer,
                               const char *serial, const char *origin, const char *request_id,
                               int64_t team, int has_project, int64_t project, const char *model_id,

@@ -606,6 +606,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
                $(TESTPREFIX)/unit-test-kb-vault-rotation-ops \
+               $(TESTPREFIX)/unit-test-kb-vault-rotation-aws \
+               $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live \
                $(TESTPREFIX)/unit-test-vault-kms-hwm-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation-live \
@@ -4759,6 +4761,26 @@ $(TESTPREFIX)/unit-test-kb-p2b-egress-live: $(OBJDIR)/tests/test_kb_p2b_egress_l
 $(TESTPREFIX)/unit-test-kb-vault-rotation-ops: $(OBJDIR)/tests/test_kb_vault_rotation_ops.o \
                               $(OBJDIR)/kb/kb_vault_rotation_ops.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# The IAM self-rotation provider against an in-test fake AWS; the vault use and
+# the TLS exchange are doubles, so it needs neither Postgres nor a network.
+$(TESTPREFIX)/unit-test-kb-vault-rotation-aws: $(OBJDIR)/tests/test_kb_vault_rotation_aws.o \
+                              $(OBJDIR)/kb/kb_vault_rotation_aws.o \
+                              $(OBJDIR)/modules/aws/aws_sigv4.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Rotation requests through the daemon worker, against real PG and the signed-HWM
+# KMS helper (scripts/run-vault-rotation-worker-live.sh); SKIPs without them. The
+# worker reaches module calls, so it links the obs-bus runtime and the ring like
+# aimee-kb; the KB closure already carries its own runtime_secret object.
+$(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live: \
+                              $(OBJDIR)/tests/test_kb_vault_rotation_worker_live.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) \
+                              $(OBS_BUS_RUNTIME_OBJ) $(OURO_RING_LIB)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/modules/vault/runtime_secret.o,$^) $(L_KB)
 
 $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: \
                               $(OBJDIR)/tests/test_kb_vault_rotation_ops_live.o \
