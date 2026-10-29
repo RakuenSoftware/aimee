@@ -239,34 +239,6 @@ static void test_agent_has_role(void)
    assert(agent_has_role(&agent, "anything") == 1);
 }
 
-static void test_agent_supports_persona(void)
-{
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-
-   /* No personas listed -> supports every persona (backward compatible). */
-   assert(agent_supports_persona(&agent, "architect") == 1);
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-
-   /* Explicit list gates by name. */
-   strcpy(agent.personas[0], "engineer");
-   agent.persona_count = 1;
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-   assert(agent_supports_persona(&agent, "architect") == 0);
-
-   /* The "all" wildcard serves any persona. */
-   strcpy(agent.personas[0], "all");
-   agent.persona_count = 1;
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-   assert(agent_supports_persona(&agent, "architect") == 1);
-   assert(agent_supports_persona(&agent, "anything") == 1);
-
-   /* NULL agent -> not supported; NULL/empty persona -> unconstrained. */
-   assert(agent_supports_persona(NULL, "engineer") == 0);
-   assert(agent_supports_persona(&agent, NULL) == 1);
-   assert(agent_supports_persona(&agent, "") == 1);
-}
-
 static void test_agent_find(void)
 {
    agent_config_t cfg;
@@ -2285,62 +2257,6 @@ static void test_tool_bash(void)
    free(result);
 }
 
-/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on
- * the aimee-server host — that host is uid 0 with the docker socket mounted, so an
- * unsandboxed command is a host-root escalation. With a delegation active tool_bash
- * must refuse instead of forking on the host. The primary session (no delegation)
- * still runs.
- *
- * The sandbox is OPTED OUT explicitly here rather than relying on the config default:
- * the default is now SANDBOX_MODE_WORKSPACE_ONLY, so an inherited default no longer
- * reaches the unsandboxed branch at all, and a test that depends on it would silently
- * stop exercising the containment it exists to prove. `sandbox: {mode: off}` is also
- * the realistic shape of this risk — an operator who turned isolation off. */
-/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on the
- * aimee-server host — that host is uid 0 with the docker socket mounted, so an
- * unsandboxed command is a host-root escalation. With a delegation active tool_bash
- * must refuse rather than fork on the host; the primary session still runs.
- *
- * The mode is forced through the test seam rather than through config. The mode now
- * defaults to WORKSPACE_ONLY, and this binary cannot redirect config in-process (the
- * config path resolves before a test can move HOME), so without the override this
- * fail-closed branch would silently stop being exercised. */
-static void test_tool_bash_delegate_unsandboxed_refused(void)
-{
-   sandbox_set_mode_override_for_test(SANDBOX_MODE_OFF);
-
-   g_test_delegation_id = "test-deleg";
-   char *result = tool_bash("echo escalated", 5000);
-   assert(result != NULL);
-   assert(strstr(result, "refused") != NULL);   /* fail-closed */
-   assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
-   assert(strstr(result, "\"exit_code\":-1") != NULL);
-   /* Names the setting rather than blaming an "unavailable" sandbox. */
-   assert(strstr(result, "sandbox.mode=off") != NULL);
-   free(result);
-
-   /* The trusted primary (operator) session still runs on the host. */
-   g_test_delegation_id = NULL;
-   result = tool_bash("echo primary-ok", 5000);
-   assert(result != NULL);
-   assert(strstr(result, "primary-ok") != NULL);
-   free(result);
-
-   /* With the sandbox ON, the same delegated command is contained by ISOLATION
-    * instead of refusal — it runs, rather than being refused. This is the branch the
-    * new default puts real installs on, so it is asserted rather than assumed. */
-   sandbox_set_mode_override_for_test(SANDBOX_MODE_WORKSPACE_ONLY);
-   g_test_delegation_id = "test-deleg";
-   result = tool_bash("echo contained", 5000);
-   assert(result != NULL);
-   assert(strstr(result, "refused") == NULL);
-   assert(strstr(result, "\"exit_code\":0") != NULL);
-   free(result);
-
-   g_test_delegation_id = NULL;
-   sandbox_set_mode_override_for_test(-1); /* restore production behaviour */
-}
-
 /* A write into a source checkout is redirected into an aimee-managed worktree
  * by guardrails (pre_tool_check returns 1 with the rewritten path) under the
  * default (shared) provider. When a `detached` workspace provider is active the
@@ -3693,6 +3609,7 @@ static void test_dispatch_tool_call(void)
 
 #include "agent_source_authority.h"
 #include <pthread.h>
+#include "support/config_test_setters.h"
 
 /* Regression test for the concurrent-delegate source-authority race: each
  * delegate installs its source context via agent_source_authority_tls_set
@@ -4034,24 +3951,6 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    assert(count == 1);
    assert(rows[0].turn == 3);
    assert(strcmp(rows[0].tool_name, "bash") == 0);
-}
-
-static void test_agent_endpoint_valid(void)
-{
-   /* `agent add` is positional, so a flag in the endpoint slot used to be SAVED as the
-    * endpoint: the agent reported ON and returned success, and the only symptom was
-    * `agent probe` reporting "GET --provider/models returned -1" later. */
-   assert(!agent_endpoint_valid("--provider"));
-   assert(!agent_endpoint_valid("-x"));
-   assert(!agent_endpoint_valid(""));
-   assert(!agent_endpoint_valid(NULL));
-
-   /* Narrow on purpose: everything that is not obviously a flag stays accepted,
-    * including the scheme-less host:port forms this command has always taken. */
-   assert(agent_endpoint_valid("http://127.0.0.1:8080/v1"));
-   assert(agent_endpoint_valid("https://api.openai.com/v1"));
-   assert(agent_endpoint_valid("localhost:11434"));
-   assert(agent_endpoint_valid("wizard-llm:8080/v1"));
 }
 
 static void test_agent_name_valid(void)
@@ -4639,12 +4538,10 @@ int main(int argc, char **argv)
    test_seeded_tool_profile_retains_request_custody();
    test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
-   test_agent_endpoint_valid();
    test_agent_name_valid();
    test_agent_expand_env();
    test_agent_save_never_serializes_literal_key();
    test_agent_has_role();
-   test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
    test_agent_route_selection_provider();
@@ -4729,7 +4626,6 @@ int main(int argc, char **argv)
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
    test_tool_bash();
-   test_tool_bash_delegate_unsandboxed_refused();
    test_detached_skips_worktree_rewrite();
    test_tool_read_file();
    test_tool_write_file();

@@ -23,11 +23,6 @@ int agent_save_config_after_removal(agent_config_t *cfg);
  * Returns 1 if valid, 0 otherwise. */
 int agent_name_valid(const char *name);
 
-/* Reject an endpoint that is really a mis-parsed flag (leading '-'). `agent add`'s
- * first three arguments are positional, so a flag in the endpoint slot used to be
- * stored as the address and only surfaced at `agent probe`. Narrow on purpose: a
- * scheme requirement would reject host:port forms this command has always taken. */
-int agent_endpoint_valid(const char *endpoint);
 const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
@@ -223,9 +218,6 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
  * "no agent available", and blocking admission still waits for a slot. An
  * unknown answer (-1, or no probe) counts as "has capacity". */
 void agent_set_route_capacity_probe(int (*fn)(const char *agent_name));
-/* Live delegate occupancy for `agent_name`, or -1 when unknown. Lets the served
- * agent list publish occupancy to out-of-process routers (the Go WFE). */
-int agent_route_agent_active(const char *agent_name);
 
 /* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
  * routes the provider-named agent through the same machinery as delegation
@@ -253,13 +245,6 @@ const char *agent_catalog_provider(const agent_t *agent);
 int agent_declared_context_window(const agent_t *agent);
 int agent_declared_max_output(const agent_t *agent);
 
-/* Registration prefix of a route-target name: everything before the first ':'.
- * Provider-general registration names its targets `<registration>:<model>`, so
- * this identifies siblings sharing credentials, endpoint and wire protocol —
- * used to prefer a same-registration peer during fallback. A legacy
- * single-model agent has no ':' and is its own registration. */
-void agent_registration_prefix(const char *name, char *out, size_t out_len);
-
 /* 1 if `a` and `b` belong to the same provider registration, and so share
  * credentials, endpoint and wire protocol. This is what fallback consults to
  * prefer a sibling model before crossing to another vendor.
@@ -281,7 +266,6 @@ void agent_registration_prefix(const char *name, char *out, size_t out_len);
 int agent_same_registration(const agent_t *a, const agent_t *b);
 
 int agent_has_role(const agent_t *agent, const char *role);
-int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
 void agent_expand_env(const char *src, char *dst, size_t dst_len);
 
@@ -307,21 +291,6 @@ int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_cap
  * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
 const char *agent_request_auth_error(void);
 int agent_has_resolvable_credentials(const agent_t *agent);
-
-/* Does the server vault hold any credential filed under this PROVIDER's name?
- *
- * The provider-level twin of agent_has_resolvable_credentials(). It exists
- * because provider availability used to be decided solely by
- * runtime_secret_has(env_var), and that table is loaded from one agent namespace
- * ("environment") for a hardcoded list of AIMEE_* names — so a key stored the
- * way an operator stores one, `aimee vault set minimax api_key ...`, was
- * invisible and `provider list` reported [no key] over a populated vault.
- *
- * Matching is case-insensitive on the name: provider ids are lowercase literals
- * in the catalogue while a vault entry carries whatever the operator typed.
- * Returns 1 when a credential exists, 0 otherwise and on any vault error, so a
- * failure to read reads as "not configured" rather than a false positive. */
-int vault_provider_has_credential(const char *provider_name);
 
 /* Server Codex connection only: resolve the canonical Vault token, refreshing
  * through the same store as serving. Never reads client files or another named

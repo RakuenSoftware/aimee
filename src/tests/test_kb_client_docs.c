@@ -47,12 +47,6 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
    return strdup(next_stub_response());
 }
 
-char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms, int *status_out)
-{
-   return kb_client_v1_post_body_with_type(path, body, "Content-Type: application/json", timeout_ms,
-                                           status_out);
-}
-
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {

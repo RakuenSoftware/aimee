@@ -22,28 +22,6 @@ char *kb_client_rules_list_json(int limit)
    return kb_v1_action_request("rules.list", req);
 }
 
-int kb_client_rules_export_jsonl(const char *path)
-{
-   if (!path)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "path", path);
-   char *json = kb_v1_action_request("rules.export_jsonl", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *count = cJSON_GetObjectItemCaseSensitive(resp, "count");
-   int rc = -1;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(count))
-      rc = (int)count->valuedouble;
-   cJSON_Delete(resp);
-   return rc;
-}
-
 int kb_client_rules_insert(const char *polarity, const char *title, const char *description,
                            int weight)
 {
@@ -247,39 +225,6 @@ char *kb_client_collab_rules_list_json(void)
    return out;
 }
 
-int kb_client_agent_outcome_record(const char *agent_name, const char *role,
-                                   const char *outcome_kind, const char *reason, int turns_used,
-                                   int tools_called, int64_t tokens_used,
-                                   const char *tool_error_pattern)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (agent_name && agent_name[0])
-      cJSON_AddStringToObject(req, "agent_name", agent_name);
-   if (role && role[0])
-      cJSON_AddStringToObject(req, "role", role);
-   if (outcome_kind && outcome_kind[0])
-      cJSON_AddStringToObject(req, "outcome_kind", outcome_kind);
-   if (reason && reason[0])
-      cJSON_AddStringToObject(req, "reason", reason);
-   cJSON_AddNumberToObject(req, "turns_used", turns_used);
-   cJSON_AddNumberToObject(req, "tools_called", tools_called);
-   cJSON_AddNumberToObject(req, "tokens_used", (double)tokens_used);
-   if (tool_error_pattern && tool_error_pattern[0])
-      cJSON_AddStringToObject(req, "tool_error_pattern", tool_error_pattern);
-
-   char *json = kb_v1_action_request("agent.outcome_record", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
 static int kb_client_v1_simple_count_request(const char *method, cJSON *req)
 {
    char *json = kb_v1_action_request(method, req);
@@ -309,18 +254,6 @@ int kb_client_anti_pattern_extract_from_failures(void)
 {
    return kb_client_v1_simple_count_request("maintenance.anti_pattern_extract_from_failures",
                                             cJSON_CreateObject());
-}
-
-int kb_client_anti_pattern_escalate(int hit_threshold)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "hit_threshold", hit_threshold);
-   return kb_client_v1_simple_count_request("maintenance.anti_pattern_escalate", req);
-}
-
-int kb_client_rules_decay(void)
-{
-   return kb_client_v1_simple_count_request("maintenance.rules_decay", cJSON_CreateObject());
 }
 
 int kb_client_memory_learn_style(void)
@@ -465,41 +398,6 @@ static void kbc_anti_pattern_row_from_json(cJSON *a, anti_pattern_t *out)
       out->confidence = conf_j->valuedouble;
 }
 
-int kb_client_anti_pattern_list(anti_pattern_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("anti_pattern.list", req);
-   if (!json)
-      return 0;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return 0;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return 0;
-   }
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "anti_patterns");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_anti_pattern_row_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
 int kb_client_anti_pattern_insert(const char *pattern, const char *description, const char *source,
                                   const char *source_ref, double confidence, anti_pattern_t *out)
 {
@@ -544,48 +442,11 @@ int kb_client_anti_pattern_insert(const char *pattern, const char *description, 
    return 0;
 }
 
-int kb_client_anti_pattern_delete(int64_t id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   char *json = kb_v1_action_request("anti_pattern.delete", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
 int kb_client_rules_delete(int id)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", id);
    char *json = kb_v1_action_request("rules.delete", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
-int kb_client_rules_update_directive_type(int id, const char *directive_type)
-{
-   if (!directive_type)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", id);
-   cJSON_AddStringToObject(req, "directive_type", directive_type);
-   char *json = kb_v1_action_request("rules.update_directive_type", req);
    if (!json)
       return -1;
    cJSON *resp = cJSON_Parse(json);
@@ -743,85 +604,6 @@ int kb_client_memory_scan_conversations(char dirs[][4096], int dir_count)
            : -1;
    cJSON_Delete(resp);
    return n;
-}
-
-int kb_client_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out,
-                                 int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   if (file_path && file_path[0])
-      cJSON_AddStringToObject(req, "file_path", file_path);
-   if (command && command[0])
-      cJSON_AddStringToObject(req, "command", command);
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("anti_pattern.check", req);
-   if (!json)
-      return 0;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return 0;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return 0;
-   }
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "matches");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rows)
-      {
-         if (n >= max)
-            break;
-         memset(&out[n], 0, sizeof(out[n]));
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(r, "id");
-         cJSON *pat_j = cJSON_GetObjectItemCaseSensitive(r, "pattern");
-         cJSON *desc_j = cJSON_GetObjectItemCaseSensitive(r, "description");
-         cJSON *src_j = cJSON_GetObjectItemCaseSensitive(r, "source");
-         cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(r, "source_ref");
-         cJSON *hit_j = cJSON_GetObjectItemCaseSensitive(r, "hit_count");
-         cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(r, "confidence");
-         if (cJSON_IsNumber(id_j))
-            out[n].id = (int64_t)id_j->valuedouble;
-         if (cJSON_IsString(pat_j))
-            snprintf(out[n].pattern, sizeof(out[n].pattern), "%s", pat_j->valuestring);
-         if (cJSON_IsString(desc_j))
-            snprintf(out[n].description, sizeof(out[n].description), "%s", desc_j->valuestring);
-         if (cJSON_IsString(src_j))
-            snprintf(out[n].source, sizeof(out[n].source), "%s", src_j->valuestring);
-         if (cJSON_IsString(ref_j))
-            snprintf(out[n].source_ref, sizeof(out[n].source_ref), "%s", ref_j->valuestring);
-         if (cJSON_IsNumber(hit_j))
-            out[n].hit_count = (int)hit_j->valuedouble;
-         if (cJSON_IsNumber(conf_j))
-            out[n].confidence = conf_j->valuedouble;
-         n++;
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_anti_pattern_bump(int64_t id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   char *json = kb_v1_action_request("anti_pattern.bump", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
 }
 
 char *kb_client_learning_application_json(cJSON *request)

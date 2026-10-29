@@ -107,39 +107,7 @@ static void reset(int m)
 {
    mode = m;
 }
-static void read_file(const char *path, char *out, size_t n)
-{
-   FILE *f = fopen(path, "r");
-   assert(f);
-   size_t got = fread(out, 1, n - 1, f);
-   out[got] = 0;
-   fclose(f);
-}
-static void test_description_writes(void)
-{
-   for (int style = 0; style < 2; style++)
-   {
-      char path[512], buffer[512];
-      snprintf(path, sizeof path, "%s/projects/sample%s.md", test_home, style ? ".style" : "");
-      for (int m = 1; m <= 4; m++)
-      {
-         FILE *f = fopen(path, "w");
-         assert(f);
-         fputs("KEEP_EXISTING_APPROVED", f);
-         fclose(f);
-         reset(m);
-         int rc = style ? style_one("sample", test_home) : describe_one("sample", test_home);
-         assert(rc == -1);
-         read_file(path, buffer, sizeof buffer);
-         assert(!strcmp(buffer, "KEEP_EXISTING_APPROVED"));
-      }
-      reset(6);
-      assert((style ? style_one("sample", test_home) : describe_one("sample", test_home)) == 0);
-      read_file(path, buffer, sizeof buffer);
-      assert(!strcmp(buffer, "CANONICAL_OK\n"));
-      unlink(path);
-   }
-}
+
 static void test_liveness_uses_canonical_observation(void)
 {
    for (int m = 1; m <= 4; m++)
@@ -180,7 +148,6 @@ int main(void)
    char projects[512];
    snprintf(projects, sizeof projects, "%s/projects", test_home);
    assert(!mkdir(projects, 0700));
-   test_description_writes();
    test_liveness_uses_canonical_observation();
    rmdir(projects);
    rmdir(test_home);

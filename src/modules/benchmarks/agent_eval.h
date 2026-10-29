@@ -72,36 +72,13 @@ int agent_eval_manifest_build(const char *suite, const eval_task_t *tasks, int t
                               const char *agent_name, unsigned int seed,
                               agent_eval_manifest_t *out);
 
-/* Refuse accidental apples-to-oranges comparisons. Latency additionally
- * requires an identical hardware profile; quality comparisons do not. */
-agent_eval_comparability_t agent_eval_manifest_compare(const agent_eval_manifest_t *left,
-                                                       const agent_eval_manifest_t *right,
-                                                       agent_eval_comparison_kind_t kind,
-                                                       const char **reason_out);
-
 int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
                                 const agent_eval_run_options_t *options, eval_result_t *results,
                                 int max_results);
 int agent_eval_load_tasks(const char *suite_dir, eval_task_t *tasks, int max_tasks);
 int agent_eval_ablation_preset(const char *preset, agent_ablation_flags_t *out);
 
-/* Eval-to-behavior feedback loop: adjust rule weights based on recent
- * eval results. Reads/writes go through DB1 directly; callers do not
- * pass a handle. */
-int eval_feedback_loop(void);
-
 /* --- IR Metrics --- */
-
-/* Compute Mean Reciprocal Rank. Returns 0.0 if no relevant results found. */
-double ir_mrr(const int64_t *retrieved, int n_retrieved, const int64_t *relevant, int n_relevant);
-
-/* Compute NDCG@k (Normalized Discounted Cumulative Gain). */
-double ir_ndcg_at_k(const int64_t *retrieved, int n_retrieved, const int64_t *relevant,
-                    int n_relevant, int k);
-
-/* Compute Recall@k. */
-double ir_recall_at_k(const int64_t *retrieved, int n_retrieved, const int64_t *relevant,
-                      int n_relevant, int k);
 
 /* --- Memory retrieval eval --- */
 

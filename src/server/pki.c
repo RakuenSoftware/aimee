@@ -43,23 +43,6 @@ static X509 *g_ca_cert = NULL;
 static char **g_revoked = NULL;
 static int g_revoked_n = 0, g_revoked_cap = 0;
 
-void pki_reset_for_test(void)
-{
-   pthread_mutex_lock(&g_mu);
-   if (g_ca_key)
-      EVP_PKEY_free(g_ca_key);
-   if (g_ca_cert)
-      X509_free(g_ca_cert);
-   g_ca_key = NULL;
-   g_ca_cert = NULL;
-   for (int i = 0; i < g_revoked_n; i++)
-      free(g_revoked[i]);
-   free(g_revoked);
-   g_revoked = NULL;
-   g_revoked_n = g_revoked_cap = 0;
-   pthread_mutex_unlock(&g_mu);
-}
-
 static void ca_cert_path(char *out, size_t n)
 {
    snprintf(out, n, "%s/tls/client-ca.crt", config_default_dir());
@@ -961,11 +944,6 @@ int pki_mtls_ramp_ready(long now)
 int pki_mtls_ramp_advance(long now)
 {
    return db1_pki_ramp_advance(now);
-}
-
-int pki_mtls_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out)
-{
-   return db1_pki_ramp_get(state_out, hash_out, hash_len, advanced_at_out);
 }
 
 int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,

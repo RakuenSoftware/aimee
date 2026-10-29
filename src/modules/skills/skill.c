@@ -1261,54 +1261,6 @@ int skill_eval_executable(const char *project_root, const char *name,
    return 0;
 }
 
-int skill_change_eval_gate_allows(const char *payload_json, double threshold, char *reason,
-                                  size_t reason_len)
-{
-   if (reason && reason_len > 0)
-      reason[0] = '\0';
-   cJSON *root = cJSON_Parse(payload_json ? payload_json : "");
-   if (!cJSON_IsObject(root))
-   {
-      cJSON_Delete(root);
-      return skill_set_err(reason, reason_len, "skill_change payload is not valid JSON"), 0;
-   }
-
-   cJSON *eval = cJSON_GetObjectItemCaseSensitive(root, "eval_result");
-   if (!cJSON_IsObject(eval))
-   {
-      cJSON_Delete(root);
-      return skill_set_err(reason, reason_len, "skill_change missing eval_result"), 0;
-   }
-
-   cJSON *passed_j = cJSON_GetObjectItemCaseSensitive(eval, "passed");
-   cJSON *status_j = cJSON_GetObjectItemCaseSensitive(eval, "status");
-   int passed = cJSON_IsTrue(passed_j) ||
-                (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "pass") == 0);
-   cJSON *delta_j = cJSON_GetObjectItemCaseSensitive(eval, "compliance_delta");
-   double delta = cJSON_IsNumber(delta_j) ? delta_j->valuedouble : 0.0;
-   if (!passed)
-   {
-      cJSON *msg = cJSON_GetObjectItemCaseSensitive(eval, "message");
-      skill_set_err(reason, reason_len,
-                    cJSON_IsString(msg) && msg->valuestring && msg->valuestring[0]
-                        ? msg->valuestring
-                        : "skill eval did not pass");
-      cJSON_Delete(root);
-      return 0;
-   }
-   if (delta < threshold)
-   {
-      if (reason && reason_len > 0)
-         snprintf(reason, reason_len, "skill eval delta %.3f is below threshold %.3f", delta,
-                  threshold);
-      cJSON_Delete(root);
-      return 0;
-   }
-
-   cJSON_Delete(root);
-   return 1;
-}
-
 static int skill_usage_path_source(const char *project_root, const char *name, char *usage_path,
                                    size_t usage_path_len, skill_source_t *source_out)
 {

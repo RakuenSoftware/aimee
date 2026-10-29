@@ -44,8 +44,7 @@
     "src/modules/workflows/wfe_router.c",
     "src/modules/workflows/wfe_router_catalog.c",
     "src/modules/workflows/wfe_scheduler.c",
-    "src/modules/workflows/wfe_validate.c",
-    "src/modules/workflows/wfe_verdict.c"
+    "src/modules/workflows/wfe_validate.c"
   ],
   "go_sources": [
     "server-go/modules/workflows/autonomous.go",

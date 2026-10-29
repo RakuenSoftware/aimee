@@ -68,23 +68,11 @@ extern "C"
    /* Most-recent `max` rows ordered by id DESC. */
    int db1_agent_log_list_recent(db1_agent_log_display_t *out, int max);
 
-   /* All rows for `session_id`, oldest-first (ORDER BY id ASC). */
-   int db1_agent_log_list_by_session(const char *session_id, db1_agent_log_display_t *out, int max);
-
-   /* Distinct session_ids whose role matches the LIKE `pattern`, newest
-    * first. Writes ids into `out_ids` (each slot DB1_AL_SESSION_LEN). */
-   int db1_agent_log_search_session_ids_by_role(const char *pattern,
-                                                char (*out_ids)[DB1_AL_SESSION_LEN], int max);
-
    typedef struct
    {
       char role[DB1_AL_ROLE_LEN];
       int count;
    } db1_agent_log_role_count_t;
-
-   /* Per-role counts, optionally filtered by created_at >= since. */
-   int db1_agent_log_count_per_role(const char *since_or_null, db1_agent_log_role_count_t *out,
-                                    int max);
 
    typedef struct
    {
@@ -103,9 +91,6 @@ extern "C"
       char error[DB1_AL_LEARN_ERROR_LEN];
    } db1_agent_log_recent_error_t;
 
-   /* Recent non-empty error strings for DB1->KB_STORE learning flows. */
-   int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_t *out, int max);
-
    typedef struct
    {
       char role[DB1_AL_ROLE_LEN];
@@ -118,10 +103,6 @@ extern "C"
       char recent_error[DB1_AL_LEARN_ERROR_LEN];
    } db1_agent_log_delegation_pattern_t;
 
-   /* Per-(role, agent) aggregates used by memory promotion. */
-   int db1_agent_log_list_delegation_patterns(int since_days, int min_total,
-                                              db1_agent_log_delegation_pattern_t *out, int max);
-
    typedef struct
    {
       char role[DB1_AL_ROLE_LEN];
@@ -129,10 +110,6 @@ extern "C"
       int fails;
       char errors[DB1_AL_LEARN_ERROR_LEN];
    } db1_agent_log_failure_episode_seed_t;
-
-   /* Grouped failure clusters used by failure-episode synthesis. */
-   int db1_agent_log_list_failure_episode_seeds(int since_days, int min_fails,
-                                                db1_agent_log_failure_episode_seed_t *out, int max);
 
    /* Metrics view that joins agent_log with token_audit (both DB1 now).
     * One row per role, ordered by total DESC. */
@@ -187,9 +164,6 @@ extern "C"
     * window used for recent_calls / recent_successes. */
    int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs);
 
-   /* success/total counts for a specific session. Returns 0 on success. */
-   int db1_agent_log_session_outcome(const char *session_id, int *successes_out, int *total_out);
-
    typedef struct
    {
       char agent_name[DB1_AL_AGENT_LEN];
@@ -214,10 +188,6 @@ extern "C"
       int64_t completion_tokens;
       int successes;
    } db1_agent_log_stats_t;
-
-   /* Aggregate stats across agent_log, optionally filtered by
-    * created_at >= since. */
-   int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out);
 
 #ifdef __cplusplus
 }

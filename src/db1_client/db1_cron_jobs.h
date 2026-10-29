@@ -13,7 +13,6 @@ int db1_cron_job_record_run(const char *job_id, const char *status, int silent, 
                             const char *output, const char *error, const char *output_hash);
 char *db1_cron_jobs_list_json(void);
 char *db1_cron_job_history_json(const char *job_id, int limit);
-char *db1_cron_job_latest_output(const char *job_id);
 char *db1_cron_job_last_output_hash(const char *job_id);
 
 /* output_ir is a marked canonical snapshot, NULL for legacy/diagnostic output.

@@ -1036,38 +1036,6 @@ static int skill_trigger_match(const char *content, const char *tool_name, const
    return rc;
 }
 
-int server_module_benchmark_score(const int64_t *retrieved, uint32_t retrieved_count,
-                                  const int64_t *relevant, uint32_t relevant_count, uint32_t k,
-                                  aimee_benchmarks_ir_scores_t *scores)
-{
-   uint8_t request[AIMEE_BENCHMARKS_REQUEST_LEN], response[AIMEE_BENCHMARKS_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return scores &&
-                  aimee_benchmarks_request_encode(retrieved, retrieved_count, relevant,
-                                                  relevant_count, k, request,
-                                                  sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_RUN, AIMEE_BENCHMARKS_STAGE_RUN, request,
-                              sizeof(request), response, sizeof(response), &response_len) == 0
-              ? aimee_benchmarks_response_decode(response, response_len, scores)
-              : -1;
-}
-
-int server_module_benchmark_latency(const double *latencies, uint32_t count,
-                                    aimee_benchmarks_latency_summary_t *summary)
-{
-   uint8_t request[AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN];
-   uint8_t response[AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return summary &&
-                  aimee_benchmarks_latency_request_encode(latencies, count, request,
-                                                          sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_LATENCY, AIMEE_BENCHMARKS_STAGE_LATENCY,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
-              ? aimee_benchmarks_latency_response_decode(response, response_len, summary)
-              : -1;
-}
-
 static int runtime_web_http_status(const char *kind, uint32_t *http_status)
 {
    uint8_t request[AIMEE_RUNTIME_WEB_REQUEST_LEN], response[AIMEE_RUNTIME_WEB_RESPONSE_LEN];

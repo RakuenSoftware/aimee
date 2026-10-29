@@ -29,6 +29,5 @@ int computer_use_is_tool_name(const char *qualified_tool_name);
 int computer_use_classify(const computer_use_policy_t *policy, const char *qualified_tool_name,
                           const char *args_json, computer_use_decision_t *decision_out,
                           char *reason_out, size_t reason_len);
-int computer_use_redact_text(const char *input, char *out, size_t out_len);
 
 #endif /* DEC_COMPUTER_USE_H */

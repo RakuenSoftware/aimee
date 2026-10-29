@@ -79,16 +79,3 @@ int gateway_policy_apply_ir(aimee_request_t *request)
    request->mutated = 1;
    return removed;
 }
-
-/* Response-side (P2c). Same canonical mapping and config gate as the request
- * side, exposed as a predicate so the buffered/streamed paths can gate cheaply
- * (the predicate does the legacy_config_read + canonical-name lookup, so the call
- * site stays one line). */
-int gateway_policy_is_denied_tool(const char *name)
-{
-   if (!name || !name[0])
-      return 0;
-   if (!gateway_prevent_subagents_enabled())
-      return 0;
-   return is_subagent_tool_name(name);
-}

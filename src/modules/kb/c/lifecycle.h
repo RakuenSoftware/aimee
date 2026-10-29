@@ -154,7 +154,6 @@ extern "C"
     * comma-separated list of admitted "old_id->new_id" transitions (see
     * kb_store_embedding_model_record_or_check). Reset by kb_store_shutdown. */
    void kb_store_set_embedder_model_id(const char *model_id);
-   const char *kb_store_embedder_model_id(void);
    /* The serving endpoint's vector-space identity, PROBED from its /health rather than
     * read from config: pooling and prefixes are properties of what the embedder applies,
     * not of what the kb was told. Empty -> the guard is a no-op. */
@@ -175,15 +174,6 @@ extern "C"
    typedef int (*kb_store_embedder_serving_probe_fn)(char *out, size_t out_len, char *err,
                                                      size_t errlen);
    void kb_store_set_embedder_serving_probe(kb_store_embedder_serving_probe_fn fn);
-   /* Whether each probe seam is currently registered. The bug these exist for was a
-    * registration decision no test could see: the caller skipped BOTH probes for the
-    * builtin embedder because the DIM probe cannot work against it, which silently
-    * disabled the serving-identity guard in the one transition it was written to catch.
-    * A seam that decides whether a guard runs has to be observable. */
-   int kb_store_embedder_probe_registered(void);
-   int kb_store_embedder_serving_probe_registered(void);
-   void kb_store_set_embedding_compat(const char *compat_csv);
-   const char *kb_store_embedding_compat(void);
 
    /* Connection-pool size used by kb_store_init (default 16). Like
     * kb_store_set_embedding_dim, call before kb_store_init to keep this layer config-free. */
@@ -227,13 +217,6 @@ extern "C"
     * the typed kb_store_* domain functions; this is exposed for KB-owned
     * migration tooling that copies arbitrary tables row-by-row. */
    void *(kb_store_conn)(void); /* parenthesised: the kb_store_conn() macro must not expand here */
-
-   /* Postgres-native diagnostics for `aimee doctor`. Each out parameter
-    * is set to -1 on probe failure; returns 0 when the connection is
-    * alive. Skipped (returns 0 with all outputs left at -1) under the
-    * test shim. */
-   int kb_store_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
-                                int64_t *replica_lag_bytes);
 
    void kb_store_shutdown(void);
 

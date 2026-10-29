@@ -130,22 +130,6 @@ char *kb_client_project_status_json(const char *project);
  * of kb_client_status_json(). Caller must free the returned string. */
 char *kb_client_vector_status_json(void);
 
-/* Run a KB search via aimee-kb's public /v1/search endpoint with the given
- * project / query / embedding_command / max_results / format ("text" or
- * "json") and returns the heap-allocated JSON response envelope (caller
- * frees).  The result payload lives at
- * resp["result"] and is either the plain-text or JSON search output
- * depending on `format`.  On any failure the returned JSON has
- * {"status":"error","message":"..."}. */
-/* Search KB documents via aimee-kb.  |project| may be NULL or empty only for
- * an intentional all-project internal call; the client sends scope=all
- * explicitly. Agent-facing surfaces resolve the active project before here.
- * |format| selects "text" (default) or "json"
- * formatting of the result body.  Returns a heap-allocated JSON
- * envelope (caller frees). */
-char *kb_client_search_json(const char *project, const char *query, const char *embedding_command,
-                            int max_results, const char *format);
-
 /* Like kb_client_search_json but with a per-call fusion mode override.
  * fusion_mode_override: "rrf" | "static_alpha" | "dynamic_alpha"; NULL = use server config. */
 char *kb_client_curator_implements_json(const char *topic);
@@ -182,16 +166,6 @@ typedef struct
    int dry_run;
    char writer[64];
 } kb_client_code_embed_result_t;
-
-/* Request code embedding refresh from aimee-kb.
- * project: project name; scope: "changed_files"|"full_project".
- * paths/path_count: optional path filter (NULL/0 = all in scope).
- * batch_size/max_points: caps (0 = server defaults).
- * dry_run: 1 = report without writing.
- * Returns 0 on success (result filled), -1 if kb unreachable. */
-int kb_client_code_embeddings_refresh(const char *project, const char *scope, const char **paths,
-                                      int path_count, int batch_size, int max_points, int dry_run,
-                                      kb_client_code_embed_result_t *out);
 
 /* Search code embeddings via aimee-kb.  Returns count of hits. */
 
@@ -243,32 +217,6 @@ char *kb_client_ingest_status_json(void);
 /* Return heap-allocated JSON describing aimee-kb's connection worker slots. */
 char *kb_client_workers_json(void);
 
-/* Query the async embedding queue (kb_async_jobs) via aimee-kb's public
- * /v1/pipeline/status endpoint and returns the heap-allocated JSON response
- * (caller frees). On any failure the returned JSON has
- * {"status":"error","message":"..."}. */
-char *kb_client_queue_status_json(void);
-char *kb_client_corpus_pipeline_status_json(void);
-
-/* Fetch a single kb_async_jobs row via aimee-kb's public /v1/jobs/{id}
- * endpoint and returns the heap-allocated JSON response (caller frees). */
-char *kb_client_job_status_json(int64_t job_id);
-
-/* Drain the async embedding queue via aimee-kb's public /v1/drain endpoint
- * with {embedding_command, timeout} and returns the heap-allocated JSON
- * response (caller frees). On any failure the returned JSON has
- * {"status":"error","message":"..."}. */
-char *kb_client_queue_drain_json(const char *embedding_command, int timeout_secs);
-char *kb_client_corpus_pipeline_drain_json(int limit);
-
-/* Reconcile vector points against the KB_STORE source of truth: prune
- * points whose memory/kb_document rows no longer exist. Calls the public
- * /v1/maintenance/reconcile endpoint with {dry_run} and returns the
- * heap-allocated JSON
- * response (caller frees).  On any failure the returned JSON has
- * {"status":"error","message":"..."}. */
-char *kb_client_reconcile_json(int dry_run);
-
 /* Create a memory directive via the aimee-kb sidecar.  Sends
  * `memory.directive_create` with the usual field set and returns
  * {"status":"ok","dedup":0|1,"directive":{...}} on success.  dedup=1
@@ -302,16 +250,6 @@ char *kb_client_curiosity_create_json(const char *gap_type, const char *target_e
                                       const char *target_topic, const char *evidence,
                                       double importance, double novelty,
                                       const char *source_session);
-char *kb_client_curiosity_sweep_json(void);
-char *kb_client_curiosity_rescore_json(void);
-char *kb_client_curiosity_get_json(int64_t id);
-char *kb_client_curiosity_update_state_json(int64_t id, const char *new_state);
-
-/* Pull the top-N open curiosity items, route each into an epistemic
- * directive, and transition the source items to in_progress (idempotent
- * on re-run via the directive unique index). Returns
- * {"status":"ok","routed":N}. Caller frees. */
-char *kb_client_curiosity_route_top_json(int limit, const char *source_session);
 
 /* Investigation-note RPCs forwarded to aimee-kb. Each returns a
  * heap-allocated JSON response (caller frees) of shape
@@ -322,27 +260,11 @@ char *kb_client_note_create_json(const char *title, const char *content, const c
 char *kb_client_note_list_json(const char *tag, int limit);
 char *kb_client_note_search_json(const char *query, int limit);
 
-/* Spec-driven roadmap RPCs via the aimee-kb sidecar (KB_STORE artifacts). Each
- * returns the heap-allocated JSON response string (caller frees), or NULL on a
- * transport failure. Roadmap data lives in KB_STORE, owned by aimee-kb; the CLI and
- * server route every roadmap op through these wrappers and never touch KB_STORE
- * directly. Defined in src/modules/kb_client/kb_client_roadmap.c. */
-/* Sends `roadmap.create_from_decomposition` with {decomposition} (the JSON
- * decomposition document). Response: {"status":"ok","roadmap_id":"..."}. */
-char *kb_client_roadmap_create_json(const char *decomposition_json);
-/* Sends `roadmap.validate` with {decomposition}. Response:
- * {"status":"ok","valid":true|false,"reason":"..."}. */
-char *kb_client_roadmap_validate_json(const char *decomposition_json);
 /* Sends `roadmap.show` with {roadmap_id}. Response:
  * {"status":"ok","roadmap":{...},"units":[...]}. */
 char *kb_client_roadmap_show_json(const char *roadmap_id);
 /* Sends `roadmap.list`. Response: {"status":"ok","roadmaps":[...]}. */
 char *kb_client_roadmap_list_json(void);
-/* Sends `roadmap.rebuild` with {roadmap_id}. Response: {"status":"ok"}. */
-char *kb_client_roadmap_rebuild_json(const char *roadmap_id);
-/* Sends `roadmap.report` with {roadmap_id, output_path?}. Generates a
- * self-contained HTML report. Response: {"status":"ok","report_path":"..."}. */
-char *kb_client_roadmap_report_json(const char *roadmap_id, const char *output_path);
 
 /* Fetch rules via the aimee-kb sidecar.  Sends `rules.list` with
  * {limit} and returns the heap-allocated JSON response (caller frees)
@@ -401,14 +323,6 @@ struct cJSON;
  * stringified envelope (caller frees) or NULL if kb is unreachable. */
 char *kb_client_learning_propose_signal_json(const struct cJSON *args);
 
-/* Record a per-agent run outcome via aimee-kb.  Mirrors
- * kb_store_agent_outcome_record().  Returns 0 on success, -1 if kb is
- * unreachable. */
-int kb_client_agent_outcome_record(const char *agent_name, const char *role,
-                                   const char *outcome_kind, const char *reason, int turns_used,
-                                   int tools_called, int64_t tokens_used,
-                                   const char *tool_error_pattern);
-
 /* Find-and-consume the highest-priority queued hint for (role, prompt)
  * via aimee-kb.  Returns a heap-allocated string (caller frees) or
  * NULL if no hint matches / kb is unreachable.  Mirrors
@@ -420,17 +334,7 @@ char *kb_client_agent_hint_consume(const char *role, const char *prompt);
  * entries acted on, or -1 if kb is unreachable. */
 int kb_client_anti_pattern_extract_from_feedback(void);
 int kb_client_anti_pattern_extract_from_failures(void);
-int kb_client_anti_pattern_escalate(int hit_threshold);
 
-/* Session-wrapup maintenance routines that touch KB_STORE — wrapped on
- * the kb side so daemon and CLI-fork callers actually execute them.
- * Each returns the count of rows adjusted/generated/decayed, or -1
- * if kb is unreachable.
- *
- * eval_feedback_loop is intentionally NOT in this set: it combines DB1
- * eval-task inputs with KB_STORE rule-weight writes and must be split across
- * the server/kb boundary before it can become a pure kb RPC. */
-int kb_client_rules_decay(void);
 int kb_client_memory_learn_style(void);
 
 /* Decision-log + anti-pattern CRUD via aimee-kb (the KB_STORE owner).
@@ -442,21 +346,8 @@ int kb_client_decision_log_insert(int64_t task_id, const char *options, const ch
                                   kb_store_decision_log_row_t *out);
 int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max);
-int kb_client_anti_pattern_list(anti_pattern_t *out, int max);
 int kb_client_anti_pattern_insert(const char *pattern, const char *description, const char *source,
                                   const char *source_ref, double confidence, anti_pattern_t *out);
-int kb_client_anti_pattern_delete(int64_t id);
-
-/* Match (file_path, command) against stored anti-patterns via
- * aimee-kb.  Returns the number of rows written into |out| (0 if
- * kb is unreachable / no match).  Mirrors kb_store_anti_pattern_check(). */
-int kb_client_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out,
-                                 int max);
-
-/* Increment the lifetime hit_count for an anti-pattern via
- * aimee-kb.  Returns 0 on success, -1 if kb is unreachable.  Mirrors
- * kb_store_anti_pattern_bump(). */
-int kb_client_anti_pattern_bump(int64_t id);
 
 /* Rules + feedback CRUD via aimee-kb (the KB_STORE owner).  Mirrors the
  * local kb_store_* signatures.  rules.delete / update_directive_type
@@ -465,7 +356,6 @@ int kb_client_anti_pattern_bump(int64_t id);
  * iff the row was an existing reinforcement rather than a fresh
  * insert. */
 int kb_client_rules_delete(int id);
-int kb_client_rules_update_directive_type(int id, const char *directive_type);
 int kb_client_feedback_record(const char *polarity, const char *title, const char *description,
                               int weight, int *reinforced_out);
 
@@ -488,8 +378,6 @@ int kb_client_memory_scan_conversations(char dirs[][4096], int dir_count);
 char *kb_client_dashboard_memory_stats_json(void);
 char *kb_client_dashboard_logs_json(void);
 char *kb_client_dashboard_reminders_json(void);
-char *kb_client_dashboard_recall_json(void);
-char *kb_client_dashboard_directives_json(void);
 
 /* Render the "Open Commitments" / "Unresolved Questions" briefing
  * sections via aimee-kb.  Returns a heap-allocated markdown fragment
@@ -563,9 +451,6 @@ char *kb_client_memory_assemble_typed_context(const char *query);
 /* Forward the Go owner's budget contract unchanged. The JSON is borrowed. */
 char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
                                                           const cJSON *context_limits);
-
-/* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
-int kb_client_rules_export_jsonl(const char *path);
 
 /* Insert a rule via aimee-kb.  Returns 0 on success, -1 on failure /
  * kb unreachable.  Mirrors kb_store_rules_insert(). */
@@ -648,29 +533,6 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
  * error envelope rather than this code. */
 #define KB_CLIENT_WITHHELD_PII (-2)
 
-int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
-                            const char *content, double confidence, const char *session_id,
-                            memory_t *out);
-int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *key,
-                               const char *content, const char *use_cases, double confidence,
-                               const char *session_id, memory_t *out);
-
-/* Same, but says whose words these are. The authority is recorded as the row's
- * provenance and decides whether the typed-fact drain may later mint Class-A
- * facts from this note (memory.h, memory_insert_ex). MEMORY_AUTHORITY_USER is
- * for a surface where the USER is the author — the `memory store` CLI, the
- * onboarding wizard — never for text the agent composed, and the kb still checks
- * that the request authenticated as a person before honouring it. The two
- * spellings above are the MODEL-authority ones. */
-int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
-                               const char *content, const char *use_cases, double confidence,
-                               const char *session_id, memory_authority_t authority, memory_t *out);
-
-/* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
- * row matches or kb is unreachable; the row id otherwise.  Mirrors
- * kb_store_memory_find_id_by_key_kind(). */
-int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
-
 /* Supersede an existing memory with a new content via aimee-kb (the
  * KB_STORE owner).  The kb side runs the full version-bump + provenance +
  * link pipeline.  Returns 0 on success (out filled if non-NULL) or
@@ -703,22 +565,6 @@ int kb_client_memory_check_drift(int64_t task_id, const char *file_path, const c
  * task_edge_t. */
 int kb_client_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out,
                         int max);
-int kb_client_task_create(const char *title, const char *session_id, int64_t parent_id,
-                          aimee_task_t *out);
-int kb_client_task_update_state(int64_t id, const char *state);
-int kb_client_task_delete(int64_t id);
-int kb_client_task_add_edge(int64_t source, int64_t target, const char *relation);
-int kb_client_task_get_edges(int64_t task_id, task_edge_t *out, int max);
-
-/* Auditable-correctness P1: ask the KB to record a single per-turn
- * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
- * surfaced into the turn. `role` is the recall op (e.g. "Recall"),
- * `query_fingerprint` identifies the turn query. Returns 0 on success (event
- * written), -1 on bad args or kb error. The KB write uses the already-merged
- * kb_store_demotion_retrieval_event_write_turn (first-wins on duplicate turn_id). */
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids);
 
 /* Like the above, but also returns the minted retrieval_event_id in event_id_out
  * (so a caller can later attribute outcomes to it). */
@@ -797,21 +643,6 @@ char *kb_client_learning_resolve_json(int budget);
  * or an unparseable answer means "use the local default". */
 char *kb_client_learning_policy_select_json(const char *decision_point);
 
-/* Fetch a single learning proposal via the aimee-kb sidecar.  Sends
- * `learning.get_proposal` with {id} and returns the heap-allocated JSON
- * response (caller frees).  {"status":"ok","proposal":{...}} on success. */
-char *kb_client_learning_get_proposal_json(int id);
-
-/* Accept a learning proposal via the aimee-kb sidecar.  Sends
- * `learning.accept_proposal` with {id} and returns the heap-allocated
- * JSON response (caller frees). */
-char *kb_client_learning_accept_proposal_json(int id);
-
-/* Reject a learning proposal via the aimee-kb sidecar.  Sends
- * `learning.reject_proposal` with {id} and returns the heap-allocated
- * JSON response (caller frees). */
-char *kb_client_learning_reject_proposal_json(int id);
-
 /* Intelligence readiness queries via the v1 KB API.  Each returns a
  * heap-allocated JSON string (caller frees) of shape {"status":"ok",...}
  * on success or {"status":"error","message":"..."}. */
@@ -837,17 +668,6 @@ int kb_client_bandit_close(const char *decision_point, const char *decision_id, 
 /* Persist the production-default arm for a decision point; raw kb JSON
  * ({status, rollback_arm}), caller frees. */
 char *kb_client_bandit_promote_json(const char *decision_point, const char *arm);
-
-/* artifacts.list_proposed: list proposed artifacts by surface (NULL = all).
- * Returns heap-allocated JSON string; caller frees. */
-char *kb_client_artifacts_list_proposed_json(const char *target_surface, int limit);
-
-/* artifacts.set_state: transition an artifact to committed or rejected.
- * verdict_tag/scope/counter_example/reason may be NULL.
- * Returns heap-allocated JSON string; caller frees. */
-char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
-                                        const char *verdict_tag, const char *verdict_scope,
-                                        const char *counter_example, const char *reason);
 
 /* Gather memory + kb collection state for `aimee memory verify`.  Sends
  * `memory.verify` with {detail, timings, embedding_command} and returns the
@@ -901,13 +721,6 @@ typedef struct
  * = "error", out->message holds the kb-supplied detail). */
 int kb_client_index_scan(const char *name, const char *root, int force,
                          kb_client_index_scan_result_t *out);
-
-/* Stable project lifecycle. operation is detach|purge|gc. Empty confirm_hash
- * performs a read-only dry-run for purge/gc. Returns the raw JSON body (caller
- * frees) and writes the HTTP status when requested. */
-char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
-                                             const char *confirm_hash, const char *reason,
-                                             int retention_days, int *http_status);
 
 /* Push a set of caller-supplied source files to aimee-kb for indexing,
  * bypassing server-side filesystem enumeration. `files_arr_v` is a cJSON array
@@ -1073,14 +886,6 @@ char *kb_client_pdf_lookup_table(const char *project, const char *document_key, 
 char *kb_client_pdf_list_assets(const char *project, const char *document_key, int *status_out);
 char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *status_out);
 
-/* Code-graph retrieval + analytics routes (see kb_client_code_graph.c). Forward
- * the route's JSON body verbatim (nested fused/ranked shapes the agent consumes
- * directly); return the malloc'd JSON (caller frees) or NULL, with *status_out
- * carrying the HTTP status. /v1/code/hybrid fuses code+graph+memory (query
- * required, symbol/project optional); /v1/code/graph/hubs ranks a project's
- * most-connected symbols (project required). */
-char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
-                            int max_results, int *status_out);
 char *kb_client_code_hybrid_scoped(const char *query, const char *symbol,
                                    const char *preferred_project, int all_projects, int max_results,
                                    int *status_out);
@@ -1118,8 +923,6 @@ char *kb_client_index_generation_check(const char *project, const char *generati
  * success, -1 if kb is unreachable. Uses /v1 over remote HTTP or local UDS.
  * Mirrors canonical_index_project_lang_breakdown(). */
 int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz);
-
-int kb_client_canonical_index_scan(const char *project, const char *root_path, int force);
 
 /* Request-local active repository context for ordered memory RPCs.  The
  * server sets this around one agent-facing call; legacy callers that do not

@@ -114,14 +114,6 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
  * Valid only between bind and unbind, on the binding thread. */
 int workspace_turn_container_bound(void);
 
-/* Test seam: force workspace_turn_container_bound()'s result. -1 restores the real
- * thread-bound state; 0/1 pin it. For tests exercising the container-delegate exemption. */
-void workspace_turn_set_container_bound_for_test(int bound);
-
-/* Test-only fallback for legacy unit requests that omit cwd. Production never
- * calls this; an explicit workspace always wins. */
-void workspace_turn_set_default_workspace_for_test(const char *workspace);
-
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);
@@ -147,21 +139,6 @@ const char *workspace_turn_drift_notice(void);
  * `/pr` works on a mirror workspace). Returns 1 and fills out[out_cap] when `cwd`
  * is in a mirror workspace; 0 otherwise (out emptied). */
 int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap);
-
-/* Same resolution, for a `detached` workspace that also carries mirror inputs.
- *
- * A detached workspace is served by its client, so a job running with no client
- * attached (a background delegate) cannot reach it at all. When such a workspace
- * has recorded a `remote` and a `head` — a client ran `workspace mirror-sync` —
- * the server can still reconstruct an equivalent tree from its own bare mirror
- * and run there instead of having nowhere to go.
- *
- * That tree is the LAST SYNCED state, not the client's current one, so this is
- * deliberately a separate entry point rather than a widening of the mirror
- * resolver: a caller must choose the stale-but-real tree knowingly, and say so.
- * Returns 1 and fills out[out_cap] when `cwd` is in a detached workspace with
- * both inputs recorded; 0 otherwise (out emptied). */
-int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_t out_cap);
 
 /* AC #6 — the worktree_cwd-trust hole. A turn carries a client-supplied `cwd`.
  * For a co-located peer (trusted_local) it is a real server-side path; for a

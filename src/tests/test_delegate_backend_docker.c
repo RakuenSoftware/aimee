@@ -833,47 +833,6 @@ static void test_acquire_rejects_invalid_args(void)
    printf("  PASS: test_acquire_rejects_invalid_args\n");
 }
 
-static void test_build_exec_command_basic(void)
-{
-   char *cmd = NULL;
-   assert(delegate_backend_docker_build_exec_command("aimee-delegate-task1", "echo hello", &cmd) ==
-          0);
-   assert(cmd != NULL);
-   assert(strstr(cmd, "docker exec -i aimee-delegate-task1 bash -c") != NULL);
-   assert(strstr(cmd, "base64 -d | bash") != NULL);
-   /* Raw user command b64-encoded — must NOT appear directly. */
-   assert(strstr(cmd, "echo hello") == NULL);
-   free(cmd);
-   printf("  PASS: test_build_exec_command_basic\n");
-}
-
-static void test_build_exec_command_handles_special_chars(void)
-{
-   const char *evil = "echo 'with quotes' && echo `backticks` && echo $HOME";
-   char *cmd = NULL;
-   assert(delegate_backend_docker_build_exec_command("c", evil, &cmd) == 0);
-   /* Raw evil string MUST NOT appear; the b64 envelope hides it. */
-   assert(strstr(cmd, "with quotes") == NULL);
-   assert(strstr(cmd, "backticks") == NULL);
-   free(cmd);
-   printf("  PASS: test_build_exec_command_handles_special_chars\n");
-}
-
-static void test_build_exec_command_rejects_invalid(void)
-{
-   char *cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command(NULL, "x", &cmd) == -1);
-   assert(cmd == NULL);
-   cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command("c", NULL, &cmd) == -1);
-   assert(cmd == NULL);
-   cmd = (char *)0x1;
-   assert(delegate_backend_docker_build_exec_command("", "x", &cmd) == -1);
-   assert(cmd == NULL);
-   assert(delegate_backend_docker_build_exec_command("c", "x", NULL) == -1);
-   printf("  PASS: test_build_exec_command_rejects_invalid\n");
-}
-
 /* cfg.workspace mounts the caller's complete source tree. No empty-workspace
  * fallback exists. */
 static void test_docker_mounts_caller_workspace(void)
@@ -1241,9 +1200,6 @@ int main(void)
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();
    test_translate_named_volume_socket_path();
-   test_build_exec_command_basic();
-   test_build_exec_command_handles_special_chars();
-   test_build_exec_command_rejects_invalid();
    test_acquire_creates_and_starts_container();
    test_acquire_refuses_when_egress_helper_refuses();
    test_release_hibernate_keeps_container();

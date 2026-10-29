@@ -119,13 +119,6 @@ static void test_kb_store_identity_key_contract(void)
    printf("  PASS: KB_STORE identity-key contract rejects unavailable or malformed answers\n");
 }
 
-static int test_kb_vector_upsert_document(int64_t document_id, const float *vec, int dim,
-                                          const char *payload_json, void *ctx)
-{
-   (void)ctx;
-   return pgvec_kb_service_upsert_document_point(document_id, vec, dim, payload_json);
-}
-
 /* The KB_STORE backing handle is owned by kb_store_test_shim_open(); these
  * helpers wrap that lifecycle plus a legacy HTTP /points/search mock
  * left over from the pre-pgvector era. The mock is harmless under the
@@ -567,79 +560,6 @@ static void test_minhash_shadow_signatures_persist(void)
    unlink(b_path);
    platform_test_rmrf(tmpdir);
    printf("  PASS: minhash shadow signatures persist\n");
-}
-
-static void test_async_embedding_queue_and_drain(void)
-{
-   char oversized_identity[128];
-   memset(oversized_identity, 'x', sizeof(oversized_identity));
-   assert(kb_store_kb_service_async_queue_drain(NULL, NULL, 0, NULL, NULL, NULL, NULL) == -1);
-   assert(kb_store_kb_service_async_queue_drain("", NULL, 0, NULL, NULL, NULL, NULL) == -1);
-   assert(kb_store_kb_service_async_queue_drain(oversized_identity, NULL, 0, NULL, NULL, NULL,
-                                                NULL) == -1);
-
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_async_XXXXXX", platform_tmpdir());
-   char *d = mkdtemp(tmpdir);
-   assert(d != NULL);
-
-   char fpath[512];
-   snprintf(fpath, sizeof(fpath), "%s/async.md", tmpdir);
-   write_file(fpath, "# Async Queue\n\nEmbeddings should be deferred.\n");
-
-   open_test_db();
-   platform_setenv("AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED", "1");
-
-   kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_async", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
-   assert(rc == 0);
-   assert(stats.chunks_added > 0);
-   assert(stats.embeddings_added == 0);
-
-   kb_store_kb_service_async_queue_stats_t qstats;
-   assert(kb_store_kb_service_async_queue_status(&qstats) == 0);
-   assert(qstats.pending > 0);
-
-   const char *vector_count_sql = "SELECT COUNT(*) FROM vector_index_ops"
-                                  " WHERE collection = 'kb_embeddings' AND status = 'ok'";
-   char vc_err[128] = "";
-   aimee_pg_stmt_t *vc_st =
-       aimee_pg_prepare(kb_store_conn(), vector_count_sql, vc_err, sizeof(vc_err));
-   assert(vc_st != NULL);
-   assert(aimee_pg_step(vc_st, vc_err, sizeof(vc_err)) == AIMEE_PG_ROW);
-   assert(aimee_pg_column_int(vc_st, 0) == 0);
-   aimee_pg_finalize(vc_st);
-
-   assert(kb_store_kb_service_async_queue_drain(
-              "test-async-drain", MEMORY_EMBED_TEST_FIXTURE, 5, pgvec_kb_vector_collection_name(),
-              test_kb_vector_upsert_document, NULL, &qstats) == 0);
-   assert(qstats.pending == 0);
-   assert(qstats.running == 0);
-   assert(qstats.failed == 0);
-   assert(qstats.done > 0);
-
-   char claim_err[128] = "";
-   aimee_pg_stmt_t *claim_st =
-       aimee_pg_prepare(kb_store_conn(),
-                        "SELECT COUNT(*) FROM kb_async_jobs WHERE claimed_by = 'test-async-drain'"
-                        " AND status = 'done'",
-                        claim_err, sizeof(claim_err));
-   assert(claim_st != NULL);
-   assert(aimee_pg_step(claim_st, claim_err, sizeof(claim_err)) == AIMEE_PG_ROW);
-   assert(aimee_pg_column_int(claim_st, 0) > 0);
-   aimee_pg_finalize(claim_st);
-
-   vc_st = aimee_pg_prepare(kb_store_conn(), vector_count_sql, vc_err, sizeof(vc_err));
-   assert(vc_st != NULL);
-   assert(aimee_pg_step(vc_st, vc_err, sizeof(vc_err)) == AIMEE_PG_ROW);
-   assert(aimee_pg_column_int(vc_st, 0) > 0);
-   aimee_pg_finalize(vc_st);
-
-   platform_setenv("AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED", "0");
-   close_test_db();
-   unlink(fpath);
-   platform_test_rmrf(tmpdir);
-   printf("  PASS: async embedding queue drains queued KB jobs\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1332,7 +1252,6 @@ int main(void)
    test_build_incremental_update();
    test_bloom_dedupe_skips_duplicate_content();
    test_minhash_shadow_signatures_persist();
-   test_async_embedding_queue_and_drain();
    test_build_sync_embeddings_and_vectors();
    test_build_vector_batch_flush();
    test_build_multi_file_counts();

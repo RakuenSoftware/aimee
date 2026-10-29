@@ -751,11 +751,6 @@ static char *run_engine(const char *engine, const char *query, int max_results,
    return NULL;
 }
 
-char *web_search(const char *query, int max_results)
-{
-   return web_search_ex(query, max_results, WEB_SEARCH_FETCH_PAGES_UNSET, NULL);
-}
-
 char *web_search_ex(const char *query, int max_results, int fetch_pages, const char *extract_query)
 {
    if (!query || !query[0])

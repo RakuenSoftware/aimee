@@ -215,18 +215,6 @@ static void test_normalize_key(void)
    assert(strcmp(buf, "i answer seattle") == 0);
 }
 
-static void test_trigram_similarity(void)
-{
-   double sim = trigram_similarity("hello world", "hello world");
-   assert(sim > 0.99);
-
-   sim = trigram_similarity("hello world", "goodbye moon");
-   assert(sim < 0.3);
-
-   sim = trigram_similarity("", "");
-   assert(sim < 0.01); /* empty strings have no trigrams */
-}
-
 static void test_stem_word(void)
 {
    char buf[64];
@@ -272,12 +260,6 @@ static void test_split_camel_case(void)
    assert(strcmp(parts[2], "Name") == 0);
    for (int i = 0; i < n; i++)
       free(parts[i]);
-}
-
-static void test_is_contradiction(void)
-{
-   assert(is_contradiction("always deploy on Friday", "never deploy on Friday") == 1);
-   assert(is_contradiction("use tabs", "use spaces") == 0);
 }
 
 static char *remote_probe(void *ctx, const char *cmd, int *ec)
@@ -639,7 +621,6 @@ int main(void)
    test_parse_utc_ts_accepts_both_spellings();
    test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();
-   test_trigram_similarity();
    test_stem_word();
    test_is_likely_path();
    test_trim_partial_utf8();
@@ -648,7 +629,6 @@ int main(void)
    test_split_reasoning_prefix();
    test_shlex_split();
    test_split_camel_case();
-   test_is_contradiction();
    test_shell_quote();
    test_shell_quote_injection_payloads();
    test_strip_ai_attribution();

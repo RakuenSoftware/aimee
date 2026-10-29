@@ -83,13 +83,7 @@ int vault_runtime_secret_delete(const char *name)
    return 0;
 }
 
-static int g_stub_mtls_resets;
 static int g_stub_dependency_resets;
-
-void kb_client_mtls_pool_reset(void)
-{
-   g_stub_mtls_resets++;
-}
 
 void kb_client_dependency_reset(void)
 {

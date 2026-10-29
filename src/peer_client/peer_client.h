@@ -172,11 +172,6 @@ extern "C"
     * large -- and they need different responses from whoever reads it. */
    const char *peer_client_transport_name(int transport);
 
-   /* Is anything serving peer delivery on this daemon's bus? A local check
-    * against the bus registry, not a probe: with no module attached there is no
-    * call to make, and saying so beats waiting out a deadline. */
-   int peer_client_available(void);
-
 #ifdef __cplusplus
 }
 #endif

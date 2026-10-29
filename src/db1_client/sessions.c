@@ -81,7 +81,6 @@ static int write_result(int status)
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
 
-
 int db1_server_session_create(const char *id, const char *client_type, const char *principal)
 {
    if (!id || !id[0])
@@ -127,52 +126,12 @@ int db1_server_session_get(const char *id, db1_server_session_t *out)
    return rc;
 }
 
-int db1_server_session_set_outcome(const char *id, const char *outcome)
-{
-   if (!id || !id[0])
-      return -1;
-   const char *fields[] = {id, outcome ? outcome : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_SET_OUTCOME, fields, 2, NULL, NULL, 0, NULL));
-}
-
 int db1_server_session_delete(const char *id)
 {
    if (!id || !id[0])
       return -1;
    const char *fields[] = {id};
    return write_result(db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_DELETE, fields, 1, NULL, NULL, 0, NULL));
-}
-
-static int legacy_session_list(const char *pattern, db1_server_session_t *out, int max, int search)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   memset(out, 0, (size_t)max * sizeof *out);
-   db1_server_session_record_t *records = calloc((size_t)max, sizeof *records);
-   if (!records)
-      return -1;
-   int n = search ? db1_server_session_record_search_by_title(pattern, records, max)
-                  : db1_server_session_record_list_recent(records, max);
-   int rc = n;
-   for (int i = 0; i < n; i++)
-      if (legacy_session_copy(&records[i], &out[i]))
-         rc = -1;
-   for (int i = 0; i < max; i++)
-      db1_server_session_record_free(&records[i]);
-   free(records);
-   if (rc < 0)
-      memset(out, 0, (size_t)max * sizeof *out);
-   return rc;
-}
-int db1_server_session_list_recent(db1_server_session_t *out, int max)
-{
-   return legacy_session_list(NULL, out, max, 0);
-}
-int db1_server_session_search_by_title(const char *pattern, db1_server_session_t *out, int max)
-{
-   return legacy_session_list(pattern, out, max, 1);
 }
 
 int db1_server_session_count(const char *since_or_null)
@@ -578,42 +537,6 @@ int db1_session_write_path_record(const char *session_id, const char *path)
    return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD, fields, 2, NULL, NULL, 0, NULL));
 }
 
-int db1_session_stale_reads(const char *parent_session_id, const char *child_session_id, char (*out_paths)[DB1_SESSION_PATH_LEN], int max)
-{
-   if (!parent_session_id || !parent_session_id[0] || !child_session_id || !child_session_id[0] || !out_paths || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", max);
-   const char *fields[] = {parent_session_id, child_session_id, arg2};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      return -1;
-   }
-   memset(out_paths, 0, (size_t)max * sizeof *out_paths);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = out_paths[wire_row];
-      wire_caps[wire_row * 1u + 0u] = sizeof out_paths[wire_row];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STALE_READS, fields, 3, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   return wire_rows;
-}
-
 int db1_webchat_live_set(const char *session_id, const char *turn_id, const char *text, const char *status)
 {
    if (!session_id || !session_id[0])
@@ -804,18 +727,6 @@ int db1_session_native_owner_claim(const char *principal, const char *request_js
    return write_result(
        db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_OWNER_CLAIM, fields, 2, NULL, NULL, 0, NULL));
 }
-int db1_session_native_reconcile(const char *principal, const char *request_json,
-                                 char out_sequence[32])
-{
-   if (!out_sequence)
-      return -1;
-   out_sequence[0] = 0;
-   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
-   char *const values[] = {out_sequence};
-   const size_t caps[] = {32u};
-   return write_result(
-       db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE, fields, 2, values, caps, 1, NULL));
-}
 
 static int native_epoch_call(uint32_t op, const char *principal, const char *request_json,
                              char out_epoch[33])
@@ -872,12 +783,6 @@ int db1_session_native_reservation_lookup_checked(const char *principal, const c
       rc = 1;
    primary_cells_free(cells, count);
    return rc;
-}
-char *db1_session_native_reservation_lookup(const char *principal, const char *request_json)
-{
-   char *result = NULL;
-   return db1_session_native_reservation_lookup_checked(principal, request_json, &result) ? NULL
-                                                                                          : result;
 }
 
 int db1_session_native_reservation_finish_checked(const char *principal, const char *request_json,

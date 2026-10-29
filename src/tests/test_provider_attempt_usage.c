@@ -233,6 +233,7 @@ static const char unknown_usage[] =
     "\"assistant\",\"content\":\"Unknown usage.\"}}]}";
 #include "agent_result_cache.h"
 #include <aimee/translation/aimee_backend.h>
+#include "support/config_test_setters.h"
 static char *cached_response;
 char *fixture_cache_get(const char *role, const char *key)
 {

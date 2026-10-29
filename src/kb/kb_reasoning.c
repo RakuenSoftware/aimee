@@ -332,25 +332,6 @@ void kb_reasoning_result_free(kb_reasoning_result_t *r)
 
 /* ---- kb_reasoning_case_write ---- */
 
-int kb_reasoning_case_write(const char *payload_json, char *id_out, int id_out_len)
-{
-   if (!payload_json)
-      return -1;
-
-   char id[64];
-   kb_store_artifact_gen_id(id, sizeof(id));
-
-   int rc = kb_store_artifact_write(id, "case", "proposed", "system", "", "", 1.0, payload_json);
-   if (rc != 0)
-      return -1;
-
-   if (id_out && id_out_len > 0)
-      snprintf(id_out, (size_t)id_out_len, "%s", id);
-
-   aimee_log(LOG_DEBUG, "reasoning", "wrote case artifact id=%s", id);
-   return 0;
-}
-
 /* ---- kb_reasoning_seed_ruleset ---- */
 
 void kb_reasoning_seed_ruleset(void)

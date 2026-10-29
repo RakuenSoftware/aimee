@@ -38,7 +38,6 @@ typedef struct
  * — NVIDIA via nvidia-smi, else AMD via /sys/class/drm. Empty output = no GPU. */
 extern const char *const HARDWARE_GPU_PROBE_CMD;
 
-void hardware_probe_result_init(hardware_probe_result_t *out);
 /* Parse the uniform "<index>, <name>, <vram_mb>" CSV (one GPU per line) into a
  * list, ignoring blank/malformed lines. Returns the number of GPUs parsed. */
 int hardware_probe_parse_gpu_csv_list(const char *csv, const char *vendor_hint,
@@ -50,16 +49,5 @@ int hardware_probe_list_local(hardware_gpu_list_t *out);
  * The AIMEE_SSH_BIN env override (shared with the ssh delegate backend) lets tests
  * substitute a fixture. On ssh/transport failure, out->error is set and count 0. */
 int hardware_probe_list_remote(const char *ssh_target, int port, hardware_gpu_list_t *out);
-int hardware_probe_parse_nvidia_csv(const char *csv, hardware_probe_result_t *out);
-int hardware_probe_parse_amd_vram_bytes(const char *bytes_text, int *mb_out);
-int hardware_probe_detect(hardware_probe_result_t *out);
-int hardware_probe_cache_result(const hardware_probe_result_t *result);
-int hardware_probe_cached_or_detect(hardware_probe_result_t *out);
-int hardware_probe_context_window_from_vram(int vram_mb, int model_context_window);
-double hardware_probe_quant_bpw(const char *model);
-double hardware_probe_params_billion(const char *model);
-int hardware_probe_estimate_model_vram_mb(const char *model, int context_window);
-int hardware_probe_should_warn_fit(const hardware_probe_result_t *result, const char *model,
-                                   int context_window, int *estimate_mb_out);
 
 #endif /* DEC_HARDWARE_PROBE_H */

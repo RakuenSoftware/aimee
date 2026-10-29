@@ -99,11 +99,6 @@ int vault_env_name_is_credential(const char *name)
    return name_span_is_credential(name, name ? strlen(name) : 0, 0);
 }
 
-int vault_env_name_is_any_credential(const char *name)
-{
-   return name_span_is_credential(name, name ? strlen(name) : 0, 1);
-}
-
 int vault_env_has_credential_environment(void)
 {
    extern char **environ;

@@ -22,9 +22,6 @@ typedef struct
 /* Read state for a session. Returns 0 on success, -1 if not found or error. */
 int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_t *out);
 
-/* Upsert state for a session. Returns 0 on success, -1 on error. */
-int db1_payload_rewrite_state_set(const payload_rewrite_state_t *s);
-
 /* Record a rewrite event: increments the appropriate counter, sets reason and timestamp.
  * deferred=1 means a cache-preserving deferral; deferred=0 means a forced rewrite.
  * Returns 0 on success. */

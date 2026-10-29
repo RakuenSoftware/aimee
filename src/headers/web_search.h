@@ -34,18 +34,6 @@ typedef struct
    char *snippet;
 } web_search_result_t;
 
-/*
- * web_search: run a search query via the configured backend.
- *
- * query       — search string (will be URL-encoded internally)
- * max_results — how many results to request (clamped to WEB_SEARCH_MAX_RESULTS)
- *
- * Returns a malloc'd, human-readable text block for the delegate context, or
- * an error string prefixed with "error:". Never returns NULL.
- * The caller must free() the returned string.
- */
-char *web_search(const char *query, int max_results);
-
 /* web_search with optional page fusion.
  *
  * fetch_pages   non-zero: fetch the top results through the guarded egress path

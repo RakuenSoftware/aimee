@@ -646,14 +646,6 @@ int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *
    return ok ? 0 : -1;
 }
 
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
-{
-   return kb_client_evidence_emit_retrieval_event_ex(turn_id, role, query_fingerprint, ids, n_ids,
-                                                     NULL, 0);
-}
-
 /* Record retrieval outcomes for surfaced rows against an event, as one batch.
  * `surface` selects the KB-service method: "memory" -> memory.record_retrieval_outcome
  * (writes retrieval_attribution), "ranker" -> ranker.record_outcome (writes

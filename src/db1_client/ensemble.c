@@ -17,10 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static db1_family_t family = {"db1.ensemble", "ensemble", AIMEE_DB1_EVENT_ENSEMBLE, AIMEE_DB1_STAGE_ENSEMBLE, 2000, 0};
-
-
 
 int db1_ensemble_create_id(const char *project_root, const char *config_dir, const char *template_name, const char *channel, const char *assignments_json, ensemble_id_result_t *out)
 {
@@ -246,26 +243,6 @@ int db1_ensemble_list_rows(ensemble_info_t **out, int *out_count)
    free(wire_scratch);
    *out = wire_held;
    *out_count = wire_rows;
-   return 0;
-}
-
-int db1_ensemble_find_current_id(const char *channel, ensemble_id_result_t *out)
-{
-   if (!channel || !channel[0] || !out)
-      return -1;
-   const char *fields[] = {channel};
-   char slot0[32];
-   char slot2[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, out->err, slot2};
-   const size_t caps[] = {sizeof slot0, sizeof out->err, sizeof slot2};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_ENSEMBLE_FIND_CURRENT_BY_CHANNEL, fields, 1, values, caps, 3, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->rc = (int)strtol(slot0, NULL, 10);
-   out->id = (int)strtol(slot2, NULL, 10);
    return 0;
 }
 

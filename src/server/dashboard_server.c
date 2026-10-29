@@ -214,13 +214,3 @@ SERVER_DASHBOARD_FALLBACK char *api_doctor(void)
 {
    return strdup("{\"error\":\"doctor report is not available from the server-hosted webchat\"}");
 }
-
-char *api_payload_rewrite_status(void)
-{
-   cJSON *obj = tool_payload_rewrite_status(NULL);
-   if (!obj)
-      return strdup("{}");
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json ? json : strdup("{}");
-}

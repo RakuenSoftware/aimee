@@ -123,14 +123,6 @@ int db1_ensemble_create(const char *project_root, const char *config_dir, const 
    return unpack_id(&res, rc, out_id, err, errlen);
 }
 
-int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err, size_t errlen)
-{
-   ensemble_id_result_t res;
-   memset(&res, 0, sizeof res);
-   int rc = db1_ensemble_find_current_id(channel, &res);
-   return unpack_id(&res, rc, out_id, err, errlen);
-}
-
 int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
 {
    if (db1_ensemble_list_rows(out, out_count) != 0)

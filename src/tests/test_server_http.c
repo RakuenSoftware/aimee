@@ -917,6 +917,7 @@ static void test_role_template_show_reports_what_the_role_came_to(void)
  * the whole connection layer to test header parsing. */
 #include "server_conn_io.h"
 #include "server_tls.h"
+#include "support/config_test_setters.h"
 
 int server_conn_io_has_ssl(int fd)
 {

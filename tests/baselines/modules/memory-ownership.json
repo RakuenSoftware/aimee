@@ -1738,7 +1738,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "090a87fdb07dd49f5ecff202a4cc8b4e8ce42d5be0b3ab19d792b44da16246d3"
+      "sha256": "435dc32d35b7c478f9a531e82b84172201cd39152980db41800f577efe874103"
     },
     "src/headers/memory.h": {
       "disposition": "storage-protocol",
@@ -1814,7 +1814,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "2401f1b5a81547c6a444efd58f21b6156bf52aec5c2595f213799c9b8c3f3e14",
+      "sha256": "394bb26f88a2af9136585edfb6e449fc7e6cbca21adb3d15f225bccf0b489e4c",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -1827,14 +1827,14 @@
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "030fcf0b232c6576fd480df2fd8ab3005a5f3de1851f0fc47e6ceb6fe78f2158"
+      "sha256": "c3e6d94683a2cbbf7740a2609e5f1d5249e33b5ab3f21729a5779216000f1f7e"
     },
     "src/kb/kb.c": {
       "disposition": "host-transport",
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "e2c0a0ea9745fc1cf39e589d22c60cdebec5973813238ae84239c6c846e8c44d",
+      "sha256": "299c6bff48bd28831e93e0c2b8cc8d81f5d6cf1b53b81e691f73d6f16adf68ee",
       "boundary_review": " 2026-10-25 specialized message admission: reviewed embedding reply decoding only. KB batch reads actual dimension separately from row count and fixed buffer stride; vector consumers honor documented dimension and decline/truncation facts. The matching HTTP fixture now supplies the real Go owner dimension and vector-free error/auth messages; all existing assertions remain. The shared C helper is a message codec only: provider execution, breaker state, storage, scoping, guards and memory eligibility remain with their existing owners. No request methods, arguments, routes, ownership classifications or original inventories change. Evidence: /var/tmp/aimee-specialized-memory-boundary-review/proof.json and /var/tmp/aimee-embed-consumer-evidence/results.json. This is explicit source-boundary review, not production-promotion approval and adds no exemption."
     },
     "src/kb/kb_memory_facts.c": {
@@ -1856,7 +1856,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "761c8d09d9b2f3519db4c608cdffe0a6bddf16b735e45be65cfea20826c3c568",
+      "sha256": "06e516ab898944e250c530d7f2abad07962f16483a8eee1985c92b0ece2702c1",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -1871,7 +1871,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "bc6456e7e9efadd539a478745d86fdefc551fa3df3a6500457d831484986ffca",
+      "sha256": "263b1b9462d254179c89283f19a3b4441d9cf8e094fae1a58e6212d6c3b8653c",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -1936,13 +1936,9 @@
         "kb_client_memory_benchmark_json",
         "kb_client_memory_check_drift",
         "kb_client_memory_compact_windows",
-        "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_get",
         "kb_client_memory_get_as_of",
         "kb_client_memory_get_json_as_of",
-        "kb_client_memory_insert",
-        "kb_client_memory_insert_as",
-        "kb_client_memory_insert_ex",
         "kb_client_memory_learn_style",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_json_ex",
@@ -1953,26 +1949,25 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "cb9aec3049852e73c8bf12c6aaee4fdd19051731abc58ab63022925aeb1f3f85"
+      "sha256": "0ea03efc3f6a177720a5ddc7e5453096db9f48f852052d275e57b4f0803f4c9b"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
       "symbols": [
-        "anti_pattern_escalate",
         "anti_pattern_extract_from_failures",
         "anti_pattern_extract_from_feedback",
         "kb_client_memory_learn_style",
         "kb_client_memory_scan_conversations",
         "memory_learn_style"
       ],
-      "sha256": "d751450dc32d1cb046b2a74d61c331265a7fcd330058cb3484a2f01017c0354a"
+      "sha256": "4ddb5bace99f5660d024a45b1d173c306a4c1d8f18d049527b3640022e0fc55f"
     },
     "src/modules/kb_client/kb_client_dashboard.c": {
       "disposition": "kb-client",
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "c681e3beba4876f6b6565d2bc696bfc3310b54667ae6d3aa3eea5db26fc3ca93"
+      "sha256": "a12cc815c630192daf3b2c87e55a1ff487e7f9966e45022a04ca4c94aea63fcf"
     },
     "src/modules/kb_client/kb_client_memory.c": {
       "disposition": "kb-client",
@@ -1997,7 +1992,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "51f1f322c263aba0012391ac0c2ed3a6d886911dfb80d0a90bacb32ceef83b1f"
+      "sha256": "4b4fd8af91b81ca5e687085de4c8f5620db27c789c5a60cf58a4abde0fa7be1a"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2010,23 +2005,17 @@
     "src/modules/kb_client/kb_client_memory_mutations.c": {
       "disposition": "kb-client",
       "symbols": [
-        "kb_client_memory_audit_note",
         "kb_client_memory_check_drift",
-        "kb_client_memory_find_id_by_key_kind",
-        "kb_client_memory_insert",
-        "kb_client_memory_insert_as",
-        "kb_client_memory_insert_ex",
-        "kb_client_memory_internal",
-        "kb_client_memory_scope_context_apply"
+        "kb_client_memory_internal"
       ],
-      "sha256": "9185c06c8eba2b61ed58d853227bc885b00770dd88d6373234fd9074b5b3f597"
+      "sha256": "89d07d96c67f6f0d855c1a2cc8daff77f72659cfa00d8538e9fb2e8198b81a25"
     },
     "src/modules/kb_client/kb_client_roadmap.c": {
       "disposition": "kb-client",
       "symbols": [
         "kb_client_memory_internal"
       ],
-      "sha256": "ce04a44d74b8086de32b699e4d7142da7f0b8983894def720e5230159f3eee83"
+      "sha256": "285ad1e358e840f37a2b91abefc57ecc0adf80246434581b8507b3f06be9f127"
     },
     "src/modules/protocols/mcp/mcp_tool_profile.c": {
       "disposition": "protocol-catalog",
@@ -2069,13 +2058,6 @@
       "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval. Canonical callers now transfer their exact admitted argument object through the same dispatcher; only legacy ingress uses cached-schema coercion. Classifier registration moves to the existing effect-contract owner. The memory scope application seam, its arguments, host identity and Go-owned memory policy are unchanged. This is source boundary analysis, not independent reviewer approval.",
       "boundary_review": "2026-10-20 PR #3052: Native configured verification now requires shell authority except read-only check/status; permission code uses existing role/toolset gates. No memory lookup, native memory authority, or knowledge-write rule changed. This records source-boundary review, not independent production-promotion approval. 2026-10-24 ACP filesystem owner: reviewed the narrow read_file/write_file callback after existing policy/snapshot/track checks and forwarding-entry relocation to the existing effect-contract owner. Non-file dispatch is unchanged; the full td_search_memory function is byte-identical to the previous pin. The sole memory scope application, its arguments and Go ownership remain unchanged. Main shared dispatcher/resource fixtures pass normally and under ASan/UBSan with leak detection. Evidence: /var/tmp/aimee-memory-acp-dispatcher-review.json. Source review, not an exemption or promotion. 2026-10-24 nested CLI outcome closure: classified verdict/reason/mode/explicit state moves to the existing effect-contract owner and joins its lexical scope. Nested completion cannot overwrite outer classification. The complete td_search_memory function remains byte-identical to the original pin, including its sole Go-owned scope application. No memory inventory, arguments or ownership changed. Independent API review clear; actual old-source nested error regression RED, three normal and three sanitizer fixtures PASS. Evidence: /var/tmp/aimee-dispatch-outcome-final-proof/final-index.json. No exemption. 2026-10-24 container file-IO review: dispatch preserves a concrete effects-unknown verdict for interrupted owned file writes and routes scoped file resources. The entire td_search_memory handler is byte-identical to the previously reviewed source; its sole memory-scope call, request arguments and Go admission ownership are unchanged. Evidence: /var/tmp/aimee-memory-boundary-container-dispatch-review.json; boundary analysis, not production promotion."
     },
-    "src/rel_types.c": {
-      "disposition": "storage-protocol",
-      "symbols": [
-        "memory_node_kind_t"
-      ],
-      "sha256": "a0680fa1bd6678cd6fc20605524c778e49120ff6f05abe820ebd5dfd18882c66"
-    },
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
       "symbols": [
@@ -2116,7 +2098,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "3cc439d100aa4daef912ded344dc70a24a5e6e73f50d1608ad4a2a161228aaea",
+      "sha256": "06f817b66c78300aee140e290b0a8d770eda621892d8e576cb3db15c4da35220",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2334,7 +2316,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ed7fa4135cc00af89aebaaeec072ca10f07141121101fe0620930c799c471c0e",
+      "sha256": "c74a8df6140b02b9a2fc33096ae6a9ac4bc4161007584094f66b78d754c7aaeb",
       "boundary_review": "2026-10-20 PR #3052: Adds explicit DB1 historical-receipt fixture and real Go assembly/source-revalidation checks. Retains existing memory assertions; no production authority is implemented by the stub. This records source-boundary review, not independent production-promotion approval. 2026-10-20 PR #3052: Reviewed deletion only of unreachable raw-message extraction/router entry APIs, associated comments/includes and their obsolete test. Canonical IR routing and existing memory assembly/Go request ownership remain unchanged. Exact deleted source is retained in the Git diff; this is source-boundary review, not independent production approval. The default-primary grade-only helper and its normal/sanitizer regression are also reviewed in the bounded CI repair commit; no optional KB retrieval is activated. 2026-10-21 PR #3057: Native callbacks retain distinct transport request IDs and fork opaque parent source provenance only through the host-only Go owner. The shared owner-response transport revalidates existing local, shared and configured-test sources; Go checks the old identity, fresh request binding, current source versions and original expiry. The host accepts only the exact new-request response and independently finishes its child handle. Parent lifecycle, mandatory final guarded provider admission, source selection and memory policy remain Go-owned. The real Go ingress fixture covers copied-ticket refusal, successful grade-bound handoff, parent survival, revoked sources and changed principal refusal; the native runtime fixture verifies captured identities. This is source-boundary review, not independent production-promotion approval."
     },
     "src/tests/test_ir_module_plan.c": {
@@ -2346,7 +2328,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "0e19e12ed3f3c5c4394e03ae5f1f94f4dda2f07bf1bc5d3e50c909e503260849",
+      "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
       "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
       "boundary_review": "2026-10-20 PR #3052: Adds only a null historical-receipt DB1 stub for an ordinary nonverification IR plan. Existing source/typed memory assertions remain unchanged. This records source-boundary review, not independent production-promotion approval."
     },
@@ -2355,23 +2337,20 @@
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "790d8a074d0d857c88249f1b9fb5b6ca0a3cc18ec3d9fb511b33d7f5f8bb2624"
+      "sha256": "0aa34578e094c8c755442a3c72f57d138e695b8642bac4c9c9fe9f1a67337512"
     },
     "src/tests/test_kb_client_memory.c": {
       "disposition": "host-fixture",
       "symbols": [
         "AIMEE_MEMORY_HEALTH_ENABLED",
-        "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
-        "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_get",
         "kb_client_memory_get_as_of",
         "kb_client_memory_get_json_as_of",
-        "kb_client_memory_insert",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_native_json",
         "kb_client_memory_recall_shared_json",
@@ -2379,7 +2358,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "c1a43bcdfb1a0a22addbcc0787bd012c3cc355676fbf430d3d913446f6cb4b1d"
+      "sha256": "0937d84896e82e1b9502735186e801c745784ffc0d55abceee6e0408a2c1fa03"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",
@@ -2428,7 +2407,7 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "9a91cd24f73df949fa180f8db7631a1fc741e851b45edf634bee578bdc852a8c"
+      "sha256": "0d42cc81cc22938f0a1df496f99b5b4ff40ed4b8836fa77ada68cdc082425f30"
     },
     "src/tests/test_module_json_call.c": {
       "disposition": "host-fixture",
@@ -2447,7 +2426,7 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "038bcb45e35385458026e0ea9cba01dab966108269a42f653e09331fd756c4a5",
+      "sha256": "7cf06a625ec9c6bfbb590f0ce6b0bec42c75304351b09daa309fd645b8c79b7f",
       "boundary_review": "2026-10-20 PR #3052: Hook resource-provider fixtures now cover nested acquisition, approved mirror cwd and enclosing binding restoration. Reversing only hook_test_exec/provider peers, pre_tool_check fixture and test_hooks_pre_remote_workspace_scope reproduces the pinned fixture byte-for-byte. Memory data/scope/stat fixtures are unchanged. 2026-10-20 PR #3052: Added only fail-closed filesystem/project custody stubs to the minimal dispatcher fixture for the new scoped learning reader. Exact reversal restores the prior reviewed hash. Production memory ownership and existing fixture assertions are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the new local-source identity stub, delegating to the existing refusing resource stub. Removing exactly that function restores the prior reviewed hash. No memory fixture or source authority is granted; not independent production approval. 2026-10-20 PR #3052: Added only the primary-session adapter include and an asserting refusal stub for browser history opening in this dispatch-only fixture. Exact removal restores the prior reviewed hash byte-for-byte. Existing memory fixtures and authority remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only an asserting refusal stub for the new DB1 exact operator cancellation entry point to the dispatch-only fixture; every call fails the fixture. Existing assertions, memory symbols and memory owner routing remain unchanged. This is source-boundary review, not independent production approval. 2026-10-23 canonical evaluator cutover: adds only the model.generate dispatcher stub. Existing memory scope/data/stats assertions are unchanged. 2026-10-25 session metadata repair: only the fixed full-session DTO/read changes to the exact identity/incarnation owner projection (or matching asserting fixture stub). Existing memory symbols, calls, scope, budgets, routing and Go ownership are unchanged. Independent source review is recorded in /var/tmp/aimee-session-callers-proof/api-independent-review.json; this is not production-promotion approval."
     },
     "src/tests/test_server_facts_transport.c": {
@@ -2531,7 +2510,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "92e7c8cb999fa163f508156d17c0f977469ecc74536e7f74f86af987ba5616ae",
+      "sha256": "874f8d1148f504a5dca6b453cf1045edea85dad92a7a77fbe04f130e19103093",
       "reason": "Reviewed 2026-10-22: the attested private Codex credential response additionally carries the existing pinned, nonsecret adapter compatibility version for account catalog GETs. Token/account/source custody, response clearing, selected-account refresh and pipe-only transport are unchanged. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. The new header contains only the installer version constant. This records exact source-boundary reasoning, not release approval.",
       "evidence": [
         "src/tests/test_agent.c",
@@ -2560,7 +2539,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "e00f3e969c97c757de8ee17473bef885568afa60d4333328e98c187780cc925e",
+      "sha256": "1031f26550f730f300382dbda94d26dc4c003ac01158be5e4a62b6fad1d52153",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2586,7 +2565,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "19ce816317b816d60385dfc33263d8421f88ca20bab4ec8f90751e8b0322a456",
+      "sha256": "dec259de822278c762f89d8e1849f95a70710a898345aa86856a2dcf012b8016",
       "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/config_client_contract.c": {
@@ -2594,7 +2573,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND"
       ],
-      "sha256": "b9275a655e5a6cae4ae333c82c138cf036c6cab30d0a008825d1f2ca3e66a370"
+      "sha256": "62e03a8f596e9efdea4f6b4a20ceed8f4763470a026ff0333a64e624649c4b0e"
     },
     "src/tests/test_server_memory_setup.c": {
       "disposition": "host-fixture",

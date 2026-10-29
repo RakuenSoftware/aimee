@@ -68,13 +68,6 @@ static int learning_max_commits_per_week(void)
                                                      : LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
 }
 
-int learning_router_enabled(void)
-{
-   if (!config_present())
-      return 1;
-   return config_learning_router_enabled() ? 1 : 0;
-}
-
 static void learning_expiry_after_days(int days, char *buf, size_t len)
 {
    time_t now = time(NULL);
@@ -540,13 +533,6 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
    return signal_id;
 }
 
-int learning_list_proposals(const char *state, const char *sink, int limit,
-                            learning_proposal_t *out, int max)
-{
-   kb_store_learning_proposals_archive_expired();
-   return kb_store_learning_proposal_list(state, sink, limit, out, max);
-}
-
 int learning_get_proposal(int id, learning_proposal_t *out)
 {
    kb_store_learning_proposals_archive_expired();
@@ -559,25 +545,6 @@ int learning_accept_proposal(int id, learning_proposal_t *out)
       return -1;
    kb_store_learning_proposals_archive_expired();
    return learning_commit_proposal(id, out);
-}
-
-int learning_reject_proposal(int id, learning_proposal_t *out)
-{
-   learning_proposal_t proposal;
-   if (id <= 0 || learning_get_proposal(id, &proposal) != 0)
-      return -1;
-
-   if (strcmp(proposal.state, "committed") != 0 && strcmp(proposal.state, "archived") != 0)
-      kb_store_learning_proposal_archive(id, "rejected");
-   else if (strcmp(proposal.state, "committed") == 0)
-   {
-      /* S5: rejecting something that ALREADY COMMITTED is the clearest regret
-       * signal there is — a human looked at what the loop did and undid it.
-       * The row stays committed (the effect was applied and is not being
-       * rewritten here); what changes is the verdict recorded against it. */
-      (void)learning_fate_record(id, LEARNING_FATE_REVERTED, "rejected after committing");
-   }
-   return learning_get_proposal(id, out ? out : &proposal);
 }
 
 struct cJSON *learning_proposal_to_json(const learning_proposal_t *proposal)
@@ -605,44 +572,6 @@ struct cJSON *learning_proposal_to_json(const learning_proposal_t *proposal)
    return obj;
 }
 
-static void ljson_copy_str(cJSON *obj, const char *key, char *dst, size_t cap)
-{
-   cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(dst, cap, "%s", item->valuestring);
-   else
-      dst[0] = '\0';
-}
-
-int learning_proposal_from_json(const struct cJSON *obj, learning_proposal_t *out)
-{
-   if (!obj || !out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *src = (cJSON *)obj;
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(src, "id");
-   cJSON *sig_j = cJSON_GetObjectItemCaseSensitive(src, "signal_id");
-   cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(src, "target_memory_id");
-   cJSON *cor_j = cJSON_GetObjectItemCaseSensitive(src, "corroboration_count");
-   if (!cJSON_IsNumber(id_j))
-      return -1;
-   out->id = (int)id_j->valuedouble;
-   out->signal_id = cJSON_IsNumber(sig_j) ? (int)sig_j->valuedouble : 0;
-   out->target_memory_id = cJSON_IsNumber(mem_j) ? (int64_t)mem_j->valuedouble : 0;
-   out->corroboration_count = cJSON_IsNumber(cor_j) ? (int)cor_j->valuedouble : 0;
-   ljson_copy_str(src, "sink", out->sink, sizeof(out->sink));
-   ljson_copy_str(src, "state", out->state, sizeof(out->state));
-   ljson_copy_str(src, "target_key", out->target_key, sizeof(out->target_key));
-   ljson_copy_str(src, "action_json", out->action_json, sizeof(out->action_json));
-   ljson_copy_str(src, "evidence_refs", out->evidence_refs, sizeof(out->evidence_refs));
-   ljson_copy_str(src, "expires_at", out->expires_at, sizeof(out->expires_at));
-   ljson_copy_str(src, "committed_at", out->committed_at, sizeof(out->committed_at));
-   ljson_copy_str(src, "archive_reason", out->archive_reason, sizeof(out->archive_reason));
-   ljson_copy_str(src, "created_at", out->created_at, sizeof(out->created_at));
-   ljson_copy_str(src, "updated_at", out->updated_at, sizeof(out->updated_at));
-   return 0;
-}
-
 struct cJSON *learning_dispatch_result_to_json(const learning_dispatch_result_t *result)
 {
    if (!result)
@@ -662,69 +591,6 @@ struct cJSON *learning_dispatch_result_to_json(const learning_dispatch_result_t 
 
 /* --- Phase-2 metrics --- */
 
-static const char *LEARNING_CANONICAL_SINKS[LEARNING_SINK_COUNT] = {"reranker", "supersede", "rule",
-                                                                    "workflow"};
-
-int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out)
-{
-   if (!out)
-      return -1;
-   if (window_days <= 0)
-      window_days = LEARNING_METRICS_DEFAULT_WINDOW_DAYS;
-
-   memset(out, 0, sizeof(*out));
-   out->window_days = window_days;
-
-   /* Settled-only denominator: committed + archived within the
-    * window, excluding still-pending rows so the ratio reflects the
-    * operator's actual accept/reject decisions rather than backlog
-    * age. */
-   if (kb_store_learning_proposals_settled_counts(window_days, &out->proposals_committed,
-                                                  &out->proposals_terminal) != 0)
-      return -1;
-   if (out->proposals_terminal > 0)
-      out->commit_ratio = (double)out->proposals_committed / (double)out->proposals_terminal;
-   return 0;
-}
-
-int learning_metrics_per_sink_caps(learning_sink_cap_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   int cap = learning_max_commits_per_week();
-   int n = max < LEARNING_SINK_COUNT ? max : LEARNING_SINK_COUNT;
-   for (int i = 0; i < n; i++)
-   {
-      memset(&out[i], 0, sizeof(out[i]));
-      snprintf(out[i].sink, sizeof(out[i].sink), "%s", LEARNING_CANONICAL_SINKS[i]);
-      out[i].committed_this_week =
-          kb_store_learning_commits_in_last_7_days(LEARNING_CANONICAL_SINKS[i]);
-      out[i].weekly_cap = cap;
-      if (cap > 0)
-         out[i].utilization = (double)out[i].committed_this_week / (double)cap;
-   }
-   return n;
-}
-
-void learning_router_metrics(int64_t *ingest_calls, double *ingest_ms_avg, double *ingest_ms_max)
-{
-   if (ingest_calls)
-      *ingest_calls = g_learning_ingest_calls;
-   if (ingest_ms_avg)
-      *ingest_ms_avg = g_learning_ingest_calls > 0
-                           ? g_learning_ingest_ms_sum / (double)g_learning_ingest_calls
-                           : 0.0;
-   if (ingest_ms_max)
-      *ingest_ms_max = g_learning_ingest_ms_max;
-}
-
-void learning_router_metrics_reset(void)
-{
-   g_learning_ingest_calls = 0;
-   g_learning_ingest_ms_sum = 0.0;
-   g_learning_ingest_ms_max = 0.0;
-}
-
 void learning_router_record_detection_ms(double ms)
 {
    if (ms < 0.0)
@@ -733,24 +599,4 @@ void learning_router_record_detection_ms(double ms)
    g_learning_detection_ms_sum += ms;
    if (ms > g_learning_detection_ms_max)
       g_learning_detection_ms_max = ms;
-}
-
-void learning_router_detection_metrics(int64_t *detection_calls, double *detection_ms_avg,
-                                       double *detection_ms_max)
-{
-   if (detection_calls)
-      *detection_calls = g_learning_detection_calls;
-   if (detection_ms_avg)
-      *detection_ms_avg = g_learning_detection_calls > 0
-                              ? g_learning_detection_ms_sum / (double)g_learning_detection_calls
-                              : 0.0;
-   if (detection_ms_max)
-      *detection_ms_max = g_learning_detection_ms_max;
-}
-
-void learning_router_detection_metrics_reset(void)
-{
-   g_learning_detection_calls = 0;
-   g_learning_detection_ms_sum = 0.0;
-   g_learning_detection_ms_max = 0.0;
 }

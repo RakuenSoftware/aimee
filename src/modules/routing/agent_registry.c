@@ -54,31 +54,6 @@ static agent_file_id_t g_id;
 static int g_cached;
 static pthread_mutex_t g_cache_lock = PTHREAD_MUTEX_INITIALIZER;
 
-int agent_registry_cache_get(const struct stat *st, agent_config_t *cfg)
-{
-   if (!st || !cfg)
-      return -1;
-   pthread_mutex_lock(&g_cache_lock);
-   agent_file_id_t id;
-   agent_file_id_from(st, &id);
-   int hit = g_cached && agent_file_id_eq(&id, &g_id);
-   if (hit)
-      memcpy(cfg, &g_cache, sizeof(*cfg));
-   pthread_mutex_unlock(&g_cache_lock);
-   return hit ? 0 : -1;
-}
-
-void agent_registry_cache_put(const agent_config_t *cfg, const struct stat *st)
-{
-   if (!cfg || !st)
-      return;
-   pthread_mutex_lock(&g_cache_lock);
-   memcpy(&g_cache, cfg, sizeof(g_cache));
-   agent_file_id_from(st, &g_id);
-   g_cached = 1;
-   pthread_mutex_unlock(&g_cache_lock);
-}
-
 void agent_registry_cache_invalidate(void)
 {
    pthread_mutex_lock(&g_cache_lock);

@@ -432,33 +432,6 @@ char *kb_client_index_verify_json(const char *project, const char *root, int dee
    return json;
 }
 
-char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
-                                             const char *confirm_hash, const char *reason,
-                                             int retention_days, int *http_status)
-{
-   if (http_status)
-      *http_status = 0;
-   if (!operation || !operation[0] || !project || !project[0] ||
-       (strcmp(operation, "detach") != 0 && strcmp(operation, "purge") != 0 &&
-        strcmp(operation, "gc") != 0))
-      return NULL;
-   char path[96];
-   snprintf(path, sizeof(path), "/v1/code/project/%s", operation);
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return NULL;
-   cJSON_AddStringToObject(req, "project", project);
-   if (confirm_hash && confirm_hash[0])
-      cJSON_AddStringToObject(req, "confirm_hash", confirm_hash);
-   if (reason && reason[0])
-      cJSON_AddStringToObject(req, "reason", reason);
-   if (strcmp(operation, "gc") == 0)
-      cJSON_AddNumberToObject(req, "retention_days", retention_days);
-   char *json = kb_client_v1_post_json(path, req, kb_client_index_read_timeout_ms(), http_status);
-   cJSON_Delete(req);
-   return json;
-}
-
 int kb_client_index_find_scoped(const char *project, int all_projects, const char *identifier,
                                 term_hit_t *out, int max)
 {

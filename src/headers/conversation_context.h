@@ -5,12 +5,6 @@
 #include "cJSON.h"
 #include <stdint.h>
 
-/* Record a tool event for the current session.
- * Returns new event id (>0), 0 if feature disabled, or -1 on error.
- * tool_input is a JSON string; tool_result is raw text. */
-int64_t conv_ctx_record_event(const char *sid, const char *tool_name, const char *tool_input,
-                              const char *tool_result, int result_bytes);
-
 /* Flush all pending (unassigned) events into chains for the session.
  * Returns number of chains created, or -1 on error. */
 int conv_ctx_flush_pending(const char *sid);

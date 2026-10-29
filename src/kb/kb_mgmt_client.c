@@ -374,10 +374,3 @@ int kb_mgmt_client_request_auth(const char *ep, const char *ca, const char *cc, 
    kb_mgmt_client_session_close(&session);
    return rc;
 }
-
-int kb_mgmt_client_request(const char *ep, const char *ca, const char *cc, const char *ck,
-                           const char *m, const char *path, const char *b, char *r, size_t n,
-                           int *st)
-{
-   return kb_mgmt_client_request_auth(ep, ca, cc, ck, m, path, b, NULL, r, n, st);
-}

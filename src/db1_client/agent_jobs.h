@@ -142,10 +142,6 @@ extern "C"
     * tolerates a zero-initialized struct (a failed get) and double calls. */
    void db1_agent_job_free(db1_agent_job_t *job);
 
-   /* Check if a heartbeat_at timestamp is older than `stale_minutes`
-    * ago. Returns 1 if stale, 0 if fresh or unparseable. */
-   int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes);
-
    /* UPDATE status='running', lease_owner=<owner>, heartbeat_at=now.
     * Returns 0 on success, -1 on error. */
    int db1_agent_job_take_lease(int job_id, const char *owner);
@@ -181,10 +177,6 @@ extern "C"
     * job, then never repeat cleanup after that admission barrier opens.
     * Empty results receive the cancellation reason; existing results remain. */
    int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
-
-   /* Cancel all 'running' jobs older than `threshold_seconds`, with a
-    * fixed reason. Returns rows changed. */
-   int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason);
 
    /* One row from the agent_log table. */
    typedef struct

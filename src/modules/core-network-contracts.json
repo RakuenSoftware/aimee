@@ -14,7 +14,7 @@
         {
           "primitive": "http",
           "path": "src/posix/agent_bridge.c",
-          "count": 13
+          "count": 12
         }
       ]
     },

@@ -79,42 +79,6 @@ int hud_gather(hud_status_t *out)
    return 0;
 }
 
-void hud_print(const hud_status_t *s)
-{
-   if (!s)
-      return;
-
-   printf("Session Status\n");
-   printf("  Mode:        %s\n", s->mode[0] ? s->mode : "unknown");
-   printf("  Delegates:   %d total  (%d ok, %d failed)\n", s->total_calls, s->successful_calls,
-          s->failed_calls);
-   printf("  Tokens:      %lld prompt / %lld completion", s->total_prompt_tokens,
-          s->total_completion_tokens);
-   if (s->total_cache_write_tokens > 0 || s->total_cache_read_tokens > 0)
-      printf(" | cache: %lldw / %lldr", s->total_cache_write_tokens, s->total_cache_read_tokens);
-   if (s->spend_realized_usd > 0.0)
-      printf(" | realized ~$%.4f", s->spend_realized_usd);
-   else if (s->total_estimated_cost_usd > 0.0)
-      printf(" | ~$%.4f", s->total_estimated_cost_usd);
-   if (s->spend_avoided_usd > 0.0)
-      printf(" (avoided ~$%.4f)", s->spend_avoided_usd);
-   printf("\n");
-   printf("  Turns:       %d  |  Tool calls: %d\n", s->total_turns, s->total_tool_calls);
-   printf("  Avg latency: %.0f ms\n", s->avg_latency_ms);
-   printf("  Recent (5m): %d calls  (%d ok)\n", s->recent_calls, s->recent_successes);
-   if (s->semantic_warn_count > 0)
-      printf("  semantic warnings: %d this session\n", s->semantic_warn_count);
-   if (s->ensemble_call_count > 0)
-      printf("  Ensemble:    %d calls  ~$%.4f\n", s->ensemble_call_count, s->ensemble_cost_usd);
-   if (s->kb_health_checked)
-   {
-      if (s->kb_health_fail)
-         printf("  KB:          [KB:down]\n");
-      else if (s->kb_health_warn)
-         printf("  KB:          [KB:warn]\n");
-   }
-}
-
 char *hud_json(const hud_status_t *s)
 {
    if (!s)

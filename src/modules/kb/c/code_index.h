@@ -20,18 +20,9 @@ extern "C"
     * DB / connection error returns -1. */
    int kb_store_code_index_project_list(project_info_t *out, int max);
 
-   /* Total row count of the projects table. Returns 0 on miss / DB
-    * unavailable. */
-   int kb_store_code_index_project_count(void);
    /* Current visible generation for a stable project id. Returns 0 when
     * current, -2 when unknown/detached, -1 on storage error. */
    int kb_store_code_index_project_current_generation(const char *name, int64_t *generation_out);
-
-   /* Most recent scanned_at timestamp across all rows in the projects
-    * table, written to |out| (NUL-terminated, ISO-8601). Returns 0 on
-    * success (out filled, may be empty if no rows), -1 on DB /
-    * connection error / bad args. */
-   int kb_store_code_index_project_last_scan(char *out, size_t cap);
 
    /* Find every (project, file, line, kind) where a term named
     * |identifier| exists. Definition rows sort first, then

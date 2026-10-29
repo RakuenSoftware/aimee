@@ -21,6 +21,7 @@
 #include "../kb_curator_extract.h"
 #include "config.h"
 #include "support/curator_model_fixture.h"
+#include "support/config_test_setters.h"
 
 /* An upstream outage must not be charged to the job. The gateway opens a circuit
  * breaker and 503s everything for its cooldown, so three claims inside one

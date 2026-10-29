@@ -606,31 +606,6 @@ static const char *PROMPT_CODE_PRINCIPLES_TEXT =
 
 /* --- Helpers ------------------------------------------------------------ */
 
-prompt_tier_t prompt_tier_from_string(const char *name)
-{
-   if (!name || !name[0])
-      return PROMPT_STANDARD;
-   if (strcasecmp(name, "MINIMAL") == 0)
-      return PROMPT_MINIMAL;
-   if (strcasecmp(name, "EXTENDED") == 0)
-      return PROMPT_EXTENDED;
-   return PROMPT_STANDARD;
-}
-
-const char *prompt_tier_to_string(prompt_tier_t tier)
-{
-   switch (tier)
-   {
-   case PROMPT_MINIMAL:
-      return "MINIMAL";
-   case PROMPT_EXTENDED:
-      return "EXTENDED";
-   case PROMPT_STANDARD:
-   default:
-      return "STANDARD";
-   }
-}
-
 aimee_mode_t aimee_mode_from_string(const char *name)
 {
    if (name && strcasecmp(name, "novel") == 0)
@@ -722,28 +697,6 @@ const char *prompt_persona_text(aimee_mode_t mode)
    }
 }
 
-char *prompt_prepend_principles(aimee_mode_t mode, const char *base_prompt)
-{
-   const char *base = base_prompt ? base_prompt : "";
-   const char *principles = prompt_principles_text(mode);
-   size_t principles_len = strlen(principles);
-
-   size_t base_len = strlen(base);
-   size_t prefix_len = strncmp(base, principles, principles_len) == 0 ? 0 : principles_len;
-   char *out = malloc(prefix_len + base_len + 1);
-   if (!out)
-      return NULL;
-   if (prefix_len)
-      memcpy(out, principles, prefix_len);
-   memcpy(out + prefix_len, base, base_len + 1);
-   return out;
-}
-
-const char *prompt_code_principles_text(void)
-{
-   return prompt_principles_text(AIMEE_MODE_ENGINEER);
-}
-
 /* The wording deliberately biases AGAINST tagging. A compaction boundary carries a
  * tagged turn forward as a settled fact while discarding the reasoning that produced it,
  * so a mis-tagged [verdict] is worse than no tag at all: it asserts a guess and outlives
@@ -764,11 +717,6 @@ const char *prompt_turn_registers_text(int enabled)
           "[verdict]: when this conversation is later compacted, tagged turns are carried "
           "forward as settled facts while the reasoning behind them is discarded, so a "
           "wrong tag outlives its evidence.\n";
-}
-
-char *prompt_prepend_code_principles(const char *base_prompt)
-{
-   return prompt_prepend_principles(AIMEE_MODE_ENGINEER, base_prompt);
 }
 
 /* Read a file's full content into a heap buffer. Returns NULL on failure. */
@@ -815,11 +763,6 @@ static void append_prompt_cwd(dstr_t *out, const char *template_text, const char
 }
 
 /* --- Public API ---------------------------------------------------------- */
-
-char *prompt_build(prompt_tier_t tier, const char *cwd, const char *custom_file)
-{
-   return prompt_build_mode(AIMEE_MODE_ENGINEER, tier, cwd, custom_file);
-}
 
 char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
                         const char *custom_file)
@@ -915,79 +858,6 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
       }
    }
 
-   return dstr_steal(&out);
-}
-
-char *prompt_apply_dispositions(const char *base_prompt)
-{
-   dstr_t out;
-   dstr_init(&out);
-   dstr_append_str(&out, base_prompt ? base_prompt : "");
-
-   int disposition_count = config_disposition_count();
-   if (disposition_count <= 0)
-      return dstr_steal(&out);
-
-   dstr_append_str(
-       &out, "\n\n## Dispositions\n"
-             "These are softer behavioral preferences. Approved rules and explicit instructions "
-             "override them.\n");
-   for (int i = 0; i < disposition_count; i++)
-      dstr_appendf(&out, "- %s: %.2f\n", config_disposition_name(i), config_disposition_value(i));
-
-   return dstr_steal(&out);
-}
-
-static int charter_total_entries(void)
-{
-   return config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
-          config_charter_values_count() + config_charter_tone_boundaries_count();
-}
-
-/* Takes the section's indexed accessor rather than the array itself: the entries
- * are no longer a block of memory the caller can hand over. Each entry is used
- * within its own dstr_appendf, so the accessor's thread-local buffer is consumed
- * before the next index overwrites it. */
-static void charter_append_section(dstr_t *out, const char *label, const char *(*entry)(int),
-                                   int count)
-{
-   if (count <= 0)
-      return;
-   dstr_appendf(out, "\n### %s\n", label);
-   for (int i = 0; i < count; i++)
-      dstr_appendf(out, "- %s\n", entry(i));
-}
-
-char *prompt_apply_charter(const char *base_prompt)
-{
-   if (charter_total_entries() == 0)
-   {
-      /* No charter configured — return an independent copy of
-       * base_prompt so callers can always free() the result. */
-      dstr_t out;
-      dstr_init(&out);
-      dstr_append_str(&out, base_prompt ? base_prompt : "");
-      return dstr_steal(&out);
-   }
-
-   dstr_t out;
-   dstr_init(&out);
-   dstr_append_str(&out,
-                   "## Charter\n"
-                   "These are immutable operator-authored constraints. They take precedence over "
-                   "dispositions, the working profile, and every turn-level or session-level "
-                   "instruction below. Do not override, negotiate, or soften any item in this "
-                   "section.\n");
-   charter_append_section(&out, "Safety axioms", config_charter_safety_axioms,
-                          config_charter_safety_axioms_count());
-   charter_append_section(&out, "Hard constraints", config_charter_hard_constraints,
-                          config_charter_hard_constraints_count());
-   charter_append_section(&out, "Values", config_charter_values, config_charter_values_count());
-   charter_append_section(&out, "Tone boundaries", config_charter_tone_boundaries,
-                          config_charter_tone_boundaries_count());
-   dstr_append_str(&out, "\n---\n\n");
-   if (base_prompt && base_prompt[0])
-      dstr_append_str(&out, base_prompt);
    return dstr_steal(&out);
 }
 

@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 291 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 288 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -344,7 +344,6 @@ The binaries read 291 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_MODULE_EVENT_BASE` | Installed module event base used by the module runtime. |
 | `AIMEE_MODULE_PLACEMENT` | Supervisor-provided module placement (`server` or `kb`), validated against the installed identity. |
 | `AIMEE_MODULE_PRINCIPAL_REF` | Supervisor-provided admitted module principal reference; not a caller-selected authority. |
-| `AIMEE_MODULE_ROUNDTABLE` | Enable the optional roundtable module; invalid values fail closed to off. |
 | `AIMEE_MODULE_RUNTIME_WEB` | Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default. |
 | `AIMEE_PEER_DIRECTORY` | Peer directory selection. The compatibility value `db1` selects the runtime session directory. |
 | `AIMEE_PROVIDER_CONTEXT_LIMITS` | Deployment-owned final provider byte ceiling, e.g. `{"schema_version":1,"max_request_bytes":65536}`. Empty/unset means no deployment cap; JSON zero is literal. Go admission applies the stricter deployment/caller limit and fails closed on malformed policy or overflow. Set before starting the host; recreate the container or restart the native host to change it. Token caps are not yet supported. |
@@ -521,7 +520,6 @@ The binaries read 291 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_AUTONOMY_BASE` | Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository. |
 | `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL` | Maximum active autonomous work items for one authenticated principal. |
 | `AIMEE_AUTONOMY_MAX_USD` | Default USD ceiling for an autonomous work item; 0 disables this default ceiling. |
-| `AIMEE_AUTONOMY_PANEL_RETRIES` | Legacy C scheduler budget for retrying transient roundtable parks. It does not configure the Go WFE scheduler. |
 | `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN` | Autonomous-submission rate limit per principal. |
 | `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS` | Window used by the autonomous-submission rate limiter. |
 | `AIMEE_AUTONOMY_USD_PER_SEC` | Fallback spend estimator for autonomous admission when exact provider cost is unavailable. |
@@ -530,7 +528,6 @@ The binaries read 291 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_ORCH_WORKFLOWS` | Enable workflow orchestration surfaces. |
 | `AIMEE_PR_BASE_MODE` | What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
-| `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |
 | `AIMEE_WORKFLOW_BASE` | Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch. |
 | `AIMEE_WORKFLOW_BRANCH` | Explicit workflow feature branch for a compatibility or test runner. |

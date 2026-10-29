@@ -18,10 +18,6 @@ extern "C"
 {
 #endif
 
-   /* Insert a decision row. `created_at` may be NULL to default to
-    * datetime('now'). Returns 0 on success, -1 on error. */
-   int db1_decision_record(int64_t window_id, const char *description, const char *created_at);
-
 #ifdef __cplusplus
 }
 #endif

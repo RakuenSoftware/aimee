@@ -25,10 +25,6 @@ const wfe_def_t *wfe_ctx_def(const wfe_ctx *c)
 {
    return c ? c->def : NULL;
 }
-const wfe_node_t *wfe_ctx_node(const wfe_ctx *c)
-{
-   return c ? c->node : NULL;
-}
 const char *wfe_ctx_repo(const wfe_ctx *c)
 {
    return (c && c->wi) ? c->wi->repo : NULL;
@@ -573,36 +569,4 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
    wfe_def_free(def);
    return 0;
-}
-
-int wfe_engine_run(const char *work_item_id, char *err, size_t errlen)
-{
-   for (int i = 0; i < 10000; i++)
-   {
-      wfe_advance_result_t r;
-      if (wfe_engine_advance(work_item_id, &r, err, errlen) != 0)
-         return -1;
-      if (r.terminal)
-         return 0;
-      if (r.last_status == WFE_STEP_PENDING || r.last_status == WFE_STEP_FAILED)
-         return 0;
-   }
-   snprintf(err, errlen, "engine run exceeded step bound (cycle without terminal?)");
-   return -1;
-}
-
-/* ---- built-in stub executors (W2): every block advances ---- */
-static wfe_step_result_t stub_exec(wfe_ctx *ctx, const wfe_node_t *node)
-{
-   (void)ctx;
-   char handle[80], hash[65];
-   snprintf(handle, sizeof handle, "%s.out", node->id);
-   wfe_sha256_hex(node->id, strlen(node->id), hash);
-   return wfe_step_advanced(handle, hash, 0.0);
-}
-
-void wfe_register_stub_executors(void)
-{
-   for (wfe_block_type_t t = WFE_BLK_UNKNOWN + 1; t < WFE_BLK__COUNT; t++)
-      wfe_register_block_executor(t, stub_exec);
 }

@@ -17,16 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static db1_family_t family = {"db1.pki", "pki", AIMEE_DB1_EVENT_PKI, AIMEE_DB1_STAGE_PKI, 2000, 0};
-
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
-
 
 int db1_pki_cert_upsert(const char *serial, const char *cn, long issued_at, long expires_at)
 {
@@ -204,25 +201,6 @@ int db1_pki_ramp_advance(long now)
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_pki_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out)
-{
-   if (!state_out || !hash_out || hash_len == 0 || !advanced_at_out)
-      return -1;
-   const char *const *fields = NULL;
-   char slot0[32];
-   char slot2[32];
-   char *const values[] = {slot0, hash_out, slot2};
-   const size_t caps[] = {sizeof slot0, hash_len, sizeof slot2};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_PKI_RAMP_GET, fields, 0, values, caps, 3, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   *state_out = (int)strtol(slot0, NULL, 10);
-   *advanced_at_out = (int64_t)strtoll(slot2, NULL, 10);
-   return 0;
 }
 
 /* clang-format on */

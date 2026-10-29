@@ -123,7 +123,6 @@ void sandbox_set_available_override_for_test(int (*fn)(const char **reason));
  *   Force the value sandbox_effective_mode() reports. Pass -1 to clear. Test-only.
  */
 int sandbox_effective_mode(const sandbox_config_t *cfg);
-void sandbox_set_mode_override_for_test(int mode);
 
 /*
  * sandbox_exec:

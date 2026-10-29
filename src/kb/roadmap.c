@@ -446,34 +446,6 @@ int roadmap_create_from_decomposition(const char *decomposition_json, char *out_
 
 /* ── decomposer hook + roadmap_new ───────────────────────────────────────── */
 
-static roadmap_decompose_fn g_decompose = NULL;
-static void *g_decompose_ud = NULL;
-
-void roadmap_set_decomposer(roadmap_decompose_fn fn, void *ud)
-{
-   g_decompose = fn;
-   g_decompose_ud = ud;
-}
-
-int roadmap_new(const char *goal, const char *planning_depth, const char *token_profile,
-                char *out_id, size_t out_len)
-{
-   if (!goal || !goal[0])
-      return -1;
-   if (!g_decompose)
-      return -1;
-
-   char *json = NULL;
-   if (g_decompose(goal, planning_depth, token_profile, &json, g_decompose_ud) != 0 || !json)
-   {
-      free(json);
-      return -1;
-   }
-   int rc = roadmap_create_from_decomposition(json, out_id, out_len);
-   free(json);
-   return rc;
-}
-
 /* ── load + render ───────────────────────────────────────────────────────── */
 
 typedef struct
@@ -713,50 +685,6 @@ int roadmap_list_json(char **out)
    if (!s)
       return -1;
    *out = s;
-   return 0;
-}
-
-int roadmap_show(const char *roadmap_id, int json_output)
-{
-   if (!roadmap_id || !roadmap_id[0])
-      return -1;
-
-   if (json_output)
-   {
-      char *s = NULL;
-      if (roadmap_show_json(roadmap_id, &s) != 0)
-         return -1;
-      printf("%s\n", s);
-      free(s);
-      return 0;
-   }
-
-   kb_store_artifact_row_t row;
-   int cc = 0;
-   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
-      return -1;
-   cJSON *rp = cJSON_Parse(row.payload_json);
-   if (!rp)
-      return -1;
-
-   loaded_unit_t units[ROADMAP_MAX_UNITS];
-   int n = 0;
-   if (load_units(roadmap_id, units, ROADMAP_MAX_UNITS, &n) != 0)
-   {
-      cJSON_Delete(rp);
-      return -1;
-   }
-
-   dstr_t s;
-   dstr_init(&s);
-   dstr_appendf(&s, "roadmap %s\n", roadmap_id);
-   dstr_appendf(&s, "goal: %s\n", obj_str(rp, "goal", ""));
-   render_tree(&s, rp, units, n);
-   printf("%s", dstr_cstr(&s));
-   dstr_free(&s);
-
-   free_units(units, n);
-   cJSON_Delete(rp);
    return 0;
 }
 

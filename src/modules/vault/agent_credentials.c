@@ -145,27 +145,6 @@ static int agent_provider_env_value(const char *provider, char *dst, size_t dst_
    return 0;
 }
 
-/* Contract in agent_config.h. Enumerating rather than probing a fixed cred name
- * is deliberate: providers are authenticated several ways (api_key, oauth,
- * codex's token trio) and the question here is only whether the operator put
- * anything under this name, not which credential a later call will use. */
-int vault_provider_has_credential(const char *provider_name)
-{
-   if (!provider_name || !provider_name[0])
-      return 0;
-
-   vault_store_entry_t entries[VAULT_PROVIDER_LIST_MAX];
-   int count = 0;
-   if (vault_service_list(VAULT_SERVER_PRINCIPAL, entries, VAULT_PROVIDER_LIST_MAX, &count) !=
-       VAULT_OK)
-      return 0;
-
-   for (int i = 0; i < count; i++)
-      if (entries[i].cred[0] && strcasecmp(entries[i].agent, provider_name) == 0)
-         return 1;
-   return 0;
-}
-
 int agent_has_resolvable_credentials(const agent_t *agent)
 {
    if (!agent)

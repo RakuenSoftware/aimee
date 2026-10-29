@@ -562,60 +562,6 @@ static void test_skill_manage_write_file_guards_paths(void)
    free(root);
 }
 
-static void test_skill_rollback_snapshot_restores_tree(void)
-{
-   char *root = make_tmpdir();
-   char err[256] = "";
-
-   char skills_dir[512], snapshot_dir[512], archive_dir[512];
-   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
-   snprintf(snapshot_dir, sizeof(snapshot_dir), "%s/.aimee/skills/.snapshots/restore-1", root);
-   snprintf(archive_dir, sizeof(archive_dir), "%s/.archive", snapshot_dir);
-   mkdir_p(skills_dir);
-   mkdir_p(snapshot_dir);
-   mkdir_p(archive_dir);
-
-   char path[512];
-   snprintf(path, sizeof(path), "%s/current.md", skills_dir);
-   write_file(path, "---\nname: current\ndescription: Use when testing current skills.\n---\n"
-                    "current\n");
-   snprintf(path, sizeof(path), "%s/keep.md", skills_dir);
-   write_file(path, "---\nname: keep\ndescription: Use when testing stale copies.\n---\nstale\n");
-
-   snprintf(path, sizeof(path), "%s/keep.md", snapshot_dir);
-   write_file(path, "---\nname: keep\ndescription: Use when testing restored skills.\n---\n"
-                    "restored\n");
-   snprintf(path, sizeof(path), "%s/.usage.json", snapshot_dir);
-   write_file(path, "{\"keep\":{\"state\":\"active\",\"use_count\":3}}\n");
-   snprintf(path, sizeof(path), "%s/old.md", archive_dir);
-   write_file(path, "---\nname: old\ndescription: Use when testing archived restore.\n---\nold\n");
-
-   assert(skill_rollback_snapshot(root, "../bad", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "bad/id", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "bad..id", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, ".", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "missing", err, sizeof(err)) != 0);
-   assert(skill_rollback_snapshot(root, "restore-1", err, sizeof(err)) == 0);
-
-   snprintf(path, sizeof(path), "%s/current.md", skills_dir);
-   assert(access(path, F_OK) != 0);
-   snprintf(path, sizeof(path), "%s/keep.md", skills_dir);
-   char *content = read_file(path);
-   assert(strstr(content, "restored") != NULL);
-   free(content);
-   snprintf(path, sizeof(path), "%s/.usage.json", skills_dir);
-   content = read_file(path);
-   assert(strstr(content, "\"use_count\":3") != NULL);
-   free(content);
-   snprintf(path, sizeof(path), "%s/.archive/old.md", skills_dir);
-   assert(access(path, F_OK) == 0);
-   snprintf(path, sizeof(path), "%s/.snapshots/restore-1/keep.md", skills_dir);
-   assert(access(path, F_OK) == 0);
-
-   rm_rf(root);
-   free(root);
-}
-
 static void test_skill_lifecycle_marks_stale_and_archives(void)
 {
    char *root = make_tmpdir();
@@ -923,28 +869,6 @@ static void test_skill_capability_autostub_proposes_missing_tool(void)
    free(root);
 }
 
-static void test_skill_change_eval_gate(void)
-{
-   char reason[256];
-   const char *pass = "{\"eval_result\":{\"status\":\"pass\",\"passed\":true,"
-                      "\"compliance_delta\":0.50}}\n";
-   assert(skill_change_eval_gate_allows(pass, 0.25, reason, sizeof(reason)) == 1);
-
-   const char *missing = "{\"skill_name\":\"x\"}\n";
-   assert(skill_change_eval_gate_allows(missing, 0.01, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "missing eval_result") != NULL);
-
-   const char *failed = "{\"eval_result\":{\"status\":\"fail\",\"passed\":false,"
-                        "\"compliance_delta\":1.0,\"message\":\"treatment failed\"}}\n";
-   assert(skill_change_eval_gate_allows(failed, 0.01, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "treatment failed") != NULL);
-
-   const char *low_delta = "{\"eval_result\":{\"status\":\"pass\",\"passed\":true,"
-                           "\"compliance_delta\":0.01}}\n";
-   assert(skill_change_eval_gate_allows(low_delta, 0.25, reason, sizeof(reason)) == 0);
-   assert(strstr(reason, "below threshold") != NULL);
-}
-
 static void test_skill_eval_passes_with_delta(void)
 {
    char *root = make_tmpdir();
@@ -1203,7 +1127,6 @@ int main(void)
    test_skill_manage_create_patch_edit_archive();
    test_skill_import_content_round_trips_agentskills_markdown();
    test_skill_manage_write_file_guards_paths();
-   test_skill_rollback_snapshot_restores_tree();
    test_skill_lifecycle_marks_stale_and_archives();
    test_skill_inject_records_activation();
    test_skill_inject_no_skill();
@@ -1215,7 +1138,6 @@ int main(void)
    test_skill_lint_rules();
    test_skill_trigger_requires_process_provider();
    test_skill_capability_autostub_proposes_missing_tool();
-   test_skill_change_eval_gate();
    test_skill_eval_passes_with_delta();
    test_skill_eval_fails_without_treatment_compliance();
    test_skill_eval_fails_without_baseline_violation();
