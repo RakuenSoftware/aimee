@@ -154,7 +154,6 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/workflows"
     "${AIMEE_SRC_DIR}/modules/guardrails"
     "${AIMEE_SRC_DIR}/modules/economizer"
-    "${AIMEE_SRC_DIR}/modules/roadmap"
     "${AIMEE_SRC_DIR}/modules/sandbox"
     "${AIMEE_SRC_DIR}/modules/lsp"
     "${AIMEE_SRC_DIR}/modules/css"
@@ -277,7 +276,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
         ${AIMEE_SRC_DIR}/posix/agent_runtime.c
@@ -298,12 +296,10 @@ elseif(APPLE)
 
     )
     set(PLATFORM_CMD_SRCS
-        ${AIMEE_SRC_DIR}/posix/cmd_infra.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
         list(APPEND PLATFORM_CMD_SRCS
-            ${AIMEE_SRC_DIR}/posix/dashboard.c
         )
     endif()
     set(PLATFORM_CLI_SRCS
@@ -331,7 +327,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/events.c
     )
     set(PLATFORM_DATA_SRCS
-        ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
         ${AIMEE_SRC_DIR}/posix/agent_runtime.c
@@ -352,12 +347,10 @@ else()
 
     )
     set(PLATFORM_CMD_SRCS
-        ${AIMEE_SRC_DIR}/posix/cmd_infra.c
         ${AIMEE_SRC_DIR}/posix/cmd_hooks.c
     )
     if(WITH_UI)
         list(APPEND PLATFORM_CMD_SRCS
-            ${AIMEE_SRC_DIR}/posix/dashboard.c
         )
     endif()
     set(PLATFORM_CLI_SRCS
@@ -470,22 +463,17 @@ set(KB_STORE_SRCS
     ${AIMEE_SRC_DIR}/modules/kb/c/team.c
     ${AIMEE_SRC_DIR}/modules/kb/c/project.c
     ${AIMEE_SRC_DIR}/modules/kb/c/membership.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/admin_grant.c
     ${AIMEE_SRC_DIR}/modules/kb/c/oidc_jwks.c
     ${AIMEE_SRC_DIR}/modules/kb/c/entity_edges.c
     ${AIMEE_SRC_DIR}/modules/kb/c/fact_identity.c
     ${AIMEE_SRC_DIR}/modules/kb/c/fact_identity_unicode.c
     ${AIMEE_SRC_DIR}/modules/kb/c/fact_mutation.c
     ${AIMEE_SRC_DIR}/modules/kb/c/evidence_lifecycle.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/entity_profiles.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/failed_queries.c
     ${AIMEE_SRC_DIR}/modules/kb/c/feedback.c
     ${AIMEE_SRC_DIR}/modules/kb/c/notes.c
     ${AIMEE_SRC_DIR}/modules/kb/c/rules.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/stopwords.c
     ${AIMEE_SRC_DIR}/modules/kb/c/tasks.c
     ${AIMEE_SRC_DIR}/modules/kb/c/tool_registry.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/kind_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_payload.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_runtime_state.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_service_backend.c
@@ -518,7 +506,6 @@ set(KB_STORE_SRCS
     ${AIMEE_SRC_DIR}/modules/kb/c/calibration.c
     ${AIMEE_SRC_DIR}/modules/kb/c/demotion.c
     ${AIMEE_SRC_DIR}/modules/kb/c/feature_rows.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/report_enrichments.c
     ${AIMEE_SRC_DIR}/modules/kb/c/bandit.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_maintenance.c
     ${AIMEE_SRC_DIR}/modules/kb/c/kb_docs.c
@@ -534,7 +521,6 @@ set(KB_STORE_HOST_ADAPTER_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_context.c
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_export.c
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_memory.c
-    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_runtime.c
 )
 
 set(IR_BASE_SRCS
@@ -682,7 +668,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_planner.c
     ${AIMEE_SRC_DIR}/kb/roadmap.c
     ${AIMEE_SRC_DIR}/kb/kb_mdl.c
-    ${AIMEE_SRC_DIR}/kb/kb_lab.c
     ${PLATFORM_DATA_SRCS}
 )
 
@@ -709,7 +694,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c
-    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_baseline.c
     ${AIMEE_SRC_DIR}/server/agent_coord.c
     ${AIMEE_SRC_DIR}/server/agent_tools.c
     ${AIMEE_SRC_DIR}/server/computer_use.c
@@ -865,7 +849,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/translation/codec_stdio.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
-    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
@@ -883,7 +866,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_session_pools.c
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
-    ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
     ${AIMEE_SRC_DIR}/server/workflow_control_bus.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
@@ -1007,7 +989,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_blocks.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_approval.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_verdict.c
-    ${AIMEE_SRC_DIR}/modules/workflows/wfe_roundtable.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomy.c
     ${PLATFORM_SERVER_SRCS}
 )
@@ -1148,7 +1129,6 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_planner.c
     ${AIMEE_SRC_DIR}/kb/roadmap.c
     ${AIMEE_SRC_DIR}/kb/kb_mdl.c
-    ${AIMEE_SRC_DIR}/kb/kb_lab.c
 )
 set(KB_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM KB_CORE_SRCS
@@ -1187,7 +1167,6 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/modules/roundtable
     ${AIMEE_SRC_DIR}/modules/kb_client
     ${AIMEE_SRC_DIR}/modules/agent_eval
-    ${AIMEE_SRC_DIR}/modules/roadmap
     ${AIMEE_SRC_DIR}/modules/sandbox
     ${AIMEE_SRC_DIR}/modules/lsp
     ${AIMEE_SRC_DIR}/modules/skill

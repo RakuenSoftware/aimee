@@ -347,12 +347,6 @@
       "ctest": false,
       "make": true,
       "module": "kb-synthesis",
-      "test": "src/tests/test_curator_profile.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb-synthesis",
       "test": "src/tests/test_curator_promote.c"
     },
     {

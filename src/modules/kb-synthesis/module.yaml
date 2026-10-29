@@ -78,7 +78,6 @@
     "src/tests/test_curator_notify.c",
     "src/tests/test_curator_pipeline.c",
     "src/tests/test_curator_pipeline_sched.c",
-    "src/tests/test_curator_profile.c",
     "src/tests/test_curator_promote.c",
     "src/tests/test_curator_queue.c",
     "src/tests/test_curator_resolve_entities.c",
