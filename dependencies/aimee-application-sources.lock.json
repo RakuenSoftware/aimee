@@ -23,9 +23,9 @@
       "id": "config",
       "classification": "required",
       "repository": "https://github.com/RakuenSoftware/aimee-module-config.git",
-      "ref": "v0.2.1-0.20261027125832-800bd8fca157",
-      "version": "v0.2.1-0.20261027125832-800bd8fca157",
-      "commit": "800bd8fca157",
+      "ref": "v0.2.1-0.20261029192528-a25e5b6cf6ba",
+      "version": "v0.2.1-0.20261029192528-a25e5b6cf6ba",
+      "commit": "a25e5b6cf6ba",
       "execution": "process",
       "placements": [
         "server",

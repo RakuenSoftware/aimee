@@ -1,5 +1,5 @@
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157 h1:/1GtRNeTWpNva+L/P4F67QrikYaPk86sqeQp/6dvgks=
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261027125832-800bd8fca157/go.mod h1:viX9M6fepRDBFpVrLwNsCuqttTwqwSWq4WsRJrIF/rw=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261029192528-a25e5b6cf6ba h1:84ZyD0ziC8BjXd0hr7jcu6oEfxtJlwjGy8KamuRxqS8=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261029192528-a25e5b6cf6ba/go.mod h1:viX9M6fepRDBFpVrLwNsCuqttTwqwSWq4WsRJrIF/rw=
 github.com/RakuenSoftware/ouroboros-ring/go v0.1.3 h1:ShsprUPstO/kYwde3zPNZqK1AJhPGRNy8wIPwdbxR44=
 github.com/RakuenSoftware/ouroboros-ring/go v0.1.3/go.mod h1:EE0tgkv3osUZRi8/Ul1KGOCazyM82MuimSNslkCaSm0=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=

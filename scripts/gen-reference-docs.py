@@ -149,9 +149,6 @@ CFG_KEY_DESC = {
     "kb_curator_extract_docs_workers": "Parallel curator document-extraction workers, bounded to the synthesis service slot count.",
     "kb_evidence_embed_enabled": "Drain evidence-index operations into evidence vectors.",
     "kb_mode": "Setup/deploy mode: local starts a KB, remote connects to kb_client_url.",
-    "verify_cmd": "Command run after a delegated fix to verify it.",
-    "verify_prompt": "Prompt template given to the cross-verification delegate.",
-    "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
     "aimee_with_llamacpp": "Compatibility image flag. Managed 0.4.0 profiles deploy a "
@@ -203,7 +200,6 @@ CFG_KEY_DESC = {
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
     "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
-    "cross_verify": "Enable cross-model verification of outputs.",
     "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-OFF). Enable it explicitly only for approved autonomous workflows. When off, the forge provider is not registered and every forge op fails closed; even when on, each operation re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
     "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
@@ -277,10 +273,6 @@ CFG_KEY_DESC = {
     "registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` "
     "(default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy "
     "`gated` and `governance` values cannot widen the live proxy allowlist.",
-    "delegate_sandbox_require_isolation": "Deprecated compatibility key. Its value is ignored: "
-    "every delegate is created with no network, its complete network/mount/environment posture is "
-    "verified after every start or resume, and any breach or unverifiable fact destroys the "
-    "container and refuses the delegation. There is no host fallback.",
     "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
     "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
     "records them per project (git root), and pre-bakes the learned set into that project's next "
@@ -427,7 +419,6 @@ SECTION_DESC = {
     "context": "Context-engine selection.",
     "cost_reward": "Cost-aware reward shaping.",
     "cron_jobs": "Scheduled job definitions (array of objects).",
-    "cross_verify": "Cross-model output verification.",
     "kb_store": "Legacy knowledge-index settings; connections are owned by PostgreSQL.",
     "dedup": "Response deduplication.",
     "dogfood": "Session capture for dogfood data.",
