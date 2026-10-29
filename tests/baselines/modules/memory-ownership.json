@@ -1834,7 +1834,7 @@
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "299c6bff48bd28831e93e0c2b8cc8d81f5d6cf1b53b81e691f73d6f16adf68ee",
+      "sha256": "e2c0a0ea9745fc1cf39e589d22c60cdebec5973813238ae84239c6c846e8c44d",
       "boundary_review": " 2026-10-25 specialized message admission: reviewed embedding reply decoding only. KB batch reads actual dimension separately from row count and fixed buffer stride; vector consumers honor documented dimension and decline/truncation facts. The matching HTTP fixture now supplies the real Go owner dimension and vector-free error/auth messages; all existing assertions remain. The shared C helper is a message codec only: provider execution, breaker state, storage, scoping, guards and memory eligibility remain with their existing owners. No request methods, arguments, routes, ownership classifications or original inventories change. Evidence: /var/tmp/aimee-specialized-memory-boundary-review/proof.json and /var/tmp/aimee-embed-consumer-evidence/results.json. This is explicit source-boundary review, not production-promotion approval and adds no exemption."
     },
     "src/kb/kb_memory_facts.c": {

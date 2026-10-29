@@ -806,6 +806,10 @@ static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out
 /* Test seam: the policy is pure, so it is exercised directly. */
 int kb_path_wants_dense_vector_for_test(const char *rel_path);
 static int kb_path_wants_dense_vector(const char *rel_path);
+int kb_path_wants_dense_vector_for_test(const char *rel_path)
+{
+   return kb_path_wants_dense_vector(rel_path);
+}
 
 static int kb_path_wants_dense_vector(const char *rel_path)
 {

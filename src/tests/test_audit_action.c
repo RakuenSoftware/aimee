@@ -143,6 +143,42 @@ static void test_key_provision_failure_is_closed(void)
    setenv("AIMEE_HOME", g_home, 1);
 }
 
+static void mac_hex(const unsigned char mac[32], char out[65])
+{
+   static const char hx[] = "0123456789abcdef";
+   for (int i = 0; i < 32; i++)
+   {
+      out[i * 2] = hx[(mac[i] >> 4) & 0xf];
+      out[i * 2 + 1] = hx[mac[i] & 0xf];
+   }
+   out[64] = '\0';
+}
+
+/* RFC 4231 known-answer vectors: independently validate the HMAC-SHA256
+ * construction (ipad/opad, 64-byte block, key>64 pre-hash), not just internal
+ * determinism. */
+static void test_hmac_rfc4231_vectors(void)
+{
+   unsigned char mac[32];
+   char hex[65];
+
+   /* Test Case 2: short key. */
+   assert(audit_hmac_sha256_testonly((const unsigned char *)"Jefe", 4,
+                                     (const unsigned char *)"what do ya want for nothing?", 28,
+                                     mac) == 0);
+   mac_hex(mac, hex);
+   assert(strcmp(hex, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843") == 0);
+
+   /* Test Case 6: key longer than the 64-byte block -> exercises the pre-hash path. */
+   unsigned char longkey[131];
+   memset(longkey, 0xaa, sizeof longkey);
+   const char *data6 = "Test Using Larger Than Block-Size Key - Hash Key First";
+   assert(audit_hmac_sha256_testonly(longkey, sizeof longkey, (const unsigned char *)data6,
+                                     strlen(data6), mac) == 0);
+   mac_hex(mac, hex);
+   assert(strcmp(hex, "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54") == 0);
+}
+
 /* Separator bytes inside a value must not forge a component boundary: an
  * attacker stuffing the length-prefix separator into old_string cannot collide
  * with a differently-structured argument set. */
@@ -378,6 +414,7 @@ int main(void)
    test_key_sensitivity();
    test_missing_key_is_provisioned();
    test_key_provision_failure_is_closed();
+   test_hmac_rfc4231_vectors();
    test_separator_injection_no_collision();
    test_value_truncation_semantics();
    test_preview_basic_bash();

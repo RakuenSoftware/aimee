@@ -67,6 +67,10 @@ void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
 
 /* Test-only effective-mode override; <0 means "no override" (production). */
 static int g_sbx_mode_override = -1;
+void sandbox_set_mode_override_for_test(int mode)
+{
+   g_sbx_mode_override = mode;
+}
 
 int sandbox_effective_mode(const sandbox_config_t *cfg)
 {

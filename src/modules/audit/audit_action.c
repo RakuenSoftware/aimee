@@ -163,6 +163,12 @@ static int hmac_sha256(const unsigned char *key, size_t keylen, const unsigned c
    return 0;
 }
 
+int audit_hmac_sha256_testonly(const unsigned char *key, size_t keylen, const unsigned char *msg,
+                               size_t mlen, unsigned char mac[32])
+{
+   return hmac_sha256(key, keylen, msg, mlen, mac);
+}
+
 /* ---- canonical projection (length-prefixed, injective) ------------------- */
 
 /* Append `len` bytes at canon[*pos], capped at AUDIT_CANON_LIMIT. On overflow,

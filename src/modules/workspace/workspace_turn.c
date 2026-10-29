@@ -925,6 +925,10 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
 /* Test override: -1 = report the real bound state; 0/1 = force it. Lets guardrail/tool
  * tests exercise the container-delegate exemption without standing up a real backend. */
 static int s_container_bound_test_override = -1;
+void workspace_turn_set_container_bound_for_test(int bound)
+{
+   s_container_bound_test_override = bound;
+}
 
 int workspace_turn_container_bound(void)
 {

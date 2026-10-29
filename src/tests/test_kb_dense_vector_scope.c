@@ -17,9 +17,60 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+int kb_path_wants_dense_vector_for_test(const char *rel_path);
+
+static void test_prose_is_embedded(void)
+{
+   assert(kb_path_wants_dense_vector_for_test("docs/architecture.md"));
+   assert(kb_path_wants_dense_vector_for_test("README.MD")); /* case-insensitive */
+   assert(kb_path_wants_dense_vector_for_test("notes.txt"));
+   assert(kb_path_wants_dense_vector_for_test("guide.rst"));
+   assert(kb_path_wants_dense_vector_for_test("book.adoc"));
+}
+
+/* The 82%: these are what made a pass five times longer than it needed to be. */
+static void test_source_is_not_embedded(void)
+{
+   assert(!kb_path_wants_dense_vector_for_test("src/db1/session_paths.c"));
+   assert(!kb_path_wants_dense_vector_for_test("src/headers/kb.h"));
+   assert(!kb_path_wants_dense_vector_for_test("scripts/deploy.sh"));
+   assert(!kb_path_wants_dense_vector_for_test("tools/gen.py"));
+   assert(!kb_path_wants_dense_vector_for_test("server-go/main.go"));
+}
+
+/* README / LICENSE / CHANGELOG carry real prose and are few, so extensionless
+ * files stay embedded. */
+static void test_extensionless_files_stay_embedded(void)
+{
+   assert(kb_path_wants_dense_vector_for_test("README"));
+   assert(kb_path_wants_dense_vector_for_test("LICENSE"));
+   assert(kb_path_wants_dense_vector_for_test("docs/CHANGELOG"));
+}
+
+/* The escape hatch must restore the old behaviour exactly. */
+static void test_env_override_restores_embedding_everything(void)
+{
+   setenv("AIMEE_KB_EMBED_ALL_FILES", "1", 1);
+   assert(kb_path_wants_dense_vector_for_test("src/db1/session_paths.c"));
+   assert(kb_path_wants_dense_vector_for_test("tools/gen.py"));
+   unsetenv("AIMEE_KB_EMBED_ALL_FILES");
+   assert(!kb_path_wants_dense_vector_for_test("src/db1/session_paths.c"));
+}
+
+static void test_null_and_empty_are_safe(void)
+{
+   assert(kb_path_wants_dense_vector_for_test(NULL));
+   assert(kb_path_wants_dense_vector_for_test(""));
+}
+
 int main(void)
 {
    printf("kb_dense_vector_scope: ");
+   test_prose_is_embedded();
+   test_source_is_not_embedded();
+   test_extensionless_files_stay_embedded();
+   test_env_override_restores_embedding_everything();
+   test_null_and_empty_are_safe();
    printf("ok\n");
    return 0;
 }
