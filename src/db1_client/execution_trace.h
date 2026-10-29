@@ -79,12 +79,8 @@ extern "C"
    } db1_execution_trace_mining_row_t;
 
    int db1_execution_trace_insert(const db1_execution_trace_insert_row_t *row);
-   int db1_execution_trace_count_for_session(const char *session_id);
    int db1_execution_trace_list_recent(db1_execution_trace_recent_row_t *out, int max);
-   int db1_execution_trace_get(int trace_id, db1_execution_trace_detail_t *out);
    int db1_execution_trace_list_tool_calls(db1_execution_trace_tool_call_t *out, int max);
-   int db1_execution_trace_list_after_id(int64_t after_id, db1_execution_trace_mining_row_t *out,
-                                         int max);
 
 #ifdef __cplusplus
 }

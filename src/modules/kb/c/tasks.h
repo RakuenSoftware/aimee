@@ -48,10 +48,6 @@ extern "C"
    /* Task edges */
    int kb_store_task_add_edge(int64_t source, int64_t target, const char *relation);
    int kb_store_task_get_edges(int64_t task_id, task_edge_t *out, int max);
-   int kb_store_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max);
-
-   /* Get the most recent in_progress task for a session, or 0. */
-   int64_t kb_store_task_get_active(const char *session_id);
 
 #ifdef __cplusplus
 }

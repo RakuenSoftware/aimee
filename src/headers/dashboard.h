@@ -36,7 +36,6 @@ char *api_dashboard_onboard(void);
 char *api_token_audit(void);
 char *api_bench_results(void);
 char *api_doctor(void);
-char *api_payload_rewrite_status(void);
 
 /* pam_check_credentials moved to headers/pam_auth.h (posix/pam_auth.c), which
  * dashboard.c includes: aimee-kb needs the same check and does not link the

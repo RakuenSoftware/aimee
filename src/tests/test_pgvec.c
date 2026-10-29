@@ -210,14 +210,6 @@ static void test_scroll_graceful_on_no_db(void)
    printf("pgvec: scroll graceful on no-vector-db OK\n");
 }
 
-static void test_latency_snapshot(void)
-{
-   int64_t total, count, maxv;
-   pgvec_search_latency_snapshot(&total, &count, &maxv, 1);
-   assert(total >= 0 && count >= 0 && maxv >= 0);
-   printf("pgvec: latency snapshot callable OK\n");
-}
-
 static void test_public_api_symbols(void)
 {
    /* Verify the KB_STORE-owned KB vector API resolves at link time. Memory-vector
@@ -232,65 +224,6 @@ static void test_public_api_symbols(void)
    printf("pgvec: all public API symbols resolve OK\n");
 }
 
-/* pgvectorscale is the DEFAULT index, and these cases exist because the tree
- * used to say otherwise in two places at once: this policy returned HNSW for an
- * unset setting and gated "auto" behind a million-row threshold, while
- * schema.sql created DiskANN whenever the extension was present. Two policies,
- * opposite defaults, and no production caller of this one to make the
- * disagreement visible. */
-static void test_corpus_index_type_defaults_to_diskann(void)
-{
-   /* Unset, "auto" and "diskann" all mean the same thing: use the access method
-    * this system indexes with, whenever it is installed. */
-   const char *t = pgvec_corpus_index_type(NULL, 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("auto", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-   t = pgvec_corpus_index_type("diskann", 0, 1, 0);
-   assert(strcmp(t, "diskann") == 0);
-
-   /* A corpus of ZERO rows still gets DiskANN. The old threshold would have sent
-    * it to HNSW, which is exactly backwards for a small corpus of wide vectors:
-    * HNSW caps at 2000 dimensions and DiskANN does not, so the threshold sent
-    * the one case that cannot use HNSW straight to it. */
-   t = pgvec_corpus_index_type("auto", 0, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   printf("pgvec: corpus_index_type defaults to diskann OK\n");
-}
-
-static void test_corpus_index_type_falls_back_without_the_extension(void)
-{
-   /* Without pgvectorscale there is only one answer available. */
-   const char *t = pgvec_corpus_index_type(NULL, 0, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   t = pgvec_corpus_index_type("auto", 2000000, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   t = pgvec_corpus_index_type("diskann", 0, 0, 0);
-   assert(strcmp(t, "hnsw") == 0);
-
-   /* An operator who names HNSW gets it even where DiskANN is available: a
-    * setting that was silently overridden would be a lie. */
-   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 0);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type falls back without vectorscale OK\n");
-}
-
-static void test_corpus_ensure_index_graceful(void)
-{
-   /* Under the sqlite shim, pgvec SQL fails gracefully — must not crash */
-   int rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 0);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "diskann", 0);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 1);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index(NULL, "hnsw", 0);
-   assert(rc == -1);
-   printf("pgvec: corpus ensure_index graceful OK\n");
-}
-
 int main(void)
 {
    kb_store_test_shim_open();
@@ -303,11 +236,7 @@ int main(void)
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();
    test_scroll_graceful_on_no_db();
-   test_latency_snapshot();
    test_public_api_symbols();
-   test_corpus_index_type_defaults_to_diskann();
-   test_corpus_index_type_falls_back_without_the_extension();
-   test_corpus_ensure_index_graceful();
 
    kb_store_test_shim_close();
    printf("pgvec: all tests passed\n");

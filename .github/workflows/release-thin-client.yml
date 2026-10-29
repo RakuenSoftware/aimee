@@ -144,7 +144,7 @@ jobs:
       - name: Build (macOS, CMake -- universal arm64+x86_64)
         if: matrix.kind == 'macos'
         run: |
-          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -DAIMEE_LEAN=ON -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 3 --target aimee
           # Fail the build unless the artifact is a true fat binary.
           echo "archs: $(lipo -archs build/aimee)"
@@ -212,23 +212,10 @@ jobs:
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Download SQLite amalgamation (Windows)
-        if: matrix.kind == 'windows'
-        shell: powershell
-        run: |
-          $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-          $want = "aa73d8748095808471deaa8e6f34aa700e37f2f787f4425744f53fdd15a89c40"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip
-          $got = (Get-FileHash -Algorithm SHA256 sqlite.zip).Hash.ToLowerInvariant()
-          if ($got -ne $want) { throw "SQLite archive digest mismatch: $got" }
-          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
-          New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.h src\vendor\sqlite3\
       - name: Build (Windows, CMake)
         if: matrix.kind == 'windows'
         run: |
-          cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -G "MinGW Makefiles" -DAIMEE_LEAN=ON -DWITH_TLS=ON -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 2 --target aimee
       - name: Stage artifact (Windows)
         if: matrix.kind == 'windows'

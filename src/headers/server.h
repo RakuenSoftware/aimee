@@ -11,12 +11,6 @@
 #include "provider_catalog.h"
 #include "index.h" /* project_info_t, for server_active_project_match */
 
-/* True when `name` is a provider the chat path can resolve: a built-in CLI
- * provider, a known adapter, or an agent in `acfg` (matched by name or by
- * provider). Gates the durable primary write in handle_provider_set so a
- * mistyped `aimee provider <word>` cannot brick every later chat turn.
- * `acfg` may be NULL to check only the built-in/adapter sets. */
-int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 #include "memory_authority.h" /* memory_authority_t — attested write authority */
 

@@ -22,12 +22,6 @@ ROOT/current always names the installation provided last, for tools that need
 only the headers.
 
     provide_ouroboros_ring.py ROOT        print the pkg-config directory to use
-    provide_ouroboros_ring.py --headers ROOT
-                                          print an include directory holding only the
-                                          ring's public headers, for builds on platforms
-                                          the ring does not run on (it is Linux-only);
-                                          the same installation choice and checks apply,
-                                          but nothing is built
     provide_ouroboros_ring.py --check-go  server-go/go.mod requires a release in range
     provide_ouroboros_ring.py --digest DIR  print the content digest of a tree
 """
@@ -265,43 +259,6 @@ def provide_locked(root: Path) -> Path:
     return pkgconfig
 
 
-def provide_headers(root: Path) -> Path:
-    root = root.resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    with open(root / ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        return provide_headers_locked(root)
-
-
-def provide_headers_locked(root: Path) -> Path:
-    pin = contract()
-    given = os.environ.get("OURO_RING_PREFIX", "").strip()
-    if given:
-        prefix = Path(given).resolve()
-        version = installed_version(installed_pkgconfig(prefix))
-        if not in_range(version, pin["compatible"]):
-            fail(f"OURO_RING_PREFIX {prefix} is ring {version}, outside compatible "
-                 f"{pin['compatible']} in {CONTRACT.relative_to(ROOT)}")
-        return prefix / "include"
-    local = os.environ.get("OURO_RING_SOURCE", "").strip()
-    if local:
-        source = Path(local).resolve()
-        version = (source / "VERSION").read_text().strip()
-        if not in_range(version, pin["compatible"]):
-            fail(f"OURO_RING_SOURCE {source} is ring {version}, outside compatible "
-                 f"{pin['compatible']} in {CONTRACT.relative_to(ROOT)}")
-        return source / "c" / "include"
-    prefix = root / f"{pin['release']}-headers-{pin['release_tree_sha256'][:12]}"
-    stamp = prefix / ".provided"
-    if not stamp.is_file():
-        shutil.rmtree(prefix, ignore_errors=True)
-        with tempfile.TemporaryDirectory(dir=root) as scratch:
-            source = release_source(pin, Path(scratch))
-            shutil.copytree(source / "c" / "include", prefix / "include")
-        stamp.write_text(f"release {pin['release']} {pin['release_tree_sha256']} headers\n")
-    return prefix / "include"
-
-
 def check_go() -> None:
     pin = contract()
     for line in GO_MOD.read_text().splitlines():
@@ -319,8 +276,6 @@ def check_go() -> None:
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "--digest":
         print(tree_digest(Path(argv[2])))
-    elif len(argv) == 3 and argv[1] == "--headers":
-        print(provide_headers(Path(argv[2])))
     elif len(argv) == 2 and argv[1] == "--check-go":
         check_go()
     elif len(argv) == 2 and not argv[1].startswith("-"):

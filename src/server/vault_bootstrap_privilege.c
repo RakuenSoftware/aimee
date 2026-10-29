@@ -24,16 +24,6 @@ int vault_bootstrap_parse_args(int argc, char **argv, const char **drop_user)
    return -1;
 }
 
-#ifdef AIMEE_WINDOWS
-
-int vault_bootstrap_run_as(const char *user)
-{
-   /* Container privilege dropping is a POSIX-only startup contract. */
-   return user && user[0] ? -1 : 0;
-}
-
-#else
-
 #include <dirent.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -212,5 +202,3 @@ int vault_bootstrap_run_as(const char *user)
       return -1;
    return geteuid() == uid && getegid() == gid ? 0 : -1;
 }
-
-#endif

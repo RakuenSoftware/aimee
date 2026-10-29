@@ -440,7 +440,7 @@ text = 'ordinary \"quoted\" data'
             checker.check(self.root)
 
     def test_chat_workers_cannot_restore_provider_transcript_writer(self):
-        for relative in ("src/posix/server_compute.c", "src/windows/server_compute.c"):
+        for relative in ("src/posix/server_compute.c",):
             with self.subTest(relative=relative):
                 path = self.source(relative, "db1_primary_session_save(session, agent, provider, json);")
                 with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):

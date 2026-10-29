@@ -7,56 +7,12 @@
 #include "aimee.h"
 #include "process_mgr.h"
 
-#ifdef AIMEE_WINDOWS
-
-#include <stdio.h>
-
-int proc_start(const char *command, const char *cwd, char *errbuf, size_t errbuf_size)
-{
-   (void)command;
-   (void)cwd;
-   if (errbuf && errbuf_size > 0)
-      snprintf(errbuf, errbuf_size, "error: background processes are not supported on Windows");
-   return -1;
-}
-
-int proc_get_output(int id, int tail_lines, char *out, size_t out_size)
-{
-   (void)tail_lines;
-   if (!out || out_size == 0)
-      return -1;
-   snprintf(out, out_size, "error: process id %d not found", id);
-   return -1;
-}
-
-int proc_kill(int id)
-{
-   (void)id;
-   return -1;
-}
-
-int proc_list(char *out, size_t out_size)
-{
-   if (!out || out_size == 0)
-      return -1;
-   snprintf(out, out_size, "[]");
-   return 0;
-}
-
-void proc_cleanup_all(void)
-{
-}
-
-#else
-
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <poll.h>
 #include <signal.h>
-#ifdef __linux__
 #include <sys/syscall.h>
-#endif
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -609,5 +565,3 @@ void proc_cleanup_all(void)
 
    pthread_mutex_unlock(&g_lock);
 }
-
-#endif /* AIMEE_WINDOWS */

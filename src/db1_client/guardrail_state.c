@@ -17,16 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static db1_family_t family = {"db1.guardrail_state", "guardrail state", AIMEE_DB1_EVENT_GUARDRAIL_STATE, AIMEE_DB1_STAGE_GUARDRAIL_STATE, 2000, 0};
-
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
-
 
 int db1_session_state_load(const char *sid, session_state_t *out)
 {
@@ -664,20 +661,6 @@ int db1_session_state_delete(const char *sid)
    return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_DELETE, fields, 1, NULL, NULL, 0, NULL));
 }
 
-int db1_session_state_exists(const char *sid)
-{
-   if (!sid || !sid[0])
-      return -1;
-   const char *fields[] = {sid};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_EXISTS, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
 int db1_session_state_list(db1_session_state_summary_t *out, int max)
 {
    if (!out || max <= 0)
@@ -724,24 +707,6 @@ int db1_session_state_list(db1_session_state_summary_t *out, int max)
    }
    free(wire_scratch);
    return wire_rows;
-}
-
-int db1_session_state_get_summary(const char *sid, db1_session_state_summary_t *out)
-{
-   if (!sid || !sid[0] || !out)
-      return -1;
-   const char *fields[] = {sid};
-   char slot2[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {out->session_id, out->updated_at, slot2};
-   const size_t caps[] = {sizeof out->session_id, sizeof out->updated_at, sizeof slot2};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY, fields, 1, values, caps, 3, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->hook_call_count = (int)strtol(slot2, NULL, 10);
-   return 0;
 }
 
 int db1_session_state_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS_SID_LEN], int max)

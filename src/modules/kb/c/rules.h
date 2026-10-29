@@ -31,24 +31,6 @@ extern "C"
    int kb_store_rules_insert(const char *polarity, const char *title, const char *description,
                              int weight);
 
-   /* Export every rule row as JSONL to |path| (one object per line)
-    * with the columns: polarity, title, description, weight, domain,
-    * created_at, updated_at. Returns rows written, or -1 on alloc / DB
-    * / IO failure. Used by `aimee data export --category rules`. */
-   int kb_store_rules_export_jsonl(const char *path);
-
-   /* List all rules ordered by weight desc. Returns count. */
-   int kb_store_rules_list(rule_t *out, int max_rules);
-
-   /* List rules with minimum weight. Returns count. */
-   int kb_store_rules_list_by_tier(int min_weight, rule_t *out, int max_rules);
-
-   /* List rules with directive_type='hard', ordered by weight desc. Returns count. */
-   int kb_store_rules_list_hard(rule_t *out, int max_rules);
-
-   /* Get a single rule by ID. Returns 0 on success, -1 if not found. */
-   int kb_store_rules_get(int id, rule_t *out);
-
    /* Find rule by title (case-insensitive). Returns 0 on success, -1 if not found. */
    int kb_store_rules_find_by_title(const char *title, rule_t *out);
 
@@ -60,33 +42,11 @@ extern "C"
     * DB error. */
    int kb_store_rules_delete_by_directive_type(const char *directive_type);
 
-   /* Update a rule's weight. Returns 0 on success. */
-   int kb_store_rules_update_weight(int id, int weight);
-
    /* Update a rule's directive_type ("hard", "soft", "session"). Returns 0 on success. */
    int kb_store_rules_update_directive_type(int id, const char *directive_type);
 
-   /* Reinforce a rule by setting directive_type, optionally weight, and bumping
-    * updated_at + last_reinforced_at to now. weight_override < 0 leaves weight
-    * unchanged. Returns 0 on success. */
-   int kb_store_rules_reinforce_directive(int id, const char *directive_type, int weight_override);
-
-   /* Generate rules.md content. Returns malloc'd string (caller frees). */
-   char *kb_store_rules_generate(void);
-
    /* Invalidate the in-process kb_store_rules_generate() cache. */
    void kb_store_rules_cache_invalidate(void);
-
-   /* Write a stable, compact signature of the rules table
-    * (count + max(updated_at)) into buf. Used by callers that build a
-    * larger session-scoped cache key. */
-   void kb_store_rules_signature(char *buf, size_t len);
-
-   /* Tier label for a weight. */
-   const char *kb_store_rules_tier(int weight);
-
-   /* Polarity symbol (+, -, ~). */
-   char kb_store_rules_polarity_symbol(const char *polarity);
 
    /* Decay weights of stale rules. Returns number of rules affected.
     * Soft rules decay every 14 days, hard directives every 42 days.

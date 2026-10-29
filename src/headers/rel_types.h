@@ -93,60 +93,12 @@ extern "C"
     * Case/format-insensitive. Returns NULL if not a seed type. */
    const rel_type_def_t *rel_types_seed_lookup(const char *rel_type);
 
-   /* Normalize, then resolve a known synonym to its canonical seed rel_type:
-    * "has_ip" -> "device_has_ip", "hostname" -> "has_hostname". Unknown labels
-    * pass through normalized and unchanged, so a genuinely new predicate is
-    * still distinguishable and still stages as provisional (§7.2).
-    *
-    * The Go memory owner also maps an
-    * alias to a canonical node so aliased facts share one entity; relations had
-    * no equivalent, so a model's reasonable synonym for a relation we already
-    * model was staged as a provisional rel_type on a Class-C edge instead of
-    * committing the validated Class-B edge. Measured on the Tier-A benchmark,
-    * 22% of novel-predicate emissions duplicated an existing seed predicate.
-    *
-    * Canonicalize at the boundary, where a model's label first enters, NOT
-    * inside rel_types_seed_lookup: callers take semantics from the returned def
-    * but persist and query the relation string they were given, so resolving
-    * inside lookup would apply device_has_ip's semantics to an edge stored as
-    * has_ip — and the two would never dedupe. */
-   void rel_type_canonicalize(const char *in, char *out, size_t out_len);
-
-   /* Number of seed aliases, and the i-th (alias, canonical) pair. Exposed so
-    * the console and tests can show what will be folded. */
-   int rel_types_alias_count(void);
-   const char *rel_types_alias_at(int i, const char **canonical_out);
-
-   /* Seed iteration (used to upsert the seed into the KB_STORE table). */
-   int rel_types_seed_count(void);
-   const rel_type_def_t *rel_types_seed_at(int i);
-
-   /* Is `kind` permitted in the head (is_head=1) or tail (is_head=0) slot of
-    * `def`? NODE_OTHER in the def's list is the ANY wildcard. */
-   int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_kind_t kind);
-
    /* Is `rel_type` single-valued (functional)? A functional relation's new object
     * contradicts any prior object for the same subject, so the commit path applies
     * the relation's correction_behavior (supersede/hard-delete/reject-if-immutable).
     * Multi-valued relations (knows, member_of, parent_of, also_known_as, ...)
     * accumulate objects and are not corrected. */
    int rel_type_is_functional(const char *rel_type);
-
-   /* Validate the SEED_ONTOLOGY for internal consistency (R1-D1): every head/tail
-    * kind is a known entity kind; a symmetric type's inverse is itself and its
-    * head/tail kind sets match; a non-symmetric type's declared inverse exists in
-    * the seed with head/tail flipped. Returns 0 if the whole seed is consistent,
-    * -1 on the first violation (a description is written to err when err!=NULL).
-    * Exercised by a unit test so a malformed seed fails the build's tests. */
-   int rel_types_self_validate(char *err, size_t errlen);
-
-   /* enum <-> text (for the KB_STORE table columns + CLI). from_text is tolerant:
-    * unknown correction -> CORR_SUPERSEDE; unknown sensitivity -> SENS_PII
-    * (fail closed, §1/§7). */
-   const char *correction_behavior_to_text(correction_behavior_t b);
-   correction_behavior_t correction_behavior_from_text(const char *s);
-   const char *rel_sensitivity_to_text(rel_sensitivity_t s);
-   rel_sensitivity_t rel_sensitivity_from_text(const char *s);
 
 #ifdef __cplusplus
 }

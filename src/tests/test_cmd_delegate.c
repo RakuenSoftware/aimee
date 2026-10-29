@@ -87,7 +87,6 @@ static void setup_role_templates(void)
 }
 
 /* Pull in only the declarations we need. */
-int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 
 /* ---- Helpers ---- */
 
@@ -289,130 +288,7 @@ void model_capability_format_flags(unsigned flags, char *out, size_t out_len)
       snprintf(out, out_len, "-");
 }
 
-static void clear_depth_env(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "");
-   platform_setenv("AIMEE_PARENT_DELEGATION_ID", "");
-}
-
 /* ---- Tests: delegate_check_chain_depth ---- */
-
-static void test_depth_zero_when_env_unset(void)
-{
-   clear_depth_env();
-   char errbuf[256] = {0};
-   /* max_depth=3: first call (depth 1) should succeed */
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   assert(errbuf[0] == '\0');
-   /* env var should now be "1" */
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "1") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_zero_when_env_unset\n");
-}
-
-static void test_depth_increments_from_env(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "2");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   assert(errbuf[0] == '\0');
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_increments_from_env\n");
-}
-
-static void test_depth_blocked_at_limit(void)
-{
-   /* parent_depth=3, current=4 > max_depth=3 -> blocked */
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "depth limit exceeded") != NULL);
-   /* env should be unchanged at "3" */
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_blocked_at_limit\n");
-}
-
-static void test_depth_allowed_at_limit_minus_one(void)
-{
-   /* parent_depth=2, current=3 == max_depth=3 -> allowed */
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "2");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_allowed_at_limit_minus_one\n");
-}
-
-static void test_depth_custom_limit(void)
-{
-   clear_depth_env();
-   char errbuf[256] = {0};
-
-   /* depth 1..5 all succeed with max_depth=5 */
-   for (int i = 0; i < 5; i++)
-   {
-      int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-      assert(rc == 0);
-      char expected[16];
-      snprintf(expected, sizeof(expected), "%d", i + 1);
-      assert(strcmp(getenv("AIMEE_DELEGATE_DEPTH"), expected) == 0);
-   }
-
-   /* depth 6 > max_depth=5 -> blocked */
-   int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "6/5") != NULL);
-
-   clear_depth_env();
-   printf("  PASS: test_depth_custom_limit\n");
-}
-
-static void test_depth_errbuf_null_safe(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   /* Passing NULL errbuf must not crash */
-   int rc = delegate_check_chain_depth(3, NULL, 0);
-   assert(rc == -1);
-   clear_depth_env();
-   printf("  PASS: test_depth_errbuf_null_safe\n");
-}
-
-static void test_depth_error_message_content(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   char errbuf[512] = {0};
-   delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(strstr(errbuf, "delegation chain depth limit exceeded") != NULL);
-   assert(strstr(errbuf, "max_delegation_depth") != NULL);
-   clear_depth_env();
-   printf("  PASS: test_depth_error_message_content\n");
-}
-
-static void test_delegate_chain_env_clear_policy(void)
-{
-   assert(delegate_chain_env_should_clear("2", "", 0, 0) == 1);
-   assert(delegate_chain_env_should_clear("2", NULL, 0, 0) == 1);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 0, 0) == 0);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 1, 1) == 0);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 1, 0) == 1);
-   assert(delegate_chain_env_should_clear("", "deleg-parent", 0, 0) == 0);
-   assert(delegate_chain_env_should_clear("", "deleg-parent", 1, 0) == 1);
-   printf("  PASS: test_delegate_chain_env_clear_policy\n");
-}
 
 static void test_guarded_lxc_readonly_root_matching(void)
 {
@@ -428,45 +304,6 @@ static void test_guarded_lxc_readonly_root_matching(void)
    assert(agent_tools_cmd_refers_to_readonly_root("cat /repo/.aimee/worktrees/session/main/src.c",
                                                   ro, rw) == 0);
    printf("  PASS: test_guarded_lxc_readonly_root_matching\n");
-}
-
-static void test_prompt_plan_inline_prompt_only(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs("summarize this text", NULL, &plan) == 0);
-   assert(strcmp(plan.task_prompt, "summarize this text") == 0);
-   assert(strcmp(plan.user_prompt, "summarize this text") == 0);
-   assert(plan.owned_user_prompt == NULL);
-   printf("  PASS: test_prompt_plan_inline_prompt_only\n");
-}
-
-static void test_prompt_plan_file_only(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs(NULL, "file payload here", &plan) == 0);
-   assert(strcmp(plan.task_prompt, "Work from the user prompt provided below.") == 0);
-   assert(strcmp(plan.user_prompt, "file payload here") == 0);
-   assert(plan.owned_user_prompt == NULL);
-   printf("  PASS: test_prompt_plan_file_only\n");
-}
-
-static void test_prompt_plan_prompt_and_file(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs("extract the marker", "MARKER_ABC_123", &plan) == 0);
-   assert(strcmp(plan.task_prompt, "extract the marker") == 0);
-   assert(plan.owned_user_prompt != NULL);
-   assert(strstr(plan.user_prompt, "extract the marker") == plan.user_prompt);
-   assert(strstr(plan.user_prompt, "# Prompt File\nMARKER_ABC_123") != NULL);
-   free(plan.owned_user_prompt);
-   printf("  PASS: test_prompt_plan_prompt_and_file\n");
-}
-
-static void test_prompt_plan_requires_prompt_source(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs(NULL, NULL, &plan) == -1);
-   printf("  PASS: test_prompt_plan_requires_prompt_source\n");
 }
 
 /* When the caller supplies the review target (target_provided=1, e.g. a diff via
@@ -1371,51 +1208,6 @@ const char *agent_scope_name(agent_scope_t s)
    }
 }
 
-/* The scope filter is what makes `--scope bounded` actually shift work to a local
- * seat, and what stops `--scope whole_task` reaching one that cannot serve it.
- * Its error must name the fleet and each ceiling: "nothing can serve this" alone
- * leaves the operator guessing which seat to change. */
-static void test_delegate_filter_route_scope(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   strcpy(cfg.agents[0].name, "local");
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
-   strcpy(cfg.agents[1].name, "capable");
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].max_scope = AGENT_SCOPE_UNSET; /* no ceiling */
-
-   char err[512];
-
-   /* Bounded work: both seats remain eligible. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_BOUNDED, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 1 && cfg.agents[1].enabled == 1);
-
-   /* Whole-task work: the ceiling disables the local seat, not the fleet. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-
-   /* UNSET is a no-op here — the routing filter resolves it to whole_task. */
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 1;
-   strcpy(cfg.agents[0].name, "local");
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_UNSET, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 1);
-
-   /* Nothing can serve it: fail, and SAY WHICH SEATS EXIST and their ceilings. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) != 0);
-   assert(strstr(err, "whole_task") != NULL);
-   assert(strstr(err, "local") != NULL);
-   assert(strstr(err, "bounded") != NULL);
-
-   printf("  PASS: test_delegate_filter_route_scope\n");
-}
-
 static int chain_via_module(unsigned op, int has_depth, int has_parent, int parent_known,
                             int parent_active, int parent_depth, int max_depth, int *flag,
                             int32_t *current_depth)
@@ -1449,19 +1241,7 @@ int main(void)
    delegate_register_chain_provider(chain_via_module);
    printf("test_cmd_delegate\n");
    setup_role_templates();
-   test_depth_zero_when_env_unset();
-   test_depth_increments_from_env();
-   test_depth_blocked_at_limit();
-   test_depth_allowed_at_limit_minus_one();
-   test_depth_custom_limit();
-   test_depth_errbuf_null_safe();
-   test_depth_error_message_content();
-   test_delegate_chain_env_clear_policy();
    test_guarded_lxc_readonly_root_matching();
-   test_prompt_plan_inline_prompt_only();
-   test_prompt_plan_file_only();
-   test_prompt_plan_prompt_and_file();
-   test_prompt_plan_requires_prompt_source();
    delegate_register_review_evidence_provider(test_review_evidence_provider);
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
@@ -1484,7 +1264,6 @@ int main(void)
    test_route_filter_refuses_without_a_provider();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
-   test_delegate_filter_route_scope();
    printf("All tests passed.\n");
    return 0;
 }

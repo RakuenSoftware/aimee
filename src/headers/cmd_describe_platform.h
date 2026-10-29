@@ -13,10 +13,6 @@ typedef struct
    char path[MAX_PATH_LEN];
 } describe_job_t;
 
-/* Defined in cmd_describe.c, called by platform implementations */
-int describe_one(const char *project_name, const char *project_path);
-int style_one(const char *project_name, const char *project_path);
-
 /* Platform-specific parallel execution of describe/style jobs.
  * POSIX: forks up to max_parallel children at a time.
  * Windows: runs jobs serially.

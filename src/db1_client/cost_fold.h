@@ -23,10 +23,6 @@ extern "C"
    int db1_cost_fold_record(const char *parent_session_id, const char *child_session_id,
                             double cost_usd, const char *source);
 
-   /* Sum of cost_usd across every row where parent_session_id matches.
-    * Returns 0.0 for unknown parents or DB-not-initialized. */
-   double db1_cost_fold_total(const char *parent_session_id);
-
 #ifdef __cplusplus
 }
 #endif

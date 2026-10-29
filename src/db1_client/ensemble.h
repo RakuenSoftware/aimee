@@ -78,7 +78,6 @@ extern "C"
    int db1_ensemble_create_id(const char *project_root, const char *config_dir,
                               const char *template_name, const char *channel,
                               const char *assignments_json, ensemble_id_result_t *out);
-   int db1_ensemble_find_current_id(const char *channel, ensemble_id_result_t *out);
 
    /* Read one ensemble, and advance one. The public functions below are thin
     * unpackings of these, kept so callers need not change shape. */
@@ -112,8 +111,6 @@ extern "C"
     * relay, so it answers with rows or with nothing. */
    int db1_ensemble_list_rows(ensemble_info_t **out, int *out_count);
    int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen);
-   int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err,
-                                            size_t errlen);
 
    /* Build a JSON object describing a ensemble suitable for MCP/HTTP responses.
     * prompt_text / context_text may be NULL. Caller owns returned cJSON*. */

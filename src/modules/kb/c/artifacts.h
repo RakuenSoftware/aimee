@@ -42,18 +42,6 @@ extern "C"
                                   const char *operator_id, double confidence, int attempt_count,
                                   const char *payload_json);
 
-   /* Idempotent evidence capture: write a proposed evidence artifact of `kind`
-    * (the charter source_kind) with the given scope and a content_hash stored
-    * in source_bundle_hash. If an artifact with the same (kind, content_hash)
-    * already exists, no row is written and its id is returned instead — so
-    * re-uploading identical evidence never duplicates it. Writes the chosen id
-    * (new or existing) into id_out (>= 37 bytes; may be NULL).
-    * Returns 0 on success, -1 on error. */
-   int kb_store_artifact_write_evidence(const char *kind, const char *scope_kind,
-                                        const char *scope_id, const char *operator_id,
-                                        const char *content_hash, const char *payload_json,
-                                        char *id_out, int id_out_len);
-
    /* Count the distinct cited evidence sources for an artifact (its
     * corroboration). Returns the count (>= 0), or -1 on error. */
    int kb_store_artifact_citation_count(const char *artifact_id);
@@ -63,19 +51,6 @@ extern "C"
     * proposals matching it. Returns 0 if none / on error. */
    int kb_store_artifact_verdict_suppressed(const char *verdict_tag, const char *verdict_scope);
 
-   /* Read the before_snapshot JSON of an artifact's most recent audit event
-    * into out ("" if none). Returns 0 on success, -1 on error. */
-   int kb_store_audit_read_latest_before(const char *artifact_id, char *out, int out_len);
-
-   /* Retroactive thumbs-down rollback: roll the artifact back to restore_state
-    * (its pre-commit snapshot state) and write an audit_events row recording the
-    * verdict (verdict='thumbs_down') with verdict_tag / verdict_scope /
-    * counter_example in their dedicated columns and before/after snapshots.
-    * Returns 0 on success, -1 on error. */
-   int kb_store_artifact_review_rollback(const char *artifact_id, const char *restore_state,
-                                         const char *verdict_tag, const char *verdict_scope,
-                                         const char *counter_example);
-
    /* Transition an artifact's state field.
     * Returns 0 on success, -1 on error / not found. */
    int kb_store_artifact_set_state(const char *id, const char *new_state);
@@ -84,12 +59,6 @@ extern "C"
     * routes to). Returns 0 on success, -1 on error. The read writes "" when the
     * column is empty. */
    int kb_store_artifact_set_target_surface(const char *id, const char *target_surface);
-   int kb_store_artifact_target_surface(const char *id, char *out, int out_len);
-
-   /* Register an artifact as a case/guardrail exemplar (insert an
-    * exemplar_vectors row; embedding filled asynchronously). Returns 0 on
-    * success, -1 on error. */
-   int kb_store_artifact_register_exemplar(const char *artifact_id, const char *collection);
 
    /* Stamp last_accessed_at for an artifact read path.
     * Returns 0 on success, -1 on error / not found. */

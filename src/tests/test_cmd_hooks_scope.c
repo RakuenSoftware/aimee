@@ -10,82 +10,6 @@
 #include "cJSON.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-static void test_hook_payload_session_id_prefers_payload(void)
-{
-   setenv("AIMEE_SESSION_ID", "env-aimee", 1);
-   setenv("CLAUDE_SESSION_ID", "env-claude", 1);
-   setenv("CODEX_THREAD_ID", "env-codex", 1);
-
-   cJSON *json = cJSON_Parse("{\"session_id\":\"payload-sid_123\"}");
-   assert(json != NULL);
-   char sid[64];
-   assert(hook_payload_session_id(json, sid, sizeof(sid)) == 1);
-   assert(strcmp(sid, "payload-sid_123") == 0);
-   cJSON_Delete(json);
-}
-
-static void test_hook_payload_session_id_env_fallback_order(void)
-{
-   unsetenv("AIMEE_SESSION_ID");
-   setenv("CLAUDE_SESSION_ID", "env-claude", 1);
-   setenv("CODEX_THREAD_ID", "env-codex", 1);
-
-   char sid[64];
-   assert(hook_payload_session_id(NULL, sid, sizeof(sid)) == 1);
-   assert(strcmp(sid, "env-claude") == 0);
-
-   unsetenv("CLAUDE_SESSION_ID");
-   assert(hook_payload_session_id(NULL, sid, sizeof(sid)) == 1);
-   assert(strcmp(sid, "env-codex") == 0);
-}
-
-static void test_hook_payload_session_id_rejects_unsafe_ids(void)
-{
-   unsetenv("AIMEE_SESSION_ID");
-   unsetenv("CLAUDE_SESSION_ID");
-   unsetenv("CODEX_THREAD_ID");
-
-   cJSON *json = cJSON_Parse("{\"session_id\":\"../../bad\"}");
-   assert(json != NULL);
-   char sid[64] = "unchanged";
-   assert(hook_payload_session_id(json, sid, sizeof(sid)) == 0);
-   assert(sid[0] == '\0');
-   cJSON_Delete(json);
-}
-
-static void test_hook_payload_cwd_prefers_top_level(void)
-{
-   const char *payload = "{\"cwd\":\"/tmp/top\",\"tool_input\":{\"workdir\":\"/tmp/nested\"}}";
-   cJSON *json = cJSON_Parse(payload);
-   assert(json != NULL);
-   char cwd[128];
-   assert(hook_payload_cwd(json, cwd, sizeof(cwd)) == 1);
-   assert(strcmp(cwd, "/tmp/top") == 0);
-   cJSON_Delete(json);
-}
-
-static void test_hook_payload_cwd_reads_nested_object(void)
-{
-   cJSON *json = cJSON_Parse("{\"tool_input\":{\"cmd\":\"date\",\"workdir\":\"/tmp/nested\"}}");
-   assert(json != NULL);
-   char cwd[128];
-   assert(hook_payload_cwd(json, cwd, sizeof(cwd)) == 1);
-   assert(strcmp(cwd, "/tmp/nested") == 0);
-   cJSON_Delete(json);
-}
-
-static void test_hook_payload_cwd_reads_nested_string(void)
-{
-   const char *payload = "{\"tool_input\":\"{\\\"command\\\":\\\"date\\\","
-                         "\\\"workdir\\\":\\\"/tmp/string\\\"}\"}";
-   cJSON *json = cJSON_Parse(payload);
-   assert(json != NULL);
-   char cwd[128];
-   assert(hook_payload_cwd(json, cwd, sizeof(cwd)) == 1);
-   assert(strcmp(cwd, "/tmp/string") == 0);
-   cJSON_Delete(json);
-}
-
 static void test_hook_scope_project_is_not_configured_workspace(void)
 {
    char root[256];
@@ -219,89 +143,10 @@ static void test_owned_hook_ir(void)
        "  canonical hook admission: owned identities, arguments, results and exact framing passed");
 }
 
-static void test_canonical_hook_transport(void)
-{
-   /* Canonical input is typed: a JSON-looking string must not be decoded a
-    * second time. Opaque result content must not override is_error metadata. */
-   const char *frame =
-       "{\"ir_version\":1,\"session_id\":\"sid\",\"cwd\":\"/scope\",\"hook\":{"
-       "\"call\":{\"type\":\"tool_use\",\"name\":\"run\",\"namespace\":\"foreign\","
-       "\"tool_id\":\"opaque/id\",\"input\":\"{\\\"exact\\\":9007199254740993}\"},"
-       "\"result\":{\"type\":\"tool_result\",\"tool_id\":\"opaque/id\","
-       "\"content\":{\"isError\":true,\"value\":9007199254740993},\"is_error\":false}}} \r\n";
-   cJSON *request = aimee_ir_json_parse_frame(frame, strlen(frame));
-   assert(request);
-   aimee_hook_ir_t hook;
-   assert(!aimee_hook_ir_admit(request, &hook));
-   cJSON_Delete(request);
-   assert(cJSON_IsString(hook.call.tool_input));
-   assert(!strcmp(hook.call.tool_input->valuestring, "{\"exact\":9007199254740993}"));
-   assert(!strcmp(hook.call.tool_namespace, "foreign"));
-   assert(!hook.result.tool_is_error);
-   assert(!strcmp(hook.call.tool_id, hook.result.tool_id));
-   request = cJSON_CreateObject();
-   assert(cJSON_AddNumberToObject(request, "ir_version", 1));
-   assert(cJSON_AddItemToObject(request, "hook", aimee_hook_ir_json(&hook)));
-   aimee_hook_ir_free(&hook);
-   assert(!aimee_hook_ir_admit(request, &hook));
-   assert(cJSON_IsString(hook.call.tool_input) && !hook.result.tool_is_error);
-   char *result = cJSON_PrintUnformatted(hook.result.tool_result);
-   assert(result && strstr(result, "9007199254740993"));
-   free(result);
-   aimee_hook_ir_free(&hook);
-   /* Every legacy identity/input alias conflicts with a marked IR envelope. */
-   const char *aliases[] = {"tool_name",    "tool_input", "tool_response", "tool_use_id",
-                            "tool_call_id", "namespace",  "tool_namespace"};
-   for (size_t i = 0; i < sizeof aliases / sizeof aliases[0]; i++)
-   {
-      assert(cJSON_AddStringToObject(request, aliases[i], "foreign"));
-      assert(aimee_hook_ir_admit(request, &hook));
-      assert(!hook.call.tool_name && !hook.result.tool_result);
-      cJSON_DeleteItemFromObjectCaseSensitive(request, aliases[i]);
-   }
-   const char *invalid[] = {
-       "{\"ir_version\":2,\"tool_name\":\"Bash\"}",
-       "{\"ir_version\":\"1\",\"tool_name\":\"Bash\"}",
-       "{\"ir_version\":1,\"hook\":{\"call\":{\"type\":\"tool_use\",\"name\":\"x\"}}}",
-       "{\"ir_version\":1,\"hook\":{\"call\":{\"type\":\"tool_result\",\"name\":\"x\",\"input\":{}}"
-       "}}",
-       "{\"ir_version\":1,\"hook\":{\"call\":{\"type\":\"tool_use\",\"name\":\"x\",\"input\":{},"
-       "\"extra\":1}}}",
-       "{\"ir_version\":1,\"hook\":{\"call\":{\"type\":\"tool_use\",\"name\":\"x\",\"tool_id\":"
-       "\"a\",\"input\":{}},"
-       "\"result\":{\"type\":\"tool_result\",\"tool_id\":\"b\",\"content\":null,\"is_error\":false}"
-       "}}"};
-   cJSON_Delete(request);
-   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
-   {
-      request = cJSON_Parse(invalid[i]);
-      assert(request && aimee_hook_ir_admit(request, &hook));
-      assert(!hook.call.tool_name && !hook.result.tool_result);
-      cJSON_Delete(request);
-   }
-   /* Installed older CLIs still enter through exactly one native adapter. */
-   request =
-       cJSON_Parse("{\"tool_name\":\"Bash\",\"tool_input\":\"{\\\"command\\\":\\\"date\\\"}\"}");
-   assert(request && !aimee_hook_ir_admit(request, &hook));
-   assert(cJSON_IsObject(hook.call.tool_input));
-   cJSON_Delete(request);
-   aimee_hook_ir_free(&hook);
-   char sid[4] = "old";
-   assert(hook_session_id("long-scope", sid, sizeof sid) == -1 && !sid[0]);
-   assert(hook_session_id("a/b", sid, sizeof sid) == -1 && !sid[0]);
-}
-
 int main(void)
 {
    printf("cmd_hooks_scope: ");
    test_owned_hook_ir();
-   test_canonical_hook_transport();
-   test_hook_payload_session_id_prefers_payload();
-   test_hook_payload_session_id_env_fallback_order();
-   test_hook_payload_session_id_rejects_unsafe_ids();
-   test_hook_payload_cwd_prefers_top_level();
-   test_hook_payload_cwd_reads_nested_object();
-   test_hook_payload_cwd_reads_nested_string();
    test_hook_scope_project_is_not_configured_workspace();
    printf("all tests passed\n");
    return 0;

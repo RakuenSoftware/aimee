@@ -56,40 +56,6 @@ static void gw_state_key(const char *skey, cJSON *msgs, char *out, size_t out_sz
    snprintf(out, out_sz, "gw:%s:%016llx", skey ? skey : "", (unsigned long long)fp);
 }
 
-int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                          int retained_msgs, gw_reduce_report_t *out)
-{
-   if (!out)
-      return 1;
-   memset(out, 0, sizeof(*out));
-   if (!cJSON_IsArray(messages))
-      return 1; /* nothing to measure; out is zeroed so the caller's free is safe */
-
-   /* Shadow mode: the module measures and never mutates. Only the ledger fields
-    * the callers read are populated; a failed call leaves them zero, which reads
-    * as "no opportunity" rather than a fabricated one. */
-   econ_module_request_t mreq;
-   memset(&mreq, 0, sizeof mreq);
-   mreq.measure_only = 1;
-   mreq.retained_msgs = retained_msgs;
-
-   cJSON *ignored = NULL;
-   econ_module_result_t mres;
-   int rc = econ_module_reduce(messages, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &ignored,
-                               &mres);
-   cJSON_Delete(ignored); /* measure_only never returns an array; defensive */
-   if (rc == 0)
-   {
-      out->baseline_tokens = mres.baseline_tokens;
-      out->reduced_tokens = mres.reduced_tokens;
-      out->removed_tokens = mres.removed_tokens;
-      out->foldable_tokens = mres.foldable_tokens;
-      out->reason = GW_REDUCE_REASON_MEASURED;
-   }
-   econ_module_result_free(&mres);
-   return rc;
-}
-
 void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx)
 {
    if (ctx)

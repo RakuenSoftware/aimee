@@ -3,10 +3,6 @@
  * All functions are no-ops; the full implementation lives in learning_implicit.c. */
 #include <stdint.h>
 
-void learning_implicit_detect_turn(const char *t)
-{
-   (void)t;
-}
 void learning_implicit_record_repeat_question(const char *s, const char *tool, const char *q)
 {
    (void)s;

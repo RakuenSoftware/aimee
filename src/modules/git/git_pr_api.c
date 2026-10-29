@@ -381,26 +381,6 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
    return rc;
 }
 
-int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
-                                  size_t out_cap, char *err, size_t errlen)
-{
-   if (out && out_cap)
-      out[0] = '\0';
-   if (err && errlen)
-      err[0] = '\0';
-   gh_ctx_t cx;
-   if (!out || out_cap == 0 || gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
-      return -1;
-   int rc = gh_default_branch(&cx, out, out_cap);
-   gh_ctx_done(&cx);
-   if (rc != 0)
-   {
-      out[0] = '\0';
-      snprintf(err, errlen, "cannot resolve authoritative default branch");
-   }
-   return rc;
-}
-
 /* PUT with a JSON body; same containment as gh_get. */
 static int gh_put(const gh_ctx_t *cx, const char *path, const char *body, char **resp)
 {

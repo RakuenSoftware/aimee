@@ -54,89 +54,6 @@ static void test_bandit_arm_register(void)
    printf("  bandit_arm_register: ok\n");
 }
 
-/* kb_bandit_sample reads the live module config, so the
- * "disabled" case must pin the config it reads — otherwise it inherits the developer's real
- * aimee.yaml and fails wherever bandit_optimize_command is set. An empty HOME yields the
- * declared defaults (command empty = disabled). */
-static char g_cfg_home[64];
-static char *g_saved_home;
-
-static void pin_empty_config(void)
-{
-   /* Fresh template per call: mkdtemp REWRITES the XXXXXX in place. */
-   snprintf(g_cfg_home, sizeof(g_cfg_home), "%s/aimee-test-bandit-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(g_cfg_home));
-   g_saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   setenv("HOME", g_cfg_home, 1);
-   unsetenv("AIMEE_HOME");
-   setenv("AIMEE_NO_CACHE", "1", 1);
-   assert(config_set_bandit_optimize_command("") == 0);
-}
-
-static void unpin_config(void)
-{
-   unsetenv("AIMEE_NO_CACHE");
-   if (g_saved_home)
-   {
-      setenv("HOME", g_saved_home, 1);
-      free(g_saved_home);
-      g_saved_home = NULL;
-   }
-   else
-      unsetenv("HOME");
-   rmdir(g_cfg_home);
-}
-
-/* ---- 2. bandit_sample_disabled ---- */
-static void test_bandit_sample_disabled(void)
-{
-   pin_empty_config(); /* bandit_optimize_command empty = disabled */
-
-   char arm_ids[2][KB_BANDIT_MAX_ARM_ID];
-   strncpy(arm_ids[0], "arm_a", KB_BANDIT_MAX_ARM_ID - 1);
-   strncpy(arm_ids[1], "arm_b", KB_BANDIT_MAX_ARM_ID - 1);
-
-   char decision_id[KB_BANDIT_MAX_DECISION] = "";
-   int rc = kb_bandit_sample("test_dp", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids, 2,
-                             decision_id);
-   unpin_config();
-   assert(rc == -1);
-
-   printf("  bandit_sample_disabled: ok\n");
-}
-
-static void test_bandit_sample_respects_selected_arm(void)
-{
-   open_db();
-   pin_empty_config();
-
-   assert(config_set_bandit_optimize_command("python3 ../scripts/bandit-sidecar.py") == 0);
-   assert(config_set_bandit_exploration_fraction(0.0) == 0);
-   assert(kb_store_bandit_arm_stats_update("test_policy", "off", 0.0, 1.0, 101.0) == 0);
-   assert(kb_store_bandit_arm_stats_update("test_policy", "brief", 1.0, 101.0, 1.0) == 0);
-   assert(kb_store_bandit_arm_stats_update("test_policy", "full", 0.0, 1.0, 101.0) == 0);
-
-   char arm_ids[3][KB_BANDIT_MAX_ARM_ID] = {{0}};
-   snprintf(arm_ids[0], sizeof(arm_ids[0]), "off");
-   snprintf(arm_ids[1], sizeof(arm_ids[1]), "brief");
-   snprintf(arm_ids[2], sizeof(arm_ids[2]), "full");
-   char decision_id[KB_BANDIT_MAX_DECISION] = "";
-   int chosen = kb_bandit_sample("test_policy", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids,
-                                 3, decision_id);
-   assert(chosen == 1);
-   assert(kb_bandit_sample("kb_fusion_mode", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids, 3,
-                           decision_id) == -1);
-   assert(decision_id[0] != '\0');
-
-   /* Do not leave the client-side config snapshot carrying this test's
-    * sidecar into subsequent callers. */
-   assert(config_set_bandit_optimize_command("") == 0);
-   assert(config_set_bandit_exploration_fraction(0.05) == 0);
-   unpin_config();
-   close_db();
-   printf("  bandit_sample_respects_selected_arm: ok\n");
-}
-
 /* ---- 3. bandit_reward_closed ---- */
 static void test_bandit_reward_closed(void)
 {
@@ -383,7 +300,6 @@ int main(void)
    printf("bandit:\n");
 
    test_bandit_arm_register();
-   test_bandit_sample_disabled();
    test_bandit_reward_closed();
    test_config_bandit_defaults();
    test_bandit_explore_stats();
@@ -391,7 +307,6 @@ int main(void)
    test_bandit_recall_reward();
    test_bandit_enumeration();
    test_bandit_replay_evidence();
-   test_bandit_sample_respects_selected_arm();
 
    printf("All bandit tests passed.\n");
    return 0;

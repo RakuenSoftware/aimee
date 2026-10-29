@@ -1030,9 +1030,3 @@ int index_find_callers(const char *project, const char *symbol, caller_hit_t *ou
 {
    return kb_store_code_index_callers_find(project, symbol, out, max);
 }
-
-int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max)
-{
-   /* The direct (non-HTTP) code-search path does not enrich line spans. */
-   return kb_store_code_index_code_search(query, project, out, max, 0);
-}

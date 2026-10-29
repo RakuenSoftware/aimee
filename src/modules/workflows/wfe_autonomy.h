@@ -21,10 +21,6 @@
  * (an explicit 0 disables auto-retry; a malformed/negative value floors here). */
 #define WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT 6
 
-/* Drive a work item as far as its mode + gate policies allow. Returns 0 on a
- * clean stop (terminal or parked), -1 on error. */
-int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen);
-
 /* The default per-run USD ceiling every autonomous intake applies when the
  * caller supplies no explicit cap: $5.00, AIMEE_AUTONOMY_MAX_USD overrides
  * (0 disables the cap; a malformed/inf/NaN override falls back to the
@@ -37,13 +33,5 @@ double wfe_autonomy_default_max_cost_usd(void);
  * switch is intentionally environment-owned so an operator can stop effects
  * immediately without a writable configuration service. */
 int wfe_autonomy_killed(void);
-
-/* Human-only escape from a stuck gate: records a signed override (counts as a
- * human approval), increments override_count, and clears the pause so the next
- * run advances. On the (WFE_MAX_OVERRIDES+1)th override the work item is forced
- * to terminal `rejected`. Returns 0 on success, 1 if it forced rejection, -1 on
- * error. */
-int wfe_gate_override(const char *work_item_id, const char *gate, const char *actor,
-                      const char *reason, char *err, size_t errlen);
 
 #endif /* DEC_WFE_AUTONOMY_H */

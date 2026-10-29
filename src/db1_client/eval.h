@@ -55,19 +55,10 @@ extern "C"
       char error[DB1_EVAL_ERROR_LEN];
    } db1_eval_failed_task_t;
 
-   /* Distinct (task_name, error) pairs from eval_results with success=0
-    * in the last 7 days, newest first. Writes up to `max` into `out`.
-    * Returns count written (>=0) or -1 on error. */
-   int db1_eval_failed_tasks_recent(db1_eval_failed_task_t *out, int max);
-
    typedef struct
    {
       char task_name[DB1_EVAL_TASK_NAME];
    } db1_eval_passed_task_t;
-
-   /* Distinct task_name from eval_results with success=1 in the last
-    * 7 days, newest first. */
-   int db1_eval_passed_tasks_recent(db1_eval_passed_task_t *out, int max);
 
    typedef struct
    {

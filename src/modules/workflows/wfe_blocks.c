@@ -302,24 +302,6 @@ unlock:
    return rc_final;
 }
 
-/* Tear down a per-work-item worktree (terminal cleanup): unlock then force-remove.
- * Best-effort; a missing/already-removed worktree is fine. */
-int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
-{
-   if (!worktree || !worktree[0])
-      return 0;
-   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
-   char *o = NULL;
-   const char *unlock[] = {"git", "-C", rl, "worktree", "unlock", worktree, NULL};
-   safe_exec_capture(unlock, &o, 1 << 14);
-   free(o);
-   o = NULL;
-   const char *rm[] = {"git", "-C", rl, "worktree", "remove", "--force", worktree, NULL};
-   int rc = safe_exec_capture(rm, &o, 1 << 14);
-   free(o);
-   return rc == 0 ? 0 : -1;
-}
-
 /* True for an immutable-terminal work-item state (mirrors the scheduler sweep's
  * set): such an item's worktree should already be gone, so a lingering one is
  * reapable rather than in-use. */
@@ -442,36 +424,16 @@ static const wfe_forge_t LIVE_FORGE = {
     live_merge,     live_open,      NULL /* publish_base: live provider registers it */};
 static const wfe_forge_t *g_forge = &LIVE_FORGE;
 
-void wfe_set_forge_provider(const wfe_forge_t *p)
-{
-   g_forge = p ? p : &LIVE_FORGE;
-}
-
 /* Delegate seam (see wfe_blocks.h). Default NULL: producing blocks fail closed
  * until the server registers a live provider, preserving the integration-gated
  * behavior the stubs had before. */
 static const wfe_delegate_provider_t *g_delegate = NULL;
 
-void wfe_set_delegate_provider(const wfe_delegate_provider_t *p)
-{
-   g_delegate = p;
-}
-
 /* Verify seam (see wfe_blocks.h). Default NULL: implement does not gate on
  * verification (pre-WP-1b behavior). */
 static const wfe_verify_provider_t *g_verify = NULL;
 
-void wfe_set_verify_provider(const wfe_verify_provider_t *p)
-{
-   g_verify = p;
-}
-
 static const wfe_judge_provider_t *g_judge = NULL;
-
-void wfe_set_judge_provider(const wfe_judge_provider_t *p)
-{
-   g_judge = p;
-}
 
 /* Run one judgment under `lens`; returns 1 if it REFUTED the change (incl. an
  * unrunnable judge / unparseable verdict -> fail closed = refuted). */
@@ -634,14 +596,6 @@ static int node_bool(const wfe_node_t *node, const char *key)
  *  -1  provider ran and failed (caller should loop/retry),
  *  -2  provider completed but proved the requested write was a no-op. */
 #define WFE_DISPATCH_NO_CHANGE (-2)
-
-int wfe_delegate_error_is_no_change(const char *error)
-{
-   if (!error || !strstr(error, "result treated as incomplete"))
-      return 0;
-   return strstr(error, "no file changes detected") != NULL ||
-          strstr(error, "no owned files changed") != NULL;
-}
 
 static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *prompt,
                                  const char *artifact_path, char out_commit_sha[64],
@@ -2170,11 +2124,6 @@ static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
  * parks (no child spawned; nothing silently advances). */
 static const wfe_foreach_provider_t *g_foreach = NULL;
 
-void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
-{
-   g_foreach = p;
-}
-
 /* foreach.workflow: fan the split packets out to one child "slice" workflow each,
  * parking until every child has merged into the feature branch. Aggregation is keyed
  * off the DB parent<->child linkage; only SPAWNING is delegated to the seam. With no
@@ -2245,14 +2194,6 @@ static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *n
       return wfe_step_advanced(handle, "", 0.0);
    }
    return wfe_step_pending(WFE_PAUSE_SLICES_RUNNING); /* slices still running -> re-drive */
-}
-
-/* Register just the foreach.workflow executor over any prior (stub) registration --
- * lets a test drive the real fan-in aggregation while stubbing the git/delegate
- * producing blocks. */
-void wfe_register_foreach_block(void)
-{
-   wfe_register_block_executor(WFE_BLK_FOREACH_WORKFLOW, exec_foreach_workflow);
 }
 
 void wfe_register_default_executors(void)

@@ -201,15 +201,3 @@ int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, s
 {
    return adapter_serve(client_fd, is_uds, head, head_len, tag, 0, NULL, NULL);
 }
-int delegate_egress_adapter_serve_owned(int client_fd, const char *head, size_t head_len,
-                                        const char *tag, int timeout_ms, int (*cancelled)(void *),
-                                        void *context)
-{
-   struct sockaddr_storage address;
-   socklen_t length = sizeof address;
-   int is_uds = client_fd >= 0 && !getsockname(client_fd, (struct sockaddr *)&address, &length) &&
-                address.ss_family == AF_UNIX;
-   if (timeout_ms <= 0 || timeout_ms > 600000)
-      return -1;
-   return adapter_serve(client_fd, is_uds, head, head_len, tag, timeout_ms, cancelled, context);
-}

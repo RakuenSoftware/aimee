@@ -126,10 +126,11 @@ legacy dataset runners' scratch-store isolation: their C connection cannot
 redirect the Go owner. Use the explicit disposable store in `aimee-memory-eval`
 for the supported Go corpus path.
 
-The separate native `bench-perf` harness keeps retired memory case names as
-`unavailable` with null timings and exits 2 without saving or certifying a
-baseline. Its deleted in-process memory calls are not a valid benchmark of the
-Go service.
+The separate native `bench-perf` harness times only native paths
+(`pre_tool_check`, `delegate_dispatch`). Its memory, `db_open` and startup cases
+left with the in-process memory engine and native database; Go memory latency is
+measured by `aimee-memory-eval`. `--check` refuses a baseline that names a case
+the harness does not run, so an old baseline cannot pass unmeasured.
 
 ## Extension and removal
 

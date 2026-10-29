@@ -60,12 +60,8 @@ econ_request_budget_result_t econ_module_request_budget_with_policy(unsigned rou
 
 static void operator_policy(const char *value)
 {
-#ifdef _WIN32
-   assert(_putenv_s("AIMEE_PROVIDER_CONTEXT_LIMITS", value ? value : "") == 0);
-#else
    assert((value ? setenv("AIMEE_PROVIDER_CONTEXT_LIMITS", value, 1)
                  : unsetenv("AIMEE_PROVIDER_CONTEXT_LIMITS")) == 0);
-#endif
 }
 
 static void test_external_backend_cannot_ignore_hard_limits(void)

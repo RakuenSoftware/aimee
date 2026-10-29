@@ -103,12 +103,6 @@ int oauth_pkce_base64url_encode(const unsigned char *in, size_t in_len, char *ou
    return 0;
 }
 
-const char *runtime_secret_get(const char *name)
-{
-   (void)name;
-   return NULL;
-}
-
 /* ── Tests ──────────────────────────────────────────────────────────────────── */
 
 static void test_device_poll_requires_the_token_to_be_stored(void)

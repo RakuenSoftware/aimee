@@ -19,7 +19,6 @@ int vault_env_import_stream(FILE *input);
 
 /* Pure classifier shared with tests and the source guard. */
 int vault_env_name_is_credential(const char *name);
-int vault_env_name_is_any_credential(const char *name);
 
 /* Return 1 when the current process inherited any credential-shaped variable,
  * 0 when clean, or -1 when a malformed/oversized name must fail closed. */

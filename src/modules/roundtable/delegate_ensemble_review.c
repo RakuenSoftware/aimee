@@ -418,18 +418,3 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
                "No panelist returned the required original-request alignment assessment.");
    }
 }
-
-void delegate_roundtable_result_free(roundtable_result_t *r)
-{
-   if (!r)
-      return;
-   free(r->artifact);
-   r->artifact = NULL;
-}
-
-double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r)
-{
-   if (!r)
-      return 0.0;
-   return r->cost_usd;
-}

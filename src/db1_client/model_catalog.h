@@ -22,19 +22,6 @@ extern "C"
 {
 #endif
 
-   /* 1 when this provider has at least one row fetched within ttl_seconds. */
-   int db1_model_catalog_is_fresh(const char *provider, int ttl_seconds);
-
-   /* Read every cached model for a provider, ordered by id. Returns 0 and sets
-    * *models_out / *n_out on success; -1 on error or when nothing is cached
-    * (callers treat both as "no catalog"). Free with db1_model_catalog_free. */
-   int db1_model_catalog_get(const char *provider, provider_model_t **models_out, int *n_out);
-
-   /* Replace this provider's cached rows wholesale, in one transaction. A fetch
-    * reports the provider's CURRENT model set, so replacing rather than merging
-    * is what lets a withdrawn model disappear instead of lingering forever. */
-   int db1_model_catalog_replace(const char *provider, const provider_model_t *models, int n);
-
    void db1_model_catalog_free(provider_model_t *models, int n);
 
 #ifdef __cplusplus

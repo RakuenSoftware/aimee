@@ -22,6 +22,7 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
+#include "support/config_test_setters.h"
 
 void test_cancelled_durable_job_blocks_tool_dispatch(void)
 {

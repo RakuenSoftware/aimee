@@ -284,8 +284,6 @@ int policy_action_inherit(const char *session);
 int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
                                        const char *attempt, uint32_t resource_categories,
                                        char *reason, size_t reason_len);
-int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
-                               char *reason, size_t reason_len);
 int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
                         int authorized);
 char *policy_action_finish(const char *verdict, char *result, int *is_error);
@@ -402,7 +400,6 @@ int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
                                        const char *content_type, const void *body, size_t body_len,
                                        char **response_buf, size_t *response_len, int timeout_ms,
                                        const char *extra_headers);
-int agent_http_delete(const char *url, const char *auth_header, int timeout_ms);
 
 /* Retry-After (seconds) parsed from the most recent buffered HTTP response on
  * this thread, or 0 if it carried none. Lets the Anthropic ingress relay an
@@ -424,7 +421,6 @@ int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_heade
                                          size_t body_len, agent_http_stream_cb callback,
                                          void *userdata, int timeout_ms, const char *extra_headers,
                                          const agent_http_send_guard_t *guard);
-int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms);
 void agent_http_init(void);
 void agent_http_cleanup(void);
 

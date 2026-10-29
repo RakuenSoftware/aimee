@@ -15,11 +15,6 @@
  * binary; the server installs a kb_client-backed backend at startup. */
 static const replay_backend_t *g_backend = NULL;
 
-void evidence_replay_set_backend(const replay_backend_t *be)
-{
-   g_backend = be;
-}
-
 const replay_backend_t *evidence_replay_active_backend(void)
 {
    return g_backend;
@@ -287,9 +282,4 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
    free(lines);
 
    return grade(n, ev->count, ev->idkey, out->idkey);
-}
-
-replay_status_t evidence_replay(const review_evidence_t *ev, reduced_record_t *out)
-{
-   return evidence_replay_with(g_backend, ev, out);
 }

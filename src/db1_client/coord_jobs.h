@@ -67,14 +67,11 @@ extern "C"
    int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role,
                               const aimee_message_t *message, const char *cwd, const char *persona);
    int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out);
-   int db1_coord_job_complete_task(int task_id, const char *result);
-   int db1_coord_job_fail_task(int task_id, const char *error);
    /* Owner-fenced variants for durable workers. A completion/failure from an
     * earlier claim attempt is rejected after the task has been requeued. */
    int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result);
    int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error);
    int db1_coord_job_release_task(int task_id);
-   int db1_coord_job_release_task_bounded(int task_id, int max_requeues);
    int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by,
                                                 int max_requeues);
    /* Recover tasks owned by a dispatcher incarnation that can no longer exist.
@@ -84,8 +81,6 @@ extern "C"
    int db1_coord_job_get(int job_id, db1_coord_job_t *out);
    int db1_coord_job_list_tasks(int job_id, db1_coord_task_t *out, int max);
    int db1_coord_job_cancel(int job_id);
-   int db1_coord_job_refresh_status(int job_id);
-   int db1_coord_job_has_file_conflict(int job_id, const char *files_json);
    int db1_coord_job_list_recent(db1_coord_job_t *out, int max);
    /* List IDs of coord jobs with pending or running tasks (needs dispatch work). */
    int db1_coord_job_list_active_ids(int *out_ids, int max);

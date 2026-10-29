@@ -43,14 +43,6 @@ ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id);
  * restart. This never registers an unknown root or changes provider choice. */
 int ws_runner_registry_register_configured(const char *workspace);
 
-/* Return the queue for `id`, or NULL if none is registered. */
-ws_runner_queue_t *ws_runner_registry_lookup(const char *id);
-
-/* Close + destroy + remove the queue for `id` (workspace/session teardown).
- * Closing wakes any blocked transport/poll and fails their ops. No-op if
- * `id` is absent. */
-void ws_runner_registry_remove(const char *id);
-
 /* Reverse-channel endpoint helpers — what the `runner.poll` / `runner.respond`
  * RPC handlers (and any future /v1 route) wrap. The filesystem-authority client
  * serving workspace `id` calls poll to fetch the next op the server needs done,

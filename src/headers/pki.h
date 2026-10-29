@@ -79,7 +79,6 @@ extern "C"
    int pki_mtls_note_presentation(const char *serial, long now);
    int pki_mtls_ramp_ready(long now);
    int pki_mtls_ramp_advance(long now);
-   int pki_mtls_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out);
 
    /* Enumerate issued certs (newest first), invoking cb per row. Returns the row
     * count, or -1 on error. Keeps pki.c free of the JSON layer. */
@@ -114,9 +113,6 @@ extern "C"
     * NAT/DNAT deployment present a cert that verifies for its reachable address
     * without an operator-supplied cert. Truncation-safe. Exposed for tests. */
    void pki_build_server_san(const char *cn, const char *extra, char *out, size_t cap);
-
-   /* For tests: drop cached CA + snapshot so a fresh AIMEE_HOME is picked up. */
-   void pki_reset_for_test(void);
 
 #ifdef __cplusplus
 }

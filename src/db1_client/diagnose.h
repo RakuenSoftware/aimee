@@ -60,24 +60,14 @@ extern "C"
    int db1_diagnose_add_hypothesis(int diag_id, const char *content);
    int db1_diagnose_add_evidence(int diag_id, int hypothesis_id, const char *kind,
                                  const char *content, const char *source, int rank);
-   int db1_diagnose_add_probe(int diag_id, int hypothesis_id, const char *content);
 
    int db1_diagnose_get(int diag_id, diagnosis_t *out);
-   int db1_diagnose_list(diagnosis_t *out, int max);
    int db1_diagnose_list_items(int diag_id, diagnosis_item_t *out, int max);
-   int db1_diagnose_list_hypotheses(int diag_id, diagnosis_item_t *out, int max);
 
    int db1_diagnose_rank_hypotheses(int diag_id, diagnosis_ranking_t *out, int max);
 
-   int db1_diagnose_conclude(int diag_id, const char *conclusion, double confidence);
-   int db1_diagnose_abandon(int diag_id);
-
    /* Returns malloc'd JSON (caller frees), NULL if not found. */
    char *db1_diagnose_json_full(int diag_id);
-   /* Returns malloc'd JSON array (caller frees). */
-   char *db1_diagnose_json_list(void);
-   /* Returns malloc'd plain-text report (caller frees), NULL if not found. */
-   char *db1_diagnose_render_status(int diag_id);
 
 #define DIAG_MAX_SUGGEST          16
 #define DIAG_PROBE_SUGGESTION_LEN 512
@@ -89,7 +79,6 @@ extern "C"
    } diagnosis_probe_suggestion_t;
 
 #define DIAG_SUGGEST_BALANCE_THRESHOLD 0.15
-   int db1_diagnose_suggest_probes(int diag_id, diagnosis_probe_suggestion_t *out, int max);
 
 #ifdef __cplusplus
 }

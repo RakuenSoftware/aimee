@@ -15,6 +15,7 @@
 #include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb_reasoning.h"
 #include "config.h"
+#include "support/config_test_setters.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The "disabled" cases below assert that an unset reasoning.datalog_command
@@ -44,24 +45,6 @@ static void open_db(void)
 static void close_db(void)
 {
    kb_store_test_shim_close();
-}
-
-/* ---- 1. reasoning_case_write ---- */
-static void test_reasoning_case_write(void)
-{
-   open_db();
-
-   const char *payload = "{\"trigger_features\":{\"guardrail_risk_score\":0.82},"
-                         "\"outcome\":\"approved_after_review\","
-                         "\"corrective_verdict\":{\"verdict_tag\":\"too_aggressive\"}}";
-
-   char id[64] = "";
-   int rc = kb_reasoning_case_write(payload, id, sizeof(id));
-   assert(rc == 0);
-   assert(strlen(id) == 36);
-
-   close_db();
-   printf("  reasoning_case_write: ok\n");
 }
 
 /* ---- 2. reasoning_contradiction_check_disabled ---- */
@@ -112,7 +95,6 @@ int main(void)
    printf("reasoning:\n");
 
    isolate_home();
-   test_reasoning_case_write();
    test_reasoning_contradiction_check_disabled();
    test_reasoning_query_disabled();
    test_config_reasoning_defaults();

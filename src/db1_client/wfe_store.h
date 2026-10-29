@@ -81,18 +81,8 @@ int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, ch
  * bad arg / db error. pr_ref must be non-empty. */
 int db1_work_item_id_by_pr_ref(const char *pr_ref, char *out, size_t n);
 
-/* Move to a new stage + update content_hash (state unchanged). */
-int db1_work_item_set_stage(const char *work_item_id, const char *stage, const char *content_hash);
-/* Record the forge PR ref opened for this work item (set when pr.open advances),
- * so the downstream forge gates (gate.ci / check.mergeable / merge) resolve the
- * real PR instead of the work-item id. */
-int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
 /* Record the per-work-item git worktree path (set when it is first created). */
 int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
-/* Record the attested submitter principal (intake-auth audit binding). */
-int db1_work_item_set_submitter(const char *work_item_id, const char *submitter);
-/* Record the parent work item of a foreach.workflow child ("slice") run. */
-int db1_work_item_set_parent(const char *work_item_id, const char *parent_id);
 /* Cascade-abandon a parent's non-terminal foreach.workflow child slices when the
  * parent is stopped/deleted, so orphaned slices stop being scheduled (which would
  * otherwise loop and re-dispatch delegates forever). Returns the number of children
@@ -105,12 +95,6 @@ int db1_work_item_abandon_children(const char *parent_id);
  * error. A parent whose total==accepted (and total>0) has every slice merged; any
  * failed child means a slice will not merge and the parent must park for a human. */
 int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed);
-/* Count this submitter's ACTIVE autonomous work items (per-principal concurrency
- * cap). Returns the count, or -1 on error. */
-int db1_work_item_count_active_by_submitter(const char *submitter);
-/* Count this submitter's work items created within the last `secs` seconds
- * (per-principal rate window). Returns the count, or -1 on error. */
-int db1_work_item_count_recent_by_submitter(const char *submitter, int secs);
 /* Atomic intake-auth submit (POST /v1/dev/submit): enforce the per-principal
  * concurrency (max_active) + rate (rate_max within rate_secs) caps and, if both
  * pass, create the autonomous work item, bind the submitter, and write the
@@ -142,18 +126,8 @@ int db1_work_item_gate_apply(const char *work_item_id, const char *expect_stage,
                              const char *terminal_state);
 int db1_work_item_set_pause(const char *work_item_id, const char *reason, const char *paused_state);
 int db1_work_item_clear_pause(const char *work_item_id);
-/* Compare-and-clear: clear the pause only while it still equals (expect_reason,
- * expect_stage). Returns 1 if this caller cleared it, 0 if the row no longer
- * matched (another driver moved it first), -1 on error (incl. SQLITE_BUSY — a
- * transient lock is deliberately folded into -1: the autonomy caller treats -1
- * and 0 identically as "did not claim; retry next sweep", so a lock just defers
- * the attempt). Lets the autonomy retry path claim a transient park atomically,
- * so at most one retry runs per park. */
-int db1_work_item_clear_pause_if(const char *work_item_id, const char *expect_reason,
-                                 const char *expect_stage);
-int db1_work_item_add_cost(const char *work_item_id, double cost);
 int db1_work_item_set_cost_cap(const char *work_item_id, double cap);
-int db1_work_item_inc_override(const char *work_item_id); /* returns new count, -1 err */
+/* returns new count, -1 err */
 
 /* Permanently delete a work item and all its history (lifecycle_event +
  * lifecycle_stage_attempt + lifecycle_work_item rows) under one transaction.
@@ -163,31 +137,12 @@ int db1_work_item_inc_override(const char *work_item_id); /* returns new count, 
  * worktree). */
 int db1_work_item_delete(const char *work_item_id);
 
-/* Backstop reaper: abandon (make terminal) any autonomous run parked in a
- * runaway/failure backstop (stuck / turn_cap_exceeded / wall_cap_exceeded /
- * budget_exceeded) whose last update is older than grace_secs, so a dead run does
- * not linger 'active' forever. Human-review parks (pending_human) and
- * operator_paused are legitimate waits and are NOT reaped. grace_secs <= 0
- * disables. Returns the number of runs reaped. The scheduler's terminal walk then
- * tears down each reaped run's worktree on the next sweep. */
-int db1_work_item_reap_stale_parks(long grace_secs);
-
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 /* The bounded forms are what cross the boundary: a reply has to have a ceiling,
  * and these lists had one only by accident of how many rows existed. The
  * unbounded names are kept for their 45 call sites and pass the ceiling. */
 int db1_work_item_list_bounded(db1_work_item_t **out, int max);
 int db1_work_item_list(db1_work_item_t **out);
-
-/* List work items LEAST-RECENTLY-UPDATED first — the scheduler's fairness
- * order. A newest-first sweep starves older siblings: the sequential autonomy
- * pass gives each item up to its wall-clock cap, so whichever items sort first
- * eat every sweep (observed live: 2 of 13 fan-out slices monopolized 3.5h
- * while the rest never advanced). Staleness-first makes starvation
- * self-correcting: whoever was skipped longest goes first next sweep.
- * Caller frees *out. Returns count or -1. */
-int db1_work_item_list_lru_bounded(db1_work_item_t **out, int max);
-int db1_work_item_list_lru(db1_work_item_t **out);
 
 /* Append an audit event. */
 int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const char *kind,
@@ -201,7 +156,6 @@ int db1_lifecycle_event_list(const char *work_item_id, db1_lifecycle_event_t **o
 /* Per-stage attempt counter (for loop-back max_attempts). */
 int db1_stage_attempt_inc(const char *work_item_id, const char *stage);   /* new count */
 int db1_stage_attempt_reset(const char *work_item_id, const char *stage); /* re-arm the loop */
-int db1_stage_attempt_get(const char *work_item_id, const char *stage);
 
 /* One step's outcome, applied atomically.
  *

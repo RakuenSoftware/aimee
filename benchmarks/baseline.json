@@ -1,75 +1,19 @@
 {
-	"version":	"0b13b09",
-	"timestamp":	"2026-04-10T20:36:30Z",
+	"version":	"v1.0.2-590-gbadf77301",
+	"timestamp":	"2026-10-29T10:33:39Z",
 	"results":	{
-		"db_open":	{
-			"p50_ms":	8.958217,
-			"p95_ms":	9.299929,
-			"p99_ms":	13.768491,
-			"target_p50_ms":	20,
-			"target_p95_ms":	50,
-			"tolerance":	0.2
-		},
-		"memory_search":	{
-			"p50_ms":	0.172291,
-			"p95_ms":	0.280348,
-			"p99_ms":	0.327153,
-			"target_p50_ms":	5,
-			"target_p95_ms":	20,
-			"tolerance":	0.3
-		},
 		"pre_tool_check":	{
-			"p50_ms":	1.537461,
-			"p95_ms":	1.650221,
-			"p99_ms":	1.713795,
+			"p50_ms":	0.027801,
+			"p95_ms":	0.038371,
+			"p99_ms":	0.046356,
 			"target_p50_ms":	5,
 			"target_p95_ms":	7,
 			"tolerance":	0.5
 		},
-		"memory_insert":	{
-			"p50_ms":	0.091742,
-			"p95_ms":	0.132784,
-			"p99_ms":	0.147745,
-			"target_p50_ms":	12,
-			"target_p95_ms":	15,
-			"tolerance":	0.3
-		},
-		"memory_stats":	{
-			"p50_ms":	0.065068,
-			"p95_ms":	0.066844,
-			"p99_ms":	0.068569,
-			"target_p50_ms":	1,
-			"target_p95_ms":	3,
-			"tolerance":	0.3
-		},
-		"memory_promote":	{
-			"p50_ms":	0.207265,
-			"p95_ms":	0.211287,
-			"p99_ms":	0.213725,
-			"target_p50_ms":	5,
-			"target_p95_ms":	15,
-			"tolerance":	0.3
-		},
-		"startup_cold":	{
-			"p50_ms":	9.583215,
-			"p95_ms":	9.718269,
-			"p99_ms":	10.481572,
-			"target_p50_ms":	50,
-			"target_p95_ms":	200,
-			"tolerance":	0.3
-		},
-		"startup_warm":	{
-			"p50_ms":	0.341897,
-			"p95_ms":	0.36126,
-			"p99_ms":	0.366922,
-			"target_p50_ms":	5,
-			"target_p95_ms":	20,
-			"tolerance":	0.3
-		},
 		"delegate_dispatch":	{
-			"p50_ms":	0.006959,
-			"p95_ms":	0.007005,
-			"p99_ms":	0.010365,
+			"p50_ms":	0.002475,
+			"p95_ms":	0.002494,
+			"p99_ms":	0.002514,
 			"target_p50_ms":	1,
 			"target_p95_ms":	5,
 			"tolerance":	0.5

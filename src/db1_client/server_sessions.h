@@ -77,9 +77,6 @@ extern "C"
    int db1_server_session_primary_set(const char *principal, const char *session_id,
                                       const char *agent);
 
-   /* UPDATE outcome. Returns 0 on success. */
-   int db1_server_session_set_outcome(const char *id, const char *outcome);
-
    /* UPDATE source + chat_key (gateway origin). Returns 0 on success. */
 
    /* Atomically reserve first-message persona delivery on this durable session.
@@ -95,12 +92,6 @@ extern "C"
 
    /* DELETE by id. Returns 0 on success. */
    int db1_server_session_delete(const char *id);
-
-   /* List most recent `max` sessions, newest-last_activity first. */
-   int db1_server_session_list_recent(db1_server_session_t *out, int max);
-
-   /* Rows whose title LIKE `pattern`. */
-   int db1_server_session_search_by_title(const char *pattern, db1_server_session_t *out, int max);
 
    /* SELECT COUNT(*), optionally filtered by created_at >= since. */
    int db1_server_session_count(const char *since_or_null);

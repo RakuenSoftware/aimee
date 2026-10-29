@@ -21,7 +21,6 @@ SURFACES = {
         "docs/gen/cli-commands.md",
         "src/server/server_main.c",
         "src/kb/kb_main.c",
-        "src/gateway/gateway_main.c",
     ),
     "routes": ("docs/gen/v1-route-descriptor.json",),
     "configuration": ("docs/gen/configuration.md",),

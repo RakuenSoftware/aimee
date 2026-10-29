@@ -64,7 +64,7 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Platform-specific server helpers (posix/server_main.c, windows/server_main.c) */
+/* Platform-specific server helpers (posix/server_main.c) */
 void platform_server_redirect_stderr(FILE *log_fp);
 void platform_server_install_signals(void (*handler)(int));
 int platform_server_service_dispatch(const char *socket_path, log_level_t log_level,
@@ -74,8 +74,7 @@ static server_ctx_t g_ctx;
 
 /* Unified-presence outbound delivery: route a presence event (e.g. a delegate
  * completion) to a surface's persistent messaging target by reusing the
- * existing typed notify path (ntfy / local). Non-ntfy/local targets (e.g.
- * telegram, which needs the out-of-process gateway) are a no-op here. */
+ * existing typed notify path (ntfy / local); any other platform fails. */
 static int presence_deliver_via_notify(const delivery_target_t *target, const char *text,
                                        void *user)
 {
@@ -125,7 +124,6 @@ static void startup_notify(int fd, const char *message)
  * config_reload() off the signal path (config_reload takes a mutex / does I/O). */
 volatile sig_atomic_t g_config_reload_requested = 0;
 
-#ifndef _WIN32
 static void signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
    (void)ucontext;
@@ -155,18 +153,6 @@ static void install_signal_handlers(void)
 #endif
    signal(SIGPIPE, SIG_IGN);
 }
-#else
-static void signal_handler(int sig)
-{
-   (void)sig;
-   g_ctx.running = 0;
-}
-
-static void install_signal_handlers(void)
-{
-   platform_server_install_signals(signal_handler);
-}
-#endif
 
 static int run_server(const char *socket_path, log_level_t log_level)
 {

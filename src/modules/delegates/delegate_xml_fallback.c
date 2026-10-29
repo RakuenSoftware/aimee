@@ -38,11 +38,3 @@ fail:
    aimee_message_free(out);
    return -1;
 }
-int delegate_rescue_has_tool_calls_with_json(const char *text, int allow_json)
-{
-   return text && g_rescue_provider && g_rescue_provider(text, allow_json, 1, NULL) > 0;
-}
-int delegate_rescue_has_tool_calls(const char *text)
-{
-   return delegate_rescue_has_tool_calls_with_json(text, 1);
-}

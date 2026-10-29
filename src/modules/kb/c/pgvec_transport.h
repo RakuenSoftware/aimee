@@ -30,22 +30,6 @@ int pgvec_ensure_index(const char *table, int dim, int recreate);
 /* Returns 1 if the pgvectorscale extension is installed in the connected database, 0 otherwise. */
 int pgvec_vectorscale_available(void);
 
-/* Resolve corpus index type from config policy.
- * configured: "auto"|"hnsw"|"diskann".  Returns "hnsw" or "diskann".
- * pgvectorscale's StreamingDiskANN is the DEFAULT: unset, "auto" and "diskann"
- * all return "diskann" when vectorscale_available=1. HNSW is returned only when
- * the extension is absent, or when an operator asked for it by name.
- * corpus_rows and diskann_threshold are accepted and ignored; see the definition
- * for why a size threshold is the wrong shape for this decision. */
-const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
-                                    int vectorscale_available, int64_t diskann_threshold);
-
-/* Create (or re-create) a corpus vector index of the given type ("hnsw" or "diskann").
- * Falls back to HNSW with a LOG_WARN if diskann is requested but vectorscale is absent.
- * recreate=1 drops existing corpus indexes first (no table truncate).
- * Returns 0 on success, -1 on error. */
-int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate);
-
 /* Upsert a single memory embedding row.  Extracts record_type, primary_scope,
  * workspace, project, kind from payload_json. */
 int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
@@ -71,7 +55,6 @@ int pgvec_kb_delete_current_project(const char *project);
  * /v1/search transport never reads. Mirrors pgvec_kb_* but targets
  * kb_pdf_embeddings; point_id is the kb_documents.id of the PDF chunk. */
 int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
-int pgvec_kbpdf_delete(int64_t point_id);
 int pgvec_kbpdf_delete_project(const char *project);
 int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
                        double *scores, int max);
@@ -183,19 +166,12 @@ int pgvec_curator_code_unit_delete_project(const char *project);
 int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,
                                    int dim, int limit, int64_t *ids, double *scores, int max);
 
-/* Cumulative search latency counters (thread-safe).
- * reset=1 resets all counters after reading. */
-void pgvec_search_latency_snapshot(int64_t *total_us, int64_t *count, int64_t *max_us, int reset);
-
 /* Code vector operations (Phase 5). */
 int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
                       const char *node_key, const char *file_path, const char *symbol,
                       const char *content_hash, const char *body_hash, const char *source_hash,
                       const char *payload_json);
-int pgvec_code_delete(int64_t point_id);
 int pgvec_code_delete_project(const char *project);
-int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                      double *scores, int max);
 /* Like pgvec_code_search but returns file paths (flat buffer of `max` slots of
  * `path_cap` bytes) for the §5 hybrid file-path-space fusion. <0 on error. */
 int pgvec_code_search_paths(const char *project, const float *vec, int dim, int limit, char *paths,

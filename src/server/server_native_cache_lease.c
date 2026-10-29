@@ -1,78 +1,4 @@
 #include "server_native_cache_lease.h"
-#if defined(_WIN32)
-#include <stddef.h>
-#include <stdio.h>
-int server_native_cache_lease_close(server_native_cache_lease_t *lease, int clean)
-{
-   (void)clean;
-   return lease ? -1 : 0;
-}
-server_native_cache_lease_t *server_native_cache_lease_acquire_unpublished(
-    const char *home, const char *sdk, const char *session, const char *binding, const char *actor,
-    const char *turn, cJSON **prior, char error[512])
-{
-   if (prior)
-      *prior = NULL;
-   (void)home;
-   (void)sdk;
-   (void)session;
-   (void)binding;
-   (void)actor;
-   (void)turn;
-   if (error)
-      snprintf(error, 512, "native cache directory custody is unavailable on this platform");
-   return NULL;
-}
-const cJSON *server_native_cache_lease_manifest(const server_native_cache_lease_t *lease)
-{
-   (void)lease;
-   return NULL;
-}
-const char *server_native_cache_lease_owner(const server_native_cache_lease_t *lease)
-{
-   (void)lease;
-   return NULL;
-}
-int server_native_cache_lease_update(server_native_cache_lease_t *lease, const cJSON *manifest)
-{
-   (void)lease;
-   (void)manifest;
-   return -1;
-}
-int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *lease,
-                                                 const char *turn, char error[512])
-{
-   (void)lease;
-   (void)turn;
-   (void)error;
-   return -1;
-}
-int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
-                                       char *path, size_t capacity)
-{
-   (void)lease;
-   (void)epoch;
-   if (path && capacity)
-      path[0] = 0;
-   return -1;
-}
-int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
-                                        int fd, const char *path)
-{
-   (void)lease;
-   (void)epoch;
-   (void)fd;
-   (void)path;
-   return 0;
-}
-int server_native_cache_sdk_identity(server_native_cache_lease_t *lease, char identity[65])
-{
-   (void)lease;
-   if (identity)
-      identity[0] = 0;
-   return -1;
-}
-#else
 #include "platform_random.h"
 #include "cJSON.h"
 #include <errno.h>
@@ -589,4 +515,3 @@ server_native_cache_lease_t *server_native_cache_lease_acquire_unpublished(
 {
    return lease_acquire(home, sdk, session, binding, actor, turn, prior, error);
 }
-#endif

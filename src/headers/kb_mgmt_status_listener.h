@@ -53,7 +53,6 @@ SSL_CTX *kb_mgmt_status_listener_tls_ctx(const char *trust_bundle_path,
  * The config strings may be released after return; tls remains caller-owned and
  * must outlive stop. A singleton is deliberate: this process has one purpose. */
 int kb_mgmt_status_listener_start(const kb_mgmt_status_listener_config_t *config);
-uint16_t kb_mgmt_status_listener_bound_port(void);
 void kb_mgmt_status_listener_stop(void);
 
 /* Pure framing seam for focused and fuzz tests. COMPLETE supplies an exact

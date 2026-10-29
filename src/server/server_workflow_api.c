@@ -10,13 +10,11 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#ifndef _WIN32
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h> /* PATH_MAX for the confined project-file browser */
 #include <unistd.h>
-#endif
 
 #include "aimee_home.h"
 #include "cJSON.h"
@@ -442,7 +440,6 @@ int wf_api_list(char *resp, int cap)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(o, "defs");
-#ifndef _WIN32
    char dir[1024];
    snprintf(dir, sizeof dir, "%s/workflows", aimee_home());
    DIR *d = opendir(dir);
@@ -478,7 +475,6 @@ int wf_api_list(char *resp, int cap)
       }
       closedir(d);
    }
-#endif
    return emit(o, resp, cap);
 }
 

@@ -29,8 +29,6 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel,
 /* Releases owned canonical output, retaining scalar/display diagnostics. */
 void delegate_ensemble_result_free(delegate_ensemble_result_t *result);
 
-double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
-
 /* Estimate the USD cost of a single delegate/model call. Routes through the
  * shared cache-aware pricing authority (token_estimate_cost), falling back to
  * the model registry for providers it does not cover, then to a coarse flat
@@ -48,7 +46,6 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
 int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                             const aimee_request_t *task, const roundtable_opts_t *opts,
                             roundtable_result_t *out);
-void delegate_roundtable_result_free(roundtable_result_t *r);
 
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
  * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */

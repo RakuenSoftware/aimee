@@ -58,12 +58,6 @@ void dogfood_log_moment_with_id(const dogfood_config_t *cfg, const char *tool, c
                                 const int64_t *retrieved_ids, int retrieved_count,
                                 const char *notes, char *record_id_out, size_t record_id_cap);
 
-/* Convenience wrapper that loads the current config and invokes
- * dogfood_log_moment(). Callers use this from hot paths to get
- * runtime-togglable logging without carrying the config through. */
-void dogfood_log_moment_live(const char *tool, const char *query, const int64_t *retrieved_ids,
-                             int retrieved_count, const char *notes);
-
 /* Variant that also writes a label entry into YYYY-MM.labels.jsonl at
  * the same time, keyed by the record's id. Useful for automated
  * tagging paths (e.g. a prospective-memory reminder firing → record
@@ -148,15 +142,6 @@ dogfood_autolabel_kind_t dogfood_classify_next_turn(const char *next_user_text);
  * flag-off no-op), -1 on failure. */
 int dogfood_autolabel_apply(const dogfood_config_t *cfg, const char *record_id,
                             dogfood_autolabel_kind_t kind);
-
-/* Live variant: reads the most recent record id written in this
- * process and applies REPAIR / CONTINUATION against it, then clears
- * the stored id so a single user turn can label at most one prior
- * record. Gated by dogfood_autolabel_repair /
- * dogfood_autolabel_continuation config keys. Safe to call from hot
- * paths — silently returns when no prior id is stored or both flags
- * are off. */
-void dogfood_autolabel_next_turn_live(const char *next_user_text);
 
 /* Scan the current month's log for an earlier record with a matching
  * (session_id, tool, query_hash) triple. Returns 1 on hit, 0 on miss

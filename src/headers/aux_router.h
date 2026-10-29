@@ -10,7 +10,4 @@
  * canonical response; callers render text only at their external boundary. */
 int aux_call(const char *task_name, const aimee_request_t *input, aimee_response_t *out);
 
-/* Print the resolved task->provider/model mapping to stdout. */
-void aux_config_show(void);
-
 #endif /* DEC_AUX_ROUTER_H */

@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "support/config_test_setters.h"
 
 /* The canonical tool-free fixture installs its own log sink. Reaching a live
  * history/learning transport would violate the no-context/no-feedback contract. */

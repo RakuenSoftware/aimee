@@ -131,8 +131,8 @@ an unavailable container backend now fails allocation, and a delegated shell tha
 co-located path with `sandbox.mode=off` is refused before fork/exec. The trusted primary/operator
 session remains a separate host-execution path; it is not a delegate fallback.
 
-`delegate_sandbox_require_isolation` is a compatibility key and cannot weaken the boundary. The Go
-module always verifies network isolation, exact source/target/read-write mounts, and the effective
+There is no setting that weakens the boundary (the former
+`delegate_sandbox_require_isolation` toggle is retired). The Go module always verifies network isolation, exact source/target/read-write mounts, and the effective
 credentialless environment after start or resume. Package access, when enabled, crosses only the
 audited Go package proxy;
 credential stripping and workspace guards remain defense in depth inside the container boundary.

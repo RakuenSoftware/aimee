@@ -1,4 +1,4 @@
-/* mcp_tools_gateway.c: MCP tool registrations for the ambient-presence gateway. */
+/* mcp_tools_gateway.c: MCP registration for ask_user, the interaction tool. */
 #include "mcp_tools_gateway.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include <cJSON.h>
@@ -6,31 +6,6 @@
 
 void mcp_add_gateway_tools(cJSON *tools)
 {
-   /* Preserve the callable name while reporting unavailable delivery truthfully. */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *tgt = cJSON_AddObjectToObject(p, "target");
-      cJSON_AddStringToObject(tgt, "type", "string");
-      cJSON_AddStringToObject(tgt, "description", "Delivery target spec or 'origin'");
-      cJSON *txt = cJSON_AddObjectToObject(p, "text");
-      cJSON_AddStringToObject(txt, "type", "string");
-      cJSON_AddStringToObject(txt, "description", "Message text to send");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("target"));
-      cJSON_AddItemToArray(req, cJSON_CreateString("text"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools,
-          mcp_tool_new(
-              "send_message",
-              "Gateway delivery is currently unavailable. This tool returns an explicit tool "
-              "error without sending to telegram:<chat_id>, ntfy:<topic>, webhook:<url>, or "
-              "origin.",
-              s));
-   }
-
    /* ask_user: format a question for the requesting client to present. */
    {
       cJSON *s = cJSON_CreateObject();

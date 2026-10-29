@@ -25,11 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifdef AIMEE_WINDOWS
-#include <windows.h>
-#else
 #include <unistd.h>
-#endif
 
 typedef int (*mining_run_fn)(int64_t hwm, int64_t *new_hwm_out);
 
@@ -45,11 +41,7 @@ static int g_mining_active;
 
 static void mining_sleep_one_second(void)
 {
-#ifdef AIMEE_WINDOWS
-   Sleep(1000);
-#else
    sleep(1);
-#endif
 }
 
 /* Shared parser (parse_utc_ts in util.c). This copy matched only the space form,

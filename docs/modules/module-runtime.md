@@ -89,9 +89,8 @@ error/empty results, bounded capacity, reset, count, and per-turn message applic
 excess registrations fail; a failing callback is skipped and later callbacks still run. Output is
 bounded by the caller-provided buffer.
 
-Both build systems register the declared test. Make builds `unit-test-plugin-c-hook` from
-`src/tests/Rules.mk`, and `src/tests/CMakeLists.txt` registers `test_plugin_c_hook` as a CTest
-case. `scripts/check_module_test_registration.py` derives that from the build files, bound to the
+Make builds the declared test as `unit-test-plugin-c-hook` from `src/tests/Rules.mk`; CMake builds
+only the thin client and registers no tests. `scripts/check_module_test_registration.py` derives that from the build files, bound to the
 declared source path rather than to a target name, and pins it to
 `tests/baselines/refactor/module-test-registration.json`, so a change in build-file registration
 fails until the baseline is regenerated and re-reviewed.

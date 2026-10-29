@@ -84,51 +84,6 @@ static unsigned route_agent_facts(const agent_t *ag, int has_role, unsigned *cap
    return flags;
 }
 
-/* Disable every agent whose declared ceiling cannot serve this packet's scope.
- *
- * The error deliberately LISTS the fleet and its ceilings: the panel's operational
- * caveat was that "no agent can serve this" leaves the operator guessing unless it
- * says which seats exist and what each is limited to. */
-int delegate_filter_route_scope(agent_config_t *cfg, agent_scope_t scope, char *errbuf,
-                                size_t errbuf_sz)
-{
-   if (errbuf && errbuf_sz > 0)
-      errbuf[0] = '\0';
-   if (!cfg || scope == AGENT_SCOPE_UNSET)
-      return 0; /* unset resolves to whole_task at the routing filter */
-
-   int kept = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled)
-         continue;
-      if (ag->max_scope != AGENT_SCOPE_UNSET && scope > ag->max_scope)
-      {
-         ag->enabled = 0;
-         continue;
-      }
-      kept++;
-   }
-   if (kept > 0)
-      return 0;
-
-   size_t n = 0;
-   n += (size_t)snprintf(errbuf + n, errbuf_sz - n,
-                         "no agent can serve scope '%s'. Fleet ceilings:", agent_scope_name(scope));
-   for (int i = 0; i < cfg->agent_count && n + 40 < errbuf_sz; i++)
-   {
-      const char *ceil = cfg->agents[i].max_scope == AGENT_SCOPE_UNSET
-                             ? "unbounded"
-                             : agent_scope_name(cfg->agents[i].max_scope);
-      n += (size_t)snprintf(errbuf + n, errbuf_sz - n, " %s=%s", cfg->agents[i].name, ceil);
-   }
-   if (n + 60 < errbuf_sz)
-      snprintf(errbuf + n, errbuf_sz - n,
-               ". Raise a ceiling, lower the packet scope, or add a capable agent.");
-   return -1;
-}
-
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
                                        unsigned required_caps, int min_context, int drop_deprecated,
                                        char *errbuf, size_t errbuf_sz)
@@ -272,27 +227,6 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
          best = ag;
    }
    return best;
-}
-
-/* Highest cost_tier among enabled, routing-available agents that can serve the
- * role (or -1 if none). Used by the delegate_routing bandit to translate a
- * "premium" arm into a concrete tier_override, deployment-independently. */
-int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
-{
-   int max_tier = -1;
-   if (!cfg)
-      return -1;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_is_available_for_execution(ag, cfg->route_execution))
-         continue;
-      if (role && !agent_has_role(ag, role))
-         continue;
-      if (ag->cost_tier > max_tier)
-         max_tier = ag->cost_tier;
-   }
-   return max_tier;
 }
 
 static void route_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...)

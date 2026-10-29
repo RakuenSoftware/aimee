@@ -1193,7 +1193,6 @@ static int g_complete_chunks;
 static int g_complete_embeddings;
 static int64_t g_fail_job_id;
 static char g_fail_error[256];
-static char g_snapshot_project[256];
 static char g_delete_project[256];
 static char g_delete_path[256];
 static int g_delete_ids_called;
@@ -1777,17 +1776,6 @@ int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
    return 0;
 }
 
-cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
-{
-   snprintf(g_snapshot_project, sizeof(g_snapshot_project), "%s", project ? project : "");
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *file = cJSON_CreateObject();
-   cJSON_AddStringToObject(file, "rel_path", "src/a.c");
-   cJSON_AddStringToObject(file, "hash", "hash-a");
-   cJSON_AddItemToArray(arr, file);
-   return arr;
-}
-
 int kb_store_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
                                                   int64_t *out, int max)
 {
@@ -2163,7 +2151,6 @@ static void test_capabilities(void)
  *    exercised without a live KB_STORE. ─────────────────────────────────────────── */
 #include "modules/kb/c/enrollments.h"
 #include "kb_identity.h"
-static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
 int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
@@ -2238,19 +2225,13 @@ int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out)
    }
    return 0;
 }
-int kb_store_enrollment_is_revoked(const char *fingerprint)
-{
-   g_stub_revoked_calls++;
-   return fingerprint && strcmp(fingerprint, "revoked-fp") == 0;
-}
+
 void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 {
    (void)fingerprint;
    (void)scope;
 }
-void kb_store_enrollment_cache_flush(void)
-{
-}
+
 static kb_store_console_oidc_t g_stub_oidc;
 int kb_store_console_oidc_get(kb_store_console_oidc_t *out)
 {

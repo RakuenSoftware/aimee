@@ -1,43 +1,42 @@
 CC      = gcc
 .DEFAULT_GOAL := all
+
+# aimee proper (server, KB, ring host, module processes) is Linux-only. macOS and
+# Windows get only the thin client, built with CMake: cmake -B build && cmake
+# --build build --target aimee.
+ifneq ($(shell uname -s),Linux)
+$(error aimee proper builds only on Linux; build the macOS or Windows thin client with CMake (cmake -B build && cmake --build build --target aimee))
+endif
 AR      ?= ar
 OBJDIR  = build/obj
 
-ifeq ($(OS),Windows_NT)
-EXEEXT  = .exe
-NULLDEV = NUL
-RM      = del /Q
-else
-EXEEXT  =
 NULLDEV = /dev/null
 RM      = rm -rf
-endif
-BINARY  = ../aimee$(EXEEXT)
-SERVER  = ../aimee-server$(EXEEXT)
-MEMORY_EVAL = ../aimee-memory-eval$(EXEEXT)
-MEMORY_TRANSFER = ../aimee-memory-transfer$(EXEEXT)
-CONFIG_MODULE = $(OBJDIR)/aimee-module-config$(EXEEXT)
+BINARY  = ../aimee
+SERVER  = ../aimee-server
+MEMORY_EVAL = ../aimee-memory-eval
+MEMORY_TRANSFER = ../aimee-memory-transfer
+CONFIG_MODULE = $(OBJDIR)/aimee-module-config
 # Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
-FORWARDER = ../aimee-forwarder$(EXEEXT)
-KB      = ../aimee-kb$(EXEEXT)
-KB_WORM = ../aimee-kb-worm$(EXEEXT)
-KB_RESOLVER = ../aimee-kb-resolver$(EXEEXT)
-KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
-KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
-KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
-KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
-KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
-RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
+FORWARDER = ../aimee-forwarder
+KB      = ../aimee-kb
+KB_WORM = ../aimee-kb-worm
+KB_RESOLVER = ../aimee-kb-resolver
+KB_STATUS_PROVISIONER = ../aimee-kb-status-provision
+KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision
+KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish
+KB_STATUS_AUTHORITY = ../aimee-kb-status-authority
+KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority
+RUNTIME_WEB = ../aimee-runtime-web
 THINCLIENT_LIBRARY = ../libaimee-client.so
 THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
-DELEGATE_EGRESS = ../aimee-delegate-egress$(EXEEXT)
-GATEWAY = ../aimee-gateway$(EXEEXT)
+DELEGATE_EGRESS = ../aimee-delegate-egress
 # Binaries a rename left behind. `all` removes these first so a renamed artifact
 # does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
 # and its 14MB predecessor was never retired, so it stayed untracked, unignored,
 # and large enough to push a workspace sync past the server's 4MB body cap.
-RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
-                        ../aimee-webchat$(EXEEXT)
+RETIRED_ROOT_BINARIES = ../aimee-client ../aimee-worker \
+                        ../aimee-webchat ../aimee-gateway
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
@@ -105,12 +104,11 @@ $(shell mkdir -p $(dir $(VERSION_FILE)) && echo "$(GIT_VERSION)" > $(VERSION_FIL
 endif
 
 # Eagerly create platform subdirectories at variable-expansion time so parallel
-# builds (-j) on macOS GNU make 3.81 don't race on directory creation. Order-only
-# prerequisites have edge cases in older make versions; $(shell) is bulletproof.
+# builds (-j) don't race on directory creation.
 # NOTE: must come AFTER the branch-switch block above, which deletes $(OBJDIR) on
 # branch changes — if this ran before, the directories would be wiped and gcc
 # would fail trying to write .d dependency files into non-existent subdirectories.
-_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
+_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
 
 # GCC 15.2 IPA bit-CP proves a live int parameter constant zero across -Os
 # -flto (kb_insights_util.c group_array: n>0 arrives as 0, by_* come back
@@ -129,46 +127,26 @@ ifeq ($(strip $(PQ_LIB)),)
 endif
 C_FLAGS  += $(PQ_CFLAGS)
 
-ifeq ($(OS),Windows_NT)
-    C_FLAGS += -DAIMEE_WINDOWS -D_WIN32_WINNT=0x0A00
-endif
-
-UNAME_S := $(shell uname -s)
 CC_MACHINE := $(shell $(CC) -dumpmachine 2>$(NULLDEV))
 
 # Shipping Linux binaries carry an explicit, repository-owned hardening contract;
 # their exploit resistance must not vary with the runner distribution defaults.
-ifeq ($(UNAME_S),Linux)
-    HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
-    # Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
-    # AArch64, so keeping it in the unconditional Linux set made the published
-    # arm64 thin client unbuildable even though the source is portable.
-    ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
-        HARDEN_C_FLAGS += -fcf-protection=full
-    endif
-    HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
-    C_FLAGS += $(HARDEN_C_FLAGS)
+HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
+# Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
+# AArch64, so keeping it in the unconditional Linux set made the published
+# arm64 thin client unbuildable even though the source is portable.
+ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
+    HARDEN_C_FLAGS += -fcf-protection=full
 endif
-
-# Platform-specific HTTP library
-ifeq ($(OS),Windows_NT)
-    HTTP_LIB = -lwinhttp
-    WINDOWS_LIBS = -lws2_32 -lbcrypt -lwinhttp
-else
-    HTTP_LIB =
-    WINDOWS_LIBS =
-endif
+HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+C_FLAGS += $(HARDEN_C_FLAGS)
 
 # PAM support (optional: set WITH_PAM=1 to enable, auto-detected if libpam-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_PAM ?= 0
-else
 # Probe with -include rather than a piped '#include' line: inside $(shell ...) the
 # '\#' escape reached the compiler as a literal backslash, so this test failed
 # ALWAYS and PAM was silently never compiled in on Linux even with libpam-dev
 # installed. -include needs no '#' at all, so there is nothing left to mis-escape.
 WITH_PAM ?= $(shell : | $(CC) -xc -fsyntax-only -include security/pam_appl.h - 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_PAM),1)
     PAM_FLAGS = -DWITH_PAM
     PAM_LIBS  = -lpam
@@ -178,11 +156,7 @@ else
 endif
 
 # libsecret support (optional: set WITH_LIBSECRET=1 to enable, auto-detected if libsecret-1-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_LIBSECRET ?= 0
-else
 WITH_LIBSECRET ?= $(shell pkg-config --exists libsecret-1 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_LIBSECRET),1)
     LIBSECRET_FLAGS = -DWITH_LIBSECRET $(shell pkg-config --cflags libsecret-1)
     LIBSECRET_LIBS  = $(shell pkg-config --libs libsecret-1)
@@ -191,14 +165,8 @@ else
     LIBSECRET_LIBS  =
 endif
 
-# In-client TLS for https:// remote servers (optional). OpenSSL-backed; enabled
-# on POSIX (server/kb already require OpenSSL), disabled on Windows where the
-# MinGW thin client has no OpenSSL and refuses https:// instead.
-ifeq ($(OS),Windows_NT)
-WITH_TLS ?= 0
-else
+# In-client TLS for https:// remote servers (optional, OpenSSL-backed).
 WITH_TLS ?= 1
-endif
 ifeq ($(WITH_TLS),1)
     TLS_FLAGS = -DWITH_TLS
     TLS_LIBS  = -lssl -lcrypto
@@ -207,33 +175,10 @@ else
     TLS_LIBS  =
 endif
 
-# dashboard.c is always compiled: provides api_metrics, api_delegations, and
-# the other JSON API functions used by the server RPC layer.  The browser UI
-# (aimee-runtime-web) is now the standalone Go binary and no longer embedded here.
-ifeq ($(OS),Windows_NT)
-    UI_PLATFORM_SRCS = windows/dashboard.c
-else
-    UI_PLATFORM_SRCS = 
-endif
-
 C_FLAGS += $(PAM_FLAGS) $(LIBSECRET_FLAGS)
 
-ifeq ($(UNAME_S),Darwin)
-    PLATFORM_FRAMEWORKS = -framework Security -framework CoreFoundation
-    LEAN_GC_FLAGS       = -Wl,-dead_strip
-else ifeq ($(OS),Windows_NT)
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       =
-else
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       = -Wl,--gc-sections
-endif
-
-ifeq ($(OS),Windows_NT)
-    PIC_FLAGS =
-else
-    PIC_FLAGS = -fPIC
-endif
+LEAN_GC_FLAGS = -Wl,--gc-sections
+PIC_FLAGS = -fPIC
 
 C_FLAGS += $(PIC_FLAGS)
 
@@ -242,9 +187,9 @@ C_FLAGS += $(PIC_FLAGS)
 CLIENT_C_FLAGS := $(filter-out -I. -Idb1_client -Imodules/kb/c $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
 
 # --- Lean build profile ---
-LEAN_BINARY = ../aimee-lean$(EXEEXT)
-LEAN_SERVER = ../aimee-server-lean$(EXEEXT)
-LEAN_KB = ../aimee-kb-lean$(EXEEXT)
+LEAN_BINARY = ../aimee-lean
+LEAN_SERVER = ../aimee-server-lean
+LEAN_KB = ../aimee-kb-lean
 LEAN_OBJDIR = build/obj-lean
 
 CORE_CODEC_SRCS = core/codec/base64.c
@@ -257,72 +202,33 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
 # Linker flag sets (layered -- each level adds to the previous)
 L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
 L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
-L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
-L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_AGENT   = $(L_CORE) -lssl -lcrypto
+L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
-L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
+L_HTTP    = $(L_MINIMAL) -lssl -lcrypto
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
-L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
-ifeq ($(OS),Windows_NT)
-    L_FULL += -ladvapi32
-    L_KB += -ladvapi32
-endif
+L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
+L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
 
-# --- Platform-specific source selection ---
-# Each platform directory contributes implementations for platform_*.c, util, history,
-# webchat, dashboard, server_main, and secret_store backend.
-#
+# --- Platform sources (posix/ and linux/) ---
 # PLATFORM_AGENT_SRCS: agent-layer platform files that depend on LIB_AGENT functions
 # (agent_protocol, agent_tools, etc.) — must be part of LIB_AGENT, not LIB_CORE.
 
-ifeq ($(OS),Windows_NT)
-    PLATFORM_BASIC_SRCS = \
-        windows/platform_event.c windows/platform_ipc.c windows/platform_path.c \
-        windows/platform_process.c windows/platform_random.c \
-        shared/platform_net.c \
-        windows/secret_store.c windows/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        windows/server_main.c \
-        windows/cli_client.c windows/cli_main.c \
-        windows/events.c windows/cmd_infra.c \
-        windows/cmd_describe.c \
-        windows/cmd_hooks.c windows/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        windows/agent_runtime.c windows/agent_bridge.c windows/web_egress.c
-else ifeq ($(UNAME_S),Darwin)
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c shared/platform_net.c \
-        mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-        mac/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-else
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c shared/platform_net.c \
-        linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-        linux/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-endif
+PLATFORM_BASIC_SRCS = \
+    posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
+    posix/platform_random.c shared/platform_net.c \
+    linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
+    linux/secret_store.c posix/util.c posix/pam_auth.c
+PLATFORM_EXTRA_SRCS = \
+    posix/server_main.c \
+    posix/cli_client.c posix/cli_main.c \
+    posix/events.c \
+    posix/cmd_hooks.c posix/server_compute.c
+PLATFORM_AGENT_SRCS = \
+    posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
 
 PLATFORM_SRCS       = $(PLATFORM_BASIC_SRCS) $(PLATFORM_EXTRA_SRCS) $(PLATFORM_AGENT_SRCS)
 PLATFORM_BASIC_OBJS = $(PLATFORM_BASIC_SRCS:%.c=$(OBJDIR)/%.o)
@@ -352,9 +258,9 @@ MODEL_WIRE_SRCS = modules/translation/aimee_frontend_anthropic.c modules/transla
 
 CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
-            wire_fence.c modules/economizer/economizer_module_client.c platform_random.c artifact_trust.c hook_session_token.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
+            wire_fence.c modules/economizer/economizer_module_client.c platform_random.c artifact_trust.c hook_session_token.c slop_detect.c proxy_bootstrap.c \
             client_integrations.c modules/protocols/mcp/mcp_group_tool.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
-            model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/lsp/lsp_context.c \
+            model_registry.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/lsp/lsp_context.c \
             modules/module-runtime/pre_llm_hook.c code_collect.c codex_auth.c \
             modules/workflows/wfe_iface.c modules/workflows/wfe_def.c modules/workflows/wfe_validate.c modules/workflows/wfe_canonical.c modules/workflows/wfe_custom.c modules/workflows/wfe_manager_artifacts.c modules/workflows/wfe_externalization.c modules/workflows/tool_egress.c modules/workflows/wfe_native_gate.c modules/workflows/wfe_enforce.c modules/workflows/wfe_deliver.c modules/workflows/wfe_advance.c modules/workflows/wfe_advance_exec.c modules/workflows/wfe_block_resolve.c modules/workflows/wfe_bind_ingress.c modules/workflows/wfe_router.c modules/workflows/wfe_router_catalog.c modules/workflows/wfe_autonomous_route.c \
             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
@@ -398,7 +304,7 @@ $(OBJDIR)/postgres-local/session.o: modules/postgres/client/session.c
 	$(CC) $(C_FLAGS) -DAIMEE_POSTGRES_LOCAL_ONLY=1 -c -o $@ $<
 KB_STORE_PG_SRCS = modules/kb/c/db_postgres.c
 KB_STORE_PG_OBJS = $(KB_STORE_PG_SRCS:modules/kb/c/%.c=$(OBJDIR)/kb_store/%.o) $(POSTGRES_CLIENT_OBJS)
-KB_STORE_SRCS = modules/kb/c/kb_store_init.c modules/kb/c/kb_store_reembed.c modules/kb/c/agent_hints.c modules/kb/c/agent_outcomes.c modules/kb/c/canonical_index.c modules/kb/c/canonical_index_query.c modules/kb/c/anti_patterns.c modules/kb/c/workflow_patterns.c modules/kb/c/evidence_vectors.c modules/kb/c/learning_synth_ops.c modules/kb/c/collab_rules.c modules/kb/c/curiosity.c modules/kb/c/decision_log.c modules/kb/c/kb_audit_worm.c modules/kb/c/enrollments.c modules/kb/c/kb_store_tenant.c modules/kb/c/kb_store_hardening.c modules/kb/c/team.c modules/kb/c/project.c modules/kb/c/membership.c modules/kb/c/write_tier_grant.c modules/kb/c/oidc_jwks.c modules/kb/c/entity_edges.c modules/kb/c/fact_identity.c modules/kb/c/fact_identity_unicode.c modules/kb/c/fact_mutation.c modules/kb/c/evidence_lifecycle.c modules/kb/c/entity_nodes.c modules/kb/c/code_projection.c modules/kb/c/lessons.c modules/kb/c/feedback.c modules/kb/c/notes.c modules/kb/c/rules.c modules/kb/c/tasks.c modules/kb/c/tool_registry.c modules/kb/c/kb_payload.c modules/kb/c/kb_runtime_state.c modules/kb/c/kb_service_backend.c modules/kb/c/kb_service_backend_ingest.c modules/kb/c/vector_index_ops.c modules/kb/c/code_index_ops.c modules/kb/c/learning.c modules/kb/c/code_index.c modules/kb/c/code_project_lifecycle.c modules/kb/c/css_graph.c modules/kb/c/css_migration.c modules/kb/c/css_render.c modules/kb/c/css_insights.c modules/kb/c/db_schema.c modules/kb/c/sketch.c modules/kb/c/artifacts.c modules/kb/c/corpus_structural.c modules/kb/c/corpus_jobs.c modules/kb/c/mining.c modules/kb/c/calibration.c modules/kb/c/demotion.c modules/kb/c/feature_rows.c modules/kb/c/bandit.c modules/kb/c/kb_maintenance.c modules/kb/c/kb_docs.c modules/kb/c/kb_releases.c modules/kb/c/code_audit.c \
+KB_STORE_SRCS = modules/kb/c/kb_store_init.c modules/kb/c/kb_store_reembed.c modules/kb/c/agent_hints.c modules/kb/c/agent_outcomes.c modules/kb/c/canonical_index.c modules/kb/c/canonical_index_query.c modules/kb/c/anti_patterns.c modules/kb/c/evidence_vectors.c modules/kb/c/learning_synth_ops.c modules/kb/c/collab_rules.c modules/kb/c/curiosity.c modules/kb/c/decision_log.c modules/kb/c/kb_audit_worm.c modules/kb/c/enrollments.c modules/kb/c/kb_store_tenant.c modules/kb/c/kb_store_hardening.c modules/kb/c/team.c modules/kb/c/project.c modules/kb/c/membership.c modules/kb/c/write_tier_grant.c modules/kb/c/oidc_jwks.c modules/kb/c/entity_edges.c modules/kb/c/fact_identity.c modules/kb/c/fact_identity_unicode.c modules/kb/c/fact_mutation.c modules/kb/c/evidence_lifecycle.c modules/kb/c/entity_nodes.c modules/kb/c/code_projection.c modules/kb/c/lessons.c modules/kb/c/feedback.c modules/kb/c/notes.c modules/kb/c/rules.c modules/kb/c/tasks.c modules/kb/c/tool_registry.c modules/kb/c/kb_payload.c modules/kb/c/kb_runtime_state.c modules/kb/c/kb_service_backend.c modules/kb/c/kb_service_backend_ingest.c modules/kb/c/vector_index_ops.c modules/kb/c/code_index_ops.c modules/kb/c/learning.c modules/kb/c/code_index.c modules/kb/c/code_project_lifecycle.c modules/kb/c/css_graph.c modules/kb/c/css_migration.c modules/kb/c/css_render.c modules/kb/c/css_insights.c modules/kb/c/db_schema.c modules/kb/c/sketch.c modules/kb/c/artifacts.c modules/kb/c/corpus_structural.c modules/kb/c/corpus_jobs.c modules/kb/c/mining.c modules/kb/c/calibration.c modules/kb/c/demotion.c modules/kb/c/feature_rows.c modules/kb/c/bandit.c modules/kb/c/kb_maintenance.c modules/kb/c/kb_docs.c modules/kb/c/kb_releases.c modules/kb/c/code_audit.c \
            modules/kb/c/pgvec_transport.c modules/kb/c/kb_vectors.c modules/kb/c/vector_status.c modules/kb/c/pgvec_kb_service.c \
            modules/kb/c/curator_terms.c modules/kb/c/curator_gaps.c \
            modules/kb/c/cross_repo_resolver.c modules/kb/c/cross_repo_classify.c modules/kb/c/cross_repo_stats.c \
@@ -466,14 +372,14 @@ endif
 # Memory policy and persistence live in server-go/modules/memory. C retains only
 # the ring connection adapters compiled with the server/KB products.
 DATA_SRCS = code_match.c rel_types.c \
-            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c modules/learning/learning_eval_synthesis.c eval_synthesis.c approach_store.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_delegate.c \
-            modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_session_lookup.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/routing/agent_config.c modules/vault/agent_credentials.c modules/routing/agent_registry.c modules/routing/routing.c agent_tier_lint.c cmd_describe.c \
-            role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c \
+            modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_session_lookup.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/routing/agent_config.c modules/vault/agent_credentials.c modules/routing/agent_registry.c modules/routing/routing.c cmd_describe.c \
+            role_templates.c modules/skills/skill.c \
             trajectory_export.c trajectory_batch.c \
             wiki_render.c \
             kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c \
-            kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
+            kb/kb_reasoning.c kb/kb_bandit.c kb/roadmap.c kb/kb_mdl.c
 DATA_SRCS += integrity_ingress.c
 DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
@@ -498,22 +404,6 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 OURO_RING_MAKE_LETTERS := $(filter-out -%,$(firstword $(MAKEFLAGS)))
 OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(OURO_RING_MAKE_LETTERS))
 ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
-else ifneq ($(UNAME_S),Linux)
-# The ring is Linux-only: its endpoints are SOCK_SEQPACKET sockets opened with
-# SOCK_CLOEXEC and accept4. Elsewhere this Makefile builds only test probes
-# that never link it. They still compile against its public headers (the
-# module-call API names ring result types), so only those are provided, from
-# the same release and checks; a product that does link the ring stops at the
-# rule below rather than in the ring's compiler.
-OURO_RING_INCLUDE := $(shell python3 ../scripts/provide_ouroboros_ring.py --headers build/deps/ouroboros-ring)
-ifeq ($(strip $(OURO_RING_INCLUDE)),)
-$(error could not provide the ouroboros ring headers in the range dependencies/ouroboros-ring.json names; see the message above)
-endif
-C_FLAGS += -I$(OURO_RING_INCLUDE)
-OURO_RING_UNSUPPORTED := build/deps/ouroboros-ring/unsupported-on-$(UNAME_S)
-OURO_RING_LIB := $(OURO_RING_UNSUPPORTED)
-$(OURO_RING_UNSUPPORTED):
-	@echo "the ouroboros ring is Linux-only; aimee-server and aimee-kb cannot be built on $(UNAME_S)" >&2; exit 1
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
@@ -542,18 +432,10 @@ else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
                   core/connection/socket.c
-ifneq ($(OS),Windows_NT)
 CORE_CONNECTION_SRCS += core/connection/tls_openssl.c
-endif
 ifeq ($(WITH_TLS),1)
 CORE_CONNECTION_SRCS += core/connection/native_tls_identity.c core/connection/native_tls_path.c
-ifeq ($(OS),Windows_NT)
-CORE_CONNECTION_SRCS += core/connection/native_tls_schannel.c
-else ifeq ($(shell uname -s),Darwin)
-CORE_CONNECTION_SRCS += core/connection/native_tls_securetransport.c
-else
 CORE_CONNECTION_SRCS += core/connection/native_tls_openssl.c
-endif
 endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
@@ -601,9 +483,7 @@ CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o 
 # Canonical identity is filesystem/Git-only; the thin client never links the
 # workspace discovery/context or server store graph.
 WORKSPACE_IDENTITY_OBJS = $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o $(OBJDIR)/yaml.o
-ifneq ($(OS),Windows_NT)
 CLIENT_SUPPORT_OBJS += $(WORKSPACE_IDENTITY_OBJS)
-endif
 CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
@@ -617,7 +497,7 @@ SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalo
               modules/delegates/delegate_role.c modules/delegates/delegate_depth.c modules/delegates/delegate_prompt.c modules/delegates/delegate_run_phases.c modules/delegates/delegate_routing.c modules/delegates/delegate_launch.c modules/delegates/delegate_source_authority.c modules/delegates/delegate_economics.c modules/delegates/delegate_credentials.c modules/delegates/delegate_credential_retry.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/ensemble_request.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c server/server_sweep.c modules/delegates/delegate_checkout.c cmd_init.c \
               server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c modules/vault/vault_env_bootstrap.c modules/vault/vault_config_bootstrap.c egress_credential_envelope.c modules/git/git_forge_vault.c modules/git/git_cred_inject.c modules/git/git_host_resolve.c modules/git/git_ssh_agent.c modules/git/git_project.c server/ws_registry.c modules/git/git_ops.c modules/git/git_host_cred.c modules/git/git_org_repos.c modules/git/git_oauth_github.c modules/git/git_oauth_gh.c modules/git/git_oauth_device.c server/deploy_apply.c modules/git/git_pr_api.c modules/git/git_pr_ci_grade.c modules/webuser/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/server_vault_agent_migration.c server/pki.c server/server_cert.c \
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
-              modules/workflows/wfe_verdict.c modules/workflows/wfe_autonomy.c \
+              modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
 SERVER_SRCS += server/agent_result_cache.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
@@ -653,7 +533,7 @@ SERVER_SRCS += server/turn_integrity_audit_bridge.c
 SERVER_SRCS += server/obs_bus_adapter.c
 # Pure policy: which provider names may be persisted as the durable primary
 # (unit tested standalone, so it stays out of the server_provider.c handler TU).
-SERVER_SRCS += server/provider_settable.c
+SERVER_SRCS += 
 SERVER_SRCS += server/module_routing_adapter.c
 SERVER_SRCS += server/module_stage_adapters.c
 SERVER_SRCS += server/server_native_delegate.c server/server_native_history.c server/server_unknown_effect_policy.c server/server_native_execution.c server/server_native_cache_lease.c server/server_native_containment.c server/server_native_launch.c cli_proxy.c server/server_native_runtime.c server/server_native_cli.c server/server_native_tool_source.c server/server_native_replay.c server/server_native_tool_admission.c
@@ -681,7 +561,7 @@ KB_CLIENT_OBJS = $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_cl
 SERVER_KB_CLIENT_OBJS = $(KB_CLIENT_OBJS)
 
 # --- KB Service ---
-KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_reflect.c kb/lessons_actuate.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c curiosity_resolve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_json.c kb/http/kb_http_common.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_facts.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c kb/kb_sidecar_identity.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/sts_cache.c modules/aws/aws_eventstream.c
+KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_reflect.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c curiosity_resolve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_json.c kb/http/kb_http_common.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_facts.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c kb/kb_sidecar_identity.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/aws_eventstream.c
 KB_SRCS += kb/kb_obs_bus_adapter.c
 KB_SRCS += kb/http/kb_metrics_listener.c
 KB_SRCS += kb/http/kb_http_code_scan_phase.c
@@ -854,8 +734,8 @@ SERVER_MEMORY_OBJS =
 
 KB_MEMORY_SPLIT_SRCS =
 KB_DATA_SRCS = code_match.c rel_types.c \
-               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
-               dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
+               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+               dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c modules/learning/learning_endogeneity.c modules/learning/learning_regret.c modules/learning/learning_approach_memory.c modules/learning/learning_attribution.c modules/learning/learning_policy_arms.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_identity.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/roadmap.c kb/kb_mdl.c
 KB_DATA_SRCS += integrity_ingress.c
 KB_DATA_OBJS = $(KB_DATA_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_PLATFORM_OBJS = $(CLIENT_TRANSPORT_OBJS) $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
@@ -980,28 +860,14 @@ $(eval $(call ts_obj,powershell,tree-sitter-powershell/src,parser.c))
 $(eval $(call ts_obj,powershell_scan,tree-sitter-powershell/src,scanner.c))
 endif
 
-# --- Gateway ---
-
-GATEWAY_SRCS = $(CLIENT_TRANSPORT_SRCS) cli_chat_stream.c $(IR_BASE_SRCS) modules/ir/session_event.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
-               gateway/delivery_router.c gateway/session_key.c \
-               gateway/platform_telegram.c gateway/platform_ntfy.c gateway/platform_webhook.c \
-               gateway/stt.c gateway/tts.c gateway/pairing.c gateway/gateway_pairing.c gateway/mirror.c \
-               posix/agent_bridge.c posix/cli_client.c proxy_bootstrap.c \
-               delivery_target.c aimee_home.c log.c platform_random.c \
-               shutdown_forensics.c
-GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o %/platform_random.o, $(PLATFORM_BASIC_OBJS))
-# cJSON uses a special build rule (strips -Werror); reference it separately.
-GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
-               $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
-
 # All source files for linting (excluding vendored cJSON)
 ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
-           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
+           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
 ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
-           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
+           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
 # direct prerequisite of a test target (modules/memory/memory_core_search.o was one
@@ -1018,7 +884,7 @@ DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
 .PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check postgres-provider-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check help-topics-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-bootstrap-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
-all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
@@ -1183,7 +1049,7 @@ wizard-bootstrap-e2e: $(BINARY) $(SERVER)
 kb: $(KB) $(KB_RESOLVER)
 
 # aimee-witness-verify: standalone OFFLINE witness verifier (no kb, no db, no net).
-WITNESS_VERIFY = ../aimee-witness-verify$(EXEEXT)
+WITNESS_VERIFY = ../aimee-witness-verify
 WITNESS_VERIFY_OBJS = $(OBJDIR)/tools/witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_offline.o $(OBJDIR)/modules/vault/vault_witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_record.o $(OBJDIR)/modules/vault/vault_witness_merkle.o \
@@ -1220,86 +1086,10 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Daemons link with -s, so the
 # only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
-# such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
-# macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
-ifeq ($(OS),Windows_NT)
-	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
-else ifeq ($(UNAME_S),Darwin)
+# such as PQ*, never on internal definitions, which a stripped binary drops.
+check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB)
 	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
-		echo "check-linking: $$bin"; \
-		deps=$$(otool -L "$$bin" | tail -n+2); \
-		if [ "$$bin" = "$(BINARY)" ]; then \
-			for lib in libsqlite3 libpq; do \
-				if echo "$$deps" | grep -q "$$lib"; then \
-					echo "  ERROR: $$lib linked into DB-free client"; \
-					fail=1; \
-				else \
-					echo "  $$lib: not found (client boundary ok)"; \
-				fi; \
-			done; \
-			continue; \
-		fi; \
-		if [ "$$bin" = "$(RUNTIME_WEB)" ]; then \
-			if echo "$$deps" | grep -q libpq; then \
-				echo "  ERROR: libpq linked into webchat (no database access)"; \
-				fail=1; \
-			else \
-				echo "  libpq: not found (webchat boundary ok)"; \
-			fi; \
-			continue; \
-		fi; \
-		case "$$bin" in \
-			*aimee-server*) \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native server"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: native server imports PostgreSQL driver symbols"; \
-					fail=1; \
-				fi ;; \
-			*aimee-kb*) \
-				if echo "$$deps" | grep -q libsqlite3; then \
-					echo "  ERROR: libsqlite3 linked into knowledge host"; \
-					fail=1; \
-				else \
-					echo "  libsqlite3: not found (kb boundary ok)"; \
-				fi; \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native KB"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | grep -Eq 'db1_|sqlite3_'; then \
-					echo "  ERROR: DB1/sqlite symbols present in knowledge host"; \
-					fail=1; \
-				else \
-					echo "  DB1/sqlite symbols: not found (kb boundary ok)"; \
-				fi; \
-				continue ;; \
-		esac; \
-		for lib in libsqlite3 libssl libcrypto; do \
-			case "$$bin" in \
-				*aimee-server*) ;; \
-				*) [ "$$lib" = "libssl" ] || [ "$$lib" = "libcrypto" ] && continue ;; \
-			esac; \
-			if echo "$$deps" | grep -q "$$lib"; then \
-				echo "  $$lib: dynamic (ok)"; \
-			else \
-				echo "  $$lib: not found (ok if unused by this binary)"; \
-			fi; \
-		done; \
-		if echo "$$deps" | grep -q '/usr/local/lib.*\.a'; then \
-			echo "  WARNING: static library detected in $$bin"; \
-			fail=1; \
-		fi; \
-	done; \
-	if [ "$$fail" = "1" ]; then exit 1; fi; \
-	echo "check-linking: ok"
-else
-	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1369,7 +1159,6 @@ else
 	done; \
 	if [ "$$fail" = "1" ]; then exit 1; fi; \
 	echo "check-linking: ok"
-endif
 
 # The harness starts the DB1 module the way a container's supervisor does, so
 # the module is a prerequisite: without it every migrated operation answers
@@ -1451,7 +1240,7 @@ BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/modules/guardrails/guardrail
              $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/bench_perf_stubs.o \
              $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
              $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o \
-             $(OBJDIR)/tests/support/git_ownership_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o
+             $(OBJDIR)/tests/support/git_ownership_stub.o 
 
 tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 	$(CC) -o $@ $^ $(TEST_L_FLAGS)
@@ -1563,7 +1352,7 @@ $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
 $(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
 	@mkdir -p $(dir $@)
-	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(PLATFORM_FRAMEWORKS) $(EXTRA_L_FLAGS)
+	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(EXTRA_L_FLAGS)
 $(THINCLIENT_PC): $(THINCLIENT_LIBRARY) Makefile
 	@mkdir -p $(dir $@)
 	@printf '%s\n' 'prefix=$(abspath $(dir $(THINCLIENT_LIBRARY)))' 'libdir=$${prefix}' 'includedir=$(abspath headers)' '' 'Name: aimee-client' 'Description: Shared Aimee thinclient transport' 'Version: 1.0.0' 'Libs: -L$${libdir} -laimee-client' 'Cflags: -I$${includedir}' > $@
@@ -1642,7 +1431,7 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 
 # THESE LINK THE CORE ARCHIVE THROUGH L_KB BUT ARE NOT IN THE PRODUCT LIST.
 #
-# $(BINARY)/$(SERVER)/$(GATEWAY) name $(CORE_CONNECTION_LIB) as a real
+# $(BINARY)/$(SERVER) name $(CORE_CONNECTION_LIB) as a real
 # prerequisite, and tests get it from `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # in tests/Rules.mk. These auxiliary drivers got neither, so on a clean tree they
 # reached the link step before the archive existed and died with
@@ -1785,12 +1574,6 @@ write-tier-enforce-live: ../write-tier-enforce-live
 #
 # Memory datasets use the shared Go module with injected evaluation storage.
 
-# aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
-# the dependency-free remote-target accessors; --gc-sections drops the transport.
-$(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o $(CORE_CONNECTION_LIB)
-	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_GATEWAY)
-
 # --- Compilation ---
 
 $(OBJDIR)/server/server_delegate_monitor.o: server/server_delegate_monitor.c
@@ -1853,7 +1636,7 @@ $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/models_dev.o: models_dev.c
+: 
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) $(CFLAGS_DATADIR) -o $@ $<
 
@@ -1862,19 +1645,7 @@ $(OBJDIR)/linux/%.o: linux/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/mac/%.o: mac/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/windows/%.o: windows/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
 $(OBJDIR)/posix/%.o: posix/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/gateway/%.o: gateway/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
@@ -1908,7 +1679,7 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
 	install -m 755 $(MEMORY_EVAL) $(PREFIX)/bin/aimee-memory-eval
 	install -m 755 $(MEMORY_TRANSFER) $(PREFIX)/bin/aimee-memory-transfer
@@ -1922,7 +1693,6 @@ install:
 	install -m 755 $(KB) $(PREFIX)/bin/aimee-kb
 	install -m 755 $(KB_WORM) $(PREFIX)/bin/aimee-kb-worm
 	install -m 755 $(KB_RESOLVER) $(PREFIX)/bin/aimee-kb-resolver
-	install -m 755 $(GATEWAY) $(PREFIX)/bin/aimee-gateway
 	@mkdir -p $(DATADIR)
 	install -m 644 modules/kb/c/schema.sql $(DATADIR)/memory-eval-schema.sql
 	install -m 644 ../data/models_dev_snapshot.json $(DATADIR)/models_dev_snapshot.json
@@ -2175,7 +1945,7 @@ frontend:
 
 clean:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(GATEWAY) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
+	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
 	       $(BINARY)-asan $(SERVER)-asan \
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
@@ -2937,7 +2707,7 @@ build-variants:
 -include $(DEPS)
 
 # Every native link may use the shared utility wrappers, including authorities.
-$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY) $(GATEWAY): $(CORE_CODEC_LIB)
+$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY): $(CORE_CODEC_LIB)
 
 .PHONY: ir-bypass-check
 ir-bypass-check:

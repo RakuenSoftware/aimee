@@ -14,18 +14,8 @@ extern "C"
 {
 #endif
 
-   /* Re-rank up to n candidates using the active ranker model.
-    * doc_ids[], lex_scores[], dense_scores[], age_days[]: per-candidate inputs.
-    * ranked_out[]:  receives re-ordered doc_ids (caller must provide n slots).
-    * scores_out[]:  receives per-candidate ranker scores; may be NULL.
-    * Returns n on success, 0 if disabled or no model loaded (caller uses RRF order). */
-   int kb_ranker_rerank(const int64_t *doc_ids, const double *lex_scores,
-                        const double *dense_scores, const double *age_days, int n,
-                        int64_t *ranked_out, double *scores_out);
-
-   int kb_ranker_rerank_with_sketch(const int64_t *doc_ids,
-                                    const double *lex_scores, const double *dense_scores,
-                                    const double *age_days,
+   int kb_ranker_rerank_with_sketch(const int64_t *doc_ids, const double *lex_scores,
+                                    const double *dense_scores, const double *age_days,
                                     const kb_sketch_features_t *sketch_features, int n,
                                     int64_t *ranked_out, double *scores_out);
 

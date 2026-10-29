@@ -14,7 +14,6 @@ typedef struct wfe_ctx wfe_ctx;
 /* Executor-facing accessors (stable; extend here without touching the seam). */
 const char *wfe_ctx_work_item(const wfe_ctx *c);
 const wfe_def_t *wfe_ctx_def(const wfe_ctx *c);
-const wfe_node_t *wfe_ctx_node(const wfe_ctx *c);
 const char *wfe_ctx_repo(const wfe_ctx *c);          /* normalized repo url */
 const char *wfe_ctx_proposal_path(const wfe_ctx *c); /* proposal artifact path */
 const char *wfe_ctx_pr_ref(const wfe_ctx *c);        /* forge PR ref from pr.open, or "" */
@@ -56,12 +55,5 @@ typedef struct
  * pause/terminal), -1 on error. */
 int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char *err,
                        size_t errlen);
-
-/* Advance repeatedly until paused, terminal, or failed. Returns 0 on clean stop. */
-int wfe_engine_run(const char *work_item_id, char *err, size_t errlen);
-
-/* Register the built-in stub executors (every block -> ADVANCED). Real
- * executors (W3+) override per block type. */
-void wfe_register_stub_executors(void);
 
 #endif /* DEC_WFE_ENGINE_H */

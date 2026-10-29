@@ -44,21 +44,6 @@ int agent_name_valid(const char *name)
    return 1;
 }
 
-/* Is `endpoint` plausibly an address rather than a mis-parsed flag?
- *
- * `agent add` takes three POSITIONAL arguments, so a flag typed in the endpoint's
- * place was stored as the endpoint: `agent add x --provider openai --endpoint URL`
- * saved endpoint="--provider", reported the agent ON, and returned success. The only
- * symptom came later, from `agent probe`: "GET --provider/models returned -1".
- *
- * Deliberately narrow. A leading '-' is unambiguous evidence of a mis-parsed flag,
- * because no address starts with one. Requiring a scheme would reject the host:port
- * forms this command has always accepted, which is a guess, not evidence. */
-int agent_endpoint_valid(const char *endpoint)
-{
-   return endpoint && endpoint[0] && endpoint[0] != '-';
-}
-
 /* Per-turn session id, set from the request in the chat/delegate workers (setter
  * below) and carried in the creds snapshot so a fan-out worker inherits the
  * originating turn's session identity. (Credentials no longer ride this: the
@@ -102,25 +87,6 @@ int agent_endpoint_is_localish(const char *endpoint)
           strstr(endpoint, "://172.28.") || strstr(endpoint, "://172.29.") ||
           strstr(endpoint, "://172.30.") || strstr(endpoint, "://172.31.") ||
           strncmp(endpoint, "unix://", 7) == 0 || endpoint[0] == '/';
-}
-
-/* Registration prefix of a route-target name: everything before the first ':'.
- * Provider-general registration names targets `<registration>:<model>`, so this
- * identifies siblings that share credentials, endpoint and wire protocol. A
- * legacy single-model agent has no ':' and is its own registration. */
-void agent_registration_prefix(const char *name, char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return;
-   out[0] = '\0';
-   if (!name || !name[0])
-      return;
-   const char *colon = strchr(name, ':');
-   size_t n = colon ? (size_t)(colon - name) : strlen(name);
-   if (n >= out_len)
-      n = out_len - 1;
-   memcpy(out, name, n);
-   out[n] = '\0';
 }
 
 /* See agent_config.h for why this compares the stored registration rather than

@@ -985,11 +985,6 @@ int aimee_pg_column_count(aimee_pg_stmt_t *stmt)
    return stmt ? sqlite3_column_count(stmt->st) : 0;
 }
 
-const char *aimee_pg_column_name(aimee_pg_stmt_t *stmt, int col)
-{
-   return stmt ? sqlite3_column_name(stmt->st, col) : NULL;
-}
-
 int aimee_pg_column_type(aimee_pg_stmt_t *stmt, int col)
 {
    if (!stmt)

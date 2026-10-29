@@ -72,12 +72,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
-#endif
 
 static kb_service_ctx_t g_ctx;
 
@@ -348,7 +346,6 @@ static int kb_cmd_vault(int argc, char **argv)
    return client;
 }
 
-#ifndef _WIN32
 static void kb_signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
    (void)ucontext;
@@ -375,19 +372,6 @@ static void kb_install_signal_handlers(void)
     * the client reads the whole response before closing.) */
    signal(SIGPIPE, SIG_IGN);
 }
-#else
-static void kb_signal_handler(int sig)
-{
-   (void)sig;
-   g_ctx.running = 0;
-}
-
-static void kb_install_signal_handlers(void)
-{
-   signal(SIGINT, kb_signal_handler);
-   signal(SIGTERM, kb_signal_handler);
-}
-#endif
 
 /* Reapply host-owned embedding policy after an isolated migration session is
  * closed: lifecycle shutdown deliberately clears these process-local values. */

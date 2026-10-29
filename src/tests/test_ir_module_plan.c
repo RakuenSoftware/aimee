@@ -335,17 +335,7 @@ const char *config_default_dir(void)
    snprintf(directory, sizeof(directory), "%s/aimee-test", platform_tmpdir());
    return directory;
 }
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
-{
-   (void)turn_id;
-   (void)role;
-   (void)query_fingerprint;
-   (void)ids;
-   (void)n_ids;
-   return 0;
-}
+
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)

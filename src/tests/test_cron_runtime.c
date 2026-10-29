@@ -158,12 +158,6 @@ char *db1_cron_job_history_json(const char *job_id, int limit)
    return strdup("[]");
 }
 
-char *db1_cron_job_latest_output(const char *job_id)
-{
-   (void)job_id;
-   return strdup(g_prior_output);
-}
-
 char *db1_cron_job_last_output_hash(const char *job_id)
 {
    (void)job_id;

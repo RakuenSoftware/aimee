@@ -105,22 +105,6 @@ int db1_checkpoint_delete(int64_t id)
    (void)id;
    return 0;
 }
-cJSON *checkpoint_to_json(const db1_checkpoint_t *cp)
-{
-   (void)cp;
-   return cJSON_CreateObject();
-}
-void emit_json_ctx(cJSON *json, const char *fields, const char *profile)
-{
-   (void)fields;
-   (void)profile;
-   cJSON_Delete(json);
-}
-void emit_ok_ctx(const char *fields, const char *profile)
-{
-   (void)fields;
-   (void)profile;
-}
 
 int main(void)
 {

@@ -24,15 +24,6 @@ extern "C"
       char last_seen_at[DB1_PROJECT_TS_LEN];
    } db1_project_clone_t;
 
-   int db1_project_clone_upsert(const char *clone_path, const char *project_uuid,
-                                const char *canonical_url, const char *origin_url,
-                                const char *upstream_url);
-   int db1_project_clone_get(const char *clone_path, db1_project_clone_t *out);
-   int db1_project_clone_delete(const char *clone_path);
-   int db1_project_clone_list(db1_project_clone_t *out, int max);
-   int db1_project_clone_list_by_project(const char *project_uuid, db1_project_clone_t *out,
-                                         int max);
-
 #ifdef __cplusplus
 }
 #endif
