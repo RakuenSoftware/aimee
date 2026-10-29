@@ -552,7 +552,6 @@ class DescriptorTests(unittest.TestCase):
              "server-go/modules/response-composition/response_composition_test.go"),
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
-            ("benchmarks", "sources", "src/modules/benchmarks/agent_eval_memory_transport.c"),
             ("memory", "go_sources", "server-go/modules/memory/memory.go"),
             ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
             ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),

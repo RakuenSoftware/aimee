@@ -230,11 +230,6 @@
         },
         {
           "primitive": "inet_socket",
-          "path": "src/posix/dashboard.c",
-          "count": 1
-        },
-        {
-          "primitive": "inet_socket",
           "path": "src/server/server_http.c",
           "count": 2
         }
@@ -338,11 +333,6 @@
           "primitive": "credentialed_git",
           "path": "src/modules/webuser/webuser_editor.c",
           "count": 1
-        },
-        {
-          "primitive": "credentialed_git",
-          "path": "src/modules/workflows/wfe_live_forge.c",
-          "count": 2
         },
         {
           "primitive": "credentialed_git",

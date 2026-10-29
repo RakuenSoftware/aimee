@@ -59,9 +59,8 @@
     "benchmark-transport": {
       "owner": "C benchmark host",
       "contract": "Versioned memory-stage calls; injected production Go evaluator",
-      "reason": "Three retained memory_insert entry points are benchmark-host transport only. No scratch memory engine or local ranking implementation remains.",
+      "reason": "The memory_insert entry points were benchmark-host transport only. That transport (agent_eval_memory_transport.c) was retired as unreachable from every shipped binary; no scratch memory engine or local ranking implementation remains.",
       "evidence": [
-        "src/modules/benchmarks/agent_eval_memory_transport.c",
         "server-go/modules/memory/live_benchmark_test.go",
         "server-go/modules/memory/retrieval_eval_test.go"
       ],
@@ -217,8 +216,7 @@
     "src/modules/memory/memory_data_bus.c": {
       "disposition": "go-owner",
       "replacement_files": [
-        "server-go/modules/memory/data.go",
-        "src/modules/benchmarks/agent_eval_memory_transport.c"
+        "server-go/modules/memory/data.go"
       ]
     },
     "src/modules/memory/memory_domain_bus.c": {
@@ -319,7 +317,6 @@
       "external_occurrences": [
         "src/headers/memory_stage_contract.h",
         "src/kb/kb_module_stage_adapters.c",
-        "src/modules/benchmarks/agent_eval_memory_transport.c",
         "src/server/module_stage_adapters.c"
       ]
     },
@@ -490,7 +487,6 @@
       "external_occurrences": [
         "src/headers/memory_stage_contract.h",
         "src/kb/kb_module_stage_adapters.c",
-        "src/modules/benchmarks/agent_eval_memory_transport.c",
         "src/server/module_stage_adapters.c"
       ]
     },
@@ -1227,7 +1223,6 @@
       "disposition": "benchmark-transport",
       "external_occurrences": [
         "src/headers/memory.h",
-        "src/modules/benchmarks/agent_eval_memory_transport.c",
         "src/tests/bench_perf.c",
         "src/tests/test_context_assembly.c",
         "src/tests/test_curiosity.c",
@@ -1238,15 +1233,13 @@
     "memory_insert_epistemic_ex": {
       "disposition": "benchmark-transport",
       "external_occurrences": [
-        "src/headers/memory.h",
-        "src/modules/benchmarks/agent_eval_memory_transport.c"
+        "src/headers/memory.h"
       ]
     },
     "memory_insert_ex": {
       "disposition": "benchmark-transport",
       "external_occurrences": [
         "src/headers/memory.h",
-        "src/modules/benchmarks/agent_eval_memory_transport.c",
         "src/tests/test_workspace_memory.c"
       ]
     },
@@ -1891,18 +1884,6 @@
         "memory_stats"
       ],
       "sha256": "cecf3d6f50e6194dc90f2ad77658911f6d2715c7eedfb9945470c08618602f68"
-    },
-    "src/modules/benchmarks/agent_eval_memory_transport.c": {
-      "disposition": "benchmark-transport",
-      "symbols": [
-        "AIMEE_MEMORY_EVENT_DATA",
-        "AIMEE_MEMORY_STAGE_DATA",
-        "memory_insert",
-        "memory_insert_epistemic_ex",
-        "memory_insert_ex"
-      ],
-      "sha256": "3f18ccfbe932655bc936c4b59398f67e03d31a188fa72051359f2a7aef04bc45",
-      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval."
     },
     "src/modules/kb/include/aimee/kb/graph_kinds.h": {
       "disposition": "storage-protocol",

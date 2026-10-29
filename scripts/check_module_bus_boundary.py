@@ -106,8 +106,6 @@ PRIVATE_HEADER_REACH = {
     ("src/modules/webuser/webuser_editor.c", "modules/git/forge_credentials.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/git/git_cred_inject.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/workspace/workspace_scope.h"),
-    ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_cred_inject.h"),
-    ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_pr_api.h"),
     ("src/modules/workspace/workspace_turn.c", "modules/git/forge_credentials.h"),
     ("src/modules/workspace/workspace_turn.c", "modules/git/git_cred_inject.h"),
 }
@@ -172,7 +170,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/tools/agent_tools_dispatch.c", "kb_client/kb_client.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "lsp/lsp.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "sandbox/sandbox_learned.h"),
-    ("src/modules/workflows/wfe_live_panel.c", "roundtable/roundtable_verify.h"),
     ("src/modules/workflows/wfe_panel_roundtable.h", "roundtable/delegate_ensemble.h"),
     ("src/modules/workspace/workspace.c", "kb_client/kb_client.h"),
 }

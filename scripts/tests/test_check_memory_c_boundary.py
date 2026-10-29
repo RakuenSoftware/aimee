@@ -5,6 +5,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -16,13 +17,21 @@ sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
 ALLOWED_C = checker.ALLOWED_C
-EXTERNAL_CONNECTION_C = checker.EXTERNAL_CONNECTION_C
 KB_CONNECTION_C = checker.KB_CONNECTION_C
 BoundaryError = checker.BoundaryError
 validate = checker.validate
 
 
 class MemoryCBoundaryTest(unittest.TestCase):
+    def allowed_owner(self, root: Path) -> Path:
+        # No shipped C file is an allowed memory owner any more; a fixture one
+        # proves the direct-store rule still fires for any that is added.
+        relative = "src/fixture_memory_owner.c"
+        patch = unittest.mock.patch.object(checker, "ALLOWED_C", {relative})
+        patch.start()
+        self.addCleanup(patch.stop)
+        return root / relative
+
     def fixture(self) -> Path:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -32,10 +41,6 @@ class MemoryCBoundaryTest(unittest.TestCase):
         (root / "server-go/modules/memory").mkdir(parents=True)
         for relative in ALLOWED_C:
             path = root / relative
-            path.write_text("/* event bus adapter */\n", encoding="utf-8")
-        for relative in EXTERNAL_CONNECTION_C:
-            path = root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("/* event bus adapter */\n", encoding="utf-8")
         for relative in KB_CONNECTION_C:
             path = root / relative
@@ -83,8 +88,6 @@ class MemoryCBoundaryTest(unittest.TestCase):
         path = root / "src/modules/audit/obs_bus.c"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("int obs_bus_host(void) { return 0; }\n")
-        path = root / next(iter(EXTERNAL_CONNECTION_C))
-        path.write_text("void *host_call(void) { return aimee_module_json_call(5895, 7); }\n")
         validate(root)
 
     def test_rejects_retired_db2_memory_source(self) -> None:
@@ -145,14 +148,14 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_direct_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(EXTERNAL_CONNECTION_C))
+        target = self.allowed_owner(root)
         target.write_text('#include "db1_client/user_memory.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 
     def test_rejects_adapter_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(ALLOWED_C | EXTERNAL_CONNECTION_C))
+        target = self.allowed_owner(root)
         target.write_text('#include "db_postgres.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
@@ -169,7 +172,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_direct_store_call_without_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(EXTERNAL_CONNECTION_C))
+        target = self.allowed_owner(root)
         target.write_text("void *p = kb_store_conn();\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)

@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 302 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 301 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -543,7 +543,6 @@ The binaries read 302 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_DEFAULT_BRANCH` | Legacy C workflow override for default-branch resolution. The Go WFE derives branch authority from the admitted repository and checkout. |
 | `AIMEE_ORCH_DELEGATES` | Enable delegate resource use by the orchestration plane. |
 | `AIMEE_ORCH_WORKFLOWS` | Enable workflow orchestration surfaces. |
-| `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
 | `AIMEE_PR_BASE_MODE` | What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
