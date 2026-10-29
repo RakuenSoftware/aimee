@@ -263,18 +263,6 @@ add_test(NAME test_agent_http COMMAND test_agent_http)
 set_tests_properties(test_agent_http PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-# test_kb_lab: Ingest lab — standalone chunk preview and quality audit.
-add_executable(test_kb_lab test_kb_lab.c ../kb/kb_lab.c)
-target_include_directories(test_kb_lab PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_kb_lab)
-target_link_libraries(test_kb_lab PRIVATE m)
-add_test(NAME test_kb_lab COMMAND test_kb_lab)
-set_tests_properties(test_kb_lab PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 # test_kb_mdl: MDL scoring for synthesis candidate selection.
 # Needs kb_mdl.c (aimee-data) + config_learning.c (aimee-core) + zstd.
 add_executable(test_kb_mdl test_kb_mdl.c ../kb/kb_mdl.c)

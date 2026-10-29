@@ -682,7 +682,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_planner.c
     ${AIMEE_SRC_DIR}/kb/roadmap.c
     ${AIMEE_SRC_DIR}/kb/kb_mdl.c
-    ${AIMEE_SRC_DIR}/kb/kb_lab.c
     ${PLATFORM_DATA_SRCS}
 )
 
@@ -1148,7 +1147,6 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_planner.c
     ${AIMEE_SRC_DIR}/kb/roadmap.c
     ${AIMEE_SRC_DIR}/kb/kb_mdl.c
-    ${AIMEE_SRC_DIR}/kb/kb_lab.c
 )
 set(KB_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM KB_CORE_SRCS

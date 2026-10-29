@@ -488,7 +488,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-sidecar-admission \
                $(TESTPREFIX)/unit-test-mcp-gateway-tools \
                $(TESTPREFIX)/unit-test-report-enrichment \
-               $(TESTPREFIX)/unit-test-curator-profile \
                $(TESTPREFIX)/unit-test-kb-client-cache \
                $(TESTPREFIX)/unit-test-openai-runs-store \
                $(TESTPREFIX)/unit-test-cli-argspec \
@@ -654,7 +653,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-json-fluent \
                $(TESTPREFIX)/unit-test-server-memory-setup \
                $(TESTPREFIX)/unit-test-tool-validation \
-               $(TESTPREFIX)/unit-test-kb-export \
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
                $(TESTPREFIX)/unit-test-delegate-liveness \
@@ -757,7 +755,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-releases \
                $(TESTPREFIX)/unit-test-sketch \
                $(TESTPREFIX)/unit-test-kb-fusion \
-               $(TESTPREFIX)/unit-test-kb-lab \
                $(TESTPREFIX)/unit-test-artifacts \
                $(TESTPREFIX)/unit-test-evidence-embed \
                $(TESTPREFIX)/unit-test-learning-bundle \
@@ -3700,12 +3697,6 @@ $(TESTPREFIX)/unit-test-report-enrichment: $(OBJDIR)/tests/test_report_enrichmen
                                         $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-curator-profile: $(OBJDIR)/tests/test_curator_profile.o \
-                                         $(OBJDIR)/curator_profile.o \
-                                         $(OBJDIR)/hardware_probe.o \
-                                         $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-kb-client-cache: $(OBJDIR)/tests/test_kb_client_cache.o \
                                          $(OBJDIR)/modules/kb_client/kb_client_cache.o \
                                          $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
@@ -6138,20 +6129,9 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-kb-lab: $(OBJDIR)/tests/test_kb_lab.o \
-                     $(OBJDIR)/kb/kb_lab.o \
-                     $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-kb-fusion: $(OBJDIR)/tests/test_kb_fusion.o \
                      $(OBJDIR)/kb/kb_fusion.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-kb-export: $(OBJDIR)/tests/test_kb_export.o \
-                     $(OBJDIR)/kb_export_obsidian.o $(OBJDIR)/kb_export_json.o \
-                     $(OBJDIR)/kb_store/kb_service_backend_export.o \
-                     $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-artifacts: $(OBJDIR)/tests/test_artifacts.o \
                      $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
