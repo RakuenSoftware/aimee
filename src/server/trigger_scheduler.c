@@ -975,7 +975,7 @@ int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
        "You are running as a cron job. The operator is not at the keyboard.\n"
        "\n"
        "DELIVERY: Your final response is automatically delivered to the configured channel; do "
-       "not call send_message or its analogues. Just respond.\n"
+       "not try to send it yourself. Just respond.\n"
        "\n"
        "SILENT: If there is genuinely nothing new to report, respond with exactly [SILENT] and "
        "nothing else. Suppressed responses do not notify the operator.\n"

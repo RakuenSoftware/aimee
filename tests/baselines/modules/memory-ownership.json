@@ -2033,7 +2033,7 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "daa9cd1bd7379781bd4f05c3b1fa67d2b781a62a49e9fa0812e95a47d3d828fa"
+      "sha256": "b9f10013be8ac217b0d83b3c56c6ffca7ec05adc3a0135e14bdfaca95ea3fcb9"
     },
     "src/modules/protocols/mcp/mcp_tools.c": {
       "disposition": "protocol-catalog",
@@ -2394,7 +2394,7 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "28bf8453115dd7ba3c006a3552a4414ef7856ef383dae895a2d8ee9bfb68df22",
+      "sha256": "37349a8ee126012f2a2ec85970d8c58894324e17c95193e363663ebd1cbd0fac",
       "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning.",
       "boundary_review": "PR #3050: adds a tools metadata coverage assertion over the real flat MCP catalog. Existing memory tool schemas, fixtures, runtime policy and Go ownership are unchanged. 2026-10-20 PR #3052: Reviewed canonical Git advert projection and its exact real-catalog tests. Existing memory schemas, handlers, arguments, admission and Go policy remain unchanged; reversing only the reviewed Git helper/caller/tests reproduces the previously pinned source exactly. This is boundary analysis, not independent production-promotion approval. 2026-10-20 PR #3052: reviewed canonical session-search actor replacement, duplicate-principal refusal assertions, unchanged input ownership, and exact new view/revision/offset schema expectations. Reversing only five newly recorded literal S1 deltas restores the pinned fixture byte-for-byte. Existing memory_recall schema and assertions remain unchanged; this is not independent production approval. 2026-10-25 recovered IR reply retirement: reviewed only removal of the unread delegate_reply MCP advert/dispatch (or its exact golden-count/signature update and retired-advert assertion). Reversing these exact non-memory edits restores the previously pinned source byte-for-byte. Existing memory symbols, schemas, handlers, calls, scope, guards, classifications and Go ownership are unchanged. Evidence: /var/tmp/aimee-openapi-reply-ownership-proof/external-proof.json. This is source-boundary analysis, adds no exemption and is not production-promotion approval."
     },
@@ -2643,10 +2643,10 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "766fb37f4580eb7b59c13350378d9f82b1866b404cbe4078b38abfaaada4bfc2",
+      "sha256": "d87deed57f7b6a85373b5e0a83aafa2d17a8445055daa75008ae13e1cf738725",
       "inputs": {
         "scripts/generate-tool-catalog.py": "3fc845b7d8370b25d9c7461c493a56cd4e5d51351a7055b8d2ab4e252bec3066",
-        "server-go/modules/tools/catalog.json": "76e80040fe7eeff5ba2ec2ea8efb21dd73e631e7a8a3788d8914cd972c2d410c"
+        "server-go/modules/tools/catalog.json": "f4c49817dcee4e8ab8835c69911c601b9c9eaa8b362f552efa74a80f4bc7d22e"
       }
     }
   },

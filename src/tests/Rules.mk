@@ -20,7 +20,7 @@ $(OBJDIR)/tests/agent_job_progress_owner.o: server/agent_tasks.c
 
 PROVIDER_IR_OBJS = $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o
 PROVIDER_CLIENT_IR_OBJS = $(PROVIDER_IR_OBJS) $(MODEL_WIRE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o
-TEST_C_FLAGS = $(C_FLAGS) -I.. -Igateway
+TEST_C_FLAGS = $(C_FLAGS) -I..
 TEST_L_FLAGS = $(L_FULL) $(KB_STORE_TEST_BACKEND_LIB)
 
 # Which object supplies the aimee_pg_* surface to test binaries.
@@ -170,11 +170,11 @@ $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o 
                  $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/proxy_bootstrap.o \
                  $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o \
                  $(OBJDIR)/modules/vault/runtime_secret.o $(PLATFORM_BASIC_OBJS) $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
+	$(TESTLINK) -o $@ $^ $(L_HTTP)
 
 $(TESTPREFIX)/unit-test-http-response-framing: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_http_response_framing.o \
     $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
+	$(TESTLINK) -o $@ $^ $(L_HTTP)
 
 TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
@@ -473,14 +473,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-cli-remote \
                $(TESTPREFIX)/unit-test-util-url \
                $(TESTPREFIX)/unit-test-delivery-target \
-               $(TESTPREFIX)/unit-test-gateway \
-               $(TESTPREFIX)/unit-test-gateway-telegram \
-               $(TESTPREFIX)/unit-test-gateway-ntfy-webhook \
-               $(TESTPREFIX)/unit-test-gateway-webhook-ir \
-               $(TESTPREFIX)/unit-test-gateway-stt-pairing \
-               $(TESTPREFIX)/unit-test-gateway-stt \
-               $(TESTPREFIX)/unit-test-gateway-tts \
-               $(TESTPREFIX)/unit-test-gateway-ntfy \
                $(TESTPREFIX)/unit-test-embed-result \
                $(TESTPREFIX)/unit-test-kb-sidecar-admission \
                $(TESTPREFIX)/unit-test-mcp-gateway-tools \
@@ -3482,122 +3474,12 @@ $(TESTPREFIX)/unit-test-delivery-target: $(OBJDIR)/tests/test_delivery_target.o 
                                          $(OBJDIR)/delivery_target.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-gateway: $(OBJDIR)/tests/test_gateway.o \
-                                 $(OBJDIR)/gateway/delivery_router.o \
-                                 $(OBJDIR)/gateway/platform_registry.o \
-                                 $(OBJDIR)/gateway/platform_telegram.o \
-                                 $(OBJDIR)/gateway/platform_ntfy.o \
-                                 $(OBJDIR)/gateway/platform_webhook.o \
-                                 $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
-                                 $(OBJDIR)/gateway/gateway_pairing.o \
-                                 $(OBJDIR)/aimee_home.o \
-                                 $(OBJDIR)/gateway/session_key.o \
-                                 $(OBJDIR)/gateway/pairing.o \
-                                 $(OBJDIR)/gateway/mirror.o \
-                                 $(OBJDIR)/gateway/stt.o \
-                                 $(OBJDIR)/gateway/tts.o \
-                                 $(OBJDIR)/delivery_target.o \
-                                 $(OBJDIR)/posix/agent_bridge.o \
-                                 $(OBJDIR)/proxy_bootstrap.o \
-                                 $(OBJDIR)/cJSON.o \
-                                 $(OBJDIR)/log.o \
-                                 $(OBJDIR)/platform_random.o \
-                                 $(OBJDIR)/modules/vault/runtime_secret.o \
-                                 $(GATEWAY_PLATFORM_OBJS) \
-                                 $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
-
-$(TESTPREFIX)/unit-test-gateway-telegram: $(OBJDIR)/tests/test_gateway_telegram.o \
-                                          $(OBJDIR)/gateway/platform_telegram.o \
-                                          $(OBJDIR)/gateway/platform_registry.o \
-                                          $(OBJDIR)/gateway/platform_ntfy.o \
-                                          $(OBJDIR)/gateway/platform_webhook.o \
-                                          $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
-                                          $(OBJDIR)/gateway/gateway_pairing.o \
-                                          $(OBJDIR)/aimee_home.o \
-                                          $(OBJDIR)/gateway/delivery_router.o \
-                                          $(OBJDIR)/gateway/session_key.o \
-                                          $(OBJDIR)/gateway/pairing.o \
-                                          $(OBJDIR)/gateway/mirror.o \
-                                          $(OBJDIR)/gateway/stt.o \
-                                          $(OBJDIR)/gateway/tts.o \
-                                          $(OBJDIR)/delivery_target.o \
-                                          $(OBJDIR)/posix/agent_bridge.o \
-                                          $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
-                                          $(OBJDIR)/proxy_bootstrap.o \
-                                          $(OBJDIR)/util.o \
-                                        $(OBJDIR)/cJSON.o \
-                                          $(OBJDIR)/log.o \
-                                          $(OBJDIR)/platform_random.o \
-                                          $(OBJDIR)/modules/vault/runtime_secret.o \
-                                          $(GATEWAY_PLATFORM_OBJS) \
-                                          $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
-
-$(TESTPREFIX)/unit-test-gateway-ntfy-webhook: $(OBJDIR)/tests/test_gateway_ntfy_webhook.o \
-                                              $(OBJDIR)/gateway/platform_ntfy.o \
-                                              $(OBJDIR)/gateway/platform_webhook.o \
-                                              $(OBJDIR)/gateway/platform_telegram.o \
-                                              $(OBJDIR)/gateway/platform_registry.o \
-                                              $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
-                                              $(OBJDIR)/gateway/gateway_pairing.o \
-                                              $(OBJDIR)/aimee_home.o \
-                                              $(OBJDIR)/gateway/delivery_router.o \
-                                              $(OBJDIR)/gateway/session_key.o \
-                                              $(OBJDIR)/gateway/pairing.o \
-                                              $(OBJDIR)/gateway/mirror.o \
-                                              $(OBJDIR)/gateway/stt.o \
-                                              $(OBJDIR)/gateway/tts.o \
-                                              $(OBJDIR)/delivery_target.o \
-                                              $(OBJDIR)/posix/agent_bridge.o \
-                                              $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
-                                              $(OBJDIR)/proxy_bootstrap.o \
-                                              $(OBJDIR)/util.o \
-                                        $(OBJDIR)/cJSON.o \
-                                              $(OBJDIR)/log.o \
-                                              $(OBJDIR)/platform_random.o \
-                                              $(OBJDIR)/modules/vault/runtime_secret.o \
-                                              $(GATEWAY_PLATFORM_OBJS) \
-                                              $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
-
 $(TESTPREFIX)/unit-test-mcp-gateway-tools: $(OBJDIR)/tests/test_mcp_gateway_tools.o \
                                             $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                                             $(OBJDIR)/server/server_mcp_gateway.o \
                                             $(OBJDIR)/delivery_target.o \
                                             $(OBJDIR)/util.o \
                                         $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
-$(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pairing.o \
-                                             $(OBJDIR)/modules/ir/session_event.o \
-                                             $(OBJDIR)/modules/ir/aimee_ir.o \
-                                             $(OBJDIR)/gateway/stt.o \
-                                             $(OBJDIR)/gateway/pairing.o \
-                                             $(OBJDIR)/gateway/mirror.o \
-                                             $(OBJDIR)/log.o \
-                                             $(OBJDIR)/platform_random.o \
-                                             $(OBJDIR)/posix/platform_random.o \
-                                             $(OBJDIR)/posix/agent_bridge.o \
-                                             $(OBJDIR)/proxy_bootstrap.o \
-                                             $(OBJDIR)/util.o \
-                                        $(OBJDIR)/cJSON.o \
-                                             $(OBJDIR)/modules/vault/runtime_secret.o \
-                                             $(GATEWAY_PLATFORM_OBJS) \
-                                             $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
-
-$(TESTPREFIX)/unit-test-gateway-stt: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_stt.o \
-    $(OBJDIR)/gateway/stt.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
-
-$(TESTPREFIX)/unit-test-gateway-tts: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_tts.o \
-    $(OBJDIR)/gateway/tts.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread -lcrypto
-
-$(TESTPREFIX)/unit-test-gateway-ntfy: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_ntfy.o \
-    $(OBJDIR)/gateway/platform_ntfy.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-embed-result: $(OBJDIR)/tests/test_embed_result.o $(OBJDIR)/cJSON.o
@@ -6809,9 +6691,6 @@ $(TESTPREFIX)/unit-test-cli-v1-delegate \
 $(TESTPREFIX)/unit-test-cli-v1-poll-deadline \
 $(TESTPREFIX)/unit-test-cli-v1-subcommands \
 $(TESTPREFIX)/unit-test-dashboard \
-$(TESTPREFIX)/unit-test-gateway \
-$(TESTPREFIX)/unit-test-gateway-ntfy-webhook \
-$(TESTPREFIX)/unit-test-gateway-telegram \
 $(TESTPREFIX)/unit-test-kb-client-memory \
 $(TESTPREFIX)/unit-test-kb-client-search \
 $(TESTPREFIX)/unit-test-workspace-add-noscan: $(WORKSPACE_IDENTITY_OBJS)
@@ -6827,10 +6706,6 @@ $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o 
 
 # Actual authenticated webhook parser/lifetime, isolated from model and delivery.
 $(OBJDIR)/tests/test_gateway_webhook_ir.o: gateway/platform_webhook.c gateway/gateway_ir.h
-$(TESTPREFIX)/unit-test-gateway-webhook-ir: $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/tests/test_gateway_webhook_ir.o \
-    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
 # Test binaries outside TEST_TARGETS and BUS_TEST_TARGETS that still link the core
 # archives through L_MINIMAL, L_CORE or L_FULL. With no rule ordering them after the
 # archives, a parallel build linked them while `ar` was still writing: PR #3064's

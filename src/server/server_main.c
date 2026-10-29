@@ -74,8 +74,7 @@ static server_ctx_t g_ctx;
 
 /* Unified-presence outbound delivery: route a presence event (e.g. a delegate
  * completion) to a surface's persistent messaging target by reusing the
- * existing typed notify path (ntfy / local). Non-ntfy/local targets (e.g.
- * telegram, which needs the out-of-process gateway) are a no-op here. */
+ * existing typed notify path (ntfy / local); any other platform fails. */
 static int presence_deliver_via_notify(const delivery_target_t *target, const char *text,
                                        void *user)
 {

@@ -1,4 +1,4 @@
-/* test_mcp_gateway_tools.c: unit tests for send_message and ask_user MCP tools. */
+/* test_mcp_gateway_tools.c: unit tests for the ask_user MCP tool. */
 #include "headers/server_mcp_gateway.h"
 #include <assert.h>
 #include <cJSON.h>
@@ -35,57 +35,14 @@ static const char *first_text(cJSON *result)
    return cJSON_IsString(t) ? t->valuestring : NULL;
 }
 
-/* ---- send_message tests ---- */
+/* ---- send_message is retired with the delivery gateway ---- */
 
-static void test_send_message_unavailable(void)
+static void test_send_message_retired(void)
 {
    cJSON *args = make_args("target", "ntfy:homelab", "text", "hello");
-   cJSON *result = mcp_gateway_tool_dispatch("send_message", args);
-   assert(result != NULL);
-   const char *text = first_text(result);
-   assert(text != NULL);
-   assert(!strcmp(text, "error: gateway delivery unavailable; no message was sent"));
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "isError")));
-   /* The complete owner result is sent unchanged through server_send_ok. */
-   char *wire = cJSON_PrintUnformatted(result);
-   cJSON *parsed = cJSON_Parse(wire);
-   assert(parsed && cJSON_Compare(parsed, result, 1));
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(parsed, "isError")));
-   cJSON_Delete(parsed);
-   free(wire);
-   cJSON_Delete(result);
+   assert(mcp_gateway_tool_dispatch("send_message", args) == NULL);
    cJSON_Delete(args);
-   PASS("send_message_unavailable");
-}
-
-static void test_send_message_missing_text(void)
-{
-   cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "target", "ntfy:foo");
-   cJSON *result = mcp_gateway_tool_dispatch("send_message", args);
-   assert(result != NULL);
-   const char *text = first_text(result);
-   assert(text != NULL);
-   assert(strncmp(text, "error:", 6) == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "isError")));
-   cJSON_Delete(result);
-   cJSON_Delete(args);
-   PASS("send_message_missing_text");
-}
-
-static void test_send_message_missing_target(void)
-{
-   cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "text", "hello");
-   cJSON *result = mcp_gateway_tool_dispatch("send_message", args);
-   assert(result != NULL);
-   const char *text = first_text(result);
-   assert(text != NULL);
-   assert(strncmp(text, "error:", 6) == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "isError")));
-   cJSON_Delete(result);
-   cJSON_Delete(args);
-   PASS("send_message_missing_target");
+   PASS("send_message_retired");
 }
 
 /* ---- ask_user tests ---- */
@@ -212,9 +169,7 @@ static void test_unknown_tool_returns_null(void)
 int main(void)
 {
    printf("test_mcp_gateway_tools\n");
-   test_send_message_unavailable();
-   test_send_message_missing_text();
-   test_send_message_missing_target();
+   test_send_message_retired();
    test_ask_user_with_choices();
    test_ask_user_open_ended();
    test_ask_user_missing_question();

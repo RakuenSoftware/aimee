@@ -31,13 +31,12 @@ RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
 THINCLIENT_LIBRARY = ../libaimee-client.so
 THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
 DELEGATE_EGRESS = ../aimee-delegate-egress$(EXEEXT)
-GATEWAY = ../aimee-gateway$(EXEEXT)
 # Binaries a rename left behind. `all` removes these first so a renamed artifact
 # does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
 # and its 14MB predecessor was never retired, so it stayed untracked, unignored,
 # and large enough to push a workspace sync past the server's 4MB body cap.
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
-                        ../aimee-webchat$(EXEEXT)
+                        ../aimee-webchat$(EXEEXT) ../aimee-gateway$(EXEEXT)
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
@@ -260,7 +259,7 @@ L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,
 L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
-L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
+L_HTTP    = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
@@ -980,28 +979,14 @@ $(eval $(call ts_obj,powershell,tree-sitter-powershell/src,parser.c))
 $(eval $(call ts_obj,powershell_scan,tree-sitter-powershell/src,scanner.c))
 endif
 
-# --- Gateway ---
-
-GATEWAY_SRCS = $(CLIENT_TRANSPORT_SRCS) cli_chat_stream.c $(IR_BASE_SRCS) modules/ir/session_event.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
-               gateway/delivery_router.c gateway/session_key.c \
-               gateway/platform_telegram.c gateway/platform_ntfy.c gateway/platform_webhook.c \
-               gateway/stt.c gateway/tts.c gateway/pairing.c gateway/gateway_pairing.c gateway/mirror.c \
-               posix/agent_bridge.c posix/cli_client.c proxy_bootstrap.c \
-               delivery_target.c aimee_home.c log.c platform_random.c \
-               shutdown_forensics.c
-GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o %/platform_random.o, $(PLATFORM_BASIC_OBJS))
-# cJSON uses a special build rule (strips -Werror); reference it separately.
-GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
-               $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
-
 # All source files for linting (excluding vendored cJSON)
 ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
-           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
+           $(CORE_CONNECTION_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
 ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
-           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
+           $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
 # direct prerequisite of a test target (modules/memory/memory_core_search.o was one
@@ -1018,7 +1003,7 @@ DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
 .PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check postgres-provider-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check help-topics-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-bootstrap-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
-all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
@@ -1222,12 +1207,12 @@ lean:
 # only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
 # such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
+check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB)
 ifeq ($(OS),Windows_NT)
 	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
 else ifeq ($(UNAME_S),Darwin)
 	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(otool -L "$$bin" | tail -n+2); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1299,7 +1284,7 @@ else ifeq ($(UNAME_S),Darwin)
 	echo "check-linking: ok"
 else
 	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1642,7 +1627,7 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 
 # THESE LINK THE CORE ARCHIVE THROUGH L_KB BUT ARE NOT IN THE PRODUCT LIST.
 #
-# $(BINARY)/$(SERVER)/$(GATEWAY) name $(CORE_CONNECTION_LIB) as a real
+# $(BINARY)/$(SERVER) name $(CORE_CONNECTION_LIB) as a real
 # prerequisite, and tests get it from `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # in tests/Rules.mk. These auxiliary drivers got neither, so on a clean tree they
 # reached the link step before the archive existed and died with
@@ -1785,12 +1770,6 @@ write-tier-enforce-live: ../write-tier-enforce-live
 #
 # Memory datasets use the shared Go module with injected evaluation storage.
 
-# aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
-# the dependency-free remote-target accessors; --gc-sections drops the transport.
-$(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o $(CORE_CONNECTION_LIB)
-	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_GATEWAY)
-
 # --- Compilation ---
 
 $(OBJDIR)/server/server_delegate_monitor.o: server/server_delegate_monitor.c
@@ -1874,10 +1853,6 @@ $(OBJDIR)/posix/%.o: posix/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/gateway/%.o: gateway/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
 # Create build ID file if it doesn't exist (for plain 'make')
 $(BUILD_ID_FILE):
 	@mkdir -p build && date +%s > $@
@@ -1908,7 +1883,7 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(MEMORY_EVAL) $(MEMORY_TRANSFER) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
 	install -m 755 $(MEMORY_EVAL) $(PREFIX)/bin/aimee-memory-eval
 	install -m 755 $(MEMORY_TRANSFER) $(PREFIX)/bin/aimee-memory-transfer
@@ -1922,7 +1897,6 @@ install:
 	install -m 755 $(KB) $(PREFIX)/bin/aimee-kb
 	install -m 755 $(KB_WORM) $(PREFIX)/bin/aimee-kb-worm
 	install -m 755 $(KB_RESOLVER) $(PREFIX)/bin/aimee-kb-resolver
-	install -m 755 $(GATEWAY) $(PREFIX)/bin/aimee-gateway
 	@mkdir -p $(DATADIR)
 	install -m 644 modules/kb/c/schema.sql $(DATADIR)/memory-eval-schema.sql
 	install -m 644 ../data/models_dev_snapshot.json $(DATADIR)/models_dev_snapshot.json
@@ -2175,7 +2149,7 @@ frontend:
 
 clean:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(GATEWAY) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
+	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(FORWARDER) $(RETIRED_ROOT_BINARIES) \
 	       $(BINARY)-asan $(SERVER)-asan \
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
@@ -2937,7 +2911,7 @@ build-variants:
 -include $(DEPS)
 
 # Every native link may use the shared utility wrappers, including authorities.
-$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY) $(GATEWAY): $(CORE_CODEC_LIB)
+$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY): $(CORE_CODEC_LIB)
 
 .PHONY: ir-bypass-check
 ir-bypass-check:

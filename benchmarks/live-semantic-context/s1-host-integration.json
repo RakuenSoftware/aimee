@@ -15,6 +15,21 @@
   ],
   "src/tests/test_mcp_client_registry.c": [
     {
+      "release_text": "#define MCP_TOOLS_GOLDEN_COUNT 54",
+      "frozen_text": "#define MCP_TOOLS_GOLDEN_COUNT 55",
+      "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
+    },
+    {
+      "release_text": "   \"search_memory {cwd,filter,project,query,scope,store,workspace} req:query\\n\"                    \\\n   \"session \"",
+      "frozen_text": "   \"search_memory {cwd,filter,project,query,scope,store,workspace} req:query\\n\"                    \\\n   \"send_message {target,text} req:target,text\\n\"                                                  \\\n   \"session \"",
+      "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
+    },
+    {
+      "release_text": "                                      \"ask_user\",\n                                      \"note\",",
+      "frozen_text": "                                      \"ask_user\",\n                                      \"send_message\",\n                                      \"note\",",
+      "review": "gateway-retirement: send_message left with the aimee-gateway delivery binary; exact one-tool removal, no LSP catalog content exemption."
+    },
+    {
       "release_text": "#define MCP_TOOLS_GOLDEN_COUNT 55",
       "frozen_text": "#define MCP_TOOLS_GOLDEN_COUNT 56",
       "review": "retired-delegate-reply: exact one-tool count change; no LSP catalog content exemption."
@@ -84,8 +99,8 @@
   ],
   "src/server/server_mcp_call_table.c": [
     {
-      "release_text": "/* \u2500\u2500 the native surface, derived from the table above \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* The tool's tools/list entry ({\"description\",\"inputSchema\"}), so the native surface\n * advertises the tool's OWN schema instead of a hand-copied second one. Copying is\n * how git_commit came to advertise parameters its handler never accepted.\n * Caller owns the result. */\n",
-      "frozen_text": "/* \u2500\u2500 the native surface, derived from the table above \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* Run an MCP tool for one of aimee's own agents: the same handler an external MCP\n * client reaches, so there is no second implementation that can drift. ctx/conn are\n * NULL \u2014 see the table's header for why only ctx/conn-free tools may be native. */\nstatic cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)\n{\n   mcp_tool_handler_fn fn = mcp_tool_lookup(tool);\n   if (!fn)\n      return NULL;\n   struct mcp_call c = {\n       .ctx = NULL, .conn = NULL, .jargs = args, .sid = sid, .tool = tool, .structured = NULL};\n   return fn(&c);\n}\n\n/* The tool's tools/list entry ({\"description\",\"inputSchema\"}), so the native surface\n * advertises the tool's OWN schema instead of a hand-copied second one. Copying is\n * how git_commit came to advertise parameters its handler never accepted.\n * Caller owns the result. */\n",
+      "release_text": "/* ── the native surface, derived from the table above ────────────────────── */\n\n/* The tool's tools/list entry ({\"description\",\"inputSchema\"}), so the native surface\n * advertises the tool's OWN schema instead of a hand-copied second one. Copying is\n * how git_commit came to advertise parameters its handler never accepted.\n * Caller owns the result. */\n",
+      "frozen_text": "/* ── the native surface, derived from the table above ────────────────────── */\n\n/* Run an MCP tool for one of aimee's own agents: the same handler an external MCP\n * client reaches, so there is no second implementation that can drift. ctx/conn are\n * NULL — see the table's header for why only ctx/conn-free tools may be native. */\nstatic cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)\n{\n   mcp_tool_handler_fn fn = mcp_tool_lookup(tool);\n   if (!fn)\n      return NULL;\n   struct mcp_call c = {\n       .ctx = NULL, .conn = NULL, .jargs = args, .sid = sid, .tool = tool, .structured = NULL};\n   return fn(&c);\n}\n\n/* The tool's tools/list entry ({\"description\",\"inputSchema\"}), so the native surface\n * advertises the tool's OWN schema instead of a hand-copied second one. Copying is\n * how git_commit came to advertise parameters its handler never accepted.\n * Caller owns the result. */\n",
       "review": "IR live acceptance canonical-native-project-dispatch: reverse only the exact reviewed removal of the table-local MCP wrapper and replacement of its registration callback by the host project-context adapter. The adapter is covered by the native MCP project/ownership fixtures; this review does not exempt its code or change any LSP implementation, handler, schema, probe, lineage or threshold. Apply these two literal reversals before older host normalizations, then require the complete frozen table comparison unchanged."
     },
     {

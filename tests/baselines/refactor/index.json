@@ -10,10 +10,6 @@
           "sha256": "cd007b229eaae912f76bdb73753f1b14a268a40524e58cf1a1d92baf7f57943d"
         },
         {
-          "path": "src/gateway/gateway_main.c",
-          "sha256": "84cf7690a06ffb3b5609d16f940847d200e8e629e8c916b7cdf80aa407b1610d"
-        },
-        {
           "path": "src/kb/kb_main.c",
           "sha256": "e39738c6ea06b6fd1c3c52e6ca1eef7f0670ef5923815ef267a4bf58404beb54"
         },

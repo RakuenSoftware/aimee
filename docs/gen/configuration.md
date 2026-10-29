@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 301 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 291 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -514,21 +514,6 @@ The binaries read 301 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_FORGE_SCOPE` | Scope for the minted forge token. |
 | `AIMEE_FORGE_TOKEN` | First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault. |
 
-### Gateway (voice / webhooks / push)
-
-| Variable | Description |
-|----------|-------------|
-| `AIMEE_GATEWAY_NTFY_BASE_URL` | ntfy push base URL. |
-| `AIMEE_GATEWAY_STT_MODEL` | Speech-to-text model. |
-| `AIMEE_GATEWAY_STT_PROVIDER` | Speech-to-text provider. |
-| `AIMEE_GATEWAY_TTS_BASE_URL` | Text-to-speech base URL. |
-| `AIMEE_GATEWAY_TTS_MODEL` | Text-to-speech model. |
-| `AIMEE_GATEWAY_TTS_PROVIDER` | Text-to-speech provider. |
-| `AIMEE_GATEWAY_TTS_VOICE` | Text-to-speech voice. |
-| `AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY` | Webhook deliver-only mode (no reply path). |
-| `AIMEE_GATEWAY_WEBHOOK_INSECURE` | Allow the webhook listener without TLS (dev). |
-| `AIMEE_GATEWAY_WEBHOOK_PORT` | Inbound webhook listener port. |
-
 ### Workflow engine
 
 | Variable | Description |
@@ -625,7 +610,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `ANTHROPIC_API_KEY` | Anthropic API key (read via the agent's `api_key_env`). |
 | `GEMINI_API_KEY` | Google Gemini API key (read via the agent's `api_key_env`). |
 | `GOOGLE_API_KEY` | Google API key fallback for Gemini (via `api_key_env`). |
-| `OPENAI_API_KEY` | OpenAI API key (default for OpenAI-family agents). |
 
 ### Provider endpoints
 

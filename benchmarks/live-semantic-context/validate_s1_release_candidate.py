@@ -103,6 +103,12 @@ def build_files_match(candidate_commit: str) -> bool:
     if (ROOT / "src/modules/roadmap").exists():
         return False
     candidate[0] = candidate[0].replace(" -Imodules/roadmap", "")
+    # Oct 29: the aimee-gateway delivery binary and src/gateway were retired.
+    # The probe includes nothing from it. Remove only that obsolete test
+    # include flag, and only while the directory is truly gone.
+    if (ROOT / "src/gateway").exists():
+        return False
+    candidate[1] = candidate[1].replace(" -Igateway", "")
     # KB_STORE retirement relocates the same knowledge headers and removes libpq
     # from native linking. This SQLite-backed probe has no PostgreSQL calls.
     # Normalize only those two reviewed changes; retain every other build input.

@@ -951,12 +951,11 @@ _check_existing_shipped_artifacts() {
     local INTEG_WEBCHAT="../aimee-runtime-web"
     local INTEG_SERVER="../aimee-server"
     local INTEG_KB="../aimee-kb"
-    local INTEG_GATEWAY="../aimee-gateway"
     local INTEG_BINARY_ABS
     INTEG_BINARY_ABS="$(pwd)/$INTEG_BINARY"
 
     local missing_shipped=""
-    for f in "$INTEG_BINARY" "$INTEG_WEBCHAT" "$INTEG_SERVER" "$INTEG_KB" "$INTEG_GATEWAY"; do
+    for f in "$INTEG_BINARY" "$INTEG_WEBCHAT" "$INTEG_SERVER" "$INTEG_KB"; do
         [ -x "$f" ] || missing_shipped="$missing_shipped $f"
     done
     if [ -z "$missing_shipped" ]; then
@@ -1101,16 +1100,15 @@ _group_integ() {
     INTEG_SERVER=build/aimee-server-integrity
     INTEG_WEBCHAT=build/aimee-runtime-web-integrity
     INTEG_KB=build/aimee-kb-integrity
-    INTEG_GATEWAY=build/aimee-gateway-integrity
-    rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB" "$INTEG_GATEWAY"
+    rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB"
     if make all OBJDIR=$INTEG_OBJDIR BINARY=$INTEG_BINARY SERVER=$INTEG_SERVER \
-            WEBCHAT=$INTEG_WEBCHAT KB=$INTEG_KB GATEWAY=$INTEG_GATEWAY >/dev/null 2>&1; then
+            WEBCHAT=$INTEG_WEBCHAT KB=$INTEG_KB >/dev/null 2>&1; then
         pass "clean build succeeds"
     else
         fail "clean build failed"
     fi
     missing_shipped=""
-    for f in "$INTEG_BINARY" "$INTEG_WEBCHAT" "$INTEG_SERVER" "$INTEG_KB" "$INTEG_GATEWAY"; do
+    for f in "$INTEG_BINARY" "$INTEG_WEBCHAT" "$INTEG_SERVER" "$INTEG_KB"; do
         [ -x "$f" ] || missing_shipped="$missing_shipped $f"
     done
     if [ -z "$missing_shipped" ]; then
@@ -1253,7 +1251,7 @@ _group_integ() {
         fail "shipped binaries suggest unrouted repair commands:$unrouted_repair_string_leaks"
     fi
 
-    rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB" "$INTEG_GATEWAY"
+    rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB"
 }
 
 _group_lean() {
@@ -1262,11 +1260,10 @@ _group_lean() {
     LEAN_SRV=build/aimee-server-lean-integrity
     LEAN_WEB=build/aimee-runtime-web-lean-integrity
     LEAN_KB=build/aimee-kb-lean-integrity
-    LEAN_GW=build/aimee-gateway-lean-integrity
     LEAN_OBJ=build/obj-lean-integrity
-    rm -rf "$LEAN_OBJ" "$LEAN_BIN" "$LEAN_SRV" "$LEAN_WEB" "$LEAN_KB" "$LEAN_GW"
+    rm -rf "$LEAN_OBJ" "$LEAN_BIN" "$LEAN_SRV" "$LEAN_WEB" "$LEAN_KB"
     if make all server OBJDIR=$LEAN_OBJ BINARY=$LEAN_BIN SERVER=$LEAN_SRV \
-            WEBCHAT=$LEAN_WEB KB=$LEAN_KB GATEWAY=$LEAN_GW \
+            WEBCHAT=$LEAN_WEB KB=$LEAN_KB \
             EXTRA_C_FLAGS="-Os -g0 -ffunction-sections -fdata-sections" \
             EXTRA_L_FLAGS="-s -Wl,--gc-sections" >/dev/null 2>&1; then
         lean_size=$(stat -c%s "$LEAN_SRV" 2>/dev/null || stat -f%z "$LEAN_SRV" 2>/dev/null)
@@ -1279,7 +1276,7 @@ _group_lean() {
     else
         fail "lean build failed"
     fi
-    rm -rf "$LEAN_OBJ" "$LEAN_BIN" "$LEAN_SRV" "$LEAN_WEB" "$LEAN_KB" "$LEAN_GW"
+    rm -rf "$LEAN_OBJ" "$LEAN_BIN" "$LEAN_SRV" "$LEAN_WEB" "$LEAN_KB"
 }
 
 _group_dynlink() {
@@ -1295,10 +1292,9 @@ _group_dynlink() {
     DLSRV=build/aimee-server-dynlink
     DLWEB=build/aimee-runtime-web-dynlink
     DLKB=build/aimee-kb-dynlink
-    DLGW=build/aimee-gateway-dynlink
-    rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB" "$DLGW"
+    rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB"
     if make all server "$DLKB" OBJDIR=$DLOBJ BINARY=$DLBIN SERVER=$DLSRV \
-            WEBCHAT=$DLWEB KB=$DLKB GATEWAY=$DLGW >/dev/null 2>&1; then
+            WEBCHAT=$DLWEB KB=$DLKB >/dev/null 2>&1; then
         dl_fail=0
         for bin in "$DLBIN" "$DLWEB" "$DLSRV" "$DLKB"; do
             if ldd "$bin" 2>&1 | grep -q 'not a dynamic executable'; then
@@ -1373,7 +1369,7 @@ _group_dynlink() {
     else
         fail "dynamic linking check: build failed"
     fi
-    rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB" "$DLGW"
+    rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB"
 }
 
 _group_branchswitch() {
@@ -1385,15 +1381,14 @@ _group_branchswitch() {
     BSSRV=build/aimee-server-branchswitch
     BSWEB=build/aimee-runtime-web-branchswitch
     BSKB=build/aimee-kb-branchswitch
-    BSGW=build/aimee-gateway-branchswitch
     BSBRANCH=build/branchswitch-branch.txt
-    rm -rf "$BSOBJ" "$BSBIN" "$BSSRV" "$BSWEB" "$BSKB" "$BSGW" "$BSBRANCH"
+    rm -rf "$BSOBJ" "$BSBIN" "$BSSRV" "$BSWEB" "$BSKB" "$BSBRANCH"
     if make all server OBJDIR=$BSOBJ BINARY=$BSBIN SERVER=$BSSRV WEBCHAT=$BSWEB \
-            KB=$BSKB GATEWAY=$BSGW BRANCH_FILE=$BSBRANCH >/dev/null 2>&1; then
+            KB=$BSKB BRANCH_FILE=$BSBRANCH >/dev/null 2>&1; then
         # Fake a prior branch so the next make triggers the branch-switch cleanup + re-mkdir
         echo "fake-previous-branch" > "$BSBRANCH"
         if make all server OBJDIR=$BSOBJ BINARY=$BSBIN SERVER=$BSSRV WEBCHAT=$BSWEB \
-                KB=$BSKB GATEWAY=$BSGW BRANCH_FILE=$BSBRANCH >/dev/null 2>&1; then
+                KB=$BSKB BRANCH_FILE=$BSBRANCH >/dev/null 2>&1; then
             pass "build succeeds after simulated branch switch (subdirectories recreated)"
         else
             fail "build fails after simulated branch switch (missing OBJDIR subdirectories — _DUMMY must run after branch-switch block)"
@@ -1401,7 +1396,7 @@ _group_branchswitch() {
     else
         fail "branch-switch test: initial build failed"
     fi
-    rm -rf "$BSOBJ" "$BSBIN" "$BSSRV" "$BSWEB" "$BSKB" "$BSGW" "$BSBRANCH"
+    rm -rf "$BSOBJ" "$BSBIN" "$BSSRV" "$BSWEB" "$BSKB" "$BSBRANCH"
 }
 
 if [ "$MODE" = "--build-variants" ]; then
