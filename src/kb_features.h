@@ -23,14 +23,6 @@ extern "C"
       double distinct_sources_hll;
    } kb_sketch_features_t;
 
-   /* Compute and upsert feature row for one KB document candidate.
-    * doc_id:      kb_documents row id (becomes subject_id as decimal string).
-    * lex_score:   lexical-leg cosine score from retrieval (0.0 if not retrieved lexically).
-    * dense_score: dense-leg cosine score from retrieval (0.0 if not retrieved densely).
-    * age_days:    document age in days relative to query time (< 0 = unknown → 0.0).
-    * Returns 0 on success, -1 on error (non-fatal; callers fall back to RRF). */
-   int kb_features_upsert(int64_t doc_id, double lex_score, double dense_score, double age_days);
-
    int kb_features_upsert_with_sketch(int64_t doc_id, double lex_score, double dense_score,
                                       double age_days, const kb_sketch_features_t *sketch);
 

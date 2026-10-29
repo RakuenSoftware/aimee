@@ -166,8 +166,6 @@ int skill_eval_run(const char *project_root, const char *name, skill_eval_result
 int skill_eval_executable(const char *project_root, const char *name,
                           const skill_trial_options_t *options, skill_trial_result_t *out,
                           char *errbuf, size_t errbuf_len);
-int skill_change_eval_gate_allows(const char *payload_json, double threshold, char *reason,
-                                  size_t reason_len);
 int skill_manage_write_file(const char *project_root, const char *name, const char *file_path,
                             const char *content, const char *updated_by, char *errbuf,
                             size_t errbuf_len);
@@ -176,8 +174,6 @@ char *skill_support_file_load(const char *project_root, const char *name, const 
 int skill_import_content(const char *project_root, const char *content, const char *created_by,
                          char *name_out, size_t name_out_len, char *errbuf, size_t errbuf_len);
 int skill_set_pinned(const char *project_root, const char *name, int pinned);
-int skill_rollback_snapshot(const char *project_root, const char *snapshot_id, char *errbuf,
-                            size_t errbuf_len);
 int skill_lifecycle_apply(const char *project_root, int stale_after_days, int archive_after_days,
                           skill_lifecycle_result_t *out, char *errbuf, size_t errbuf_len);
 int skill_capability_autostub_from_json(const char *project_root, const char *snapshot_json,

@@ -121,11 +121,6 @@ const char *peer_client_transport_name(int transport)
    return call_result_name(transport);
 }
 
-int peer_client_available(void)
-{
-   return obs_bus_module_available(PEER_EVENT_KIND(PEER_STAGE_DELIVERY));
-}
-
 const char *peer_client_status_name(uint32_t status)
 {
    switch (status)

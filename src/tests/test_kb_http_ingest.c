@@ -10,6 +10,7 @@
 #include "kb_http_ingest.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
+#include "support/config_test_setters.h"
 
 /* ── Stubs for kb_store/kb_docs.h symbols ───────────────────────────────────────
  * The real kb_store_kb_doc_t layout must match what handle_get_doc reads,
@@ -122,11 +123,6 @@ int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear, const ch
    return 0;
 }
 
-int kb_store_kb_doc_delete(int64_t id)
-{
-   return (id == 42) ? 0 : -1;
-}
-
 int kb_store_kb_doc_list_review(int limit, int64_t cursor_id, stub_doc_t *out, int max_out)
 {
    (void)limit;
@@ -161,11 +157,6 @@ const char *kb_ingest_detect_format(const char *filename)
 }
 
 /* ── Stubs for the structured-PDF path (config + kb_doc_pdf) ─────────────── */
-
-static void set_pdf_ingest_enabled(int enabled)
-{
-   assert(config_set_kb_pdf_ingest_enabled(enabled) == 0);
-}
 
 int kb_doc_pdf_render_assets(const char *project, const char *file_path,
                              const char *sensitivity_class, const unsigned char *pdf_bytes, int n)
@@ -235,101 +226,7 @@ int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const ch
    return 2;
 }
 
-/* Build a multipart body for a `.pdf` upload. `magic` toggles the %PDF- magic bytes;
- * `sclass` (NULL = omit) adds a sensitivity_class part. */
-static int build_pdf_body(char *body, size_t cap, int magic, const char *sclass)
-{
-   const char *b = "----B";
-   int n = snprintf(body, cap,
-                    "--%s\r\n"
-                    "Content-Disposition: form-data; name=\"file\"; filename=\"r.pdf\"\r\n"
-                    "Content-Type: application/pdf\r\n\r\n"
-                    "%s payload bytes\r\n",
-                    b, magic ? "%PDF-1.4" : "NOTPDF12");
-   if (sclass)
-      n += snprintf(body + n, cap - (size_t)n,
-                    "--%s\r\n"
-                    "Content-Disposition: form-data; name=\"sensitivity_class\"\r\n\r\n"
-                    "%s\r\n",
-                    b, sclass);
-   n += snprintf(body + n, cap - (size_t)n, "--%s--\r\n", b);
-   return n;
-}
-
 /* ── Tests ──────────────────────────────────────────────────────────────── */
-
-static void test_post_pdf_requires_sensitivity(void)
-{
-   set_pdf_ingest_enabled(1);
-   g_ingest_called = 0;
-   char body[512];
-   int n = build_pdf_body(body, sizeof(body), 1, NULL); /* no sensitivity_class */
-   char buf[256];
-   int st = handle_post_docs(body, n, buf, sizeof(buf));
-   assert(st == 400);
-   assert(strstr(buf, "sensitivity") != NULL);
-   assert(g_ingest_called == 0); /* no rows / no ingest */
-}
-
-static void test_post_pdf_invalid_sensitivity(void)
-{
-   set_pdf_ingest_enabled(1);
-   g_ingest_called = 0;
-   char body[512];
-   int n = build_pdf_body(body, sizeof(body), 1, "secret"); /* not in the allowed set */
-   char buf[256];
-   int st = handle_post_docs(body, n, buf, sizeof(buf));
-   assert(st == 400);
-   assert(g_ingest_called == 0);
-}
-
-static void test_post_pdf_routed(void)
-{
-   set_pdf_ingest_enabled(1);
-   g_ingest_called = 0;
-   g_ingest_class[0] = '\0';
-   char body[512];
-   int n = build_pdf_body(body, sizeof(body), 1, "internal");
-   char buf[256];
-   int st = handle_post_docs(body, n, buf, sizeof(buf));
-   assert(st == 201);
-   assert(g_ingest_called == 1);
-   assert(strcmp(g_ingest_class, "internal") == 0);
-   assert(strcmp(g_ingest_fp, "r.pdf") == 0);
-   assert(g_ingest_hash[0] != '\0');
-   assert(strstr(buf, "\"doc_kind\":\"pdf\"") != NULL);
-}
-
-static void test_post_pdf_flag_off_falls_through(void)
-{
-   set_pdf_ingest_enabled(0); /* structured PDF disabled */
-   g_ingest_called = 0;
-   g_last_content_hash[0] = '\0';
-   char body[512];
-   int n = build_pdf_body(body, sizeof(body), 1, "internal");
-   char buf[256];
-   int st = handle_post_docs(body, n, buf, sizeof(buf));
-   assert(st == 201);
-   assert(g_ingest_called == 0);           /* not routed to the structured path */
-   assert(g_last_content_hash[0] != '\0'); /* legacy kb_store_kb_doc_write reached */
-}
-
-static void test_post_pdf_magic_mismatch_rejected(void)
-{
-   set_pdf_ingest_enabled(1);
-   g_ingest_called = 0;
-   g_last_content_hash[0] = '\0';
-   char body[512];
-   int n = build_pdf_body(body, sizeof(body), 0, "internal"); /* .pdf name, NOT %PDF bytes */
-   char buf[256];
-   int st = handle_post_docs(body, n, buf, sizeof(buf));
-   /* Under the flag a .pdf must be a real PDF: a bad-magic file is rejected, NOT routed to
-    * the legacy path (which would index it untagged). */
-   assert(st == 400);
-   assert(strstr(buf, "not_a_pdf") != NULL);
-   assert(g_ingest_called == 0);
-   assert(g_last_content_hash[0] == '\0'); /* legacy path NOT reached */
-}
 
 static void test_post_docs_ok(void)
 {
@@ -476,11 +373,6 @@ int main(void)
    test_delete_doc_requires_lifecycle_preview();
    test_delete_doc_not_found();
    test_get_review_ok();
-   test_post_pdf_requires_sensitivity();
-   test_post_pdf_invalid_sensitivity();
-   test_post_pdf_routed();
-   test_post_pdf_flag_off_falls_through();
-   test_post_pdf_magic_mismatch_rejected();
 
    printf("ok\n");
    return 0;

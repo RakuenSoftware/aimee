@@ -255,11 +255,6 @@ int policy_recheck_action_tool_attempt(const char *tool, const char *effect, con
    return policy_unknown_effect_check(tool, arguments, attempt, resource_categories, 1, reason,
                                       reason_len);
 }
-int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
-                               char *reason, size_t reason_len)
-{
-   return policy_recheck_action_tool_attempt(tool, effect, arguments, NULL, 0, reason, reason_len);
-}
 
 static int policy_check_attempt(const char *tool, const char *effect, const char *args,
                                 const char *attempt, uint32_t categories, char *reason,

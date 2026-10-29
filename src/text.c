@@ -32,41 +32,6 @@ typedef struct
    char tri[4];
 } trigram_t;
 
-static int extract_trigrams(const char *s, trigram_t *out, int max)
-{
-   int count = 0;
-   size_t len = strlen(s);
-   if (len < 3)
-   {
-      if (len > 0 && count < max)
-      {
-         memset(out[count].tri, 0, 4);
-         strncpy(out[count].tri, s, 3);
-         count++;
-      }
-      return count;
-   }
-   for (size_t i = 0; i <= len - 3 && count < max; i++)
-   {
-      out[count].tri[0] = (char)tolower((unsigned char)s[i]);
-      out[count].tri[1] = (char)tolower((unsigned char)s[i + 1]);
-      out[count].tri[2] = (char)tolower((unsigned char)s[i + 2]);
-      out[count].tri[3] = '\0';
-      count++;
-   }
-   return count;
-}
-
-static int trigram_in_set(const char *tri, trigram_t *set, int count)
-{
-   for (int i = 0; i < count; i++)
-   {
-      if (memcmp(tri, set[i].tri, 3) == 0)
-         return 1;
-   }
-   return 0;
-}
-
 /* Split a reasoning preamble off the front of a model response. See util.h.
  *
  * Deliberately prefix-anchored and non-destructive: the two things every
@@ -259,34 +224,6 @@ size_t text_utf8_chunk_len(const char *s, size_t remaining, size_t max_bytes)
    while (take > 0 && ((unsigned char)s[take] & 0xc0) == 0x80)
       take--;
    return take;
-}
-
-double trigram_similarity(const char *a, const char *b)
-{
-   if (!a || !b || !a[0] || !b[0])
-      return 0.0;
-
-   trigram_t ta[512], tb[512];
-   int na = extract_trigrams(a, ta, 512);
-   int nb = extract_trigrams(b, tb, 512);
-
-   if (na == 0 && nb == 0)
-      return 1.0;
-   if (na == 0 || nb == 0)
-      return 0.0;
-
-   int intersection = 0;
-   for (int i = 0; i < na; i++)
-   {
-      if (trigram_in_set(ta[i].tri, tb, nb))
-         intersection++;
-   }
-
-   /* Jaccard = intersection / union, union = na + nb - intersection */
-   int uni = na + nb - intersection;
-   if (uni == 0)
-      return 0.0;
-   return (double)intersection / (double)uni;
 }
 
 /* --- stem_word --- */
@@ -498,83 +435,6 @@ double word_similarity(const char *a, const char *b)
 }
 
 /* --- is_contradiction --- */
-
-static const char *negators[] = {
-    "never",  "don't",   "dont",   "not",    "no",     "shouldn't", "shouldnt", "can't", "cant",
-    "won't",  "wont",    "isn't",  "isnt",   "aren't", "arent",     "wasn't",   "wasnt", "weren't",
-    "werent", "doesn't", "doesnt", "didn't", "didnt",  "avoid",     "disable",  NULL};
-
-static int has_negator(const char *text)
-{
-   char buf[4096];
-   snprintf(buf, sizeof(buf), "%s", text);
-   for (char *p = buf; *p; p++)
-      *p = (char)tolower((unsigned char)*p);
-
-   for (int i = 0; negators[i]; i++)
-   {
-      if (strstr(buf, negators[i]))
-         return 1;
-   }
-   return 0;
-}
-
-static void strip_negators(const char *text, char *buf, size_t buf_len)
-{
-   char tmp[4096];
-   snprintf(tmp, sizeof(tmp), "%s", text);
-   for (char *p = tmp; *p; p++)
-      *p = (char)tolower((unsigned char)*p);
-
-   size_t out = 0;
-   char *save3;
-   char *tok = strtok_r(tmp, " \t\n\r", &save3);
-   while (tok)
-   {
-      int is_neg = 0;
-      for (int i = 0; negators[i]; i++)
-      {
-         if (strcmp(tok, negators[i]) == 0)
-         {
-            is_neg = 1;
-            break;
-         }
-      }
-      if (!is_neg)
-      {
-         if (out > 0 && out < buf_len - 1)
-            buf[out++] = ' ';
-         size_t tl = strlen(tok);
-         if (out + tl < buf_len)
-         {
-            memcpy(buf + out, tok, tl);
-            out += tl;
-         }
-      }
-      tok = strtok_r(NULL, " \t\n\r", &save3);
-   }
-   buf[out] = '\0';
-}
-
-int is_contradiction(const char *a, const char *b)
-{
-   if (!a || !b)
-      return 0;
-
-   int neg_a = has_negator(a);
-   int neg_b = has_negator(b);
-
-   /* One must negate, the other must not */
-   if (neg_a == neg_b)
-      return 0;
-
-   /* Check word similarity on cleaned text (negators removed) */
-   char clean_a[4096], clean_b[4096];
-   strip_negators(a, clean_a, sizeof(clean_a));
-   strip_negators(b, clean_b, sizeof(clean_b));
-
-   return word_similarity(clean_a, clean_b) > 0.5;
-}
 
 /* --- split_camel_case --- */
 

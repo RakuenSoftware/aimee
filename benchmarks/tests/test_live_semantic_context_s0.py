@@ -145,20 +145,11 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         provider_job = workflow.split("  lsp-real-providers:", 1)[1].split(
             "\n  unit-tests:", 1
         )[0]
-        # The matrix is selected by the event/base branch; inspect both JSON
-        # arms rather than requiring the obsolete literal YAML-list spelling.
-        matrix = re.search(r"include: \$\{\{ fromJSON\((.+?) && '(.+?)' \|\| '(.+?)'\) \}\}",
-                           provider_job)
+        # Linux only: the LSP client is part of aimee proper, which macOS and
+        # Windows do not build. Every event runs the same single leg.
+        matrix = re.search(r"include: (\[.+?\])\n", provider_job)
         self.assertIsNotNone(matrix)
-        self.assertIn("github.event_name != 'pull_request'", matrix[1])
-        self.assertIn("github.base_ref == 'main'", matrix[1])
-        self.assertEqual(json.loads(matrix[2]), [
-            {"os": "ubuntu-24.04", "artifact": "linux"},
-            {"os": "macos-latest", "artifact": "macos"},
-        ])
-        self.assertEqual(json.loads(matrix[3]), [
-            {"os": "ubuntu-24.04", "artifact": "linux"},
-        ])
+        self.assertEqual(json.loads(matrix[1]), [{"os": "ubuntu-24.04", "artifact": "linux"}])
         self.assertIn("runs-on: ${{ matrix.os }}", provider_job)
         self.assertIn("--assert-baseline", provider_job)
         self.assertIn("run_s1_candidate_probe.py", provider_job)

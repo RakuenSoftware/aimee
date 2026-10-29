@@ -14,25 +14,9 @@
 #include "aimee.h" /* now_utc: portable enqueued_at for the shim path */
 #include "kb_audit_worm.h"
 
-/* Retained as a no-op ABI during the module transition. Canonical hashing is
- * now owned directly by the shared SQLite WORM worker, not injected into KB_STORE. */
-void aimee_kb_store_register_audit_hash_provider(kb_store_audit_hash_fn provider)
-{
-   (void)provider;
-}
-
-void aimee_kb_store_register_audit_hash_v2_provider(kb_store_audit_hash_v2_fn provider)
-{
-   (void)provider;
-}
-
 /* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
  * and cached, so the hot kb-audit seam costs one branch after the first call. */
 static int g_kb_worm_enabled = -1;
-void kb_store_kb_audit_worm_set_enabled(int enabled)
-{
-   g_kb_worm_enabled = enabled ? 1 : 0;
-}
 int kb_store_kb_audit_worm_enabled(void)
 {
    if (g_kb_worm_enabled < 0)

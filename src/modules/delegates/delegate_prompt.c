@@ -15,45 +15,6 @@
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/module_api.h>
 
-int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prompt,
-                                   delegate_prompt_plan_t *out)
-{
-   const char *fallback_task = "Work from the user prompt provided below.";
-
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   if (file_prompt && file_prompt[0])
-   {
-      if (cli_prompt && cli_prompt[0])
-      {
-         size_t cap = strlen(cli_prompt) + strlen(file_prompt) + 32;
-         out->owned_user_prompt = malloc(cap);
-         if (!out->owned_user_prompt)
-            return -1;
-         snprintf(out->owned_user_prompt, cap, "%s\n\n# Prompt File\n%s", cli_prompt, file_prompt);
-         out->task_prompt = cli_prompt;
-         out->user_prompt = out->owned_user_prompt;
-         return 0;
-      }
-
-      out->task_prompt = fallback_task;
-      out->user_prompt = file_prompt;
-      return 0;
-   }
-
-   if (cli_prompt && cli_prompt[0])
-   {
-      out->task_prompt = cli_prompt;
-      out->user_prompt = cli_prompt;
-      return 0;
-   }
-
-   return -1;
-}
-
 static delegate_handoff_provider_fn g_handoff_provider;
 
 void delegate_register_handoff_provider(delegate_handoff_provider_fn provider)
@@ -1375,72 +1336,6 @@ char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
       return NULL;
    memcpy(out, buf, (size_t)(pos + 1));
    return out;
-}
-
-char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const char *worktree_path,
-                                  int *occurrences_out)
-{
-   if (occurrences_out)
-      *occurrences_out = 0;
-   if (!prompt || !cwd || !cwd[0] || !worktree_path || !worktree_path[0])
-      return NULL;
-
-   size_t cwd_len = strlen(cwd);
-   size_t wt_len = strlen(worktree_path);
-   int occurrences = 0;
-   const char *scan = prompt;
-   while ((scan = strstr(scan, cwd)) != NULL)
-   {
-      occurrences++;
-      scan += cwd_len;
-   }
-   if (occurrences == 0)
-      return NULL;
-
-   size_t old_len = strlen(prompt);
-   size_t new_len = old_len - (size_t)occurrences * cwd_len + (size_t)occurrences * wt_len;
-   char *rewritten = malloc(new_len + 1);
-   if (!rewritten)
-      return NULL;
-
-   char *out = rewritten;
-   const char *p = prompt;
-   while (*p)
-   {
-      const char *found = strstr(p, cwd);
-      if (!found)
-      {
-         size_t tail = strlen(p);
-         memcpy(out, p, tail);
-         out += tail;
-         break;
-      }
-      size_t pre = (size_t)(found - p);
-      memcpy(out, p, pre);
-      out += pre;
-      memcpy(out, worktree_path, wt_len);
-      out += wt_len;
-      p = found + cwd_len;
-   }
-   *out = '\0';
-   if (occurrences_out)
-      *occurrences_out = occurrences;
-   return rewritten;
-}
-
-char *delegate_prompt_append_block(const char *base, const char *block)
-{
-   if (!block)
-      return NULL;
-   size_t base_len = base ? strlen(base) : 0;
-   size_t blk_len = strlen(block);
-   char *combined = malloc(base_len + blk_len + 1);
-   if (!combined)
-      return NULL;
-   if (base)
-      memcpy(combined, base, base_len);
-   memcpy(combined + base_len, block, blk_len + 1);
-   return combined;
 }
 
 int delegate_assemble_policy_ir(int has_source_policy, const char *role, const char *cwd,

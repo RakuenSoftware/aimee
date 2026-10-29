@@ -66,13 +66,3 @@ char *kb_client_dashboard_reminders_json(void)
 {
    return kb_client_v1_dashboard_payload_request("dashboard.reminders");
 }
-
-char *kb_client_dashboard_recall_json(void)
-{
-   return kb_client_v1_dashboard_payload_request("dashboard.recall");
-}
-
-char *kb_client_dashboard_directives_json(void)
-{
-   return kb_client_v1_dashboard_payload_request("dashboard.directives");
-}

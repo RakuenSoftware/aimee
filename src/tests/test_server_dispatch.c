@@ -177,6 +177,7 @@ static char g_git_repo_root_value[MAX_PATH_LEN];
  * test exercises method routing only; pretend every cwd is outside a git
  * repo by default so the GC paths short-circuit. */
 #include "../worktree_gc.h"
+#include "support/config_test_setters.h"
 int git_repo_root(const char *dir, char *out, size_t cap)
 {
    if (dir && g_git_repo_root_prefix[0] && g_git_repo_root_value[0])
@@ -272,13 +273,6 @@ static int stub_handler(server_conn_t *conn, const char *name)
    return rc;
 }
 
-int platform_evloop_del(platform_evloop_t *loop, int fd)
-{
-   (void)loop;
-   (void)fd;
-   return 0;
-}
-
 /* Instrumented so test_conn_update_events_null_evloop can assert the invariant
  * that conn_update_events never hands a NULL loop to the event layer (a NULL
  * loop here means epoll_ctl(loop->epoll_fd,...) would dereference NULL and
@@ -296,27 +290,9 @@ int platform_evloop_mod(platform_evloop_t *loop, int fd, uint32_t events)
    return 0;
 }
 
-int platform_evloop_add(platform_evloop_t *loop, int fd, uint32_t events)
-{
-   (void)loop;
-   (void)fd;
-   (void)events;
-   return 0;
-}
-
 int platform_evloop_create(platform_evloop_t *loop)
 {
    (void)loop;
-   return 0;
-}
-
-int platform_evloop_wait(platform_evloop_t *loop, platform_event_t *events, int max_events,
-                         int timeout_ms)
-{
-   (void)loop;
-   (void)events;
-   (void)max_events;
-   (void)timeout_ms;
    return 0;
 }
 

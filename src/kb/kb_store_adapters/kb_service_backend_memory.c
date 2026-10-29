@@ -12,30 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-cJSON *kb_store_kb_service_session_briefing_commitments_json(int limit)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char *body = session_briefing_render_commitments(limit);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "body", body ? body : "");
-   free(body);
-   return resp;
-}
-
-cJSON *kb_store_kb_service_session_briefing_directives_json(int limit)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char *body = session_briefing_render_directives(limit);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "body", body ? body : "");
-   free(body);
-   return resp;
-}
-
 /* Read-only typed-fact recall (§7), PII-gated: the cheap path ingress_preinject
  * calls every turn. No write; facts="" when there are none. */
 

@@ -57,23 +57,6 @@ static int64_t code_index_resolve_file(void *conn, int64_t project_id, const cha
    return id;
 }
 
-int kb_store_code_index_project_count(void)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return 0;
-   static const char *sql = "SELECT COUNT(*) FROM projects WHERE lifecycle_state = 'current'";
-   char err[CIDX_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   int n = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
 int kb_store_code_index_project_current_generation(const char *name, int64_t *generation_out)
 {
    if (generation_out)
@@ -100,30 +83,6 @@ int kb_store_code_index_project_current_generation(const char *name, int64_t *ge
    }
    aimee_pg_finalize(st);
    return rc;
-}
-
-int kb_store_code_index_project_last_scan(char *out, size_t cap)
-{
-   if (!out || cap == 0)
-      return -1;
-   out[0] = '\0';
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   static const char *sql =
-       "SELECT MAX(scanned_at) FROM projects WHERE lifecycle_state = 'current'";
-   char err[CIDX_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *ts = aimee_pg_column_text(st, 0);
-      if (ts)
-         snprintf(out, cap, "%s", ts);
-   }
-   aimee_pg_finalize(st);
-   return 0;
 }
 
 int kb_store_code_index_project_list(project_info_t *out, int max)

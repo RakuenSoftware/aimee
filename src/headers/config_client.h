@@ -13,7 +13,6 @@ int config_client_refresh(void);
 int config_client_changed(void);
 int config_client_read_number(const char *key, double *out);
 int config_client_read_string(const char *key, char *out, size_t n);
-int config_client_read_indexed_number(const char *key, int index, const char *member, double *out);
 int config_client_read_indexed_string(const char *key, int index, const char *member, char *out,
                                       size_t n);
 cJSON *config_client_value_copy(const char *key);

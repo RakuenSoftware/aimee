@@ -31,6 +31,8 @@
 #include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
 #include "headers/memory_stage_contract.h"
+#include "kb_mdl.h"
+#include "artifacts.h" /* aimee_kb_store_register_mdl_score_provider */
 #include <aimee/response-composition/module_api.h>
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
@@ -1034,38 +1036,6 @@ static int skill_trigger_match(const char *content, const char *tool_name, const
    return rc;
 }
 
-int server_module_benchmark_score(const int64_t *retrieved, uint32_t retrieved_count,
-                                  const int64_t *relevant, uint32_t relevant_count, uint32_t k,
-                                  aimee_benchmarks_ir_scores_t *scores)
-{
-   uint8_t request[AIMEE_BENCHMARKS_REQUEST_LEN], response[AIMEE_BENCHMARKS_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return scores &&
-                  aimee_benchmarks_request_encode(retrieved, retrieved_count, relevant,
-                                                  relevant_count, k, request,
-                                                  sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_RUN, AIMEE_BENCHMARKS_STAGE_RUN, request,
-                              sizeof(request), response, sizeof(response), &response_len) == 0
-              ? aimee_benchmarks_response_decode(response, response_len, scores)
-              : -1;
-}
-
-int server_module_benchmark_latency(const double *latencies, uint32_t count,
-                                    aimee_benchmarks_latency_summary_t *summary)
-{
-   uint8_t request[AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN];
-   uint8_t response[AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return summary &&
-                  aimee_benchmarks_latency_request_encode(latencies, count, request,
-                                                          sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_LATENCY, AIMEE_BENCHMARKS_STAGE_LATENCY,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
-              ? aimee_benchmarks_latency_response_decode(response, response_len, summary)
-              : -1;
-}
-
 static int runtime_web_http_status(const char *kind, uint32_t *http_status)
 {
    uint8_t request[AIMEE_RUNTIME_WEB_REQUEST_LEN], response[AIMEE_RUNTIME_WEB_RESPONSE_LEN];
@@ -1100,6 +1070,22 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    return rc;
 }
 
+/* The same canonical MDL scorer aimee-kb installs: artifacts the server
+ * commits carry the same MDL features as those the KB commits. */
+static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
+                     double *l_residual, double *total)
+{
+   if (!l_candidate || !l_residual || !total)
+      return -1;
+   kb_mdl_score_t score = {0};
+   if (kb_mdl_score(candidate, evidence, &score) != 0)
+      return -1;
+   *l_candidate = score.l_candidate;
+   *l_residual = score.l_residual;
+   *total = score.total;
+   return 0;
+}
+
 void server_module_tools_adapters_configure(void)
 {
    agent_tools_register_classifier(tool_classify);
@@ -1109,6 +1095,7 @@ void server_module_tools_adapters_configure(void)
 void server_module_stage_adapters_configure(void)
 {
    learning_router_register_signal_classifier(learning_classify);
+   aimee_kb_store_register_mdl_score_provider(score_mdl);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);
    delegate_register_chain_provider(delegate_chain);

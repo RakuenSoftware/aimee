@@ -33,10 +33,10 @@ private; `workspace_provider.h` is the provider dispatch interface and has no pa
 `workspace_provider_detached.c`, and `workspace_runner_queue.c`, have no external includer but are
 live module-internal units: the container and detached providers are selected through
 `workspace_provider.h` by `workspace_turn.c` and `cli_workspace_serve.c`, and the runner queue is
-consumed through `workspace_runner_registry.h`. Make compiles all eleven sources; CMake compiles the
-four the thin `aimee` client reaches (`cli_workspace_serve.c`, `workspace.c`, `workspace_manifest.c`,
-`workspace_provider_detached.c`) and omits the seven server/runner-side units, the same intentional
-thin-client boundary recorded for gateway and learning. `docs/validation/core-modularization-slice-44.md`
+consumed through `workspace_runner_registry.h`. Make compiles every source; the CMake thin client
+compiles the five it reaches (`cli_workspace_serve.c`, `workspace_client_diff.c`,
+`workspace_provider_detached.c`, and, off Windows, `workspace_identity.c` and `workspace_manifest.c`)
+and omits the server/runner-side units, the same intentional thin-client boundary recorded for gateway and learning. `docs/validation/core-modularization-slice-44.md`
 records the declaration audit and `docs/validation/core-modularization-slice-45.md` the completeness
 audit; the two were split so the latch reviews declarations merged on their own first. Adding a new
 module-local source or module-root header without declaring it now fails CI on `rule=ownership-complete`.

@@ -120,36 +120,3 @@ int aux_call(const char *task_name, const aimee_request_t *input, aimee_response
    agent_result_clear_response(&res);
    return cloned;
 }
-
-void aux_config_show(void)
-{
-   printf("auxiliary.enabled:          %s\n", config_aux_enabled() ? "true" : "false");
-   /* Each printf consumes its accessor's buffer before the next call, so these
-    * can read one at a time -- unlike the loop below, which needs three values
-    * from one element live at once and takes a copy. */
-   printf("auxiliary.default_provider: %s\n",
-          config_aux_default_provider()[0] ? config_aux_default_provider() : "(none)");
-   printf("auxiliary.default_model:    %s\n",
-          config_aux_default_model()[0] ? config_aux_default_model() : "(none)");
-   printf("auxiliary.default_max_tokens: %d\n", config_aux_default_max_tokens());
-   int n = config_aux_task_count();
-   if (n == 0)
-   {
-      printf("(no per-task overrides)\n");
-      return;
-   }
-   printf("\n%-30s  %-20s  %-40s  %s\n", "task", "provider", "model", "max_tokens");
-   printf("%-30s  %-20s  %-40s  %s\n", "----", "--------", "-----", "----------");
-   for (int i = 0; i < n && i < CONFIG_AUX_MAX_TASKS; i++)
-   {
-      config_aux_task_t t;
-      if (config_aux_task_at(i, &t) != 0)
-         continue;
-      const char *prov = t.provider[0] ? t.provider : "(default)";
-      const char *mod = t.model[0] ? t.model : "(default)";
-      if (t.max_tokens > 0)
-         printf("%-30s  %-20s  %-40s  %d\n", t.task, prov, mod, t.max_tokens);
-      else
-         printf("%-30s  %-20s  %-40s  (default)\n", t.task, prov, mod);
-   }
-}

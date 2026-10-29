@@ -142,11 +142,3 @@ int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
       *response_length = strlen(*response_buf);
    return status;
 }
-
-int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)
-{
-   (void)url;
-   (void)auth_header;
-   (void)timeout_ms;
-   return -1;
-}

@@ -30,9 +30,6 @@ int oauth_dev_provider_from_name(const char *name, oauth_dev_provider_t *out);
 /* Canonical provider name ("gitlab" | "gitea"). */
 const char *oauth_dev_provider_name(oauth_dev_provider_t p);
 
-/* 1 iff a client_id is registered for (provider, host) — the flow is usable. */
-int oauth_dev_available(oauth_dev_provider_t p, const char *host);
-
 /* Store / read the OAuth App client_id for (provider, host) in the server vault.
  * set returns 0/-1; get returns 1 (found, out filled) or 0 (none). */
 int oauth_dev_set_client_id(oauth_dev_provider_t p, const char *host, const char *client_id);

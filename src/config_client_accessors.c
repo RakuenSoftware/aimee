@@ -10,10 +10,6 @@
       double value = fallback;                                                                     \
       (void)config_client_read_number(key, &value);                                                \
       return (type)value;                                                                          \
-   }                                                                                               \
-   int config_set_##name(type value)                                                               \
-   {                                                                                               \
-      return config_client_set_number(key, (double)value);                                         \
    }
 #define CONFIG_STRING(name, key, width)                                                            \
    const char *config_##name(void)                                                                 \
@@ -21,10 +17,6 @@
       static _Thread_local char value[width];                                                      \
       (void)config_client_read_string(key, value, sizeof(value));                                  \
       return value;                                                                                \
-   }                                                                                               \
-   int config_set_##name(const char *value)                                                        \
-   {                                                                                               \
-      return config_client_set_string(key, value);                                                 \
    }                                                                                               \
    size_t config_##name##_copy(char *out, size_t n)                                                \
    {                                                                                               \
@@ -77,11 +69,6 @@ int config_mcp_client_count(void)
    return (int)value;
 }
 
-int config_set_mcp_client_count(int value)
-{
-   return config_client_set_number("mcp_client_count", (double)value);
-}
-
 const char *config_server_api_bearer_extra(int index)
 {
    static _Thread_local char value[256];
@@ -106,10 +93,4 @@ int config_server_api_bearer_extra_count(void)
          break;
    }
    return count;
-}
-
-int config_set_server_api_bearer_extra_count(int value)
-{
-   (void)value;
-   return -1;
 }

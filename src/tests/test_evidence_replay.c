@@ -298,18 +298,6 @@ static void test_idkey_cap_and_dedup(void)
    assert(strcmp(kbig, kone) == 0); /* dedup: 300 copies == the single token */
 }
 
-static void test_no_backend_degrades(void)
-{
-   /* no backend registered (default) -> evidence_replay degrades, never rejects */
-   review_evidence_t ev;
-   memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_SYMBOL;
-   snprintf(ev.target, sizeof(ev.target), "x");
-   reduced_record_t r;
-   assert(evidence_replay_active_backend() == NULL);
-   assert(evidence_replay(&ev, &r) == REPLAY_INDEX_UNAVAILABLE);
-}
-
 static void test_status_strings(void)
 {
    assert(strcmp(replay_status_str(REPLAY_MATCH), "match") == 0);
@@ -330,7 +318,6 @@ int main(void)
    test_backend_total_larger_than_hit_buffer();
    test_claimed_idkey_match_and_mismatch();
    test_idkey_cap_and_dedup();
-   test_no_backend_degrades();
    test_status_strings();
    printf("evidence_replay: all tests passed\n");
    return 0;

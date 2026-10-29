@@ -38,35 +38,6 @@ static void emit_implicit(const char *signal_type, const char *polarity, const c
    learning_router_record_signal(&input, NULL);
 }
 
-void learning_implicit_detect_turn(const char *user_text)
-{
-   if (!user_text || !user_text[0])
-      return;
-   if (!config_present())
-      return;
-   if (!config_learning_implicit_citation_repair() &&
-       !config_learning_implicit_citation_continuation())
-      return;
-
-   struct timespec t0, t1;
-   clock_gettime(CLOCK_MONOTONIC, &t0);
-
-   dogfood_autolabel_kind_t kind = dogfood_classify_next_turn(user_text);
-   if (kind == DOGFOOD_AUTOLABEL_REPAIR && config_learning_implicit_citation_repair())
-      emit_implicit("citation_then_repair", "negative", "Implicit citation_then_repair signal",
-                    "User turn classified as repair/correction after memory retrieval.", NULL, 0,
-                    NULL, NULL);
-   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION &&
-            config_learning_implicit_citation_continuation())
-      emit_implicit(
-          "citation_then_continuation", "positive", "Implicit citation_then_continuation signal",
-          "User turn classified as continuation after memory retrieval.", NULL, 0, NULL, NULL);
-
-   clock_gettime(CLOCK_MONOTONIC, &t1);
-   double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;
-   learning_router_record_detection_ms(ms);
-}
-
 void learning_implicit_record_repeat_question(const char *session_id, const char *tool,
                                               const char *query_hash)
 {

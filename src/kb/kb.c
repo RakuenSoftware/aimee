@@ -34,9 +34,7 @@
 #include "lifecycle.h"
 #include <dirent.h>
 #include <errno.h>
-#ifndef AIMEE_WINDOWS
 #include <fnmatch.h>
-#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,57 +78,12 @@ static void file_hash(const char *path, char *out, size_t out_len)
 /* Glob matching                                                        */
 /* ------------------------------------------------------------------ */
 
-#ifdef AIMEE_WINDOWS
-#define KB_FNM_PATHNAME 1
-
-static int kb_glob_match_impl(const char *pattern, const char *text, int flags)
-{
-   while (*pattern)
-   {
-      if (*pattern == '*')
-      {
-         while (pattern[1] == '*')
-            pattern++;
-         pattern++;
-         if (!*pattern)
-            return !(flags & KB_FNM_PATHNAME) || strchr(text, '/') == NULL;
-         for (const char *t = text;; t++)
-         {
-            if (kb_glob_match_impl(pattern, t, flags))
-               return 1;
-            if (!*t || ((flags & KB_FNM_PATHNAME) && *t == '/'))
-               break;
-         }
-         return 0;
-      }
-      if (*pattern == '?')
-      {
-         if (!*text || ((flags & KB_FNM_PATHNAME) && *text == '/'))
-            return 0;
-         pattern++;
-         text++;
-         continue;
-      }
-      if (*pattern != *text)
-         return 0;
-      pattern++;
-      text++;
-   }
-   return *text == '\0';
-}
-
-static int kb_fnmatch(const char *pattern, const char *text, int flags)
-{
-   return kb_glob_match_impl(pattern, text, flags) ? 0 : 1;
-}
-#else
 #define KB_FNM_PATHNAME FNM_PATHNAME
 
 static int kb_fnmatch(const char *pattern, const char *text, int flags)
 {
    return fnmatch(pattern, text, flags);
 }
-#endif
 
 /* Split a comma-separated glob list into individual patterns.
  * Returns the number of patterns written to out[] (max max_patterns). */

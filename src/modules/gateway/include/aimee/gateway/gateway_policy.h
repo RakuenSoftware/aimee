@@ -11,13 +11,6 @@
 /* Canonical catalog policing includes namespace children. */
 int gateway_policy_apply_ir(aimee_request_t *request);
 
-/* True if `name` would be denied by the active response-side policy. Reads
- * `config.gateway_prevent_subagents` internally — the caller need not gate. The
- * canonical-tool-name mapping is shared with the request side, so a denied name
- * matches the request-side `is_subagent_tool_name` rule (Task / Agent / spawn_agent
- * / RemoteTrigger, etc., all mapped to "Subagent"). */
-int gateway_policy_is_denied_tool(const char *name);
-
 /* True when the response-side tool-policing policy is enabled. Cheap — one
  * legacy_config_read + one bool read. The streaming /v1/messages path uses this as a
  * single-branch dispatcher: when ON, the upstream is buffered + policed +

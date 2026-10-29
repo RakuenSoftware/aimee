@@ -32,9 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef AIMEE_WINDOWS
 #include <unistd.h>
-#endif
 
 extern kb_service_ctx_t *g_kb_ctx;
 
@@ -80,19 +78,7 @@ char *kb_service_conn_slots_json(int configured)
 
 static long kb_ipc_write(int fd, const char *buf, size_t len)
 {
-#ifdef AIMEE_WINDOWS
-   HANDLE h = (HANDLE)(intptr_t)fd;
-   DWORD written = 0;
-   DWORD chunk = len > (size_t)((DWORD)~0u) ? (DWORD)~0u : (DWORD)len;
-   if (!WriteFile(h, buf, chunk, &written, NULL))
-   {
-      errno = GetLastError() == ERROR_BROKEN_PIPE ? EPIPE : EIO;
-      return -1;
-   }
-   return (long)written;
-#else
    return (long)write(fd, buf, len);
-#endif
 }
 
 /* Shared with kb_service_memory.c — keep external linkage. */

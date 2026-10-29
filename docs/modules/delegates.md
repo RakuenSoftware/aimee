@@ -37,8 +37,8 @@ empty declared set against an empty actual set. The empty ephemeral-checkout imp
 delegate must receive a full source worktree. The Go-owned sandbox specification, container lifecycle,
 and post-start posture verifier are declared alongside the remaining C integration surfaces. These
 server/KB-side units follow the same intentional thin-client boundary recorded
-for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
-than of those. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
+for gateway, learning, workspace, vault, config, and git; the CMake thin client compiles only
+`delegate_plan.c`. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
 `docs/validation/core-modularization-slice-53.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source now fails CI on
 `rule=ownership-complete`, and so does adding a module-root header: the absent `private_headers` field

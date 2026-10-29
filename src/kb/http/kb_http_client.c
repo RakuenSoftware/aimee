@@ -899,17 +899,6 @@ malformed:
    return KB_HTTP_RESOLVE_ERROR;
 }
 
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__parse_resolver_response(const unsigned char *wire, size_t length)
-{
-   struct addrinfo *result = NULL;
-   if (!wire)
-      return KB_HTTP_INVALID_ARGUMENT;
-   kb_http_result_t status = parse_resolver_response(wire, length, &result);
-   resolved_addresses_free(result);
-   return status;
-}
-
 static kb_http_result_t resolve_deadline_with(const char *host, const char *service, unsigned flags,
                                               const char *helper_override, int64_t deadline,
                                               struct addrinfo **result)
@@ -1026,56 +1015,6 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
    return resolve_deadline_with(host, service, 0, NULL, deadline, result);
 }
 
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__resolve(const char *host, int timeout_ms, int hang)
-{
-   int64_t now = now_ns();
-   char helper_path[PATH_MAX];
-   if (!host || timeout_ms <= 0 || now < 0 || !realpath("../aimee-kb-resolver", helper_path) ||
-       now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
-      return KB_HTTP_INVALID_ARGUMENT;
-   struct addrinfo *result = NULL;
-   kb_http_result_t status =
-       resolve_deadline_with(host, "443", hang ? KB_RESOLVER_FLAG_HANG_TEST : 0, helper_path,
-                             now + (int64_t)timeout_ms * 1000000LL, &result);
-   resolved_addresses_free(result);
-   return status;
-}
-
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water)
-{
-   int64_t now = now_ns();
-   if (!high_water || timeout_ms <= 0 || now < 0 ||
-       now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
-      return KB_HTTP_INVALID_ARGUMENT;
-   if (pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
-      return KB_HTTP_INTERNAL_ERROR;
-   int64_t deadline = now + (int64_t)timeout_ms * 1000000LL;
-   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
-   pthread_mutex_lock(&dns_pool_mutex);
-   int wait_result = 0;
-   while (dns_slots_used && wait_result == 0)
-      wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_pool_mutex, &until);
-   *high_water = dns_slots_high_water;
-   kb_http_result_t result = dns_slots_used ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
-   pthread_mutex_unlock(&dns_pool_mutex);
-   return result;
-}
-
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__dns_slots(size_t *used, size_t *high_water)
-{
-   if (!used || !high_water || pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
-      return KB_HTTP_INVALID_ARGUMENT;
-   if (pthread_mutex_lock(&dns_pool_mutex) != 0)
-      return KB_HTTP_INTERNAL_ERROR;
-   *used = dns_slots_used;
-   *high_water = dns_slots_high_water;
-   pthread_mutex_unlock(&dns_pool_mutex);
-   return KB_HTTP_OK;
-}
-
 static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
 {
    aimee_core_control_t control = deadline_control(deadline);
@@ -1084,16 +1023,6 @@ static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
    return result == AIMEE_CORE_OK        ? KB_HTTP_OK
           : result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT
                                          : KB_HTTP_IO_ERROR;
-}
-
-__attribute__((visibility("hidden"))) kb_http_result_t kb_http_client_test__wait_fd(int fd,
-                                                                                    short events,
-                                                                                    int timeout_ms)
-{
-   int64_t now = now_ns();
-   if (fd < 0 || timeout_ms <= 0 || now < 0 || now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
-      return KB_HTTP_INVALID_ARGUMENT;
-   return wait_fd(fd, events, now + (int64_t)timeout_ms * 1000000LL);
 }
 
 static kb_http_result_t connect_deadline(struct addrinfo *addresses, int64_t deadline, int *out_fd)
@@ -1418,12 +1347,6 @@ static SSL_CTX *client_context(void)
       return NULL;
    }
    return ctx;
-}
-
-__attribute__((visibility("hidden"))) int
-kb_http_client_test__tls_eof_is_authenticated(int ssl_error)
-{
-   return ssl_error == SSL_ERROR_ZERO_RETURN;
 }
 
 static kb_http_result_t build_request_bytes(const kb_http_request_t *r, unsigned char **out,

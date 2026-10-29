@@ -77,16 +77,6 @@ extern "C"
     * direct delegate/server coupling. */
    typedef int (*roadmap_decompose_fn)(const char *goal, const char *planning_depth,
                                        const char *token_profile, char **out_json, void *ud);
-   void roadmap_set_decomposer(roadmap_decompose_fn fn, void *ud);
-
-   /* Phase 1 — create a roadmap from a goal. Decomposition is delegated to a
-    * reason/draft delegate via the registered decomposer; the proposed roadmap +
-    * plan_unit artifacts pass structural DAG validation before commit (no LLM
-    * writes state directly). On success writes the committed roadmap id into
-    * out_id (caller-provided buffer). Returns 0 on success, -1 on error
-    * (including when no decomposer is registered). */
-   int roadmap_new(const char *goal, const char *planning_depth, const char *token_profile,
-                   char *out_id, size_t out_len);
 
    /* Phase 1 — deterministic core: validate a decomposition document and, if it
     * is structurally sound, write the roadmap + plan_unit artifacts (proposed),
@@ -118,10 +108,6 @@ extern "C"
     * tool_policy_mode. On failure, writes a human-readable reason into err (if
     * non-NULL). Returns 0 if valid, -1 otherwise. */
    int roadmap_validate_decomposition(const char *decomposition_json, char *err, size_t err_len);
-
-   /* Phase 1 — render the roadmap tree + state. json_output != 0 emits JSON;
-    * otherwise prints the human projection. Returns 0 on success, -1 on error. */
-   int roadmap_show(const char *roadmap_id, int json_output);
 
    /* Phase 1 — build the roadmap tree as a JSON document and return it
     * heap-allocated in *out (caller frees). Shape:

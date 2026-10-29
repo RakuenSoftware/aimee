@@ -137,7 +137,6 @@ static const aimee_tool_catalog_entry_t aimee_tool_catalog[] = {
    {"search_graph", {1u, 1u, 1u}},
    {"search_memory", {1u, 1u, 1u}},
    {"search_notes", {1u, 1u, 1u}},
-   {"send_message", {5u, 16u, 24u}},
    {"session_context_expand", {1u, 1u, 1u}},
    {"session_context_search", {1u, 1u, 1u}},
    {"session_context_status", {1u, 1u, 1u}},

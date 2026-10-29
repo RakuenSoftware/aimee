@@ -143,54 +143,6 @@ extern "C"
     * next. Production code never calls this. */
    void delegate_backend_reset_for_test(void);
 
-   /* Parse delegate-backend flags out of an argv array. Recognises:
-    *   --backend <name>     pick the backend ("local", "ssh", ...)
-    *   --image <ref>        docker image hint
-    *   --host <user@host>   ssh target
-    *   --no-hibernate       release tears down workspace on exit
-    *
-    * `cfg` is filled in-place — fields the argv does not set keep their
-    * pre-existing values, so the caller can pre-seed defaults from
-    * agents.json. `*first_non_flag_idx` is set to the index of the
-    * first argv element that did not look like one of these flags
-    * (the prompt / role / freeform tail). Returns 0 on success, -1
-    * on a malformed flag (e.g. `--backend` at the end of argv with
-    * no value).
-    *
-    * String slots in `cfg` (image, host) point INTO `argv` and remain
-    * valid as long as `argv` does — the parser does not copy. Use
-    * snprintf into your own buffer if you need to outlive argv.
-    *
-    * Pure string parsing; no allocation, no syscalls. */
-   int delegate_backend_config_parse(int argc, char **argv, delegate_backend_config_t *cfg,
-                                     const char **out_backend_name, int *first_non_flag_idx);
-
-   /* Wrap a user command in the snapshot-file boilerplate that the
-    * non-local backends (ssh / docker) all share. The
-    * resulting bash script:
-    *   1. sources `snap_path` if it exists, restoring env + cwd state
-    *      from the previous exec;
-    *   2. cd's into the cwd recorded in `cwd_file_path` (if present);
-    *   3. runs the user command in a subshell, captures its exit code;
-    *   4. dumps `export -p; declare -f; alias -p` back to `snap_path`
-    *      atomically (write to .tmp, then rename);
-    *   5. dumps `pwd` to `cwd_file_path` atomically;
-    *   6. exits with the user command's exit code.
-    *
-    * The result is a single bash string the caller hands to `bash -c`
-    * (or wraps in `ssh ... bash -c`, `docker exec ... bash -c`, etc.).
-    *
-    * Caller-supplied path strings are spliced in raw — they MUST be
-    * paths the caller fully controls (workspace dir under
-    * ~/.cache/aimee/...). User command is similarly spliced raw; the
-    * caller is responsible for sanitising any untrusted input.
-    *
-    * Returns a malloc'd NUL-terminated string in *out_script (caller
-    * frees) and 0 on success; -1 on NULL inputs or allocation failure.
-    * On failure *out_script is set to NULL. */
-   int delegate_backend_wrap_command(const char *snap_path, const char *cwd_file_path,
-                                     const char *user_command, char **out_script);
-
 #ifdef __cplusplus
 }
 #endif

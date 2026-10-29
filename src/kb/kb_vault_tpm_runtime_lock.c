@@ -355,13 +355,6 @@ kb_vault_tpm_runtime_lock_revalidate(kb_vault_tpm_runtime_lock_t *owner)
    return KB_VAULT_TPM_RUNTIME_LOCK_OK;
 }
 
-void kb_vault_tpm_runtime_lock_after_fork_child(kb_vault_tpm_runtime_lock_t *owner)
-{
-   close_child_descriptors(owner);
-   if (g_current_owner == owner)
-      g_current_owner = NULL;
-}
-
 void kb_vault_tpm_runtime_lock_release(kb_vault_tpm_runtime_lock_t **owner_ptr)
 {
    if (!owner_ptr || !*owner_ptr)

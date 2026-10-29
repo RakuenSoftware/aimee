@@ -24,19 +24,6 @@ const char *guardrails_canonical_tool_name(const char *n)
    return n ? n : "";
 }
 
-static void test_predicate_is_denied_tool(void)
-{
-   g_prevent = 1;
-   assert(gateway_policy_is_denied_tool("Task") == 1);
-   assert(gateway_policy_is_denied_tool("Agent") == 1);
-   assert(gateway_policy_is_denied_tool("web_search") == 0);
-   assert(gateway_policy_is_denied_tool("") == 0);
-   assert(gateway_policy_is_denied_tool(NULL) == 0);
-   g_prevent = 0;
-   assert(gateway_policy_is_denied_tool("Task") == 0); /* gate off */
-   PASS("predicate_is_denied_tool");
-}
-
 static int test_delegates_available_yes(void)
 {
    return 1;
@@ -103,7 +90,6 @@ int main(void)
    printf("test_gateway_policy:\n");
    test_canonical_namespace_policing();
    test_canonical_empty_and_surviving_choice();
-   test_predicate_is_denied_tool();
 
    /* enforce-delegate-only: a registered delegates-available provider activates
     * sub-agent prevention even when the config flag is off. */

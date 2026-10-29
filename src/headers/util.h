@@ -144,9 +144,6 @@ static inline int str_contains_ci(const char *haystack, const char *needle)
  * Result written to buf (max buf_len). Returns buf. */
 char *normalize_key(const char *key, char *buf, size_t buf_len);
 
-/* Trigram Jaccard similarity between two strings. Returns 0.0-1.0. */
-double trigram_similarity(const char *a, const char *b);
-
 /* Split a reasoning PREAMBLE off the front of a model response.
  *
  * Reasoning models PREPEND <think>...</think> when the server is not configured
@@ -196,9 +193,6 @@ char *canonical_fingerprint(const char *text, char *buf, size_t buf_len);
 
 /* Word-set Jaccard similarity. */
 double word_similarity(const char *a, const char *b);
-
-/* Check if two strings are likely contradictions. */
-int is_contradiction(const char *a, const char *b);
 
 /* POSIX-like shell token splitting. Returns token count.
  * Tokens written to out array (max max_tokens). Caller frees each token. */

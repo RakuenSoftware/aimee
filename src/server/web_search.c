@@ -559,7 +559,6 @@ void web_search_free_results(web_search_result_t *results, int count)
 #define FUSION_PAGE_TIMEOUT 3000
 #define FUSION_TOTAL_MS     8000
 
-#ifndef _WIN32
 static void fusion_append(dstr_t *ds, const web_search_result_t *results, int count,
                           const char *query)
 {
@@ -661,7 +660,6 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
       dstr_append_str(ds, "(no pages could be fetched; the snippets above are all that is "
                           "available)\n");
 }
-#endif /* !_WIN32 */
 
 /* ---------------- multi-engine fanout ----------------
  *
@@ -751,11 +749,6 @@ static char *run_engine(const char *engine, const char *query, int max_results,
       return block; /* the backend's own message, handed to the caller */
    free(block);     /* re-formatted from the fused list below */
    return NULL;
-}
-
-char *web_search(const char *query, int max_results)
-{
-   return web_search_ex(query, max_results, WEB_SEARCH_FETCH_PAGES_UNSET, NULL);
 }
 
 char *web_search_ex(const char *query, int max_results, int fetch_pages, const char *extract_query)
@@ -851,10 +844,6 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
    /* The snippet block is left BYTE-FOR-BYTE unchanged and the spans are
     * appended. Anything parsing today's "[N] title -- url" output keeps working,
     * and removing the feature is deleting one section. */
-#ifdef _WIN32
-   web_search_free_results(fused, nf);
-   return block;
-#else
    dstr_t ds;
    dstr_init(&ds);
    dstr_append_str(&ds, block);
@@ -864,5 +853,4 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
    char *out = dstr_steal(&ds);
    dstr_free(&ds);
    return out ? out : safe_strdup("error: web_search: out of memory");
-#endif
 }

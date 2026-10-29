@@ -599,7 +599,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 55
+#define MCP_TOOLS_GOLDEN_COUNT 54
 #ifdef AIMEE_WINDOWS
 #define MCP_LSP_GOLDEN "lsp {col,command,file,line,workspace} req:command\n"
 #else
@@ -674,7 +674,6 @@ static void test_osv_offline_cache_miss_allows(void)
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
    "search_memory {cwd,filter,project,query,scope,store,workspace} req:query\n"                    \
-   "send_message {target,text} req:target,text\n"                                                  \
    "session "                                                                                      \
    "{around_message_id,chain_id,command,include_sources,limit,offset,query,session_id,source_"     \
    "revision,"                                                                                     \
@@ -819,7 +818,6 @@ static void test_tool_profile_filter(void)
                                       "delegate_status",
                                       "roundtable_review",
                                       "ask_user",
-                                      "send_message",
                                       "note",
                                       "peer",
                                       NULL};

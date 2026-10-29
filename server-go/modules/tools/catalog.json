@@ -130,7 +130,6 @@
   "search_graph": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "search_memory": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "search_notes": {"class": "read", "side_effect": "read", "categories": ["read"]},
-  "send_message": {"class": "remote", "side_effect": "external", "categories": ["external", "network"]},
   "session_context_expand": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "session_context_search": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "session_context_status": {"class": "read", "side_effect": "read", "categories": ["read"]},

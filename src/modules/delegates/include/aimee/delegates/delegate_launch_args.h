@@ -26,14 +26,6 @@ typedef int (*delegate_launch_args_fn)(const aimee_delegates_launch_spec_t *spec
 
 void delegate_register_launch_args_provider(delegate_launch_args_fn provider);
 
-/* Ask for the create argv. Returns the argument count, or -1 (logged).
- *
- * The returned argv entries point into `buf`; they are NUL-terminated in place,
- * which is why `buf` is the caller's and not the seam's. */
-int delegate_launch_args_resolve(const aimee_delegates_launch_spec_t *spec, char *name_out,
-                                 size_t name_cap, const char **argv_out, size_t argv_cap,
-                                 uint8_t *buf, size_t buf_cap);
-
 /* The Dockerfile a sandbox image is built from, and the tag naming its content.
  *
  * Same seam, same reason: the package and base names are interpolated into a
@@ -62,12 +54,6 @@ typedef int (*delegate_isolation_fn)(const char *report, int probe_failed, int r
                                      size_t reason_cap);
 
 void delegate_register_isolation_provider(delegate_isolation_fn provider);
-
-/* Returns 0 with the verdict filled, or -1 (logged) -- which callers must treat
- * as a refusal. */
-int delegate_isolation_judge(const char *report, int probe_failed, int require_isolation,
-                             int *refuse, int *warn, int *is_error, char *reason,
-                             size_t reason_cap);
 
 /* Which built sandbox images may be deleted.
  *

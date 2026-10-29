@@ -21,23 +21,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static db1_family_t family = {"db1.delegation", "delegation", AIMEE_DB1_EVENT_DELEGATION, AIMEE_DB1_STAGE_DELEGATION, 2000, 0};
-
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
-}
-
-
-int db1_delegation_message_record(const char *delegation_id, const char *direction, const char *content)
-{
-   if (!delegation_id || !delegation_id[0] || !direction || !direction[0])
-      return -1;
-   const char *fields[] = {delegation_id, direction, content ? content : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_DELEGATION_MESSAGE_RECORD, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_delegation_spawn_record(const char *delegation_id, const char *parent_delegation_id, const char *session_id, int depth, const char *role)
@@ -56,34 +45,6 @@ int db1_delegation_spawn_complete(const char *delegation_id)
       return -1;
    const char *fields[] = {delegation_id};
    return write_result(db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_COMPLETE, fields, 1, NULL, NULL, 0, NULL));
-}
-
-int db1_delegation_spawn_preempt(const char *delegation_id)
-{
-   if (!delegation_id || !delegation_id[0])
-      return -1;
-   const char *fields[] = {delegation_id};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_PREEMPT, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_spawn_status(const char *delegation_id, char *out, size_t out_sz)
-{
-   if (!delegation_id || !delegation_id[0] || !out || out_sz == 0)
-      return -1;
-   const char *fields[] = {delegation_id};
-   char slot_rc[32];
-   char *const values[] = {out, slot_rc};
-   const size_t caps[] = {out_sz, sizeof slot_rc};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_STATUS, fields, 1, values, caps, 2, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtol(slot_rc, NULL, 10);
 }
 
 int db1_delegation_spawn_stop_reason(const char *delegation_id, char *out, size_t out_sz)
@@ -109,20 +70,6 @@ int db1_delegation_spawn_is_stopped(const char *delegation_id)
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_IS_STOPPED, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_spawn_is_cancelled(const char *delegation_id)
-{
-   if (!delegation_id || !delegation_id[0])
-      return -1;
-   const char *fields[] = {delegation_id};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_IS_CANCELLED, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -179,90 +126,6 @@ int db1_delegation_spawn_count_descendants(const char *root_delegation_id)
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_COUNT_DESCENDANTS, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_spawn_list_active(int *out_ids, int max)
-{
-   if (!out_ids || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", max);
-   const char *fields[] = {arg0};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
-      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_LIST_ACTIVE, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out_ids[wire_row] = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
-int db1_delegation_spawn_cancel_by_id(int spawn_id)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", spawn_id);
-   const char *fields[] = {arg0};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_BY_ID, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_spawn_cancel_recursive(int spawn_id)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", spawn_id);
-   const char *fields[] = {arg0};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_RECURSIVE, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_spawn_cancel_stale()
-{
-   const char *const *fields = NULL;
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_SPAWN_CANCEL_STALE, fields, 0, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -334,31 +197,6 @@ int db1_delegate_reservation_forget_if_matches(const char *execution_key, int jo
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_delegation_checkpoint_save(const char *delegation_id, const char *job_id, int attempt, const char *steps_json, const char *last_output, const char *error)
-{
-   if (!delegation_id || !delegation_id[0])
-      return -1;
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", attempt);
-   const char *fields[] = {delegation_id, job_id ? job_id : "", arg2, steps_json ? steps_json : "", last_output ? last_output : "", error ? error : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_DELEGATION_CHECKPOINT_SAVE, fields, 6, NULL, NULL, 0, NULL));
-}
-
-int db1_delegation_checkpoint_load(const char *delegation_id, char *steps_out, size_t steps_cap, char *error_out, size_t error_cap, char *output_out, size_t output_cap)
-{
-   if (!delegation_id || !delegation_id[0] || !steps_out || steps_cap == 0 || !error_out || error_cap == 0 || !output_out || output_cap == 0)
-      return -1;
-   const char *fields[] = {delegation_id};
-   char *const values[] = {steps_out, error_out, output_out};
-   const size_t caps[] = {steps_cap, error_cap, output_cap};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATION_CHECKPOINT_LOAD, fields, 1, values, caps, 3, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   return 0;
 }
 
 int db1_agent_job_create(const char *role, const char *prompt, const char *agent_name, const char *lease_owner)
@@ -565,22 +403,6 @@ int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_jo
    if (shrunk_result)
       out->result = shrunk_result;
    return 0;
-}
-
-int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes)
-{
-   if (!heartbeat_at || !heartbeat_at[0])
-      return -1;
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", stale_minutes);
-   const char *fields[] = {heartbeat_at, arg1};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_JOB_HEARTBEAT_IS_STALE, fields, 2, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_agent_job_take_lease(int job_id, const char *owner)
@@ -815,20 +637,6 @@ int db1_agent_job_cancel_nonterminal_on_restart(const char *reason)
    return (int)strtoll(slot0, NULL, 10);
 }
 
-int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", threshold_seconds);
-   const char *fields[] = {arg0, reason ? reason : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_JOB_CANCEL_STALE, fields, 2, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
 int db1_agent_log_list(const char *agent_filter, db1_agent_log_entry_t *out, int max)
 {
    if (!out || max <= 0)
@@ -895,34 +703,6 @@ int db1_agent_log_list(const char *agent_filter, db1_agent_log_entry_t *out, int
    }
    free(wire_scratch);
    return wire_rows;
-}
-
-int db1_delegate_learning_record(const char *session_id, const char *role, const char *failure_mode, const char *lesson, const char *evidence_json, double confidence)
-{
-   char arg5[32];
-   snprintf(arg5, sizeof arg5, "%.17g", (double)confidence);
-   const char *fields[] = {session_id ? session_id : "", role ? role : "", failure_mode ? failure_mode : "", lesson ? lesson : "", evidence_json ? evidence_json : "", arg5};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD, fields, 6, NULL, NULL, 0, NULL));
-}
-
-char *db1_delegate_learning_inject_prompt(const char *role, const char *system_prompt, int top_n)
-{
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", top_n);
-   const char *fields[] = {role ? role : "", system_prompt ? system_prompt : "", arg2};
-   char *value = malloc(1048576u);
-   if (!value)
-      return NULL;
-   char *const values[] = {value};
-   const size_t caps[] = {1048576u};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT, fields, 3, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
-   {
-      free(value);
-      return NULL;
-   }
-   char *shrunk = realloc(value, strlen(value) + 1u);
-   return shrunk ? shrunk : value;
 }
 
 /* clang-format on */

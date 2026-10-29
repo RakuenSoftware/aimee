@@ -108,42 +108,6 @@ int kb_store_kb_runtime_state_set_now(const char *key)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int kb_store_kb_runtime_state_vector_rebuild_lock_held(void)
-{
-   void *conn = kb_store_conn();
-   if (!conn)
-      return 0;
-
-   char err[KBRS_ERRBUF] = "";
-   /* 1800s = 30 minutes. state_value is the UTC TEXT timestamp written
-    * by pg_now_text(); CURRENT_TIMESTAMP is forced to UTC for the
-    * comparison. */
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT 1 FROM kb_runtime_state"
-       " WHERE state_key = 'vector_rebuild_lock'"
-       "   AND state_value::timestamp > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - interval '1800 "
-       "seconds'",
-       err, sizeof(err));
-   if (!st)
-      return 0;
-   int held = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? 1 : 0;
-   aimee_pg_finalize(st);
-   return held;
-}
-
-int kb_store_kb_runtime_state_vector_rebuild_lock_try_acquire(void)
-{
-   if (kb_store_kb_runtime_state_vector_rebuild_lock_held())
-      return 0;
-   return kb_store_kb_runtime_state_set_now("vector_rebuild_lock") == 0 ? 1 : 0;
-}
-
-void kb_store_kb_runtime_state_vector_rebuild_lock_release(void)
-{
-   (void)kb_store_kb_runtime_state_delete("vector_rebuild_lock");
-}
-
 /* ── Project-purge generation fence (webchat-project-lifecycle slice 2) ──
  *
  * Two kb_runtime_state rows per fenced project key:

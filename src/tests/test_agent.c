@@ -69,7 +69,6 @@ void test_primary_turn_reaches_default_above_min_tier(void);
 void test_primary_turn_default_must_still_satisfy_caps(void);
 void test_catalog_provider_endpoint_parser_edges(void);
 void test_request_max_tokens_clamped_to_context_window(void);
-void test_registration_prefix(void);
 void test_registration_grouping(void);
 void test_declared_roles_route_precisely(void);
 void test_scope_ceiling_matches_work_to_capability(void);
@@ -237,34 +236,6 @@ static void test_agent_has_role(void)
    assert(agent_has_role(&agent, "summarize") == 1);
    assert(agent_has_role(&agent, "code") == 1);
    assert(agent_has_role(&agent, "anything") == 1);
-}
-
-static void test_agent_supports_persona(void)
-{
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-
-   /* No personas listed -> supports every persona (backward compatible). */
-   assert(agent_supports_persona(&agent, "architect") == 1);
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-
-   /* Explicit list gates by name. */
-   strcpy(agent.personas[0], "engineer");
-   agent.persona_count = 1;
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-   assert(agent_supports_persona(&agent, "architect") == 0);
-
-   /* The "all" wildcard serves any persona. */
-   strcpy(agent.personas[0], "all");
-   agent.persona_count = 1;
-   assert(agent_supports_persona(&agent, "engineer") == 1);
-   assert(agent_supports_persona(&agent, "architect") == 1);
-   assert(agent_supports_persona(&agent, "anything") == 1);
-
-   /* NULL agent -> not supported; NULL/empty persona -> unconstrained. */
-   assert(agent_supports_persona(NULL, "engineer") == 0);
-   assert(agent_supports_persona(&agent, NULL) == 1);
-   assert(agent_supports_persona(&agent, "") == 1);
 }
 
 static void test_agent_find(void)
@@ -3693,6 +3664,7 @@ static void test_dispatch_tool_call(void)
 
 #include "agent_source_authority.h"
 #include <pthread.h>
+#include "support/config_test_setters.h"
 
 /* Regression test for the concurrent-delegate source-authority race: each
  * delegate installs its source context via agent_source_authority_tls_set
@@ -4034,24 +4006,6 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    assert(count == 1);
    assert(rows[0].turn == 3);
    assert(strcmp(rows[0].tool_name, "bash") == 0);
-}
-
-static void test_agent_endpoint_valid(void)
-{
-   /* `agent add` is positional, so a flag in the endpoint slot used to be SAVED as the
-    * endpoint: the agent reported ON and returned success, and the only symptom was
-    * `agent probe` reporting "GET --provider/models returned -1" later. */
-   assert(!agent_endpoint_valid("--provider"));
-   assert(!agent_endpoint_valid("-x"));
-   assert(!agent_endpoint_valid(""));
-   assert(!agent_endpoint_valid(NULL));
-
-   /* Narrow on purpose: everything that is not obviously a flag stays accepted,
-    * including the scheme-less host:port forms this command has always taken. */
-   assert(agent_endpoint_valid("http://127.0.0.1:8080/v1"));
-   assert(agent_endpoint_valid("https://api.openai.com/v1"));
-   assert(agent_endpoint_valid("localhost:11434"));
-   assert(agent_endpoint_valid("wizard-llm:8080/v1"));
 }
 
 static void test_agent_name_valid(void)
@@ -4639,12 +4593,10 @@ int main(int argc, char **argv)
    test_seeded_tool_profile_retains_request_custody();
    test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
-   test_agent_endpoint_valid();
    test_agent_name_valid();
    test_agent_expand_env();
    test_agent_save_never_serializes_literal_key();
    test_agent_has_role();
-   test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
    test_agent_route_selection_provider();
@@ -4688,7 +4640,6 @@ int main(int argc, char **argv)
    test_primary_turn_default_must_still_satisfy_caps();
    test_catalog_provider_endpoint_parser_edges();
    test_request_max_tokens_clamped_to_context_window();
-   test_registration_prefix();
    test_registration_grouping();
    test_declared_roles_route_precisely();
    test_scope_ceiling_matches_work_to_capability();

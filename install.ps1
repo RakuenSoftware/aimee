@@ -9,8 +9,8 @@ $ErrorActionPreference = "Stop"
 #
 # On Windows aimee runs as the thin client: a single `aimee.exe` that talks to a
 # remote aimee-server over the /v1 HTTP API. The server (aimee-server) and the
-# knowledge base (aimee-kb) run in Docker or on a Linux/macOS host, not on
-# Windows. This script builds that client with CMake's thin-client profile and
+# knowledge base (aimee-kb) run in Docker or on a Linux host, not on
+# Windows. This script builds that client with CMake and
 # installs it to %LOCALAPPDATA%\aimee\bin; it does not build or run any services.
 # (Prefer no build at all? Download the prebuilt aimee-windows-x86_64.exe from a
 # GitHub release and put it on your PATH instead.)
@@ -42,17 +42,12 @@ try {
     Write-Host "> Building the aimee thin client with CMake..." -ForegroundColor Green
     Push-Location $repoRoot
     try {
-        # Thin-client profile: only aimee.exe (no server/kb/gateway/webchat, so no
-        # libpq / Go / PAM). TLS uses Schannel (Windows cert store), so https://
+        # CMake builds only the thin client: aimee.exe (no libpq / Go / PAM). TLS uses Schannel (Windows cert store), so https://
         # remote aimee-servers work with no OpenSSL. Matches the CI and release
         # Windows builds.
         $cfgArgs = @(
             "-B", $buildDir,
-            "-DAIMEE_THIN_CLIENT=ON",
             "-DAIMEE_LEAN=ON",
-            "-DWITH_PAM=OFF",
-            "-DWITH_LIBSECRET=OFF",
-            "-DWITH_UI=OFF",
             "-DWITH_TLS=ON"
         )
         # MinGW gcc needs an explicit Makefiles generator; MSVC uses its default.
@@ -116,7 +111,7 @@ try {
     Write-Host "Thin client installed." -ForegroundColor Green
     Write-Host "Next steps:" -ForegroundColor Green
     Write-Host "  1. Open a new PowerShell or Command Prompt so PATH changes take effect."
-    Write-Host "  2. Point aimee at your aimee-server (running in Docker or on Linux/macOS):"
+    Write-Host "  2. Point aimee at your aimee-server (running in Docker or on Linux):"
     Write-Host "       aimee remote set http://YOUR_SERVER:8740 YOUR_BEARER_TOKEN"
     Write-Host "       aimee remote status"
     Write-Host "     (or set AIMEE_SERVER_URL / AIMEE_SERVER_TOKEN, or pass --server per command)."

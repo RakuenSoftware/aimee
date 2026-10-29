@@ -1697,39 +1697,6 @@ int agent_http_patch(const char *url, const char *auth_header, const char *body,
    return status;
 }
 
-int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
-{
-   if (!response_buf)
-      return -1;
-   *response_buf = NULL;
-
-   parsed_url_t pu;
-   if (parse_url(url, &pu) < 0)
-      return -1;
-
-   http_conn_t conn;
-   if (conn_open(&conn, &pu, timeout_ms) < 0)
-      return -1;
-
-   if (send_request(&conn, "POST", &pu, "Content-Type: application/x-www-form-urlencoded", NULL,
-                    "originator: codex_cli_rs", "codex_cli/1.0", body, body ? strlen(body) : 0) < 0)
-   {
-      conn_close(&conn);
-      return -1;
-   }
-
-   size_t resp_len = 0;
-   int status = http_read_response(&conn, response_buf, &resp_len);
-   conn_close(&conn);
-
-   if (status < 0)
-   {
-      free(*response_buf);
-      *response_buf = NULL;
-   }
-   return status;
-}
-
 int agent_http_post_stream(const char *url, const char *auth_header, const char *body,
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers)
@@ -1773,30 +1740,6 @@ int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_heade
    return status;
 }
 
-int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)
-{
-   parsed_url_t pu;
-   if (parse_url(url, &pu) < 0)
-      return -1;
-
-   http_conn_t conn;
-   if (conn_open(&conn, &pu, timeout_ms) < 0)
-      return -1;
-
-   if (send_request(&conn, "DELETE", &pu, NULL, auth_header, NULL, "aimee/1.0", NULL, 0) < 0)
-   {
-      conn_close(&conn);
-      return -1;
-   }
-
-   char *response = NULL;
-   size_t resp_len = 0;
-   int status = http_read_response(&conn, &response, &resp_len);
-   conn_close(&conn);
-   free(response);
-   return status;
-}
-
 /* ================================================================
  * From: agent_tunnel.c
  * ================================================================ */
@@ -1814,26 +1757,6 @@ int agent_http_delete(const char *url, const char *auth_header, int timeout_ms)
 #endif
 
 /* --- State string conversion --- */
-
-const char *agent_tunnel_state_str(agent_tunnel_state_t state)
-{
-   switch (state)
-   {
-   case TUNNEL_STATE_IDLE:
-      return "idle";
-   case TUNNEL_STATE_CONNECTING:
-      return "connecting";
-   case TUNNEL_STATE_ACTIVE:
-      return "active";
-   case TUNNEL_STATE_RECONNECTING:
-      return "reconnecting";
-   case TUNNEL_STATE_FAILED:
-      return "failed";
-   case TUNNEL_STATE_STOPPED:
-      return "stopped";
-   }
-   return "unknown";
-}
 
 /* --- Internal: parse allocated port from ssh stderr --- */
 
@@ -2180,22 +2103,6 @@ void agent_tunnel_stop_all(agent_tunnel_mgr_t *mgr)
    }
 }
 
-void agent_tunnel_mgr_destroy(agent_tunnel_mgr_t *mgr)
-{
-   agent_tunnel_stop_all(mgr);
-   pthread_mutex_destroy(&mgr->lock);
-}
-
-agent_tunnel_t *agent_tunnel_find(agent_tunnel_mgr_t *mgr, const char *name)
-{
-   for (int i = 0; i < mgr->tunnel_count; i++)
-   {
-      if (strcmp(mgr->tunnels[i].name, name) == 0)
-         return &mgr->tunnels[i];
-   }
-   return NULL;
-}
-
 int agent_tunnel_resolve_entry(const agent_tunnel_mgr_t *mgr, const agent_network_t *network,
                                const agent_net_host_t *host, char *buf, size_t buf_len)
 {
@@ -2219,50 +2126,4 @@ int agent_tunnel_resolve_entry(const agent_tunnel_mgr_t *mgr, const agent_networ
    else
       buf[0] = '\0';
    return 0;
-}
-
-void agent_tunnel_print_status(const agent_tunnel_mgr_t *mgr, int json_output)
-{
-   if (json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < mgr->tunnel_count; i++)
-      {
-         const agent_tunnel_t *t = &mgr->tunnels[i];
-         cJSON *obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(obj, "name", t->name);
-         cJSON_AddStringToObject(obj, "state", agent_tunnel_state_str(t->state));
-         cJSON_AddStringToObject(obj, "relay", t->relay_ssh);
-         cJSON_AddStringToObject(obj, "target_host", t->target_host);
-         cJSON_AddNumberToObject(obj, "target_port", t->target_port);
-         cJSON_AddNumberToObject(obj, "allocated_port", t->allocated_port);
-         if (t->error[0])
-            cJSON_AddStringToObject(obj, "error", t->error);
-         cJSON_AddItemToArray(arr, obj);
-      }
-      char *json = cJSON_Print(arr);
-      if (json)
-      {
-         printf("%s\n", json);
-         free(json);
-      }
-      cJSON_Delete(arr);
-   }
-   else
-   {
-      if (mgr->tunnel_count == 0)
-      {
-         printf("No tunnels configured.\n");
-         return;
-      }
-      printf("%-12s %-12s %-30s %-20s %s\n", "TUNNEL", "STATE", "RELAY", "TARGET", "PORT");
-      for (int i = 0; i < mgr->tunnel_count; i++)
-      {
-         const agent_tunnel_t *t = &mgr->tunnels[i];
-         char target[80];
-         snprintf(target, sizeof(target), "%s:%d", t->target_host, t->target_port);
-         printf("%-12s %-12s %-30s %-20s %d\n", t->name, agent_tunnel_state_str(t->state),
-                t->relay_ssh, target, t->allocated_port);
-      }
-   }
 }

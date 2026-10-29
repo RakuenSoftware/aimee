@@ -16,9 +16,7 @@
 #include <openssl/sha.h>
 #include <stdarg.h>
 #include <stdint.h>
-#ifndef _WIN32
 #include <sys/file.h>
-#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -54,15 +52,6 @@ static const char *skill_bundled_dir(void)
       snprintf(path, sizeof(path), "%s", override);
       return path;
    }
-#ifdef _WIN32
-   const char *local = getenv("LOCALAPPDATA");
-   if (local && local[0])
-   {
-      snprintf(path, sizeof(path), "%s/aimee/skills", local);
-      return path;
-   }
-   const char *home = getenv("USERPROFILE");
-#else
    const char *xdg = getenv("XDG_DATA_HOME");
    if (xdg && xdg[0])
    {
@@ -70,7 +59,6 @@ static const char *skill_bundled_dir(void)
       return path;
    }
    const char *home = getenv("HOME");
-#endif
    if (home && home[0])
       snprintf(path, sizeof(path), "%s/.local/share/aimee/skills", home);
    else
@@ -1273,54 +1261,6 @@ int skill_eval_executable(const char *project_root, const char *name,
    return 0;
 }
 
-int skill_change_eval_gate_allows(const char *payload_json, double threshold, char *reason,
-                                  size_t reason_len)
-{
-   if (reason && reason_len > 0)
-      reason[0] = '\0';
-   cJSON *root = cJSON_Parse(payload_json ? payload_json : "");
-   if (!cJSON_IsObject(root))
-   {
-      cJSON_Delete(root);
-      return skill_set_err(reason, reason_len, "skill_change payload is not valid JSON"), 0;
-   }
-
-   cJSON *eval = cJSON_GetObjectItemCaseSensitive(root, "eval_result");
-   if (!cJSON_IsObject(eval))
-   {
-      cJSON_Delete(root);
-      return skill_set_err(reason, reason_len, "skill_change missing eval_result"), 0;
-   }
-
-   cJSON *passed_j = cJSON_GetObjectItemCaseSensitive(eval, "passed");
-   cJSON *status_j = cJSON_GetObjectItemCaseSensitive(eval, "status");
-   int passed = cJSON_IsTrue(passed_j) ||
-                (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "pass") == 0);
-   cJSON *delta_j = cJSON_GetObjectItemCaseSensitive(eval, "compliance_delta");
-   double delta = cJSON_IsNumber(delta_j) ? delta_j->valuedouble : 0.0;
-   if (!passed)
-   {
-      cJSON *msg = cJSON_GetObjectItemCaseSensitive(eval, "message");
-      skill_set_err(reason, reason_len,
-                    cJSON_IsString(msg) && msg->valuestring && msg->valuestring[0]
-                        ? msg->valuestring
-                        : "skill eval did not pass");
-      cJSON_Delete(root);
-      return 0;
-   }
-   if (delta < threshold)
-   {
-      if (reason && reason_len > 0)
-         snprintf(reason, reason_len, "skill eval delta %.3f is below threshold %.3f", delta,
-                  threshold);
-      cJSON_Delete(root);
-      return 0;
-   }
-
-   cJSON_Delete(root);
-   return 1;
-}
-
 static int skill_usage_path_source(const char *project_root, const char *name, char *usage_path,
                                    size_t usage_path_len, skill_source_t *source_out)
 {
@@ -1692,10 +1632,6 @@ static int skill_usage_write_root(const char *path, cJSON *root)
 
 static int skill_usage_lock(const char *path)
 {
-#ifdef _WIN32
-   (void)path;
-   return -2;
-#else
    char lock_path[SKILL_PATH_MAX + 16];
    snprintf(lock_path, sizeof(lock_path), "%s.lock", path);
    int fd = open(lock_path, O_CREAT | O_RDWR, 0600);
@@ -1707,20 +1643,15 @@ static int skill_usage_lock(const char *path)
       return -1;
    }
    return fd;
-#endif
 }
 
 static void skill_usage_unlock(int fd)
 {
-#ifndef _WIN32
    if (fd >= 0)
    {
       (void)flock(fd, LOCK_UN);
       close(fd);
    }
-#else
-   (void)fd;
-#endif
 }
 
 static int skill_json_int(cJSON *obj, const char *key)

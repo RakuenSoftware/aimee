@@ -1558,13 +1558,8 @@ static void test_canonical_catalog_only_projection(void)
 #include "support/offline_model_request_fixture.h"
 int main(int argc, char **argv)
 {
-#ifndef _WIN32
    if (argc > 1)
       return offline_model_request_diagnostic(argc, argv);
-#else
-   (void)argc;
-   (void)argv;
-#endif
    test_canonical_catalog_only_projection();
    test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();

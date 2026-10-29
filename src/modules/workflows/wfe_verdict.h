@@ -40,22 +40,4 @@ typedef enum
    WFE_GATE_DEGRADED     /* -> PENDING (panel could not be composed) */
 } wfe_gate_decision_t;
 
-/* Fail-closed scoring. `artifact_hash` is the lifecycle's hash of the artifact
- * under review. For each verdict: an unknown schema_version, or a
- * reviewed_content_hash != artifact_hash, or MALFORMED kind is coerced to
- * REQUEST_CHANGES (defends against approving a tampered/different artifact).
- * Decision:
- *   - DEGRADED if any required persona is missing a verdict;
- *   - CHANGES  if any unresolved high-severity blocker (any source), or the
- *              APPROVE count (COMMENT does NOT count) is below quorum;
- *   - APPROVE  otherwise.
- * `quorum` is the already-floored effective quorum (caller applies max(2,nreq)).
- */
-wfe_gate_decision_t wfe_gate_decide(const wfe_verdict_t *verdicts, int n,
-                                    const char *const *required, int nreq, int quorum,
-                                    const char *artifact_hash, char *reason, size_t rcap);
-
-/* The effective quorum: max(requested, 2, nreq) — the single-lens floor. */
-int wfe_gate_effective_quorum(int requested, int nreq);
-
 #endif /* DEC_WFE_VERDICT_H */

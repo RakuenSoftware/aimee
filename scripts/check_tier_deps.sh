@@ -112,7 +112,7 @@ path_scan '\\bkb_store_(init|shutdown)\\b' \
   src/kb/kb.c src/kb/kb_service.c src/modules/kb_client/kb_client.c src/cmd_kb.c
 path_scan 'KB_STORE_FORK_SPEC_SHARED_STORE|KB_STORE_FORK_SPEC_POSTGRES|kb_store_child_reopen_shared_store|kb_store_child_close_shared_store|kb_store_(open|close)_shared_store' \
   "non-KB_STORE code exposes legacy KB_STORE shared-store fork lifecycle" \
-  src/posix/memory.c src/posix/cmd_hooks.c src/windows/cmd_hooks.c src/modules/kb/c/kb_store.h src/modules/kb/c/lifecycle.h
+  src/posix/memory.c src/posix/cmd_hooks.c src/modules/kb/c/kb_store.h src/modules/kb/c/lifecycle.h
 scan '\\bkb_store_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \
   "KB_STORE transitional SQLite lifecycle outside src/modules/kb/c"
 public_header_scan '\\bkb_store_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \

@@ -20,13 +20,10 @@ extern "C"
    typedef int (*pgvec_kb_service_record_exists_fn)(int64_t record_id);
 
    int pgvec_kb_service_ensure_kb_collection(int dim);
-   int pgvec_kb_service_ensure_memory_collection(int dim);
 
    int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
                                           pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                           pgvec_kb_service_reconcile_result_t *out);
-   int pgvec_kb_service_upsert_document_point(int64_t doc_id, const float *vec, int dim,
-                                              const char *payload_json);
 
    /* Phase 5: code embedding helpers. */
    int pgvec_kb_service_ensure_code_collection(int dim);

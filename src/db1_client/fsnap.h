@@ -30,11 +30,6 @@ extern "C"
       int file_count;
    } fsnap_info_t;
 
-   /* Create a new snapshot in the given session at the given turn number.
-    * `label` is an optional free-form description (may be NULL).
-    * Returns the snapshot id (>0), or -1 on error. */
-   int64_t db1_fsnap_create(const char *session_id, int turn, const char *label);
-
    /* Return an existing snapshot id for (session_id, turn, label), or
     * create one if none exists. Used for auto-snapshots so all file
     * writes in a single turn share one snapshot. */
@@ -43,21 +38,6 @@ extern "C"
    /* Record the current content of `path` as part of snapshot `snap_id`.
     * Safe to call multiple times per path (the latest call wins). */
    int db1_fsnap_record_file(int64_t snap_id, const char *path);
-
-   /* Prune old snapshots for a session, keeping the N most recent.
-    * Returns number pruned, or -1 on error. */
-   int db1_fsnap_prune(const char *session_id, int keep);
-
-   /* List snapshots for a session, newest first. Returns count written. */
-   int db1_fsnap_list(const char *session_id, fsnap_info_t *out, int max);
-
-   /* Restore all files recorded in `snap_id` to their captured content.
-    * `files_restored` and `files_deleted` are optional counters.
-    * Returns 0 on success, -1 on error. */
-   int db1_fsnap_restore(int64_t snap_id, int *files_restored, int *files_deleted);
-
-   /* Look up snapshot info by id. Returns 0 on success, -1 if not found. */
-   int db1_fsnap_get(int64_t snap_id, fsnap_info_t *out);
 
 #ifdef __cplusplus
 }

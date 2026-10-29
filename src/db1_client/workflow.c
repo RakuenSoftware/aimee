@@ -21,16 +21,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static db1_family_t family = {"db1.workflow", "workflow", AIMEE_DB1_EVENT_WORKFLOW, AIMEE_DB1_STAGE_WORKFLOW, 2000, 0};
-
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
-
 
 int db1_execution_trace_insert(const db1_execution_trace_insert_row_t *row)
 {
@@ -42,18 +39,6 @@ int db1_execution_trace_insert(const db1_execution_trace_insert_row_t *row)
    snprintf(arg2, sizeof arg2, "%d", row->turn);
    const char *fields[] = {arg0, row->session_id ? row->session_id : "", arg2, row->direction ? row->direction : "", row->content ? row->content : "", row->tool_name ? row->tool_name : "", row->tool_args ? row->tool_args : "", row->tool_result ? row->tool_result : "", row->context_hash ? row->context_hash : ""};
    return write_result(db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_INSERT, fields, 9, NULL, NULL, 0, NULL));
-}
-
-int db1_execution_trace_count_for_session(const char *session_id)
-{
-   const char *fields[] = {session_id ? session_id : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_COUNT_FOR_SESSION, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
 }
 
 int db1_execution_trace_list_recent(db1_execution_trace_recent_row_t *out, int max)
@@ -109,30 +94,6 @@ int db1_execution_trace_list_recent(db1_execution_trace_recent_row_t *out, int m
    return wire_rows;
 }
 
-int db1_execution_trace_get(int trace_id, db1_execution_trace_detail_t *out)
-{
-   if (!out)
-      return -1;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", trace_id);
-   const char *fields[] = {arg0};
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, slot1, slot2, out->direction, out->content, out->tool_name, out->tool_args, out->tool_result, out->context_hash, out->created_at};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->direction, sizeof out->content, sizeof out->tool_name, sizeof out->tool_args, sizeof out->tool_result, sizeof out->context_hash, sizeof out->created_at};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_GET, fields, 1, values, caps, 10, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->id = (int)strtol(slot0, NULL, 10);
-   out->plan_id = (int)strtol(slot1, NULL, 10);
-   out->turn = (int)strtol(slot2, NULL, 10);
-   return 0;
-}
-
 int db1_execution_trace_list_tool_calls(db1_execution_trace_tool_call_t *out, int max)
 {
    if (!out || max <= 0)
@@ -185,66 +146,6 @@ int db1_execution_trace_list_tool_calls(db1_execution_trace_tool_call_t *out, in
    return wire_rows;
 }
 
-int db1_execution_trace_list_after_id(int64_t after_id, db1_execution_trace_mining_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 128)
-      max = 128;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%lld", (long long)after_id);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {arg0, arg1};
-   char **wire_values = malloc((size_t)max * 7u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 7u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 3u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 7u + 0u] = wire_scratch[wire_row * 3u + 0u];
-      wire_caps[wire_row * 7u + 0u] = sizeof wire_scratch[wire_row * 3u + 0u];
-      wire_values[wire_row * 7u + 1u] = wire_scratch[wire_row * 3u + 1u];
-      wire_caps[wire_row * 7u + 1u] = sizeof wire_scratch[wire_row * 3u + 1u];
-      wire_values[wire_row * 7u + 2u] = wire_scratch[wire_row * 3u + 2u];
-      wire_caps[wire_row * 7u + 2u] = sizeof wire_scratch[wire_row * 3u + 2u];
-      wire_values[wire_row * 7u + 3u] = out[wire_row].direction;
-      wire_caps[wire_row * 7u + 3u] = sizeof out[wire_row].direction;
-      wire_values[wire_row * 7u + 4u] = out[wire_row].tool_name;
-      wire_caps[wire_row * 7u + 4u] = sizeof out[wire_row].tool_name;
-      wire_values[wire_row * 7u + 5u] = out[wire_row].tool_args;
-      wire_caps[wire_row * 7u + 5u] = sizeof out[wire_row].tool_args;
-      wire_values[wire_row * 7u + 6u] = out[wire_row].tool_result;
-      wire_caps[wire_row * 7u + 6u] = sizeof out[wire_row].tool_result;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 7), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 7u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 7u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 0u], NULL, 10);
-      out[wire_row].plan_id = (int)strtol(wire_scratch[wire_row * 3u + 1u], NULL, 10);
-      out[wire_row].turn = (int)strtol(wire_scratch[wire_row * 3u + 2u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
 int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *enforce_stage)
 {
    if (!session_id || !session_id[0] || !work_item_id || !work_item_id[0])
@@ -274,14 +175,6 @@ int db1_wfe_binding_get(const char *session_id, char *wi_out, size_t wi_n, char 
    return 1;
 }
 
-int db1_wfe_unbind(const char *session_id)
-{
-   if (!session_id || !session_id[0])
-      return -1;
-   const char *fields[] = {session_id};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_WFE_UNBIND, fields, 1, NULL, NULL, 0, NULL));
-}
-
 int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
 {
    if (!session_id || !session_id[0])
@@ -290,57 +183,6 @@ int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
    snprintf(arg1, sizeof arg1, "%d", ttl_secs);
    const char *fields[] = {session_id, arg1};
    return write_result(db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_RENEW, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
-{
-   if (!session_id || !session_id[0] || !out || n == 0)
-      return -1;
-   const char *fields[] = {session_id};
-   char *const values[] = {out};
-   const size_t caps[] = {n};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
-   }
-   return 1;
-}
-
-int db1_wfe_lease_stale_work_items(char (*out)[DB1_WFE_WORK_ITEM_ID_LEN], int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", max);
-   const char *fields[] = {arg0};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = out[wire_row];
-      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   return wire_rows;
 }
 
 int db1_wfe_lease_reclaim_stale()
@@ -512,152 +354,6 @@ int db1_pipeline_list_active(db1_pipeline_t *out, int max)
    }
    free(wire_scratch);
    return wire_rows;
-}
-
-int db1_roadmap_dispatch_upsert(const char *roadmap_id, const char *token_profile, int require_slice_discussion, int budget_ceiling_tokens)
-{
-   if (!roadmap_id || !roadmap_id[0])
-      return -1;
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", require_slice_discussion);
-   char arg3[32];
-   snprintf(arg3, sizeof arg3, "%d", budget_ceiling_tokens);
-   const char *fields[] = {roadmap_id, token_profile ? token_profile : "", arg2, arg3};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT, fields, 4, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
-{
-   if (!roadmap_id || !roadmap_id[0] || !out)
-      return -1;
-   const char *fields[] = {roadmap_id};
-   char slot0[32];
-   char slot5[32];
-   char slot6[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, out->roadmap_id, out->status, out->phase, out->token_profile, slot5, slot6, out->exit_reason, out->created_at, out->updated_at};
-   const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->status, sizeof out->phase, sizeof out->token_profile, sizeof slot5, sizeof slot6, sizeof out->exit_reason, sizeof out->created_at, sizeof out->updated_at};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_GET, fields, 1, values, caps, 10, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->id = (int)strtol(slot0, NULL, 10);
-   out->require_slice_discussion = (int)strtol(slot5, NULL, 10);
-   out->budget_ceiling_tokens = (int)strtol(slot6, NULL, 10);
-   return 0;
-}
-
-int db1_roadmap_dispatch_set_status(const char *roadmap_id, const char *status, const char *exit_reason)
-{
-   if (!roadmap_id || !roadmap_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, status ? status : "", exit_reason ? exit_reason : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS, fields, 3, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase)
-{
-   if (!roadmap_id || !roadmap_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, phase ? phase : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level, const char *tool_policy_mode)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id, level ? level : "", tool_policy_mode ? tool_policy_mode : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE, fields, 4, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0] || !out)
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id};
-   char slot0[32];
-   char slot9[32];
-   char slot10[32];
-   char slot12[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, out->roadmap_id, out->unit_id, out->level, out->state, out->tool_policy_mode, out->claimed_by, out->claimed_at, out->heartbeat_at, slot9, slot10, out->worktree_path, slot12, out->result, out->error, out->created_at, out->updated_at};
-   const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->unit_id, sizeof out->level, sizeof out->state, sizeof out->tool_policy_mode, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->heartbeat_at, sizeof slot9, sizeof slot10, sizeof out->worktree_path, sizeof slot12, sizeof out->result, sizeof out->error, sizeof out->created_at, sizeof out->updated_at};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_GET, fields, 2, values, caps, 17, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->id = (int)strtol(slot0, NULL, 10);
-   out->verify_attempts = (int)strtol(slot9, NULL, 10);
-   out->dispatch_attempts = (int)strtol(slot10, NULL, 10);
-   out->coord_job_id = (int)strtol(slot12, NULL, 10);
-   return 0;
-}
-
-int db1_roadmap_unit_set_state(const char *roadmap_id, const char *unit_id, const char *state)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id, state ? state : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE, fields, 3, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner, const char *worktree_path)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id, owner ? owner : "", worktree_path ? worktree_path : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM, fields, 4, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const char *state, const char *result, const char *error)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id, state ? state : "", result ? result : "", error ? error : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_FINISH, fields, 5, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", coord_job_id);
-   const char *fields[] = {roadmap_id, unit_id, arg2};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB, fields, 3, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id)
-{
-   if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
-      return -1;
-   const char *fields[] = {roadmap_id, unit_id};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len)
-{
-   if (!roadmap_id || !roadmap_id[0] || !out_unit_id || len == 0)
-      return -1;
-   const char *fields[] = {roadmap_id};
-   char slot_rc[32];
-   char *const values[] = {out_unit_id, slot_rc};
-   const size_t caps[] = {len, sizeof slot_rc};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT, fields, 1, values, caps, 2, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtol(slot_rc, NULL, 10);
 }
 
 int db1_execution_plan_create(const char *agent_name, const char *task, const char *steps_json)
@@ -1464,50 +1160,6 @@ int db1_execution_plan_get(int plan_id, plan_t *out)
    return 0;
 }
 
-int db1_execution_plan_list_ids(int *out_ids, int max)
-{
-   if (!out_ids || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", max);
-   const char *fields[] = {arg0};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
-      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_LIST_IDS, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out_ids[wire_row] = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
 int db1_execution_plan_exists(int plan_id)
 {
    char arg0[32];
@@ -1531,50 +1183,6 @@ int db1_execution_plan_count_steps(int plan_id)
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_execution_plan_list_running_ids(int *out_ids, int max)
-{
-   if (!out_ids || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", max);
-   const char *fields[] = {arg0};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
-      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RUNNING_IDS, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out_ids[wire_row] = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
 }
 
 int db1_execution_plan_list_recent_summaries(db1_execution_plan_summary_t *out, int max)
@@ -1635,20 +1243,6 @@ int db1_execution_plan_list_recent_summaries(db1_execution_plan_summary_t *out, 
    return wire_rows;
 }
 
-int db1_execution_plan_set_status(int plan_id, const char *status)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", plan_id);
-   const char *fields[] = {arg0, status ? status : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_SET_STATUS, fields, 2, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
 int db1_execution_plan_cancel_by_id(int plan_id, const char *reason)
 {
    char arg0[32];
@@ -1661,106 +1255,6 @@ int db1_execution_plan_cancel_by_id(int plan_id, const char *reason)
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_execution_plan_cancel_stale(int threshold_seconds, const char *reason)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", threshold_seconds);
-   const char *fields[] = {arg0, reason ? reason : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_STALE, fields, 2, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_plan_step_set_status(int step_id, const char *status)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", step_id);
-   const char *fields[] = {arg0, status ? status : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_SET_STATUS, fields, 2, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_plan_step_set_status_output(int step_id, const char *status, const char *output)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", step_id);
-   const char *fields[] = {arg0, status ? status : "", output ? output : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_SET_STATUS_OUTPUT, fields, 3, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_plan_step_cancel_active_for_plan(int plan_id)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", plan_id);
-   const char *fields[] = {arg0};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_CANCEL_ACTIVE_FOR_PLAN, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_plan_step_cancel_orphans()
-{
-   const char *const *fields = NULL;
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_CANCEL_ORPHANS, fields, 0, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_step_evidence_insert(int plan_id, int step_id, const char *kind, const char *content, int passed, const char *strength)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", plan_id);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", step_id);
-   char arg4[32];
-   snprintf(arg4, sizeof arg4, "%d", passed);
-   const char *fields[] = {arg0, arg1, kind ? kind : "", content ? content : "", arg4, strength ? strength : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_STEP_EVIDENCE_INSERT, fields, 6, NULL, NULL, 0, NULL));
-}
-
-int db1_step_evidence_get_latest(int step_id, db1_step_evidence_latest_t *out)
-{
-   if (!out)
-      return -1;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", step_id);
-   const char *fields[] = {arg0};
-   char slot1[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {out->strength, slot1, out->kind, out->created_at};
-   const size_t caps[] = {sizeof out->strength, sizeof slot1, sizeof out->kind, sizeof out->created_at};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST, fields, 1, values, caps, 4, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->passed = (int)strtol(slot1, NULL, 10);
-   return 0;
 }
 
 /* clang-format on */

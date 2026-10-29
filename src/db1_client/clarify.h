@@ -78,18 +78,6 @@ extern "C"
 
    /* --- Scoring and question generation --- */
 
-   float db1_clarify_score(const clarify_session_t *s);
-
-   void db1_clarify_weakest_dim(const clarify_session_t *s, char *dim_out, size_t len);
-
-   /* Returns 0 if a question was generated, 1 if already ready, -1 if max
-    * rounds reached. */
-   int db1_clarify_next_question(const clarify_session_t *s, char *q_out, size_t q_len,
-                                 char *dim_out, size_t dim_len);
-
-   /* Returns malloc'd string (caller frees). */
-   char *db1_clarify_crystallize(const clarify_session_t *s);
-
    /* --- Serialisation --- */
 
    /* Returns malloc'd JSON string (caller frees). */

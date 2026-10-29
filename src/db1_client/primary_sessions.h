@@ -57,10 +57,7 @@ extern "C"
    /* Complete bounded session owner list, including other native models/SDKs. */
    int db1_session_native_active_owned(const char *principal, const char *session_id,
                                        char **out_json);
-   char *db1_session_native_reservation_lookup(const char *principal, const char *request_json);
    int db1_session_native_owner_claim(const char *principal, const char *request_json);
-   int db1_session_native_reconcile(const char *principal, const char *request_json,
-                                    char out_sequence[32]);
 
    /* Canonical ordered session log. Append returns an exact decimal sequence
     * into out_sequence[32]; retrying an event ID is idempotent only when every

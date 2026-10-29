@@ -112,29 +112,6 @@ static void test_conn_string_malformed(void)
    printf("  conn_string_malformed: ok\n");
 }
 
-/* ---- 6. single-use registry: issue / consume / replay / reset ---- */
-static void test_registry_single_use(void)
-{
-   kb_enroll_registry_reset();
-   char tok[KB_ENROLL_TOKEN_MAX], scope[128];
-   assert(kb_enroll_registry_issue("project:X", tok, sizeof(tok)) == 0);
-   assert(kb_enroll_registry_consume(tok, scope, sizeof(scope)) == 1); /* first use */
-   assert(strcmp(scope, "project:X") == 0);                            /* scope returned */
-   assert(kb_enroll_registry_consume(tok, scope, sizeof(scope)) == 0); /* replay rejected */
-   assert(kb_enroll_registry_consume("never-issued", scope, sizeof(scope)) == 0); /* unknown */
-
-   /* a second issued token is independent */
-   char tok2[KB_ENROLL_TOKEN_MAX];
-   assert(kb_enroll_registry_issue("global", tok2, sizeof(tok2)) == 0);
-   assert(strcmp(tok, tok2) != 0);
-   assert(kb_enroll_registry_consume(tok2, scope, sizeof(scope)) == 1);
-   assert(strcmp(scope, "global") == 0);
-
-   kb_enroll_registry_reset();
-   assert(kb_enroll_registry_consume(tok2, scope, sizeof(scope)) == 0); /* gone after reset */
-   printf("  registry_single_use: ok\n");
-}
-
 /* ---- 7. file-backed single-use store: issue / consume / replay / persist ---- */
 static void test_store_single_use(void)
 {
@@ -427,7 +404,6 @@ int main(void)
    test_token_verify();
    test_conn_string_roundtrip();
    test_conn_string_malformed();
-   test_registry_single_use();
    test_store_single_use();
    test_mint();
    test_redeem();

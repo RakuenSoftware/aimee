@@ -83,11 +83,6 @@ typedef struct
  * purpose of this table is that a name resolves one way. */
 int aimee_command_register(const aimee_command_t *cmd);
 
-/* Register a contiguous array in one call, for a module declaring its set at bus
- * connect. Stops and returns -1 at the first failure, having registered the
- * entries before it -- the caller is expected to treat that as fatal. */
-int aimee_command_register_many(const aimee_command_t *cmds, size_t n);
-
 /* Drop every command registered by `module`, returning how many were removed.
  *
  * Registration is otherwise append-only, which was right while every registrant

@@ -80,9 +80,6 @@ typedef struct
    int (*publish_base)(const char *repo, const char *branch);
 } wfe_forge_t;
 
-/* Install a forge provider (NULL restores the default live/gh provider). */
-void wfe_set_forge_provider(const wfe_forge_t *p);
-
 /* ---- Delegate seam for the producing blocks (author/implement/document).
  * The wfe library must not depend on server/ delegate internals
  * (module-boundary-check), so blocks dispatch real delegate work through this
@@ -105,14 +102,6 @@ typedef struct
               const char *artifact_path, char out_commit_sha[64], char *err, size_t errlen);
 } wfe_delegate_provider_t;
 
-/* Classify the stable no-op diagnostics emitted by delegate_detect_noop_write.
- * Kept here so the server bridge can preserve NO_CHANGE across the coord queue
- * without treating unrelated delegate failures as acceptable no-ops. */
-int wfe_delegate_error_is_no_change(const char *error);
-
-/* Install a delegate provider (NULL restores the default fail-closed provider). */
-void wfe_set_delegate_provider(const wfe_delegate_provider_t *p);
-
 /* ---- Mechanical verify seam for the implement manager loop (WP-1b).
  * implement only advances a unit that PASSES the mechanical gate. The wfe library
  * must not call the server's git_verify directly (module-boundary-check), so it
@@ -130,9 +119,6 @@ typedef struct
    int (*verify)(const char *workdir, char *out_verdict, size_t n);
 } wfe_verify_provider_t;
 
-/* Install a verify provider (NULL = implement does not gate on verification). */
-void wfe_set_verify_provider(const wfe_verify_provider_t *p);
-
 /* ---- Adversarial judge seam for the implement manager loop (PC3 / Q2).
  * On top of the mechanical verify, implement can run a REVIEW + N adversarial
  * SKEPTIC judgments of the produced change. The wfe library cannot dispatch judge
@@ -149,9 +135,6 @@ typedef struct
     * run (treated as REFUTED — fail closed). */
    int (*judge)(const char *workdir, const char *lens, char *out_verdict, size_t n);
 } wfe_judge_provider_t;
-
-/* Install a judge provider (NULL restores the default fail-closed provider). */
-void wfe_set_judge_provider(const wfe_judge_provider_t *p);
 
 /* The implement ADVERSARIAL gate (PC3): with AIMEE_AUTONOMY_SKEPTICS=K>0, run a
  * reviewer + K skeptic judgments; accept (1) only if the reviewer did not refute AND
@@ -228,13 +211,6 @@ typedef struct
                 int max_children, char *err, size_t errlen);
 } wfe_foreach_provider_t;
 
-/* Install a child-workflow spawn provider (NULL restores the default park). */
-void wfe_set_foreach_provider(const wfe_foreach_provider_t *p);
-
-/* Register only the foreach.workflow executor (test seam: stub the rest, drive the
- * real fan-in aggregation). */
-void wfe_register_foreach_block(void);
-
 /* ---- per-work-item git worktree isolation (F2) ----
  * Create/return a locked per-work-item worktree (aimee/wi/<id>) so concurrent
  * autonomous runs don't share one checkout; tear it down on terminal. Exposed for
@@ -242,7 +218,6 @@ void wfe_register_foreach_block(void);
  * caller falls back to the shared repo dir). */
 int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
                         const char *base, char *out_path, size_t n);
-int wfe_worktree_cleanup(const char *worktree, const char *repo_local);
 
 /* Orphan GC: reap wfe-worktrees/<id> dirs that no LIVE (non-terminal) work item
  * owns — a vanished row (deleted item) or a terminal row whose terminal-cleanup

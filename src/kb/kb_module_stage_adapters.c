@@ -373,25 +373,6 @@ static int embed_text(const char *text, const char *command, int input_type, flo
               : 0;
 }
 
-int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
-{
-   uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
-   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN] = {0};
-   uint32_t response_len = 0;
-   if (schema_ok)
-      *schema_ok = 0;
-   if (have_pg_trgm)
-      *have_pg_trgm = 0;
-   if (kb_tables_ok)
-      *kb_tables_ok = 0;
-   if (aimee_postgres_health_request_encode(request, sizeof(request)) != 0 ||
-       call_module(AIMEE_POSTGRES_EVENT_HEALTH, AIMEE_POSTGRES_STAGE_HEALTH, request,
-                   sizeof(request), response, sizeof(response), &response_len) != 0)
-      return -1;
-   return aimee_postgres_health_response_decode(response, response_len, schema_ok, have_pg_trgm,
-                                                kb_tables_ok);
-}
-
 /* Signal classification, for the router that runs HERE. The signal-capture
  * route is served by the KB -- that is where the learning tables live -- but
  * the classifier was registered only by the daemon, so every signal reaching

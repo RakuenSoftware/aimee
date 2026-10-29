@@ -102,12 +102,6 @@ static int docker_build_exec_command(const char *container_name, const char *wra
    return 0;
 }
 
-int delegate_backend_docker_build_exec_command(const char *container_name,
-                                               const char *wrapped_script, char **out_cmd)
-{
-   return docker_build_exec_command(container_name, wrapped_script, 0, out_cmd);
-}
-
 /* --- container lifecycle --- */
 
 typedef struct

@@ -12,6 +12,7 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include <aimee/audit/obs_bus.h>
+#include "support/config_test_setters.h"
 
 /* The learned toolchain moved to the sandbox module, so resolving a sandbox
  * image now asks the bus for it. No bus runs in a unit test: report the module

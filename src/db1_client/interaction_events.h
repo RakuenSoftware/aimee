@@ -51,14 +51,6 @@ extern "C"
    char *db1_execution_test_grade_recall(const char *principal, const char *project,
                                          const char *sources_json);
 
-   int db1_interaction_event_list_unreflected(const char *session_id, ie_event_row_t *out, int max);
-   int db1_interaction_event_list_for_session(const char *session_id, ie_event_row_t *out, int max);
-   int db1_interaction_event_mark_reflected(const int *ids, int count);
-   int db1_interaction_event_list_promotion_feed(ie_event_row_t *out, int max);
-   int db1_interaction_event_mark_promoted(const int *ids, int count);
-
-   int db1_interaction_event_evict_if_needed(int cap);
-
 #ifdef __cplusplus
 }
 #endif

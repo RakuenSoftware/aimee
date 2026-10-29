@@ -48,7 +48,7 @@ Install the shared Aimee thinclient (`libaimee-client.so`) and set `aimee_librar
 Build that normal CMake target from this checkout with:
 
 ```sh
-cmake -S . -B build/discord-client -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON
+cmake -S . -B build/discord-client -DAIMEE_LEAN=ON
 cmake --build build/discord-client --target aimee-client
 ```
 

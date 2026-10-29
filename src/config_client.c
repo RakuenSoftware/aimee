@@ -252,23 +252,6 @@ static cJSON *config_client_indexed_locked(const char *key, int index, const cha
    return value;
 }
 
-int config_client_read_indexed_number(const char *key, int index, const char *member, double *out)
-{
-   if (!key || !out)
-      return -1;
-   pthread_mutex_lock(&g_config_client_lock);
-   int rc = config_client_ensure_locked();
-   cJSON *value = rc == 0 ? config_client_indexed_locked(key, index, member) : NULL;
-   if (cJSON_IsBool(value))
-      *out = cJSON_IsTrue(value) ? 1.0 : 0.0;
-   else if (cJSON_IsNumber(value))
-      *out = value->valuedouble;
-   else
-      rc = -1;
-   pthread_mutex_unlock(&g_config_client_lock);
-   return rc;
-}
-
 int config_client_read_indexed_string(const char *key, int index, const char *member, char *out,
                                       size_t n)
 {

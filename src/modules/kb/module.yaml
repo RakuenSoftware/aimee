@@ -130,7 +130,6 @@
     "src/modules/kb/c/vault_pg.c",
     "src/modules/kb/c/vector_index_ops.c",
     "src/modules/kb/c/vector_status.c",
-    "src/modules/kb/c/workflow_patterns.c",
     "src/modules/kb/c/write_tier_grant.c"
   ],
   "private_headers": [

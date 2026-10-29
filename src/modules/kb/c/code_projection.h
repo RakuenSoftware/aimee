@@ -61,10 +61,6 @@ extern "C"
    int kb_store_code_projection_generation_update_counts(int64_t gen_id, int64_t edge_count,
                                                          int64_t node_count);
 
-   /* Delete superseded/aborted generations older than min_days_old.
-    * CASCADE deletes their code_projection_edges rows.  Returns deleted count. */
-   int kb_store_code_projection_cleanup_old(const char *project, int min_days_old);
-
    /* --- Edge ledger --- */
 
    /* Record a projected edge in the bookkeeping table.  Returns 0 on success,

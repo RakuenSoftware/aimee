@@ -43,19 +43,11 @@ RULES = Path("src/tests/Rules.mk")
 # removed, which the check below enforces so the list cannot rot into a place
 # things hide.
 UNBUILT_SOURCES = {
-    "test_audit_action.c",
-    "test_audit_action_log.c",
-    "test_audit_ledger.c",
     "test_bus_plugin_process.c",
     "test_bus_plugin_scale.c",
-    "test_git_oauth_device.c",
-    "test_git_oauth_gh.c",
-    "test_git_oauth_github.c",
-    "test_git_org_repos.c",
     "test_identity_authority_facade_pg.c",
     "test_kb_mgmt_token_authority_client_commit.c",
     "test_kb_mgmt_token_authority_daemon_stop.c",
-    "test_self_update.c",
 }
 
 # Targets the ordinary suite cannot run, and the reason. A -pg target needs a

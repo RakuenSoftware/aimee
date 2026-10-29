@@ -213,37 +213,6 @@ static void test_projection_rebuild_identity(void)
    printf("  projection_rebuild_identity: ok\n");
 }
 
-/* ---- 6. roadmap_new via injectable decomposer ---- */
-static int stub_decomposer(const char *goal, const char *depth, const char *profile,
-                           char **out_json, void *ud)
-{
-   (void)goal;
-   (void)depth;
-   (void)profile;
-   (void)ud;
-   *out_json = strdup(GOOD_DECOMP);
-   return 0;
-}
-
-static void test_new_via_decomposer(void)
-{
-   open_db();
-
-   /* no decomposer registered -> -1 */
-   roadmap_set_decomposer(NULL, NULL);
-   char rid[64] = "";
-   assert(roadmap_new("g", "standard", "balanced", rid, sizeof(rid)) == -1);
-
-   /* with a stub decomposer -> commits */
-   roadmap_set_decomposer(stub_decomposer, NULL);
-   assert(roadmap_new("g", "standard", "balanced", rid, sizeof(rid)) == 0);
-   assert(rid[0] != '\0');
-
-   roadmap_set_decomposer(NULL, NULL);
-   close_db();
-   printf("  new_via_decomposer: ok\n");
-}
-
 /* ---- 7. roadmap_show_json / roadmap_list_json return the tree as JSON ---- */
 static void test_show_and_list_json(void)
 {
@@ -305,7 +274,6 @@ int main(void)
    test_validate_rejects_bad_leaf();
    test_create_commits();
    test_projection_rebuild_identity();
-   test_new_via_decomposer();
    test_show_and_list_json();
    printf("All roadmap tests passed.\n");
    return 0;

@@ -1,6 +1,5 @@
-/* Gateway MCP results. No delivery owner is currently wired into the server. */
+/* ask_user MCP results: format a question for the requesting client to present. */
 #include "server_mcp_gateway.h"
-#include "delivery_target.h"
 #include <cJSON.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -94,19 +93,6 @@ cJSON *mcp_gateway_tool_dispatch(const char *tool, cJSON *jargs)
 {
    if (!tool || !jargs)
       return NULL;
-   if (!strcmp(tool, "send_message"))
-   {
-      const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "text"));
-      const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "target"));
-      if (!text || !text[0])
-         return tool_result("error: text required", 1);
-      if (!target || !target[0])
-         return tool_result("error: target required", 1);
-      delivery_target_t parsed;
-      if (delivery_target_parse(target, &parsed))
-         return tool_result("error: target invalid", 1);
-      return tool_result("error: gateway delivery unavailable; no message was sent", 1);
-   }
    if (!strcmp(tool, "ask_user"))
    {
       const char *question =

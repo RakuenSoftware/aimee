@@ -67,24 +67,6 @@ int agent_has_role(const agent_t *agent, const char *role)
    return 0;
 }
 
-/* 1 if the agent may be dispatched AS `persona`. An agent with no personas list
- * (backward-compatible default) or one containing the "all" wildcard serves any
- * persona; otherwise the persona must be listed. A NULL/empty persona is treated
- * as unconstrained (routing then depends on role alone). */
-int agent_supports_persona(const agent_t *agent, const char *persona)
-{
-   if (!agent)
-      return 0;
-   if (!persona || !persona[0] || agent->persona_count == 0)
-      return 1;
-   for (int i = 0; i < agent->persona_count; i++)
-   {
-      if (strcmp(agent->personas[i], "all") == 0 || strcmp(agent->personas[i], persona) == 0)
-         return 1;
-   }
-   return 0;
-}
-
 /* Selection eligibility is exactly role membership: an agent serves `role` iff
  * it declares the `all` wildcard or the role itself (agent_has_role). There is
  * deliberately NO exec-role fallback here — a role an agent did not declare is a
@@ -196,22 +178,6 @@ static int (*g_route_capacity_probe)(const char *agent_name) = NULL;
 void agent_set_route_capacity_probe(int (*fn)(const char *agent_name))
 {
    g_route_capacity_probe = fn;
-}
-
-/* How many delegates is this agent running right now, or -1 when that is not
- * knowable here (no probe registered, or the controller is unconfigured).
- *
- * Exposed so the agent list served over /v1 can publish live occupancy. The Go
- * WFE routes seats in a separate process and cannot call the in-process probe
- * above, so without this it can only see max_parallel and will happily seat an
- * agent that is already saturated — the seat then fails at admission with
- * AGENT_RC_AT_LIMIT. Keeps the same hook indirection, so this unit still has no
- * link dependency on the admission controller. */
-int agent_route_agent_active(const char *agent_name)
-{
-   if (!g_route_capacity_probe || !agent_name || !agent_name[0])
-      return -1;
-   return g_route_capacity_probe(agent_name);
 }
 
 /* Does this agent have a free concurrency slot right now? Returns 1 when it

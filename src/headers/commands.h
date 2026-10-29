@@ -51,14 +51,6 @@ int detect_project_stacks(const char *dir, stack_info_t out[], int max_stacks);
 /* Write .aimee-rules template for dir. Returns 0 on success, 1 if already exists, -1 on error. */
 int write_aimee_rules_file(const char *dir, const stack_info_t *stacks, int count);
 
-/* Write a story-bible .aimee-rules scaffold for novel mode (premise, voice,
- * characters, setting, timeline) instead of the engineering stack doc.
- * Returns 0 on success, 1 if already exists, -1 on error. */
-int write_novel_rules_file(const char *dir);
-
-/* Write a songbook .aimee-rules scaffold for songwriter mode (concept, voice,
- * structure, hook). Returns 0 on success, 1 if already exists, -1 on error. */
-int write_songbook_rules_file(const char *dir);
 /* cli_workspace_serve.c: client-side detached-workspace runner serve loop. */
 int cmd_workspace_serve(const char *workspace_id);
 /* cmd_ensemble.c — multi-agent ensemble sessions (canonical `ensemble` verb;
@@ -88,9 +80,6 @@ void cmd_learning(app_ctx_t *ctx, int argc, char **argv);
 /* cmd_dogfood.c */
 void cmd_dogfood(app_ctx_t *ctx, int argc, char **argv);
 
-/* cmd_identity.c */
-void cmd_identity(app_ctx_t *ctx, int argc, char **argv);
-
 /* JSON accessors reused by MCP and dashboard surfaces. Caller owns
  * the returned cJSON object and must cJSON_Delete() it. */
 struct cJSON;
@@ -116,7 +105,6 @@ void cmd_feedback_minus(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_hooks.c */
 void cmd_hooks(app_ctx_t *ctx, int argc, char **argv);
-void cmd_session_start(app_ctx_t *ctx, int argc, char **argv);
 /* Shared body of session-start. CLI uses stdin/stdout; server RPC reads the
  * hook payload off the wire and writes into an open_memstream so it can echo
  * the captured brief back to the thin client. */
@@ -125,8 +113,6 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out);
  * (session.brief_assemble). Side-effect-free: build_session_context only, none
  * of session_start_emit's worktree/state/reindex work. */
 void session_brief_emit(FILE *out);
-void cmd_launch(app_ctx_t *ctx, int argc, char **argv);
-void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_agent.c */
 void cmd_agent(app_ctx_t *ctx, int argc, char **argv);
@@ -201,9 +187,6 @@ const subcmd_t *get_aux_subcmds(void);
 
 /* Platform gateway command. */
 void cmd_gateway(app_ctx_t *ctx, int argc, char **argv);
-
-/* cmd_describe.c */
-void cmd_describe(app_ctx_t *ctx, int argc, char **argv);
 
 /* describe_read: read project description file. Caller owns returned string (or NULL). */
 char *describe_read(const char *project_name);

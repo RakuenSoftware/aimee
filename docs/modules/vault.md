@@ -55,10 +55,8 @@ as `private_headers` because they live at the module root rather than under
 always compiled by Make: `WITH_TPM2` and `WITH_PKCS11` toggle a `-D` flag that switches the tpm2 and
 pkcs11 sources between a real implementation and a fail-closed stub rather than omitting them.
 `vault_hwm.c` has no external includer but is live: `vault_custody_kms.c` calls
-`vault_hwm_attest_verify` in its high-water-mark attestation path. CMake compiles the six sources the
-thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
-`vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
-`vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
+`vault_hwm_attest_verify` in its high-water-mark attestation path. The CMake
+thin client compiles no vault source, the same intentional thin-client boundary recorded for
 gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the declaration audit and
 `docs/validation/core-modularization-slice-47.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root

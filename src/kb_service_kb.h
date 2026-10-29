@@ -9,7 +9,6 @@
 char *kb_service_status_json(const char *project);
 char *kb_service_health_json(void);
 char *kb_service_ingest_status_json(void);
-int kb_handle_ingest(int fd, cJSON *req);
 int kb_handle_maintenance_run(int fd, cJSON *req);
 int kb_handle_kb_export(int fd, cJSON *req);
 int kb_handle_kb_import(int fd, cJSON *req);

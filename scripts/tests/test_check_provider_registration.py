@@ -24,14 +24,7 @@ SPEC = importlib.util.spec_from_file_location("provider_registration_checker", S
 CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 
-CMAKE = """
-set(KB_SRCS
-    ${AIMEE_SRC_DIR}/modules/thing/thing.c
-)
-set(SERVER_SRCS
-    ${AIMEE_SRC_DIR}/modules/other/other.c
-)
-"""
+BUILT = {"kb": {"modules/thing/thing.c"}, "server": {"modules/other/other.c"}}
 
 # The consumer: it owns the pointer, and goes null without a registration.
 THING_C = """
@@ -56,6 +49,14 @@ void other_register_provider(other_fn provider)
 
 
 class ProviderRegistrationTest(unittest.TestCase):
+    _real_built = None
+
+    @classmethod
+    def real_built(cls):
+        if cls._real_built is None:
+            cls._real_built = CHECKER.linked_sources(CHECKER.ROOT, CHECKER.TARGETS)
+        return cls._real_built
+
     def build_tree(self, kb_adapter: str, server_adapter: str, extra: dict | None = None):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -75,10 +76,9 @@ class ProviderRegistrationTest(unittest.TestCase):
             path.write_text(body, encoding="utf-8")
         return root
 
-    def analyse(self, root, unreachable=None, cmake=CMAKE):
+    def analyse(self, root, unreachable=None, built=None):
         adapters = {"kb": root / "src/kb/adapter.c", "server": root / "src/server/adapter.c"}
-        lists = {"kb": ("KB_SRCS",), "server": ("SERVER_SRCS",)}
-        return CHECKER.analyse(root, cmake, adapters, lists, unreachable or {})
+        return CHECKER.analyse(root, BUILT if built is None else built, adapters, unreachable or {})
 
     def test_registered_in_both_passes(self):
         tree = self.build_tree("void c(void){ thing_register_provider(f); }",
@@ -131,12 +131,20 @@ class ProviderRegistrationTest(unittest.TestCase):
         code, _ = self.analyse(tree)
         self.assertEqual(code, 2)
 
-    def test_moved_cmake_lists_are_a_hard_error(self):
+    def test_an_empty_link_graph_is_a_hard_error(self):
         tree = self.build_tree("void c(void){ thing_register_provider(f); }",
                                "void c(void){ thing_register_provider(f); }")
-        code, messages = self.analyse(tree, cmake="set(SOMETHING_ELSE\n)\n")
+        code, messages = self.analyse(tree, built={"kb": set(), "server": {"modules/other/other.c"}})
         self.assertEqual(code, 2)
-        self.assertIn("CMake list names have moved", "\n".join(messages))
+        self.assertIn("Make link target has moved", "\n".join(messages))
+
+    def test_the_link_graph_resolves_prefixed_objects_to_their_sources(self):
+        """aimee-kb compiles its own copies under build/obj/kb/; those still
+        name the shared source, or the gate would miss what the KB links."""
+        built = CHECKER.linked_sources(CHECKER.ROOT, CHECKER.TARGETS)
+        self.assertIn("modules/learning/learning_router.c", built["kb"])
+        self.assertIn("kb/kb_main.c", built["kb"])
+        self.assertIn("server/module_stage_adapters.c", built["server"])
 
     def test_a_gate_that_sees_nothing_does_not_report_success(self):
         """If the registrar spelling drifts, every pair vanishes. Reporting ok
@@ -149,8 +157,8 @@ class ProviderRegistrationTest(unittest.TestCase):
 
     def test_the_real_tree_passes(self):
         """The committed configuration must hold, or the gate is already broken."""
-        code, messages = CHECKER.analyse(CHECKER.ROOT, CHECKER.CMAKE, CHECKER.ADAPTERS,
-                                         CHECKER.SOURCE_LISTS, CHECKER.UNREACHABLE)
+        code, messages = CHECKER.analyse(CHECKER.ROOT, self.real_built(), CHECKER.ADAPTERS,
+                                         CHECKER.UNREACHABLE)
         self.assertEqual(code, 0, "\n".join(messages))
 
     def test_deleting_the_registration_reproduces_the_defect_that_shipped(self):
@@ -168,8 +176,8 @@ class ProviderRegistrationTest(unittest.TestCase):
         # tests and builds are using. The actual analyser still reads its full
         # production graph, including the original adapter path identity.
         with mock.patch.object(Path, "read_text", read_with_missing_registration):
-            code, messages = CHECKER.analyse(CHECKER.ROOT, CHECKER.CMAKE, CHECKER.ADAPTERS,
-                                             CHECKER.SOURCE_LISTS, CHECKER.UNREACHABLE)
+            code, messages = CHECKER.analyse(CHECKER.ROOT, self.real_built(), CHECKER.ADAPTERS,
+                                             CHECKER.UNREACHABLE)
         self.assertEqual(code, 1)
         self.assertIn("learning_router_register_signal_classifier", "\n".join(messages))
 

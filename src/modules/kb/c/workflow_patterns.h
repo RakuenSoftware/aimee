@@ -18,11 +18,6 @@ extern "C"
       double confidence;
    } workflow_pattern_t;
 
-   /* Insert a workflow pattern. out may be NULL. Returns 0 on success, -1 on
-    * failure. */
-   int kb_store_workflow_pattern_insert(const char *pattern, const char *description,
-                                        const char *source, const char *source_ref,
-                                        double confidence, workflow_pattern_t *out);
 #ifdef __cplusplus
 }
 #endif
