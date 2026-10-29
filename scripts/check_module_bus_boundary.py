@@ -35,9 +35,6 @@ IR_SHARED_TYPE = {
     ("src/modules/delegates/delegate_launch.c", "aimee/ir/session_event.h"),
     # Roadmap model builders/hooks exchange canonical requests and responses;
     # the resulting roadmap/verdict remains its own domain artifact.
-    ("src/modules/roadmap/roadmap_decompose.h", "aimee/ir/aimee_ir.h"),
-    ("src/modules/roadmap/roadmap_milestone.h", "aimee/ir/aimee_ir.h"),
-    ("src/modules/roadmap/roadmap_reassess.h", "aimee/ir/aimee_ir.h"),
     # Ensemble/chair model continuations retain the original canonical request.
     ("src/modules/roundtable/ensemble_request.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/roundtable/roundtable_chair.h", "aimee/ir/aimee_ir.h"),
@@ -78,7 +75,6 @@ PENDING_BUS_MIGRATION = {
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_action.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),
     ("src/modules/guardrails/guardrails_orchestrator.c", "aimee/skills/skill.h"),
-    ("src/modules/roadmap/roadmap_auto.c", "aimee/delegates/delegate_launch.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "aimee/delegates/delegate_credentials.h"),
     ("src/modules/tools/agent_tools.c", "aimee/protocols/mcp/mcp_client_registry.h"),
     ("src/modules/tools/agent_tools.c", "aimee/workspace/workspace.h"),
@@ -276,18 +272,6 @@ KNOWLEDGE_HOST_REACH = {
     ('src/modules/learning/learning_router.c', 'modules/kb/c/artifacts.h'),
     ('src/modules/learning/learning_router.c', 'modules/kb/c/collab_rules.h'),
     ('src/modules/learning/learning_router.c', 'modules/kb/c/kb_store_learning.h'),
-    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/artifacts.h'),
-    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/kb_store_internal.h'),
-    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/db_postgres.h'),
-    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/artifacts.h'),
-    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/kb_store_internal.h'),
-    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/db_postgres.h'),
-    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/artifacts.h'),
-    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/kb_store_internal.h'),
-    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/db_postgres.h'),
-    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/artifacts.h'),
-    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/kb_store_internal.h'),
-    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/db_postgres.h'),
 }
 ALLOWED = (IR_SHARED_TYPE | PENDING_BUS_MIGRATION | PRIVATE_HEADER_REACH |
            CORE_LINKED_REACH | FLAT_ROOT_REACH | KNOWLEDGE_HOST_REACH)

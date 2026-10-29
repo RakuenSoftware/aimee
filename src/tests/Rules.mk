@@ -774,7 +774,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-learning-application \
                $(TESTPREFIX)/unit-test-planner \
                $(TESTPREFIX)/unit-test-roadmap \
-               $(TESTPREFIX)/unit-test-roadmap-decompose \
                $(TESTPREFIX)/unit-test-kb-mdl \
                $(TESTPREFIX)/unit-test-trigger \
                $(TESTPREFIX)/unit-test-kb-mining \
@@ -1093,7 +1092,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-delegate
 TEST_TARGETS += $(TESTPREFIX)/unit-test-native-provider-turn-limit
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-aux-ir
-TEST_TARGETS += $(TESTPREFIX)/unit-test-roadmap-request-origin
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-sweep-ir
 
 UNIT_TEST_SHARD_COUNT ?= 1
@@ -6341,17 +6339,6 @@ $(TESTPREFIX)/unit-test-kb-releases-db: $(OBJDIR)/tests/test_kb_releases_db.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-$(TESTPREFIX)/unit-test-roadmap-decompose: $(OBJDIR)/tests/test_roadmap_decompose.o \
-                     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
-                     $(OBJDIR)/modules/roadmap/roadmap_decompose.o \
-                     $(OBJDIR)/kb/roadmap.o \
-                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/kb_store/feature_rows.o \
-                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
-                     $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
-
 $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/kb_store/feature_rows.o \
@@ -6946,9 +6933,6 @@ $(TESTPREFIX)/unit-test-workspace-add-noscan: $(WORKSPACE_IDENTITY_OBJS)
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/server/server_compute_mailbox.o $(OBJDIR)/server/server_session_question.o
 
 $(TESTPREFIX)/unit-test-server-aux-ir: $(OBJDIR)/tests/test_server_aux_ir.o $(OBJDIR)/json_fluent.o $(OBJDIR)/server/server_jobs_aux.o $(OBJDIR)/server/server_delegate_input.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
-
-$(TESTPREFIX)/unit-test-roadmap-request-origin: $(OBJDIR)/tests/test_roadmap_request_origin.o $(OBJDIR)/modules/roadmap/roadmap_milestone.o $(OBJDIR)/modules/roadmap/roadmap_reassess.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o

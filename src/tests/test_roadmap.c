@@ -1,5 +1,5 @@
 /* test_roadmap.c — unit tests for the spec-driven roadmap data model
- * (src/headers/roadmap.h, implemented in src/kb/roadmap.c).
+ * (src/kb/roadmap.h, implemented in src/kb/roadmap.c).
  *
  * Tests:
  *   1. roadmap_validate_decomposition accepts a well-formed milestone/slice/task
@@ -23,7 +23,7 @@
 
 #include "cJSON.h"
 #include "modules/kb/c/kb_store_test_shim.h"
-#include "roadmap.h"
+#include "kb/roadmap.h"
 #include "../modules/kb/c/artifacts.h"
 #include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"

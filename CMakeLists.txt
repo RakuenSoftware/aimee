@@ -154,7 +154,6 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/workflows"
     "${AIMEE_SRC_DIR}/modules/guardrails"
     "${AIMEE_SRC_DIR}/modules/economizer"
-    "${AIMEE_SRC_DIR}/modules/roadmap"
     "${AIMEE_SRC_DIR}/modules/sandbox"
     "${AIMEE_SRC_DIR}/modules/lsp"
     "${AIMEE_SRC_DIR}/modules/css"
@@ -1185,7 +1184,6 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/modules/roundtable
     ${AIMEE_SRC_DIR}/modules/kb_client
     ${AIMEE_SRC_DIR}/modules/agent_eval
-    ${AIMEE_SRC_DIR}/modules/roadmap
     ${AIMEE_SRC_DIR}/modules/sandbox
     ${AIMEE_SRC_DIR}/modules/lsp
     ${AIMEE_SRC_DIR}/modules/skill
