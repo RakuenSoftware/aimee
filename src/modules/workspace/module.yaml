@@ -26,8 +26,7 @@
     "src/modules/workspace/workspace_runner_queue.c",
     "src/modules/workspace/workspace_runner_registry.c",
     "src/modules/workspace/workspace_scope.c",
-    "src/modules/workspace/workspace_turn.c",
-    "src/modules/workspace/module_adapter.c"
+    "src/modules/workspace/workspace_turn.c"
   ],
   "go_sources": [
     "server-go/modules/workspace/workspace.go",

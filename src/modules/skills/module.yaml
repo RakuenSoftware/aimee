@@ -14,9 +14,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/skills/skill.c",
-    "src/modules/skills/skill_rollback.c",
-    "src/modules/skills/skill_trigger_policy.c",
-    "src/modules/skills/module_adapter.c"
+    "src/modules/skills/skill_rollback.c"
   ],
   "go_sources": [
     "server-go/modules/skills/skills.go"

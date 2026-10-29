@@ -836,37 +836,16 @@ static void test_skill_lint_rules(void)
    assert(skill_lint_content("clean-skill", clean, report, sizeof(report)) == 0);
 }
 
-static void test_skill_trigger_frontmatter_matches(void)
-{
-   const char *content = "---\nname: trigger-skill\n"
-                         "description: Use when matching trigger frontmatter.\n"
-                         "triggers:\n"
-                         "  tool: [Bash]\n"
-                         "  arg_pattern: [\"sleep \", \"curl \"]\n"
-                         "---\n"
-                         "Prefer condition checks.\n";
-   assert(skill_trigger_policy_matches_content(content, "Bash", "sleep 5") == 1);
-   assert(skill_trigger_policy_matches_content(content, "Bash", "echo ok") == 0);
-   assert(skill_trigger_policy_matches_content(content, "Write", "sleep 5") == 0);
-
-   const char *path_content = "---\nname: path-skill\n"
-                              "description: Use when matching path trigger frontmatter.\n"
-                              "triggers:\n"
-                              "  tool: [Write, Edit]\n"
-                              "  path_pattern: [\"_test.\", \"test_\"]\n"
-                              "---\n"
-                              "Prefer tests first.\n";
-   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo_test.c") == 1);
-   assert(skill_trigger_policy_matches_content(path_content, "Edit", "src/test_foo.c") == 1);
-   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo.c") == 0);
-}
-
+/* The skills module process owns trigger matching (its Go tests hold the
+ * frontmatter rules); this stand-in only lets the wiring through skill.c be
+ * exercised: it matches the one trigger the test skill declares. */
 static int trigger_policy_provider(const char *content, const char *tool_name, const char *subject,
                                    int *match)
 {
+   (void)content;
    if (!match)
       return -1;
-   *match = skill_trigger_policy_matches_content(content, tool_name, subject);
+   *match = strcmp(tool_name, "Bash") == 0 && strncmp(subject, "sleep ", 6) == 0;
    return 0;
 }
 
@@ -1234,7 +1213,6 @@ int main(void)
    test_skill_path_null_inputs();
    test_skill_list_null_inputs();
    test_skill_lint_rules();
-   test_skill_trigger_frontmatter_matches();
    test_skill_trigger_requires_process_provider();
    test_skill_capability_autostub_proposes_missing_tool();
    test_skill_change_eval_gate();
