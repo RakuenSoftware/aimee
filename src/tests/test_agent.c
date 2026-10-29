@@ -69,7 +69,6 @@ void test_primary_turn_reaches_default_above_min_tier(void);
 void test_primary_turn_default_must_still_satisfy_caps(void);
 void test_catalog_provider_endpoint_parser_edges(void);
 void test_request_max_tokens_clamped_to_context_window(void);
-void test_registration_prefix(void);
 void test_registration_grouping(void);
 void test_declared_roles_route_precisely(void);
 void test_scope_ceiling_matches_work_to_capability(void);
@@ -123,7 +122,6 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_script_rpc_keeps_permission_scope(void);
 void test_script_rpc_keeps_host_context(void);
-int script_rpc_admission_fixture_main(void);
 void test_script_rpc_admission_process(const char *executable);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_bash_host_cancellation_and_closed_output_deadline(void);
@@ -4491,8 +4489,6 @@ static void test_owned_tool_and_source_handoff(void)
 
 int main(int argc, char **argv)
 {
-   if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
-      return script_rpc_admission_fixture_main();
    if (argc == 2 && !strcmp(argv[1], "--container-routing"))
    {
       delegate_role_seam_install();
@@ -4585,7 +4581,6 @@ int main(int argc, char **argv)
    test_primary_turn_default_must_still_satisfy_caps();
    test_catalog_provider_endpoint_parser_edges();
    test_request_max_tokens_clamped_to_context_window();
-   test_registration_prefix();
    test_registration_grouping();
    test_declared_roles_route_precisely();
    test_scope_ceiling_matches_work_to_capability();

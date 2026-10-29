@@ -87,7 +87,6 @@ static void setup_role_templates(void)
 }
 
 /* Pull in only the declarations we need. */
-int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 
 /* ---- Helpers ---- */
 

@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int kb_path_wants_dense_vector_for_test(const char *rel_path);
-
 int main(void)
 {
    printf("kb_dense_vector_scope: ");

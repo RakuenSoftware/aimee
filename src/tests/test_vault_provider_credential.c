@@ -20,8 +20,6 @@
 #include <stdio.h>
 #include <string.h>
 
-int vault_provider_has_credential(const char *provider_name);
-
 static vault_store_entry_t g_entries[16];
 static int g_count;
 static vault_status_t g_status = VAULT_OK;
