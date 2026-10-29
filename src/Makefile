@@ -404,7 +404,7 @@ KB_STORE_SRCS = modules/kb/c/kb_store_init.c modules/kb/c/kb_store_reembed.c mod
            modules/kb/c/cross_repo_resolver.c modules/kb/c/cross_repo_classify.c modules/kb/c/cross_repo_stats.c \
            modules/kb/c/cross_repo_deps.c modules/kb/c/cross_repo_review.c modules/kb/c/cross_repo_identity.c \
            modules/kb/c/cross_repo_route.c modules/kb/c/cross_repo_build.c \
-           modules/kb/c/vault_pg.c modules/kb/c/org_vault_rewrap.c modules/kb/c/org_vault_key_use.c modules/kb/c/org_model_catalog.c modules/kb/c/org_spend.c modules/kb/c/org_budget.c modules/kb/c/org_rate.c modules/kb/c/org_egress.c modules/kb/c/org_telemetry.c modules/kb/c/org_telemetry_fmt.c
+           modules/kb/c/vault_pg.c modules/kb/c/org_vault_rewrap.c modules/kb/c/org_vault_rotation.c modules/kb/c/org_vault_key_use.c modules/kb/c/org_model_catalog.c modules/kb/c/org_spend.c modules/kb/c/org_budget.c modules/kb/c/org_rate.c modules/kb/c/org_egress.c modules/kb/c/org_telemetry.c modules/kb/c/org_telemetry_fmt.c
 KB_STORE_SRCS += modules/kb/c/server_registry.c modules/kb/c/management_client_instance.c modules/kb/c/management_action_journal.c modules/kb/c/management_identity_journal.c modules/kb/c/management_read_journal.c modules/kb/c/management_jwks_runtime.c
 KB_STORE_SRCS += modules/kb/c/kb_store_witness_checkpoint.c
 KB_STORE_SRCS += modules/kb/c/kb_store_witness_emit.c

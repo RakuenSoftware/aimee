@@ -115,6 +115,7 @@
     "src/modules/kb/c/org_telemetry_fmt.c",
     "src/modules/kb/c/org_vault_key_use.c",
     "src/modules/kb/c/org_vault_rewrap.c",
+    "src/modules/kb/c/org_vault_rotation.c",
     "src/modules/kb/c/pgvec_kb_service.c",
     "src/modules/kb/c/pgvec_transport.c",
     "src/modules/kb/c/project.c",
