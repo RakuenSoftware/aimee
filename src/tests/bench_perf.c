@@ -19,8 +19,6 @@
 #include <time.h>
 
 #include "aimee.h"
-#include "db1_client/db1.h"
-#include "modules/kb/c/kb_store.h"
 #include "agent_config.h"
 #include "guardrails.h"
 #include "platform_test_util.h"
@@ -74,18 +72,6 @@ typedef struct
    percentiles_t results;
 } bench_entry_t;
 
-/* Benchmark: db1 init + shutdown (in-memory) — exercises the production
- * cold-start path for DB1. */
-static void bench_db_open(double *samples, int n)
-{
-   for (int i = 0; i < n; i++)
-   {
-      int64_t t0 = now_ns();
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-}
-
 /* Benchmark: pre_tool_check (Edit, simple path) */
 static void bench_pre_tool_check(double *samples, int n)
 {
@@ -114,65 +100,6 @@ static void bench_pre_tool_check(double *samples, int n)
       assert(platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", previous_bypass_buf) == 0);
    else
       assert(platform_unsetenv("AIMEE_ANTIPATTERNS_BYPASS") == 0);
-}
-
-/* Benchmark: startup_cold — fresh disk DB with migrations (cold path) */
-static void bench_startup_cold(double *samples, int n)
-{
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee-bench-cold.db", platform_tmpdir());
-
-   for (int i = 0; i < n; i++)
-   {
-      /* Remove any prior file so each open runs migrations from scratch */
-      unlink(path);
-      {
-         char aux[528];
-         snprintf(aux, sizeof(aux), "%s-wal", path);
-         unlink(aux);
-         snprintf(aux, sizeof(aux), "%s-shm", path);
-         unlink(aux);
-      }
-
-      int64_t t0 = now_ns();
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-
-   /* Cleanup */
-   unlink(path);
-   {
-      char aux[528];
-      snprintf(aux, sizeof(aux), "%s-wal", path);
-      unlink(aux);
-      snprintf(aux, sizeof(aux), "%s-shm", path);
-      unlink(aux);
-   }
-}
-
-/* Benchmark: startup_warm — existing disk DB via fast path (migrations already applied) */
-static void bench_startup_warm(double *samples, int n)
-{
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee-bench-warm.db", platform_tmpdir());
-
-   /* Seed: run db1_init once so migrations are applied. */
-   for (int i = 0; i < n; i++)
-   {
-      int64_t t0 = now_ns();
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-
-   /* Cleanup */
-   unlink(path);
-   {
-      char aux[528];
-      snprintf(aux, sizeof(aux), "%s-wal", path);
-      unlink(aux);
-      snprintf(aux, sizeof(aux), "%s-shm", path);
-      unlink(aux);
-   }
 }
 
 /* Benchmark: delegate_dispatch — agent config load + routing overhead */
@@ -227,9 +154,32 @@ static int parse_baseline(const char *path, bench_entry_t *entries, int count)
       return -1;
    }
 
+   /* A baseline case this harness does not run would pass unmeasured. The
+    * memory cases moved to aimee-memory-eval with the Go memory owner, and the
+    * db_open and startup cases left with the native database. */
+   int unknown = 0;
+   cJSON *named;
+   cJSON_ArrayForEach(named, results)
+   {
+      int known = 0;
+      for (int i = 0; i < count && !known; i++)
+         known = named->string && strcmp(named->string, entries[i].name) == 0;
+      if (!known)
+      {
+         fprintf(stderr, "Error: baseline case %s is not run by this harness\n",
+                 named->string ? named->string : "(unnamed)");
+         unknown++;
+      }
+   }
+   if (unknown)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+
    for (int i = 0; i < count; i++)
    {
-      /* Convert name to underscore key: "memory_search" from "memory search" */
+      /* Convert name to underscore key: "pre_tool_check" from "pre tool check" */
       char key[64];
       snprintf(key, sizeof(key), "%s", entries[i].name);
       for (char *p = key; *p; p++)
@@ -448,18 +398,10 @@ int main(int argc, char **argv)
 
    /* Define benchmarks with SLO targets */
    bench_entry_t benchmarks[] = {
-       {"db_open", 20.0, 50.0, 0.20, {0, 0, 0}},
-       {"memory_search", 5.0, 20.0, 0.30, {0, 0, 0}},
-       {"memory_pagerank_search", 2.0, 5.0, 0.30, {0, 0, 0}},
        /* These are end-to-end governed paths, not bare parser/SQL timings. The
         * ceilings include dedupe, policy, provenance, and derived metadata on
         * the low-core managed-appliance class used by the release E2E suite. */
        {"pre_tool_check", 5.0, 7.0, 0.50, {0, 0, 0}},
-       {"memory_insert", 12.0, 15.0, 0.30, {0, 0, 0}},
-       {"memory_stats", 1.0, 3.0, 0.30, {0, 0, 0}},
-       {"memory_promote", 5.0, 15.0, 0.30, {0, 0, 0}},
-       {"startup_cold", 50.0, 200.0, 0.30, {0, 0, 0}},
-       {"startup_warm", 5.0, 20.0, 0.30, {0, 0, 0}},
        {"delegate_dispatch", 1.0, 5.0, 0.50, {0, 0, 0}},
    };
    int bench_count = (int)(sizeof(benchmarks) / sizeof(benchmarks[0]));
@@ -469,31 +411,13 @@ int main(int argc, char **argv)
    double *samples = calloc((size_t)total, sizeof(double));
    assert(samples);
 
-   /* The removed in-process memory engine cannot be measured from this native
-    * harness. Preserve its case names as unavailable so a historical baseline
-    * cannot silently pass with those measurements omitted. Real Go memory
-    * measurements use aimee-memory-eval and its isolated PostgreSQL session. */
-   int unavailable = 0;
-
    /* Run each benchmark */
    for (int b = 0; b < bench_count; b++)
    {
       memset(samples, 0, (size_t)total * sizeof(double));
-      if (strncmp(benchmarks[b].name, "memory_", 7) == 0)
-      {
-         benchmarks[b].results = (percentiles_t){NAN, NAN, NAN};
-         unavailable++;
-         continue;
-      }
 
-      if (strcmp(benchmarks[b].name, "db_open") == 0)
-         bench_db_open(samples, total);
-      else if (strcmp(benchmarks[b].name, "pre_tool_check") == 0)
+      if (strcmp(benchmarks[b].name, "pre_tool_check") == 0)
          bench_pre_tool_check(samples, total);
-      else if (strcmp(benchmarks[b].name, "startup_cold") == 0)
-         bench_startup_cold(samples, total);
-      else if (strcmp(benchmarks[b].name, "startup_warm") == 0)
-         bench_startup_warm(samples, total);
       else if (strcmp(benchmarks[b].name, "delegate_dispatch") == 0)
          bench_delegate_dispatch(samples, total);
 
@@ -519,15 +443,6 @@ int main(int argc, char **argv)
                 benchmarks[i].results.p50_ms, benchmarks[i].results.p95_ms,
                 benchmarks[i].results.p99_ms);
       }
-   }
-
-   if (unavailable)
-   {
-      fprintf(stderr,
-              "%d memory benchmarks unavailable in the native harness; "
-              "use aimee-memory-eval. No baseline was saved or certified.\n",
-              unavailable);
-      return 2;
    }
 
    /* Save baseline if requested */

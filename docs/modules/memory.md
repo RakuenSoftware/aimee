@@ -304,9 +304,9 @@ emit no keys. Counters are process-local, concurrency-safe and diagnostic only;
 they are not evidence of final context packing, transaction commit or provider
 delivery. Route-qualified counts distinguish lexical from hybrid contributions.
 
-The native `bench-perf` memory cases depended on deleted in-process functions.
-They now emit null timings with `status=unavailable`, exit 2, and cannot save or
-certify a baseline. Use `aimee-memory-eval` for isolated Go corpus measurements;
+The native `bench-perf` memory cases depended on deleted in-process functions
+and were removed; `bench-perf --check` refuses a baseline that still names them.
+Use `aimee-memory-eval` for isolated Go corpus measurements;
 its results are not interchangeable with the old in-process timing baseline.
 The private, host-only `runtime` operation `pagerank` now scores an explicit
 candidate set in Go. Supply `ids`, optional `iterations` (default 6, range 1–16),
