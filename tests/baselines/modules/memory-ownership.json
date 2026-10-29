@@ -1223,7 +1223,6 @@
       "disposition": "benchmark-transport",
       "external_occurrences": [
         "src/headers/memory.h",
-        "src/tests/bench_perf.c",
         "src/tests/test_context_assembly.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_memory_advanced.c",
@@ -1609,7 +1608,6 @@
     "memory_search": {
       "disposition": "host-transport",
       "external_occurrences": [
-        "src/tests/bench_perf.c",
         "src/tests/test_dogfood.c"
       ]
     },
@@ -1635,7 +1633,6 @@
         "src/server/server_dispatch_defs_data.h",
         "src/server/server_http_routes.c",
         "src/server/server_state.c",
-        "src/tests/bench_perf.c",
         "src/tests/test_server_dispatch.c"
       ]
     },
@@ -2271,15 +2268,6 @@
         "kb_client_memory_scope_context_apply"
       ],
       "sha256": "58c5949f3d51bb1fbf190c8501efa92447555c345ee7447135bdbc759796bd9f"
-    },
-    "src/tests/bench_perf.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "memory_insert",
-        "memory_search",
-        "memory_stats"
-      ],
-      "sha256": "e243ef1b4f6edd6bee5ca6553849ae7bb7858f25e129b01ae26738688de5c2ba"
     },
     "src/tests/support/kb_client_test_stub.c": {
       "disposition": "host-fixture",
