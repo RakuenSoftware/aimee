@@ -33,9 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef AIMEE_WINDOWS
 #include <unistd.h>
-#endif
 
 kb_service_ctx_t *g_kb_ctx = NULL;
 

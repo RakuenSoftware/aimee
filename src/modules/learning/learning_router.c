@@ -80,11 +80,7 @@ static void learning_expiry_after_days(int days, char *buf, size_t len)
    time_t now = time(NULL);
    time_t then = now + (time_t)days * 86400;
    struct tm tmv;
-#if defined(_WIN32)
-   gmtime_s(&tmv, &then);
-#else
    gmtime_r(&then, &tmv);
-#endif
    strftime(buf, len, "%Y-%m-%d %H:%M:%S", &tmv);
 }
 

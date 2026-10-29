@@ -19,7 +19,6 @@ from pathlib import Path
 
 ALLOWED_TRANSPORT_SHIMS = {
     "posix/agent_bridge.o",
-    "windows/agent_bridge.o",
 }
 
 ALLOWED_AGENT_NAMED_SOURCES = {

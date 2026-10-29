@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# aimee proper (server, KB, ring host) is Linux-only. macOS and Windows get the
+# thin client only: download a release, or build it with CMake
+# (cmake -B build && cmake --build build --target aimee).
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "Error: $(basename "$0") installs aimee proper, which runs only on Linux." >&2
+    echo "On macOS and Windows install the thin client (cmake -B build && cmake --build build --target aimee)." >&2
+    exit 1
+fi
+
 # aimee installer
 # Builds the shipped binaries, installs them, and configures hooks.
 
@@ -296,9 +305,8 @@ export AIMEE_KB_MODE="$KB_MODE"
 
 # --- Install systemd user units (Linux only) ---
 #
-# aimee-server's lifecycle is owned by systemd on Linux. The CLI no longer
-# auto-spawns the server; it expects a service-managed instance. macOS
-# launchd and Windows SCM units land in their own follow-up PRs.
+# aimee-server's lifecycle is owned by systemd. The CLI no longer auto-spawns
+# the server; it expects a service-managed instance.
 if command -v systemctl >/dev/null 2>&1 && [ -d "$SCRIPT_DIR/systemd/user" ]; then
     USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$USER_UNIT_DIR"
@@ -313,10 +321,7 @@ if command -v systemctl >/dev/null 2>&1 && [ -d "$SCRIPT_DIR/systemd/user" ]; th
     # (proposal: aimee-kb-network-listener) is to allow kb to run on a
     # separate host shared by many aimee-servers; that work removes the
     # local fallback entirely.
-    # aimee-gateway.service (multi-channel ambient presence) is refreshed here
-    # too, but not auto-enabled — it needs per-channel config, so the operator
-    # enables it explicitly (systemctl --user enable --now aimee-gateway).
-    for unit in aimee.slice aimee-kb.service aimee-server.service aimee-gateway.service; do
+    for unit in aimee.slice aimee-kb.service aimee-server.service; do
         src="$SCRIPT_DIR/systemd/user/$unit"
         if [ -f "$src" ]; then
             cp "$src" "$USER_UNIT_DIR/$unit"
@@ -347,35 +352,6 @@ if command -v systemctl >/dev/null 2>&1 && [ -d "$SCRIPT_DIR/systemd/user" ]; th
     else
         warn "systemctl --user daemon-reload failed; check that user manager is running (loginctl enable-linger \$USER if needed)"
     fi
-fi
-
-# --- Install macOS LaunchAgent plists (Darwin only) ---
-#
-# aimee-server's lifecycle is owned by launchd on macOS. The CLI no longer
-# auto-spawns the server; it expects a service-managed instance. This
-# mirrors the Linux systemd block above: kb is installed and loaded first
-# so the server's connect-on-start finds it, server second.
-if [ "$(uname)" = "Darwin" ] && [ -d "$SCRIPT_DIR/service" ]; then
-    LA_DIR="$HOME/Library/LaunchAgents"
-    mkdir -p "$LA_DIR" "$HOME/Library/Logs/aimee"
-
-    # Remote kb: load only the server agent (no local sidecar).
-    mac_labels="com.aimee.kb com.aimee.server"
-    [ "$KB_MODE" = "remote" ] && mac_labels="com.aimee.server"
-    for label in $mac_labels; do
-        src="$SCRIPT_DIR/service/$label.plist"
-        dst="$LA_DIR/$label.plist"
-        if [ -f "$src" ]; then
-            sed "s|__HOME__|$HOME|g" "$src" > "$dst"
-            info "LaunchAgent plist installed at $dst"
-            launchctl unload "$dst" 2>/dev/null || true
-            if launchctl load "$dst" 2>/dev/null; then
-                info "$label loaded via launchctl"
-            else
-                warn "launchctl load $dst failed; run: launchctl load $dst"
-            fi
-        fi
-    done
 fi
 
 # --- Install ast-grep (sg) for structural code search ---

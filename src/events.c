@@ -308,7 +308,7 @@ static int notify_deliver_local(const char *event_name, const char *message)
    return 0;
 }
 
-/* Platform-specific async notification delivery (posix/events.c, windows/events.c) */
+/* Platform-specific async notification delivery (posix/events.c) */
 void platform_events_deliver_detached(const char *cmd);
 
 static void deliver_detached_shell(const char *cmd)

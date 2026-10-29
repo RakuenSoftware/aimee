@@ -31,14 +31,7 @@
 
 static long delegate_stat_mtime_nsec(const struct stat *st)
 {
-#if defined(_WIN32)
-   (void)st;
-   return 0;
-#elif defined(__APPLE__) || defined(__MACH__)
-   return st->st_mtimespec.tv_nsec;
-#else
    return st->st_mtim.tv_nsec;
-#endif
 }
 
 delegate_file_snapshot_t delegate_file_snapshot(const char *path)

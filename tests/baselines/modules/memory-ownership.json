@@ -1834,7 +1834,7 @@
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "1a57fc573d37acf521e380f732c21735114d8691914b6b41dfc5b88215669a61",
+      "sha256": "e2c0a0ea9745fc1cf39e589d22c60cdebec5973813238ae84239c6c846e8c44d",
       "boundary_review": " 2026-10-25 specialized message admission: reviewed embedding reply decoding only. KB batch reads actual dimension separately from row count and fixed buffer stride; vector consumers honor documented dimension and decline/truncation facts. The matching HTTP fixture now supplies the real Go owner dimension and vector-free error/auth messages; all existing assertions remain. The shared C helper is a message codec only: provider execution, breaker state, storage, scoping, guards and memory eligibility remain with their existing owners. No request methods, arguments, routes, ownership classifications or original inventories change. Evidence: /var/tmp/aimee-specialized-memory-boundary-review/proof.json and /var/tmp/aimee-embed-consumer-evidence/results.json. This is explicit source-boundary review, not production-promotion approval and adds no exemption."
     },
     "src/kb/kb_memory_facts.c": {
@@ -1883,7 +1883,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "cecf3d6f50e6194dc90f2ad77658911f6d2715c7eedfb9945470c08618602f68"
+      "sha256": "009f2da643c881e4e2136ccb5d37931d041f798a34b330cece31b665c4d115f4"
     },
     "src/modules/kb/include/aimee/kb/graph_kinds.h": {
       "disposition": "storage-protocol",
@@ -2116,7 +2116,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "d43626077e090476c6cc2235bf5a87be6aea24736bba4ff82a1c8af81d80a64a",
+      "sha256": "3cc439d100aa4daef912ded344dc70a24a5e6e73f50d1608ad4a2a161228aaea",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"

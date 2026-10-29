@@ -388,8 +388,7 @@ def findings(root: Path) -> list[dict]:
             if rule == "model-command-bypass" and relative not in CANONICAL_MODEL_FILES:
                 continue
             if rule == "legacy-transcript-write" and relative not in {
-                    "src/server/server_auth.c", "src/posix/server_compute.c",
-                    "src/windows/server_compute.c"}:
+                    "src/server/server_auth.c", "src/posix/server_compute.c"}:
                 continue
             if rule == "legacy-session-search" and relative not in {
                     "src/server/session_search_tool.c",

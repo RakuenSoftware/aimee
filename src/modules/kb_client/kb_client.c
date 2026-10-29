@@ -67,16 +67,6 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
 static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {DEPENDENCY_BREAKER_INITIALIZER,
                                                                    DEPENDENCY_BREAKER_INITIALIZER};
 static int64_t (*g_kb_dependency_clock)(void);
-#if defined(_MSC_VER)
-static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
-static __declspec(thread) char g_kb_last_dependency[32] = "kb";
-static __declspec(thread) int64_t g_kb_last_observed_generation;
-static __declspec(thread) int64_t g_kb_last_current_generation;
-static __declspec(thread) int64_t g_kb_last_observed_dimension;
-static __declspec(thread) int64_t g_kb_last_current_dimension;
-static __declspec(thread) int64_t g_kb_last_retry_after_ms;
-static __declspec(thread) int g_kb_last_suppressed;
-#else
 static _Thread_local kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 static _Thread_local char g_kb_last_dependency[32] = "kb";
 static _Thread_local int64_t g_kb_last_observed_generation;
@@ -87,7 +77,6 @@ static _Thread_local int64_t g_kb_last_retry_after_ms;
 /* Set when the local breaker refused the call, so the typed error can say the
  * KB was never contacted instead of blaming the operation the caller asked for. */
 static _Thread_local int g_kb_last_suppressed;
-#endif
 
 static int64_t kb_dependency_now_ms(void)
 {

@@ -68,11 +68,8 @@ Readiness must report the exact missing stage rather than marking all of gateway
 
 Listener, policy, memory-stage, and notification delivery settings tune concrete providers.
 A future module profile must omit a platform's code and hide its GUI/config when excluded, while the core
-gateway remains. Build membership is currently asymmetric by policy, not by drift: Make compiles both
-remaining sources into `DATA_SRCS`, while no CMake target compiles any of them. `CMakeLists.txt` states
-that CMake builds only the `aimee` thin client plus the unit-test suite, and that the `aimee-server`,
-`aimee-kb`, and `aimee-webchat` targets were removed because CMake's source lists had
-drifted far behind `src/Makefile` and no CI gate built them. Multiple config keys must not select parallel ingress pipelines with divergent policy or
+gateway remains. Make compiles both remaining sources into `DATA_SRCS`; CMake builds only the thin
+client, which compiles neither. Multiple config keys must not select parallel ingress pipelines with divergent policy or
 IR stage ordering.
 
 ## Surfaces
@@ -109,10 +106,7 @@ and its unused registry were removed with those implementations.
 `test_gateway_mutate_wire.c`, mixed ingress/governance tests, and cross-protocol IR tests cover
 adjacent boundaries without becoming gateway-owned.
 
-Make registers all three declared tests in `src/tests/Rules.mk`; CTest registers none of them. That
-is an audited current condition, consistent with the module sitting outside CMake's thin-client
-profile; CMake does own a unit-test suite, so profile exclusion alone does not establish that these
-tests must be absent from it. `scripts/check_module_test_registration.py` pins that per-test registration to a reviewed
+Make registers all three declared tests in `src/tests/Rules.mk`. `scripts/check_module_test_registration.py` pins that per-test registration to a reviewed
 baseline. Identity
 or policy failure is fail-closed; absent optional delivery returns a typed unsupported/unready result;
 stage failure must not fall through to a second, less-policed execution path.

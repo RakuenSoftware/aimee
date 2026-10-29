@@ -16,9 +16,7 @@
 #include <openssl/sha.h>
 #include <stdarg.h>
 #include <stdint.h>
-#ifndef _WIN32
 #include <sys/file.h>
-#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -54,15 +52,6 @@ static const char *skill_bundled_dir(void)
       snprintf(path, sizeof(path), "%s", override);
       return path;
    }
-#ifdef _WIN32
-   const char *local = getenv("LOCALAPPDATA");
-   if (local && local[0])
-   {
-      snprintf(path, sizeof(path), "%s/aimee/skills", local);
-      return path;
-   }
-   const char *home = getenv("USERPROFILE");
-#else
    const char *xdg = getenv("XDG_DATA_HOME");
    if (xdg && xdg[0])
    {
@@ -70,7 +59,6 @@ static const char *skill_bundled_dir(void)
       return path;
    }
    const char *home = getenv("HOME");
-#endif
    if (home && home[0])
       snprintf(path, sizeof(path), "%s/.local/share/aimee/skills", home);
    else
@@ -1692,10 +1680,6 @@ static int skill_usage_write_root(const char *path, cJSON *root)
 
 static int skill_usage_lock(const char *path)
 {
-#ifdef _WIN32
-   (void)path;
-   return -2;
-#else
    char lock_path[SKILL_PATH_MAX + 16];
    snprintf(lock_path, sizeof(lock_path), "%s.lock", path);
    int fd = open(lock_path, O_CREAT | O_RDWR, 0600);
@@ -1707,20 +1691,15 @@ static int skill_usage_lock(const char *path)
       return -1;
    }
    return fd;
-#endif
 }
 
 static void skill_usage_unlock(int fd)
 {
-#ifndef _WIN32
    if (fd >= 0)
    {
       (void)flock(fd, LOCK_UN);
       close(fd);
    }
-#else
-   (void)fd;
-#endif
 }
 
 static int skill_json_int(cJSON *obj, const char *key)

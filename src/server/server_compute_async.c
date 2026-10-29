@@ -416,7 +416,7 @@ int tool_execute_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
 
 /* --- chat.send_stream worker --- */
 
-/* chat_stream_worker is implemented in posix/server_compute.c and windows/server_compute.c. */
+/* chat_stream_worker is implemented in posix/server_compute.c. */
 
 /* Streaming providers can make MCP/tool callbacks into aimee-server while
  * their primary request is still blocked on provider I/O. If those streams

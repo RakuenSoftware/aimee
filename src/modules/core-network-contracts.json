@@ -15,11 +15,6 @@
           "primitive": "http",
           "path": "src/posix/agent_bridge.c",
           "count": 13
-        },
-        {
-          "primitive": "http",
-          "path": "src/windows/agent_bridge.c",
-          "count": 11
         }
       ]
     },
@@ -142,11 +137,6 @@
         {
           "primitive": "http",
           "path": "src/posix/web_egress.c",
-          "count": 1
-        },
-        {
-          "primitive": "http",
-          "path": "src/windows/web_egress.c",
           "count": 1
         },
         {

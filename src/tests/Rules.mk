@@ -310,6 +310,14 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-roundtable-preset \
                $(TESTPREFIX)/unit-test-roundtable-seat-resolve \
                $(TESTPREFIX)/unit-test-audit-worm \
+               $(TESTPREFIX)/unit-test-audit-action \
+               $(TESTPREFIX)/unit-test-audit-action-log \
+               $(TESTPREFIX)/unit-test-audit-ledger \
+               $(TESTPREFIX)/unit-test-git-oauth-device \
+               $(TESTPREFIX)/unit-test-git-oauth-gh \
+               $(TESTPREFIX)/unit-test-git-oauth-github \
+               $(TESTPREFIX)/unit-test-git-org-repos \
+               $(TESTPREFIX)/unit-test-self-update \
                $(TESTPREFIX)/unit-test-audit-worm-chain \
                $(TESTPREFIX)/unit-test-kb-audit-worm \
                $(TESTPREFIX)/unit-test-msg-session-key \
@@ -934,9 +942,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cli
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-unknown-effect-action $(TESTPREFIX)/unit-test-server-native-history $(TESTPREFIX)/unit-test-server-unknown-effect-policy
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
-ifeq ($(UNAME_S),Linux)
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-containment
-endif
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
     $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/platform_random.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
@@ -1833,6 +1839,37 @@ $(TESTPREFIX)/unit-test-roundtable-seat-resolve: $(OBJDIR)/tests/test_roundtable
 $(TESTPREFIX)/unit-test-audit-worm: $(OBJDIR)/tests/test_audit_worm.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
                       $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# These eight ran only under CMake's unit-test suite until CMake became
+# thin-client only.
+$(TESTPREFIX)/unit-test-audit-action: $(OBJDIR)/tests/test_audit_action.o $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/aimee_sha256.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-audit-action-log: $(OBJDIR)/tests/test_audit_action_log.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-audit-ledger: $(OBJDIR)/tests/test_audit_ledger.o $(OBJDIR)/modules/audit/audit_ledger.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-self-update: $(OBJDIR)/tests/test_self_update.o $(OBJDIR)/self_update_util.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The git OAuth and org-repo tests stub HTTP, vault and exec externals
+# themselves, so they link only the module under test and cJSON.
+$(TESTPREFIX)/unit-test-git-oauth-device: $(OBJDIR)/tests/test_git_oauth_device.o \
+    $(OBJDIR)/modules/git/git_oauth_device.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-git-oauth-gh: $(OBJDIR)/tests/test_git_oauth_gh.o $(OBJDIR)/modules/git/git_oauth_gh.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-git-oauth-github: $(OBJDIR)/tests/test_git_oauth_github.o \
+    $(OBJDIR)/modules/git/git_oauth_github.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-git-org-repos: $(OBJDIR)/tests/test_git_org_repos.o \
+    $(OBJDIR)/modules/git/git_org_repos.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Pure-primitive drift/golden test for the shared WORM chain (no storage engine):
 # the single source of truth for the cross-engine hash contract.
@@ -3528,10 +3565,8 @@ $(TESTPREFIX)/unit-test-cli-argspec: $(OBJDIR)/tests/test_cli_argspec.o \
                                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-ifeq ($(UNAME_S),Linux)
 $(OBJDIR)/tests/test_cli_http_transport.o: C_FLAGS += -DAIMEE_TEST_CONNECT_WRAPPED -fno-lto
 CLI_HTTP_TEST_CONNECT_WRAP = -Wl,--wrap=aimee_core_socket_connect_controlled
-endif
 
 $(OBJDIR)/tests/cli_http_transport_client.o: cli_client.c
 	@mkdir -p $(dir $@)
@@ -6581,12 +6616,10 @@ $(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_n
     $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
-ifeq ($(UNAME_S),Linux)
 $(TESTPREFIX)/unit-test-server-native-containment: $(OBJDIR)/tests/test_server_native_containment.o \
     $(OBJDIR)/server/server_native_containment.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread
-endif
 
 $(TESTPREFIX)/unit-test-server-native-history: $(OBJDIR)/tests/test_server_native_history.o \
     $(OBJDIR)/server/server_native_history.o $(OBJDIR)/modules/ir/session_event.o \

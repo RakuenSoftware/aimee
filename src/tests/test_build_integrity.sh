@@ -889,9 +889,7 @@ declare -A LAYER_EXEMPT=(
 
 LAYER0_FILES="db.c db_migrations.c config.c util.c text.c render.c log.c dstr.c platform_random.c client_integrations.c mcp_tools.c git_verify.c git_verify_ops.c \
 posix/platform_ipc.c posix/platform_path.c posix/platform_process.c posix/platform_random.c posix/util.c \
-linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-windows/platform_event.c windows/platform_ipc.c windows/platform_path.c windows/platform_process.c windows/platform_random.c windows/util.c"
+linux/platform_event.c linux/platform_ipc.c linux/platform_process.c"
 LAYER1_FILES="memory.c memory_promote.c memory_context.c memory_scan.c memory_graph.c memory_advanced.c trace_analysis.c index.c extractors.c extractors_extra.c rules.c tasks.c feedback.c guardrails.c branch_ownership.c workspace.c working_memory.c agent_config.c"
 LAYER2_FILES="agent.c agent_protocol.c agent_policy.c agent_context.c agent_plan.c agent_eval.c agent_eval_memory_support.c agent_coord.c agent_jobs.c agent_tools.c agent_tools_defs.c agent_http.c agent_fallback.c http_retry.c failover.c agent_tunnel.c"
 

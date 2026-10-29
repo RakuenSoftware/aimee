@@ -19,13 +19,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#if defined(__APPLE__)
-#define AGENT_STAT_MTIM(st) ((st).st_mtimespec)
-#elif defined(__unix__)
 #define AGENT_STAT_MTIM(st) ((st).st_mtim)
-#else
-#define AGENT_STAT_MTIM(st) ((struct timespec){.tv_sec = (st).st_mtime, .tv_nsec = 0})
-#endif
 
 typedef struct
 {

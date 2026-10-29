@@ -1,42 +1,42 @@
 CC      = gcc
 .DEFAULT_GOAL := all
+
+# aimee proper (server, KB, ring host, module processes) is Linux-only. macOS and
+# Windows get only the thin client, built with CMake: cmake -B build && cmake
+# --build build --target aimee.
+ifneq ($(shell uname -s),Linux)
+$(error aimee proper builds only on Linux; build the macOS or Windows thin client with CMake (cmake -B build && cmake --build build --target aimee))
+endif
 AR      ?= ar
 OBJDIR  = build/obj
 
-ifeq ($(OS),Windows_NT)
-EXEEXT  = .exe
-NULLDEV = NUL
-RM      = del /Q
-else
-EXEEXT  =
 NULLDEV = /dev/null
 RM      = rm -rf
-endif
-BINARY  = ../aimee$(EXEEXT)
-SERVER  = ../aimee-server$(EXEEXT)
-MEMORY_EVAL = ../aimee-memory-eval$(EXEEXT)
-MEMORY_TRANSFER = ../aimee-memory-transfer$(EXEEXT)
-CONFIG_MODULE = $(OBJDIR)/aimee-module-config$(EXEEXT)
+BINARY  = ../aimee
+SERVER  = ../aimee-server
+MEMORY_EVAL = ../aimee-memory-eval
+MEMORY_TRANSFER = ../aimee-memory-transfer
+CONFIG_MODULE = $(OBJDIR)/aimee-module-config
 # Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
-FORWARDER = ../aimee-forwarder$(EXEEXT)
-KB      = ../aimee-kb$(EXEEXT)
-KB_WORM = ../aimee-kb-worm$(EXEEXT)
-KB_RESOLVER = ../aimee-kb-resolver$(EXEEXT)
-KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
-KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
-KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
-KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
-KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
-RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
+FORWARDER = ../aimee-forwarder
+KB      = ../aimee-kb
+KB_WORM = ../aimee-kb-worm
+KB_RESOLVER = ../aimee-kb-resolver
+KB_STATUS_PROVISIONER = ../aimee-kb-status-provision
+KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision
+KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish
+KB_STATUS_AUTHORITY = ../aimee-kb-status-authority
+KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority
+RUNTIME_WEB = ../aimee-runtime-web
 THINCLIENT_LIBRARY = ../libaimee-client.so
 THINCLIENT_PC = $(OBJDIR)/thinclient/pkgconfig/aimee-client.pc
-DELEGATE_EGRESS = ../aimee-delegate-egress$(EXEEXT)
+DELEGATE_EGRESS = ../aimee-delegate-egress
 # Binaries a rename left behind. `all` removes these first so a renamed artifact
 # does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
 # and its 14MB predecessor was never retired, so it stayed untracked, unignored,
 # and large enough to push a workspace sync past the server's 4MB body cap.
-RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
-                        ../aimee-webchat$(EXEEXT) ../aimee-gateway$(EXEEXT)
+RETIRED_ROOT_BINARIES = ../aimee-client ../aimee-worker \
+                        ../aimee-webchat ../aimee-gateway
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
@@ -104,12 +104,11 @@ $(shell mkdir -p $(dir $(VERSION_FILE)) && echo "$(GIT_VERSION)" > $(VERSION_FIL
 endif
 
 # Eagerly create platform subdirectories at variable-expansion time so parallel
-# builds (-j) on macOS GNU make 3.81 don't race on directory creation. Order-only
-# prerequisites have edge cases in older make versions; $(shell) is bulletproof.
+# builds (-j) don't race on directory creation.
 # NOTE: must come AFTER the branch-switch block above, which deletes $(OBJDIR) on
 # branch changes — if this ran before, the directories would be wiped and gcc
 # would fail trying to write .d dependency files into non-existent subdirectories.
-_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
+_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
 
 # GCC 15.2 IPA bit-CP proves a live int parameter constant zero across -Os
 # -flto (kb_insights_util.c group_array: n>0 arrives as 0, by_* come back
@@ -128,46 +127,26 @@ ifeq ($(strip $(PQ_LIB)),)
 endif
 C_FLAGS  += $(PQ_CFLAGS)
 
-ifeq ($(OS),Windows_NT)
-    C_FLAGS += -DAIMEE_WINDOWS -D_WIN32_WINNT=0x0A00
-endif
-
-UNAME_S := $(shell uname -s)
 CC_MACHINE := $(shell $(CC) -dumpmachine 2>$(NULLDEV))
 
 # Shipping Linux binaries carry an explicit, repository-owned hardening contract;
 # their exploit resistance must not vary with the runner distribution defaults.
-ifeq ($(UNAME_S),Linux)
-    HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
-    # Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
-    # AArch64, so keeping it in the unconditional Linux set made the published
-    # arm64 thin client unbuildable even though the source is portable.
-    ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
-        HARDEN_C_FLAGS += -fcf-protection=full
-    endif
-    HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
-    C_FLAGS += $(HARDEN_C_FLAGS)
+HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
+# Intel CET is an x86 hardening facility. GCC rejects -fcf-protection on
+# AArch64, so keeping it in the unconditional Linux set made the published
+# arm64 thin client unbuildable even though the source is portable.
+ifneq ($(filter x86_64% amd64% i386% i486% i586% i686%,$(CC_MACHINE)),)
+    HARDEN_C_FLAGS += -fcf-protection=full
 endif
-
-# Platform-specific HTTP library
-ifeq ($(OS),Windows_NT)
-    HTTP_LIB = -lwinhttp
-    WINDOWS_LIBS = -lws2_32 -lbcrypt -lwinhttp
-else
-    HTTP_LIB =
-    WINDOWS_LIBS =
-endif
+HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+C_FLAGS += $(HARDEN_C_FLAGS)
 
 # PAM support (optional: set WITH_PAM=1 to enable, auto-detected if libpam-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_PAM ?= 0
-else
 # Probe with -include rather than a piped '#include' line: inside $(shell ...) the
 # '\#' escape reached the compiler as a literal backslash, so this test failed
 # ALWAYS and PAM was silently never compiled in on Linux even with libpam-dev
 # installed. -include needs no '#' at all, so there is nothing left to mis-escape.
 WITH_PAM ?= $(shell : | $(CC) -xc -fsyntax-only -include security/pam_appl.h - 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_PAM),1)
     PAM_FLAGS = -DWITH_PAM
     PAM_LIBS  = -lpam
@@ -177,11 +156,7 @@ else
 endif
 
 # libsecret support (optional: set WITH_LIBSECRET=1 to enable, auto-detected if libsecret-1-dev present)
-ifeq ($(OS),Windows_NT)
-WITH_LIBSECRET ?= 0
-else
 WITH_LIBSECRET ?= $(shell pkg-config --exists libsecret-1 2>$(NULLDEV) && echo 1 || echo 0)
-endif
 ifeq ($(WITH_LIBSECRET),1)
     LIBSECRET_FLAGS = -DWITH_LIBSECRET $(shell pkg-config --cflags libsecret-1)
     LIBSECRET_LIBS  = $(shell pkg-config --libs libsecret-1)
@@ -190,14 +165,8 @@ else
     LIBSECRET_LIBS  =
 endif
 
-# In-client TLS for https:// remote servers (optional). OpenSSL-backed; enabled
-# on POSIX (server/kb already require OpenSSL), disabled on Windows where the
-# MinGW thin client has no OpenSSL and refuses https:// instead.
-ifeq ($(OS),Windows_NT)
-WITH_TLS ?= 0
-else
+# In-client TLS for https:// remote servers (optional, OpenSSL-backed).
 WITH_TLS ?= 1
-endif
 ifeq ($(WITH_TLS),1)
     TLS_FLAGS = -DWITH_TLS
     TLS_LIBS  = -lssl -lcrypto
@@ -206,33 +175,10 @@ else
     TLS_LIBS  =
 endif
 
-# dashboard.c is always compiled: provides api_metrics, api_delegations, and
-# the other JSON API functions used by the server RPC layer.  The browser UI
-# (aimee-runtime-web) is now the standalone Go binary and no longer embedded here.
-ifeq ($(OS),Windows_NT)
-    UI_PLATFORM_SRCS = windows/dashboard.c
-else
-    UI_PLATFORM_SRCS = 
-endif
-
 C_FLAGS += $(PAM_FLAGS) $(LIBSECRET_FLAGS)
 
-ifeq ($(UNAME_S),Darwin)
-    PLATFORM_FRAMEWORKS = -framework Security -framework CoreFoundation
-    LEAN_GC_FLAGS       = -Wl,-dead_strip
-else ifeq ($(OS),Windows_NT)
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       =
-else
-    PLATFORM_FRAMEWORKS =
-    LEAN_GC_FLAGS       = -Wl,--gc-sections
-endif
-
-ifeq ($(OS),Windows_NT)
-    PIC_FLAGS =
-else
-    PIC_FLAGS = -fPIC
-endif
+LEAN_GC_FLAGS = -Wl,--gc-sections
+PIC_FLAGS = -fPIC
 
 C_FLAGS += $(PIC_FLAGS)
 
@@ -241,9 +187,9 @@ C_FLAGS += $(PIC_FLAGS)
 CLIENT_C_FLAGS := $(filter-out -I. -Idb1_client -Imodules/kb/c $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
 
 # --- Lean build profile ---
-LEAN_BINARY = ../aimee-lean$(EXEEXT)
-LEAN_SERVER = ../aimee-server-lean$(EXEEXT)
-LEAN_KB = ../aimee-kb-lean$(EXEEXT)
+LEAN_BINARY = ../aimee-lean
+LEAN_SERVER = ../aimee-server-lean
+LEAN_KB = ../aimee-kb-lean
 LEAN_OBJDIR = build/obj-lean
 
 CORE_CODEC_SRCS = core/codec/base64.c
@@ -256,72 +202,33 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
 # Linker flag sets (layered -- each level adds to the previous)
 L_MINIMAL = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
 L_CORE    = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
-L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
-L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_AGENT   = $(L_CORE) -lssl -lcrypto
+L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
-L_HTTP    = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
+L_HTTP    = $(L_MINIMAL) -lssl -lcrypto
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
-L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
-ifeq ($(OS),Windows_NT)
-    L_FULL += -ladvapi32
-    L_KB += -ladvapi32
-endif
+L_SERVER  = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
+L_KB      = -Os -flto $(IPA_BIT_CP_FIX) -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) $(LIBSECRET_LIBS) $(CORE_CODEC_LIB)
 
-# --- Platform-specific source selection ---
-# Each platform directory contributes implementations for platform_*.c, util, history,
-# webchat, dashboard, server_main, and secret_store backend.
-#
+# --- Platform sources (posix/ and linux/) ---
 # PLATFORM_AGENT_SRCS: agent-layer platform files that depend on LIB_AGENT functions
 # (agent_protocol, agent_tools, etc.) — must be part of LIB_AGENT, not LIB_CORE.
 
-ifeq ($(OS),Windows_NT)
-    PLATFORM_BASIC_SRCS = \
-        windows/platform_event.c windows/platform_ipc.c windows/platform_path.c \
-        windows/platform_process.c windows/platform_random.c \
-        shared/platform_net.c \
-        windows/secret_store.c windows/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        windows/server_main.c \
-        windows/cli_client.c windows/cli_main.c \
-        windows/events.c windows/cmd_infra.c \
-        windows/cmd_describe.c \
-        windows/cmd_hooks.c windows/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        windows/agent_runtime.c windows/agent_bridge.c windows/web_egress.c
-else ifeq ($(UNAME_S),Darwin)
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c shared/platform_net.c \
-        mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-        mac/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-else
-    PLATFORM_BASIC_SRCS = \
-        posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
-        posix/platform_random.c shared/platform_net.c \
-        linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-        linux/secret_store.c posix/util.c posix/pam_auth.c
-    PLATFORM_EXTRA_SRCS = \
-        posix/server_main.c \
-        posix/cli_client.c posix/cli_main.c \
-        posix/events.c \
-        posix/cmd_hooks.c posix/server_compute.c \
-        $(UI_PLATFORM_SRCS)
-    PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
-endif
+PLATFORM_BASIC_SRCS = \
+    posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
+    posix/platform_random.c shared/platform_net.c \
+    linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
+    linux/secret_store.c posix/util.c posix/pam_auth.c
+PLATFORM_EXTRA_SRCS = \
+    posix/server_main.c \
+    posix/cli_client.c posix/cli_main.c \
+    posix/events.c \
+    posix/cmd_hooks.c posix/server_compute.c
+PLATFORM_AGENT_SRCS = \
+    posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_bridge.c modules/tools/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c modules/tools/agent_tools_dispatch.c modules/tools/agent_tools_effect_contract.c modules/tools/agent_tools_completion.c modules/tools/agent_tools_anchored.c posix/web_egress.c posix/web_read.c posix/td_search_render.c posix/sandbox.c
 
 PLATFORM_SRCS       = $(PLATFORM_BASIC_SRCS) $(PLATFORM_EXTRA_SRCS) $(PLATFORM_AGENT_SRCS)
 PLATFORM_BASIC_OBJS = $(PLATFORM_BASIC_SRCS:%.c=$(OBJDIR)/%.o)
@@ -497,22 +404,6 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 OURO_RING_MAKE_LETTERS := $(filter-out -%,$(firstword $(MAKEFLAGS)))
 OURO_RING_DRY_RUN := $(findstring n,$(OURO_RING_MAKE_LETTERS))$(findstring q,$(OURO_RING_MAKE_LETTERS))
 ifneq ($(filter clean distclean,$(MAKECMDGOALS)),)
-else ifneq ($(UNAME_S),Linux)
-# The ring is Linux-only: its endpoints are SOCK_SEQPACKET sockets opened with
-# SOCK_CLOEXEC and accept4. Elsewhere this Makefile builds only test probes
-# that never link it. They still compile against its public headers (the
-# module-call API names ring result types), so only those are provided, from
-# the same release and checks; a product that does link the ring stops at the
-# rule below rather than in the ring's compiler.
-OURO_RING_INCLUDE := $(shell python3 ../scripts/provide_ouroboros_ring.py --headers build/deps/ouroboros-ring)
-ifeq ($(strip $(OURO_RING_INCLUDE)),)
-$(error could not provide the ouroboros ring headers in the range dependencies/ouroboros-ring.json names; see the message above)
-endif
-C_FLAGS += -I$(OURO_RING_INCLUDE)
-OURO_RING_UNSUPPORTED := build/deps/ouroboros-ring/unsupported-on-$(UNAME_S)
-OURO_RING_LIB := $(OURO_RING_UNSUPPORTED)
-$(OURO_RING_UNSUPPORTED):
-	@echo "the ouroboros ring is Linux-only; aimee-server and aimee-kb cannot be built on $(UNAME_S)" >&2; exit 1
 else ifneq ($(OURO_RING_DRY_RUN),)
 C_FLAGS += -Ibuild/deps/ouroboros-ring/current/include
 OURO_RING_LIB := build/deps/ouroboros-ring/current/lib/libouroboros-ring.a
@@ -541,18 +432,10 @@ else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
                   core/connection/socket.c
-ifneq ($(OS),Windows_NT)
 CORE_CONNECTION_SRCS += core/connection/tls_openssl.c
-endif
 ifeq ($(WITH_TLS),1)
 CORE_CONNECTION_SRCS += core/connection/native_tls_identity.c core/connection/native_tls_path.c
-ifeq ($(OS),Windows_NT)
-CORE_CONNECTION_SRCS += core/connection/native_tls_schannel.c
-else ifeq ($(shell uname -s),Darwin)
-CORE_CONNECTION_SRCS += core/connection/native_tls_securetransport.c
-else
 CORE_CONNECTION_SRCS += core/connection/native_tls_openssl.c
-endif
 endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
@@ -600,9 +483,7 @@ CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o 
 # Canonical identity is filesystem/Git-only; the thin client never links the
 # workspace discovery/context or server store graph.
 WORKSPACE_IDENTITY_OBJS = $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o $(OBJDIR)/yaml.o
-ifneq ($(OS),Windows_NT)
 CLIENT_SUPPORT_OBJS += $(WORKSPACE_IDENTITY_OBJS)
-endif
 CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
@@ -1168,7 +1049,7 @@ wizard-bootstrap-e2e: $(BINARY) $(SERVER)
 kb: $(KB) $(KB_RESOLVER)
 
 # aimee-witness-verify: standalone OFFLINE witness verifier (no kb, no db, no net).
-WITNESS_VERIFY = ../aimee-witness-verify$(EXEEXT)
+WITNESS_VERIFY = ../aimee-witness-verify
 WITNESS_VERIFY_OBJS = $(OBJDIR)/tools/witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_offline.o $(OBJDIR)/modules/vault/vault_witness_verify.o \
   $(OBJDIR)/modules/vault/vault_witness_record.o $(OBJDIR)/modules/vault/vault_witness_merkle.o \
@@ -1205,84 +1086,8 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Daemons link with -s, so the
 # only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
-# such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
-# macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
+# such as PQ*, never on internal definitions, which a stripped binary drops.
 check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB)
-ifeq ($(OS),Windows_NT)
-	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
-else ifeq ($(UNAME_S),Darwin)
-	@fail=0; \
-	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
-		echo "check-linking: $$bin"; \
-		deps=$$(otool -L "$$bin" | tail -n+2); \
-		if [ "$$bin" = "$(BINARY)" ]; then \
-			for lib in libsqlite3 libpq; do \
-				if echo "$$deps" | grep -q "$$lib"; then \
-					echo "  ERROR: $$lib linked into DB-free client"; \
-					fail=1; \
-				else \
-					echo "  $$lib: not found (client boundary ok)"; \
-				fi; \
-			done; \
-			continue; \
-		fi; \
-		if [ "$$bin" = "$(RUNTIME_WEB)" ]; then \
-			if echo "$$deps" | grep -q libpq; then \
-				echo "  ERROR: libpq linked into webchat (no database access)"; \
-				fail=1; \
-			else \
-				echo "  libpq: not found (webchat boundary ok)"; \
-			fi; \
-			continue; \
-		fi; \
-		case "$$bin" in \
-			*aimee-server*) \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native server"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: native server imports PostgreSQL driver symbols"; \
-					fail=1; \
-				fi ;; \
-			*aimee-kb*) \
-				if echo "$$deps" | grep -q libsqlite3; then \
-					echo "  ERROR: libsqlite3 linked into knowledge host"; \
-					fail=1; \
-				else \
-					echo "  libsqlite3: not found (kb boundary ok)"; \
-				fi; \
-				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: PostgreSQL driver linked into native KB"; \
-					fail=1; \
-				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | grep -Eq 'db1_|sqlite3_'; then \
-					echo "  ERROR: DB1/sqlite symbols present in knowledge host"; \
-					fail=1; \
-				else \
-					echo "  DB1/sqlite symbols: not found (kb boundary ok)"; \
-				fi; \
-				continue ;; \
-		esac; \
-		for lib in libsqlite3 libssl libcrypto; do \
-			case "$$bin" in \
-				*aimee-server*) ;; \
-				*) [ "$$lib" = "libssl" ] || [ "$$lib" = "libcrypto" ] && continue ;; \
-			esac; \
-			if echo "$$deps" | grep -q "$$lib"; then \
-				echo "  $$lib: dynamic (ok)"; \
-			else \
-				echo "  $$lib: not found (ok if unused by this binary)"; \
-			fi; \
-		done; \
-		if echo "$$deps" | grep -q '/usr/local/lib.*\.a'; then \
-			echo "  WARNING: static library detected in $$bin"; \
-			fail=1; \
-		fi; \
-	done; \
-	if [ "$$fail" = "1" ]; then exit 1; fi; \
-	echo "check-linking: ok"
-else
 	@fail=0; \
 	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB); do \
 		echo "check-linking: $$bin"; \
@@ -1354,7 +1159,6 @@ else
 	done; \
 	if [ "$$fail" = "1" ]; then exit 1; fi; \
 	echo "check-linking: ok"
-endif
 
 # The harness starts the DB1 module the way a container's supervisor does, so
 # the module is a prerequisite: without it every migrated operation answers
@@ -1548,7 +1352,7 @@ $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 THINCLIENT_LIBRARY_INPUTS = $(filter cli_client.c cli_chat_stream.c %/session_event.c,$(CLI_SRCS)) $(IR_BASE_SRCS) aimee_home.c aimee_sha256.c vendor/cJSON.c $(CORE_CONNECTION_SRCS)
 $(THINCLIENT_LIBRARY): Makefile $(THINCLIENT_LIBRARY_INPUTS) $(wildcard headers/*.h modules/ir/include/aimee/ir/*.h core/connection/*.h core/connection/include/aimee/core/connection/*.h vendor/headers/*.h) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB))
 	@mkdir -p $(dir $@)
-	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(PLATFORM_FRAMEWORKS) $(EXTRA_L_FLAGS)
+	$(CC) $(CLIENT_C_FLAGS) -fPIC -shared -DAIMEE_CLIENT_LIBRARY -o $@ $(THINCLIENT_LIBRARY_INPUTS) $(if $(strip $(AIMEE_CORE_PREFIX)),$(CORE_CONNECTION_LIB)) $(TLS_LIBS) -lcrypto -lpthread $(EXTRA_L_FLAGS)
 $(THINCLIENT_PC): $(THINCLIENT_LIBRARY) Makefile
 	@mkdir -p $(dir $@)
 	@printf '%s\n' 'prefix=$(abspath $(dir $(THINCLIENT_LIBRARY)))' 'libdir=$${prefix}' 'includedir=$(abspath headers)' '' 'Name: aimee-client' 'Description: Shared Aimee thinclient transport' 'Version: 1.0.0' 'Libs: -L$${libdir} -laimee-client' 'Cflags: -I$${includedir}' > $@
@@ -1838,14 +1642,6 @@ $(OBJDIR)/models_dev.o: models_dev.c
 
 # Subdirectories are created at make startup via $(shell mkdir -p ...) above.
 $(OBJDIR)/linux/%.o: linux/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/mac/%.o: mac/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -o $@ $<
-
-$(OBJDIR)/windows/%.o: windows/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 

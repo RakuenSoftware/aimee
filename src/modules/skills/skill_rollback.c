@@ -29,11 +29,7 @@ static int snapshot_id_ok(const char *snapshot_id)
 
 static int rollback_lstat(const char *path, struct stat *st)
 {
-#ifdef _WIN32
-   return stat(path, st);
-#else
    return lstat(path, st);
-#endif
 }
 
 static int mkdir_p_local(const char *path)

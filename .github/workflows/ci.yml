@@ -651,14 +651,6 @@ jobs:
       # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
       - name: Build the shipping set
         run: cd src && make -j"$(nproc)" all
-      - name: Native CMake canonical capture fixtures
-        run: |
-          cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
-          cmake --build build/native-ir-cmake --parallel "$(nproc)" \
-            --target test_server_chat_ir test_server_session_log test_server_native_runtime test_server_native_replay test_server_learning_application
-          ctest --test-dir build/native-ir-cmake \
-            -R '^test_server_(chat_ir|session_log|native_runtime|native_replay|learning_application)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 
@@ -1074,12 +1066,12 @@ jobs:
   lsp-real-providers:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    # The Linux leg runs everywhere. The macOS leg runs where the macOS thin
-    # client is gated: pull requests into main, pushes and the merge queue.
+    # Linux only: the LSP client is part of aimee proper, which is Linux-only;
+    # the macOS and Windows thin client carries no LSP code.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((github.event_name != 'pull_request' || github.base_ref == 'main') && '[{"os":"ubuntu-24.04","artifact":"linux"},{"os":"macos-latest","artifact":"macos"}]' || '[{"os":"ubuntu-24.04","artifact":"linux"}]') }}
+        include: [{"os": "ubuntu-24.04", "artifact": "linux"}]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -1087,7 +1079,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
         uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
@@ -1097,15 +1088,11 @@ jobs:
         with:
           node-version: 20.19.2
       - name: Install native build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           timeout 240 sudo apt-get update -q
           i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
             libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
-      - name: Install native build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install libpq openssl@3 zstd
       - name: Install pinned real language servers
         env:
           GOBIN: ${{ runner.temp }}/lsp-tools/go/bin
@@ -1120,20 +1107,8 @@ jobs:
         run: |
           exec > >(tee "$RUNNER_TEMP/lsp-probe-build.log") 2>&1
           jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
-          if [ "$RUNNER_OS" = macOS ]; then
-            libpq="$(brew --prefix libpq)"
-            openssl="$(brew --prefix openssl@3)"
-            zstd="$(brew --prefix zstd)"
-            export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
-            make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -Wno-deprecated-declarations -I$libpq/include -I$openssl/include -I$zstd/include" \
-              EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
-              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
-              build/obj/tests/unit-test-lsp
-          else
-            make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              build/obj/tests/unit-test-lsp
-          fi
+          make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            build/obj/tests/unit-test-lsp
       - name: Name the LSP probe build failure
         if: failure()
         run: scripts/ci-annotate-log-tail.sh "$RUNNER_TEMP/lsp-probe-build.log" "LSP probe build failed"
@@ -1782,9 +1757,7 @@ jobs:
       - name: Workflow name resolution
         run: cd src && make workflow-name-resolution-test
 
-  # The only Windows thin-client build. A second job, windows-cmake, built the
-  # same target with the same flags (its one difference, -DWITH_UI=OFF, is
-  # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
+  # The only Windows build: Windows gets the thin client and nothing else.
   windows-build:
     needs: change-scope
     # Shared native headers/build contracts also change on testing-target PRs.
@@ -1847,17 +1820,8 @@ jobs:
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Download SQLite amalgamation
-        shell: powershell
-        run: |
-          $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip
-          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
-          New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.h src\vendor\sqlite3\
       - name: Configure with CMake
-        run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+        run: cmake -B build -G "MinGW Makefiles"
       # Windows ships only the thin client (aimee.exe); server/kb/gateway/webchat
       # are Linux/Docker components and are not built here.
       - name: Build the thin client
@@ -1929,7 +1893,7 @@ jobs:
       # release build. Secure Transport and the pinned libcrypto above both
       # contain the two required slices.
       - name: Configure with CMake (universal arm64+x86_64)
-        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
       - name: Build the thin client
         run: |
           cmake --build build --parallel 3 --target aimee

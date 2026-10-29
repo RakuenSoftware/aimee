@@ -31,6 +31,8 @@
 #include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
 #include "headers/memory_stage_contract.h"
+#include "kb_mdl.h"
+#include "artifacts.h" /* aimee_kb_store_register_mdl_score_provider */
 #include <aimee/response-composition/module_api.h>
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
@@ -1100,6 +1102,22 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    return rc;
 }
 
+/* The same canonical MDL scorer aimee-kb installs: artifacts the server
+ * commits carry the same MDL features as those the KB commits. */
+static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
+                     double *l_residual, double *total)
+{
+   if (!l_candidate || !l_residual || !total)
+      return -1;
+   kb_mdl_score_t score = {0};
+   if (kb_mdl_score(candidate, evidence, &score) != 0)
+      return -1;
+   *l_candidate = score.l_candidate;
+   *l_residual = score.l_residual;
+   *total = score.total;
+   return 0;
+}
+
 void server_module_tools_adapters_configure(void)
 {
    agent_tools_register_classifier(tool_classify);
@@ -1109,6 +1127,7 @@ void server_module_tools_adapters_configure(void)
 void server_module_stage_adapters_configure(void)
 {
    learning_router_register_signal_classifier(learning_classify);
+   aimee_kb_store_register_mdl_score_provider(score_mdl);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);
    delegate_register_chain_provider(delegate_chain);
