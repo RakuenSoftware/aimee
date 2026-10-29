@@ -76,7 +76,7 @@ The current process catalog contains 26 Go identities: `config`, `memory`, `lear
 `providers`, `server` and `kb`. Placement and activation select the running set; the Server and
 KB role identities never run together. The catalog contains no supervised C KB_STORE process.
 The Go PostgreSQL module serves both placements. Transitional module-owned C resource/domain
-code remains, and C adapters used as parity fixtures do not establish a second policy owner.
+code remains; it calls the module processes and owns no policy of its own.
 
 The depth of each Go owner differs. Memory owns retrieval, mutations and lifecycle orchestration;
 providers owns request preparation; role modules own composition. Some other migrated stages

@@ -116,6 +116,61 @@ class ProvideTests(unittest.TestCase):
             provide.provide(self.base / "deps")
         build.assert_not_called()
 
+    def release_archive(self, files: dict[str, bytes]) -> mock.MagicMock:
+        tree = self.base / "release-tree"
+        for name, data in files.items():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_bytes(data)
+        pin = json.loads(self.contract.read_text())
+        pin["release_tree_sha256"] = provide.tree_digest(tree)
+        self.contract.write_text(json.dumps(pin))
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+            for name, data in files.items():
+                info = tarfile.TarInfo(f"ouroboros-ring-0.1.0/{name}")
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = archive.getvalue()
+        return response
+
+    def test_headers_come_from_the_checked_release_without_building(self) -> None:
+        response = self.release_archive({
+            "VERSION": b"0.1.0\n",
+            "c/include/ouroboros/ring.h": b"/* ring */\n",
+            "c/src/endpoint.c": b"/* linux only */\n",
+        })
+        with mock.patch.object(provide.urllib.request, "urlopen", return_value=response), \
+                mock.patch.object(provide, "build") as build:
+            include = provide.provide_headers(self.base / "deps")
+            again = provide.provide_headers(self.base / "deps")
+        build.assert_not_called()
+        self.assertEqual(include, again)
+        self.assertEqual((include / "ouroboros/ring.h").read_bytes(), b"/* ring */\n")
+        self.assertEqual(sorted(p.name for p in include.rglob("*") if p.is_file()), ["ring.h"])
+
+    def test_headers_from_a_changed_release_are_refused(self) -> None:
+        response = self.release_archive({"c/include/ouroboros/ring.h": b"/* ring */\n"})
+        pin = json.loads(self.contract.read_text())
+        pin["release_tree_sha256"] = "1" * 64
+        self.contract.write_text(json.dumps(pin))
+        with mock.patch.object(provide.urllib.request, "urlopen", return_value=response), \
+                self.assertRaisesRegex(SystemExit, "a release tag must never change"):
+            provide.provide_headers(self.base / "deps")
+        self.assertFalse(list((self.base / "deps").glob("*/include")))
+
+    def test_headers_from_an_installation_out_of_range_are_refused(self) -> None:
+        prefix = self.base / "installed"
+        installed_ring(prefix, "0.1.4")
+        with mock.patch.dict(os.environ, {"OURO_RING_PREFIX": str(prefix)}):
+            self.assertEqual(provide.provide_headers(self.base / "deps"), prefix.resolve() / "include")
+        source = self.base / "checkout"
+        source.mkdir()
+        (source / "VERSION").write_text("0.2.0\n")
+        with mock.patch.dict(os.environ, {"OURO_RING_SOURCE": str(source)}), \
+                self.assertRaisesRegex(SystemExit, "outside compatible 0.1"):
+            provide.provide_headers(self.base / "deps")
+
     def test_unsafe_archive_paths_are_refused(self) -> None:
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w:gz") as tar:

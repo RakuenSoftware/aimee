@@ -1,3 +1,8 @@
+/* Test double: a C stand-in for the workspace module's Go handler
+ * (server-go/modules/workspace), so C core tests can exercise the code that calls
+ * the module without a ring and a module process. No shipped binary links it,
+ * and the Go module's own tests are what hold the handler's behaviour. Built
+ * with aimee_module_handler renamed to aimee_workspace_module_handler. */
 #include <ouroboros/module_runtime.h>
 #include <aimee/workspace/module_api.h>
 

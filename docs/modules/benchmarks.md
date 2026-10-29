@@ -14,7 +14,7 @@ bounded deterministic stages. Its BIRQ/BIRS scoring contract accepts up to 32
 retrieved and relevant identifiers plus K, then returns the existing MRR, NDCG@K,
 and recall@K definitions. Its BLRQ/BLRS latency contract accepts up to 512
 non-negative finite measurements, then returns nearest-rank p50/p95/p99 plus the
-minimum and maximum. The C adapter is a wire-parity fixture. Dataset loading,
+minimum and maximum. Dataset loading,
 benchmark execution, providers, scratch databases, raw timing capture, baselines,
 reporting, and result persistence remain in their current C and script owners
 while those boundaries are migrated. The production server's live
@@ -28,8 +28,7 @@ requiring a daemon bus.
 
 The native module retains `agent_eval.c` (agent harness and live scoring transport),
 `agent_eval_baseline.c` (baseline files), `agent_eval_memory_support.c` (external
-host support), `agent_eval_memory_transport.c` (memory bus transport), and
-`module_adapter.c` (wire-parity fixture). `agent_eval.h` and
+host support), and `agent_eval_memory_transport.c` (memory bus transport). `agent_eval.h` and
 `agent_eval_internal.h` expose retained host contracts. Native dataset runners,
 QA orchestration and scratch-store hooks are retired. Memory dataset adapters
 use the [shared Go module evaluation setup](../MEMORY.md#isolated-go-evaluation-transport), with isolated storage and

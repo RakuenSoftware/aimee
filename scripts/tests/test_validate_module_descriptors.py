@@ -31,7 +31,6 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
     inventory = repo / validator.INVENTORY_PATH
     inventory.parent.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
-    include_roots: set[str] = set()
     for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
         target = repo / "src/modules" / source.parent.name / "module.yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -42,26 +41,6 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
                 owned_target = repo / relative
                 owned_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / relative, owned_target)
-        build = descriptor.get("c_build")
-        if isinstance(build, dict):
-            include_roots.update(build.get("include_roots", []))
-            for relative in build.get("header_dependencies", []):
-                dependency = repo / relative
-                dependency.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(REPO_ROOT / relative, dependency)
-            for header in build.get("generated_headers", []):
-                for entry in header.get("entries", []):
-                    relative = entry["source"]
-                    generated_input = repo / relative
-                    generated_input.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(REPO_ROOT / relative, generated_input)
-    # The validator requires every c_build include root to be a real directory.
-    # Only roots that happen to hold a descriptor-owned file appear from the
-    # copies above, so materialize the rest: a module may legitimately include
-    # from a root it owns no file in. Deferred until every descriptor is copied
-    # so that creating one module's root cannot race another module's own dir.
-    for root in sorted(include_roots):
-        (repo / root).mkdir(parents=True, exist_ok=True)
     return tmp
 
 
@@ -282,89 +261,16 @@ class DescriptorTests(unittest.TestCase):
         complete_type["ownership_complete"] = 1
         self.assert_rule(complete_type, "ownership-complete-type")
 
-    def test_c_build_contract_is_closed_sorted_and_safe(self) -> None:
-        descriptor = self.required()
-        descriptor["c_build"] = {
-            "compile_definitions": ["AIMEE_DB1_DISABLED"],
-            "generated_headers": [{
-                "entries": [{
-                    "source": "src/modules/memory/schema.sql",
-                    "symbol": "AIMEE_MEMORY_SCHEMA_SQL",
-                }],
-                "output": "schema_data.h",
-            }],
-            "header_dependencies": ["src/headers/aimee.h"],
-            "include_roots": ["src", "src/modules/memory"],
-            "pkg_config": ["libpq"],
-            "system_libraries": ["OpenSSL::Crypto", "m"],
-        }
-        required, optional = self.taxonomy()
-        self.assertEqual(
-            validator.validate_descriptor(descriptor, required, optional), "memory"
-        )
-
-        cases = (
-            ({"include_roots": ["src"], "pkg_config": []}, "c-build-shape"),
-            ({"include_roots": [], "pkg_config": [], "system_libraries": []},
-             "c-build-empty"),
-            ({"include_roots": ["src", "src"], "pkg_config": [],
-              "system_libraries": []}, "c-build-order"),
-            ({"include_roots": ["../outside"], "pkg_config": [],
-              "system_libraries": []}, "c-build-path"),
-            ({"include_roots": ["src"], "pkg_config": ["libpq;injected"],
-              "system_libraries": []}, "c-build-token"),
-            ({"compile_definitions": ["BAD=1"], "include_roots": ["src"],
-              "pkg_config": [], "system_libraries": []}, "c-build-token"),
-            ({"compile_definitions": ["Z", "A"], "include_roots": ["src"],
-              "pkg_config": [], "system_libraries": []}, "c-build-order"),
-            ({"generated_headers": "bad", "include_roots": ["src"],
-              "pkg_config": [], "system_libraries": []}, "c-build-type"),
-            ({"header_dependencies": "bad", "include_roots": ["src"],
-              "pkg_config": [], "system_libraries": []}, "c-build-type"),
-            ({"header_dependencies": ["../outside.h"], "include_roots": ["src"],
-              "pkg_config": [], "system_libraries": []}, "c-build-path"),
-            ({"header_dependencies": ["src/modules/memory/private.h"],
-              "include_roots": ["src"], "pkg_config": [], "system_libraries": []},
-             "c-build-header-owned"),
-            ({"generated_headers": [{"output": "../bad.h", "entries": [
-                {"source": "src/schema.sql", "symbol": "SCHEMA_SQL"},
-            ]}], "include_roots": ["src"], "pkg_config": [],
-              "system_libraries": []}, "c-build-generated-output"),
-            ({"generated_headers": [{"output": "schema.h", "entries": [
-                {"source": "../schema.sql", "symbol": "SCHEMA_SQL"},
-            ]}], "include_roots": ["src"], "pkg_config": [],
-              "system_libraries": []}, "c-build-path"),
-            ({"generated_headers": [{"output": "schema.h", "entries": [
-                {"source": "src/a.sql", "symbol": "Z_SQL"},
-                {"source": "src/z.sql", "symbol": "A_SQL"},
-            ]}], "include_roots": ["src"], "pkg_config": [],
-              "system_libraries": []}, "c-build-order"),
-            ({"include_roots": ["src"], "pkg_config": [],
-              "system_libraries": [7]}, "c-build-type"),
-        )
-        for build, rule in cases:
-            mutated = self.required()
-            mutated["c_build"] = build
-            with self.subTest(rule=rule):
-                self.assert_rule(mutated, rule)
-
-    def test_c_build_include_roots_must_be_real_directories(self) -> None:
-        descriptor = json.loads(
-            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(
-                encoding="utf-8"
-            )
-        )
-        descriptor["c_build"] = {
-            "include_roots": ["src/modules/module-runtime/missing"],
-            "pkg_config": [],
-            "system_libraries": [],
-        }
-        required, optional = self.taxonomy()
-        validator.validate_descriptor(descriptor, required, optional)
-        with self.assertRaisesRegex(
-            validator.DescriptorError, r"rule=c-build-directory"
-        ):
-            validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
+    def test_the_retired_c_build_is_an_unknown_key(self) -> None:
+        # Module processes are Go; the C module-process build and the c_build
+        # and c_init fields that described it are retired.
+        for key, value in (("c_build", {"include_roots": ["src"], "pkg_config": [],
+                                        "system_libraries": []}), ("c_init", "x_init")):
+            descriptor = self.required()
+            descriptor[key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(
+                    validator.DescriptorError, r"rule=descriptor-keys .*unknown=\['" + key):
+                validator.validate_descriptor(descriptor, {"memory"}, set())
 
     def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
         report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
@@ -502,9 +408,6 @@ class DescriptorTests(unittest.TestCase):
              "src/modules/translation/aimee_backend_openai.c"),
             ("translation", "sources", "src/modules/translation/aimee_ir_stream.c"),
             ("skills", "sources", "src/modules/skills/skill.c"),
-            ("skills", "sources", "src/modules/skills/skill_rollback.c"),
-            ("skills", "sources", "src/modules/skills/skill_trigger_policy.c"),
-            ("skills", "private_headers", "src/modules/skills/skill_trigger_policy.h"),
             ("audit", "sources", "src/modules/audit/audit_action.c"),
             ("audit", "sources", "src/modules/audit/audit_worm.c"),
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
@@ -553,31 +456,21 @@ class DescriptorTests(unittest.TestCase):
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
             ("memory", "go_sources", "server-go/modules/memory/memory.go"),
-            ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
-            ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),
             ("roundtable", "go_sources", "server-go/modules/roundtable/roundtable.go"),
-            ("roundtable", "go_tests", "server-go/modules/roundtable/roundtable_test.go"),
-            ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
             ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
             ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "go_sources", "server-go/modules/governance/governance.go"),
-            ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
-            ("workflows", "sources", "src/modules/workflows/module_adapter.c"),
             ("workflows", "go_sources", "server-go/modules/workflows/workflows.go"),
-            ("workflows", "go_tests", "server-go/modules/workflows/workflows_test.go"),
-            ("kb-synthesis", "sources", "src/modules/kb-synthesis/module_adapter.c"),
             ("kb-synthesis", "go_sources", "server-go/modules/kb-synthesis/kb_synthesis.go"),
             ("kb-synthesis", "go_tests",
              "server-go/modules/kb-synthesis/kb_synthesis_test.go"),
-            ("runtime-web", "sources", "src/modules/runtime-web/module_adapter.c"),
             ("runtime-web", "go_sources",
              "server-go/modules/runtime-web/policy/status.go"),
             ("runtime-web", "go_sources",
              "server-go/modules/runtime-web/runtime_web.go"),
             ("runtime-web", "go_tests",
              "server-go/modules/runtime-web/runtime_web_test.go"),
-            ("control-web", "sources", "src/modules/control-web/module_adapter.c"),
             ("control-web", "go_sources",
              "server-go/modules/control-web/policy/acl.go"),
             ("control-web", "go_sources",

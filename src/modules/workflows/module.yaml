@@ -20,7 +20,6 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/workflows/gw_orch_workflows.c",
-    "src/modules/workflows/module_adapter.c",
     "src/modules/workflows/tool_egress.c",
     "src/modules/workflows/wfe_advance.c",
     "src/modules/workflows/wfe_advance_exec.c",

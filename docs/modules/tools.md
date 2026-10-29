@@ -18,8 +18,7 @@ private seam shared across the three sources). These were relocated from `src/po
 implementations) and `src/headers/` (the contract).
 
 The tool-dispatch classification stage now runs in the supervised Go
-`aimee-module-tools` process from `server-go/modules/tools`. The C
-`module_adapter.c` remains a byte-parity fixture. The dispatcher uses only the
+`aimee-module-tools` process from `server-go/modules/tools`. The dispatcher uses only the
 registered event-bus classifier; if it is absent or fails, the tool remains
 unclassified rather than falling back to a local name table. Tool execution,
 policy and workspace binding, schemas, and result handling are deliberately not

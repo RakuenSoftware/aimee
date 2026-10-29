@@ -10,8 +10,8 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    (void)session_id;
 }
 
-/* The dispatch test isolates server.c from the event-bus runtime. The module
- * handler's modulo semantics are covered by unit-test-process-module-handlers. */
+/* The dispatch test isolates server.c from the event-bus runtime. The skills
+ * module process's modulo semantics are covered by its Go tests. */
 int server_module_skill_should_fire(int hook_count, int interval, int *fire)
 {
    if (!fire)
