@@ -70,6 +70,7 @@ Architecture figures live in `docs/images/architecture/`. Regenerate their SVGs 
 - [Benchmarks](BENCHMARKS.md)
 - [Change the KB embedder](runbooks/change-embedder.md)
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
+- [Org-vault credential rotation](runbooks/org-vault-credential-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
 - [Observability security](runbooks/observability-security.md)

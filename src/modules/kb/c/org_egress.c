@@ -274,3 +274,38 @@ int kb_store_org_egress_recover(int limit, int64_t *out_count)
    aimee_pg_finalize(st);
    return rc;
 }
+
+int kb_store_org_egress_binding_set(const kb_store_org_egress_binding_t *b)
+{
+   int g = bind_common_guard();
+   if (g)
+      return g;
+   if (!b || b->team_id < 1 || !b->model_id[0] || !b->billable_model[0] || b->pricing_version < 1 ||
+       !b->key_id[0] || !b->vault_principal[0] || b->max_input_tokens < 1 ||
+       b->max_output_tokens < 1)
+      return -1;
+   void *conn = kb_store_conn();
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn,
+                               "SELECT org_egress_binding_set(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                               err, sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", b->team_id);
+   aimee_pg_bind_text(st, "?2", b->model_id);
+   aimee_pg_bind_text(st, "?3", b->billable_model);
+   aimee_pg_bind_int64(st, "?4", b->pricing_version);
+   aimee_pg_bind_text(st, "?5", b->key_id);
+   aimee_pg_bind_text(st, "?6", b->vault_principal);
+   aimee_pg_bind_text(st, "?7", b->vault_agent);
+   aimee_pg_bind_text(st, "?8", b->vault_cred);
+   aimee_pg_bind_int64(st, "?9", b->max_input_tokens);
+   aimee_pg_bind_int64(st, "?10", b->max_output_tokens);
+   aimee_pg_bind_text(st, "?11", b->enabled ? "true" : "false");
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = step == AIMEE_PG_ROW ? 0 : egress_error(st);
+   aimee_pg_finalize(st);
+   return rc;
+}

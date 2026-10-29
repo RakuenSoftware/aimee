@@ -97,6 +97,14 @@ presence checks, provider bootstrap, and scoped injection into delegates or Git 
 and health output expose references and state only; protocol clients and GUI forms must never receive
 stored secret values merely to display whether a credential exists.
 
+Org-vault egress credentials are adopted, bound and rotated through `aimee-kb vault
+adopt|bind|rotate|remediate|schedule|rotations`: the
+command files a request in `org_rotation_request`, and the KB daemon's rotation worker
+(`src/kb/kb_vault_rotation_worker.c`) starts and drives the fenced workflow with the AWS IAM
+provider (`src/kb/kb_vault_rotation_aws.c`). Rotation needs KMS custody, the only custody that keeps a
+signed high-water mark per slot. See the
+[credential rotation runbook](../runbooks/org-vault-credential-rotation.md).
+
 ## Data and migrations
 
 Encrypted records carry principal, agent/provider, credential name, wrapped data key, ciphertext,

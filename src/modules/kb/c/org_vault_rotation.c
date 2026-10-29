@@ -20,6 +20,20 @@ static void copy_text(char *dst, size_t cap, const char *src)
    snprintf(dst, cap, "%s", src ? src : "");
 }
 
+/* Request functions raise P0002 for a missing binding, slot or rotation, and
+ * P0003 for a slot that cannot take the request now. */
+static int request_error(aimee_pg_step_t step, const aimee_pg_stmt_t *st)
+{
+   if (step == AIMEE_PG_ROW)
+      return 0;
+   const char *state = aimee_pg_sqlstate(st);
+   if (state && !strcmp(state, "P0002"))
+      return KB_STORE_VAULT_ROTATION_REQUEST_UNKNOWN;
+   if (state && !strcmp(state, "P0003"))
+      return KB_STORE_VAULT_ROTATION_REQUEST_CONFLICT;
+   return -1;
+}
+
 int kb_store_vault_rotation_start(const char *actor, const char *key_id, const char *principal,
                                   int has_team, int64_t team_id, const char *agent,
                                   const char *cred, int64_t from_version, int compromise,
@@ -423,4 +437,273 @@ int kb_store_vault_rotation_remediate(const char *actor, int64_t rotation_id, co
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    return step == AIMEE_PG_ROW ? 0 : -1;
+}
+
+int kb_store_vault_rotation_request_add(const char *actor, int64_t team_id, const char *kind,
+                                        const char *model_id, int64_t rotation_id, int64_t *out_id)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || team_id < 1 || !kind ||
+       (strcmp(kind, "rotate") && strcmp(kind, "remediate")) || !out_id)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_request_add(?1,?2,?3,?4,?5)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   aimee_pg_bind_text(st, "?3", kind);
+   aimee_pg_bind_text(st, "?4", model_id ? model_id : "");
+   if (rotation_id > 0)
+      aimee_pg_bind_int64(st, "?5", rotation_id);
+   else
+      aimee_pg_bind_null(st, "?5");
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   if (step == AIMEE_PG_ROW)
+      *out_id = aimee_pg_column_int64(st, 0);
+   int rc = request_error(step, st);
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+int kb_store_vault_rotation_request_next(const char *actor, kb_store_vault_rotation_request_t *out)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_request_next(?1)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = step == AIMEE_PG_DONE ? 1 : -1;
+   if (step == AIMEE_PG_ROW)
+   {
+      out->id = aimee_pg_column_int64(st, 0);
+      out->team_id = aimee_pg_column_int64(st, 1);
+      copy_text(out->kind, sizeof(out->kind), aimee_pg_column_text(st, 2));
+      copy_text(out->model_id, sizeof(out->model_id), aimee_pg_column_text(st, 3));
+      if (!aimee_pg_column_is_null(st, 4))
+         out->rotation_id = aimee_pg_column_int64(st, 4);
+      out->has_slot = !aimee_pg_column_is_null(st, 5);
+      copy_text(out->key_id, sizeof(out->key_id), aimee_pg_column_text(st, 5));
+      copy_text(out->principal, sizeof(out->principal), aimee_pg_column_text(st, 6));
+      copy_text(out->agent, sizeof(out->agent), aimee_pg_column_text(st, 7));
+      copy_text(out->cred, sizeof(out->cred), aimee_pg_column_text(st, 8));
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+int kb_store_vault_rotation_request_settle(const char *actor, int64_t request_id, int accepted,
+                                           int64_t rotation_id, const char *detail)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || request_id < 1)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_request_settle(?1,?2,?3,?4,?5)",
+                               err, sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", request_id);
+   aimee_pg_bind_text(st, "?3", accepted ? "accepted" : "rejected");
+   if (rotation_id > 0)
+      aimee_pg_bind_int64(st, "?4", rotation_id);
+   else
+      aimee_pg_bind_null(st, "?4");
+   aimee_pg_bind_text(st, "?5", detail ? detail : "");
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 0 : -1;
+}
+
+int kb_store_vault_rotation_pending(const char *actor, kb_store_vault_rotation_ref_t *out, int cap)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || !out || cap < 1 || cap > 100)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_pending(?1,?2)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", cap);
+   int n = 0;
+   aimee_pg_step_t step;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW && n < cap)
+   {
+      out[n].id = aimee_pg_column_int64(st, 0);
+      out[n].team_id = aimee_pg_column_int64(st, 1);
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE || step == AIMEE_PG_ROW ? n : -1;
+}
+
+int kb_store_vault_rotation_request_list(const char *actor, int64_t team_id,
+                                         kb_store_vault_rotation_request_row_t *out, int cap)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || team_id < 1 || !out || cap < 1 ||
+       cap > 100)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_request_list(?1,?2,?3)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   aimee_pg_bind_int64(st, "?3", cap);
+   int n = 0;
+   aimee_pg_step_t step;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW && n < cap)
+   {
+      kb_store_vault_rotation_request_row_t *r = &out[n++];
+      memset(r, 0, sizeof(*r));
+      r->id = aimee_pg_column_int64(st, 0);
+      r->team_id = aimee_pg_column_int64(st, 1);
+      copy_text(r->kind, sizeof(r->kind), aimee_pg_column_text(st, 2));
+      copy_text(r->model_id, sizeof(r->model_id), aimee_pg_column_text(st, 3));
+      if (!aimee_pg_column_is_null(st, 4))
+         r->rotation_id = aimee_pg_column_int64(st, 4);
+      copy_text(r->state, sizeof(r->state), aimee_pg_column_text(st, 5));
+      copy_text(r->detail, sizeof(r->detail), aimee_pg_column_text(st, 6));
+      copy_text(r->created_at, sizeof(r->created_at), aimee_pg_column_text(st, 7));
+      copy_text(r->rotation_state, sizeof(r->rotation_state), aimee_pg_column_text(st, 8));
+      copy_text(r->failure_phase, sizeof(r->failure_phase), aimee_pg_column_text(st, 9));
+      copy_text(r->last_error, sizeof(r->last_error), aimee_pg_column_text(st, 10));
+      copy_text(r->slot_principal, sizeof(r->slot_principal), aimee_pg_column_text(st, 11));
+   }
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE || step == AIMEE_PG_ROW ? n : -1;
+}
+
+int kb_store_vault_rotation_request_adopt(const char *actor, int64_t team_id, const char *key_id,
+                                          const char *principal, const char *agent,
+                                          const char *cred, int64_t *out_id)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || team_id < 1 || !key_id ||
+       !*key_id || !principal || !*principal || !agent || !cred || !out_id)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_request_adopt(?1,?2,?3,?4,?5,?6)",
+                               err, sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   aimee_pg_bind_text(st, "?3", key_id);
+   aimee_pg_bind_text(st, "?4", principal);
+   aimee_pg_bind_text(st, "?5", agent);
+   aimee_pg_bind_text(st, "?6", cred);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   if (step == AIMEE_PG_ROW)
+      *out_id = aimee_pg_column_int64(st, 0);
+   int rc = request_error(step, st);
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+int kb_store_vault_rotation_schedule_set(const char *actor, int64_t team_id, const char *model_id,
+                                         int interval_days)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || team_id < 1 || !model_id ||
+       !*model_id || interval_days < 0 || interval_days > 3650)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_schedule_set(?1,?2,?3,?4)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   aimee_pg_bind_text(st, "?3", model_id);
+   aimee_pg_bind_int64(st, "?4", interval_days);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = request_error(step, st);
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+int kb_store_vault_rotation_schedule_list(const char *actor, int64_t team_id,
+                                          kb_store_vault_rotation_schedule_t *out, int cap)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || team_id < 1 || !out || cap < 1)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_schedule_list(?1,?2)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   int n = 0;
+   aimee_pg_step_t step;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW && n < cap)
+   {
+      kb_store_vault_rotation_schedule_t *r = &out[n++];
+      memset(r, 0, sizeof(*r));
+      r->team_id = team_id;
+      copy_text(r->model_id, sizeof(r->model_id), aimee_pg_column_text(st, 0));
+      r->interval_days = (int)aimee_pg_column_int64(st, 1);
+      copy_text(r->last_retired_at, sizeof(r->last_retired_at), aimee_pg_column_text(st, 2));
+   }
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE || step == AIMEE_PG_ROW ? n : -1;
+}
+
+int kb_store_vault_rotation_schedule_due(const char *actor, kb_store_vault_rotation_schedule_t *out,
+                                         int cap)
+{
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || !out || cap < 1 || cap > 100)
+      return -1;
+   char err[ROT_ERR] = "";
+   void *conn = kb_store_conn();
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_schedule_due(?1,?2)", err,
+                               sizeof(err))
+            : NULL;
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_int64(st, "?2", cap);
+   int n = 0;
+   aimee_pg_step_t step;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW && n < cap)
+   {
+      kb_store_vault_rotation_schedule_t *r = &out[n++];
+      memset(r, 0, sizeof(*r));
+      r->team_id = aimee_pg_column_int64(st, 0);
+      copy_text(r->model_id, sizeof(r->model_id), aimee_pg_column_text(st, 1));
+   }
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE || step == AIMEE_PG_ROW ? n : -1;
 }
