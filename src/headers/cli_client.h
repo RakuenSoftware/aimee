@@ -191,6 +191,8 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
                              const char *bearer, volatile sig_atomic_t *stop);
 
 /* Scope a detached-workspace runner to one synchronous remote Git CLI call.
+ * POSIX clients register an uncovered local Git root without indexing it;
+ * existing workspace providers remain authoritative.
  * Returns 1 when a runner thread started, 0 when no detached runner is needed,
  * and -1 when the remote workspace registry could not be resolved. */
 void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void));

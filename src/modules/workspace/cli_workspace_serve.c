@@ -226,8 +226,9 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
  *
  * The scoped helper below finds the longest registered detached root containing
  * the current directory and serves it on a background thread for exactly one
- * forwarded Git command.  It never registers, converts, or removes a workspace;
- * the server remains the authority for the provider choice. */
+ * forwarded Git command. An explicit Git command may register an uncovered local
+ * repository without indexing it. Configured providers are never converted or
+ * removed; the server remains the authority for the provider choice. */
 static volatile sig_atomic_t g_git_runner_stop;
 static int g_git_runner_active;
 static char g_git_runner_workspace[CLI_TUI_PATH_MAX];
@@ -356,6 +357,53 @@ int cli_workspace_git_clone_prepare(cJSON *args)
 }
 #endif
 
+#if defined(AIMEE_POSIX)
+/* A source upload deliberately does not authorize an executable workspace.
+ * An explicit Git command does need that workspace: register only its verified
+ * local repository root, without scanning/uploading content or changing any
+ * existing provider. Re-list below before admitting the runner. */
+static int git_runner_register_local_repo(const char *cwd, const char *endpoint, const char *bearer)
+{
+   const char *argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
+   char *out = NULL;
+   if (safe_exec_capture(argv, &out, CLI_TUI_PATH_MAX) != 0 || !out)
+   {
+      free(out);
+      return 0; /* Not a local repository; preserve server-side resolution. */
+   }
+   out[strcspn(out, "\r\n")] = '\0';
+   char root[CLI_TUI_PATH_MAX];
+   int valid = realpath(out, root) && workspace_root_contains(root, cwd);
+   free(out);
+   if (!valid)
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "root", root);
+   cJSON_AddStringToObject(req, "provider", "detached");
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   if (!body)
+      return -1;
+   int status = 0;
+   cJSON *response =
+       cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 60000, &status);
+   free(body);
+   const char *state = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   const cJSON *error = cJSON_GetObjectItemCaseSensitive(response, "error");
+   int failed = !response || status < 200 || status >= 300 || (error && !cJSON_IsNull(error)) ||
+                cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(response, "ok")) ||
+                (state && strcmp(state, "error") == 0);
+   cJSON_Delete(response);
+   if (failed)
+   {
+      fprintf(stderr, "aimee: cannot register local Git workspace %s (HTTP %d)\n", root, status);
+      return -1;
+   }
+   return 1;
+}
+#endif
+
 int cli_workspace_git_runner_start(const char *target)
 {
    if (g_git_runner_active || !cli_v1_has_remote_endpoint())
@@ -377,40 +425,71 @@ int cli_workspace_git_runner_start(const char *target)
       return 0;
    }
 
-   int status = 0;
-   cJSON *list = cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
-   if (!list || status < 200 || status >= 300)
-   {
-      cJSON_Delete(list);
-      free(endpoint);
-      free(bearer);
-      return -1;
-   }
-
    const char *best = NULL;
    size_t best_len = 0;
-   const cJSON *arr = cJSON_GetObjectItemCaseSensitive(list, "workspaces");
-   const cJSON *row = NULL;
-   cJSON_ArrayForEach(row, arr)
+   cJSON *list = NULL;
+   for (int attempt = 0; attempt < 2; attempt++)
    {
-      const cJSON *provider = cJSON_GetObjectItemCaseSensitive(row, "provider");
-      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "path");
-      if (!cJSON_IsString(provider) || strcmp(provider->valuestring, "detached") != 0 ||
-          !cJSON_IsString(path) || !workspace_root_contains(path->valuestring, cwd))
-         continue;
-      size_t n = strlen(path->valuestring);
-      if (n > best_len)
+      int status = 0;
+      list = cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
+      const cJSON *arr = list ? cJSON_GetObjectItemCaseSensitive(list, "workspaces") : NULL;
+      if (!list || status < 200 || status >= 300 || !cJSON_IsArray(arr))
+         break;
+
+      int covered = 0;
+      const cJSON *row = NULL;
+      cJSON_ArrayForEach(row, arr)
       {
-         best = path->valuestring;
-         best_len = n;
+         const char *provider =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "provider"));
+         const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "path"));
+         if (!path || !workspace_root_contains(path, cwd))
+            continue;
+         covered = 1;
+         if (!provider || strcmp(provider, "detached") != 0)
+            continue;
+         size_t n = strlen(path);
+         if (n > best_len)
+         {
+            best = path;
+            best_len = n;
+         }
       }
+      if (best)
+         break;
+      if (covered)
+      {
+         cJSON_Delete(list);
+         free(endpoint);
+         free(bearer);
+         return 0; /* An existing shared/mirror provider remains authoritative. */
+      }
+      cJSON_Delete(list);
+      list = NULL;
+      if (attempt != 0)
+         break; /* Registration was not visible; do not dispatch Git. */
+#if defined(AIMEE_POSIX)
+      int registered = git_runner_register_local_repo(cwd, endpoint, bearer);
+      if (registered == 0)
+      {
+         free(endpoint);
+         free(bearer);
+         return 0;
+      }
+      if (registered < 0)
+         break;
+#else
+      free(endpoint);
+      free(bearer);
+      return 0;
+#endif
    }
    if (!best)
    {
       cJSON_Delete(list);
       free(endpoint);
       free(bearer);
-      return 0; /* shared/mirror/unregistered: no detached runner to service */
+      return -1;
    }
    if (best_len >= sizeof(g_git_runner_workspace) ||
        strlen(endpoint) >= sizeof(g_git_runner_endpoint))
