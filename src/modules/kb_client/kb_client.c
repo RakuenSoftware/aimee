@@ -1074,30 +1074,6 @@ char *kb_client_curiosity_list_json(const char *state, int limit)
    return kb_v1_action_request("curiosity.list", req);
 }
 
-char *kb_client_curiosity_create_json(const char *gap_type, const char *target_entity,
-                                      const char *target_topic, const char *evidence,
-                                      double importance, double novelty, const char *source_session)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "gap_type", gap_type ? gap_type : "");
-   /* evidence quotes the material that raised the gap -- the field most likely
-    * to carry a verbatim span of whatever the session was handling. */
-   if (kb_client_pii_identifier_sensitive(target_entity) ||
-       kb_client_pii_add_string(req, "target_topic", target_topic) != 0 ||
-       kb_client_pii_add_string(req, "evidence", evidence) != 0)
-   {
-      cJSON_Delete(req);
-      return kb_client_pii_withheld_json();
-   }
-   if (target_entity && target_entity[0])
-      cJSON_AddStringToObject(req, "target_entity", target_entity);
-   cJSON_AddNumberToObject(req, "importance", importance);
-   cJSON_AddNumberToObject(req, "novelty", novelty);
-   if (source_session && source_session[0])
-      cJSON_AddStringToObject(req, "source_session", source_session);
-   return kb_v1_action_request("curiosity.create", req);
-}
-
 char *kb_client_note_create_json(const char *title, const char *content, const char *tags,
                                  const char *author)
 {

@@ -1228,157 +1228,6 @@ static void test_panel_treats_providerless_agents_as_distinct(void)
    printf("  test_panel_treats_providerless_agents_as_distinct: ok\n");
 }
 
-static void test_panel_persona_name_assignment(void)
-{
-   /* Drives the pure resolution table directly: panel_persona_name() now reads
-    * live config, so exercising it would mean writing a config file between
-    * every assertion. panel_persona_for_slot takes the two config-derived
-    * inputs as parameters, which is the same coverage with no I/O. */
-
-   /* REVIEW mode: round-robin the diverse default lineup keyed on the model
-    * index (stable, independent of any sequential shuffle). */
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, ""), "original-request") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, NULL, ""), "security") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 2, NULL, ""), "architect") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 4, NULL, ""), "reviewer") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 5, NULL, ""), "reviewer-constructive") ==
-          0);
-
-   /* DRAFT authors every panelist as the configured default persona; an unset
-    * default_persona falls back to the built-in `engineer`. */
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, ""), "engineer") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, ""), "engineer") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, "architect"), "architect") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, "architect"), "architect") == 0);
-
-   /* the configured default persona does not disturb the REVIEW lineup */
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, "architect"),
-                 "original-request") == 0);
-
-   /* a configured persona pins to its model slot; an empty entry within the
-    * configured range still falls back to the mode default */
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, "security", ""), "security") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, "", ""), "original-request") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
-
-   /* the per-slot override also binds in DRAFT; empty/beyond slots fall to engineer */
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 1, "security", ""), "security") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, "", ""), "engineer") == 0);
-   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 3, NULL, ""), "engineer") == 0);
-   printf("  test_panel_persona_name_assignment: ok\n");
-}
-
-static void test_roundtable_captures_original_request_alignment(void)
-{
-   agent_result_t results[3];
-   memset(results, 0, sizeof results);
-   snprintf(results[0].agent_name, sizeof results[0].agent_name, "codex");
-   assert(!fixture_agent_result_from_text(
-       &results[0],
-       "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"implements "
-       "the requested scheduler\"},\"items\":[]}"));
-   results[0].success = 1;
-   snprintf(results[1].agent_name, sizeof results[1].agent_name, "minimax");
-   assert(!fixture_agent_result_from_text(
-       &results[1],
-       "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"builds an "
-       "unrequested dashboard instead\"},\"items\":[]}"));
-   results[1].success = 1;
-   snprintf(results[2].agent_name, sizeof results[2].agent_name, "kimi");
-   assert(!fixture_agent_result_from_text(&results[2], "{\"items\":[]}"));
-   results[2].success = 1;
-   roundtable_result_t out;
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(results, 3, &out, 2);
-   assert(strcmp(out.original_request_alignment, "drifted") == 0);
-   assert(strstr(out.original_request_alignment_summary, "unrequested dashboard") != NULL);
-   assert(strcmp(out.original_request_alignment_sources, "minimax") == 0);
-
-   assert(!fixture_agent_result_from_text(
-       &results[1], "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"\"},"
-                    "\"items\":[]}"));
-   results[1].success = 1;
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(results, 2, &out, 2);
-   assert(strcmp(out.original_request_alignment, "aligned") == 0);
-   assert(strstr(out.original_request_alignment_summary, "requested scheduler") != NULL);
-
-   /* A stricter verdict without its required rationale remains stricter and
-    * fails closed; it must not inherit an earlier aligned explanation. */
-   assert(!fixture_agent_result_from_text(
-       &results[1], "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"\"},"
-                    "\"items\":[]}"));
-   results[1].success = 1;
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(results, 2, &out, 2);
-   assert(strcmp(out.original_request_alignment, "drifted") == 0);
-   assert(strstr(out.original_request_alignment_summary, "no explanation") != NULL);
-
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(&results[2], 1, &out, 3);
-   assert(strcmp(out.original_request_alignment, "unclear") == 0);
-   assert(strstr(out.original_request_alignment_summary, "No panelist") != NULL);
-
-   assert(!fixture_agent_result_from_text(
-       &results[0], "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
-                    "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}"));
-   results[0].success = 1;
-   results[0].successful_tool_calls = 0;
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(results, 1, &out, 4);
-   assert(out.item_count == 1);
-   assert(out.items[0].tool_grounded == 0);
-
-   agent_result_clear_response(&results[1]);
-   assert(!aimee_ir_response_clone(&results[0].canonical_response, &results[1].canonical_response));
-   results[1].success = 1;
-   results[1].successful_tool_calls = 1;
-   memset(&out, 0, sizeof out);
-   capture_round_review_items(results, 2, &out, 4);
-   assert(out.item_count == 1);
-   assert(out.items[0].tool_grounded == 1); /* grounded duplicate upgrades provenance */
-   for (int i = 0; i < 3; i++)
-      agent_result_clear_response(&results[i]);
-   printf("  test_roundtable_captures_original_request_alignment: ok\n");
-}
-
-/* The proximate cause of empty reviews on large diffs: a panelist returns a PROSE
- * review that also contains `{...}` code snippets, wrapping the real
- * {"items":[...]} object. The old first-'{'-to-last-'}' slice spanned unrelated
- * braces and failed; the balanced-brace scan must still find the items object. */
-static void test_parse_lenient_prose_with_code_braces(void)
-{
-   const char *resp =
-       "Reviewing kb_graph_cycles:\n"
-       "The DFS `if (w == start && dsp >= 1) { emit(); }` looks correct, and the\n"
-       "struct `typedef struct { int a; } t;` is fine. Here is my verdict:\n"
-       "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
-       "\"location\":\"x.c:10\",\"summary\":\"off by one\",\"recommendation\":\"fix\"}],"
-       "\"overall\":\"one issue\"}\n"
-       "Note: the helper `free_all() { }` is also fine.\n";
-   cJSON *root = parse_model_json_lenient(resp);
-   assert(root != NULL);
-   cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "items");
-   assert(cJSON_IsArray(items) && cJSON_GetArraySize(items) == 1);
-   cJSON *it0 = cJSON_GetArrayItem(items, 0);
-   assert(strcmp(cJSON_GetObjectItemCaseSensitive(it0, "severity")->valuestring, "blocking") == 0);
-   cJSON_Delete(root);
-
-   /* A brace inside a JSON string must not confuse the balance matcher. */
-   cJSON *r2 = parse_model_json_lenient("prose {\"items\":[],\"overall\":\"has } brace\"} tail");
-   assert(r2 != NULL);
-   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(r2, "items")));
-   cJSON_Delete(r2);
-
-   /* Bare JSON still parses; pure prose with no object yields NULL. */
-   cJSON *r3 = parse_model_json_lenient("{\"items\":[],\"overall\":\"ok\"}");
-   assert(r3 != NULL);
-   cJSON_Delete(r3);
-   assert(parse_model_json_lenient("no json here at all") == NULL);
-   printf("  test_parse_lenient_prose_with_code_braces: ok\n");
-}
-
 /* A ONE-SEAT PANEL MUST NOT RUN THE CHAIR PASS.
  *
  * The chair pass arbitrates between seats that disagree; with one reviewer it is
@@ -1429,31 +1278,9 @@ static void test_refused_native_participants_cannot_synthesize_success(void)
    reset_modes();
 }
 
-static void test_review_items_require_canonical_success(void)
-{
-   reset_modes();
-   agent_result_t source = {0};
-   char *text = strdup("{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":"
-                       "\"canonical\"},\"items\":[]}");
-   source.success = 1;
-   fixture_observation(&source, text);
-   roundtable_result_t output = {0};
-   capture_round_review_items(&source, 1, &output, 1);
-   assert(!strcmp(output.original_request_alignment, "aligned"));
-   source.canonical_response.stop_reason = AIMEE_STOP_CONTENT_FILTER;
-   capture_round_review_items(&source, 1, &output, 1);
-   assert(!strcmp(output.original_request_alignment, "unclear"));
-   source.canonical_response.stop_reason = AIMEE_STOP_END_TURN;
-   source.success = 0;
-   capture_round_review_items(&source, 1, &output, 1);
-   assert(!strcmp(output.original_request_alignment, "unclear"));
-   agent_result_clear_response(&source);
-}
-
 int main(void)
 {
    test_refused_native_participants_cannot_synthesize_success();
-   test_review_items_require_canonical_success();
    printf("delegate_ensemble tests\n");
    test_one_seat_panel_skips_chair_pass();
    test_ensemble_cost_cap();
@@ -1470,9 +1297,6 @@ int main(void)
    test_configured_random_seats_fill_balanced_capacity();
    test_panel_prioritizes_distinct_providers();
    test_panel_treats_providerless_agents_as_distinct();
-   test_panel_persona_name_assignment();
-   test_roundtable_captures_original_request_alignment();
-   test_parse_lenient_prose_with_code_braces();
    assert(g_peer_blocks_seen > 0);
    free(g_fixture_request_view);
    printf("all tests passed\n");

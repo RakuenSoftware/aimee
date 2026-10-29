@@ -22,35 +22,6 @@ char *kb_client_rules_list_json(int limit)
    return kb_v1_action_request("rules.list", req);
 }
 
-int kb_client_rules_insert(const char *polarity, const char *title, const char *description,
-                           int weight)
-{
-   if (!title)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   if (polarity && polarity[0])
-      cJSON_AddStringToObject(req, "polarity", polarity);
-   /* A rule's title and description are prose written from a session. */
-   if (kb_client_pii_add_string_required(req, "title", title) != 0 ||
-       kb_client_pii_add_string(req, "description", description) != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   cJSON_AddNumberToObject(req, "weight", weight);
-   char *json = kb_v1_action_request("rules.insert", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
 char *kb_client_rules_generate_json(void)
 {
    cJSON *req = cJSON_CreateObject();
@@ -290,50 +261,6 @@ static void kbc_decision_row_from_json(cJSON *d, kb_store_decision_log_row_t *ou
       snprintf(out->created_at, sizeof(out->created_at), "%s", cre_j->valuestring);
 }
 
-int kb_client_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
-                                  const char *rationale, const char *assumptions,
-                                  kb_store_decision_log_row_t *out)
-{
-   if (!chosen)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "task_id", (double)task_id);
-   /* A decision record is four prose fields; a rationale routinely quotes the
-    * material the decision was made about. */
-   if (kb_client_pii_add_string_required(req, "options", options ? options : "") != 0 ||
-       kb_client_pii_add_string_required(req, "chosen", chosen) != 0 ||
-       kb_client_pii_add_string_required(req, "rationale", rationale ? rationale : "") != 0 ||
-       kb_client_pii_add_string_required(req, "assumptions", assumptions ? assumptions : "") != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-
-   char *json = kb_v1_action_request("decision_log.insert", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   if (out)
-   {
-      cJSON *d = cJSON_GetObjectItemCaseSensitive(resp, "decision");
-      if (cJSON_IsObject(d))
-         kbc_decision_row_from_json(d, out);
-      else
-         memset(out, 0, sizeof(*out));
-   }
-   cJSON_Delete(resp);
-   return 0;
-}
-
 int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max)
 {
@@ -372,76 +299,6 @@ int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decisio
    return n;
 }
 
-static void kbc_anti_pattern_row_from_json(cJSON *a, anti_pattern_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(a, "id");
-   cJSON *pat_j = cJSON_GetObjectItemCaseSensitive(a, "pattern");
-   cJSON *desc_j = cJSON_GetObjectItemCaseSensitive(a, "description");
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(a, "source");
-   cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(a, "source_ref");
-   cJSON *hit_j = cJSON_GetObjectItemCaseSensitive(a, "hit_count");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(a, "confidence");
-   if (cJSON_IsNumber(id_j))
-      out->id = (int64_t)id_j->valuedouble;
-   if (cJSON_IsString(pat_j))
-      snprintf(out->pattern, sizeof(out->pattern), "%s", pat_j->valuestring);
-   if (cJSON_IsString(desc_j))
-      snprintf(out->description, sizeof(out->description), "%s", desc_j->valuestring);
-   if (cJSON_IsString(src_j))
-      snprintf(out->source, sizeof(out->source), "%s", src_j->valuestring);
-   if (cJSON_IsString(ref_j))
-      snprintf(out->source_ref, sizeof(out->source_ref), "%s", ref_j->valuestring);
-   if (cJSON_IsNumber(hit_j))
-      out->hit_count = (int)hit_j->valuedouble;
-   if (cJSON_IsNumber(conf_j))
-      out->confidence = conf_j->valuedouble;
-}
-
-int kb_client_anti_pattern_insert(const char *pattern, const char *description, const char *source,
-                                  const char *source_ref, double confidence, anti_pattern_t *out)
-{
-   if (!pattern)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   /* An anti-pattern is distilled from something that went wrong, and the
-    * pattern text often quotes it. source_ref is a citation handle. */
-   if (kb_client_pii_identifier_sensitive(source_ref) ||
-       kb_client_pii_add_string_required(req, "pattern", pattern) != 0 ||
-       kb_client_pii_add_string(req, "description", description) != 0 ||
-       kb_client_pii_add_string(req, "source", source) != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   if (source_ref && source_ref[0])
-      cJSON_AddStringToObject(req, "source_ref", source_ref);
-   cJSON_AddNumberToObject(req, "confidence", confidence);
-   char *json = kb_v1_action_request("anti_pattern.insert", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   if (out)
-   {
-      cJSON *a = cJSON_GetObjectItemCaseSensitive(resp, "anti_pattern");
-      if (cJSON_IsObject(a))
-         kbc_anti_pattern_row_from_json(a, out);
-      else
-         memset(out, 0, sizeof(*out));
-   }
-   cJSON_Delete(resp);
-   return 0;
-}
-
 int kb_client_rules_delete(int id)
 {
    cJSON *req = cJSON_CreateObject();
@@ -457,41 +314,6 @@ int kb_client_rules_delete(int id)
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
    return rc;
-}
-
-int kb_client_feedback_record(const char *polarity, const char *title, const char *description,
-                              int weight, int *reinforced_out)
-{
-   if (!polarity || !title)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "polarity", polarity);
-   if (kb_client_pii_add_string_required(req, "title", title) != 0 ||
-       kb_client_pii_add_string(req, "description", description) != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   cJSON_AddNumberToObject(req, "weight", weight);
-   char *json = kb_v1_action_request("feedback.record", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   cJSON *rein_j = cJSON_GetObjectItemCaseSensitive(resp, "reinforced");
-   int id = -1;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(id_j))
-   {
-      id = (int)id_j->valuedouble;
-      if (reinforced_out)
-         *reinforced_out = (cJSON_IsBool(rein_j) && cJSON_IsTrue(rein_j)) ? 1 : 0;
-   }
-   cJSON_Delete(resp);
-   return id;
 }
 
 char *kb_client_agent_hint_consume(const char *role, const char *prompt)

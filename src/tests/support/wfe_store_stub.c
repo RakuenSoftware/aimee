@@ -29,22 +29,6 @@ int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
    return -1;
 }
 
-int db1_work_item_set_worktree(const char *work_item_id, const char *worktree)
-{
-   (void)work_item_id;
-   (void)worktree;
-   return -1;
-}
-
-int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed)
-{
-   (void)parent_id;
-   (void)total;
-   (void)accepted;
-   (void)failed;
-   return -1;
-}
-
 int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const char *kind,
                             const char *actor, const char *detail, const char *content_hash,
                             double cost)

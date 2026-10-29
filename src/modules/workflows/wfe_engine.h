@@ -11,13 +11,10 @@
 /* Opaque per-step context handed to block executors. */
 typedef struct wfe_ctx wfe_ctx;
 
-/* Executor-facing accessors (stable; extend here without touching the seam). */
-const char *wfe_ctx_work_item(const wfe_ctx *c);
-const wfe_def_t *wfe_ctx_def(const wfe_ctx *c);
-const char *wfe_ctx_repo(const wfe_ctx *c);          /* normalized repo url */
-const char *wfe_ctx_proposal_path(const wfe_ctx *c); /* proposal artifact path */
-const char *wfe_ctx_pr_ref(const wfe_ctx *c);        /* forge PR ref from pr.open, or "" */
-const char *wfe_ctx_worktree(const wfe_ctx *c);      /* per-work-item git worktree, or "" */
+/* normalized repo url */
+/* proposal artifact path */
+/* forge PR ref from pr.open, or "" */
+/* per-work-item git worktree, or "" */
 
 /* Load a workflow definition by name from $AIMEE_HOME/workflows/<name>.yaml.
  * Caller frees with wfe_def_free. */

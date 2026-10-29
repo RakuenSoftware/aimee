@@ -78,7 +78,6 @@
     "src/tests/test_vault_tpm2_stub.c": 1,
     "src/tests/test_webchat_git_leak.c": 1,
     "src/tests/test_webuser_editor.c": 2,
-    "src/tests/test_wfe_blocks.c": 1,
     "src/tests/test_workspace.c": 1,
     "src/tests/test_workspace_migration.c": 1,
     "src/tests/test_workspace_mirror.c": 3,

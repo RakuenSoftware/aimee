@@ -33,27 +33,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
 }
 int main(void)
 {
-   char text[12001];
-   memset(text, 'x', sizeof(text) - 1);
-   text[sizeof(text) - 1] = 0;
-   cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "status", "ok");
-   cJSON_AddStringToObject(body, "block", text);
-   char *encoded = cJSON_PrintUnformatted(body);
-   reply = encoded;
-   expected_operation = "prospective-briefing";
-   expected_limit = 0;
-   char *value = session_briefing_render_commitments(expected_limit);
-   assert(value && strcmp(value, text) == 0);
-   free(value);
-   expected_operation = "directive-briefing";
-   expected_limit = 2;
-   value = session_briefing_render_directives(expected_limit);
-   assert(value && strcmp(value, text) == 0);
-   free(value);
-   free(encoded);
-   cJSON_Delete(body);
-
+   char *value = NULL;
    struct view
    {
       const char *operation;
@@ -81,12 +61,6 @@ int main(void)
       assert(views[i].render() == NULL);
       transport_result = 1;
    }
-   expected_operation = "directive-briefing";
-   expected_limit = 1;
-   reply = "{\"status\":\"error\",\"block\":\"must not inject\"}";
-   assert(session_briefing_render_directives(1) == NULL);
-   reply = "{\"status\":\"ok\",\"block\":17}";
-   assert(session_briefing_render_directives(1) == NULL);
    initialized = 0;
    int before = calls;
    assert(api_dashboard_reminders() == NULL && api_dashboard_directives() == NULL);

@@ -111,7 +111,6 @@ CONFIG_NUMBER(ensemble_reference_persona_count, int, "ensemble_reference_persona
 CONFIG_INDEX_STRING(ensemble_reference_personas, "ensemble_reference_personas", NULL, 64)
 CONFIG_NUMBER(extended_thinking_enabled, int, "extended_thinking_enabled", 0)
 CONFIG_NUMBER(feature_auto_promote, int, "feature_auto_promote", 0)
-CONFIG_NUMBER(fidelity_check_enabled, int, "fidelity_check_enabled", 0)
 CONFIG_NUMBER(fold_enabled, int, "fold_enabled", 0)
 CONFIG_NUMBER(fold_excerpt_bytes, int, "fold_excerpt_bytes", 0)
 CONFIG_NUMBER(fold_min_fold_msgs, int, "fold_min_fold_msgs", 0)

@@ -40,11 +40,6 @@ typedef struct
 /* Latency bookkeeping */
 double elapsed_ms(const struct timespec *start, const struct timespec *end);
 
-/* Benchmark context is assembled by Go; native callers copy the full reply. */
-int mem_eval_build_retrieval_context(const char *query, int top_k, int token_budget,
-                                     char *context_out, size_t context_len,
-                                     int *retrieved_tokens_out);
-
 /* Normalization / lookup */
 
 /* Agent config loader for benchmark runs. */
