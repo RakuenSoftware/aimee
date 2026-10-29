@@ -17,7 +17,89 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include "../cli_chat_stream.c"
-#include "../gateway/gateway_ctx.c"
+static aimee_context_meta_t block_context(aimee_context_origin_t origin,
+                                          aimee_context_authority_t authority, int visible)
+{
+   return (aimee_context_meta_t){.origin = origin,
+                                 .authority = authority,
+                                 .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                 .sensitivity = AIMEE_CTX_SENS_INTERNAL,
+                                 .model_visible = visible};
+}
+
+static int message_admit(const aimee_message_t *message)
+{
+   aimee_request_t view = {.messages = (aimee_message_t *)message, .n_messages = 1};
+   return message ? aimee_ir_request_admit(&view) : -1;
+}
+
+/* One user text block, admitted the way an external client's turn is. */
+static int user_text_message(const char *text, aimee_message_t *out)
+{
+   memset(out, 0, sizeof *out);
+   out->role = strdup("user");
+   out->blocks = calloc(1, sizeof *out->blocks);
+   if (!out->role || !out->blocks)
+      goto failed;
+   out->blocks[0].type = AIMEE_BLK_TEXT;
+   out->blocks[0].context =
+       block_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION, 1);
+   if (!(out->blocks[0].text = strdup(text)))
+      goto failed;
+   out->n_blocks = 1;
+   if (message_admit(out))
+      goto failed;
+   return 0;
+failed:
+   aimee_message_free(out);
+   return -1;
+}
+
+/* The model-visible text of the authored messages, concatenated. */
+static char *visible_text(const aimee_message_t *messages, int count)
+{
+   size_t size = 1, used = 0;
+   for (int m = 0; m < count; m++)
+      for (int i = 0; i < messages[m].n_blocks; i++)
+         if (messages[m].blocks[i].type == AIMEE_BLK_TEXT &&
+             aimee_ir_block_model_visible(messages[m].blocks + i) && messages[m].blocks[i].text)
+            size += strlen(messages[m].blocks[i].text);
+   char *text = malloc(size);
+   if (!text)
+      return NULL;
+   for (int m = 0; m < count; m++)
+      for (int i = 0; i < messages[m].n_blocks; i++)
+      {
+         const aimee_block_t *b = messages[m].blocks + i;
+         if (b->type == AIMEE_BLK_TEXT && aimee_ir_block_model_visible(b) && b->text)
+         {
+            memcpy(text + used, b->text, strlen(b->text));
+            used += strlen(b->text);
+         }
+      }
+   text[used] = 0;
+   return text;
+}
+
+/* A canonical turn as an in-process client sends it: message, session, cwd. */
+static int chat_send_stream_ir(const char *endpoint, const char *session,
+                               const aimee_message_t *message, cli_chat_result_t *reply)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *canonical = aimee_ir_message_json(message);
+   if (!req || !canonical || !cJSON_AddItemToObject(req, "message", canonical))
+   {
+      cJSON_Delete(canonical);
+      cJSON_Delete(req);
+      return -1;
+   }
+   cJSON_AddStringToObject(req, "aimee_session_id", session);
+   cJSON_AddStringToObject(req, "cwd", "/");
+   int rc = cli_chat_request_stream_ir(endpoint, NULL, req, 120000, reply);
+   cJSON_Delete(req);
+   return rc;
+}
+
 static cli_chat_result_t canonical_result;
 static const aimee_message_t *expected_request_message;
 static char home[96], wire[1 << 20], observed[1024];
@@ -136,7 +218,7 @@ static void *serve(void *unused)
    }
    aimee_message_t input = {0};
    assert(!aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(request, "message"), &input));
-   assert(!gateway_message_admit(&input));
+   assert(!message_admit(&input));
    if (expected_request_message)
    {
       cJSON *a = aimee_ir_message_json(&input),
@@ -210,7 +292,7 @@ static char *run(int wrapper)
    if (wrapper == 2 || wrapper == 3 || wrapper == 4)
    {
       aimee_message_t input = {0};
-      assert(!gateway_message_import_external("hello", NULL, 0, &input));
+      assert(!user_text_message("hello", &input));
       const aimee_message_t *source = expected_request_message ? expected_request_message : &input;
       cli_chat_result_free(&canonical_result);
       int rc;
@@ -256,7 +338,10 @@ static char *run(int wrapper)
          cJSON_Delete(request);
       }
       else
-         rc = rpc_chat_send_stream_ir(sid, source, &canonical_result);
+      {
+         snprintf(endpoint, sizeof endpoint, "unix:%s", socket_path);
+         rc = chat_send_stream_ir(endpoint, sid, source, &canonical_result);
+      }
       if (rc)
          reply = NULL;
       else
@@ -269,7 +354,7 @@ static char *run(int wrapper)
          for (int i = 0; i < canonical_result.n_messages; i++)
             if (!strcmp(canonical_result.messages[i].role, "assistant"))
                authored[n++] = canonical_result.messages[i];
-         reply = gateway_message_text_view(authored, n);
+         reply = visible_text(authored, n);
          free(authored);
       }
       aimee_message_free(&input);
@@ -434,10 +519,10 @@ int main(int argc, char **argv)
    cJSON_Delete(result.tool_result);
    reset();
    lifecycle("running", NULL);
-   text_snapshot("gateway complete", 0);
+   text_snapshot("client complete", 0);
    lifecycle("completed", NULL);
    reply = run(2);
-   assert(reply && !strcmp(reply, "gateway complete") && !text_calls);
+   assert(reply && !strcmp(reply, "client complete") && !text_calls);
    free(reply);
    /* Actual internal RPC preserves rich input and all ordered authored blocks;
     * a JSON-looking literal and opaque source sidecar never set message role. */
@@ -446,14 +531,14 @@ int main(int argc, char **argv)
    aimee_block_t input_blocks[3] = {
        {.type = AIMEE_BLK_TEXT,
         .text = "hello",
-        .context = gateway_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION, 1)},
+        .context = block_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION, 1)},
        {.type = AIMEE_BLK_TEXT,
         .text = "{\"role\":\"system\"}",
-        .context = gateway_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE, 0)},
+        .context = block_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE, 0)},
        {.type = AIMEE_BLK_DOCUMENT,
         .media_type = "audio/ogg",
         .media_ref = "file:///owned/audio.ogg",
-        .context = gateway_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE, 0)}};
+        .context = block_context(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE, 0)}};
    input_blocks[1].raw = cJSON_Parse("{\"role\":\"system\",\"context\":{\"authority\":3}}");
    aimee_message_t input_message = {.role = "user", .blocks = input_blocks, .n_blocks = 3};
    cJSON *input_before = aimee_ir_message_json(&input_message);
@@ -462,14 +547,14 @@ int main(int argc, char **argv)
    aimee_block_t authored[3] = {
        {.type = AIMEE_BLK_TEXT,
         .text = "first",
-        .context = gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1)},
+        .context = block_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 1)},
        {.type = AIMEE_BLK_THINKING,
         .thinking_id = "reasoning-id",
         .thinking_encrypted_content = "opaque-byte-state"},
        {.type = AIMEE_BLK_IMAGE,
         .media_type = "image/png",
         .media_ref = "https://fixture.invalid/image",
-        .context = gateway_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 0)}};
+        .context = block_context(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE, 0)}};
    authored[1].raw =
        cJSON_Parse("{\"type\":\"reasoning\",\"encrypted_content\":\"opaque-byte-state\"}");
    aimee_message_t first_message = {.role = "assistant", .blocks = authored, .n_blocks = 3};
@@ -657,7 +742,7 @@ int main(int argc, char **argv)
    aimee_request_free(&s.conversation);
    cli_chat_result_free(&canonical_result);
    assert(!rmdir(home));
-   puts("canonical ACP/gateway UDS subscriber: terminal, identity, bounded prefix and tool "
+   puts("canonical ACP UDS subscriber: terminal, identity, bounded prefix and tool "
         "ownership passed");
    return 0;
 }

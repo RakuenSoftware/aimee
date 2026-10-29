@@ -6737,8 +6737,6 @@ $(TESTPREFIX)/unit-test-server-aux-ir: $(OBJDIR)/tests/test_server_aux_ir.o $(OB
 $(TESTPREFIX)/unit-test-server-sweep-ir: $(OBJDIR)/tests/test_server_sweep_ir.o $(OBJDIR)/dstr.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-# Actual authenticated webhook parser/lifetime, isolated from model and delivery.
-$(OBJDIR)/tests/test_gateway_webhook_ir.o: gateway/platform_webhook.c gateway/gateway_ir.h
 # Test binaries outside TEST_TARGETS and BUS_TEST_TARGETS that still link the core
 # archives through L_MINIMAL, L_CORE or L_FULL. With no rule ordering them after the
 # archives, a parallel build linked them while `ar` was still writing: PR #3064's
