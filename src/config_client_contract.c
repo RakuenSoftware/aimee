@@ -675,33 +675,6 @@ int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs)
    return 1;
 }
 
-int config_autonomy_lookup(const char *env_name, long *out)
-{
-   if (!env_name || !out || strncmp(env_name, "AIMEE_AUTONOMY_", 15) != 0)
-      return 0;
-   const char *override = getenv(env_name);
-   if (override && override[0])
-   {
-      char *end = NULL;
-      long parsed = strtol(override, &end, 10);
-      if (end && !*end)
-      {
-         *out = parsed;
-         return 1;
-      }
-   }
-   char key[128] = "autonomy_";
-   size_t at = strlen(key);
-   for (const char *p = env_name + 15; *p && at + 1 < sizeof(key); p++)
-      key[at++] = (char)tolower((unsigned char)*p);
-   key[at] = 0;
-   double value = 0;
-   if (config_client_read_number(key, &value) != 0)
-      return 0;
-   *out = (long)value;
-   return 1;
-}
-
 void config_secret_writer_set(config_secret_writer_fn writer)
 {
    g_secret_writer = writer;

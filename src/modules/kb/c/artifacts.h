@@ -55,11 +55,6 @@ extern "C"
     * Returns 0 on success, -1 on error / not found. */
    int kb_store_artifact_set_state(const char *id, const char *new_state);
 
-   /* Set / read an artifact's target_surface (the promotion target a candidate
-    * routes to). Returns 0 on success, -1 on error. The read writes "" when the
-    * column is empty. */
-   int kb_store_artifact_set_target_surface(const char *id, const char *target_surface);
-
    /* Stamp last_accessed_at for an artifact read path.
     * Returns 0 on success, -1 on error / not found. */
    int kb_store_artifact_touch(const char *id);

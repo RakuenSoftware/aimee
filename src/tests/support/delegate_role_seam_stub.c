@@ -11,9 +11,6 @@
  * unlisted alias resolves to itself, which is what the module does; an unlisted
  * role is not built in, which is also what the module does. Nothing here decides
  * either.
- *
- * Do not link this alongside delegate_role_policy_stub.c: that one REPLACES the
- * seam rather than filling it, and the two would collide.
  */
 
 #include "delegate_role_seam_stub.h"

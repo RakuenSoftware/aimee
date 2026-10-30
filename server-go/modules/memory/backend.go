@@ -3,14 +3,15 @@ package memory
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
+	"time"
+
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/memory/cognee"
 	"github.com/JBailes/aimee/server-go/modules/memory/hillock"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
-	"os"
-	"strings"
-	"time"
 )
 
 // BackendFactory receives the request-bound source contract, so adapters do not
@@ -136,20 +137,6 @@ func (s *postgresDataStore) searchBackend(ctx context.Context, scope Scope, quer
 		return nil, memorycontract.ErrUnavailable
 	}
 	return result, nil
-}
-
-// WithMemoryBackend selects a contract implementation inside the existing
-// memory service. Module registration, caller admission and restarts are unchanged.
-func WithMemoryBackend(factory BackendFactory) HandlerOption {
-	return func(options *handlerOptions) {
-		native, ok := options.data.(*postgresDataStore)
-		if !ok {
-			return
-		}
-		bound := *native
-		bound.backendFactory = factory
-		options.data = &bound
-	}
 }
 
 func (s *postgresDataStore) backendGet(ctx context.Context, scope Scope, id int64) (Record, error) {

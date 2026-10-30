@@ -1017,7 +1017,6 @@
       "disposition": "storage-protocol",
       "external_occurrences": [
         "src/headers/memory.h",
-        "src/tests/test_curiosity.c",
         "src/tests/test_memory_advanced.c"
       ]
     },
@@ -1224,7 +1223,6 @@
       "external_occurrences": [
         "src/headers/memory.h",
         "src/tests/test_context_assembly.c",
-        "src/tests/test_curiosity.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_workspace_memory.c"
       ]
@@ -1923,7 +1921,6 @@
     "src/modules/kb_client/kb_client.h": {
       "disposition": "kb-client",
       "symbols": [
-        "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_assemble_typed_context_requirements_json",
@@ -1933,9 +1930,6 @@
         "kb_client_memory_benchmark_json",
         "kb_client_memory_check_drift",
         "kb_client_memory_compact_windows",
-        "kb_client_memory_get",
-        "kb_client_memory_get_as_of",
-        "kb_client_memory_get_json_as_of",
         "kb_client_memory_learn_style",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_json_ex",
@@ -1946,7 +1940,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "0ea03efc3f6a177720a5ddc7e5453096db9f48f852052d275e57b4f0803f4c9b"
+      "sha256": "1a60fb8efa4c381fd475756a5988806378efd57e20899683994b45ecf1eeeb0d"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
@@ -1957,7 +1951,7 @@
         "kb_client_memory_scan_conversations",
         "memory_learn_style"
       ],
-      "sha256": "4ddb5bace99f5660d024a45b1d173c306a4c1d8f18d049527b3640022e0fc55f"
+      "sha256": "48bc977da0055610223168cab6765ac15aad125b5af5e54ed786e7fbec74f488"
     },
     "src/modules/kb_client/kb_client_dashboard.c": {
       "disposition": "kb-client",
@@ -1970,16 +1964,12 @@
       "disposition": "kb-client",
       "symbols": [
         "AIMEE_MEMORY_HEALTH_ENABLED",
-        "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_compact_windows",
-        "kb_client_memory_get",
-        "kb_client_memory_get_as_of",
-        "kb_client_memory_get_json_as_of",
         "kb_client_memory_internal",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_json_ex",
@@ -1989,7 +1979,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "4b4fd8af91b81ca5e687085de4c8f5620db27c789c5a60cf58a4abde0fa7be1a"
+      "sha256": "90ab10a87c4b1625b15ca525897430938b6d72195d1d22f517ec78ab8260f465"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2244,13 +2234,6 @@
       "sha256": "c0d215ce8a0bbd7ce0032997d17ddf596002733b4300f177cc71f1fc74b0a865",
       "review": "2026-10-17: Verifies a separate restored historical audit archive instead of hardcoding RED for every recovery epoch. Memory request handlers, actor checks, custody symbols and Go ownership are unchanged. Evidence: C audit recovery/cache regressions and docs/validation/deployment-audit-index-recovery-2026-10-17.md. 2026-10-20: Reviewed the exact three primary get/set/clear handler changes: propagate durable owner-bound selection failures before acknowledgment. Memory handlers, symbols and Go ownership are unchanged. Independent boundary review and actual PostgreSQL/race tests cover owner isolation, metadata preservation, rollback and pool-reopen selection persistence. This source review is not production promotion approval."
     },
-    "src/tasks.c": {
-      "disposition": "host-context",
-      "symbols": [
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "58c5949f3d51bb1fbf190c8501efa92447555c345ee7447135bdbc759796bd9f"
-    },
     "src/tests/support/kb_client_test_stub.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -2278,14 +2261,6 @@
         "kb_client_memory_audit_note"
       ],
       "sha256": "74184437dd278bc1b68f1210be82f327b6e80e7332cfcf016997c6277ff72544"
-    },
-    "src/tests/test_curiosity.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "memory_directive_list",
-        "memory_insert"
-      ],
-      "sha256": "95c098e69987ba8d7b5186eb334962549bdfc5d83709ccf18a52636d01f8e31c"
     },
     "src/tests/test_dogfood.c": {
       "disposition": "host-fixture",
@@ -2320,13 +2295,6 @@
       "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
       "boundary_review": "2026-10-20 PR #3052: Adds only a null historical-receipt DB1 stub for an ordinary nonverification IR plan. Existing source/typed memory assertions remain unchanged. This records source-boundary review, not independent production-promotion approval."
     },
-    "src/tests/test_kb.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
-      ],
-      "sha256": "0aa34578e094c8c755442a3c72f57d138e695b8642bac4c9c9fe9f1a67337512"
-    },
     "src/tests/test_kb_client_memory.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -2336,9 +2304,6 @@
         "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
-        "kb_client_memory_get",
-        "kb_client_memory_get_as_of",
-        "kb_client_memory_get_json_as_of",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_native_json",
         "kb_client_memory_recall_shared_json",
@@ -2346,7 +2311,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "0937d84896e82e1b9502735186e801c745784ffc0d55abceee6e0408a2c1fa03"
+      "sha256": "818f11fb373c7f0407a422e4f0ee8eee46d2c359bd0fd37fc79ff8ca5ea4c437"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",
@@ -2389,13 +2354,6 @@
         "memory_get"
       ],
       "sha256": "d5701cf5caf3b4f058d0d3a3ec06078ebbc5d28bfc314698640e00c17a380986"
-    },
-    "src/tests/test_memory_checkpoint_transport.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "0d42cc81cc22938f0a1df496f99b5b4ff40ed4b8836fa77ada68cdc082425f30"
     },
     "src/tests/test_module_json_call.c": {
       "disposition": "host-fixture",
@@ -2465,20 +2423,6 @@
         "kb_client_memory_scope_context_apply"
       ],
       "sha256": "bdd928a66bebeee343ed1da935aac55547cc8d78e3e78b79794659de7609041c"
-    },
-    "src/tests/test_wiki_render.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "ce1ca897443c2155a6e0edfa74c8f6fb558795d90dc3aa85047be5d0d97e329a"
-    },
-    "src/wiki_render.c": {
-      "disposition": "host-context",
-      "symbols": [
-        "kb_client_memory_scope_context_apply"
-      ],
-      "sha256": "a9a98f5c46a694e89f1888fed98e7663c0fcb1ce488b391f6dfe99ed9e648d4e"
     },
     "src/kb/http/kb_http_governance.c": {
       "disposition": "host-transport",
@@ -2561,7 +2505,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND"
       ],
-      "sha256": "62e03a8f596e9efdea4f6b4a20ceed8f4763470a026ff0333a64e624649c4b0e"
+      "sha256": "6bc08338194fa51e89366aa82cebc38ae8a7842d5e956c0100db86986d351104"
     },
     "src/tests/test_server_memory_setup.c": {
       "disposition": "host-fixture",

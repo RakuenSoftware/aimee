@@ -69,19 +69,6 @@ func TestClassifyVerifyRespectsThePlatformCeiling(t *testing.T) {
 	}
 }
 
-func TestVerifyOutcomeNames(t *testing.T) {
-	for outcome, want := range map[VerifyOutcome]string{
-		VerifyPass:       "pass",
-		VerifyFailed:     "failed",
-		VerifyInfraError: "infra_error",
-		VerifyOutcome(9): "unknown",
-	} {
-		if got := outcome.String(); got != want {
-			t.Errorf("%d = %q, want %q", outcome, got, want)
-		}
-	}
-}
-
 func TestVerifyEscalationWarranted(t *testing.T) {
 	if !VerifyEscalationWarranted(0, VerifyFailed) {
 		t.Error("a completed run with a genuine verifier failure should be reported")

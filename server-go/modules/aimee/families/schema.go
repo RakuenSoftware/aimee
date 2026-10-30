@@ -93,16 +93,6 @@ func ApplySchema(ctx context.Context, m SchemaMigrator) error {
 	return nil
 }
 
-// PendingCount is how many migrations a store at this version still needs, for
-// a startup line that says something checkable rather than "ok".
-func PendingCount(applied int64) int {
-	pending, err := PendingMigrations(applied)
-	if err != nil {
-		return 0
-	}
-	return len(pending)
-}
-
 // SchemaFileCount is how many files ApplySchema will run, for a startup log
 // line that says something checkable rather than "ok".
 func SchemaFileCount() int {

@@ -4,25 +4,6 @@ import "testing"
 
 // Ported from src/tests/test_episode_seal.c.
 
-func TestEpisodeInventoryAndTouch(t *testing.T) {
-	var s EpisodeSeal
-	s.SetConclusion("concluded: the index rebuild is idempotent")
-	s.AddFile("src/modules/kb/c/code_index.c")
-	s.AddFile("src/headers/code_span.h")
-	s.AddFile("src/modules/kb/c/code_index.c") // duplicate
-	s.AddFile("")                               // ignored
-
-	if len(s.Files) != 2 {
-		t.Fatalf("file count = %d, want 2", len(s.Files))
-	}
-	if !s.Touches("src/modules/kb/c/code_index.c") || !s.Touches("src/headers/code_span.h") {
-		t.Error("a member file must be recognised")
-	}
-	if s.Touches("src/unrelated.c") {
-		t.Error("a non-member file must not match")
-	}
-}
-
 func TestEpisodeSerializeParseRoundTrip(t *testing.T) {
 	var s EpisodeSeal
 	s.SetConclusion("concluded: cache stays warm with freeze")

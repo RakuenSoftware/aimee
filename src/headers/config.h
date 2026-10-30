@@ -354,7 +354,6 @@ int config_wait_ready(unsigned int timeout_ms);
 void config_sandbox(sandbox_config_t *out);
 int config_reload_if_changed(void);
 void config_reload_register_reapplier(config_reapplier_fn fn);
-int config_autonomy_lookup(const char *env_name, long *out);
 int config_antipatterns_bypass(void);
 const char *config_tsr_endpoint(void);
 const char *config_ocr_endpoint(void);

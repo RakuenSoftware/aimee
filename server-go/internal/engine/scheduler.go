@@ -85,13 +85,6 @@ func (s *Scheduler) SetPolicySource(source func() RunPolicy) {
 	s.Notify()
 }
 
-func (s *Scheduler) SetTerminalCancellation(cancel func(context.Context) (int, error)) {
-	s.mu.Lock()
-	s.cancelTerminal = cancel
-	s.mu.Unlock()
-	s.Notify()
-}
-
 // SetTerminalCleanup installs the managed-worktree cleanup boundary. Terminal
 // rows remain as workflow history, but their checkouts must not accumulate
 // forever after the final transition.

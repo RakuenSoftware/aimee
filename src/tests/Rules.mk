@@ -276,7 +276,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/test
                  $(OBJDIR)/kb_store/kb_payload.o $(OBJDIR)/kb_store/vector_index_ops.o $(OBJDIR)/kb_store/code_index_ops.o \
                  $(OBJDIR)/workflow_learn.o \
                  $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/kb_store/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
-                 $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
+                 $(OBJDIR)/render.o \
                  $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/agent_hints.o $(OBJDIR)/kb_store/agent_outcomes.o $(OBJDIR)/kb_store/anti_patterns.o $(OBJDIR)/kb_store/collab_rules.o $(OBJDIR)/kb_store/curiosity.o $(OBJDIR)/kb_store/decision_log.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/kb_store/entity_edges.o $(OBJDIR)/kb_store/entity_nodes.o $(OBJDIR)/kb_store/code_projection.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/kb_store/feedback.o $(OBJDIR)/kb_store/notes.o $(OBJDIR)/kb_store/rules.o $(OBJDIR)/kb_store/tasks.o $(OBJDIR)/kb_store/tool_registry.o $(OBJDIR)/kb_store/kb_runtime_state.o $(OBJDIR)/kb_store/kb_service_backend.o $(OBJDIR)/kb_store/kb_service_backend_ingest.o $(OBJDIR)/kb_store/learning.o $(OBJDIR)/kb_store/code_index.o $(OBJDIR)/kb_store/sketch.o $(OBJDIR)/kb_store/pgvec_transport.o $(OBJDIR)/kb_store/kb_vectors.o $(OBJDIR)/kb_store/vector_status.o $(OBJDIR)/kb_store/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
                  $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_identity.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
                  $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/kb_store/learning_synth_ops.o \
@@ -309,7 +309,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-mcp-native-dispatch \
                $(TESTPREFIX)/unit-test-server-mcp-project \
                $(TESTPREFIX)/unit-test-extractors \
-               $(TESTPREFIX)/unit-test-text \
                $(TESTPREFIX)/unit-test-roundtable-preset \
                $(TESTPREFIX)/unit-test-roundtable-seat-resolve \
                $(TESTPREFIX)/unit-test-audit-worm \
@@ -342,7 +341,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-code-audit-graph \
                $(TESTPREFIX)/unit-test-cochange \
                $(TESTPREFIX)/unit-test-cron-runtime \
-               $(TESTPREFIX)/unit-test-render \
                $(TESTPREFIX)/unit-test-index \
                $(TESTPREFIX)/unit-test-manuscript \
                $(TESTPREFIX)/unit-test-persona \
@@ -366,7 +364,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-turn-integrity \
                $(TESTPREFIX)/unit-test-turn-registry \
  $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-roundtable-chair $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
+               $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -375,10 +373,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-log $(TESTPREFIX)/unit-test-server-error-kind \
                $(TESTPREFIX)/unit-test-aimee-home \
                $(TESTPREFIX)/unit-test-workflow \
-               $(TESTPREFIX)/unit-test-wfe-blocks \
                $(TESTPREFIX)/unit-test-wfe-sliced-build \
-               $(TESTPREFIX)/unit-test-wfe-panel-roundtable \
-               $(TESTPREFIX)/unit-test-wfe-replay-worktree \
                $(TESTPREFIX)/unit-test-wfe-failure-taxonomy \
                $(TESTPREFIX)/unit-test-wfe-gate-reject \
                $(TESTPREFIX)/unit-test-wfe-manager-blocks \
@@ -705,10 +700,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-server-erasure-protocol \
                $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-memory-demotion-transport \
-               $(TESTPREFIX)/unit-test-memory-checkpoint-transport \
                $(TESTPREFIX)/unit-test-workflow-transport \
                $(TESTPREFIX)/unit-test-assertion-transport \
-               $(TESTPREFIX)/unit-test-benchmark-context-transport \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
                $(TESTPREFIX)/unit-test-server-facts-transport \
                $(TESTPREFIX)/unit-test-server-memory-domain \
@@ -719,7 +712,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-policy-arms \
                $(TESTPREFIX)/unit-test-curiosity-resolve \
                $(TESTPREFIX)/unit-test-eval-candidates \
-               $(TESTPREFIX)/unit-test-wiki-render \
                $(TESTPREFIX)/unit-test-integrity-gate \
                $(TESTPREFIX)/unit-test-http-content-encoding \
                $(TESTPREFIX)/unit-test-guardrails-computer-use \
@@ -762,7 +754,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
                $(TESTPREFIX)/unit-test-fidelity-transport \
-               $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-ranker-fit \
                $(TESTPREFIX)/unit-test-retrieval-outcome-bridge \
@@ -1390,14 +1381,6 @@ $(TESTPREFIX)/unit-test-cross-repo-review: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-# auditable-correctness P3 fidelity-check eligibility (fail-closed gate). The
-# helper only reads legacy_config_record fields, so it links standalone.
-$(TESTPREFIX)/unit-test-fidelity-check: \
-                                       $(OBJDIR)/tests/test_fidelity_check.o \
-                                       $(OBJDIR)/server/fidelity_check.o \
-                                       $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # CSS style-graph persistence (WP-B) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
@@ -1702,7 +1685,7 @@ $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_tre
                            $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                            $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                            $(TEST_DATA_OBJS_MOCK) \
-                           $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/tasks.o \
+                           $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o \
                            $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/kb_store/feature_rows.o \
                            $(OBJDIR)/render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1731,10 +1714,6 @@ $(TESTPREFIX)/unit-test-css-render-cmd: $(OBJDIR)/tests/test_css_render_cmd.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
-
-$(TESTPREFIX)/unit-test-text: $(OBJDIR)/tests/test_text.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
-                     $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinject.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS)) \
                      $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
@@ -1923,9 +1902,6 @@ learning-citation-eval: $(TESTPREFIX)/learning-implicit-replay
 		../benchmarks/learning/implicit-signal/labelled.jsonl \
 		--heuristics citation_then_repair,citation_then_continuation \
 		--predictions $(OBJDIR)/learning_citation_preds.jsonl
-
-$(TESTPREFIX)/unit-test-render: $(OBJDIR)/tests/test_render.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOCK) \
                                $(OBJDIR)/kb_store/canonical_index.o \
@@ -2148,20 +2124,6 @@ $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Workflow engine W2: state machine + engine (DB1-backed).
-
-# Workflow engine W3: block executors (freeze is real git; others integration-gated).
-$(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
-                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/tests/support/wfe_store_stub.o \
-                                    $(OBJDIR)/modules/workflows/wfe_def.o \
-                                    $(OBJDIR)/wfe_store_lists.o \
-                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
-                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
-                                    $(OBJDIR)/artifact_trust.o \
-                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
-                                    $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
-                                    $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # primary-as-manager (S0): the def-parse-based tests need the def/validate/canonical
 # chain (no engine/db1); the schema + externalization tests are pure.
@@ -2791,17 +2753,6 @@ $(TESTPREFIX)/unit-test-workflow-gate-caps: $(OBJDIR)/tests/test_workflow_gate_c
 
 # foreach.workflow fan-in aggregation (DB parent<->child linkage) via the engine +
 # a mock child-spawn provider.
-
-# Live panel: verified roundtable items -> per-lens wfe verdicts (pure mapper).
-$(TESTPREFIX)/unit-test-wfe-panel-roundtable: $(OBJDIR)/tests/test_wfe_panel_roundtable.o \
-                                    $(OBJDIR)/modules/workflows/wfe_panel_roundtable.o \
-                                    $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
-# Live panel: the worktree-grounded evidence-replay backend.
-$(TESTPREFIX)/unit-test-wfe-replay-worktree: $(OBJDIR)/tests/test_wfe_replay_worktree.o \
-                              $(OBJDIR)/modules/workflows/wfe_replay_worktree.o $(OBJDIR)/server/evidence_replay.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Live foreach spawner: a split packet-plan -> child slice work items (parent linkage).
 
@@ -4431,10 +4382,7 @@ $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegat
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_delegate_ensemble.o \
-                                       $(OBJDIR)/modules/roundtable/delegate_ensemble.o $(OBJDIR)/modules/roundtable/ensemble_request.o $(OBJDIR)/modules/roundtable/delegate_ensemble_review.o \
-                                       $(OBJDIR)/modules/roundtable/roundtable_verify.o \
-                                       $(OBJDIR)/modules/roundtable/roundtable_chair.o \
-                                       $(OBJDIR)/server/evidence_replay.o \
+                                       $(OBJDIR)/modules/roundtable/delegate_ensemble.o $(OBJDIR)/modules/roundtable/ensemble_request.o \
                                        $(OBJDIR)/server/token_tracker.o \
                                        $(OBJDIR)/server/token_tracker_registry.o \
                                        $(TEST_CORE_OBJS)
@@ -4611,23 +4559,10 @@ $(TESTPREFIX)/unit-test-org-vault-rewrap: $(OBJDIR)/tests/test_org_vault_rewrap.
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
 
-$(TESTPREFIX)/unit-test-evidence-replay: $(OBJDIR)/tests/test_evidence_replay.o \
-                              $(OBJDIR)/server/evidence_replay.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
-
 # Live forge: the pure check-runs/combined-status -> CI verdict aggregation.
 $(TESTPREFIX)/unit-test-git-pr-ci-grade: $(OBJDIR)/tests/test_git_pr_ci_grade.o \
                               $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                               $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
-$(TESTPREFIX)/unit-test-roundtable-verify: $(OBJDIR)/tests/test_roundtable_verify.o \
-                              $(OBJDIR)/modules/roundtable/roundtable_verify.o $(OBJDIR)/server/evidence_replay.o \
-                              $(OBJDIR)/dstr.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
-
-$(TESTPREFIX)/unit-test-roundtable-chair: $(OBJDIR)/tests/test_roundtable_chair.o \
-                              $(OBJDIR)/modules/roundtable/roundtable_chair.o $(OBJDIR)/modules/roundtable/ensemble_request.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-sweep-logic: $(OBJDIR)/tests/test_sweep_logic.o \
@@ -5785,10 +5720,6 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(OURO_RING_LIB) $(TEST_L_FLAGS) $(PQ_LIB)
 
-$(TESTPREFIX)/unit-test-wiki-render: $(OBJDIR)/tests/test_wiki_render.o \
-                     $(OBJDIR)/wiki_render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
 $(TESTPREFIX)/unit-test-integrity-gate: $(OBJDIR)/tests/test_integrity_gate.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -6432,15 +6363,9 @@ $(OBJDIR)/aimee-memory-fixture: $(AIMEE_MODULE_GO_SRCS)
 $(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/kb/kb_intel_payload.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-memory-checkpoint-transport: $(OBJDIR)/tests/test_memory_checkpoint_transport.o $(OBJDIR)/tasks.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
 $(TESTPREFIX)/unit-test-workflow-transport: $(OBJDIR)/tests/test_workflow_transport.o $(OBJDIR)/workflow_learn.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
-
-$(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread

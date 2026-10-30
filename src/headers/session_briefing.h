@@ -12,8 +12,6 @@
 
 #include <stdarg.h>
 
-char *session_briefing_render_commitments(int limit);
-char *session_briefing_render_directives(int limit);
 char *session_briefing_render_skill_index(const char *project_root, int limit);
 
 #endif /* DEC_SESSION_BRIEFING_H */
