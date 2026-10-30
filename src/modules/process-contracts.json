@@ -1155,6 +1155,16 @@
           "subscribers": [
             "core"
           ]
+        },
+        {
+          "id": 26,
+          "name": "aimee-learning-projection-pending",
+          "event_kind": 11802,
+          "durability": "capture",
+          "durability_reason": "says only that a learning projection was queued; the queued source pointer is already a durable learning_projection_outbox row",
+          "subscribers": [
+            "core"
+          ]
         }
       ]
     },

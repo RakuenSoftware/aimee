@@ -297,7 +297,7 @@ class ModuleExportTests(unittest.TestCase):
             self.assertEqual(grant_line((grants / "config.grant").read_text(), "publish"),
                              ["4610"])
             self.assertEqual(grant_line((grants / "aimee.grant").read_text(), "publish"),
-                             ["11800", "11801"])
+                             ["11800", "11801", "11802"])
             self.assertEqual(grant_line((grants / "wfe.grant").read_text(), "subscribe"),
                              ["4610", "11800"])
             self.assertEqual(

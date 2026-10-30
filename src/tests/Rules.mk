@@ -913,6 +913,7 @@ $(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-approaches
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-application
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-recovery
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-kb-heartbeat
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-replay
 $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native_replay.o \
     $(OBJDIR)/server/server_native_replay.o $(OBJDIR)/modules/ir/session_event.o \
@@ -6633,6 +6634,10 @@ $(TESTPREFIX)/unit-test-server-learning-approaches: $(OBJDIR)/tests/test_server_
 $(TESTPREFIX)/unit-test-server-learning-recovery: $(OBJDIR)/tests/test_server_learning_recovery.o \
     $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/server/server_learning_outcome.o \
     $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-server-kb-heartbeat: $(OBJDIR)/tests/test_server_kb_heartbeat.o \
+    $(OBJDIR)/server/server_kb_heartbeat.o $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_native_cache_lease.o \

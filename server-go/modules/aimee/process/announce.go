@@ -18,6 +18,9 @@ const (
 	// KindDelegationChanged follows a committed delegation or agent-work
 	// write: the core's delegate monitor reacts to it instead of a 30s sweep.
 	KindDelegationChanged uint32 = 4096 + 30*256 + 25
+	// KindLearningProjectionPending follows a commit that queued a learning
+	// projection: the core's delivery worker claims it instead of every 3s.
+	KindLearningProjectionPending uint32 = 4096 + 30*256 + 26
 )
 
 // Announcer publishes this module's change notifications once it has a slot to

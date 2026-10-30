@@ -39,7 +39,7 @@ class NotificationContractTests(unittest.TestCase):
         self.validate(self.document)
         subscribed = contracts.subscriptions(self.document)
         self.assertEqual(subscribed["wfe"], [4610, 11800])
-        self.assertEqual(subscribed["core"], [4610, 11801])
+        self.assertEqual(subscribed["core"], [4610, 11801, 11802])
         self.assertEqual(subscribed["memory-postgres"], [4610])
         self.assertEqual(contracts.notification_kinds(self.component(self.document, "config")),
                          [4610])

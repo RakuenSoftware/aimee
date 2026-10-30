@@ -107,3 +107,34 @@ func TestAReadOpensNoTransactionAndIsNotAnnounced(t *testing.T) {
 		t.Fatalf("a read announced %v (asked=%v)", got, tx.asked)
 	}
 }
+
+func notedAfter(t *testing.T, body OpFunc) []string {
+	t.Helper()
+	var noted []string
+	family := Family{Noted: func(topic string) { noted = append(noted, topic) }}
+	_, _, _ = family.run(context.Background(), &writeDB{tx: &writeTx{wrote: true}},
+		Op{Name: "session_ir_append", Tx: true, Run: body}, nil)
+	return noted
+}
+
+func TestANoteIsDeliveredOnceAfterTheCommit(t *testing.T) {
+	queued := func(ctx context.Context, _ Queryer, _ []string) (uint32, []string, error) {
+		Note(ctx, "learning_projection_queued")
+		Note(ctx, "learning_projection_queued")
+		return StatusOK, nil, nil
+	}
+	if got := notedAfter(t, queued); len(got) != 1 || got[0] != "learning_projection_queued" {
+		t.Fatalf("noted %v, want the topic once", got)
+	}
+}
+
+func TestARolledBackNoteIsNotDelivered(t *testing.T) {
+	refused := func(ctx context.Context, _ Queryer, _ []string) (uint32, []string, error) {
+		Note(ctx, "learning_projection_queued")
+		return StatusInvalid, nil, nil
+	}
+	if got := notedAfter(t, refused); len(got) != 0 {
+		t.Fatalf("noted %v for a refused operation", got)
+	}
+	Note(context.Background(), "nowhere") // outside an operation: nothing to do, no panic
+}

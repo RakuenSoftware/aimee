@@ -33,9 +33,16 @@ func enqueueLearningProjection(ctx context.Context, q store.Queryer, f []string,
 	if !projectionEligible(f[4]) {
 		return nil
 	}
-	_, err := q.Exec(ctx, `INSERT INTO learning_projection_outbox(session_id,sequence,event_id,turn_id,actor) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, f[0], sequence, f[1], f[2], f[3])
+	tag, err := q.Exec(ctx, `INSERT INTO learning_projection_outbox(session_id,sequence,event_id,turn_id,actor) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, f[0], sequence, f[1], f[2], f[3])
+	if err == nil && tag != nil && tag.RowsAffected() > 0 {
+		store.Note(ctx, NoteLearningProjectionQueued)
+	}
 	return err
 }
+
+// NoteLearningProjectionQueued is noted when an operation queued a learning
+// projection, so the delivery worker is told instead of polling the queue.
+const NoteLearningProjectionQueued = "learning_projection_queued"
 
 type projectionTicket struct {
 	Lease  string          `json:"lease"`
@@ -108,7 +115,13 @@ func learningProjectionClaim(ctx context.Context, q store.Queryer, f []string) (
 	if err = q.QueryRow(ctx, `SELECT to_char(cutoff AT TIME ZONE 'utc','YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM learning_projection_coverage WHERE version=1`).Scan(&cutoff); err != nil {
 		return store.StatusFailed, nil, err
 	}
-	body, err := encodeSessionIR(map[string]any{"schema_version": 1, "coverage": "canonical_appends_since_cutover", "cutoff": cutoff, "items": tickets})
+	// When the worker has to look again with nothing announced: the next retry
+	// or lease expiry still pending, 0 when one is already due, -1 for none.
+	var nextDue int64
+	if err = q.QueryRow(ctx, `SELECT COALESCE(GREATEST(0,CEIL(EXTRACT(EPOCH FROM MIN(GREATEST(next_attempt,COALESCE(lease_until,next_attempt)))-now())*1000))::bigint,-1) FROM learning_projection_outbox WHERE state='pending'`).Scan(&nextDue); err != nil {
+		return store.StatusFailed, nil, err
+	}
+	body, err := encodeSessionIR(map[string]any{"schema_version": 1, "coverage": "canonical_appends_since_cutover", "cutoff": cutoff, "items": tickets, "next_due_ms": nextDue})
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}

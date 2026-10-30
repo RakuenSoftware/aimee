@@ -249,12 +249,18 @@ func New(ctx context.Context, moduleBusSocket string, announcer *Announcer) (*ai
 
 // announcing has the families whose changes other components act on announce
 // each committed write: lifecycle for the workflow engine, delegation and agent
-// work for the core's delegate monitor.
+// work for the core's delegate monitor. Any family's operation that queues a
+// learning projection announces that to the core's delivery worker.
 func announcing(all []aimee.Family, announcer *Announcer) []aimee.Family {
 	if announcer == nil {
 		return all
 	}
 	for i := range all {
+		all[i].Noted = func(topic string) {
+			if topic == families.NoteLearningProjectionQueued {
+				announcer.Announce(KindLearningProjectionPending, topic)
+			}
+		}
 		switch all[i].Name {
 		case families.Lifecycle.Name:
 			all[i].Changed = func(op string) { announcer.Announce(KindWorkItemChanged, op) }

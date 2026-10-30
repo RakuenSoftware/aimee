@@ -13,6 +13,8 @@
 #include <time.h>
 
 static atomic_int failed_write = 1, retries, delivered, observations, claims;
+/* Set: the claim reply says nothing is pending, as a current module does. */
+static atomic_int nothing_pending;
 static const char *record_wire =
     "{\"version\":1,\"session_id\":\"s\",\"turn_id\":\"turn\",\"sequence\":\"9\",\"event_id\":"
     "\"terminal\",\"actor\":\"alice\",\"event\":{\"kind\":\"execution\",\"payload\":{\"status\":"
@@ -24,6 +26,8 @@ char *db1_learning_projection_claim(void)
    atomic_fetch_add(&claims, 1);
    cJSON *batch = cJSON_CreateObject(), *items = cJSON_AddArrayToObject(batch, "items");
    cJSON_AddStringToObject(batch, "cutoff", "fixture-cutover");
+   if (atomic_load(&nothing_pending))
+      cJSON_AddNumberToObject(batch, "next_due_ms", -1);
    if (!atomic_load(&delivered))
    {
       cJSON *item = cJSON_CreateObject();
@@ -101,6 +105,14 @@ int db1_delegate_execution_experience_record(const char *actor, const char *sour
    assert(!"unexpected delegate source");
    return -1;
 }
+static void settle(int tenths)
+{
+   for (int n = 0; n < tenths; n++)
+   {
+      struct timespec pause = {.tv_nsec = 100000000L};
+      nanosleep(&pause, NULL);
+   }
+}
 static int cancelled_delivery(void)
 {
    return 1;
@@ -124,6 +136,23 @@ int main(void)
    server_learning_recovery_init();
    server_learning_recovery_shutdown();
    assert(atomic_load(&delivered) == 1);
+
+   /* An empty queue with nothing due: the worker claims once, then sleeps until
+    * a queued projection is announced, rather than every few seconds. */
+   atomic_store(&nothing_pending, 1);
+   int before = atomic_load(&claims);
+   server_learning_recovery_init();
+   for (int n = 0; n < 50 && atomic_load(&claims) == before; n++)
+      settle(1);
+   int first = atomic_load(&claims);
+   assert(first == before + 1);
+   settle(35); /* past the old 3s cadence */
+   assert(atomic_load(&claims) == first);
+   server_learning_recovery_wake();
+   for (int n = 0; n < 50 && atomic_load(&claims) == first; n++)
+      settle(1);
+   assert(atomic_load(&claims) == first + 1);
+   server_learning_recovery_shutdown();
    puts("learning recovery: actual timer retries failed publication and acknowledges only explicit "
         "delivery; no browser, model or tool execution");
    return 0;
