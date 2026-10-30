@@ -17,6 +17,11 @@
 #include "workspace_provider_container.h"
 #include "workspace_provider_detached.h"
 #include "workspace_runner_registry.h"
+#include <aimee/workspace/module_api.h>
+
+/* The server's request context, absent from binaries that link this module
+ * without it (then every op goes to the tree's own runner). */
+const char *request_context_runner_channel(void) __attribute__((weak));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -452,9 +457,15 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
                                     : WS_PROVIDER_SHARED;
       if (kind == WS_PROVIDER_DETACHED && !background)
       {
-         /* The runner queue is keyed by the workspace root — the same id the
-          * client's `aimee workspace serve <root>` polls. */
-         ws_runner_queue_t *q = ws_runner_registry_get_or_create(config_workspaces(i));
+         /* The runner queue is the requesting CLI's own channel when it sent
+          * one, so the client that asked runs the op -- not whichever client
+          * polled the tree first, with its own environment and credentials.
+          * Otherwise it is keyed by the workspace root, the id `aimee
+          * workspace serve <root>` polls. */
+         const char *channel =
+             request_context_runner_channel ? request_context_runner_channel() : "";
+         ws_runner_queue_t *q = ws_runner_registry_get_or_create(
+             aimee_ws_runner_channel_valid(channel) ? channel : config_workspaces(i));
          if (q)
          {
             /* Bind both the unary and streaming transports off the same queue so

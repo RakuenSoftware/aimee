@@ -5,6 +5,14 @@
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_runner_registry.h"
+#include "modules/workspace/workspace_provider_detached.h"
+
+/* The server's request context, as the bind sees it. */
+static const char *g_test_runner_channel = "";
+const char *request_context_runner_channel(void)
+{
+   return g_test_runner_channel;
+}
 #include "config.h"
 #include <aimee/delegates/delegate_backend.h>
 #include "modules/workspace/workspace_provider_container.h"
@@ -430,6 +438,28 @@ int main(void)
       assert(!restored && workspace_provider_active() == active);
       workspace_turn_unbind_active();
       assert(workspace_provider_active() == shared); /* restored */
+   }
+
+   /* A request that names its CLI's runner channel binds that channel's queue,
+    * not the tree's: only the client that asked runs its ops. A malformed
+    * channel falls back to the tree. */
+   {
+      static const char channel[] = "runner:0123456789abcdef0123456789abcdef";
+      char inside[256];
+      snprintf(inside, sizeof inside, "%s/src/file.c", test_detached_workspace);
+      g_test_runner_channel = channel;
+      assert(workspace_turn_bind_active(inside) == 1);
+      const ws_detached_provider_t *bound =
+          (const ws_detached_provider_t *)workspace_provider_active();
+      assert(!strcmp(((const ws_runner_queue_t *)bound->transport_ctx)->id, channel));
+      workspace_turn_unbind_active();
+      g_test_runner_channel = "runner:not-a-channel";
+      assert(workspace_turn_bind_active(inside) == 1);
+      bound = (const ws_detached_provider_t *)workspace_provider_active();
+      assert(!strcmp(((const ws_runner_queue_t *)bound->transport_ctx)->id,
+                     test_detached_workspace));
+      workspace_turn_unbind_active();
+      g_test_runner_channel = "";
    }
 
    /* the workspace root itself also matches */

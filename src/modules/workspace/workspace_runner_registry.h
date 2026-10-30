@@ -43,6 +43,11 @@ ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id);
  * restart. This never registers an unknown root or changes provider choice. */
 int ws_runner_registry_register_configured(const char *workspace);
 
+/* Close a client's private runner channel (aimee_ws_runner_channel_valid): its
+ * CLI has finished, so anything still waiting on it fails instead of waiting
+ * for a client that is gone. A tree's own id is never closed here. */
+int ws_runner_registry_close_channel(const char *channel);
+
 /* Reverse-channel endpoint helpers — what the `runner.poll` / `runner.respond`
  * RPC handlers (and any future /v1 route) wrap. The filesystem-authority client
  * serving workspace `id` calls poll to fetch the next op the server needs done,
