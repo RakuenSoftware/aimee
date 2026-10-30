@@ -15,9 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
-static int g_db1_probe_calls;
+static _Atomic int g_db1_probe_calls; /* the sampler thread probes too */
 static int g_kb_probe_calls;
 static int g_kb_configured;
 int kb_client_connection_configured(void)
@@ -39,9 +40,56 @@ int kb_client_health(kb_health_t *out)
    return -1;
 }
 
+static server_http_ready_fn g_provider;
 void server_http_set_ready_provider(server_http_ready_fn fn)
 {
-   (void)fn;
+   g_provider = fn;
+}
+
+static void pause_ms(long ms)
+{
+   struct timespec t = {.tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000L};
+   nanosleep(&t, NULL);
+}
+
+/* The sampler samples on demand, never on a timer: idle, it asks nothing. */
+static void test_samples_only_when_asked(void)
+{
+   char resp[2048];
+   setenv("AIMEE_READY_INTERVAL_SECS", "1", 1);
+   setenv("AIMEE_READY_STALE_SECS", "2", 1);
+   int before = g_db1_probe_calls;
+   server_ready_register();
+   assert(g_provider != NULL);
+   for (int i = 0; i < 200 && g_db1_probe_calls == before; i++)
+      pause_ms(10);
+   assert(g_db1_probe_calls == before + 1); /* the startup sample */
+
+   /* Nobody asks: nothing is sampled, however long it is left. */
+   pause_ms(2300);
+   assert(g_db1_probe_calls == before + 1);
+
+   /* Too old to answer from: the request waits for the sample it asked for. */
+   (void)g_provider(resp, sizeof resp);
+   assert(g_db1_probe_calls == before + 2);
+   assert(strstr(resp, "\"db1\":\"ok\""));
+
+   /* Fresh: answered from the snapshot, nothing sampled. */
+   (void)g_provider(resp, sizeof resp);
+   assert(strstr(resp, "\"db1\":\"ok\""));
+   pause_ms(100);
+   assert(g_db1_probe_calls == before + 2);
+
+   /* Due but still answerable: answered at once, the sample lands behind it. */
+   pause_ms(1100);
+   (void)g_provider(resp, sizeof resp);
+   assert(strstr(resp, "\"db1\":\"ok\"")); /* answered from the last sample */
+   for (int i = 0; i < 200 && g_db1_probe_calls == before + 2; i++)
+      pause_ms(10);
+   assert(g_db1_probe_calls == before + 3);
+   unsetenv("AIMEE_READY_INTERVAL_SECS");
+   unsetenv("AIMEE_READY_STALE_SECS");
+   puts("  readiness samples on demand, never on a timer");
 }
 
 void kb_client_dependency_health(kb_client_dependency_health_t *out)
@@ -256,6 +304,7 @@ int main(void)
    assert(strstr(resp, "audit_capacity"));
    capacity.audit_capacity_failed = 0;
    assert(server_ready_render(1, 1, &capacity, NOW - 5, NOW, 60, resp, sizeof(resp)) == 200);
+   test_samples_only_when_asked();
    printf("server_ready: OK\n");
    return 0;
 }
