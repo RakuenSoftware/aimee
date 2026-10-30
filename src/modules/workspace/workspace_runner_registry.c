@@ -128,6 +128,11 @@ int ws_runner_registry_register_configured(const char *workspace)
    return 0;
 }
 
+int ws_runner_registry_announce(const char *id)
+{
+   return runner_ask(AIMEE_WS_RUNNER_OP_REGISTER, id, NULL, 0) < 0 ? -1 : 0;
+}
+
 int ws_runner_registry_close_channel(const char *channel)
 {
    if (!aimee_ws_runner_channel_valid(channel))
