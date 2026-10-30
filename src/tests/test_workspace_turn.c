@@ -456,8 +456,8 @@ int main(void)
       g_test_runner_channel = "runner:not-a-channel";
       assert(workspace_turn_bind_active(inside) == 1);
       bound = (const ws_detached_provider_t *)workspace_provider_active();
-      assert(!strcmp(((const ws_runner_queue_t *)bound->transport_ctx)->id,
-                     test_detached_workspace));
+      assert(
+          !strcmp(((const ws_runner_queue_t *)bound->transport_ctx)->id, test_detached_workspace));
       workspace_turn_unbind_active();
       /* Channels are per command, so many more than the registry's 64 tree
        * handles come and go; each one still binds its own channel. */

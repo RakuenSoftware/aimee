@@ -424,9 +424,8 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
 static int active_mirror_lease(const char *real);
 
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached,
-                            ws_runner_queue_t *channel_slot, int *bound,
-                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
-                            int background)
+                            ws_runner_queue_t *channel_slot, int *bound, int *mirror_fd,
+                            char resolved[MAX_PATH_LEN], char drift[256], int background)
 {
    *bound = 0;
    *mirror_fd = -1;
@@ -522,8 +521,7 @@ int workspace_turn_bind_active(const char *cwd)
    if (t_turn_mirror_fd >= 0)
       close(t_turn_mirror_fd);
    int result = bind_active_into(cwd, &t_turn_detached, &t_turn_channel, &t_turn_bound,
-                                 &t_turn_mirror_fd,
-                                 t_turn_cwd, t_turn_drift, 0);
+                                 &t_turn_mirror_fd, t_turn_cwd, t_turn_drift, 0);
    t_turn_detached_epoch[0] = 0;
    if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
        platform_random_hex(t_turn_detached_epoch, 64))
@@ -548,8 +546,7 @@ static int scope_begin(const char *cwd, workspace_turn_scope_t **out, int backgr
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
    int result = bind_active_into(cwd, &scope->detached, &scope->channel, &scope->bound,
-                                 &scope->mirror_fd,
-                                 scope->cwd, scope->drift, background);
+                                 &scope->mirror_fd, scope->cwd, scope->drift, background);
    if (result < 0)
    {
       workspace_provider_set_active(scope->previous_provider);

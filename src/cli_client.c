@@ -368,8 +368,13 @@ static char *request_bytes(const cli_http_options_t *o, const char *host, size_t
    if (o->bearer && o->bearer[0] && aimee_core_bearer_value(auth, sizeof(auth), o->bearer))
       return NULL;
    size_t capacity = 256;
-   size_t pieces[] = {o->body_length, strlen(o->method), strlen(o->path),
-                      strlen(host),   strlen(auth),      extra, sizeof(g_runner_channel) + 20};
+   size_t pieces[] = {o->body_length,
+                      strlen(o->method),
+                      strlen(o->path),
+                      strlen(host),
+                      strlen(auth),
+                      extra,
+                      sizeof(g_runner_channel) + 20};
    for (size_t i = 0; i < sizeof(pieces) / sizeof(pieces[0]); ++i)
    {
       if (pieces[i] > SIZE_MAX - capacity)
