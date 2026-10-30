@@ -172,7 +172,7 @@ def go_module_main(module_id: str, principal_ref: int,
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
-    process_options = "\t\tMaxIdlePollInterval: handler.RequestAdmissionPollInterval,\n" if module_id == "economizer" else ""
+    process_options = ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
@@ -189,12 +189,14 @@ def go_module_main(module_id: str, principal_ref: int,
     if module_id == "aimee":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
         handler = "moduleHandler.Handle"
-        process_setup = """\tmoduleHandler, err := process.New(ctx, os.Args[1])
+        process_setup = """\tannouncer := process.NewAnnouncer()
+\tmoduleHandler, err := process.New(ctx, os.Args[1], announcer)
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
 \t}
 """
+        process_options = "\t\tStarted: func(publisher ring.Publisher) { announcer.Start(ctx, publisher) },\n"
     if module_id == "memory":
         handler = "moduleHandler"
         process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1], os.Getenv("AIMEE_MODULE_PLACEMENT"))

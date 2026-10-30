@@ -10,6 +10,11 @@
 #include "server.h"
 #include "server_delegate_monitor.h"
 
+/* Test binaries that link the adapter without the park loop or the delegate
+ * monitor have nothing to wake. */
+extern void server_park_wake(void) __attribute__((weak));
+extern void server_delegate_monitor_wake(void) __attribute__((weak));
+
 static int persist_guardrail(const guardrail_event_t *event, void *ctx)
 {
    (void)ctx;
@@ -32,7 +37,8 @@ static void config_changed(uint32_t kind, const uint8_t *payload, uint32_t len, 
 {
    (void)kind, (void)ctx;
    config_client_note_announcement(payload, len);
-   server_park_wake();
+   if (server_park_wake)
+      server_park_wake();
 }
 
 /* A delegation or agent job changed: the delegate monitor looks now instead of
@@ -40,7 +46,8 @@ static void config_changed(uint32_t kind, const uint8_t *payload, uint32_t len, 
 static void delegation_changed(uint32_t kind, const uint8_t *payload, uint32_t len, void *ctx)
 {
    (void)kind, (void)payload, (void)len, (void)ctx;
-   server_delegate_monitor_wake();
+   if (server_delegate_monitor_wake)
+      server_delegate_monitor_wake();
 }
 
 int server_obs_bus_configure(void)

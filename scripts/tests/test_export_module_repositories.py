@@ -253,11 +253,15 @@ class ModuleExportTests(unittest.TestCase):
         self.assertIn("storage.Bootstrap(os.Args)", exporter.go_module_main("postgres", 26, []))
         self.assertIn("handler.ModelServicesBootstrap(os.Args)", exporter.go_module_main("providers", 17, []))
 
-    def test_exported_admission_process_uses_owner_poll_ceiling(self) -> None:
+    def test_exported_admission_process_waits_without_a_poll_ceiling(self) -> None:
         main = exporter.go_module_main("economizer", 27, [])
-        self.assertIn("MaxIdlePollInterval: handler.RequestAdmissionPollInterval", main)
         self.assertIn("Handler: handler.NewHandler()", main)
-        self.assertNotIn("MaxIdlePollInterval", exporter.go_module_main("memory", 7, []))
+        self.assertNotIn("MaxIdlePollInterval", main)
+
+    def test_exported_aimee_process_announces_its_changes(self) -> None:
+        main = exporter.go_module_main("aimee", 30, [])
+        self.assertIn("process.New(ctx, os.Args[1], announcer)", main)
+        self.assertIn("announcer.Start(ctx, publisher)", main)
 
     def test_final_request_admission_is_started_and_granted(self) -> None:
         # Exercise the shipping descriptors, rather than merely proving the
