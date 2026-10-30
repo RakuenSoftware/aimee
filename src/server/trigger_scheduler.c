@@ -857,8 +857,8 @@ static time_t g_last_db_cron_job_fired[CRON_JOBS_MAX];
 
 static pthread_mutex_t g_sched_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_sched_cond = PTHREAD_COND_INITIALIZER;
-static int g_sched_stop;   /* under g_sched_lock */
-static int g_sched_woken;  /* under g_sched_lock: a change not yet ticked on */
+static int g_sched_stop;  /* under g_sched_lock */
+static int g_sched_woken; /* under g_sched_lock: a change not yet ticked on */
 
 /* Stored cron jobs, re-read only when agent work (where they live) or config is
  * announced to have changed, not on every tick. */

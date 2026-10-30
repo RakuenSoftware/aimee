@@ -2224,8 +2224,8 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_RERANK"
       ],
-      "sha256": "2cff74187d238e1046ae9d6a7c0354171337ef4f45c92fe9c915e20d2eb679e8",
-      "review": "2026-10-22: Joined, interruptible readiness sampler lifecycle; stop wakes the worker, waits for its in-flight owner probes, clears the snapshot, and prevents post-stop re-polling. Memory rerank attachment, existing DB1/KB/module probe bodies, transport and owner authority are unchanged. src/tests/test_server_ready.c covers in-flight stop, no polling after stop, repeated/concurrent lifecycle and fail-closed stopped readiness.",
+      "sha256": "494ab00d341761f6c72126795cb228e37f7bd1ecc57043d270b37eec2277944c",
+      "review": "2026-10-31 ring-telemetry: the readiness sampler samples on demand instead of every AIMEE_READY_INTERVAL_SECS; a readiness request older than the interval asks for a sample and one too old to answer waits at most 2 s for it. The DB1/KB/module probe bodies, the required-module list including memory rerank, transport and owner authority are unchanged. src/tests/test_server_ready.c covers no sampling while unasked, the bounded wait for a stale snapshot, and a fresh snapshot answered without sampling.",
       "boundary_review": "2026-10-30 push-not-poll: the readiness summary and store probe trust recent store traffic instead of an idle probe; the required-module list, including memory rerank, is unchanged. No memory symbol, hook, transport or Go memory ownership changed. Not independent production-promotion approval."
     },
     "src/server/server_session.c": {
@@ -2554,8 +2554,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "aeb89d17562821a9071bff7a6cbaacc7cf3dec0e0183c7fbbd679a1ba4622517",
-      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval. 2026-10-30 push-not-poll: answers changed() from config-changed announcements instead of a version call; the memory backend token handling is unchanged. No memory symbol, hook, transport or Go memory ownership changed. Not independent production-promotion approval."
+      "sha256": "eb3439b6bc8f7efeacaebae6ccfb5c2d0ce0838ade95bf22b86f81f030f63379",
+      "boundary_review": "2026-10-27 ouroboros ring migration: mechanical rename only. The ring moved to github.com/RakuenSoftware/ouroboros-ring, so <aimee/core/event_bus/X.h> became <ouroboros/X.h> and the bus_/aimee_module_ identifiers became ouro_/ouro_module_, with clang-format re-aligning continuation lines. Memory symbols, handlers, arguments and Go-owned policy are unchanged. This is boundary analysis, not independent production-promotion approval. 2026-10-30 push-not-poll: answers changed() from config-changed announcements instead of a version call; the memory backend token handling is unchanged. No memory symbol, hook, transport or Go memory ownership changed. Not independent production-promotion approval. 2026-10-31: clang-format 19 only; no code change."
     },
     "src/config_client_contract.c": {
       "disposition": "host-transport",

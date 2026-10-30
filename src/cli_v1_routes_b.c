@@ -1761,13 +1761,13 @@ void print_server_health(cJSON *resp)
     * which every governed action is refused, and the one this command is run in. */
    int unready = cJSON_IsFalse(ready);
    printf("aimee-server: %s\n", unready                  ? "not ready"
-                                 : cJSON_IsString(status) ? status->valuestring
-                                                          : "unknown");
+                                : cJSON_IsString(status) ? status->valuestring
+                                                         : "unknown");
    printf("  state:       %s\n", cJSON_IsString(state) ? state->valuestring : "unknown");
    if (unready)
-      printf("  not ready:   %s\n",
-             cJSON_IsString(not_ready) && not_ready->valuestring[0] ? not_ready->valuestring
-                                                                    : "unknown");
+      printf("  not ready:   %s\n", cJSON_IsString(not_ready) && not_ready->valuestring[0]
+                                        ? not_ready->valuestring
+                                        : "unknown");
    if (cJSON_IsNumber(uptime))
       printf("  uptime:      %.0fs\n", uptime->valuedouble);
    if (cJSON_IsNumber(connections))

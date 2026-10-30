@@ -339,8 +339,8 @@ int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       now_generation = (double)aimee_command_registry_generation();
       if (busy || now_generation != have || waited >= timeout_ms)
          break;
-      long step = timeout_ms - waited < TOOLS_WAIT_RECHECK_MS ? timeout_ms - waited
-                                                               : TOOLS_WAIT_RECHECK_MS;
+      long step =
+          timeout_ms - waited < TOOLS_WAIT_RECHECK_MS ? timeout_ms - waited : TOOLS_WAIT_RECHECK_MS;
       struct timespec pause = {.tv_sec = step / 1000, .tv_nsec = (step % 1000) * 1000000L};
       nanosleep(&pause, NULL);
    }

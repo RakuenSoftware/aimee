@@ -821,7 +821,6 @@ static uint64_t now_ms(void)
    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
 }
 
-
 static pthread_mutex_t g_collect_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int aimee_module_commands_refresh(int ttl_ms)

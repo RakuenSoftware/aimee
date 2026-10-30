@@ -23,9 +23,9 @@ static char g_config_client_version[65];
  * thread routes, so taking it there would deadlock. */
 static pthread_mutex_t g_announce_lock = PTHREAD_MUTEX_INITIALIZER;
 static atomic_int g_announcements_used;
-static unsigned long g_announced;       /* announcements received */
-static unsigned long g_announced_seen;  /* g_announced when the snapshot was fetched */
-static char g_announced_version[65];    /* "" for a missed announcement */
+static unsigned long g_announced;      /* announcements received */
+static unsigned long g_announced_seen; /* g_announced when the snapshot was fetched */
+static char g_announced_version[65];   /* "" for a missed announcement */
 static _Thread_local char g_config_client_error[160];
 
 /* Narrow transport seam used by contract tests. Production resolves this weak
