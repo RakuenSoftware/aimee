@@ -1911,6 +1911,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/toolsets/resolve", NULL, RM_EXACT, "toolset.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/blast_radius/preview", NULL, RM_EXACT, "blast_radius.preview", 0, rh_dispatch_op},
     {"GET", "/v1/mcp/tools_list", NULL, RM_EXACT, "mcp.tools_list", 0, rh_dispatch_op},
+    {"POST", "/v1/mcp/tools_wait", NULL, RM_EXACT, "mcp.tools_wait", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/audit", NULL, RM_EXACT, "mcp.audit", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/recheck", NULL, RM_EXACT, "mcp.recheck", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/call", NULL, RM_EXACT, "mcp.call", 0, rh_dispatch_op},

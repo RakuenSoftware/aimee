@@ -3329,6 +3329,16 @@ paths:
     get:
       summary: List MCP tools
       responses: { "200": { description: MCP tools, content: { application/json: { schema: { type: object } } } } }
+  /mcp/tools_wait:
+    post:
+      summary: Wait for the MCP tool list to change
+      description: >
+        Answers once the tool-list generation differs from the caller's
+        `generation`, or after `timeout_ms` (at most 290000), so an MCP bridge
+        holds one request open instead of listing tools on a timer. A server
+        already holding its maximum of waiters answers at once with `busy`.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Current generation, content: { application/json: { schema: { type: object } } } } }
   /mcp/audit:
     post:
       summary: Audit MCP servers

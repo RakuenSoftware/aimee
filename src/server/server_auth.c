@@ -186,6 +186,7 @@ const method_policy_t method_registry[] = {
      * fail during the MCP startup handshake before it can call even read-only
      * tools. Tool execution remains independently gated at mcp.call. */
     {"mcp.tools_list", CAP_SESSION_READ, "MCP tool list"},
+    {"mcp.tools_wait", CAP_SESSION_READ, "wait for the MCP tool list to change"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},

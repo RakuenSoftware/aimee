@@ -271,6 +271,7 @@
     {"chat.send_stream", handle_chat_send_stream},
     /* MCP proxy */
     {"mcp.tools_list", handle_mcp_tools_list},
+    {"mcp.tools_wait", handle_mcp_tools_wait},
     {"mcp.audit", handle_mcp_audit},
     {"mcp.recheck", handle_mcp_recheck},
     {"mcp.call", handle_mcp_call},

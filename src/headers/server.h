@@ -690,6 +690,7 @@ int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
 /* MCP proxy handler (server_mcp.c) */
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Full served tool surface (built-ins + discovery + server-only), unfiltered;
  * caller owns the returned cJSON array (server_mcp_tools.c). */
 cJSON *mcp_build_full_served_list(void);
