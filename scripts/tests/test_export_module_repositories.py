@@ -320,7 +320,11 @@ class ModuleExportTests(unittest.TestCase):
             "id": "memory-postgres", "principal_ref": 73,
             "executable": "/module", "placements": ["server", "kb"],
             "request": [11266], "publish": [3000],
-        }]}), encoding="utf-8")
+        }], "telemetry": {
+            "id": "ring-telemetry", "principal_ref": 77,
+            "executable": "/usr/local/libexec/aimee-modules/aimee-module-ring-telemetry",
+            "placements": ["server", "kb"],
+        }}), encoding="utf-8")
         contract = {
             "execution": "process",
             "runtime": runtime,
@@ -345,9 +349,20 @@ class ModuleExportTests(unittest.TestCase):
                 self.assertIn("request=11266\n", grant)
                 self.assertIn("subscribe=\n", grant)
                 self.assertIn("serve=\n", grant)
-            self.assertEqual((bundle / "go.modules").read_text(encoding="utf-8"), "kb\n")
+            self.assertEqual((bundle / "go.modules").read_text(encoding="utf-8"),
+                             "kb\nring-telemetry\n")
             self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))
+            # The ring's telemetry exporter is granted the telemetry ring and
+            # nothing else, and is supervised in every placement.
+            for placement in ("server", "kb"):
+                grant = (bundle / "grants" / placement / "ring-telemetry.grant").read_text()
+                self.assertIn("telemetry=yes\n", grant)
+                for key in ("publish", "subscribe", "request", "serve"):
+                    self.assertIn(f"{key}=\n", grant)
+                self.assertIn("ring-telemetry\t/usr/local/libexec/aimee-modules/"
+                              "aimee-module-ring-telemetry",
+                              (bundle / f"{placement}.modules").read_text(encoding="utf-8"))
             self.assertFalse((bundle / "src").exists())
             self.assertFalse((bundle / "c-build.json").exists())
 
