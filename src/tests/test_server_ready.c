@@ -56,8 +56,9 @@ static void pause_ms(long ms)
 static void test_samples_only_when_asked(void)
 {
    char resp[2048];
-   setenv("AIMEE_READY_INTERVAL_SECS", "1", 1);
-   setenv("AIMEE_READY_STALE_SECS", "2", 1);
+   /* Ages are whole seconds; every step below keeps a full second of margin. */
+   setenv("AIMEE_READY_INTERVAL_SECS", "2", 1);
+   setenv("AIMEE_READY_STALE_SECS", "4", 1);
    int before = g_db1_probe_calls;
    server_ready_register();
    assert(g_provider != NULL);
@@ -66,7 +67,7 @@ static void test_samples_only_when_asked(void)
    assert(g_db1_probe_calls == before + 1); /* the startup sample */
 
    /* Nobody asks: nothing is sampled, however long it is left. */
-   pause_ms(2300);
+   pause_ms(5200); /* age >= 5, past the 4 s stale bound */
    assert(g_db1_probe_calls == before + 1);
 
    /* Too old to answer from: the request waits for the sample it asked for. */
@@ -74,14 +75,15 @@ static void test_samples_only_when_asked(void)
    assert(g_db1_probe_calls == before + 2);
    assert(strstr(resp, "\"db1\":\"ok\""));
 
-   /* Fresh: answered from the snapshot, nothing sampled. */
+   /* Fresh (age 0 or 1, under the 2 s interval): answered from the snapshot. */
    (void)g_provider(resp, sizeof resp);
    assert(strstr(resp, "\"db1\":\"ok\""));
    pause_ms(100);
    assert(g_db1_probe_calls == before + 2);
 
-   /* Due but still answerable: answered at once, the sample lands behind it. */
-   pause_ms(1100);
+   /* Due but still answerable (age 2 or 3): answered at once, the sample
+    * lands behind it. */
+   pause_ms(2100);
    (void)g_provider(resp, sizeof resp);
    assert(strstr(resp, "\"db1\":\"ok\"")); /* answered from the last sample */
    for (int i = 0; i < 200 && g_db1_probe_calls == before + 2; i++)
