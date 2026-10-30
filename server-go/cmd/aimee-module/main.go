@@ -17,6 +17,7 @@ import (
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
+	"github.com/JBailes/aimee/server-go/modules/observability"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	aimeeprocess "github.com/JBailes/aimee/server-go/modules/aimee/process"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
@@ -732,6 +733,19 @@ func main() {
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "aimee composition: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// The ring's telemetry exporter (D16): a supervised process of its own,
+	// granted the host's telemetry ring, serving no stage.
+	if filepath.Base(os.Args[0]) == "aimee-module-ring-telemetry" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: aimee-module-ring-telemetry <module-bus-socket>")
+			os.Exit(2)
+		}
+		if err := observability.RunRingTelemetry(ctx, os.Args[1], ""); err != nil {
+			fmt.Fprintf(os.Stderr, "aimee-module-ring-telemetry: %v\n", err)
 			os.Exit(1)
 		}
 		return

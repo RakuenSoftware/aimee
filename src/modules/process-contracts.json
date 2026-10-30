@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "principal_class": 1,
   "components": [
     {
@@ -1475,5 +1475,14 @@
         6679
       ]
     }
-  ]
+  ],
+  "telemetry": {
+    "id": "ring-telemetry",
+    "principal_ref": 77,
+    "executable": "/usr/local/libexec/aimee-modules/aimee-module-ring-telemetry",
+    "placements": [
+      "server",
+      "kb"
+    ]
+  }
 }

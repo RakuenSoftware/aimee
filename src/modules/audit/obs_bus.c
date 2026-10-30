@@ -1214,6 +1214,18 @@ static int start_locked(void)
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
+   /* Every event leaves the host the moment it is stamped (ring D16): the host
+    * writes its content-free record before the tap runs, and the exporter
+    * process the module grants name (telemetry=yes) sends it to the collector.
+    * Without the ring that guarantee does not hold, so neither does the bus. */
+   if (ouro_host_telemetry_enable(&g.host, 0) != OURO_HOST_OK)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "ring telemetry could not be created; the bus will not start");
+      ouro_host_destroy(&g.host);
+      pthread_mutex_destroy(&g.host_lock);
+      pthread_mutex_destroy(&g.pub_lock);
+      return -1;
+   }
    ouro_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
    /* The ring's module client pool checks a client out per call and bounds the
     * wait for one by the call's own deadline. */

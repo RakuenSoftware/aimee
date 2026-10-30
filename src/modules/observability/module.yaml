@@ -14,14 +14,14 @@
     "server-go/modules/observability/metrics_server.go",
     "server-go/modules/observability/observability.go",
     "server-go/modules/observability/otlp_config.go",
-    "server-go/modules/observability/tap.go"
+    "server-go/modules/observability/ringtelemetry.go"
   ],
   "go_tests": [
     "server-go/modules/observability/metrics_server_test.go",
     "server-go/modules/observability/metrics_tls_test.go",
     "server-go/modules/observability/observability_test.go",
     "server-go/modules/observability/otlp_config_test.go",
-    "server-go/modules/observability/tap_test.go"
+    "server-go/modules/observability/ringtelemetry_test.go"
   ],
   "docs": [
     "docs/modules/observability.md"

@@ -723,6 +723,24 @@ serve=
 """
         for placement in client["placements"]:
             write_text(output_root / "grants" / placement / f"{client['id']}.grant", client_grant)
+    # The ring's telemetry exporter (D16): granted the host's telemetry ring,
+    # serving and requesting nothing, supervised wherever a ring is hosted.
+    telemetry = contract_doc["telemetry"]
+    telemetry_grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={telemetry["principal_ref"]}
+uid=self
+executable={telemetry["executable"]}
+publish=
+subscribe=
+request=
+serve=
+telemetry=yes
+"""
+    for placement in telemetry["placements"]:
+        write_text(output_root / "grants" / placement / f"{telemetry['id']}.grant", telemetry_grant)
+        placement_rows[placement].append(f"{telemetry['id']}\t{telemetry['executable']}")
+    go_modules.append(telemetry["id"])
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")

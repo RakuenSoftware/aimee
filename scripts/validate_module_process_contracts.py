@@ -101,10 +101,11 @@ def validate() -> dict[str, dict[str, object]]:
     if not all(isinstance(item, str) for item in ordered):
         raise ContractError("canonical inventory is not a string array")
     contract = load(CONTRACTS)
-    if set(contract) != {"schema_version", "principal_class", "components", "clients"}:
-        raise ContractError("top-level keys differ from v5")
-    if contract["schema_version"] != 5 or contract["principal_class"] != 1:
-        raise ContractError("schema_version must equal 5 and principal_class must equal 1")
+    if set(contract) != {"schema_version", "principal_class", "components", "clients",
+                         "telemetry"}:
+        raise ContractError("top-level keys differ from v6")
+    if contract["schema_version"] != 6 or contract["principal_class"] != 1:
+        raise ContractError("schema_version must equal 6 and principal_class must equal 1")
     components = contract["components"]
     if not isinstance(components, list) or len(components) != len(ordered):
         raise ContractError("component count differs from canonical inventory")
@@ -322,6 +323,7 @@ def validate() -> dict[str, dict[str, object]]:
                 raise ContractError(f"{component_id}: unexpected required process")
         result[component_id] = raw
     validate_clients(contract["clients"], kinds, refs)
+    validate_telemetry(contract["telemetry"], contract["clients"], set(result), refs)
     validate_subscribers(contract)
     return result
 
@@ -387,6 +389,36 @@ def validate_subscribers(contract: dict[str, object]) -> None:
         if subscriber not in known:
             raise ContractError(f"notification subscriber {subscriber!r} is not a process, "
                                 "a client or the core")
+
+
+def validate_telemetry(telemetry: object, clients: list, component_ids: set[str],
+                       module_refs: set[int]) -> None:
+    """The ring's telemetry exporter (ouroboros ring D16).
+
+    The host hands one principal the consumer end of its telemetry ring, which
+    describes every event on the ring, so exactly one is declared. It serves and
+    requests nothing; its grant says telemetry=yes, and the supervisor runs it
+    in every placement that hosts a ring.
+    """
+    if not isinstance(telemetry, dict) or set(telemetry) != {
+            "id", "principal_ref", "executable", "placements"}:
+        raise ContractError("telemetry: keys differ from v6")
+    identifier = telemetry["id"]
+    client_ids = {client["id"] for client in clients}
+    if (not isinstance(identifier, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identifier)
+            or identifier in client_ids or identifier in component_ids):
+        raise ContractError("telemetry: invalid or colliding id")
+    ref = telemetry["principal_ref"]
+    if type(ref) is not int or ref <= max(module_refs, default=0):
+        raise ContractError("telemetry: principal_ref must sit above every module ref")
+    if ref in module_refs or ref in {client["principal_ref"] for client in clients}:
+        raise ContractError(f"telemetry: principal_ref {ref} collides")
+    executable = telemetry["executable"]
+    if executable != f"/usr/local/libexec/aimee-modules/aimee-module-{identifier}":
+        raise ContractError("telemetry: executable must be the module runtime under its id")
+    placements = telemetry["placements"]
+    if placements != ["server", "kb"]:
+        raise ContractError("telemetry: every placement hosts a ring, so both run the exporter")
 
 
 def validate_clients(clients: object, served_kinds: set[int], module_refs: set[int]) -> None:
