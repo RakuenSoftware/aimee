@@ -945,9 +945,10 @@ void obs_bus_record_loss(void *ctx, const ouro_frame_t *frame, const uint8_t *pa
    }
 }
 
-/* Longest the consumer sleeps on the host doorbell with nothing to route. Inside
- * the 30s reap window, with the reap itself every 7.5s, so liveness holds while
- * an idle server wakes only for it. */
+/* Longest the consumer sleeps on the host doorbell with nothing to route while
+ * some admitted client is heartbeat-reaped. Inside the 30s reap window, with the
+ * reap itself every 7.5s. When every client is bound to its process (ring D15),
+ * the ring releases a dead one itself and the consumer sleeps until woken. */
 #define AB_IDLE_WAIT_MS 5000
 
 static void *consumer_main(void *arg)
@@ -990,11 +991,12 @@ static void *consumer_main(void *arg)
           * heartbeats, reaping and the capture flush inside their windows. */
          pthread_mutex_lock(&g.host_lock);
          int begun = ouro_host_wait_begin(&g.host);
+         int reaping = g.runtime && ouro_runtime_maintenance_due(g.runtime);
          pthread_mutex_unlock(&g.host_lock);
          if (begun == 0)
          {
             struct pollfd bell = {.fd = ouro_host_doorbell_fd(&g.host), .events = POLLIN};
-            (void)poll(&bell, 1, AB_IDLE_WAIT_MS);
+            (void)poll(&bell, 1, reaping ? AB_IDLE_WAIT_MS : -1);
             ouro_host_wait_end(&g.host);
          }
          else if (begun < 0)
