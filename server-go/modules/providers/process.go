@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"errors"
+	"os"
 	"time"
 
 	configclient "github.com/JBailes/aimee/server-go/config"
@@ -43,4 +45,10 @@ func NewProcessHandler(ctx context.Context, socket, home string) (ring.ModuleHan
 	manager.SetEgress(transport)
 	manager.SetConfig(config)
 	return manager.Handle, nil
+}
+func NewDefaultHandler() (ring.ModuleHandler, error) {
+	if len(os.Args) != 2 {
+		return nil, errors.New("module bus socket required")
+	}
+	return NewProcessHandler(context.Background(), os.Args[1], os.Getenv("AIMEE_HOME"))
 }
