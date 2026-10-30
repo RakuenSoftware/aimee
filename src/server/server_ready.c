@@ -415,6 +415,22 @@ static int ready_provider(char *resp, int cap)
                               ready_stale_secs(), resp, cap);
 }
 
+int server_ready_summary(char *boundary, size_t n)
+{
+   char body[4096];
+   int ready = ready_provider(body, (int)sizeof body) == 200;
+   if (boundary && n)
+   {
+      pthread_mutex_lock(&g_ready_mtx);
+      const char *failed = g_snap.failed_boundary[0] ? g_snap.failed_boundary
+                           : ready                   ? ""
+                                                     : "unknown";
+      snprintf(boundary, n, "%s", failed);
+      pthread_mutex_unlock(&g_ready_mtx);
+   }
+   return ready;
+}
+
 /* Start the sampler and register the provider. The first sample is taken by the
  * background thread, NOT here: kb_client_health() is an HTTP call, and doing it
  * synchronously on the startup path would let an unreachable or slow aimee-kb

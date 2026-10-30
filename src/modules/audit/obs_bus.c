@@ -1651,6 +1651,8 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
    }
 }
 
+static void record_outcome(uint32_t event_kind, ouro_module_call_result_t result);
+
 ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
@@ -1674,9 +1676,81 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
        &g.module_pool, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
        response_body, response_capacity, response_len, module_call_cancelled, &state);
    atomic_fetch_sub(&g.module_callers, 1);
+   record_outcome(event_kind, result);
    if (result != OURO_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;
+}
+
+/* Per-principal call outcomes for obs_bus_module_outcome. Module refs are small
+ * (the kind carve gives each 256 kinds from 4096); larger ones are not tracked. */
+#define AB_OUTCOME_REFS 256u
+static _Atomic int64_t outcome_ok_ns[AB_OUTCOME_REFS];
+static _Atomic int64_t outcome_fail_ns[AB_OUTCOME_REFS];
+
+static void record_outcome(uint32_t event_kind, ouro_module_call_result_t result)
+{
+   if (event_kind < 4096u)
+      return;
+   uint32_t ref = (event_kind - 4096u) / 256u;
+   if (ref >= AB_OUTCOME_REFS)
+      return;
+   int64_t now = (int64_t)ouro_runtime_monotonic_ns();
+   switch (result)
+   {
+   case OURO_MODULE_CALL_OK:
+      atomic_store_explicit(&outcome_ok_ns[ref], now, memory_order_relaxed);
+      break;
+   case OURO_MODULE_CALL_CANCELLED:
+   case OURO_MODULE_CALL_CAPABILITY_DENIED:
+   case OURO_MODULE_CALL_INVALID_REQUEST:
+   case OURO_MODULE_CALL_INVALID_ARGUMENT:
+   case OURO_MODULE_CALL_RESPONSE_TOO_LARGE:
+      break; /* the caller's doing, not the module's */
+   default:
+      atomic_store_explicit(&outcome_fail_ns[ref], now, memory_order_relaxed);
+      break;
+   }
+}
+
+void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t *last_fail_ns)
+{
+   int known = principal_ref < AB_OUTCOME_REFS;
+   if (last_ok_ns)
+      *last_ok_ns = known ? atomic_load_explicit(&outcome_ok_ns[principal_ref],
+                                                 memory_order_relaxed)
+                          : 0;
+   if (last_fail_ns)
+      *last_fail_ns = known ? atomic_load_explicit(&outcome_fail_ns[principal_ref],
+                                                   memory_order_relaxed)
+                            : 0;
+}
+
+uint64_t obs_bus_slot_fingerprint(void)
+{
+   uint64_t hash = 0xcbf29ce484222325ULL; /* FNV-1a */
+   pthread_mutex_lock(&g.host_lock);
+   if (!g.host.slots)
+   {
+      pthread_mutex_unlock(&g.host_lock);
+      return 0;
+   }
+   for (uint32_t i = 0; i < g.host.cfg.max_slots; ++i)
+   {
+      const ouro_slot_t *slot = &g.host.slots[i];
+      /* The mapping is fresh for every attach, so a module that restarted into
+       * the slot it left changes the value even with the same principal. */
+      uint64_t parts[3] = {(uint64_t)slot->in_use, slot->in_use ? slot->principal_ref : 0u,
+                           slot->in_use ? (uint64_t)(uintptr_t)slot->qpair_region.base : 0u};
+      for (size_t p = 0; p < 3; ++p)
+         for (int b = 0; b < 8; ++b)
+         {
+            hash ^= (parts[p] >> (8 * b)) & 0xffu;
+            hash *= 0x100000001b3ULL;
+         }
+   }
+   pthread_mutex_unlock(&g.host_lock);
+   return hash;
 }
 
 int obs_bus_module_peak_concurrency(void)

@@ -486,6 +486,16 @@ static int admit_pending(uint32_t declare_kind, const char *module_id, const uns
    return 1;
 }
 
+/* Weak so unit binaries that stub the bus without it link; with no fingerprint
+ * the registry falls back to its time-to-live alone. */
+uint64_t obs_bus_slot_fingerprint(void) __attribute__((weak));
+
+static uint64_t g_last_collect_ms;
+/* The bus's slot fingerprint when the registry was last collected, and whether
+ * some module failed to answer then (so the next refresh asks again). */
+static uint64_t g_last_collect_fingerprint;
+static int g_collect_incomplete;
+
 static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t invoke_kind,
                        uint32_t version, const char *module_id, aimee_plugin_state_t *state_out,
                        char *err_out, size_t err_cap)
@@ -515,6 +525,7 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
                                NULL, NULL);
       if (rc != OURO_MODULE_CALL_OK)
       {
+         g_collect_incomplete = 1; /* ask this module again on the next refresh */
          LOG_WARN("commands", "module %s declaration failed: %s", module_id,
                   ouro_module_call_result_name(rc));
          if (err_out)
@@ -810,7 +821,7 @@ static uint64_t now_ms(void)
    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
 }
 
-static uint64_t g_last_collect_ms;
+
 static pthread_mutex_t g_collect_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int aimee_module_commands_refresh(int ttl_ms)
@@ -819,13 +830,27 @@ int aimee_module_commands_refresh(int ttl_ms)
       ttl_ms = 0;
    pthread_mutex_lock(&g_collect_lock);
    uint64_t now = now_ms();
+   /* What modules declare can only change when one attaches or leaves. While
+    * that has not happened and the last collection heard from every module, the
+    * registry is current: asking every module again -- which this used to do
+    * every two seconds of tool traffic -- would only return the same answer.
+    * ttl_ms still paces retries after a collection some module did not answer. */
+   uint64_t fingerprint = obs_bus_slot_fingerprint ? obs_bus_slot_fingerprint() : 0;
+   if (g_last_collect_ms != 0 && fingerprint != 0 && fingerprint == g_last_collect_fingerprint &&
+       !g_collect_incomplete)
+   {
+      pthread_mutex_unlock(&g_collect_lock);
+      return 0;
+   }
    if (now != 0 && g_last_collect_ms != 0 && now - g_last_collect_ms < (uint64_t)ttl_ms)
    {
       pthread_mutex_unlock(&g_collect_lock);
       return 0;
    }
+   g_collect_incomplete = 0;
    int registered = aimee_module_commands_collect();
    g_last_collect_ms = now;
+   g_last_collect_fingerprint = fingerprint;
    pthread_mutex_unlock(&g_collect_lock);
    return registered;
 }

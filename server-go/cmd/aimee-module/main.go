@@ -395,9 +395,9 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		config.Handler = sandbox.NewHandler(store)
 	case "economizer":
-		// Final request admission is on the provider dispatch path. Avoid the
-		// generic consumer's 10ms idle backoff; keep reduction policy unchanged.
-		config.MaxIdlePollInterval = economizer.RequestAdmissionPollInterval
+		// Final request admission is on the provider dispatch path. The ring
+		// wakes the process for each request (doorbell, ring D13), so it no
+		// longer trades idle wakeups for latency with a 1ms poll ceiling.
 		config.ModuleName = name
 		config.PrincipalRef = 27
 		config.Stages = []ring.ModuleStage{

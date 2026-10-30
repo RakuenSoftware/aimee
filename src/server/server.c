@@ -403,6 +403,10 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+/* Weak so unit binaries that link the dispatcher without the readiness sampler
+ * resolve it to NULL and report no verdict; the server always links it. */
+int server_ready_summary(char *boundary, size_t n) __attribute__((weak));
+
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
@@ -411,6 +415,16 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    /* Probe DB1 directly; module registry state survives death for about 37s. */
    cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   /* The verdict the container is judged by, so this answer cannot say the
+    * server is fine while /v1/ready -- and every governed action -- says not. */
+   if (server_ready_summary)
+   {
+      char not_ready[96];
+      int ready = server_ready_summary(not_ready, sizeof not_ready);
+      cJSON_AddBoolToObject(resp, "ready", ready);
+      if (!ready)
+         cJSON_AddStringToObject(resp, "not_ready", not_ready);
+   }
    obs_bus_capture_health_t capture;
    obs_bus_capture_health(&capture);
    cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);

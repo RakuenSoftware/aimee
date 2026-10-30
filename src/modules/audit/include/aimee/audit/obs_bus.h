@@ -106,6 +106,19 @@ extern "C"
                                            uint32_t payload_len, void *ctx);
    int obs_bus_on_notification(uint32_t kind, obs_bus_notification_fn fn, void *ctx);
 
+   /* When calls to a module last succeeded and last failed, by its principal
+    * ref (CLOCK_MONOTONIC ns, 0 for never). A failure is a result that says the
+    * module could not serve -- transport, absent, internal, deadline -- not a
+    * caller's own cancellation or malformed request. Readiness reads this
+    * instead of probing a store that real traffic has just answered for. */
+   void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t *last_fail_ns);
+
+   /* A value that changes whenever a client attaches to the bus or its slot is
+    * released, and otherwise stays the same. What modules serve -- their stages,
+    * the commands they declare -- can only change then, so a registry built from
+    * them is current until this changes. 0 before the bus starts. */
+   uint64_t obs_bus_slot_fingerprint(void);
+
    /* Commit one action-class record synchronously to the daemon's WORM sink.
     * This is the durability edge for security-relevant bridges whose ordinary
     * ACTION event is intentionally asynchronous.  Returns 0 only after the
