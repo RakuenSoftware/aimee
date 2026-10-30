@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	canonical "github.com/JBailes/aimee/server-go/ir"
-	"github.com/JBailes/aimee/server-go/modules/roundtable/panelwire"
-	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +13,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panelwire"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
@@ -1569,10 +1570,6 @@ func roundtableStepResult(result roundtablecfg.RunResult, artifactHash string) S
 	return step
 }
 
-func normalizeRoundtableStage(raw string) (string, bool) {
-	return panelwire.NormalizeStage(raw)
-}
-
 func panelFailureCategory(err error, transport bool) string {
 	// Typed deadlines intentionally unwrap to context.DeadlineExceeded, so their
 	// specific sentinels must stay ahead of the generic deadline branch.
@@ -1594,20 +1591,6 @@ func panelFailureCategory(err error, transport bool) string {
 	default:
 		return "malformed_after_repair"
 	}
-}
-
-func remainingCostLimit(limit, spent float64) float64 {
-	return panelwire.RemainingCostLimit(limit, spent)
-}
-
-// panelVerdictError reports why a parsed seat response is not a usable verdict.
-// Approve carries no findings and changes carries at least one; anything else is
-// a reviewer that contradicted itself, which says nothing about the artifact.
-// panelVerdict is the one normalization of a seat or chairman verdict. Both
-// paths must read the same value: validating one form and branching on another
-// silently turns a usable verdict into a non-vote.
-func panelVerdict(parsed panelResponse) string {
-	return strings.ToLower(strings.TrimSpace(parsed.Verdict))
 }
 
 func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult, error) {

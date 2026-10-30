@@ -107,21 +107,3 @@ func TestGradeCIUnreadablePayloadIsErrorNotNone(t *testing.T) {
 		})
 	}
 }
-
-func TestCIPermitsMerge(t *testing.T) {
-	for verdict, want := range map[CIVerdict]bool{
-		CISuccess: true,
-		CINone:    true, // no CI reported -> nothing to fail
-		CIPending: false,
-		CIFailure: false,
-		CIError:   false, // unknown state is never a pass
-	} {
-		if got := CIPermitsMerge(verdict); got != want {
-			t.Fatalf("CIPermitsMerge(%q) = %v, want %v", verdict, got, want)
-		}
-	}
-	// An unrecognised value must fail closed rather than inherit "may merge".
-	if CIPermitsMerge(CIVerdict("something-new")) {
-		t.Fatal("an unclassified verdict must fail closed")
-	}
-}

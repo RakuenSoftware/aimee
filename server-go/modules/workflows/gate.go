@@ -84,18 +84,6 @@ func effectiveKind(v Verdict, artifactHash string) VerdictKind {
 	return VerdictRequestChanges
 }
 
-// EffectiveQuorum is max(requested, nreq, 2) -- the single-lens floor.
-func EffectiveQuorum(requested, nreq int) int {
-	q := requested
-	if q < nreq {
-		q = nreq
-	}
-	if q < 2 {
-		q = 2
-	}
-	return q
-}
-
 // GateDecide returns the ruling and a human-readable reason.
 //
 // quorum is the already-floored effective quorum; the caller applies

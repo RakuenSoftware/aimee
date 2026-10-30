@@ -246,18 +246,3 @@ func GWReplaceMessages(container *JSONValue, key string, reduced *JSONValue) boo
 	container.Set(key, reduced)
 	return true
 }
-
-// GWProvenanceMarkReduced records that a seam reduced this request, so a later
-// seam re-measures but does not re-reduce.
-func GWProvenanceMarkReduced(st *ReduceState) {
-	if st != nil {
-		st.Reduced = true
-	}
-}
-
-// GWProvenanceClear resets the per-request provenance flag.
-func GWProvenanceClear(st *ReduceState) {
-	if st != nil {
-		st.Reduced = false
-	}
-}

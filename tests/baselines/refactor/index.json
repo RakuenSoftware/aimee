@@ -891,7 +891,7 @@
         },
         {
           "path": "src/headers/ip_transition.h",
-          "sha256": "61f3a4a9d9f31a1f13b8b4ed92e4b4f21f2e6cef4437d89cecffaa1059782e21"
+          "sha256": "b10241e4c4ceab0583392be4e6b4a0567c7314eabc5fa36615b6458fa9fb1697"
         },
         {
           "path": "src/headers/json_fluent.h",
@@ -2120,7 +2120,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "9bb354d52b4e72761249b061873d7c8f4bbd172205083e5924056df044976f84",
+      "sha256": "caa7cba8fffa307c89fd1a14e1d5aaee471069cf293eea126ea528f66325b8cf",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

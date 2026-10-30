@@ -15,7 +15,6 @@ import (
 	"time"
 
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
-	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 var errNoConfiguredAgents = errors.New("agent registry has no agents")
@@ -41,17 +40,6 @@ func (b *compatibleBool) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("expected boolean or legacy 0/1, got %s", data)
 	}
-}
-
-// NewDefaultHandler is the independently exported delegates process entry
-// point. The shared multicall binary performs the same construction explicitly
-// so it can report registry errors in its process log.
-func NewDefaultHandler() ring.ModuleHandler {
-	executor, err := NewRegistryExecutor(os.Getenv("AIMEE_HOME"))
-	if err != nil {
-		return NewHandler(nil)
-	}
-	return NewHandler(executor)
 }
 
 type agentEntry struct {

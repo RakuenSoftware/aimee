@@ -8,22 +8,6 @@ import (
 // Ported from src/tests/test_roundtable_pipeline_chunk.c. The hashing assertions
 // stay on the C side, since the hash deliberately did not move.
 
-func TestChunkNeeded(t *testing.T) {
-	if ChunkNeeded("short", 100) {
-		t.Fatal("under budget must not need chunking")
-	}
-	if !ChunkNeeded(strings.Repeat("x", 200), 100) {
-		t.Fatal("over budget must need chunking")
-	}
-	// No budget means no chunking, not "chunk everything".
-	if ChunkNeeded(strings.Repeat("x", 200), 0) {
-		t.Fatal("a zero budget must not request chunking")
-	}
-	if ChunkNeeded("", 100) {
-		t.Fatal("empty origin must not need chunking")
-	}
-}
-
 func TestPlanWholeArtifactFits(t *testing.T) {
 	for _, budget := range []int{100, 0, -1} {
 		plan := PlanChunks("hello world", budget)

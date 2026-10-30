@@ -155,15 +155,6 @@ func sessCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []
 	return inBand, cells
 }
 
-func ran(db *sessDB, fragment string) bool {
-	for _, sql := range db.executed {
-		if strings.Contains(sql, fragment) {
-			return true
-		}
-	}
-	return false
-}
-
 // Retired private transcript/binding op numbers are never reused or served.
 // The real wire handler must refuse before any read, write, or transaction.
 func TestRetiredLegacySessionOperationsRefuseBeforeStorage(t *testing.T) {

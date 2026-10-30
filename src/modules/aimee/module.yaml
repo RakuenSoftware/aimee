@@ -104,7 +104,6 @@
     "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/cmd/peerprobe/main_test.go",
     "server-go/modules/aimee/cmd/peerprobe/record_test.go",
-    "server-go/modules/aimee/db_contract_test.go",
     "server-go/modules/aimee/families/agent_work_coord_ir_test.go",
     "server-go/modules/aimee/families/agent_work_cron_ir_test.go",
     "server-go/modules/aimee/families/all_test.go",

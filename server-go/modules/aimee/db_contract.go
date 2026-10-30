@@ -26,8 +26,4 @@ var (
 )
 
 func IsNoRows(err error) bool                  { return db.IsNoRows(err) }
-func IsUniqueViolation(err error) bool         { return db.IsUniqueViolation(err) }
-func IsForeignKeyViolation(err error) bool     { return db.IsForeignKeyViolation(err) }
-func IsCheckViolation(err error) bool          { return db.IsCheckViolation(err) }
-func IsNotNullViolation(err error) bool        { return db.IsNotNullViolation(err) }
 func StoreChecksum(statements []string) string { return db.StoreChecksum(statements) }

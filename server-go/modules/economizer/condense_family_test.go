@@ -3,7 +3,6 @@ package economizer
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -222,26 +221,6 @@ func TestTCRecallRefusesSymlink(t *testing.T) {
 	}
 }
 
-func TestTCSpillWriteRefusesTempSymlink(t *testing.T) {
-	dir := t.TempDir()
-	ref := "tc-0123456789abcdef"
-	target := filepath.Join(dir, "target")
-	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	tmp := filepath.Join(dir, ref+"."+strconv.Itoa(os.Getpid())+".tmp")
-	if err := os.Symlink(target, tmp); err != nil {
-		t.Fatal(err)
-	}
-	if err := tcSpillWrite(dir, ref, "replacement"); err == nil {
-		t.Fatal("writer followed a planted temp symlink")
-	}
-	got, err := os.ReadFile(target)
-	if err != nil || string(got) != "unchanged" {
-		t.Fatalf("target changed: %q, %v", got, err)
-	}
-}
-
 func TestTCRecallRefusesOversizedSpill(t *testing.T) {
 	dir := t.TempDir()
 	ref := "tc-0123456789abcdef"
@@ -250,20 +229,5 @@ func TestTCRecallRefusesOversizedSpill(t *testing.T) {
 	}
 	if got, err := TCRecall(dir, ref); err == nil || got != "" {
 		t.Fatalf("oversized recall = %d bytes, %v", len(got), err)
-	}
-}
-
-// The spill store stays bounded: the OLDEST files go first.
-func TestTCSpillEvict(t *testing.T) {
-	dir := t.TempDir()
-	for _, n := range []string{"tc-aaaaaaaaaaaaaaa1.out", "tc-aaaaaaaaaaaaaaa2.out"} {
-		if err := os.WriteFile(dir+"/"+n, make([]byte, 1024), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tcSpillEvict(dir, 512) // budget below the total forces eviction
-	entries, _ := os.ReadDir(dir)
-	if len(entries) >= 2 {
-		t.Errorf("eviction did not bring the store under budget: %d files left", len(entries))
 	}
 }
