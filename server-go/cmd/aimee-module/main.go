@@ -472,12 +472,14 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "aimee", "store", "db1":
 		config.ModuleName = name
 		config.PrincipalRef = aimee.PrincipalRef
-		module, err := aimeeprocess.New(ctx, moduleBusSocket)
+		announcer := aimeeprocess.NewAnnouncer()
+		module, err := aimeeprocess.New(ctx, moduleBusSocket, announcer)
 		if err != nil {
 			return config, false
 		}
 		config.Stages = module.Stages()
 		config.Handler = module.Handle
+		config.Started = func(publisher ring.Publisher) { announcer.Start(ctx, publisher) }
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25

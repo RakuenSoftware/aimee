@@ -76,6 +76,14 @@ func (s *postgresDataStore) listPersonalCorrectionProposals(ctx context.Context,
 }
 
 func (s *postgresDataStore) reviewPersonalCorrection(ctx context.Context, r correctionReviewRequest, caller *ring.CommandContext) (correctionProposal, error) {
+	reviewed, err := s.reviewPersonalCorrectionRecord(ctx, r, caller)
+	if err == nil {
+		s.personal.Wake() // an accepted correction rewrites a memory
+	}
+	return reviewed, err
+}
+
+func (s *postgresDataStore) reviewPersonalCorrectionRecord(ctx context.Context, r correctionReviewRequest, caller *ring.CommandContext) (correctionProposal, error) {
 	if s.placement != PlacementServer || !r.valid() || !verifiedRetryCaller(caller) || !caller.UserAuthority {
 		return correctionProposal{}, errors.New("memory: authenticated user review required")
 	}

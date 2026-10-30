@@ -237,5 +237,8 @@ func (s *Server) workflowSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if s.triggersChanged != nil {
+		s.triggersChanged()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": report.Name, "version": report.Version})
 }

@@ -81,6 +81,13 @@ type Family struct {
 	// reads. It also wraps RunDB transactions, so independently hosted callers
 	// obey the same domain invariant. Read-only operations remain concurrent.
 	TransactionLockSQL string
+	// Changed, when set, is called with the operation's name after one of its
+	// transactions commits having written something. A transaction that matched
+	// no row wrote nothing and calls nothing, so a consumer's own housekeeping
+	// sweep that found nothing to do cannot wake that consumer again. The family
+	// announces its changes through this (ouroboros ring D14) instead of its
+	// consumers asking on a timer.
+	Changed func(op string)
 }
 
 // Handler builds the bus handler for this family against a database.
@@ -195,6 +202,10 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	if f.TransactionLockSQL != "" {
 		db = transactionLockDB{DB: db, sql: f.TransactionLockSQL}
 	}
+	if f.Changed != nil {
+		name, changed := spec.Name, f.Changed
+		db = changeWatchDB{DB: db, changed: func() { changed(name) }}
+	}
 	if spec.RunDB != nil {
 		return spec.RunDB(ctx, db, fields)
 	}
@@ -231,6 +242,43 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 		return 0, nil, err
 	}
 	return status, reply, nil
+}
+
+// wroteSQL asks whether the transaction has written anything. PostgreSQL
+// assigns a transaction id at its first write, and not for reads, advisory locks
+// or an UPDATE that matched no row.
+const wroteSQL = "SELECT pg_catalog.txid_current_if_assigned() IS NOT NULL"
+
+type changeWatchDB struct {
+	DB
+	changed func()
+}
+
+func (d changeWatchDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := d.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &changeWatchTx{Tx: tx, changed: d.changed}, nil
+}
+
+type changeWatchTx struct {
+	Tx
+	changed func()
+}
+
+func (t *changeWatchTx) Commit(ctx context.Context) error {
+	wrote := true // a question that cannot be answered announces: one extra sweep is cheap
+	if row := t.Tx.QueryRow(ctx, wroteSQL); row == nil || row.Scan(&wrote) != nil {
+		wrote = true
+	}
+	if err := t.Tx.Commit(ctx); err != nil {
+		return err
+	}
+	if wrote {
+		t.changed()
+	}
+	return nil
 }
 
 type transactionLockDB struct {
