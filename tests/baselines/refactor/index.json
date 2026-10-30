@@ -650,10 +650,6 @@
           "sha256": "62fd7b74b582cd7d036a74f7ed33d5cd666fbb18ee4645ca2d47835633069577"
         },
         {
-          "path": "src/headers/cmd_agent_delegate_internal.h",
-          "sha256": "69f88ddcb560c915299d18aee5aea1dcd4d22e8f7ae425560ce96249ea750a43"
-        },
-        {
           "path": "src/headers/cmd_describe_platform.h",
           "sha256": "75d4057189ae8582f78cb0fc25ceaaadbb47f9af987ae582f6a57ac6d4f8642a"
         },
@@ -1698,10 +1694,6 @@
           "sha256": "4a331f9d9341a56a9e2fc059682630b14090b4e1baf89104f6dcdad7b8d14dfe"
         },
         {
-          "path": "src/headers/tasks_compose.h",
-          "sha256": "681b2a433945f0d886551442af64c3f1f977858f3f03412902a946e3f00fc16a"
-        },
-        {
           "path": "src/headers/td_search_render.h",
           "sha256": "ee1b336ad7c5b05b9fe15133d3178920657b7d25c6bb0f69934c326ddde4f4ce"
         },
@@ -2120,7 +2112,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "caa7cba8fffa307c89fd1a14e1d5aaee471069cf293eea126ea528f66325b8cf",
+      "sha256": "b2077ee971184bc44861eb3e26dada9412706c2b16da4896682ef82944fb9a19",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

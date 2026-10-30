@@ -22,7 +22,6 @@
     "src/tests/test_code_audit.c": 1,
     "src/tests/test_codex_auth.c": 1,
     "src/tests/test_curator_notify.c": 1,
-    "src/tests/test_curiosity.c": 1,
     "src/tests/test_delegate_backend.c": 2,
     "src/tests/test_delegate_backend_docker.c": 17,
     "src/tests/test_delegate_credentials.c": 3,

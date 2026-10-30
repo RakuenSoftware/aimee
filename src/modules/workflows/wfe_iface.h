@@ -2,8 +2,8 @@
  *
  * This header freezes ONLY what the engine itself switches on: the block
  * executor vtable and the wfe_step_result discriminated union. Gate-internal
- * types (verdicts, panel specs, signed approvals) deliberately live in their
- * own slice headers (wfe_verdict.h, wfe_approval.h) and may grow freely
+ * types (signed approvals) deliberately live in their own slice header
+ * (wfe_approval.h) and may grow freely
  * without touching this contract -- so adding a verdict field in a later
  * slice never breaks the W1 contract test.
  *

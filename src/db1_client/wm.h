@@ -5,8 +5,7 @@
  * The implementation used to be src/modules/db1/wm.c against SQLite. That went
  * with the C module: the family is served from
  * server-go/modules/aimee/families/conversation_wm.go against PostgreSQL, and
- * these declarations are the bus client for it. src/tests/support/wm_mock.c is
- * still the in-memory stand-in for tests.
+ * these declarations are the bus client for it.
  */
 #ifndef DEC_DB1_WM_H
 #define DEC_DB1_WM_H 1

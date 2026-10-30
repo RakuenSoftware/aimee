@@ -77,8 +77,7 @@
     "src/modules/workflows/wfe_iface.h",
     "src/modules/workflows/wfe_manager_artifacts.h",
     "src/modules/workflows/wfe_native_gate.h",
-    "src/modules/workflows/wfe_router.h",
-    "src/modules/workflows/wfe_verdict.h"
+    "src/modules/workflows/wfe_router.h"
   ],
   "tests": [
     "src/tests/test_gw_orch_workflows.c",

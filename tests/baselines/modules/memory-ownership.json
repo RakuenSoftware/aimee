@@ -1017,7 +1017,6 @@
       "disposition": "storage-protocol",
       "external_occurrences": [
         "src/headers/memory.h",
-        "src/tests/test_curiosity.c",
         "src/tests/test_memory_advanced.c"
       ]
     },
@@ -1224,7 +1223,6 @@
       "external_occurrences": [
         "src/headers/memory.h",
         "src/tests/test_context_assembly.c",
-        "src/tests/test_curiosity.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_workspace_memory.c"
       ]
@@ -2264,14 +2262,6 @@
       ],
       "sha256": "74184437dd278bc1b68f1210be82f327b6e80e7332cfcf016997c6277ff72544"
     },
-    "src/tests/test_curiosity.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "memory_directive_list",
-        "memory_insert"
-      ],
-      "sha256": "95c098e69987ba8d7b5186eb334962549bdfc5d83709ccf18a52636d01f8e31c"
-    },
     "src/tests/test_dogfood.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -2304,13 +2294,6 @@
       "sha256": "ee4f1fa6553f5fe1f29dcb54ef98db06be9e1b9c7eedef61dc55abed1611b430",
       "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
       "boundary_review": "2026-10-20 PR #3052: Adds only a null historical-receipt DB1 stub for an ordinary nonverification IR plan. Existing source/typed memory assertions remain unchanged. This records source-boundary review, not independent production-promotion approval."
-    },
-    "src/tests/test_kb.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
-      ],
-      "sha256": "0aa34578e094c8c755442a3c72f57d138e695b8642bac4c9c9fe9f1a67337512"
     },
     "src/tests/test_kb_client_memory.c": {
       "disposition": "host-fixture",
