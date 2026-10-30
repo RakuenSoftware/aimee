@@ -147,7 +147,6 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
  * Without this, a stale/crashed delegate leaks its container until the next
  * restart, accumulating until the image volume fills. It asks the container
  * runtime, not the store, so an idle server still makes no store call for it. */
-#define CONTAINER_REAP_INTERVAL_SECS 300
 /* Age threshold for the container reap. Above DEFAULT_IN_TOOL_THRESHOLD_SECS so a
  * live long-running turn is never removed. */
 #define CONTAINER_REAP_AGE_SECS 1800
@@ -162,7 +161,14 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
 static void *monitor_thread(void *arg)
 {
    (void)arg;
-   time_t last_container_reap = time(NULL);
+   /* A delegate container can leak only when a delegation ends (stale cancel,
+    * crash), and one that leaked comes due at a known age. So the reap runs at
+    * start (a previous run's leftovers), on every delegation change, and when
+    * the oldest remaining delegate container comes due -- never on an idle
+    * timer. A docker error waits for the next change rather than a retry
+    * timer, which on a host without docker would poll forever. */
+   int reap_now = 1;
+   time_t next_reap = 0; /* 0: nothing can come due until a delegate starts */
    while (!g_monitor_stop)
    {
       pthread_mutex_lock(&g_monitor_lock);
@@ -182,25 +188,40 @@ static void *monitor_thread(void *arg)
          LOG_WARN("server.delegate_monitor", "reclaimed %d wedged admission slot(s)", freed);
 
       time_t now = time(NULL);
-      if (now - last_container_reap >= CONTAINER_REAP_INTERVAL_SECS)
+      if (reap_now || notified || (next_reap && now >= next_reap))
       {
-         last_container_reap = now;
-         int reaped = delegate_backend_docker_reap_aged(CONTAINER_REAP_AGE_SECS);
+         reap_now = 0;
+         time_t due = 0;
+         int reaped = delegate_backend_docker_reap_aged_next(CONTAINER_REAP_AGE_SECS, &due);
          if (reaped > 0)
             LOG_INFO("server.delegate_monitor", "reaped %d aged delegate container(s)", reaped);
+         next_reap = reaped < 0 ? 0 : due;
       }
 
       /* Busy: staleness is a deadline, so check it every poll interval. Idle:
-       * sleep until a delegation changes or the container reap is due. */
+       * sleep until a delegation changes, or until a leftover delegate container
+       * comes due if there is one; otherwise with no timeout at all. */
       busy = g_monitor_running_jobs > 0 || agent_admission_global_active() > 0;
-      int wait = busy ? DEFAULT_POLL_INTERVAL_SECS : CONTAINER_REAP_INTERVAL_SECS;
-      struct timespec until;
-      clock_gettime(CLOCK_REALTIME, &until);
-      until.tv_sec += wait;
+      long wait = busy ? DEFAULT_POLL_INTERVAL_SECS : next_reap ? (long)(next_reap - now) : -1;
+      if (next_reap && wait > next_reap - now)
+         wait = next_reap - now;
+      if (wait == 0)
+         wait = 1;
       pthread_mutex_lock(&g_monitor_lock);
-      while (!g_monitor_notified && !g_monitor_stop &&
-             pthread_cond_timedwait(&g_monitor_wake, &g_monitor_lock, &until) == 0)
-         ;
+      if (wait < 0)
+      {
+         while (!g_monitor_notified && !g_monitor_stop)
+            pthread_cond_wait(&g_monitor_wake, &g_monitor_lock);
+      }
+      else
+      {
+         struct timespec until;
+         clock_gettime(CLOCK_REALTIME, &until);
+         until.tv_sec += wait;
+         while (!g_monitor_notified && !g_monitor_stop &&
+                pthread_cond_timedwait(&g_monitor_wake, &g_monitor_lock, &until) == 0)
+            ;
+      }
       pthread_mutex_unlock(&g_monitor_lock);
    }
    return NULL;

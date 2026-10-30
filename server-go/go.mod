@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20261029192528-a25e5b6cf6ba
-	github.com/RakuenSoftware/ouroboros-ring/go v0.2.0
+	github.com/RakuenSoftware/ouroboros-ring/go v0.3.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.24.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
