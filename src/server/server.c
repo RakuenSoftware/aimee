@@ -77,9 +77,45 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <signal.h>
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
+
+/* The park loop's doorbell: written by a signal, by an announced config change
+ * and by shutdown; read by the loop. An eventfd write is async-signal-safe. */
+static int g_park_fd = -1;
+
+void server_park_wake(void)
+{
+   int fd = g_park_fd;
+   if (fd >= 0)
+   {
+      uint64_t one = 1;
+      ssize_t ignored = write(fd, &one, sizeof one);
+      (void)ignored;
+   }
+}
+
+/* Sleep until woken or timeout_ms passes (negative: until woken). */
+static void server_park_sleep(int timeout_ms)
+{
+   if (g_park_fd < 0)
+      g_park_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+   if (g_park_fd < 0)
+   {
+      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0}; /* no eventfd: the old cadence */
+      nanosleep(&ts, NULL);
+      return;
+   }
+   struct pollfd park = {.fd = g_park_fd, .events = POLLIN};
+   if (poll(&park, 1, timeout_ms) > 0)
+   {
+      uint64_t count;
+      ssize_t ignored = read(g_park_fd, &count, sizeof count);
+      (void)ignored;
+   }
+}
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -2252,14 +2288,23 @@ int server_run(server_ctx_t *ctx)
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so
-    * run_server() can tear everything down. The 1s tick also drives idle-reaping
-    * of per-webuser code-server editors (WP-I lifecycle) via reap_tick. */
+    * run_server() can tear everything down. The park sleeps until there is
+    * something to do -- a SIGHUP, an announced config change, shutdown -- and
+    * otherwise wakes only while it has a deadline: idle code-server editors to
+    * reap, or a startup reconciliation to retry. It used to wake every second. */
+   int reconcile_failed = 0;
    while (ctx->running)
    {
-      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-      nanosleep(&ts, NULL);
+      int timeout_ms = -1;
+      if (reconcile_failed)
+         timeout_ms = 1000;
+      else if (webuser_editor_running() > 0)
+         timeout_ms = WEBUSER_EDITOR_REAP_EVERY_SECS * 1000;
+      server_park_sleep(timeout_ms);
+      if (!ctx->running)
+         break;
       webuser_editor_reap_tick();
-      (void)server_delegate_startup_reconcile();
+      reconcile_failed = server_delegate_startup_reconcile() != 0;
       /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
        * signal path, since config_reload takes a mutex and does file I/O. */
       if (g_config_reload_requested)

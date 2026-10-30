@@ -656,6 +656,16 @@ static void guardrail_writer_finish(void)
 
 /* ---------------------------------------------------------- consumer ----- */
 
+/* Notification handlers the daemon registered (obs_bus_on_notification). */
+static struct
+{
+   uint32_t kind;
+   obs_bus_notification_fn fn;
+   void *ctx;
+} notifications[OBS_BUS_MAX_NOTIFICATIONS];
+static size_t notification_count;
+static int deliver_notification(const ouro_event_t *ev);
+
 static uint32_t drain(void)
 {
    uint32_t n = 0;
@@ -697,7 +707,10 @@ static uint32_t drain(void)
             n++; /* accepted into the durable retry queue */
       }
       else
+      {
+         (void)deliver_notification(&ev);
          continue;
+      }
    }
    return n;
 }
@@ -1231,6 +1244,8 @@ static int start_locked(void)
    if (sinks.guardrail)
       ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
    ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_DURABILITY_EVENT);
+   for (size_t i = 0; i < notification_count; i++)
+      ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, notifications[i].kind);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -1729,6 +1744,53 @@ int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
    sinks.durable = sink;
    sinks.durable_ctx = sink ? ctx : NULL;
    pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_on_notification(uint32_t kind, obs_bus_notification_fn fn, void *ctx)
+{
+   if (!fn || kind < OURO_KIND_MODULE_BASE)
+      return -1;
+   pthread_mutex_lock(&start_lock);
+   if (g.started || notification_count == OBS_BUS_MAX_NOTIFICATIONS)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   notifications[notification_count].kind = kind;
+   notifications[notification_count].fn = fn;
+   notifications[notification_count].ctx = ctx;
+   notification_count++;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+/* A registered kind's notification, or an overflow naming it. Returns 1 if the
+ * event was one. Runs on the consumer thread. */
+static int deliver_notification(const ouro_event_t *ev)
+{
+   const ouro_frame_t *f = &ev->frame;
+   if (!(f->hdr_flags & OURO_F_NOTIFICATION))
+      return 0;
+   uint32_t kind = f->event_kind;
+   const uint8_t *payload = ev->payload;
+   uint32_t len = ev->payload_len;
+   if (f->hdr_flags & OURO_F_CONTROL)
+   {
+      if (f->event_kind != OURO_KIND_OVERFLOW || !ev->payload ||
+          ev->payload_len < OURO_OVERFLOW_LEN)
+         return 0;
+      const uint8_t *k = ev->payload + OURO_OVERFLOW_OFF_SHED_KIND;
+      kind = (uint32_t)k[0] | (uint32_t)k[1] << 8 | (uint32_t)k[2] << 16 | (uint32_t)k[3] << 24;
+      payload = NULL;
+      len = 0;
+   }
+   for (size_t i = 0; i < notification_count; i++)
+      if (notifications[i].kind == kind)
+      {
+         notifications[i].fn(kind, payload, len, notifications[i].ctx);
+         return 1;
+      }
    return 0;
 }
 

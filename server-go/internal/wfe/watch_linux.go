@@ -1,7 +1,4 @@
-// Package fswatch tells a caller that a directory's entries changed, from the
-// kernel (inotify), so a component that reacts to files on disk does not have
-// to re-read them on a timer.
-package fswatch
+package wfe
 
 import (
 	"context"
@@ -12,19 +9,21 @@ import (
 
 // Events a caller treats as "the directory's contents may differ now": a file
 // written and closed, created, removed, or renamed into or out of it.
-const events = unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE |
+const watchEvents = unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE |
 	unix.IN_MOVED_TO | unix.IN_MOVED_FROM
 
-// Watch calls changed after each batch of changes to dir's entries until ctx
-// ends. It does not descend into subdirectories. changed runs on Watch's
-// goroutine; a burst of edits may arrive as one call.
-func Watch(ctx context.Context, dir string, changed func()) error {
+// WatchDefinitions calls changed after each batch of changes to the workflow
+// definitions in dir until ctx ends, from the kernel (inotify), so the trigger
+// scan does not re-read them on a timer. It does not descend into
+// subdirectories, which the registry does not read either. changed runs on
+// this goroutine; a burst of edits may arrive as one call.
+func WatchDefinitions(ctx context.Context, dir string, changed func()) error {
 	notify, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return err
 	}
 	defer unix.Close(notify)
-	if _, err := unix.InotifyAddWatch(notify, dir, events); err != nil {
+	if _, err := unix.InotifyAddWatch(notify, dir, watchEvents); err != nil {
 		return err
 	}
 	stop, err := unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)

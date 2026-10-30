@@ -183,6 +183,11 @@
 #define AIMEE_DB1_EVENT_DELEGATION 11781u
 #define AIMEE_DB1_STAGE_DELEGATION 5u
 
+/* aimee-delegation-changed: the module announces each committed delegation or
+ * agent-work write (ouroboros ring D14), 4096 + 30*256 + 25, so the delegate
+ * monitor reacts instead of sweeping. */
+#define AIMEE_DB1_EVENT_DELEGATION_CHANGED 11801u
+
 #define AIMEE_DB1_OP_DELEGATION_MESSAGE_RECORD               1u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_RECORD                 2u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_COMPLETE               3u

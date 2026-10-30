@@ -94,6 +94,18 @@ extern "C"
    typedef void (*obs_bus_sink_idle_fn)(void *ctx);
    int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx);
 
+   /* Hand the core's notifications of kind (a module's change announcement,
+    * ouroboros ring D14) to fn, so the core reacts to a change instead of asking
+    * on a timer. fn runs on the bus consumer thread, the thread that routes every
+    * module reply: it must not block or make a module call, only note the change
+    * and wake whoever acts on it. payload is NULL when the ring reports a missed
+    * notification of the kind, which means the same thing: re-read. Register
+    * before obs_bus_start; at most OBS_BUS_MAX_NOTIFICATIONS kinds. */
+#define OBS_BUS_MAX_NOTIFICATIONS 8
+   typedef void (*obs_bus_notification_fn)(uint32_t kind, const uint8_t *payload,
+                                           uint32_t payload_len, void *ctx);
+   int obs_bus_on_notification(uint32_t kind, obs_bus_notification_fn fn, void *ctx);
+
    /* Commit one action-class record synchronously to the daemon's WORM sink.
     * This is the durability edge for security-relevant bridges whose ordinary
     * ACTION event is intentionally asynchronous.  Returns 0 only after the

@@ -1,4 +1,4 @@
-package fswatch
+package wfe
 
 import (
 	"context"
@@ -9,12 +9,12 @@ import (
 	"time"
 )
 
-func TestWatchReportsChangesAndStopsWithItsContext(t *testing.T) {
+func TestWatchDefinitionsReportsChangesAndStopsWithItsContext(t *testing.T) {
 	dir := t.TempDir()
 	var changes atomic.Int64
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Watch(ctx, dir, func() { changes.Add(1) }) }()
+	go func() { done <- WatchDefinitions(ctx, dir, func() { changes.Add(1) }) }()
 	time.Sleep(50 * time.Millisecond) // let the watch be installed
 
 	time.Sleep(100 * time.Millisecond)
@@ -47,8 +47,8 @@ func TestWatchReportsChangesAndStopsWithItsContext(t *testing.T) {
 	}
 }
 
-func TestWatchRefusesAMissingDirectory(t *testing.T) {
-	if err := Watch(context.Background(), filepath.Join(t.TempDir(), "absent"), func() {}); err == nil {
+func TestWatchDefinitionsRefusesAMissingDirectory(t *testing.T) {
+	if err := WatchDefinitions(context.Background(), filepath.Join(t.TempDir(), "absent"), func() {}); err == nil {
 		t.Fatal("watching a directory that does not exist must fail")
 	}
 }

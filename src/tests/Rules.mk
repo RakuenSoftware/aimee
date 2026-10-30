@@ -816,6 +816,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-instance-identity \
                $(TESTPREFIX)/unit-test-execution-policy-bus \
                $(TESTPREFIX)/unit-test-bus-config-autonomy \
+               $(TESTPREFIX)/unit-test-config-announcements \
                $(TESTPREFIX)/unit-test-git-verify-state-bus \
                $(TESTPREFIX)/unit-test-bus-audit-durability \
                $(TESTPREFIX)/unit-test-bus-memory-audit \
@@ -3202,6 +3203,15 @@ $(TESTPREFIX)/unit-test-bus-config-autonomy: $(OBJDIR)/tests/test_bus_config_aut
 
 .PHONY: unit-test-bus-config-autonomy
 unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
+	$<
+
+$(TESTPREFIX)/unit-test-config-announcements: $(OBJDIR)/tests/test_config_announcements.o \
+                                              $(OBJDIR)/config_client.o \
+                                              $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-config-announcements
+unit-test-config-announcements: $(TESTPREFIX)/unit-test-config-announcements
 	$<
 
 # The audit-on-bus DURABILITY test: the first module whose real path is being

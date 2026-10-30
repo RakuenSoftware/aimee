@@ -19,7 +19,6 @@ import (
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	"github.com/JBailes/aimee/server-go/internal/engine"
-	"github.com/JBailes/aimee/server-go/internal/fswatch"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	"github.com/JBailes/aimee/server-go/modules/observability"
@@ -310,7 +309,7 @@ func main() {
 		configClient.OnChange(retrigger)
 		handler.SetTriggersChanged(retrigger)
 		go func() {
-			if err := fswatch.Watch(rootCtx, *workflowDir, retrigger); err != nil && rootCtx.Err() == nil {
+			if err := wfe.WatchDefinitions(rootCtx, *workflowDir, retrigger); err != nil && rootCtx.Err() == nil {
 				log.Printf("workflow files edited on disk will apply on the next trigger scan: %v", err)
 			}
 		}()

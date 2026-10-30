@@ -306,6 +306,10 @@ int server_vault_bootstrap_prepare(void);
 typedef int (*aimee_agent_resolver_fn)(const char *name, char *canon, size_t cap);
 void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn);
 void server_shutdown(server_ctx_t *ctx);
+
+/* Wake the server's park loop: a SIGHUP, an announced config change, shutdown.
+ * Async-signal-safe. */
+void server_park_wake(void);
 int server_compute_budget_acquire(server_ctx_t *ctx);
 void server_compute_budget_release(server_ctx_t *ctx, int granted);
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
