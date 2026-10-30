@@ -117,8 +117,9 @@ func learningProjectionClaim(ctx context.Context, q store.Queryer, f []string) (
 	}
 	// When the worker has to look again with nothing announced: the next retry
 	// or lease expiry still pending, 0 when one is already due, -1 for none.
+	// (GREATEST ignores NULL, so an empty queue is tested for explicitly.)
 	var nextDue int64
-	if err = q.QueryRow(ctx, `SELECT COALESCE(GREATEST(0,CEIL(EXTRACT(EPOCH FROM MIN(GREATEST(next_attempt,COALESCE(lease_until,next_attempt)))-now())*1000))::bigint,-1) FROM learning_projection_outbox WHERE state='pending'`).Scan(&nextDue); err != nil {
+	if err = q.QueryRow(ctx, `SELECT CASE WHEN MIN(next_attempt) IS NULL THEN -1 ELSE GREATEST(0,CEIL(EXTRACT(EPOCH FROM MIN(GREATEST(next_attempt,COALESCE(lease_until,next_attempt)))-now())*1000))::bigint END FROM learning_projection_outbox WHERE state='pending'`).Scan(&nextDue); err != nil {
 		return store.StatusFailed, nil, err
 	}
 	body, err := encodeSessionIR(map[string]any{"schema_version": 1, "coverage": "canonical_appends_since_cutover", "cutoff": cutoff, "items": tickets, "next_due_ms": nextDue})
