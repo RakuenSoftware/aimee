@@ -59,6 +59,26 @@ def process_stages(contract):
     return [stage for stage in contract["stages"] if "hosted_by" not in stage]
 
 
+# A notification's subscriber is a process component, a client, or the C core,
+# which subscribes its own host-owned slots and so needs no grant.
+CORE_SUBSCRIBER = "core"
+
+
+def notification_kinds(contract) -> list[int]:
+    """Kinds a process component publishes (D14 change notifications)."""
+    return [n["event_kind"] for n in contract.get("notifications", [])]
+
+
+def subscriptions(document) -> dict[str, list[int]]:
+    """Every subscriber's notification kinds, in contract order."""
+    result: dict[str, list[int]] = {}
+    for component in document.get("components", []):
+        for notification in component.get("notifications", []):
+            for subscriber in notification["subscribers"]:
+                result.setdefault(subscriber, []).append(notification["event_kind"])
+    return result
+
+
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 PROTOCOL_KIND_FLAG = 0x80000000
 MAX_MODULE_STAGES = 255
@@ -155,7 +175,7 @@ def validate() -> dict[str, dict[str, object]]:
             if set(raw) != {"id", "execution", "placements"}:
                 raise ContractError(f"{component_id}: core component has process fields")
         else:
-            keys = set(raw) - {"hosted_by", "durability_declarations"}
+            keys = set(raw) - {"hosted_by", "durability_declarations", "notifications"}
             if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
                 raise ContractError(f"{component_id}: process keys differ from v5")
             # Most processes are multicall binaries the module runtime spawns and
@@ -242,6 +262,7 @@ def validate() -> dict[str, dict[str, object]]:
             if not isinstance(declarations, list):
                 raise ContractError(
                     f"{component_id}: durability_declarations must be an array")
+            reserved_ids: set[int] = set()
             for declaration in declarations:
                 base_stage_keys = {
                     "id", "name", "event_kind", "durability", "durability_reason"
@@ -294,11 +315,78 @@ def validate() -> dict[str, dict[str, object]]:
                         f"{component_id}/{name}: event_kind must equal {expected_kind}")
                 stage_names.add(name)
                 durability_kinds.add(kind)
+                reserved_ids.add(stage_id)
+            validate_notifications(component_id, raw, len(stages), reserved_ids, principal_ref,
+                                   stage_names, durability_kinds)
             if component_id not in optional and component_id not in PROCESS_REQUIRED:
                 raise ContractError(f"{component_id}: unexpected required process")
         result[component_id] = raw
     validate_clients(contract["clients"], kinds, refs)
+    validate_subscribers(contract)
     return result
+
+
+def validate_notifications(component_id: str, raw: dict[str, object], stage_count: int,
+                           reserved_ids: set[int], principal_ref: int, stage_names: set[str],
+                           durability_kinds: set[int]) -> None:
+    """Change notifications a process publishes (D14 in the ouroboros ring).
+
+    A notification is carved from the publisher's own kind range, after its
+    stages and durability declarations, so it can never collide with a stage.
+    It carries ids and versions, never state, and the request that changed the
+    state already wrote its durable row, so a notification is capture-only: it
+    must never become a second WORM row per change.
+    """
+    notifications = raw.get("notifications", [])
+    if not isinstance(notifications, list):
+        raise ContractError(f"{component_id}: notifications must be an array")
+    keys = {"id", "name", "event_kind", "durability", "durability_reason", "subscribers"}
+    for notification in notifications:
+        if not isinstance(notification, dict) or set(notification) != keys:
+            raise ContractError(f"{component_id}: invalid notification shape")
+        name = notification["name"]
+        notification_id = notification["id"]
+        kind = notification["event_kind"]
+        if type(notification_id) is not int or \
+                not stage_count < notification_id <= MAX_MODULE_STAGES or \
+                notification_id in reserved_ids:
+            raise ContractError(
+                f"{component_id}: notification IDs must follow active stages and declarations")
+        reserved_ids.add(notification_id)
+        if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or name in stage_names:
+            raise ContractError(f"{component_id}: invalid or duplicate notification name {name!r}")
+        expected_kind = 4096 + principal_ref * 256 + notification_id
+        if type(kind) is not int or kind != expected_kind or kind in durability_kinds:
+            raise ContractError(f"{component_id}/{name}: event_kind must equal {expected_kind}")
+        if notification["durability"] != "capture":
+            raise ContractError(
+                f"{component_id}/{name}: a notification is capture-only; the change it "
+                "announces is already durable")
+        reason = notification["durability_reason"]
+        if not isinstance(reason, str) or not reason.strip():
+            raise ContractError(f"{component_id}/{name}: durability reason is required")
+        subscribers = notification["subscribers"]
+        if (not isinstance(subscribers, list) or not subscribers or
+                any(not isinstance(item, str) or not item for item in subscribers) or
+                len(subscribers) != len(set(subscribers)) or component_id in subscribers):
+            raise ContractError(
+                f"{component_id}/{name}: subscribers must be unique names, not the publisher")
+        stage_names.add(name)
+        durability_kinds.add(kind)
+
+
+def validate_subscribers(contract: dict[str, object]) -> None:
+    """A subscriber that names nothing is a grant that admits nothing."""
+    components = contract["components"]
+    clients = contract["clients"]
+    assert isinstance(components, list) and isinstance(clients, list)
+    known = {CORE_SUBSCRIBER}
+    known |= {item["id"] for item in components if item.get("execution") == "process"}
+    known |= {item["id"] for item in clients}
+    for subscriber in subscriptions(contract):
+        if subscriber not in known:
+            raise ContractError(f"notification subscriber {subscriber!r} is not a process, "
+                                "a client or the core")
 
 
 def validate_clients(clients: object, served_kinds: set[int], module_refs: set[int]) -> None:

@@ -64,6 +64,19 @@ static int test_worm_sink(const char *actor_role, const char *actor_principal, c
    return 0;
 }
 
+/* Accepts every durable row, so module-call receipts give the writer work.
+ * Counted: the bus counts them as written alongside the action rows. */
+static _Atomic int durable_rows;
+
+static int accept_durable(const char *actor_role, const char *actor_principal, const char *action,
+                          const char *subject, const char *verdict, const char *detail, void *ctx)
+{
+   (void)actor_role, (void)actor_principal, (void)action, (void)subject, (void)verdict;
+   (void)detail, (void)ctx;
+   atomic_fetch_add(&durable_rows, 1);
+   return 0;
+}
+
 static uint64_t now_ns(void)
 {
    struct timespec ts;
@@ -105,7 +118,7 @@ int main(void)
    assert(obs_bus_commit_action("session:123", "vault.get", "v1-test", "agent/key", "tls", "ok",
                                 "allow", 17) == 0);
    assert(worm_commits == 1);
-   assert(obs_bus_set_durable_sink(NULL, NULL) == 0);
+   assert(obs_bus_set_durable_sink(accept_durable, NULL) == 0);
    assert(obs_bus_set_sink_idle_hook(count_idle, NULL) == 0);
 
    if (obs_bus_start() != 0)
@@ -138,19 +151,25 @@ int main(void)
       emit_ns[i] = now_ns() - s;
    }
 
-   /* Once the backlog is drained the consumer must reach its idle edge and tell
-    * the sink so, repeatedly -- not once at startup. Poll rather than sleep a
-    * fixed span: the consumer naps 200us and backs off to 5ms, so this settles
-    * in milliseconds and the bound only exists so a broken build fails instead
-    * of hanging. */
+   /* When a burst of durable writes drains, the writer tells the sink it is
+    * idle, so a sink holding a pooled lease lets go of it -- after EVERY burst,
+    * not once at startup. It does not wake to say so again while nothing
+    * happens: an idle bus sleeps. The bounds only exist so a broken build fails
+    * instead of hanging. */
    int first_idle = 0;
    for (int i = 0; i < 2000 && (first_idle = atomic_load(&idle_calls)) == 0; i++)
       usleep(1000);
    assert(first_idle > 0);
+   usleep(300 * 1000);
+   assert(atomic_load(&idle_calls) == first_idle); /* no wakeups with no work */
+   assert(obs_bus_module_call(5889, 1, 2, now_ns() + 1000000000ULL, "again", 5, module_response,
+                              sizeof module_response, &module_response_len, NULL,
+                              NULL) == OURO_MODULE_CALL_CAPABILITY_ABSENT);
    for (int i = 0; i < 2000 && atomic_load(&idle_calls) <= first_idle; i++)
       usleep(1000);
    assert(atomic_load(&idle_calls) > first_idle);
-   printf("  sink idle edge fired %d time(s) while idle\n", atomic_load(&idle_calls));
+   printf("  sink idle edge fired after each burst (%d), and not while idle\n",
+          atomic_load(&idle_calls));
 
    /* Reconfiguration while running is refused, for the idle hook as for the
     * sinks it accompanies. */
@@ -169,9 +188,10 @@ int main(void)
               (unsigned long long)dropped);
       return 1;
    }
-   if (written != (uint64_t)N)
+   if (written != (uint64_t)N + (uint64_t)atomic_load(&durable_rows))
    {
-      fprintf(stderr, "FAIL: consumer wrote %llu, expected %d\n", (unsigned long long)written, N);
+      fprintf(stderr, "FAIL: consumer wrote %llu, expected %d action rows and %d receipts\n",
+              (unsigned long long)written, N, atomic_load(&durable_rows));
       return 1;
    }
 

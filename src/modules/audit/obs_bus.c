@@ -13,6 +13,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -437,6 +438,11 @@ static int queue_durable(const char *action, const char *subject, const char *ve
    g.durable_tail = p;
    atomic_fetch_add(&g.durable_pending_count, 1);
    pthread_mutex_unlock(&durable_lock);
+   /* The writer sleeps until told there is work; tell it. Signalled under
+    * writer_lock so a writer that has just found the count zero cannot miss it. */
+   pthread_mutex_lock(&g.writer_lock);
+   pthread_cond_signal(&g.writer_ready);
+   pthread_mutex_unlock(&g.writer_lock);
    return 1;
 }
 
@@ -565,17 +571,26 @@ static void *guardrail_writer_main(void *arg)
       pthread_mutex_lock(&g.writer_lock);
       if (g.writer_count == 0 && !atomic_load(&g.writer_finish))
       {
-         /* A timed wait also services capture rows queued before writer startup
-          * and retries an unavailable store without blocking the bus consumer. */
-         struct timespec wake;
-         clock_gettime(CLOCK_REALTIME, &wake);
-         wake.tv_nsec += 100000000;
-         if (wake.tv_nsec >= 1000000000)
+         /* Nothing queued: sleep until queue_durable or a guardrail event says
+          * otherwise. Rows held back because the store was unavailable are
+          * retried at their deadline, without a timer while there are none --
+          * this used to wake ten times a second to find nothing. */
+         if (!atomic_load(&g.durable_pending_count))
+            pthread_cond_wait(&g.writer_ready, &g.writer_lock);
+         else
          {
-            wake.tv_sec++;
-            wake.tv_nsec -= 1000000000;
+            uint64_t now = ouro_runtime_monotonic_ns();
+            uint64_t retry = g.durable_retry_after_ns;
+            if (retry > now)
+            {
+               struct timespec wake;
+               clock_gettime(CLOCK_REALTIME, &wake);
+               uint64_t ns = (uint64_t)wake.tv_nsec + (retry - now);
+               wake.tv_sec += (time_t)(ns / 1000000000ull);
+               wake.tv_nsec = (long)(ns % 1000000000ull);
+               pthread_cond_timedwait(&g.writer_ready, &g.writer_lock, &wake);
+            }
          }
-         pthread_cond_timedwait(&g.writer_ready, &g.writer_lock, &wake);
       }
       uint8_t payload[AB_GUARDRAIL_MAX];
       uint32_t len = 0;
@@ -775,7 +790,7 @@ static void capture_flush(void)
  * pruned on start — so the streams do not accumulate without limit. */
 #define AB_CAP_PREFIX "audit-bus-capture-"
 #define AB_CAP_SUFFIX ".aimeecap"
-#define AB_CAP_KEEP   16
+#define AB_CAP_KEEP   4
 
 static int cmp_str_desc(const void *a, const void *b)
 {
@@ -917,6 +932,11 @@ void obs_bus_record_loss(void *ctx, const ouro_frame_t *frame, const uint8_t *pa
    }
 }
 
+/* Longest the consumer sleeps on the host doorbell with nothing to route. Inside
+ * the 30s reap window, with the reap itself every 7.5s, so liveness holds while
+ * an idle server wakes only for it. */
+#define AB_IDLE_WAIT_MS 5000
+
 static void *consumer_main(void *arg)
 {
    (void)arg;
@@ -950,13 +970,30 @@ static void *consumer_main(void *arg)
          capture_flush();
       if (n == 0 && routed == 0)
       {
-         struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
-         nanosleep(&nap, NULL);
-         if (nap_ns < nap_max_ns)
+         /* Sleep on the host doorbell (ring D13) until a client publishes, a
+          * consumer frees room a held producer needs, or stop wakes it. The
+          * re-check of every ring must hold host_lock, because attach and reap
+          * take it on other threads; the sleep must not. The timeout keeps
+          * heartbeats, reaping and the capture flush inside their windows. */
+         pthread_mutex_lock(&g.host_lock);
+         int begun = ouro_host_wait_begin(&g.host);
+         pthread_mutex_unlock(&g.host_lock);
+         if (begun == 0)
          {
-            nap_ns *= 2;
-            if (nap_ns > nap_max_ns)
-               nap_ns = nap_max_ns;
+            struct pollfd bell = {.fd = ouro_host_doorbell_fd(&g.host), .events = POLLIN};
+            (void)poll(&bell, 1, AB_IDLE_WAIT_MS);
+            ouro_host_wait_end(&g.host);
+         }
+         else if (begun < 0)
+         {
+            struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
+            nanosleep(&nap, NULL);
+            if (nap_ns < nap_max_ns)
+            {
+               nap_ns *= 2;
+               if (nap_ns > nap_max_ns)
+                  nap_ns = nap_max_ns;
+            }
          }
       }
       else
@@ -2053,6 +2090,7 @@ void obs_bus_stop(void)
     * becoming a module is what made this ordering wrong, with nothing in either
     * file changing to say so. */
    atomic_store_explicit(&g.stop, 1, memory_order_release);
+   ouro_host_wake(&g.host); /* the consumer may be asleep on the doorbell */
 
    /* WAIT FOR THAT DRAIN TO FINISH before touching the writer. The consumer is
     * still pumping throughout, so nothing is stalled by waiting here. */

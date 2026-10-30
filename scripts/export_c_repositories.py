@@ -64,6 +64,16 @@ def copy_file(relative: str, destination: Path) -> None:
     shutil.copy2(source, target)
 
 
+def notification_grant(module_id: str, contract: dict[str, object]) -> tuple[str, str]:
+    """A process's publish= and subscribe= grant lines: the change notifications
+    it announces, and those it is named a subscriber of."""
+    document = load_json(process_contracts.CONTRACTS)
+    publish = ",".join(str(kind) for kind in process_contracts.notification_kinds(contract))
+    subscribe = ",".join(
+        str(kind) for kind in process_contracts.subscriptions(document).get(module_id, []))
+    return publish, subscribe
+
+
 def write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
@@ -442,6 +452,7 @@ def export_module(
         stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         write_text(
             repository / "grants/module.grant.in",
             f"""version=1
@@ -449,8 +460,8 @@ principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable=@CMAKE_INSTALL_FULL_BINDIR@/{binary}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """,
@@ -667,13 +678,14 @@ def export_runtime_bundle(output_root: Path) -> int:
         if hosted_by is None:
             go_modules.append(module_id)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable={executable}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """
@@ -692,16 +704,18 @@ serve={serve}
     # Bus clients request stages but serve none, so they get a grant and no
     # manifest row: nothing supervises them, they are already running.
     contract_doc = load_json(process_contracts.CONTRACTS)
+    subscribed = process_contracts.subscriptions(contract_doc)
     for client in contract_doc.get("clients", []):
         request = ",".join(str(kind) for kind in client["request"])
         publish = ",".join(str(kind) for kind in client.get("publish", []))
+        subscribe = ",".join(str(kind) for kind in subscribed.get(client["id"], []))
         client_grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={client["principal_ref"]}
 uid=self
 executable={client["executable"]}
 publish={publish}
-subscribe=
+subscribe={subscribe}
 request={request}
 serve=
 """

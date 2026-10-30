@@ -276,6 +276,32 @@ class ModuleExportTests(unittest.TestCase):
             pin = next(module for module in lock["modules"] if module["id"] == "economizer")
             self.assertEqual(pin["serve"], [int(kind) for kind in serve.split(",")])
 
+    def test_change_notifications_are_granted_to_publisher_and_subscribers(self) -> None:
+        # A declared notification is a publish grant for the component that owns
+        # it and a subscribe grant for each subscriber it names. Without both the
+        # host refuses the publish or never routes it, and a consumer silently
+        # falls back to never hearing of a change.
+        def grant_line(grant: str, key: str) -> list[str]:
+            value = next(line.removeprefix(key + "=") for line in grant.splitlines()
+                         if line.startswith(key + "="))
+            return value.split(",") if value else []
+
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "bundle"
+            exporter.export_runtime_bundle(bundle)
+            grants = bundle / "grants/server"
+            self.assertEqual(grant_line((grants / "config.grant").read_text(), "publish"),
+                             ["4610"])
+            self.assertEqual(grant_line((grants / "aimee.grant").read_text(), "publish"),
+                             ["11800", "11801"])
+            self.assertEqual(grant_line((grants / "wfe.grant").read_text(), "subscribe"),
+                             ["4610", "11800"])
+            self.assertEqual(
+                grant_line((grants / "memory-postgres.grant").read_text(), "subscribe"),
+                ["4610"])
+            # A component that publishes nothing is granted nothing.
+            self.assertEqual(grant_line((grants / "git.grant").read_text(), "publish"), [])
+
     def runtime_bundle(self, runtime: str, temporary: str) -> Path:
         root = Path(temporary) / "repo"
         bundle = Path(temporary) / "bundle"

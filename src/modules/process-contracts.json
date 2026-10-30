@@ -28,6 +28,20 @@
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
         }
+      ],
+      "notifications": [
+        {
+          "id": 2,
+          "name": "config-changed",
+          "event_kind": 4610,
+          "durability": "capture",
+          "durability_reason": "carries only the committed config version; the mutation that produced it is already a durable config-store row",
+          "subscribers": [
+            "core",
+            "wfe",
+            "memory-postgres"
+          ]
+        }
       ]
     },
     {
@@ -1119,6 +1133,28 @@
           "durability": "ledger",
           "durability_reason": "peer channel operations change durable communication state",
           "emitter": "obs_bus_emit_durable_event"
+        }
+      ],
+      "notifications": [
+        {
+          "id": 24,
+          "name": "aimee-work-item-changed",
+          "event_kind": 11800,
+          "durability": "capture",
+          "durability_reason": "carries only a work item id and the earliest pending resume time; the lifecycle transition is already a durable aimee-lifecycle row",
+          "subscribers": [
+            "wfe"
+          ]
+        },
+        {
+          "id": 25,
+          "name": "aimee-delegation-changed",
+          "event_kind": 11801,
+          "durability": "capture",
+          "durability_reason": "carries only a delegate job id and state; the job transition is already a durable aimee-delegation row",
+          "subscribers": [
+            "core"
+          ]
         }
       ]
     },
