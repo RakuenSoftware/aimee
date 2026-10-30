@@ -1099,6 +1099,9 @@ static void module_service_stop_locked(obs_bus_module_service_t *service)
    if (service->running)
    {
       atomic_store_explicit(&service->stop, 1, memory_order_release);
+      /* The loop sleeps on its doorbell with no timeout: this attach is
+       * process-bound (D15), so only the doorbell can make it see `stop`. */
+      ouro_client_interrupt(&service->bus);
       pthread_join(service->thread, NULL);
       service->running = 0;
    }
