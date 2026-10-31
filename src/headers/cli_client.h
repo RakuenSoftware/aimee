@@ -322,6 +322,9 @@ const struct cJSON *cli_v1_manifest_argspec(const char *method);
  * `doc`. Never called outside tests; real invocations always fetch. */
 void cli_v1_manifest_set_for_test(struct cJSON *doc);
 
+/* TEST ONLY. Forget the manifest, so the next lookup fetches it again. */
+void cli_v1_manifest_reset_for_test(void);
+
 /* Thin-client workspace push: when the configured endpoint is a remote
  * "tcp:host:port" the server cannot see this host's filesystem, so
  * `aimee workspace add <path>` resolves the path locally, registers it as a
