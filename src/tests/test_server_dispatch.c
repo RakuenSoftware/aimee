@@ -1556,6 +1556,11 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "mcp.tools_list");
 }
 
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "mcp.tools_wait");
+}
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "mcp.call");

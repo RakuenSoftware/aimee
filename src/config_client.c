@@ -5,6 +5,7 @@
 #include "module_json_call.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,16 @@
 static pthread_mutex_t g_config_client_lock = PTHREAD_MUTEX_INITIALIZER;
 static cJSON *g_config_client_values;
 static char g_config_client_version[65];
+
+/* Announcements (config-changed, ouroboros ring D14). The bus consumer thread
+ * records them under their own lock, which is never held across a module call:
+ * g_config_client_lock is held across the snapshot call, whose reply that same
+ * thread routes, so taking it there would deadlock. */
+static pthread_mutex_t g_announce_lock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_int g_announcements_used;
+static unsigned long g_announced;      /* announcements received */
+static unsigned long g_announced_seen; /* g_announced when the snapshot was fetched */
+static char g_announced_version[65];   /* "" for a missed announcement */
 static _Thread_local char g_config_client_error[160];
 
 /* Narrow transport seam used by contract tests. Production resolves this weak
@@ -106,8 +117,41 @@ static int config_key_is_retired(const char *key)
           (strcmp(key, "db2") == 0 || strncmp(key, "db2_", 4) == 0 || strncmp(key, "db2.", 4) == 0);
 }
 
+void config_client_use_announcements(void)
+{
+   atomic_store(&g_announcements_used, 1);
+}
+
+void config_client_note_announcement(const uint8_t *payload, uint32_t len)
+{
+   char version[65] = {0};
+   if (payload && len)
+   {
+      cJSON *body = cJSON_ParseWithLength((const char *)payload, len);
+      cJSON *field = body ? cJSON_GetObjectItemCaseSensitive(body, "version") : NULL;
+      if (cJSON_IsString(field) && strlen(field->valuestring) == 64)
+         snprintf(version, sizeof version, "%s", field->valuestring);
+      cJSON_Delete(body);
+   }
+   pthread_mutex_lock(&g_announce_lock);
+   g_announced++;
+   snprintf(g_announced_version, sizeof g_announced_version, "%s", version);
+   pthread_mutex_unlock(&g_announce_lock);
+}
+
+static unsigned long announced_now(void)
+{
+   pthread_mutex_lock(&g_announce_lock);
+   unsigned long n = g_announced;
+   pthread_mutex_unlock(&g_announce_lock);
+   return n;
+}
+
 static int config_client_fetch_locked(void)
 {
+   /* An announcement that arrives while this fetch is in flight is newer than
+    * what it returns, so the count is taken first. */
+   unsigned long announced = announced_now();
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "snapshot"))
    {
@@ -156,12 +200,33 @@ static int config_client_fetch_locked(void)
    cJSON_Delete(g_config_client_values);
    g_config_client_values = copy;
    snprintf(g_config_client_version, sizeof(g_config_client_version), "%s", version_copy);
+   pthread_mutex_lock(&g_announce_lock);
+   g_announced_seen = announced;
+   pthread_mutex_unlock(&g_announce_lock);
    config_client_error("");
    return 0;
 }
 
 int config_client_changed(void)
 {
+   if (atomic_load(&g_announcements_used))
+   {
+      /* The module says when it changes, so asking is unnecessary: changed if
+       * anything was announced since the snapshot, unless what was announced is
+       * the version already held (this process's own write, echoed back). */
+      pthread_mutex_lock(&g_config_client_lock);
+      int have = g_config_client_values != NULL;
+      char held[65];
+      snprintf(held, sizeof held, "%s", g_config_client_version);
+      pthread_mutex_unlock(&g_config_client_lock);
+      pthread_mutex_lock(&g_announce_lock);
+      int changed = !have || (g_announced != g_announced_seen &&
+                              (!g_announced_version[0] || strcmp(g_announced_version, held) != 0));
+      if (have && !changed)
+         g_announced_seen = g_announced; /* an echo: nothing to refresh */
+      pthread_mutex_unlock(&g_announce_lock);
+      return changed;
+   }
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "version"))
    {

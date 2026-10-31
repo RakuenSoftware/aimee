@@ -41,6 +41,10 @@ def command(*argv, env=None, data=None, timeout=300):
         # emitting potentially credential-bearing arguments or Docker output.
         operation = next((value for value in argv[1:]
                           if value in ('up', 'config', 'inspect', 'exec', 'run', 'restart', 'down')), '')
+        # A gate is `python3 <repo script> ...`: the script's file name is fixed
+        # by this file, never caller data, and says which gate failed.
+        if Path(argv[0]).name.startswith('python') and len(argv) > 1 and str(argv[1]).endswith('.py'):
+            operation = Path(str(argv[1])).name
         raise RuntimeError(f'{Path(argv[0]).name} {operation} failed with exit {result.returncode} ({reason})')
     return result.stdout.strip()
 
@@ -1420,6 +1424,11 @@ def main():
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            # The message is the sanitized error above; it never carries arguments or Docker output.
+            passed = [row['name'] for row in checks if row['passed']]
+            after = ('after "' + passed[-1] + '"') if passed else 'before any gate passed'
+            print(f'::error title=e2e {args.topology} failed::{error} ({after})', flush=True)
     finally:
         (args.output / 'topology.json').write_text(json.dumps(checks, indent=2) + '\n')
         # Export only this fixed diagnostic grammar. Full Docker output may

@@ -379,6 +379,11 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
             path = "/v1/mcp/tools_list";
             verb = "GET";
          }
+         else if (!strcmp(method, "mcp.tools_wait"))
+         {
+            path = "/v1/mcp/tools_wait";
+            verb = "POST";
+         }
          else if (!strcmp(method, "mcp.call"))
          {
             path = "/v1/mcp/call";
@@ -1411,25 +1416,85 @@ static int tools_generation_now(double *out)
    return ok ? 0 : -1;
 }
 
+/* How long the server holds one mcp.tools_wait, and how much longer the request
+ * may take in transit before the bridge gives up on it. */
+#define TOOLS_WAIT_MS       290000
+#define TOOLS_WAIT_GRACE_MS 15000
+
+/* mcp.tools_wait: 0 with the generation once it differs from `have` or the
+ * server's hold expires, 1 if the server was too busy to hold the wait, -1 on
+ * failure, -2 if the server predates the method. */
+static int tools_generation_wait(double have, double *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "mcp.tools_wait");
+   cJSON_AddNumberToObject(req, "generation", have);
+   cJSON_AddNumberToObject(req, "timeout_ms", TOOLS_WAIT_MS);
+   cJSON *resp = server_request(req, TOOLS_WAIT_MS + TOOLS_WAIT_GRACE_MS);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   cJSON *gen = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int rc = -1;
+   if (cJSON_IsNumber(gen))
+   {
+      *out = gen->valuedouble;
+      rc = cJSON_IsString(status) && strcmp(status->valuestring, "busy") == 0 ? 1 : 0;
+   }
+   else if (cJSON_GetObjectItemCaseSensitive(resp, "error"))
+      rc = -2; /* an older server: no such method */
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* Sleep the configured interval in short slices, so stop() is prompt. */
+static void tools_watch_pause(void)
+{
+   for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
+      usleep(100000);
+}
+
 static void *tools_watch_run(void *unused)
 {
    (void)unused;
    double last = 0;
    int have_last = 0;
+   /* The server holds one wait open and answers when the tool list changes,
+    * instead of the bridge asking every interval. Against a server without the
+    * method, or one too busy to hold the wait, it falls back to asking. */
+   int long_poll = 1;
 
    while (!atomic_load(&g_watch_stop))
    {
-      /* Sleep in short slices so stop() is prompt even on a long interval: a
-       * thread that only checks its stop flag once per interval makes shutdown
-       * wait out the whole tick. */
-      for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
-         usleep(100000);
-      if (atomic_load(&g_watch_stop))
-         break;
-
       double now = 0;
-      if (tools_generation_now(&now) != 0)
-         continue; /* server down or too old to report it; try again next tick */
+      if (have_last && long_poll)
+      {
+         int waited = tools_generation_wait(last, &now);
+         if (atomic_load(&g_watch_stop))
+            break;
+         if (waited == -2)
+            long_poll = 0;
+         if (waited != 0)
+         {
+            tools_watch_pause(); /* busy, failed or unsupported: do not spin */
+            continue;
+         }
+      }
+      else
+      {
+         if (have_last)
+            tools_watch_pause();
+         if (atomic_load(&g_watch_stop))
+            break;
+         if (tools_generation_now(&now) != 0)
+         {
+            tools_watch_pause(); /* server down or too old to report it */
+            continue;
+         }
+      }
       if (!have_last)
       {
          last = now;
@@ -1462,7 +1527,9 @@ static void tools_watch_stop(void)
    if (!g_watch_running)
       return;
    atomic_store(&g_watch_stop, 1);
-   pthread_join(g_watch_thread, NULL);
+   /* Not joined: the watcher may be inside a wait the server holds for
+    * minutes, and the bridge is exiting. It checks the flag before it sends. */
+   pthread_detach(g_watch_thread);
    g_watch_running = 0;
 }
 

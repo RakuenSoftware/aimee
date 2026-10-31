@@ -855,6 +855,17 @@ static time_t g_last_fired[TRIGGER_RULES_MAX];
 static time_t g_last_cron_job_fired[CRON_JOBS_MAX];
 static time_t g_last_db_cron_job_fired[CRON_JOBS_MAX];
 
+static pthread_mutex_t g_sched_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_sched_cond = PTHREAD_COND_INITIALIZER;
+static int g_sched_stop;  /* under g_sched_lock */
+static int g_sched_woken; /* under g_sched_lock: a change not yet ticked on */
+
+/* Stored cron jobs, re-read only when agent work (where they live) or config is
+ * announced to have changed, not on every tick. */
+static cron_job_t g_db_jobs[CRON_JOBS_MAX];
+static int g_db_job_count;
+static int g_db_jobs_stale = 1;
+
 /* Implemented in server_cron.c. Kept as a narrow forward declaration so the
  * cron parser unit test can include this file with a tiny local stub. */
 int cron_run_config_job(const cron_job_t *job, cJSON **out_resp);
@@ -1328,11 +1339,25 @@ static void sched_tick(void)
                    job->schedule);
    }
 
-   cron_job_t db_jobs[CRON_JOBS_MAX];
-   int db_count = db1_cron_jobs_load(db_jobs, CRON_JOBS_MAX, 1);
-   for (int i = 0; i < db_count && i < CRON_JOBS_MAX; i++)
+   pthread_mutex_lock(&g_sched_lock);
+   int reload = g_db_jobs_stale;
+   g_db_jobs_stale = 0;
+   pthread_mutex_unlock(&g_sched_lock);
+   if (reload)
    {
-      const cron_job_t *job = &db_jobs[i];
+      int loaded = db1_cron_jobs_load(g_db_jobs, CRON_JOBS_MAX, 1);
+      if (loaded < 0)
+      {
+         pthread_mutex_lock(&g_sched_lock);
+         g_db_jobs_stale = 1; /* the store did not answer: ask again next tick */
+         pthread_mutex_unlock(&g_sched_lock);
+         loaded = 0;
+      }
+      g_db_job_count = loaded;
+   }
+   for (int i = 0; i < g_db_job_count && i < CRON_JOBS_MAX; i++)
+   {
+      const cron_job_t *job = &g_db_jobs[i];
       if (config_has_cron_job(job->id) || !job->enabled || !job->id[0] || !job->schedule[0])
          continue;
       int match = schedule_matches(job->schedule, &tm);
@@ -1357,7 +1382,20 @@ static void sched_tick(void)
 /* ------------------------------------------------------------------ */
 
 static pthread_t g_sched_thread;
-static int g_sched_stop;
+
+/* Whether any source could fire on a later minute. Schedules are minute
+ * granular, so with one the thread wakes at each minute boundary; with none it
+ * sleeps until a config or agent-work change is announced. */
+static int sched_has_timed_work(void)
+{
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   if (!engine || strcmp(engine, "go") != 0)
+      return 1; /* the native WFE's trigger rules and armed workflows */
+   pthread_mutex_lock(&g_sched_lock);
+   int stale = g_db_jobs_stale;
+   pthread_mutex_unlock(&g_sched_lock);
+   return stale || g_db_job_count > 0 || config_cron_job_count() > 0;
+}
 
 static void *sched_thread_fn(void *arg)
 {
@@ -1365,17 +1403,42 @@ static void *sched_thread_fn(void *arg)
 
    for (;;)
    {
-      /* Sleep 30 seconds in 1-second chunks so shutdown is responsive. */
-      for (int slept = 0; slept < 30; slept++)
+      int timed = sched_has_timed_work();
+      pthread_mutex_lock(&g_sched_lock);
+      if (!g_sched_stop && !g_sched_woken)
       {
-         if (g_sched_stop)
-            return NULL;
-         sleep(1);
+         if (timed)
+         {
+            /* One second past the next minute boundary, so the tick sees the
+             * minute a schedule names. */
+            struct timespec deadline;
+            clock_gettime(CLOCK_REALTIME, &deadline);
+            deadline.tv_sec += 61 - deadline.tv_sec % 60;
+            deadline.tv_nsec = 0;
+            pthread_cond_timedwait(&g_sched_cond, &g_sched_lock, &deadline);
+         }
+         else
+         {
+            while (!g_sched_stop && !g_sched_woken)
+               pthread_cond_wait(&g_sched_cond, &g_sched_lock);
+         }
       }
-      if (g_sched_stop)
+      g_sched_woken = 0;
+      int stop = g_sched_stop;
+      pthread_mutex_unlock(&g_sched_lock);
+      if (stop)
          return NULL;
       sched_tick();
    }
+}
+
+void trigger_scheduler_jobs_changed(void)
+{
+   pthread_mutex_lock(&g_sched_lock);
+   g_db_jobs_stale = 1;
+   g_sched_woken = 1;
+   pthread_cond_signal(&g_sched_cond);
+   pthread_mutex_unlock(&g_sched_lock);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1387,12 +1450,19 @@ void trigger_scheduler_init(void)
    memset(g_last_fired, 0, sizeof(g_last_fired));
    memset(g_last_cron_job_fired, 0, sizeof(g_last_cron_job_fired));
    memset(g_last_db_cron_job_fired, 0, sizeof(g_last_db_cron_job_fired));
+   pthread_mutex_lock(&g_sched_lock);
    g_sched_stop = 0;
+   g_sched_woken = 0;
+   g_db_jobs_stale = 1;
+   pthread_mutex_unlock(&g_sched_lock);
    pthread_create(&g_sched_thread, NULL, sched_thread_fn, NULL);
 }
 
 void trigger_scheduler_shutdown(void)
 {
+   pthread_mutex_lock(&g_sched_lock);
    g_sched_stop = 1;
+   pthread_cond_signal(&g_sched_cond);
+   pthread_mutex_unlock(&g_sched_lock);
    pthread_join(g_sched_thread, NULL);
 }

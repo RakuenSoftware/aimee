@@ -64,6 +64,16 @@ def copy_file(relative: str, destination: Path) -> None:
     shutil.copy2(source, target)
 
 
+def notification_grant(module_id: str, contract: dict[str, object]) -> tuple[str, str]:
+    """A process's publish= and subscribe= grant lines: the change notifications
+    it announces, and those it is named a subscriber of."""
+    document = load_json(process_contracts.CONTRACTS)
+    publish = ",".join(str(kind) for kind in process_contracts.notification_kinds(contract))
+    subscribe = ",".join(
+        str(kind) for kind in process_contracts.subscriptions(document).get(module_id, []))
+    return publish, subscribe
+
+
 def write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
@@ -162,7 +172,7 @@ def go_module_main(module_id: str, principal_ref: int,
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
-    process_options = "\t\tMaxIdlePollInterval: handler.RequestAdmissionPollInterval,\n" if module_id == "economizer" else ""
+    process_options = ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
@@ -179,12 +189,14 @@ def go_module_main(module_id: str, principal_ref: int,
     if module_id == "aimee":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
         handler = "moduleHandler.Handle"
-        process_setup = """\tmoduleHandler, err := process.New(ctx, os.Args[1])
+        process_setup = """\tannouncer := process.NewAnnouncer()
+\tmoduleHandler, err := process.New(ctx, os.Args[1], announcer)
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
 \t}
 """
+        process_options = "\t\tStarted: func(publisher ring.Publisher) { announcer.Start(ctx, publisher) },\n"
     if module_id == "memory":
         handler = "moduleHandler"
         process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1], os.Getenv("AIMEE_MODULE_PLACEMENT"))
@@ -442,6 +454,7 @@ def export_module(
         stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         write_text(
             repository / "grants/module.grant.in",
             f"""version=1
@@ -449,8 +462,8 @@ principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable=@CMAKE_INSTALL_FULL_BINDIR@/{binary}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """,
@@ -667,13 +680,14 @@ def export_runtime_bundle(output_root: Path) -> int:
         if hosted_by is None:
             go_modules.append(module_id)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable={executable}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """
@@ -692,21 +706,41 @@ serve={serve}
     # Bus clients request stages but serve none, so they get a grant and no
     # manifest row: nothing supervises them, they are already running.
     contract_doc = load_json(process_contracts.CONTRACTS)
+    subscribed = process_contracts.subscriptions(contract_doc)
     for client in contract_doc.get("clients", []):
         request = ",".join(str(kind) for kind in client["request"])
         publish = ",".join(str(kind) for kind in client.get("publish", []))
+        subscribe = ",".join(str(kind) for kind in subscribed.get(client["id"], []))
         client_grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={client["principal_ref"]}
 uid=self
 executable={client["executable"]}
 publish={publish}
-subscribe=
+subscribe={subscribe}
 request={request}
 serve=
 """
         for placement in client["placements"]:
             write_text(output_root / "grants" / placement / f"{client['id']}.grant", client_grant)
+    # The ring's telemetry exporter (D16): granted the host's telemetry ring,
+    # serving and requesting nothing, supervised wherever a ring is hosted.
+    telemetry = contract_doc["telemetry"]
+    telemetry_grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={telemetry["principal_ref"]}
+uid=self
+executable={telemetry["executable"]}
+publish=
+subscribe=
+request=
+serve=
+telemetry=yes
+"""
+    for placement in telemetry["placements"]:
+        write_text(output_root / "grants" / placement / f"{telemetry['id']}.grant", telemetry_grant)
+        placement_rows[placement].append(f"{telemetry['id']}\t{telemetry['executable']}")
+    go_modules.append(telemetry["id"])
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")

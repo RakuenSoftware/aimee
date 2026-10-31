@@ -9,15 +9,19 @@ authorization decisions, store audit evidence, export payload content, or force 
 ## Public contracts
 
 Consumers use `observability.Telemetry` for bounded `Logger`, `LocalLogger`, `Meter`, `Tracer`,
-`MetricsHandler`, `HTTPHandler`, `ForceFlush`, and `Shutdown` behavior. `TapObserver` maps bus metadata
-to content-free instruments; payload bytes are counted but never attached to logs or traces.
+`MetricsHandler`, `HTTPHandler`, `ForceFlush`, and `Shutdown` behavior. `RunRingTelemetry` is the ring's
+telemetry exporter process (ouroboros ring D16): every event the ring host stamps reaches the collector
+as a content-free OTLP log record, under the same collector policy as every other exporter.
 
 ## Dependencies and consumers
 
 - `module-runtime`: declares lifecycle, optional activation, ownership, and readiness for the reusable Go package.
 
-Go server and KB services import the package for local or OTLP telemetry. The event-bus host can use
-`TapObserver`; services retain control of listener placement and do not depend on a global provider.
+Go server and KB services import the package for local or OTLP telemetry; services retain control of
+listener placement and do not depend on a global provider. The ring's telemetry exporter is the
+`ring-telemetry` entry in `src/modules/process-contracts.json`: the module supervisor runs it as
+`aimee-module-ring-telemetry` in both placements, and its grant (`telemetry=yes`) is the only one
+that receives the host's telemetry ring.
 
 ## Providers and readiness
 
@@ -46,31 +50,35 @@ belongs to `audit`, not this package. Restart resets process-local counters and 
 
 ## Security and privacy
 
-Use `LocalLogger` for prompts, credentials, content, paths, and errors that may contain them. Tap labels
-come only from bounded wire vocabulary; sequence and source handle are log attributes, not metric labels.
+Use `LocalLogger` for prompts, credentials, content, paths, and errors that may contain them. A ring
+telemetry record is the stamped frame header alone (kind, pattern, placement, sequence, principal,
+source, payload length); the ring never puts a payload byte in it, so none can reach the collector.
 TLS protects remote export, and headers are redacted from config and diagnostic output.
 
 ## Supported journeys
 
 A service constructs one `Runtime`, requests component loggers, meters, and tracers, wraps HTTP handlers,
-then flushes and shuts down within bounded contexts. A bus event reaches `TapObserver`, which records kind,
-pattern, status, sequence, source, and payload length without copying the payload itself.
+then flushes and shuts down within bounded contexts. A ring event is written to the host's telemetry
+ring when it is stamped, and `RunRingTelemetry` sends it to the collector as soon as it is woken,
+releasing it back to the host only once the collector accepts it. With no collector configured it says
+so once and sleeps; the host keeps the newest records and counts the rest as a gap.
 
 ## Tests and failure behavior
 
-Tests under `server-go/modules/observability` cover providers, OTLP configuration, tap mapping, metrics
-servers, and TLS. Invalid endpoints, headers, certificates, or listener settings return errors. Exporter
+Tests under `server-go/modules/observability` cover providers, OTLP configuration, the ring telemetry
+exporter's principal and policy, metrics servers, and TLS. Invalid endpoints, headers, certificates, or listener settings return errors. Exporter
 failure is visible and bounded; it cannot crash request handling or redirect sensitive events to logs.
 
 ## Operational diagnostics
 
 Inspect exporter readiness, queue/drop counts, last OTLP error, scrape health, TLS certificate state,
-and `aimee.tap.exceptions`. Compare local logs with collector reception using trace IDs. Never enable
+and `ouro.ring.gap` records from the ring telemetry exporter. Compare local logs with collector reception using trace IDs. Never enable
 payload logging to debug export; use bounded metadata and the separate governed capture path.
 
 ## Compatibility
 
-Telemetry interface methods, instrument names such as `aimee.tap.events`, bounded label vocabulary, and
+Telemetry interface methods, the ring telemetry record names (`ouro.ring.event`, `ouro.ring.gap`) and
+attributes (`ouro.*`, defined by the ring), bounded label vocabulary, and
 privacy classification are compatibility contracts. Provider internals may change without consumers.
 New labels require cardinality and privacy review; existing names are not silently repurposed.
 

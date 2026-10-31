@@ -1453,9 +1453,11 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
       if (mtls_mode == 1)
       {
          long ramp_now = (long)time(NULL);
-         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+         int noted = pki_mtls_note_presentation(rc_serial, ramp_now);
+         if (noted < 0)
             LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
-         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         /* Readiness can only change when a presentation was written. */
+         else if (noted == 0 && pki_mtls_ramp_ready(ramp_now) == 1)
          {
             SSL_CTX *prepared = server_tls_prepare_required();
             if (!prepared)

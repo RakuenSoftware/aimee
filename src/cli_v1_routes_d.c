@@ -14,6 +14,7 @@
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
 #include "kb_index_timeouts.h"
+#include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -519,15 +520,10 @@ static cJSON *manifest_cache_load(const char *endpoint)
    return doc;
 }
 
-/* The manifest document, or NULL when it could not be fetched. Fetched at most
- * once: every routed command calls through here, so an unconditional diagnostic
- * would print several times for a single failure. */
-static const cJSON *cli_v1_manifest(void)
+/* Fetch and validate the manifest document, or NULL when it could not be
+ * fetched. Touches no cached state; cli_v1_manifest() owns that. */
+static cJSON *cli_v1_manifest_fetch(void)
 {
-   if (g_cli_manifest_fetched)
-      return g_cli_manifest;
-   g_cli_manifest_fetched = 1;
-
    char *remote = cli_v1_client_endpoint();
    if (!remote)
       return NULL; /* cli_v1_warn_no_endpoint() already covers "nothing configured" */
@@ -551,8 +547,7 @@ static const cJSON *cli_v1_manifest(void)
          free(remote);
          fprintf(stderr, "aimee: using the last known command list; the server did not "
                          "answer, so it may be out of date.\n");
-         g_cli_manifest = cached;
-         return g_cli_manifest;
+         return cached;
       }
       free(remote);
       /* Say which failure class this is. status == 0 means the transport never
@@ -590,8 +585,28 @@ static const cJSON *cli_v1_manifest(void)
    if (!cli_native_bridge_enabled())
       manifest_cache_store(remote, doc);
    free(remote);
-   g_cli_manifest = doc;
-   return g_cli_manifest;
+   return doc;
+}
+
+/* The manifest document, or NULL when it could not be fetched. Fetched at most
+ * once: every routed command calls through here, so an unconditional diagnostic
+ * would print several times for a single failure. Locked, and marked fetched
+ * only once the document is in place: the MCP bridge's watcher and request loop
+ * both route through here, and a mark set before the GET returned gave the second
+ * thread no manifest, so no route for mcp.call and a bogus "server unavailable". */
+static pthread_mutex_t g_cli_manifest_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static const cJSON *cli_v1_manifest(void)
+{
+   pthread_mutex_lock(&g_cli_manifest_lock);
+   if (!g_cli_manifest_fetched)
+   {
+      g_cli_manifest = cli_v1_manifest_fetch();
+      g_cli_manifest_fetched = 1;
+   }
+   const cJSON *doc = g_cli_manifest;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
+   return doc;
 }
 
 /* The command catalogue the server sent, or NULL when there is none (no server
@@ -689,9 +704,20 @@ const cJSON *cli_v1_manifest_argspec(const char *method)
  * called from tests only; every real invocation still fetches. Takes ownership. */
 void cli_v1_manifest_set_for_test(cJSON *doc)
 {
+   pthread_mutex_lock(&g_cli_manifest_lock);
    cJSON_Delete(g_cli_manifest);
    g_cli_manifest = doc;
    g_cli_manifest_fetched = 1;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
+}
+
+void cli_v1_manifest_reset_for_test(void)
+{
+   pthread_mutex_lock(&g_cli_manifest_lock);
+   cJSON_Delete(g_cli_manifest);
+   g_cli_manifest = NULL;
+   g_cli_manifest_fetched = 0;
+   pthread_mutex_unlock(&g_cli_manifest_lock);
 }
 
 /* Look `method` up in the manifest. want_async selects between the queued

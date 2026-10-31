@@ -5,5 +5,7 @@
  * AIMEE_KB_CONN is configured and fails closed for an invalid server id. */
 int server_kb_heartbeat_start(void);
 void server_kb_heartbeat_stop(void);
+/* Config changed: an unenrolled server looks again at once. */
+void server_kb_heartbeat_wake(void);
 
 #endif
