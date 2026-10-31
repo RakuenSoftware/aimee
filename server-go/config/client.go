@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
@@ -22,6 +23,10 @@ const (
 	// 4096 + 2*256 + stage ordinal 1.
 	EventConfig uint32 = 4609
 	StageConfig uint32 = 1
+	// EventConfigChanged is the module's config-changed notification: 4096 +
+	// 2*256 + 2, published after every committed change with the new document
+	// version. A subscribed client caches instead of asking again.
+	EventConfigChanged uint32 = 4610
 
 	MaxTriggerRules            = 32
 	MinAutonomyMaxWallSecs     = 360
@@ -129,6 +134,110 @@ type Service interface {
 type Client struct {
 	caller   StageCaller
 	deadline time.Duration
+	cache    replyCache
+}
+
+// NotificationSource delivers a slot's subscribed notifications and tells it
+// what it missed. ring.ConcurrentModuleCaller is one.
+type NotificationSource interface {
+	OnNotification(kind uint32, fn func(payload []byte))
+	OnOverflow(kind uint32, fn func())
+}
+
+// cacheable operations answer from the document alone, so a reply stays right
+// until the document version changes.
+var cacheable = map[Operation]bool{
+	OpValues: true, OpSnapshot: true, OpValue: true, OpStringValue: true,
+	OpVersion: true, OpTriggerRules: true,
+}
+
+// replyCache holds the module's raw replies to read operations while the client
+// is subscribed to config-changed. Raw bytes are decoded again for each caller,
+// so no caller can alter what another reads. A reply is only stored if no
+// change arrived while it was in flight (the generation is unchanged), so a
+// read that raced a change is never kept.
+type replyCache struct {
+	mu        sync.Mutex
+	enabled   bool
+	gen       uint64
+	version   string
+	replies   map[string][]byte
+	listeners []func()
+}
+
+func cacheKey(request Request) string { return string(request.Operation) + "\x00" + request.Key }
+
+func (r *replyCache) lookup(key string) ([]byte, uint64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reply, ok := r.replies[key]
+	return reply, r.gen, ok && r.enabled
+}
+
+func (r *replyCache) store(key string, reply []byte, gen uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.enabled && r.gen == gen {
+		if r.replies == nil {
+			r.replies = map[string][]byte{}
+		}
+		r.replies[key] = reply
+	}
+}
+
+// invalidate drops every cached reply and tells the listeners. version is the
+// one announced; an announcement of the version already known (a duplicate,
+// or the client's own write echoed back) changes nothing. An empty version is
+// a missed notification, which always invalidates.
+func (r *replyCache) invalidate(version string) {
+	r.mu.Lock()
+	if version != "" && version == r.version {
+		r.mu.Unlock()
+		return
+	}
+	if version != "" {
+		r.version = version
+	}
+	r.gen++
+	clear(r.replies)
+	listeners := append([]func(){}, r.listeners...)
+	r.mu.Unlock()
+	for _, fn := range listeners {
+		fn()
+	}
+}
+
+// Subscribe has the client cache what it reads and drop the cache whenever the
+// module announces a new version, or the ring reports a missed announcement.
+// Without it every read is a bus call, as before.
+func (c *Client) Subscribe(source NotificationSource) {
+	if c == nil || source == nil {
+		return
+	}
+	source.OnNotification(EventConfigChanged, func(payload []byte) {
+		var changed struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(payload, &changed) != nil {
+			changed.Version = "" // unreadable: treat as missed
+		}
+		c.cache.invalidate(changed.Version)
+	})
+	source.OnOverflow(EventConfigChanged, func() { c.cache.invalidate("") })
+	c.cache.mu.Lock()
+	c.cache.enabled = true
+	c.cache.mu.Unlock()
+}
+
+// OnChange has fn called after the configuration changes, once Subscribe is in
+// effect. It runs on the notification goroutine and must not block.
+func (c *Client) OnChange(fn func()) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	c.cache.listeners = append(c.cache.listeners, fn)
 }
 
 func NewClient(caller StageCaller, deadline time.Duration) (*Client, error) {
@@ -145,6 +254,13 @@ func (c *Client) request(request Request) (Response, error) {
 	if c == nil || c.caller == nil {
 		return Response{}, ErrConfig
 	}
+	key := cacheKey(request)
+	if cacheable[request.Operation] {
+		if reply, _, ok := c.cache.lookup(key); ok {
+			return decodeReply(reply)
+		}
+	}
+	_, gen, _ := c.cache.lookup(key)
 	body, err := json.Marshal(request)
 	if err != nil {
 		return Response{}, err
@@ -153,6 +269,23 @@ func (c *Client) request(request Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	response, err := decodeReply(reply)
+	if cacheable[request.Operation] {
+		// A typed refusal (an unknown key) is as much an answer as a value, so
+		// it is kept too; only a reply that failed to decode is not.
+		var moduleErr *ModuleError
+		if err == nil || errors.As(err, &moduleErr) {
+			c.cache.store(key, reply, gen)
+		}
+	} else if err == nil {
+		// This client changed the document: what it cached is stale now, before
+		// the announcement arrives.
+		c.cache.invalidate("")
+	}
+	return response, err
+}
+
+func decodeReply(reply []byte) (Response, error) {
 	if len(reply) == 0 || len(reply) > defaultMaxResponseBodySize {
 		return Response{}, ErrMalformed
 	}

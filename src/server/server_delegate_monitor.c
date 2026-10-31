@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /* Pull domain helpers via forward decls — server_delegate_monitor.c is
@@ -98,11 +99,28 @@ void server_delegate_heartbeat_end(void)
 static pthread_t g_monitor_thread;
 static volatile int g_monitor_running;
 static volatile int g_monitor_stop;
+/* The monitor sleeps on this until a delegation changes (announced by the store,
+ * ouroboros ring D14), its staleness check falls due, or shutdown. */
+static pthread_mutex_t g_monitor_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_monitor_wake = PTHREAD_COND_INITIALIZER;
+static int g_monitor_notified = 1; /* look once at start */
+/* Running jobs the last sweep saw: while there are any, staleness is a deadline
+ * that has to be checked; while there are none, nothing can go stale. */
+static int g_monitor_running_jobs;
+
+void server_delegate_monitor_wake(void)
+{
+   pthread_mutex_lock(&g_monitor_lock);
+   g_monitor_notified = 1;
+   pthread_cond_signal(&g_monitor_wake);
+   pthread_mutex_unlock(&g_monitor_lock);
+}
 
 int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold_secs)
 {
    int ids[MAX_RUNNING_JOBS_PER_SWEEP];
    int n = db1_agent_job_list_running_ids(ids, MAX_RUNNING_JOBS_PER_SWEEP);
+   g_monitor_running_jobs = n > 0 ? n : 0;
    if (n <= 0)
       return 0;
 
@@ -124,11 +142,11 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
    return cancelled;
 }
 
-/* Reap aged delegate containers this many sweeps apart (~5 min at 30 s/sweep).
- * The sweep above stale-cancels the JOB but never removes its container; only the
- * normal completion path does. Without this, a stale/crashed delegate leaks its
- * container until the next restart, accumulating until the image volume fills. */
-#define CONTAINER_REAP_EVERY_N_SWEEPS 10
+/* Reap aged delegate containers this often. The sweep above stale-cancels the
+ * JOB but never removes its container; only the normal completion path does.
+ * Without this, a stale/crashed delegate leaks its container until the next
+ * restart, accumulating until the image volume fills. It asks the container
+ * runtime, not the store, so an idle server still makes no store call for it. */
 /* Age threshold for the container reap. Above DEFAULT_IN_TOOL_THRESHOLD_SECS so a
  * live long-running turn is never removed. */
 #define CONTAINER_REAP_AGE_SECS 1800
@@ -143,26 +161,68 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
 static void *monitor_thread(void *arg)
 {
    (void)arg;
-   int sweeps = 0;
+   /* A delegate container can leak only when a delegation ends (stale cancel,
+    * crash), and one that leaked comes due at a known age. So the reap runs at
+    * start (a previous run's leftovers), on every delegation change, and when
+    * the oldest remaining delegate container comes due -- never on an idle
+    * timer. A docker error waits for the next change rather than a retry
+    * timer, which on a host without docker would poll forever. */
+   int reap_now = 1;
+   time_t next_reap = 0; /* 0: nothing can come due until a delegate starts */
    while (!g_monitor_stop)
    {
-      (void)server_delegate_monitor_sweep(DEFAULT_IDLE_THRESHOLD_SECS,
-                                          DEFAULT_IN_TOOL_THRESHOLD_SECS);
+      pthread_mutex_lock(&g_monitor_lock);
+      int notified = g_monitor_notified;
+      g_monitor_notified = 0;
+      pthread_mutex_unlock(&g_monitor_lock);
+      int busy = g_monitor_running_jobs > 0 || agent_admission_global_active() > 0;
+
+      /* The store is asked only when a delegation changed or one is running:
+       * this used to sweep every 30s with nothing to find. */
+      if (notified || busy)
+         (void)server_delegate_monitor_sweep(DEFAULT_IDLE_THRESHOLD_SECS,
+                                             DEFAULT_IN_TOOL_THRESHOLD_SECS);
 
       int freed = agent_admission_reap_idle(ADMISSION_IDLE_REAP_SECS);
       if (freed > 0)
          LOG_WARN("server.delegate_monitor", "reclaimed %d wedged admission slot(s)", freed);
 
-      if (++sweeps % CONTAINER_REAP_EVERY_N_SWEEPS == 0)
+      time_t now = time(NULL);
+      if (reap_now || notified || (next_reap && now >= next_reap))
       {
-         int reaped = delegate_backend_docker_reap_aged(CONTAINER_REAP_AGE_SECS);
+         reap_now = 0;
+         time_t due = 0;
+         int reaped = delegate_backend_docker_reap_aged_next(CONTAINER_REAP_AGE_SECS, &due);
          if (reaped > 0)
             LOG_INFO("server.delegate_monitor", "reaped %d aged delegate container(s)", reaped);
+         next_reap = reaped < 0 ? 0 : due;
       }
 
-      /* Sleep in 1 s chunks so shutdown is responsive. */
-      for (int slept = 0; slept < DEFAULT_POLL_INTERVAL_SECS && !g_monitor_stop; slept++)
-         sleep(1);
+      /* Busy: staleness is a deadline, so check it every poll interval. Idle:
+       * sleep until a delegation changes, or until a leftover delegate container
+       * comes due if there is one; otherwise with no timeout at all. */
+      busy = g_monitor_running_jobs > 0 || agent_admission_global_active() > 0;
+      long wait = busy ? DEFAULT_POLL_INTERVAL_SECS : next_reap ? (long)(next_reap - now) : -1;
+      if (next_reap && wait > next_reap - now)
+         wait = next_reap - now;
+      if (wait == 0)
+         wait = 1;
+      pthread_mutex_lock(&g_monitor_lock);
+      if (wait < 0)
+      {
+         while (!g_monitor_notified && !g_monitor_stop)
+            pthread_cond_wait(&g_monitor_wake, &g_monitor_lock);
+      }
+      else
+      {
+         struct timespec until;
+         clock_gettime(CLOCK_REALTIME, &until);
+         until.tv_sec += wait;
+         while (!g_monitor_notified && !g_monitor_stop &&
+                pthread_cond_timedwait(&g_monitor_wake, &g_monitor_lock, &until) == 0)
+            ;
+      }
+      pthread_mutex_unlock(&g_monitor_lock);
    }
    return NULL;
 }
@@ -200,6 +260,7 @@ void server_delegate_monitor_shutdown(void)
    if (!g_monitor_running)
       return;
    g_monitor_stop = 1;
+   server_delegate_monitor_wake();
    pthread_join(g_monitor_thread, NULL);
    g_monitor_running = 0;
 }

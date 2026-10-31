@@ -14,4 +14,6 @@ void server_learning_observe_child(const char *session, const char *turn, const 
 int server_learning_deliver_record(const cJSON *record, int (*cancelled)(void));
 void server_learning_recovery_init(void);
 void server_learning_recovery_shutdown(void);
+/* A learning projection was queued: claim now rather than at the next due time. */
+void server_learning_recovery_wake(void);
 #endif

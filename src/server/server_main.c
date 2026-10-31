@@ -131,12 +131,14 @@ static void signal_handler_info(int sig, siginfo_t *info, void *ucontext)
    if (sig == SIGHUP)
    {
       g_config_reload_requested = 1; /* reload config, NOT shut down */
+      server_park_wake();
       return;
    }
 #endif
    (void)shutdown_forensics_record_signal("server", sig, info, g_ctx.start_time,
                                           g_ctx.active_sessions, 0, g_ctx.session_threads);
    g_ctx.running = 0;
+   server_park_wake();
 }
 
 static void install_signal_handlers(void)

@@ -179,7 +179,7 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 
 // New initializes storage and applies the complete schema before advertising
 // any capability. Both executable forms use this startup path.
-func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
+func New(ctx context.Context, moduleBusSocket string, announcer *Announcer) (*aimee.Module, error) {
 	// Peer messaging. The registry is process-local: inboxes and grants
 	// live in memory and do not survive a bounce.
 	//
@@ -225,7 +225,7 @@ func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
 		return nil, err
 	}
 	log.Printf("store: schema applied (%d files)", families.SchemaFileCount())
-	mux, err := aimee.NewMux(db, families.All()...)
+	mux, err := aimee.NewMux(db, announcing(families.All(), announcer)...)
 	if err != nil {
 		log.Printf("store: %v", err)
 		return nil, err
@@ -245,4 +245,28 @@ func New(ctx context.Context, moduleBusSocket string) (*aimee.Module, error) {
 		return nil, err
 	}
 	return module, nil
+}
+
+// announcing has the families whose changes other components act on announce
+// each committed write: lifecycle for the workflow engine, delegation and agent
+// work for the core's delegate monitor. Any family's operation that queues a
+// learning projection announces that to the core's delivery worker.
+func announcing(all []aimee.Family, announcer *Announcer) []aimee.Family {
+	if announcer == nil {
+		return all
+	}
+	for i := range all {
+		all[i].Noted = func(topic string) {
+			if topic == families.NoteLearningProjectionQueued {
+				announcer.Announce(KindLearningProjectionPending, topic)
+			}
+		}
+		switch all[i].Name {
+		case families.Lifecycle.Name:
+			all[i].Changed = func(op string) { announcer.Announce(KindWorkItemChanged, op) }
+		case families.Delegation.Name, families.AgentWork.Name:
+			all[i].Changed = func(op string) { announcer.Announce(KindDelegationChanged, op) }
+		}
+	}
+	return all
 }

@@ -98,7 +98,7 @@ static void test_prune_marker(const char *home)
    int files_before = capture_file_count(home);
    assert(obs_bus_start() == 0);
    obs_bus_stop();
-   int expected = files_before + 1 - 16;
+   int expected = files_before + 1 - 4; /* AB_CAP_KEEP in obs_bus.c */
    assert(expected > 0);
    assert(rows_matching("bus.capture.pruned", NULL) - rows_before == expected);
    printf("  prune: each removed session left a durable row\n");

@@ -816,6 +816,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-instance-identity \
                $(TESTPREFIX)/unit-test-execution-policy-bus \
                $(TESTPREFIX)/unit-test-bus-config-autonomy \
+               $(TESTPREFIX)/unit-test-config-announcements \
                $(TESTPREFIX)/unit-test-git-verify-state-bus \
                $(TESTPREFIX)/unit-test-bus-audit-durability \
                $(TESTPREFIX)/unit-test-bus-memory-audit \
@@ -912,6 +913,7 @@ $(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-approaches
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-application
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-recovery
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-kb-heartbeat
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-replay
 $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native_replay.o \
     $(OBJDIR)/server/server_native_replay.o $(OBJDIR)/modules/ir/session_event.o \
@@ -3202,6 +3204,15 @@ $(TESTPREFIX)/unit-test-bus-config-autonomy: $(OBJDIR)/tests/test_bus_config_aut
 
 .PHONY: unit-test-bus-config-autonomy
 unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
+	$<
+
+$(TESTPREFIX)/unit-test-config-announcements: $(OBJDIR)/tests/test_config_announcements.o \
+                                              $(OBJDIR)/config_client.o \
+                                              $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-config-announcements
+unit-test-config-announcements: $(TESTPREFIX)/unit-test-config-announcements
 	$<
 
 # The audit-on-bus DURABILITY test: the first module whose real path is being
@@ -6623,6 +6634,10 @@ $(TESTPREFIX)/unit-test-server-learning-approaches: $(OBJDIR)/tests/test_server_
 $(TESTPREFIX)/unit-test-server-learning-recovery: $(OBJDIR)/tests/test_server_learning_recovery.o \
     $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/server/server_learning_outcome.o \
     $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-server-kb-heartbeat: $(OBJDIR)/tests/test_server_kb_heartbeat.o \
+    $(OBJDIR)/server/server_kb_heartbeat.o $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_native_cache_lease.o \

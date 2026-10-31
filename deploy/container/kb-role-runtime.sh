@@ -71,7 +71,17 @@ stop() {
     wait "$modules" 2>/dev/null || true
 }
 trap 'stop; exit 0' TERM INT HUP
-while kill -0 "$resource" 2>/dev/null && kill -0 "$modules" 2>/dev/null; do sleep 0.2; done
+# Sleep until a child exits: a trapped SIGCHLD ends the wait on the timer at
+# once, and the timer only bounds an exit between the check and the wait.
+trap ':' CHLD
+while kill -0 "$resource" 2>/dev/null && kill -0 "$modules" 2>/dev/null; do
+    sleep 60 &
+    timer=$!
+    wait "$timer" 2>/dev/null || true
+    kill "$timer" 2>/dev/null || true
+    wait "$timer" 2>/dev/null || true
+done
+trap - CHLD
 status=0
 if ! kill -0 "$resource" 2>/dev/null; then wait "$resource" || status=$?; else status=1; fi
 stop

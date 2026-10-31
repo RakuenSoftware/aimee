@@ -33,6 +33,7 @@ import (
 	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
+	"github.com/JBailes/aimee/server-go/modules/observability"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 	"github.com/JBailes/aimee/server-go/modules/postgres/storage"
 	"github.com/JBailes/aimee/server-go/modules/providers"
@@ -395,9 +396,9 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		config.Handler = sandbox.NewHandler(store)
 	case "economizer":
-		// Final request admission is on the provider dispatch path. Avoid the
-		// generic consumer's 10ms idle backoff; keep reduction policy unchanged.
-		config.MaxIdlePollInterval = economizer.RequestAdmissionPollInterval
+		// Final request admission is on the provider dispatch path. The ring
+		// wakes the process for each request (doorbell, ring D13), so it no
+		// longer trades idle wakeups for latency with a 1ms poll ceiling.
 		config.ModuleName = name
 		config.PrincipalRef = 27
 		config.Stages = []ring.ModuleStage{
@@ -472,12 +473,14 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "aimee", "store", "db1":
 		config.ModuleName = name
 		config.PrincipalRef = aimee.PrincipalRef
-		module, err := aimeeprocess.New(ctx, moduleBusSocket)
+		announcer := aimeeprocess.NewAnnouncer()
+		module, err := aimeeprocess.New(ctx, moduleBusSocket, announcer)
 		if err != nil {
 			return config, false
 		}
 		config.Stages = module.Stages()
 		config.Handler = module.Handle
+		config.Started = func(publisher ring.Publisher) { announcer.Start(ctx, publisher) }
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
@@ -730,6 +733,19 @@ func main() {
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "aimee composition: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// The ring's telemetry exporter (D16): a supervised process of its own,
+	// granted the host's telemetry ring, serving no stage.
+	if filepath.Base(os.Args[0]) == "aimee-module-ring-telemetry" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: aimee-module-ring-telemetry <module-bus-socket>")
+			os.Exit(2)
+		}
+		if err := observability.RunRingTelemetry(ctx, os.Args[1], ""); err != nil {
+			fmt.Fprintf(os.Stderr, "aimee-module-ring-telemetry: %v\n", err)
 			os.Exit(1)
 		}
 		return

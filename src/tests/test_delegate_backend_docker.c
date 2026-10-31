@@ -1186,6 +1186,12 @@ static void test_reap_aged_removes_only_old(void)
     * `--filter name=^aimee-delegate-` anchor is gone, so this must survive. */
    assert(strstr(buf, "cccccccccccc") == NULL);
 
+   /* The current delegate is not aged yet, so it comes due at a known time:
+    * the monitor sleeps until then rather than asking again on a timer. */
+   time_t due = 0, before = time(NULL);
+   assert(delegate_backend_docker_reap_aged_next(1800, &due) == 1);
+   assert(due >= before + 1800 - 5 && due <= time(NULL) + 1800);
+
    unsetenv("AIMEE_DOCKER_BIN");
    unlink(script);
    unlink(rmlog);

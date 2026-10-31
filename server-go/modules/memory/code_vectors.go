@@ -99,6 +99,7 @@ SELECT f.project,f.path,left(f.content,8192),f.fingerprint,`+codeEmbeddingInputH
 			return err
 		}
 	}
+	p.batched.Add(int64(len(items)))
 
 	var workErr error
 	// Two simultaneous document calls let the shipped embedder coalesce work,

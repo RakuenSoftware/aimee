@@ -37,6 +37,17 @@
  * rather than counting rows on a busy store. */
 #define PROBE_SINCE    "9999-12-31T23:59:59Z"
 #define PROBE_CACHE_NS 1000000000LL /* 1s */
+/* A store call that succeeded this recently, with no failure since, already
+ * answered the question; probing on top of it only adds idle traffic. A failure
+ * newer than the last success answers it the other way, at once. */
+#define TRAFFIC_TRUST_NS (300LL * 1000000000LL) /* 5 min */
+/* The store family's principal ref: its kinds are 4096 + 30*256 + stage. */
+#define DB1_PRINCIPAL_REF 30u
+
+/* Weak so unit binaries that stub the bus without it link; then every
+ * readiness question is probed, as before. */
+void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t *last_fail_ns)
+    __attribute__((weak));
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static long long g_checked_at_ns;
@@ -65,6 +76,11 @@ int db1_store_probe(void)
    }
 
    long long now = now_ns();
+   int64_t ok_ns = 0, fail_ns = 0;
+   if (obs_bus_module_outcome)
+      obs_bus_module_outcome(DB1_PRINCIPAL_REF, &ok_ns, &fail_ns);
+   if (ok_ns > fail_ns && now - ok_ns < TRAFFIC_TRUST_NS)
+      return 1; /* real traffic just answered for the store */
    pthread_mutex_lock(&g_lock);
    if (g_last_answer >= 0 && g_checked_at_ns != 0 && now - g_checked_at_ns < PROBE_CACHE_NS)
    {
