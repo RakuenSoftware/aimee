@@ -97,7 +97,13 @@ static void *recover_projections(void *unused)
             if (!lease || strlen(lease) != 32 || !cJSON_IsObject(record))
                continue;
             int delivered = server_learning_deliver_record(record, delivery_stopping);
-            if (db1_learning_projection_ack(lease, delivered ? "delivered" : "retry"))
+            /* The store refuses a delivered ack while the delivery's evidence is
+             * still landing: a configured-test grade is written after the
+             * terminal event that announced this record. The lease would then
+             * hold the record for its full three minutes, so hand it back for an
+             * ordinary retry instead. */
+            if (db1_learning_projection_ack(lease, delivered ? "delivered" : "retry") &&
+                (!delivered || db1_learning_projection_ack(lease, "retry")))
                LOG_WARN("learning.recovery",
                         "source delivery acknowledgment deferred; canonical source retained");
          }
