@@ -2306,7 +2306,9 @@ int server_run(server_ctx_t *ctx)
     * something to do -- a SIGHUP, an announced config change, shutdown -- and
     * otherwise wakes only while it has a deadline: idle code-server editors to
     * reap, or a startup reconciliation to retry. It used to wake every second. */
-   int reconcile_failed = 0;
+   /* Seed from the real state: startup's attempt usually runs before the store
+    * module has attached, and a park with no deadline would never retry it. */
+   int reconcile_failed = server_delegate_startup_reconcile() != 0;
    while (ctx->running)
    {
       int timeout_ms = -1;

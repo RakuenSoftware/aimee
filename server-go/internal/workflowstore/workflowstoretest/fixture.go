@@ -335,7 +335,15 @@ func start(t testing.TB, path string) (*fixture, error) {
 	// mysterious first-call failure.
 	// Attach once, then wait for the module to answer through it. Attaching on
 	// every poll would burn a slot per attempt and deny the one that mattered.
-	deadline := time.Now().Add(20 * time.Second)
+	//
+	// The budget covers the store's schema apply, which takes the database-wide
+	// migration lock (aimee:db:schema). Every fixture in every package of a
+	// workflow-db-e2e run migrates its own schema under that one lock, so a
+	// fixture can queue behind many others; at 20s, a CT with 6 cores under
+	// -race timed out 2 runs in 3 on testing with the postgres module still
+	// waiting for the lock.
+	const serveBudget = 90 * time.Second
+	deadline := time.Now().Add(serveBudget)
 	var lastErr error
 	for time.Now().Before(deadline) && f.client == nil {
 		client, err := attach(f)
@@ -369,8 +377,9 @@ func start(t testing.TB, path string) (*fixture, error) {
 	for _, e := range entries {
 		names += " " + e.Name()
 	}
-	return nil, fmt.Errorf("module did not start serving within 20s: %v\nhome:%s\nserver: %s\nmodule: %s",
-		lastErr, names, tail(filepath.Join(home, "server.log")), tail(filepath.Join(home, "store.log")))
+	return nil, fmt.Errorf("module did not start serving within %v: %v\nhome:%s\nserver: %s\ndaemon log: %s\nmodule: %s\npostgres: %s",
+		serveBudget, lastErr, names, tail(filepath.Join(home, "server.log")), tail(filepath.Join(aimeeHome, "server.log")),
+		tail(filepath.Join(home, "store.log")), tail(filepath.Join(home, "postgres.log")))
 }
 
 func copyExecutable(source, destination string) error {
