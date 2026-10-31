@@ -7486,7 +7486,11 @@ paths:
         The filesystem-authority client serving a `detached` workspace polls for
         the next op the server needs run against its working tree. Returns
         immediately with have_op:false when nothing is pending (bounded wait);
-        the client re-polls. Capability: tool:execute.
+        the client re-polls. Capability: tool:execute. workspace_id is a
+        workspace root, or a CLI's private runner channel ("runner:" and 32
+        lowercase hex digits) that the CLI also sends as X-Aimee-Runner on its own
+        requests, so their ops are run by that CLI only. A channel opens on its
+        first poll; close:true closes it.
       requestBody:
         required: true
         content:
@@ -7496,6 +7500,7 @@ paths:
               required: [workspace_id]
               properties:
                 workspace_id: { type: string }
+                close: { type: boolean, description: "Close this runner channel instead of polling it." }
       responses:
         "200":
           description: An op to execute, or have_op:false

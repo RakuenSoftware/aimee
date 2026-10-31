@@ -1477,6 +1477,16 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "missing workspace_id");
    }
+   /* A CLI that has finished closes its private channel (no op is fetched). */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(body, "close")))
+   {
+      int closed = ws_runner_registry_close_channel(wsid);
+      cJSON_Delete(body);
+      if (closed != 0)
+         return err_json(resp, cap, 400, "only a runner channel can be closed");
+      snprintf(resp, (size_t)cap, "{\"ok\":true,\"closed\":true}");
+      return 200;
+   }
    int unserved = 0; /* poll paces an unserved tree itself; see its header */
    (void)ws_runner_registry_register_configured(wsid);
    cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS, &unserved);

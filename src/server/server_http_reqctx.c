@@ -14,6 +14,7 @@
 #include "server_http_identity.h"
 #include "config.h"
 #include "runtime_secret.h"
+#include <aimee/workspace/module_api.h>
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
 #include <openssl/crypto.h>
 #include <pwd.h>
@@ -220,6 +221,14 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
          snprintf(ctx.source, sizeof(ctx.source), "%s", source);
       http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
    }
+
+   /* Not identity: a channel only says which of this caller's own processes
+    * runs the request's workspace ops, and it is a 128-bit name the CLI chose,
+    * so any authorized caller may set it for its own request. */
+   char channel[64] = "";
+   if (http_header(buf, "X-Aimee-Runner", channel, sizeof(channel)) &&
+       aimee_ws_runner_channel_valid(channel))
+      snprintf(ctx.runner_channel, sizeof(ctx.runner_channel), "%s", channel);
 
    request_context_capture_budget_header(&ctx, buf);
    request_context_set(&ctx);

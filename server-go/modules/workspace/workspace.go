@@ -4,6 +4,7 @@ package workspace
 import (
 	"encoding/binary"
 	"sync"
+	"time"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
@@ -99,7 +100,74 @@ func runnerUnregister(id string) {
 	}
 }
 
+// A runner channel is one client's private rendezvous: "runner:" and 32
+// lowercase hex digits the client chose. The aimee CLI opens one for each
+// command it runs inside a detached tree and sends its name with that command,
+// so the ops the command causes are run by that client and no other. A tree's
+// own id stays shared by `aimee workspace serve`; a CLI that polled it could
+// otherwise be handed another session's op and run it with its own
+// environment and credentials.
+const (
+	runnerChannelPrefix = "runner:"
+	runnerChannelLen    = len(runnerChannelPrefix) + 32
+	// Channels are per command, so many are open at once across sessions.
+	runnerChannelMax = 1024
+	// A channel nobody polled for this long belongs to a client that is gone.
+	runnerChannelIdle = 2 * time.Minute
+)
+
+var channels = map[string]*rendezvous{}
+
+func isRunnerChannel(id string) bool {
+	if len(id) != runnerChannelLen || id[:len(runnerChannelPrefix)] != runnerChannelPrefix {
+		return false
+	}
+	for _, c := range []byte(id[len(runnerChannelPrefix):]) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// channelFor returns a channel's rendezvous, opening it on first use: the
+// client's own first poll opens it, so the command it then sends finds it
+// served. Channels idle past runnerChannelIdle are closed on the way.
+func channelFor(id string) *rendezvous {
+	runnersMu.Lock()
+	defer runnersMu.Unlock()
+	if point := channels[id]; point != nil {
+		return point
+	}
+	for other, point := range channels {
+		if point.idleFor() > runnerChannelIdle {
+			delete(channels, other)
+			point.close()
+		}
+	}
+	if len(channels) >= runnerChannelMax {
+		return nil
+	}
+	point := newRendezvous()
+	point.markServing()
+	channels[id] = point
+	return point
+}
+
+func channelClose(id string) {
+	runnersMu.Lock()
+	point := channels[id]
+	delete(channels, id)
+	runnersMu.Unlock()
+	if point != nil {
+		point.close()
+	}
+}
+
 func runnerFor(id string) *rendezvous {
+	if isRunnerChannel(id) {
+		return channelFor(id)
+	}
 	runnersMu.Lock()
 	defer runnersMu.Unlock()
 	return runners[id]
@@ -134,11 +202,19 @@ func handleRunner(invocation ring.ModuleInvocation, request []byte) ([]byte, rin
 
 	switch op {
 	case RunnerOpRegister:
-		if !runnerRegister(value) {
+		if isRunnerChannel(value) {
+			if channelFor(value) == nil {
+				return nil, ring.ModuleStatusInvalidRequest
+			}
+		} else if !runnerRegister(value) {
 			return nil, ring.ModuleStatusInvalidRequest
 		}
 	case RunnerOpUnregister:
-		runnerUnregister(value)
+		if isRunnerChannel(value) {
+			channelClose(value)
+		} else {
+			runnerUnregister(value)
+		}
 	case RunnerOpResolve:
 		if id := serverFor(value); id != "" {
 			binary.LittleEndian.PutUint32(response[4:8], uint32(len(id)))
