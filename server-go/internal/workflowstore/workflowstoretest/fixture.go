@@ -32,7 +32,9 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
+	serverconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	aimeeprocess "github.com/JBailes/aimee/server-go/modules/aimee/process"
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -221,18 +223,20 @@ func start(t testing.TB, path string) (*fixture, error) {
 	// test process attaches as the WFE principal, which is what the engine does
 	// in production.
 	if err := writeGrant(filepath.Join(policy, "aimee.grant"), 1, 30, storeModuleBin,
-		serveKinds()); err != nil {
+		serveKinds(), kindList(aimeeprocess.KindWorkItemChanged, aimeeprocess.KindDelegationChanged,
+			aimeeprocess.KindLearningProjectionPending)); err != nil {
 		return nil, err
 	}
 	if err := writeGrant(filepath.Join(policy, "postgres.grant"), 1, 28,
-		postgresModuleBin, "11265,11266"); err != nil {
+		postgresModuleBin, "11265,11266", ""); err != nil {
 		return nil, err
 	}
 	if err := writeGrantRequesting(filepath.Join(policy, "aimee-postgres.grant"), 1, 69,
-		storeModuleBin, 11266); err != nil {
+		storeModuleBin, 11266, ""); err != nil {
 		return nil, err
 	}
-	if err := writeGrant(filepath.Join(policy, "config.grant"), 1, 2, configBin, "4609"); err != nil {
+	if err := writeGrant(filepath.Join(policy, "config.grant"), 1, 2, configBin, "4609",
+		kindList(serverconfig.EventConfigChanged)); err != nil {
 		return nil, err
 	}
 	// Mirrors the wfe client in src/modules/process-contracts.json: the engine
@@ -250,7 +254,8 @@ func start(t testing.TB, path string) (*fixture, error) {
 		self = resolved
 	}
 	if err := writeGrantRequesting(filepath.Join(policy, "wfe.grant"), busPrincipalClass,
-		wfeBusPrincipalRef, self, lifecycleKind); err != nil {
+		wfeBusPrincipalRef, self, lifecycleKind,
+		kindList(serverconfig.EventConfigChanged, workflowstore.WorkItemChangedKind)); err != nil {
 		return nil, err
 	}
 
@@ -524,18 +529,31 @@ func attach(f *fixture) (*wire.Client, error) {
 // lifecycleKind is DB1's lifecycle stage, the one the engine's store calls.
 const lifecycleKind = 11792
 
-func writeGrantRequesting(path string, class, ref uint32, executable string, request int) error {
+// The publish= and subscribe= lines carry the change notifications the
+// exporter grants in production (ring D14). Left empty, the daemon refuses
+// every announcement, and push-driven paths -- the engine's work-item wake, the
+// learning delivery worker -- are never exercised here.
+func writeGrantRequesting(path string, class, ref uint32, executable string, request int,
+	subscribe string) error {
 	body := fmt.Sprintf("version=1\nprincipal_class=%d\nprincipal_ref=%d\nuid=self\n"+
-		"executable=%s\npublish=\nsubscribe=\nrequest=%d\nserve=\n",
-		class, ref, executable, request)
+		"executable=%s\npublish=\nsubscribe=%s\nrequest=%d\nserve=\n",
+		class, ref, executable, subscribe, request)
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
-func writeGrant(path string, class, ref uint32, executable, serve string) error {
+func writeGrant(path string, class, ref uint32, executable, serve, publish string) error {
 	body := fmt.Sprintf("version=1\nprincipal_class=%d\nprincipal_ref=%d\nuid=self\n"+
-		"executable=%s\npublish=\nsubscribe=\nrequest=\nserve=%s\n",
-		class, ref, executable, serve)
+		"executable=%s\npublish=%s\nsubscribe=\nrequest=\nserve=%s\n",
+		class, ref, executable, publish, serve)
 	return os.WriteFile(path, []byte(body), 0o600)
+}
+
+func kindList(kinds ...uint32) string {
+	out := make([]string, len(kinds))
+	for i, kind := range kinds {
+		out[i] = strconv.FormatUint(uint64(kind), 10)
+	}
+	return strings.Join(out, ",")
 }
 
 // serveKinds lists DB1's event kinds. Derived from the family base rather than

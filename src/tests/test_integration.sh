@@ -447,9 +447,14 @@ install_db1_module() {
         python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
             --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
     fi
-    local serve="" ref=""
+    local serve="" ref="" publish="" subscribe=""
     if [ -r "$generated" ]; then
         serve=$(sed -n 's/^serve=//p' "$generated" || true)
+        # The change notifications too (ring D14). An empty publish= has the
+        # daemon refuse every announcement this module makes, so the work-item,
+        # delegation and learning-delivery wakes would go untested here.
+        publish=$(sed -n 's/^publish=//p' "$generated" || true)
+        subscribe=$(sed -n 's/^subscribe=//p' "$generated" || true)
         # From the file for the same reason the serve list is: a ref restated
         # here can drift from the one the module registers under, and the
         # failure that produces is a module nobody can reach.
@@ -469,8 +474,8 @@ principal_class=1
 principal_ref=${ref:-30}
 uid=self
 executable=$DB1_MODULE
-publish=
-subscribe=
+publish=$publish
+subscribe=$subscribe
 request=
 serve=$serve
 GRANT
