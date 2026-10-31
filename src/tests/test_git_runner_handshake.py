@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Delay runner registration and reject any Git dispatch before its ack."""
+"""Delay runner registration and reject any Git dispatch before its ack.
+
+Each CLI polls on a private channel ("runner:" + 32 hex) and names it on the
+Git call (X-Aimee-Runner), so the server hands that CLI's ops to that CLI and
+no other; a served CLI closes its channel when it is done."""
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -16,7 +21,8 @@ def exercise(served, poll_response=None):
     with tempfile.TemporaryDirectory(prefix="git-runner-handshake-") as tmp:
         target = Path(tmp) / "checkout"
         target.mkdir()
-        state = {"registered": False, "git_calls": 0, "early": False}
+        state = {"registered": False, "git_calls": 0, "early": False, "channels": set(),
+                 "call_channel": None, "closed": False}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -40,13 +46,20 @@ def exercise(served, poll_response=None):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
                 if self.path == "/v1/runner/poll":
-                    assert body["workspace_id"] == str(target)
+                    channel = body["workspace_id"]
+                    assert re.fullmatch(r"runner:[0-9a-f]{32}", channel), channel
+                    state["channels"].add(channel)
+                    if body.get("close"):
+                        state["closed"] = True
+                        self.reply({"ok": True, "closed": True})
+                        return
                     time.sleep(0.15)
                     state["registered"] = served
                     self.reply(poll_response if poll_response is not None else
                                {"ok": True, "have_op": False, "served": served})
                 elif body.get("tool") == "git_status":
                     state["git_calls"] += 1
+                    state["call_channel"] = self.headers.get("X-Aimee-Runner")
                     state["early"] |= not state["registered"]
                     self.reply({"content": [{"type": "text", "text": "handshake verified"}]})
                 else:
@@ -66,8 +79,11 @@ def exercise(served, poll_response=None):
             server.server_close()
             thread.join()
         assert not state["early"], "Git raced runner registration"
+        assert len(state["channels"]) <= 1, f"one CLI polled on several channels: {state['channels']}"
         if served:
             assert result.returncode == 0 and state["git_calls"] == 1, result.stderr + result.stdout
+            assert state["call_channel"] in state["channels"], "the Git call did not name its runner"
+            assert state["closed"], "a served CLI left its runner channel open"
         else:
             assert result.returncode != 0 and state["git_calls"] == 0, result.stderr + result.stdout
 

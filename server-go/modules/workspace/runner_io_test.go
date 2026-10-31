@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
+	"golang.org/x/sys/unix"
 )
 
 func ioRequest(op byte, id string, payload []byte) []byte {
@@ -303,5 +304,91 @@ func TestRegisteredWorkspaceWithoutPollerFailsPromptly(t *testing.T) {
 	point.lastPoll = time.Now().Add(-2 * time.Minute)
 	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != ring.ModuleStatusCapabilityAbsent {
 		t.Fatalf("stale runner status: %v", status)
+	}
+}
+
+const (
+	channelA = "runner:0123456789abcdef0123456789abcdef"
+	channelB = "runner:fedcba9876543210fedcba9876543210"
+)
+
+// An op sent on a client's channel is run by that client: not by another
+// client's channel, and not by a runner serving the tree itself. Before
+// channels every aimee command in the tree polled the tree's own id, so a push
+// could be claimed and run by another session's process, with its credentials.
+func TestRunnerChannelOpsReachOnlyTheirOwnClient(t *testing.T) {
+	reset()
+	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing()
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner},
+		runnerRequest(RunnerOpRegister, channelA)); status != ring.ModuleStatusOK {
+		t.Fatalf("register channel A: %d", status)
+	}
+	runnerFor(channelB) // another client's first poll opens its channel
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var got []byte
+	go func() {
+		defer wg.Done()
+		got, _ = io(IOOpSubmit, channelA, []byte("push"))
+	}()
+
+	// Neither the tree's runner nor another channel is handed the op, though it
+	// is waiting to be claimed while they poll.
+	time.Sleep(100 * time.Millisecond)
+	for _, other := range []string{"/srv/repo", channelB} {
+		var now unix.Timespec
+		if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+			t.Fatal(err)
+		}
+		deadline := uint64(now.Nano()) + uint64(200*time.Millisecond)
+		response, status := Handle(ring.ModuleInvocation{StageID: StageRunnerIO, DeadlineNS: deadline},
+			ioRequest(IOOpPoll, other, nil))
+		if status == ring.ModuleStatusOK {
+			t.Fatalf("%s claimed %q, an op sent on channel A", other, response)
+		}
+	}
+	var claimed []byte
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if next, status := io(IOOpPoll, channelA, nil); status == ring.ModuleStatusOK && len(next) > 0 {
+			claimed = next
+			break
+		}
+	}
+	if string(claimed) != "push" {
+		t.Fatalf("channel A claimed %q", claimed)
+	}
+	if _, status := io(IOOpRespond, channelA, []byte("pushed")); status != ring.ModuleStatusOK {
+		t.Fatalf("respond: %d", status)
+	}
+	wg.Wait()
+	if string(got) != "pushed" {
+		t.Fatalf("submitter got %q", got)
+	}
+}
+
+// A channel is a client's own: only its id names it, it never serves a path,
+// and closing it fails anything still waiting rather than stranding it.
+func TestRunnerChannelIsPrivateAndCloses(t *testing.T) {
+	reset()
+	for _, bad := range []string{"runner:", "runner:XYZ", "runner:0123456789ABCDEF0123456789ABCDEF"} {
+		if isRunnerChannel(bad) {
+			t.Fatalf("%q accepted as a channel", bad)
+		}
+	}
+	runnerFor(channelA)
+	if id := serverFor("/srv/repo/file"); id != "" {
+		t.Fatalf("a channel served a path: %q", id)
+	}
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRunner},
+		runnerRequest(RunnerOpUnregister, channelA)); status != ring.ModuleStatusOK {
+		t.Fatalf("close channel: %d", status)
+	}
+	runnersMu.Lock()
+	_, open := channels[channelA]
+	runnersMu.Unlock()
+	if open {
+		t.Fatal("closed channel still open")
 	}
 }

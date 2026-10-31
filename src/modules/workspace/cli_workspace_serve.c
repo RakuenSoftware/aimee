@@ -20,6 +20,8 @@
 #include "workspace_provider_detached.h"
 #include "util.h" /* safe_exec_capture: the client's own vcs coordinates */
 #include <aimee/workspace/client_diff.h>
+#include <aimee/workspace/module_api.h>
+#include <openssl/rand.h>
 #include "cJSON.h"
 
 #include <signal.h>
@@ -420,7 +422,24 @@ int cli_workspace_git_runner_start(const char *target)
       free(bearer);
       return -1;
    }
-   snprintf(g_git_runner_workspace, sizeof(g_git_runner_workspace), "%s", best);
+   /* Serve this command on a private channel, not the tree's own id. Every aimee
+    * command in the tree runs a runner like this one, so a shared id let another
+    * session's process claim this command's op and run it -- a push with that
+    * process's environment and credentials. The server routes this command's
+    * ops to the channel it names (X-Aimee-Runner); only this process polls it. */
+   unsigned char raw[16];
+   char hex[33];
+   if (RAND_bytes(raw, sizeof(raw)) != 1)
+   {
+      cJSON_Delete(list);
+      free(endpoint);
+      free(bearer);
+      return -1;
+   }
+   for (size_t i = 0; i < sizeof(raw); i++)
+      snprintf(hex + 2 * i, 3, "%02x", raw[i]);
+   snprintf(g_git_runner_workspace, sizeof(g_git_runner_workspace), "%s%s",
+            AIMEE_WS_RUNNER_CHANNEL_PREFIX, hex);
    snprintf(g_git_runner_endpoint, sizeof(g_git_runner_endpoint), "%s", endpoint);
    cJSON_Delete(list);
    free(endpoint);
@@ -433,6 +452,8 @@ int cli_workspace_git_runner_start(const char *target)
    serve_ctx_t initial = {
        NULL, g_git_runner_workspace, g_git_runner_endpoint, g_git_runner_bearer, 1, 0};
    (void)ws_runner_serve_once(serve_fetch, serve_post, &initial);
+   if (initial.registered)
+      cli_http_set_runner_channel(g_git_runner_workspace);
    if (!initial.registered)
    {
       free(g_git_runner_bearer);
@@ -475,6 +496,20 @@ void cli_workspace_git_runner_stop(void)
 #else
    (void)pthread_join(g_git_runner_thread, NULL);
 #endif
+   cli_http_set_runner_channel(NULL);
+   /* Close the channel, so a server op still waiting on it fails now. */
+   cJSON *close_req = cJSON_CreateObject();
+   if (close_req && cJSON_AddStringToObject(close_req, "workspace_id", g_git_runner_workspace) &&
+       cJSON_AddTrueToObject(close_req, "close"))
+   {
+      char *body = cJSON_PrintUnformatted(close_req);
+      int status = 0;
+      if (body)
+         cJSON_Delete(cli_http_request(g_git_runner_endpoint, "POST", "/v1/runner/poll", body,
+                                       g_git_runner_bearer, 5000, &status));
+      free(body);
+   }
+   cJSON_Delete(close_req);
    g_git_runner_active = 0;
    g_git_runner_workspace[0] = '\0';
    g_git_runner_endpoint[0] = '\0';

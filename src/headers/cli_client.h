@@ -194,6 +194,10 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
  * Returns 1 when a runner thread started, 0 when no detached runner is needed,
  * and -1 when the remote workspace registry could not be resolved. */
 void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void));
+/* Send `channel` as X-Aimee-Runner on every later request this process makes
+ * ("" or NULL stops). The server routes the request's detached-workspace ops
+ * to that runner channel, which only this process polls. */
+void cli_http_set_runner_channel(const char *channel);
 int cli_workspace_git_runner_start(const char *target);
 /* Create a clone's destination, register it as a detached workspace when none
  * covers it, and point the request's path/cwd at it. 0, or -1 with the reason
