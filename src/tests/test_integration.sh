@@ -2639,6 +2639,11 @@ else
     echo "FAIL: actual independently graded execution and scoped reuse"
     tail -c 16000 "$EXECUTION_GRADE_LOG"
     dump_server_log
+    # The tail above is whatever the daemon logged last. This check turns on the
+    # grade and its delivery, so show those lines wherever they fell.
+    echo "  grade, verification and delivery lines from $AIMEE_HOME/server.log:"
+    grep -E "learning\.recovery|verif|grade|projection|outcome" "$AIMEE_HOME/server.log" 2>/dev/null |
+        tail -n 80 | sed 's/^/    /' || true
     FAIL=$((FAIL + 1))
 fi
 
