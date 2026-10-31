@@ -32,6 +32,10 @@ static void expect(kb_workload_helper_result_t got, kb_workload_helper_result_t 
 }
 #define EXPECT(want, ...) expect(kb_workload_helper_invoke(__VA_ARGS__), want, __LINE__)
 
+/* Exchanges that do not test the deadline get the whole budget: a fork and exec
+ * under ASan on a loaded CI runner can take longer than a second. */
+#define EXCHANGE_MS KB_WORKLOAD_HELPER_TIMEOUT_MAX_MS
+
 int main(void)
 {
 #if !defined(__linux__)
@@ -58,7 +62,7 @@ int main(void)
    memset(response, 0xa5, sizeof(response));
    size_t response_len = 99;
    EXPECT(KB_WORKLOAD_HELPER_OK, fd, request, sizeof(request) - 1, response, sizeof(response),
-          &response_len, 1000);
+          &response_len, EXCHANGE_MS);
    assert(response_len == sizeof(request) - 1 && !memcmp(response, request, response_len));
 
    sigset_t sigpipe_set, old_mask, pending;
@@ -68,18 +72,33 @@ int main(void)
    assert(raise(SIGPIPE) == 0);
    response_len = 99;
    EXPECT(KB_WORKLOAD_HELPER_OK, fd, request, sizeof(request) - 1, response, sizeof(response),
-          &response_len, 1000);
+          &response_len, EXCHANGE_MS);
    assert(sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1);
    int received_signal = 0;
    assert(sigwait(&sigpipe_set, &received_signal) == 0 && received_signal == SIGPIPE);
    assert(pthread_sigmask(SIG_SETMASK, &old_mask, NULL) == 0);
+
+   /* A 1 ms deadline is usually missed while the helper runs, and sometimes
+    * only after it has finished. Either way the result is a timeout (or, on a
+    * fast machine, a completed exchange), never an unavailable helper. */
+   for (int attempt = 0; attempt < 200; ++attempt)
+   {
+      response_len = 99;
+      kb_workload_helper_result_t late = kb_workload_helper_invoke(
+          fd, request, sizeof(request) - 1, response, sizeof(response), &response_len, 1);
+      if (late != KB_WORKLOAD_HELPER_OK && late != KB_WORKLOAD_HELPER_TIMEOUT)
+         fprintf(stderr, "1 ms deadline, attempt %d: returned %d\n", attempt, (int)late);
+      assert(late == KB_WORKLOAD_HELPER_OK || late == KB_WORKLOAD_HELPER_TIMEOUT);
+      assert(late == KB_WORKLOAD_HELPER_OK || (response_len == 0 && response[0] == 0));
+   }
    close(fd);
 
    const char *env = trusted_fixture("AIMEE_TEST_TRUSTED_ENV", "/usr/bin/env", "/bin/env");
    assert(kb_workload_helper_open(env, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
-   EXPECT(KB_WORKLOAD_HELPER_OK, fd, NULL, 0, response, sizeof(response), &response_len, 1000);
+   EXPECT(KB_WORKLOAD_HELPER_OK, fd, NULL, 0, response, sizeof(response), &response_len,
+          EXCHANGE_MS);
    assert(response_len == 0); /* explicit empty envp */
    close(fd);
 
@@ -87,7 +106,7 @@ int main(void)
    assert(kb_workload_helper_open(yes, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
-   EXPECT(KB_WORKLOAD_HELPER_UNAVAILABLE, fd, NULL, 0, response, 8, &response_len, 1000);
+   EXPECT(KB_WORKLOAD_HELPER_UNAVAILABLE, fd, NULL, 0, response, 8, &response_len, EXCHANGE_MS);
    assert(response_len == 0);
    for (size_t i = 0; i < 8; ++i)
       assert(response[i] == 0);
@@ -106,7 +125,7 @@ int main(void)
       response_len = 99;
       kb_workload_helper_result_t closed_result =
           kb_workload_helper_invoke(fd, closed_request, sizeof(closed_request), response,
-                                    sizeof(response), &response_len, 1000);
+                                    sizeof(response), &response_len, EXCHANGE_MS);
       assert(closed_result == KB_WORKLOAD_HELPER_OK ||
              closed_result == KB_WORKLOAD_HELPER_UNAVAILABLE);
       observed_closed_pipe = closed_result == KB_WORKLOAD_HELPER_UNAVAILABLE;
