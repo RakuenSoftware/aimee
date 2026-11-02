@@ -147,7 +147,10 @@ def exercise_bootstrap(provider=None, register_status=200, poll_served=True,
                         self.reply(register_error if register_error is not None else
                                    {"error": "registration denied"}, register_status)
                 elif self.path == "/v1/runner/poll":
-                    assert body["workspace_id"] == str(target), body
+                    assert re.fullmatch(r"runner:[0-9a-f]{32}", body["workspace_id"]), body
+                    if body.get("close"):
+                        self.reply({"ok": True, "closed": True})
+                        return
                     state["ready"] = poll_served
                     state["events"].append("ready" if poll_served else "unserved")
                     self.reply({"ok": True, "have_op": False, "served": poll_served})
