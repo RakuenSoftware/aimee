@@ -81,20 +81,11 @@ int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, ch
  * bad arg / db error. pr_ref must be non-empty. */
 int db1_work_item_id_by_pr_ref(const char *pr_ref, char *out, size_t n);
 
-/* Record the per-work-item git worktree path (set when it is first created). */
-int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
 /* Cascade-abandon a parent's non-terminal foreach.workflow child slices when the
  * parent is stopped/deleted, so orphaned slices stop being scheduled (which would
  * otherwise loop and re-dispatch delegates forever). Returns the number of children
  * marked 'abandoned', or -1 on error. */
 int db1_work_item_abandon_children(const char *parent_id);
-/* Aggregate the terminal state of a parent's children (foreach.workflow fan-in).
- * Fills the counts (any may be NULL): total children, those in state 'accepted',
- * and those that reached a terminal state OTHER than accepted -- i.e. 'rejected' or
- * 'abandoned' ('failed', a slice that will never merge). Returns 0 on success, -1 on
- * error. A parent whose total==accepted (and total>0) has every slice merged; any
- * failed child means a slice will not merge and the parent must park for a human. */
-int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed);
 /* Atomic intake-auth submit (POST /v1/dev/submit): enforce the per-principal
  * concurrency (max_active) + rate (rate_max within rate_secs) caps and, if both
  * pass, create the autonomous work item, bind the submitter, and write the

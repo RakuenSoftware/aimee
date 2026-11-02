@@ -91,14 +91,6 @@ int db1_work_item_id_by_pr_ref(const char *pr_ref, char *out, size_t n)
    return read_result(wire_status, out);
 }
 
-int db1_work_item_set_worktree(const char *work_item_id, const char *worktree)
-{
-   if (!work_item_id || !work_item_id[0])
-      return -1;
-   const char *fields[] = {work_item_id, worktree ? worktree : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_SET_WORKTREE, fields, 2, NULL, NULL, 0, NULL));
-}
-
 int db1_work_item_abandon_children(const char *parent_id)
 {
    if (!parent_id || !parent_id[0])
@@ -111,27 +103,6 @@ int db1_work_item_abandon_children(const char *parent_id)
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed)
-{
-   if (!parent_id || !parent_id[0] || !total || !accepted || !failed)
-      return -1;
-   const char *fields[] = {parent_id};
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   char *const values[] = {slot0, slot1, slot2};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WORK_ITEM_CHILD_COUNTS, fields, 1, values, caps, 3, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   *total = (int)strtol(slot0, NULL, 10);
-   *accepted = (int)strtol(slot1, NULL, 10);
-   *failed = (int)strtol(slot2, NULL, 10);
-   return 0;
 }
 
 int db1_work_item_submit_capped(const char *work_item_id, const char *repo, const char *proposal_path, const char *workflow_name, const char *workflow_version, const char *start_stage, const char *submitter, int max_active, int rate_max, int rate_secs)

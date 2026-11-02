@@ -155,7 +155,7 @@ path_scan 'fts_search_via_vector|MAX_FTS_RESULTS|fts_res|n_fts|fts_weight|weight
   "KB/directive/query-plan surfaces expose stale FTS vocabulary" \
   src/kb/kb.c src/headers/config.h src/headers/memory.h src/headers/aimee.h \
   src/modules/memory/memory_directives.c src/cmd_memory_core.c src/modules/memory/memory_core_search.inc \
-  src/modules/kb/c/epistemic_directives.h src/modules/kb/c/epistemic_directives.c src/tests/test_kb.c
+  src/modules/kb/c/epistemic_directives.h src/modules/kb/c/epistemic_directives.c
 path_scan 'use sqlite|sqlite WAL' \
   "SQLite-named compute comments outside src/db1" \
   src/server/server.c

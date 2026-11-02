@@ -101,20 +101,6 @@ func TestEagerTinyCapStillBounded(t *testing.T) {
 	}
 }
 
-func TestToolOutputCapClamp(t *testing.T) {
-	cases := []struct{ in, want int }{
-		{0, AgentToolOutputMax},
-		{-1, AgentToolOutputMax},
-		{1024, 1024},
-		{AgentToolOutputRawMax + 1, AgentToolOutputRawMax},
-	}
-	for _, c := range cases {
-		if got := ToolOutputCapClamp(c.in); got != c.want {
-			t.Errorf("ToolOutputCapClamp(%d) = %d, want %d", c.in, got, c.want)
-		}
-	}
-}
-
 // Per-tool overrides reach the shared core through this seam.
 func TestEagerPerToolDisable(t *testing.T) {
 	cfg := eagerCfg()

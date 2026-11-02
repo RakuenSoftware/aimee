@@ -185,15 +185,6 @@ size_t text_sanitize_utf8(char *s);
  * modifies the input. */
 int text_is_valid_utf8(const char *s);
 
-/* Basic Porter-like stemming. Result written to buf. Returns buf. */
-char *stem_word(const char *word, char *buf, size_t buf_len);
-
-/* Canonical fingerprint: normalize + stem + sort words. */
-char *canonical_fingerprint(const char *text, char *buf, size_t buf_len);
-
-/* Word-set Jaccard similarity. */
-double word_similarity(const char *a, const char *b);
-
 /* POSIX-like shell token splitting. Returns token count.
  * Tokens written to out array (max max_tokens). Caller frees each token. */
 int shlex_split(const char *command, char **out, int max_tokens);
@@ -211,9 +202,6 @@ int tokenize_for_search(const char *text, char **out, int max_tokens);
 
 /* Conservative detector for low-information acknowledgement chatter. */
 int is_noise_utterance(const char *text);
-
-/* Expand terms for lexical indexing (includes camelCase/snake_case splits). */
-char *expand_terms_for_search(char **terms, int count, char *buf, size_t buf_len);
 
 /* Split camelCase into parts. Returns part count. */
 int split_camel_case(const char *s, char **out, int max_parts);

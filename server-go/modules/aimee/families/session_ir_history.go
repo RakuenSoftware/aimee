@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	canonical "github.com/JBailes/aimee/server-go/ir"
 	"sort"
 	"strconv"
 	"strings"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -153,22 +154,6 @@ func sessionIRRunningHistoryLoad(ctx context.Context, q store.Queryer, f []strin
 		return store.StatusInvalid, nil, nil
 	}
 	return sessionIRHistoryProject(ctx, q, []string{f[0], "primary", f[1], f[2]}, true)
-}
-
-// A tool result can commit while the provider stream is still open. Retain the
-// assistant message's first canonical observation order rather than the later
-// full-snapshot arrival order. Unmatched deltas never manufacture messages.
-func orderedIRPending(messages []json.RawMessage, order []uint64) []json.RawMessage {
-	indices := make([]int, len(messages))
-	for i := range indices {
-		indices[i] = i
-	}
-	sort.SliceStable(indices, func(i, j int) bool { return order[indices[i]] < order[indices[j]] })
-	result := make([]json.RawMessage, len(messages))
-	for i, index := range indices {
-		result[i] = messages[index]
-	}
-	return result
 }
 
 func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, running bool) (uint32, []string, error) {

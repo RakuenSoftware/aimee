@@ -42,12 +42,23 @@ RULES = Path("src/tests/Rules.mk")
 # Shrinking this list is the fix. An entry that stops being orphaned must be
 # removed, which the check below enforces so the list cannot rot into a place
 # things hide.
-UNBUILT_SOURCES = {
-    "test_bus_plugin_process.c",
-    "test_bus_plugin_scale.c",
-    "test_identity_authority_facade_pg.c",
-    "test_kb_mgmt_token_authority_client_commit.c",
-    "test_kb_mgmt_token_authority_daemon_stop.c",
+def source_is_named(stem: str, rules: str) -> bool:
+    """Whether Rules.mk names this test source as a whole word. A substring
+    test let test_kb.c hide behind every test_kb_* target and test_curiosity.c
+    behind test_curiosity_resolve."""
+    return re.search(r"(?<![\w-])" + re.escape(stem) + r"(?:\.[co]\b|(?![\w-]))", rules) is not None
+
+
+UNBUILT_SOURCES: set[str] = set()
+
+# Test sources a script builds and runs instead of a Rules.mk target. Each entry
+# names the script; the check below requires that the script names the test and
+# that a make target runs the script, so an entry cannot outlive either.
+SCRIPT_BUILT = {
+    "test_kb_mgmt_token_authority_client_commit.c":
+        "scripts/run-p5c2d-token-authority-regressions.sh",
+    "test_kb_mgmt_token_authority_daemon_stop.c":
+        "scripts/run-p5c2d-token-authority-regressions.sh",
 }
 
 # Targets the ordinary suite cannot run, and the reason. A -pg target needs a
@@ -208,10 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     # and nothing compiles it. That is a weaker position than an unrun target,
     # which at least still builds.
     sources = sorted((args.root / "src/tests").glob("test_*.c"))
-    orphans = sorted(
-        path.name for path in sources
-        if path.stem not in joined and path.name not in joined
-    )
+    named = lambda stem: source_is_named(stem, joined)
+    makefile = (args.root / "src/Makefile").read_text(encoding="utf-8")
+    for name, script in SCRIPT_BUILT.items():
+        body = (args.root / script).read_text(encoding="utf-8") if (args.root / script).is_file() else ""
+        if name not in body or Path(script).name not in makefile:
+            return fail(f"SCRIPT_BUILT entry {name}: {script} must build it and a make "
+                        "target must run that script")
+    orphans = sorted(path.name for path in sources
+                     if not named(path.stem) and path.name not in SCRIPT_BUILT)
     unexpected = [name for name in orphans if name not in UNBUILT_SOURCES]
     if unexpected:
         listing = "\n".join(f"    src/tests/{name}" for name in unexpected)

@@ -222,76 +222,6 @@ static void kbc_memory_add_scope_context(cJSON *req)
    kb_client_memory_scope_context_apply(req);
 }
 
-/* Single-record readers use 1 for a valid miss and -1 for an unavailable or
- * malformed result. Keeping those outcomes distinct prevents callers from
- * rendering a stale thread-local dependency status as a genuine not-found. */
-static int kbc_memory_single_miss(const cJSON *resp)
-{
-   const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
-   return (cJSON_IsString(status) && (strcmp(status->valuestring, "empty") == 0 ||
-                                      strcmp(status->valuestring, "not_found") == 0)) ||
-          (cJSON_IsString(message) && strstr(message->valuestring, "not found") != NULL);
-}
-
-/* Owner-provided decimal IDs preserve full int64 tokens across cJSON. Older
- * peers are accepted only when their numeric token is exactly representable. */
-int64_t kbc_memory_response_id(const cJSON *object)
-{
-   const cJSON *text = cJSON_GetObjectItemCaseSensitive(object, "id_text");
-   if (text)
-   {
-      const char *raw = cJSON_GetStringValue(text);
-      char *end = NULL;
-      int64_t id = 0;
-      return kbc_memory_activation_integer(raw, &end, &id) && end && !*end ? id : 0;
-   }
-   int64_t id = 0;
-   return jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(object, "id"), &id) && id > 0 ? id : 0;
-}
-
-void kbc_memory_row_from_json(cJSON *f, memory_t *m)
-{
-   memset(m, 0, sizeof(*m));
-   cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(f, "tier");
-   cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(f, "kind");
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(f, "key");
-   cJSON *headline_j = cJSON_GetObjectItemCaseSensitive(f, "headline");
-   cJSON *content_j = cJSON_GetObjectItemCaseSensitive(f, "content");
-   cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(f, "use_cases");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
-   cJSON *uses_j = cJSON_GetObjectItemCaseSensitive(f, "use_count");
-   cJSON *last_j = cJSON_GetObjectItemCaseSensitive(f, "last_used_at");
-   cJSON *created_j = cJSON_GetObjectItemCaseSensitive(f, "created_at");
-   cJSON *updated_j = cJSON_GetObjectItemCaseSensitive(f, "updated_at");
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(f, "source_session");
-   m->id = kbc_memory_response_id(f);
-   if (cJSON_IsString(tier_j))
-      snprintf(m->tier, sizeof(m->tier), "%s", tier_j->valuestring);
-   if (cJSON_IsString(kind_j))
-      snprintf(m->kind, sizeof(m->kind), "%s", kind_j->valuestring);
-   if (cJSON_IsString(key_j))
-      snprintf(m->key, sizeof(m->key), "%s", key_j->valuestring);
-   if (cJSON_IsString(headline_j))
-      snprintf(m->headline, sizeof(m->headline), "%s", headline_j->valuestring);
-   if (cJSON_IsString(content_j))
-      snprintf(m->content, sizeof(m->content), "%s", content_j->valuestring);
-   if (cJSON_IsString(use_cases_j))
-      snprintf(m->use_cases, sizeof(m->use_cases), "%s", use_cases_j->valuestring);
-   if (cJSON_IsNumber(conf_j))
-      m->confidence = conf_j->valuedouble;
-   if (cJSON_IsNumber(uses_j))
-      m->use_count = (int)uses_j->valuedouble;
-   if (cJSON_IsString(last_j))
-      snprintf(m->last_used_at, sizeof(m->last_used_at), "%s", last_j->valuestring);
-   if (cJSON_IsString(created_j))
-      snprintf(m->created_at, sizeof(m->created_at), "%s", created_j->valuestring);
-   if (cJSON_IsString(updated_j))
-      snprintf(m->updated_at, sizeof(m->updated_at), "%s", updated_j->valuestring);
-   if (cJSON_IsString(src_j))
-      snprintf(m->source_session, sizeof(m->source_session), "%s", src_j->valuestring);
-}
-
 static char *kb_client_v1_session_briefing_section(const char *method, int limit)
 {
    cJSON *req = cJSON_CreateObject();
@@ -309,28 +239,6 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
    char *out = NULL;
    if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(body) &&
        body->valuestring[0])
-      out = strdup(body->valuestring);
-   cJSON_Delete(resp);
-   return out;
-}
-
-char *kb_client_memory_assemble_context(const char *task_hint)
-{
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (task_hint && task_hint[0])
-      cJSON_AddStringToObject(req, "task_hint", task_hint);
-   char *json = kb_v1_action_request("memory.assemble_context", req);
-   if (!json)
-      return NULL;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "context");
-   char *out = NULL;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(body))
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
@@ -531,80 +439,6 @@ char *kb_client_session_briefing_commitments(int limit)
 char *kb_client_session_briefing_directives(int limit)
 {
    return kb_client_v1_session_briefing_section("session_briefing.directives", limit);
-}
-
-int kb_client_memory_get(int64_t id, memory_t *out)
-{
-   return kb_client_memory_get_as_of(id, NULL, out, NULL);
-}
-
-int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
-                                    kb_valid_at_t *verdict)
-{
-   if (verdict)
-      *verdict = KB_VALID_AT_UNASKED;
-   if (!out)
-      return -1;
-   *out = NULL;
-
-   cJSON *req = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(req);
-   cJSON_AddItemToObject(req, "id", jo_i64_value_exact(id));
-   /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
-    * receives a non-empty as_of, so an empty one here would be indistinguishable
-    * from not asking -- and this omission is what left `memory get --as-of`
-    * marshalling the flag correctly and then dropping it on this hop. */
-   if (as_of && as_of[0])
-      cJSON_AddStringToObject(req, "as_of", as_of);
-   char *json = kb_v1_action_request("memory.get", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = json_wire_parse_exact_integers(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      int miss = kbc_memory_single_miss(resp);
-      cJSON_Delete(resp);
-      return miss ? 1 : -1;
-   }
-
-   cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
-   if (!cJSON_IsObject(mem_j))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   /* aimee-kb answers with a bool, or the string "unknown" when it could not
-    * tell. A missing key means it was not asked. */
-   if (verdict)
-   {
-      cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");
-      if (cJSON_IsString(v))
-         *verdict = KB_VALID_AT_UNKNOWN;
-      else if (cJSON_IsBool(v))
-         *verdict = cJSON_IsTrue(v) ? KB_VALID_AT_YES : KB_VALID_AT_NO;
-   }
-   *out = cJSON_DetachItemFromObjectCaseSensitive(resp, "memory");
-   cJSON_Delete(resp);
-   return *out ? 0 : -1;
-}
-
-int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_valid_at_t *verdict)
-{
-   if (!out)
-      return -1;
-   cJSON *mem_j = NULL;
-   int rc = kb_client_memory_get_json_as_of(id, as_of, &mem_j, verdict);
-   if (rc != 0)
-      return rc;
-   kbc_memory_row_from_json(mem_j, out);
-   cJSON_Delete(mem_j);
-   return out->id > 0 ? 0 : -1;
 }
 
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,

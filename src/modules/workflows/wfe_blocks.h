@@ -7,22 +7,6 @@
 #include <stddef.h>
 #include <aimee/ir/aimee_ir.h>
 
-/* Register the real executors for every non-gate block type. Gates are
- * registered by their own slices (W4 human, W5 roundtable). */
-void wfe_register_default_executors(void);
-
-/* Compute a frozen diff for the implementation gate. base_ref defaults to the
- * merge-base of HEAD against `base_branch` (e.g. "origin/testing" or "main").
- * Fills the short SHAs and the sha256 hex of the cumulative diff. Returns 0 on
- * success. Standalone (no engine ctx) so it is directly unit-testable. */
-/* source.archive git half (unit-testable): move the file under from/ whose HEAD
- * blob is `sha` into to/ and commit. 1 = moved+committed, 0 = nothing to do,
- * -1 = git failure. */
-int wfe_source_archive_move(const char *wd, const char *sha, const char *from, const char *to);
-
-int wfe_git_freeze(const char *repo_dir, const char *base_branch, char out_base_sha[64],
-                   char out_head_sha[64], char out_diff_hash[65], char *err, size_t errlen);
-
 /* ---- Forge seam for the safety blocks (gate.ci / check.mergeable / merge).
  * The default provider calls `gh` and is integration-gated; tests inject a mock
  * so the state-mapping + idempotent-merge logic is unit-testable. ---- */
@@ -136,58 +120,6 @@ typedef struct
    int (*judge)(const char *workdir, const char *lens, char *out_verdict, size_t n);
 } wfe_judge_provider_t;
 
-/* The implement ADVERSARIAL gate (PC3): with AIMEE_AUTONOMY_SKEPTICS=K>0, run a
- * reviewer + K skeptic judgments; accept (1) only if the reviewer did not refute AND
- * FEWER THAN HALF the skeptics refuted (an exact tie for even K REJECTS — safety bias;
- * i.e. accept iff refutes*2 < K). K==0 (a valid decimal >= 0, else a WARN + off) -> 1
- * (tier off, unchanged behavior). K>0 with no judge provider / an unrunnable /
- * unparseable / non-boolean verdict -> 0 (fail closed). Exposed for the unit test. */
-int wfe_implement_adversarial_ok(const char *workdir);
-
-/* The implement verify gate: 1 = advance ONLY when the top-level verdict is an
- * explicit "passed"; 0 = block in every other case (no provider, gate-unrunnable,
- * unparseable, or any non-pass verdict) -> FAIL CLOSED. Exposed for the unit test. */
-int wfe_implement_verify_ok(const char *workdir);
-
-/* The TDD RED gate: after the test author commits (implement node `tdd: true`), a
- * genuine red step must leave at least one FAILING test — the change must NOT
- * already pass. Returns 1 to proceed to the GREEN (implementer) step, 0 to loop
- * (re-run the test author). Cases:
- *   - no verify provider installed -> 1 (cannot enforce mechanically; proceed, the
- *     same drivable-without-a-provider stance as the rest of implement),
- *   - a produced verdict that is anything OTHER than "passed" -> 1 (a real red),
- *   - an explicit "passed" verdict (tests pass / none were added), a gate that
- *     could not run, or an unparseable verdict -> 0 (red unconfirmed). It is the
- *     logical inverse of wfe_implement_verify_ok in the provider-present cases.
- * Exposed for the unit test. */
-int wfe_tdd_red_ok(const char *workdir);
-
-/* TDD anti-deletion guard: after the GREEN implementer commits, every file the RED
- * commit `red_sha` ADDED or MODIFIED (its tests) must still exist at HEAD — GREEN
- * makes them pass, it does not delete them. Returns 1 if all survive OR the check
- * is not applicable (empty args, or git cannot resolve the commit — the mandatory
- * freeze + aggregate verify remain the backstop), 0 if GREEN deleted a red-authored
- * file. Best-effort by design so a non-git/degraded workdir stays drivable. Exposed
- * for the unit test. */
-int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
-
-/* Add/add pre-check at freeze. Returns 1 (and fills `path_out`) when this slice
- * CREATES a path that already exists on `base_ref` with DIFFERENT content — the
- * shape that cannot be merged once a sibling slice has landed the same file, and
- * that no rebase resolves. Identical content is not flagged: git merges an
- * add/add cleanly when both sides added the same bytes.
- *
- * Compared against the current feature head rather than against sibling slices,
- * which is race-free — it reads a branch that already reflects whatever merged,
- * so there is no shared mutable state to serialise. It therefore fires from the
- * second colliding slice onward; the first is not yet a collision.
- *
- * Best-effort like the guard above: any git failure returns 0, leaving the merge
- * to surface it, rather than failing a slice on a command we could not run.
- * Exposed for the unit test. */
-int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
-                                  char *path_out, size_t path_cap);
-
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet
  * (the "slice" workflow: implement -> freeze -> roundtable -> sub-PR -> green CI ->
@@ -210,23 +142,5 @@ typedef struct
    int (*spawn)(const char *work_item_id, const char *child_workflow, const char *packets_path,
                 int max_children, char *err, size_t errlen);
 } wfe_foreach_provider_t;
-
-/* ---- per-work-item git worktree isolation (F2) ----
- * Create/return a locked per-work-item worktree (aimee/wi/<id>) so concurrent
- * autonomous runs don't share one checkout; tear it down on terminal. Exposed for
- * the unit test. ensure() returns 0 + out_path on success, -1 on any failure (the
- * caller falls back to the shared repo dir). */
-int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
-                        const char *base, char *out_path, size_t n);
-
-/* Orphan GC: reap wfe-worktrees/<id> dirs that no LIVE (non-terminal) work item
- * owns — a vanished row (deleted item) or a terminal row whose terminal-cleanup
- * was missed would otherwise strand a full git worktree (~thousands of inodes)
- * forever. Only dirs older than `grace_secs` are reaped (grace_secs <= 0 reaps
- * immediately), so an in-flight worktree mid-creation is never raced. Force-removes
- * the worktree + its branch + lock, prunes git's admin refs, and clears any stale
- * DB worktree column. Returns the number reaped. Belt-and-suspenders to the
- * terminal-cleanup path (wfe_autonomy_cleanup_worktree / scheduler sweep). */
-int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs);
 
 #endif /* DEC_WFE_BLOCKS_H */

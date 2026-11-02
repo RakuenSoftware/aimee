@@ -141,20 +141,6 @@ func TestGWReplaceMessages(t *testing.T) {
 	}
 }
 
-func TestGWProvenance(t *testing.T) {
-	st := &ReduceState{}
-	GWProvenanceMarkReduced(st)
-	if !st.Reduced {
-		t.Error("mark did not set provenance")
-	}
-	GWProvenanceClear(st)
-	if st.Reduced {
-		t.Error("clear did not reset provenance")
-	}
-	GWProvenanceMarkReduced(nil) // must not panic
-	GWProvenanceClear(nil)
-}
-
 func TestGWBypassReasonStrings(t *testing.T) {
 	cases := map[GWBypassReason]string{
 		GWBypassNone: "none", GWBypassNoOp: "no_op",

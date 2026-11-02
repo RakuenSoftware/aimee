@@ -629,8 +629,11 @@ def activate_embedding_generation(kb, check, version):
                 if type(indexed.get(field)) is bool:
                     diagnostic[field] = indexed[field]
             (kb.output / 'typed-index-state.json').write_text(json.dumps(diagnostic, indent=2) + '\n')
-            check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
-                  and not indexed.get('failed', 0))
+            indexing_ok = code == 200 and indexed.get('status') == 'ok' and not indexed.get('failed', 0)
+            if not indexing_ok:
+                # The same fixed fields as the evidence file, so the log says why.
+                print('typed fixture indexing state: ' + json.dumps(diagnostic, sort_keys=True), flush=True)
+            check('Typed fixture indexing succeeds', indexing_ok)
             if indexed.get('ready') is True:
                 break
             if time.monotonic() >= deadline:

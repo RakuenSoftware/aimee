@@ -40,7 +40,6 @@ typedef struct
 } guardrail_event_row_t;
 
 int db1_guardrail_event_insert(const guardrail_event_t *e);
-int db1_guardrail_event_counts_7d(guardrail_event_counts_t *out);
 int db1_guardrail_event_session_advisory_count(const char *session_id, int *out);
 
 #endif /* DEC_GUARDRAIL_EVENTS_H */

@@ -389,11 +389,6 @@
     {
       "make": true,
       "module": "roundtable",
-      "test": "src/tests/test_roundtable_chair.c"
-    },
-    {
-      "make": true,
-      "module": "roundtable",
       "test": "src/tests/test_roundtable_pipeline_chunk.c"
     },
     {
@@ -410,11 +405,6 @@
       "make": true,
       "module": "roundtable",
       "test": "src/tests/test_roundtable_seat_resolve.c"
-    },
-    {
-      "make": true,
-      "module": "roundtable",
-      "test": "src/tests/test_roundtable_verify.c"
     },
     {
       "make": true,
@@ -564,11 +554,6 @@
     {
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_blocks.c"
-    },
-    {
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_deliver.c"
     },
     {
@@ -605,16 +590,6 @@
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_native_gate.c"
-    },
-    {
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_panel_roundtable.c"
-    },
-    {
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_replay_worktree.c"
     },
     {
       "make": true,

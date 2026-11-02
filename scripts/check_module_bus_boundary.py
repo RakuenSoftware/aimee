@@ -37,7 +37,6 @@ IR_SHARED_TYPE = {
     # the resulting roadmap/verdict remains its own domain artifact.
     # Ensemble/chair model continuations retain the original canonical request.
     ("src/modules/roundtable/ensemble_request.h", "aimee/ir/aimee_ir.h"),
-    ("src/modules/roundtable/roundtable_chair.h", "aimee/ir/aimee_ir.h"),
     # Trial and delegate callbacks exchange model I/O, not peer service policy.
     ("src/modules/skills/include/aimee/skills/skill.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/workflows/wfe_blocks.h", "aimee/ir/aimee_ir.h"),
@@ -170,7 +169,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/tools/agent_tools_dispatch.c", "kb_client/kb_client.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "lsp/lsp.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "sandbox/sandbox_learned.h"),
-    ("src/modules/workflows/wfe_panel_roundtable.h", "roundtable/delegate_ensemble.h"),
     ("src/modules/workspace/workspace.c", "kb_client/kb_client.h"),
 }
 # Native knowledge algorithms were already linked by the KB host. Their exact
