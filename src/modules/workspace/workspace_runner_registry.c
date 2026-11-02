@@ -128,6 +128,18 @@ int ws_runner_registry_register_configured(const char *workspace)
    return 0;
 }
 
+int ws_runner_registry_announce(const char *id)
+{
+   return runner_ask(AIMEE_WS_RUNNER_OP_REGISTER, id, NULL, 0) < 0 ? -1 : 0;
+}
+
+int ws_runner_registry_close_channel(const char *channel)
+{
+   if (!aimee_ws_runner_channel_valid(channel))
+      return -1;
+   return runner_ask(AIMEE_WS_RUNNER_OP_UNREGISTER, channel, NULL, 0) < 0 ? -1 : 0;
+}
+
 /* One handoff op, carrying `payload` and returning the module's chunk. The
  * caller owns *out (malloc'd) when this returns 0 and `out` is non-NULL. */
 int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payload_len, char **out,

@@ -44,9 +44,10 @@ int agent_admission_reap_idle(int seconds)
    (void)seconds;
    abort();
 }
-int delegate_backend_docker_reap_aged(int seconds)
+int delegate_backend_docker_reap_aged_next(int seconds, time_t *next_due)
 {
    (void)seconds;
+   (void)next_due;
    abort();
 }
 

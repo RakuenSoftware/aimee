@@ -30,6 +30,10 @@ def main() -> int:
         # so it is a Go module with source and a repository, but not a row here.
         expected_spawned = [name for name, row in contracts.items()
                             if row.get("runtime") == "go" and not row.get("hosted_by")]
+        # The ring's telemetry exporter is the same module runtime under its own
+        # name, spawned in every placement, though it serves no stage.
+        expected_spawned.append(json.loads(exporter.process_contracts.CONTRACTS.read_text(
+            encoding="utf-8"))["telemetry"]["id"])
         # Every module process is Go; the C core is only their caller. A
         # contract naming any other runtime is a regression to the retired C
         # module processes, which the exporter no longer knows how to build.

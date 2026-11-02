@@ -13,6 +13,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -437,6 +438,11 @@ static int queue_durable(const char *action, const char *subject, const char *ve
    g.durable_tail = p;
    atomic_fetch_add(&g.durable_pending_count, 1);
    pthread_mutex_unlock(&durable_lock);
+   /* The writer sleeps until told there is work; tell it. Signalled under
+    * writer_lock so a writer that has just found the count zero cannot miss it. */
+   pthread_mutex_lock(&g.writer_lock);
+   pthread_cond_signal(&g.writer_ready);
+   pthread_mutex_unlock(&g.writer_lock);
    return 1;
 }
 
@@ -565,17 +571,26 @@ static void *guardrail_writer_main(void *arg)
       pthread_mutex_lock(&g.writer_lock);
       if (g.writer_count == 0 && !atomic_load(&g.writer_finish))
       {
-         /* A timed wait also services capture rows queued before writer startup
-          * and retries an unavailable store without blocking the bus consumer. */
-         struct timespec wake;
-         clock_gettime(CLOCK_REALTIME, &wake);
-         wake.tv_nsec += 100000000;
-         if (wake.tv_nsec >= 1000000000)
+         /* Nothing queued: sleep until queue_durable or a guardrail event says
+          * otherwise. Rows held back because the store was unavailable are
+          * retried at their deadline, without a timer while there are none --
+          * this used to wake ten times a second to find nothing. */
+         if (!atomic_load(&g.durable_pending_count))
+            pthread_cond_wait(&g.writer_ready, &g.writer_lock);
+         else
          {
-            wake.tv_sec++;
-            wake.tv_nsec -= 1000000000;
+            uint64_t now = ouro_runtime_monotonic_ns();
+            uint64_t retry = g.durable_retry_after_ns;
+            if (retry > now)
+            {
+               struct timespec wake;
+               clock_gettime(CLOCK_REALTIME, &wake);
+               uint64_t ns = (uint64_t)wake.tv_nsec + (retry - now);
+               wake.tv_sec += (time_t)(ns / 1000000000ull);
+               wake.tv_nsec = (long)(ns % 1000000000ull);
+               pthread_cond_timedwait(&g.writer_ready, &g.writer_lock, &wake);
+            }
          }
-         pthread_cond_timedwait(&g.writer_ready, &g.writer_lock, &wake);
       }
       uint8_t payload[AB_GUARDRAIL_MAX];
       uint32_t len = 0;
@@ -641,6 +656,16 @@ static void guardrail_writer_finish(void)
 
 /* ---------------------------------------------------------- consumer ----- */
 
+/* Notification handlers the daemon registered (obs_bus_on_notification). */
+static struct
+{
+   uint32_t kind;
+   obs_bus_notification_fn fn;
+   void *ctx;
+} notifications[OBS_BUS_MAX_NOTIFICATIONS];
+static size_t notification_count;
+static int deliver_notification(const ouro_event_t *ev);
+
 static uint32_t drain(void)
 {
    uint32_t n = 0;
@@ -682,7 +707,10 @@ static uint32_t drain(void)
             n++; /* accepted into the durable retry queue */
       }
       else
+      {
+         (void)deliver_notification(&ev);
          continue;
+      }
    }
    return n;
 }
@@ -775,7 +803,7 @@ static void capture_flush(void)
  * pruned on start — so the streams do not accumulate without limit. */
 #define AB_CAP_PREFIX "audit-bus-capture-"
 #define AB_CAP_SUFFIX ".aimeecap"
-#define AB_CAP_KEEP   16
+#define AB_CAP_KEEP   4
 
 static int cmp_str_desc(const void *a, const void *b)
 {
@@ -917,6 +945,12 @@ void obs_bus_record_loss(void *ctx, const ouro_frame_t *frame, const uint8_t *pa
    }
 }
 
+/* Longest the consumer sleeps on the host doorbell with nothing to route while
+ * some admitted client is heartbeat-reaped. Inside the 30s reap window, with the
+ * reap itself every 7.5s. When every client is bound to its process (ring D15),
+ * the ring releases a dead one itself and the consumer sleeps until woken. */
+#define AB_IDLE_WAIT_MS 5000
+
 static void *consumer_main(void *arg)
 {
    (void)arg;
@@ -950,13 +984,31 @@ static void *consumer_main(void *arg)
          capture_flush();
       if (n == 0 && routed == 0)
       {
-         struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
-         nanosleep(&nap, NULL);
-         if (nap_ns < nap_max_ns)
+         /* Sleep on the host doorbell (ring D13) until a client publishes, a
+          * consumer frees room a held producer needs, or stop wakes it. The
+          * re-check of every ring must hold host_lock, because attach and reap
+          * take it on other threads; the sleep must not. The timeout keeps
+          * heartbeats, reaping and the capture flush inside their windows. */
+         pthread_mutex_lock(&g.host_lock);
+         int begun = ouro_host_wait_begin(&g.host);
+         int reaping = g.runtime && ouro_runtime_maintenance_due(g.runtime);
+         pthread_mutex_unlock(&g.host_lock);
+         if (begun == 0)
          {
-            nap_ns *= 2;
-            if (nap_ns > nap_max_ns)
-               nap_ns = nap_max_ns;
+            struct pollfd bell = {.fd = ouro_host_doorbell_fd(&g.host), .events = POLLIN};
+            (void)poll(&bell, 1, reaping ? AB_IDLE_WAIT_MS : -1);
+            ouro_host_wait_end(&g.host);
+         }
+         else if (begun < 0)
+         {
+            struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
+            nanosleep(&nap, NULL);
+            if (nap_ns < nap_max_ns)
+            {
+               nap_ns *= 2;
+               if (nap_ns > nap_max_ns)
+                  nap_ns = nap_max_ns;
+            }
          }
       }
       else
@@ -1047,6 +1099,9 @@ static void module_service_stop_locked(obs_bus_module_service_t *service)
    if (service->running)
    {
       atomic_store_explicit(&service->stop, 1, memory_order_release);
+      /* The loop sleeps on its doorbell with no timeout: this attach is
+       * process-bound (D15), so only the doorbell can make it see `stop`. */
+      ouro_client_interrupt(&service->bus);
       pthread_join(service->thread, NULL);
       service->running = 0;
    }
@@ -1159,6 +1214,18 @@ static int start_locked(void)
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
+   /* Every event leaves the host the moment it is stamped (ring D16): the host
+    * writes its content-free record before the tap runs, and the exporter
+    * process the module grants name (telemetry=yes) sends it to the collector.
+    * Without the ring that guarantee does not hold, so neither does the bus. */
+   if (ouro_host_telemetry_enable(&g.host, 0) != OURO_HOST_OK)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "ring telemetry could not be created; the bus will not start");
+      ouro_host_destroy(&g.host);
+      pthread_mutex_destroy(&g.host_lock);
+      pthread_mutex_destroy(&g.pub_lock);
+      return -1;
+   }
    ouro_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
    /* The ring's module client pool checks a client out per call and bounds the
     * wait for one by the call's own deadline. */
@@ -1194,6 +1261,8 @@ static int start_locked(void)
    if (sinks.guardrail)
       ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
    ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_DURABILITY_EVENT);
+   for (size_t i = 0; i < notification_count; i++)
+      ouro_host_subscribe(&g.host, g.consumer.reply.handle_id, notifications[i].kind);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -1599,6 +1668,8 @@ static void governance_tap(void *ctx, const ouro_frame_t *frame, const uint8_t *
    }
 }
 
+static void record_outcome(uint32_t event_kind, ouro_module_call_result_t result);
+
 ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
@@ -1622,9 +1693,81 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
        &g.module_pool, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
        response_body, response_capacity, response_len, module_call_cancelled, &state);
    atomic_fetch_sub(&g.module_callers, 1);
+   record_outcome(event_kind, result);
    if (result != OURO_MODULE_CALL_OK)
       obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;
+}
+
+/* Per-principal call outcomes for obs_bus_module_outcome. Module refs are small
+ * (the kind carve gives each 256 kinds from 4096); larger ones are not tracked. */
+#define AB_OUTCOME_REFS 256u
+static _Atomic int64_t outcome_ok_ns[AB_OUTCOME_REFS];
+static _Atomic int64_t outcome_fail_ns[AB_OUTCOME_REFS];
+
+static void record_outcome(uint32_t event_kind, ouro_module_call_result_t result)
+{
+   if (event_kind < 4096u)
+      return;
+   uint32_t ref = (event_kind - 4096u) / 256u;
+   if (ref >= AB_OUTCOME_REFS)
+      return;
+   int64_t now = (int64_t)ouro_runtime_monotonic_ns();
+   switch (result)
+   {
+   case OURO_MODULE_CALL_OK:
+      atomic_store_explicit(&outcome_ok_ns[ref], now, memory_order_relaxed);
+      break;
+   case OURO_MODULE_CALL_CANCELLED:
+   case OURO_MODULE_CALL_CAPABILITY_DENIED:
+   case OURO_MODULE_CALL_INVALID_REQUEST:
+   case OURO_MODULE_CALL_INVALID_ARGUMENT:
+   case OURO_MODULE_CALL_RESPONSE_TOO_LARGE:
+      break; /* the caller's doing, not the module's */
+   default:
+      atomic_store_explicit(&outcome_fail_ns[ref], now, memory_order_relaxed);
+      break;
+   }
+}
+
+void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t *last_fail_ns)
+{
+   int known = principal_ref < AB_OUTCOME_REFS;
+   if (last_ok_ns)
+      *last_ok_ns = known ? atomic_load_explicit(&outcome_ok_ns[principal_ref],
+                                                 memory_order_relaxed)
+                          : 0;
+   if (last_fail_ns)
+      *last_fail_ns = known ? atomic_load_explicit(&outcome_fail_ns[principal_ref],
+                                                   memory_order_relaxed)
+                            : 0;
+}
+
+uint64_t obs_bus_slot_fingerprint(void)
+{
+   uint64_t hash = 0xcbf29ce484222325ULL; /* FNV-1a */
+   pthread_mutex_lock(&g.host_lock);
+   if (!g.host.slots)
+   {
+      pthread_mutex_unlock(&g.host_lock);
+      return 0;
+   }
+   for (uint32_t i = 0; i < g.host.cfg.max_slots; ++i)
+   {
+      const ouro_slot_t *slot = &g.host.slots[i];
+      /* The mapping is fresh for every attach, so a module that restarted into
+       * the slot it left changes the value even with the same principal. */
+      uint64_t parts[3] = {(uint64_t)slot->in_use, slot->in_use ? slot->principal_ref : 0u,
+                           slot->in_use ? (uint64_t)(uintptr_t)slot->qpair_region.base : 0u};
+      for (size_t p = 0; p < 3; ++p)
+         for (int b = 0; b < 8; ++b)
+         {
+            hash ^= (parts[p] >> (8 * b)) & 0xffu;
+            hash *= 0x100000001b3ULL;
+         }
+   }
+   pthread_mutex_unlock(&g.host_lock);
+   return hash;
 }
 
 int obs_bus_module_peak_concurrency(void)
@@ -1692,6 +1835,53 @@ int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
    sinks.durable = sink;
    sinks.durable_ctx = sink ? ctx : NULL;
    pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_on_notification(uint32_t kind, obs_bus_notification_fn fn, void *ctx)
+{
+   if (!fn || kind < OURO_KIND_MODULE_BASE)
+      return -1;
+   pthread_mutex_lock(&start_lock);
+   if (g.started || notification_count == OBS_BUS_MAX_NOTIFICATIONS)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   notifications[notification_count].kind = kind;
+   notifications[notification_count].fn = fn;
+   notifications[notification_count].ctx = ctx;
+   notification_count++;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+/* A registered kind's notification, or an overflow naming it. Returns 1 if the
+ * event was one. Runs on the consumer thread. */
+static int deliver_notification(const ouro_event_t *ev)
+{
+   const ouro_frame_t *f = &ev->frame;
+   if (!(f->hdr_flags & OURO_F_NOTIFICATION))
+      return 0;
+   uint32_t kind = f->event_kind;
+   const uint8_t *payload = ev->payload;
+   uint32_t len = ev->payload_len;
+   if (f->hdr_flags & OURO_F_CONTROL)
+   {
+      if (f->event_kind != OURO_KIND_OVERFLOW || !ev->payload ||
+          ev->payload_len < OURO_OVERFLOW_LEN)
+         return 0;
+      const uint8_t *k = ev->payload + OURO_OVERFLOW_OFF_SHED_KIND;
+      kind = (uint32_t)k[0] | (uint32_t)k[1] << 8 | (uint32_t)k[2] << 16 | (uint32_t)k[3] << 24;
+      payload = NULL;
+      len = 0;
+   }
+   for (size_t i = 0; i < notification_count; i++)
+      if (notifications[i].kind == kind)
+      {
+         notifications[i].fn(kind, payload, len, notifications[i].ctx);
+         return 1;
+      }
    return 0;
 }
 
@@ -2053,6 +2243,7 @@ void obs_bus_stop(void)
     * becoming a module is what made this ordering wrong, with nothing in either
     * file changing to say so. */
    atomic_store_explicit(&g.stop, 1, memory_order_release);
+   ouro_host_wake(&g.host); /* the consumer may be asleep on the doorbell */
 
    /* WAIT FOR THAT DRAIN TO FINISH before touching the writer. The consumer is
     * still pumping throughout, so nothing is stalled by waiting here. */

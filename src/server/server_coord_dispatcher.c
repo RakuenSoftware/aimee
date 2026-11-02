@@ -151,6 +151,10 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
    return backing.spawn_rc; /* 0 spawned, -1 refused (ceiling/pool full) */
 }
 
+/* While coord jobs are active the dispatcher re-checks on this interval, for
+ * capacity freed somewhere nothing announces. With none active it sleeps until
+ * a delegation, agent-work or config change is announced, or work is queued
+ * here. */
 #define COORD_POLL_INTERVAL_SECS 10
 #define COORD_MAX_ACTIVE_JOBS    32
 #define COORD_FILES_MAX          DB1_COORD_FILES_LEN
@@ -162,6 +166,7 @@ static atomic_int g_running;
 static atomic_int g_stop;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static int g_notified; /* under g_mutex: a notify not yet consumed by a wait */
 static server_ctx_t *g_ctx;
 static char g_claim_owner[DB1_COORD_DELEGATE_LEN];
 
@@ -228,8 +233,19 @@ static int dispatcher_recover_previous_boot(coord_startup_t *startup)
    return 0;
 }
 
+/* Wait for a notify, or for milliseconds when it is not negative. A notify that
+ * arrived while the dispatcher was sweeping ends the wait at once. */
 static void dispatcher_wait(int milliseconds)
 {
+   if (milliseconds < 0)
+   {
+      pthread_mutex_lock(&g_mutex);
+      while (!g_stop && !g_notified)
+         pthread_cond_wait(&g_cond, &g_mutex);
+      g_notified = 0;
+      pthread_mutex_unlock(&g_mutex);
+      return;
+   }
    struct timespec ts;
    clock_gettime(CLOCK_REALTIME, &ts);
    ts.tv_sec += milliseconds / 1000;
@@ -240,14 +256,17 @@ static void dispatcher_wait(int milliseconds)
       ts.tv_nsec -= 1000000000L;
    }
    pthread_mutex_lock(&g_mutex);
-   if (!g_stop)
+   if (!g_stop && !g_notified)
       pthread_cond_timedwait(&g_cond, &g_mutex, &ts);
+   g_notified = 0;
    pthread_mutex_unlock(&g_mutex);
 }
 
-/* Sweep all coord jobs that have pending tasks and dispatch up to max_concurrent. */
-static int dispatcher_sweep(void)
+/* Sweep all coord jobs that have pending tasks and dispatch up to max_concurrent.
+ * *active says whether any coord job is still active, so worth re-checking. */
+static int dispatcher_sweep(int *active)
 {
+   *active = 0;
    /* Delegates module disabled -> dispatch nothing: do NOT claim tasks (claiming then failing
     * to dispatch would release them and re-claim every poll tick, churning the queue). Coord
     * tasks ARE delegate work, so they simply wait until the module is re-enabled. Checked here,
@@ -258,8 +277,14 @@ static int dispatcher_sweep(void)
 
    int job_ids[COORD_MAX_ACTIVE_JOBS];
    int njobs = db1_coord_job_list_active_ids(job_ids, COORD_MAX_ACTIVE_JOBS);
-   if (njobs <= 0)
+   if (njobs < 0)
+   {
+      *active = 1; /* the store did not answer: look again */
       return 0;
+   }
+   if (njobs == 0)
+      return 0;
+   *active = 1;
 
    int dispatched = 0;
    for (int i = 0; i < njobs; i++)
@@ -342,10 +367,12 @@ static void *dispatcher_thread(void *arg)
          ready = 1;
          if (g_stop)
             break;
-         LOG_INFO("coord_dispatcher", "started (poll=%ds)", COORD_POLL_INTERVAL_SECS);
+         LOG_INFO("coord_dispatcher", "started (re-check=%ds while jobs are active)",
+                  COORD_POLL_INTERVAL_SECS);
       }
-      dispatcher_sweep();
-      dispatcher_wait(COORD_POLL_INTERVAL_SECS * 1000);
+      int active = 0;
+      dispatcher_sweep(&active);
+      dispatcher_wait(active ? COORD_POLL_INTERVAL_SECS * 1000 : -1);
    }
    return NULL;
 }
@@ -378,6 +405,7 @@ void server_coord_dispatcher_shutdown(void)
 void server_coord_dispatcher_notify(void)
 {
    pthread_mutex_lock(&g_mutex);
+   g_notified = 1;
    pthread_cond_signal(&g_cond);
    pthread_mutex_unlock(&g_mutex);
 }

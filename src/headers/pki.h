@@ -76,6 +76,9 @@ extern "C"
     * repeats the same roster/hash test under BEGIN IMMEDIATE before committing
     * the monotonic state transition. */
    int pki_mtls_ramp_init(int configured_mode);
+   /* 0 when the presentation was recorded, 1 when the same certificate was
+    * already recorded within the last few minutes (nothing written: the ramp's
+    * answer cannot have changed), -1 on failure. */
    int pki_mtls_note_presentation(const char *serial, long now);
    int pki_mtls_ramp_ready(long now);
    int pki_mtls_ramp_advance(long now);

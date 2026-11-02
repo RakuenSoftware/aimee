@@ -17,6 +17,11 @@
 #include "workspace_provider_container.h"
 #include "workspace_provider_detached.h"
 #include "workspace_runner_registry.h"
+#include <aimee/workspace/module_api.h>
+
+/* The server's request context, absent from binaries that link this module
+ * without it (then every op goes to the tree's own runner). */
+const char *request_context_runner_channel(void) __attribute__((weak));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -40,6 +45,9 @@ void workspace_turn_register_project_owner(workspace_turn_project_open_fn owner)
 /* The detached provider bound for the current turn lives here for the turn's
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
+/* A runner channel's queue handle, owned by the binding that uses it. Channels
+ * are per command, so they cannot take one of the registry's fixed handles. */
+static __thread ws_runner_queue_t t_turn_channel;
 static __thread int t_turn_bound;
 static __thread int t_turn_mirror_fd = -1;
 static __thread char t_turn_detached_epoch[65], t_turn_container_epoch[65];
@@ -70,6 +78,7 @@ static __thread const workspace_turn_mirror_lease_t *t_callback_mirror;
 struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
+   ws_runner_queue_t channel;
    int bound;
    int mirror_fd, created_fd;
    char created_cwd[MAX_PATH_LEN];
@@ -414,9 +423,9 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
 
 static int active_mirror_lease(const char *real);
 
-static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
-                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
-                            int background)
+static int bind_active_into(const char *cwd, ws_detached_provider_t *detached,
+                            ws_runner_queue_t *channel_slot, int *bound, int *mirror_fd,
+                            char resolved[MAX_PATH_LEN], char drift[256], int background)
 {
    *bound = 0;
    *mirror_fd = -1;
@@ -452,9 +461,23 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
                                     : WS_PROVIDER_SHARED;
       if (kind == WS_PROVIDER_DETACHED && !background)
       {
-         /* The runner queue is keyed by the workspace root — the same id the
-          * client's `aimee workspace serve <root>` polls. */
-         ws_runner_queue_t *q = ws_runner_registry_get_or_create(config_workspaces(i));
+         /* The runner queue is the requesting CLI's own channel when it sent
+          * one, so the client that asked runs the op -- not whichever client
+          * polled the tree first, with its own environment and credentials.
+          * Otherwise it is keyed by the workspace root, the id `aimee
+          * workspace serve <root>` polls. */
+         const char *channel =
+             request_context_runner_channel ? request_context_runner_channel() : "";
+         ws_runner_queue_t *q = NULL;
+         if (aimee_ws_runner_channel_valid(channel))
+         {
+            /* The binding owns the channel's handle: the registry's handles
+             * are a fixed table for trees, and one per command would run out. */
+            snprintf(channel_slot->id, sizeof(channel_slot->id), "%s", channel);
+            q = ws_runner_registry_announce(channel) == 0 ? channel_slot : NULL;
+         }
+         else
+            q = ws_runner_registry_get_or_create(config_workspaces(i));
          if (q)
          {
             /* Bind both the unary and streaming transports off the same queue so
@@ -497,8 +520,8 @@ int workspace_turn_bind_active(const char *cwd)
 {
    if (t_turn_mirror_fd >= 0)
       close(t_turn_mirror_fd);
-   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, &t_turn_mirror_fd,
-                                 t_turn_cwd, t_turn_drift, 0);
+   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_channel, &t_turn_bound,
+                                 &t_turn_mirror_fd, t_turn_cwd, t_turn_drift, 0);
    t_turn_detached_epoch[0] = 0;
    if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
        platform_random_hex(t_turn_detached_epoch, 64))
@@ -522,8 +545,8 @@ static int scope_begin(const char *cwd, workspace_turn_scope_t **out, int backgr
    scope->created_fd = -1;
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
-   int result = bind_active_into(cwd, &scope->detached, &scope->bound, &scope->mirror_fd,
-                                 scope->cwd, scope->drift, background);
+   int result = bind_active_into(cwd, &scope->detached, &scope->channel, &scope->bound,
+                                 &scope->mirror_fd, scope->cwd, scope->drift, background);
    if (result < 0)
    {
       workspace_provider_set_active(scope->previous_provider);

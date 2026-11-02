@@ -253,11 +253,15 @@ class ModuleExportTests(unittest.TestCase):
         self.assertIn("storage.Bootstrap(os.Args)", exporter.go_module_main("postgres", 26, []))
         self.assertIn("handler.ModelServicesBootstrap(os.Args)", exporter.go_module_main("providers", 17, []))
 
-    def test_exported_admission_process_uses_owner_poll_ceiling(self) -> None:
+    def test_exported_admission_process_waits_without_a_poll_ceiling(self) -> None:
         main = exporter.go_module_main("economizer", 27, [])
-        self.assertIn("MaxIdlePollInterval: handler.RequestAdmissionPollInterval", main)
         self.assertIn("Handler: handler.NewHandler()", main)
-        self.assertNotIn("MaxIdlePollInterval", exporter.go_module_main("memory", 7, []))
+        self.assertNotIn("MaxIdlePollInterval", main)
+
+    def test_exported_aimee_process_announces_its_changes(self) -> None:
+        main = exporter.go_module_main("aimee", 30, [])
+        self.assertIn("process.New(ctx, os.Args[1], announcer)", main)
+        self.assertIn("announcer.Start(ctx, publisher)", main)
 
     def test_final_request_admission_is_started_and_granted(self) -> None:
         # Exercise the shipping descriptors, rather than merely proving the
@@ -276,6 +280,32 @@ class ModuleExportTests(unittest.TestCase):
             pin = next(module for module in lock["modules"] if module["id"] == "economizer")
             self.assertEqual(pin["serve"], [int(kind) for kind in serve.split(",")])
 
+    def test_change_notifications_are_granted_to_publisher_and_subscribers(self) -> None:
+        # A declared notification is a publish grant for the component that owns
+        # it and a subscribe grant for each subscriber it names. Without both the
+        # host refuses the publish or never routes it, and a consumer silently
+        # falls back to never hearing of a change.
+        def grant_line(grant: str, key: str) -> list[str]:
+            value = next(line.removeprefix(key + "=") for line in grant.splitlines()
+                         if line.startswith(key + "="))
+            return value.split(",") if value else []
+
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "bundle"
+            exporter.export_runtime_bundle(bundle)
+            grants = bundle / "grants/server"
+            self.assertEqual(grant_line((grants / "config.grant").read_text(), "publish"),
+                             ["4610"])
+            self.assertEqual(grant_line((grants / "aimee.grant").read_text(), "publish"),
+                             ["11800", "11801", "11802"])
+            self.assertEqual(grant_line((grants / "wfe.grant").read_text(), "subscribe"),
+                             ["4610", "11800"])
+            self.assertEqual(
+                grant_line((grants / "memory-postgres.grant").read_text(), "subscribe"),
+                ["4610"])
+            # A component that publishes nothing is granted nothing.
+            self.assertEqual(grant_line((grants / "git.grant").read_text(), "publish"), [])
+
     def runtime_bundle(self, runtime: str, temporary: str) -> Path:
         root = Path(temporary) / "repo"
         bundle = Path(temporary) / "bundle"
@@ -290,7 +320,11 @@ class ModuleExportTests(unittest.TestCase):
             "id": "memory-postgres", "principal_ref": 73,
             "executable": "/module", "placements": ["server", "kb"],
             "request": [11266], "publish": [3000],
-        }]}), encoding="utf-8")
+        }], "telemetry": {
+            "id": "ring-telemetry", "principal_ref": 77,
+            "executable": "/usr/local/libexec/aimee-modules/aimee-module-ring-telemetry",
+            "placements": ["server", "kb"],
+        }}), encoding="utf-8")
         contract = {
             "execution": "process",
             "runtime": runtime,
@@ -315,9 +349,20 @@ class ModuleExportTests(unittest.TestCase):
                 self.assertIn("request=11266\n", grant)
                 self.assertIn("subscribe=\n", grant)
                 self.assertIn("serve=\n", grant)
-            self.assertEqual((bundle / "go.modules").read_text(encoding="utf-8"), "kb\n")
+            self.assertEqual((bundle / "go.modules").read_text(encoding="utf-8"),
+                             "kb\nring-telemetry\n")
             self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))
+            # The ring's telemetry exporter is granted the telemetry ring and
+            # nothing else, and is supervised in every placement.
+            for placement in ("server", "kb"):
+                grant = (bundle / "grants" / placement / "ring-telemetry.grant").read_text()
+                self.assertIn("telemetry=yes\n", grant)
+                for key in ("publish", "subscribe", "request", "serve"):
+                    self.assertIn(f"{key}=\n", grant)
+                self.assertIn("ring-telemetry\t/usr/local/libexec/aimee-modules/"
+                              "aimee-module-ring-telemetry",
+                              (bundle / f"{placement}.modules").read_text(encoding="utf-8"))
             self.assertFalse((bundle / "src").exists())
             self.assertFalse((bundle / "c-build.json").exists())
 

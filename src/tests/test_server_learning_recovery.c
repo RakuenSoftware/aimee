@@ -13,6 +13,11 @@
 #include <time.h>
 
 static atomic_int failed_write = 1, retries, delivered, observations, claims;
+/* Set: the claim reply says nothing is pending, as a current module does. */
+static atomic_int nothing_pending;
+/* Set: the store refuses the next delivered ack, as it does while a grade the
+ * delivery depends on has not landed yet. */
+static atomic_int refuse_delivered, refused, released;
 static const char *record_wire =
     "{\"version\":1,\"session_id\":\"s\",\"turn_id\":\"turn\",\"sequence\":\"9\",\"event_id\":"
     "\"terminal\",\"actor\":\"alice\",\"event\":{\"kind\":\"execution\",\"payload\":{\"status\":"
@@ -24,6 +29,8 @@ char *db1_learning_projection_claim(void)
    atomic_fetch_add(&claims, 1);
    cJSON *batch = cJSON_CreateObject(), *items = cJSON_AddArrayToObject(batch, "items");
    cJSON_AddStringToObject(batch, "cutoff", "fixture-cutover");
+   if (atomic_load(&nothing_pending))
+      cJSON_AddNumberToObject(batch, "next_due_ms", -1);
    if (!atomic_load(&delivered))
    {
       cJSON *item = cJSON_CreateObject();
@@ -38,6 +45,18 @@ char *db1_learning_projection_claim(void)
 int db1_learning_projection_ack(const char *token, const char *result)
 {
    assert(!strcmp(token, lease));
+   if (atomic_load(&refuse_delivered))
+   {
+      if (!strcmp(result, "delivered"))
+      {
+         atomic_fetch_add(&refused, 1);
+         return -1;
+      }
+      assert(!strcmp(result, "retry") && atomic_load(&refused) == 1);
+      atomic_fetch_add(&released, 1);
+      atomic_store(&refuse_delivered, 0);
+      return 0;
+   }
    if (!strcmp(result, "retry"))
    {
       assert(!atomic_load(&observations));
@@ -101,6 +120,14 @@ int db1_delegate_execution_experience_record(const char *actor, const char *sour
    assert(!"unexpected delegate source");
    return -1;
 }
+static void settle(int tenths)
+{
+   for (int n = 0; n < tenths; n++)
+   {
+      struct timespec pause = {.tv_nsec = 100000000L};
+      nanosleep(&pause, NULL);
+   }
+}
 static int cancelled_delivery(void)
 {
    return 1;
@@ -123,6 +150,36 @@ int main(void)
    assert(atomic_load(&claims) >= 2 && atomic_load(&observations) == 1);
    server_learning_recovery_init();
    server_learning_recovery_shutdown();
+   assert(atomic_load(&delivered) == 1);
+
+   /* An empty queue with nothing due: the worker claims once, then sleeps until
+    * a queued projection is announced, rather than every few seconds. */
+   atomic_store(&nothing_pending, 1);
+   int before = atomic_load(&claims);
+   server_learning_recovery_init();
+   for (int n = 0; n < 50 && atomic_load(&claims) == before; n++)
+      settle(1);
+   int first = atomic_load(&claims);
+   assert(first == before + 1);
+   settle(35); /* past the old 3s cadence */
+   assert(atomic_load(&claims) == first);
+   server_learning_recovery_wake();
+   for (int n = 0; n < 50 && atomic_load(&claims) == first; n++)
+      settle(1);
+   assert(atomic_load(&claims) == first + 1);
+   server_learning_recovery_shutdown();
+
+   /* A refused delivered ack hands the lease back at once with a retry, so the
+    * record is redelivered after the store's backoff rather than held for the
+    * whole lease. */
+   atomic_store(&nothing_pending, 0);
+   atomic_store(&delivered, 0);
+   atomic_store(&refuse_delivered, 1);
+   server_learning_recovery_init();
+   for (int n = 0; n < 50 && !atomic_load(&delivered); n++)
+      settle(1);
+   server_learning_recovery_shutdown();
+   assert(atomic_load(&refused) == 1 && atomic_load(&released) == 1);
    assert(atomic_load(&delivered) == 1);
    puts("learning recovery: actual timer retries failed publication and acknowledges only explicit "
         "delivery; no browser, model or tool execution");

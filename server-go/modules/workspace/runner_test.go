@@ -37,6 +37,7 @@ func reset() {
 	runnersMu.Lock()
 	defer runnersMu.Unlock()
 	runners = map[string]*rendezvous{}
+	channels = map[string]*rendezvous{}
 }
 
 // A client serving a tree is what makes that tree reachable, so resolving must

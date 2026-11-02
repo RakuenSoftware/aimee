@@ -119,6 +119,18 @@ func (r *rendezvous) markServing() {
 	r.lastPoll = time.Now()
 	r.mu.Unlock()
 }
+
+// idleFor is how long since a client last polled, counting an op still in
+// flight as activity.
+func (r *rendezvous) idleFor() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending != nil || r.inflight != nil {
+		return 0
+	}
+	return time.Since(r.lastPoll)
+}
+
 func (r *rendezvous) hasLiveRunner() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

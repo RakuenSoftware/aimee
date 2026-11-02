@@ -39,6 +39,14 @@ func personalCaller(caller *ring.CommandContext, requested int) personalActor {
 // together. Store additionally serializes a missing (kind,key), so two callers
 // cannot bypass replacement admission by racing an insert.
 func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string, wanted Record, expected *MemoryRecordVersion) (Record, error) {
+	record, err := s.mutatePersonalRecord(ctx, operation, wanted, expected)
+	if err == nil {
+		s.personal.Wake() // a changed memory needs its embedding refreshed
+	}
+	return record, err
+}
+
+func (s *postgresDataStore) mutatePersonalRecord(ctx context.Context, operation string, wanted Record, expected *MemoryRecordVersion) (Record, error) {
 	if db, ok := s.db.(store.DB); ok {
 		tx, err := db.Begin(ctx)
 		if err != nil {

@@ -11,3 +11,5 @@ int cron_build_context_preamble(char *buf, size_t bufsz, const char *workdir,
                                 const char *skills_csv, const char *deliver_target);
 void trigger_scheduler_init(void);
 void trigger_scheduler_shutdown(void);
+/* Cron jobs or config changed: re-read the stored jobs and look now. */
+void trigger_scheduler_jobs_changed(void);

@@ -152,6 +152,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("config bus client: %v", err)
 	}
+	// Read config from a cache the module's config-changed announcements keep
+	// current, instead of asking the module several times a second.
+	configClient.Subscribe(caller)
 	if err := waitForConfig(rootCtx, configClient, 60*time.Second); err != nil {
 		log.Fatalf("config module did not answer: %v", err)
 	}
@@ -282,25 +285,58 @@ func main() {
 		})
 		handler.SetSchedulerNotify(scheduler.Notify)
 		handler.SetSchedulerCancel(scheduler.Cancel)
+		// The store announces each committed lifecycle write, and a live config
+		// change can open capacity: either is a reason to look, and nothing else
+		// is. A missed announcement is a reason to look as well.
+		caller.OnNotification(workflowstore.WorkItemChangedKind, func([]byte) { scheduler.Notify() })
+		caller.OnOverflow(workflowstore.WorkItemChangedKind, scheduler.Notify)
+		configClient.OnChange(scheduler.Notify)
 		if worktreeManager != nil {
 			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
 		}
 		go scheduler.Run(rootCtx)
-		// Trigger definitions are live UI/config state. Re-read them every scan so
-		// a saved workflow or run-policy change takes effect without a restart.
+		// Trigger definitions are live UI/config state, so a saved workflow or a
+		// config change rescans at once. A defined trigger watches a git ref,
+		// which nothing announces, so only then is the scan also periodic; with
+		// none defined the loop sleeps until one might exist.
+		triggersChanged := make(chan struct{}, 1)
+		retrigger := func() {
+			select {
+			case triggersChanged <- struct{}{}:
+			default:
+			}
+		}
+		configClient.OnChange(retrigger)
+		handler.SetTriggersChanged(retrigger)
+		go func() {
+			if err := wfe.WatchDefinitions(rootCtx, *workflowDir, retrigger); err != nil && rootCtx.Err() == nil {
+				log.Printf("workflow files edited on disk will apply on the next trigger scan: %v", err)
+			}
+		}()
 		go func() {
 			for {
 				handler.ScanTriggers(rootCtx)
-				interval := configClient.Int("trigger.scan_interval_secs", 5)
-				if interval < 1 {
-					interval = 1
+				var due <-chan time.Time
+				var timer *time.Timer
+				if handler.TriggersWatched() {
+					interval := configClient.Int("trigger.scan_interval_secs", 5)
+					if interval < 1 {
+						interval = 1
+					}
+					timer = time.NewTimer(time.Duration(interval) * time.Second)
+					due = timer.C
 				}
-				timer := time.NewTimer(time.Duration(interval) * time.Second)
 				select {
 				case <-rootCtx.Done():
-					timer.Stop()
+					if timer != nil {
+						timer.Stop()
+					}
 					return
-				case <-timer.C:
+				case <-due:
+				case <-triggersChanged:
+					if timer != nil {
+						timer.Stop()
+					}
 				}
 			}
 		}()

@@ -83,15 +83,41 @@ extern "C"
     * running is refused. */
    int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx);
 
-   /* Called on the consumer thread each time the bus goes idle, before it naps.
-    * A durable sink that holds a per-thread resource uses this to let go of it
-    * between bursts: aimee-kb's WORM append lazily leases a pooled KB_STORE
-    * connection, and without this hook that lease is held for the life of the
-    * process, because the consumer thread never ends a unit of work. obs_bus
-    * stays storage-neutral -- it only says "idle now" and the adapter decides
-    * what that costs. Optional; leaving it unset is a no-op. */
+   /* Called on the durable writer thread after each burst of writes, before it
+    * sleeps until there is more. A durable sink that holds a per-thread
+    * resource uses this to let go of it between bursts: aimee-kb's WORM append
+    * lazily leases a pooled KB_STORE connection, and without this hook that
+    * lease is held for the life of the process, because the writer thread never
+    * ends a unit of work. It is not called while the bus is idle: an idle bus
+    * sleeps. obs_bus stays storage-neutral -- it only says "idle now" and the
+    * adapter decides what that costs. Optional; leaving it unset is a no-op. */
    typedef void (*obs_bus_sink_idle_fn)(void *ctx);
    int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx);
+
+   /* Hand the core's notifications of kind (a module's change announcement,
+    * ouroboros ring D14) to fn, so the core reacts to a change instead of asking
+    * on a timer. fn runs on the bus consumer thread, the thread that routes every
+    * module reply: it must not block or make a module call, only note the change
+    * and wake whoever acts on it. payload is NULL when the ring reports a missed
+    * notification of the kind, which means the same thing: re-read. Register
+    * before obs_bus_start; at most OBS_BUS_MAX_NOTIFICATIONS kinds. */
+#define OBS_BUS_MAX_NOTIFICATIONS 8
+   typedef void (*obs_bus_notification_fn)(uint32_t kind, const uint8_t *payload,
+                                           uint32_t payload_len, void *ctx);
+   int obs_bus_on_notification(uint32_t kind, obs_bus_notification_fn fn, void *ctx);
+
+   /* When calls to a module last succeeded and last failed, by its principal
+    * ref (CLOCK_MONOTONIC ns, 0 for never). A failure is a result that says the
+    * module could not serve -- transport, absent, internal, deadline -- not a
+    * caller's own cancellation or malformed request. Readiness reads this
+    * instead of probing a store that real traffic has just answered for. */
+   void obs_bus_module_outcome(uint32_t principal_ref, int64_t *last_ok_ns, int64_t *last_fail_ns);
+
+   /* A value that changes whenever a client attaches to the bus or its slot is
+    * released, and otherwise stays the same. What modules serve -- their stages,
+    * the commands they declare -- can only change then, so a registry built from
+    * them is current until this changes. 0 before the bus starts. */
+   uint64_t obs_bus_slot_fingerprint(void);
 
    /* Commit one action-class record synchronously to the daemon's WORM sink.
     * This is the durability edge for security-relevant bridges whose ordinary

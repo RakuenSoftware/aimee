@@ -81,6 +81,26 @@ func ConfigFromEnv(serviceName, serviceVersion string) Config {
 	}
 }
 
+// serviceResource is the OpenTelemetry resource every Aimee exporter sends
+// under. cfg.ServiceNamespace must already be defaulted.
+func serviceResource(cfg Config) (*resource.Resource, error) {
+	attrs := []attribute.KeyValue{
+		semconv.ServiceNameKey.String(cfg.ServiceName),
+		semconv.ServiceNamespaceKey.String(cfg.ServiceNamespace),
+	}
+	if cfg.ServiceVersion != "" {
+		attrs = append(attrs, semconv.ServiceVersionKey.String(cfg.ServiceVersion))
+	}
+	if cfg.Environment != "" {
+		attrs = append(attrs, semconv.DeploymentEnvironmentNameKey.String(cfg.Environment))
+	}
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(attrs...))
+	if err != nil {
+		return nil, fmt.Errorf("observability resource: %w", err)
+	}
+	return res, nil
+}
+
 func envConfigured(name string) bool {
 	return strings.TrimSpace(os.Getenv(name)) != ""
 }
@@ -120,19 +140,9 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		cfg.PrometheusRegistry = prometheus.NewRegistry()
 	}
 
-	attrs := []attribute.KeyValue{
-		semconv.ServiceNameKey.String(cfg.ServiceName),
-		semconv.ServiceNamespaceKey.String(cfg.ServiceNamespace),
-	}
-	if cfg.ServiceVersion != "" {
-		attrs = append(attrs, semconv.ServiceVersionKey.String(cfg.ServiceVersion))
-	}
-	if cfg.Environment != "" {
-		attrs = append(attrs, semconv.DeploymentEnvironmentNameKey.String(cfg.Environment))
-	}
-	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(attrs...))
+	res, err := serviceResource(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("observability resource: %w", err)
+		return nil, err
 	}
 
 	runtime := &Runtime{resource: res, registry: cfg.PrometheusRegistry, local: cfg.LocalHandler}

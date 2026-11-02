@@ -306,6 +306,10 @@ int server_vault_bootstrap_prepare(void);
 typedef int (*aimee_agent_resolver_fn)(const char *name, char *canon, size_t cap);
 void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn);
 void server_shutdown(server_ctx_t *ctx);
+
+/* Wake the server's park loop: a SIGHUP, an announced config change, shutdown.
+ * Async-signal-safe. */
+void server_park_wake(void);
 int server_compute_budget_acquire(server_ctx_t *ctx);
 void server_compute_budget_release(server_ctx_t *ctx, int granted);
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
@@ -686,6 +690,7 @@ int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
 /* MCP proxy handler (server_mcp.c) */
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Full served tool surface (built-ins + discovery + server-only), unfiltered;
  * caller owns the returned cJSON array (server_mcp_tools.c). */
 cJSON *mcp_build_full_served_list(void);

@@ -2,15 +2,28 @@
 #define AIMEE_CONFIG_CLIENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "cJSON.h"
 
 #define AIMEE_CONFIG_EVENT_KIND 4609u
 #define AIMEE_CONFIG_STAGE_ID   1u
 
+/* config-changed: the module's announcement after every committed change
+ * (4096 + 2*256 + 2). */
+#define AIMEE_CONFIG_CHANGED_KIND 4610u
+
 int config_client_refresh(void);
 /* Return 1 when the module's document version differs from the cached
- * snapshot, 0 when unchanged, and -1 on transport/protocol failure. */
+ * snapshot, 0 when unchanged, and -1 on transport/protocol failure. Once
+ * config_client_use_announcements is in effect this asks nothing: it answers
+ * from the announcements received since the snapshot was fetched. */
 int config_client_changed(void);
+/* The process receives config-changed (a daemon subscribed to it on the bus),
+ * so config_client_changed needs no module call. */
+void config_client_use_announcements(void);
+/* Record one config-changed payload, or a missed one (payload NULL). Safe on
+ * the bus consumer thread: it never waits on a module call. */
+void config_client_note_announcement(const uint8_t *payload, uint32_t len);
 int config_client_read_number(const char *key, double *out);
 int config_client_read_string(const char *key, char *out, size_t n);
 int config_client_read_indexed_string(const char *key, int index, const char *member, char *out,

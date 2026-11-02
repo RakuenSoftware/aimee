@@ -75,10 +75,12 @@ def analyse(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
                 registered_processes.add(module_id)
                 active = component.get("stages", [])
                 reserved = component.get("durability_declarations", [])
-                if not isinstance(active, list) or not isinstance(reserved, list):
+                notifications = component.get("notifications", [])
+                if not isinstance(active, list) or not isinstance(reserved, list) or \
+                        not isinstance(notifications, list):
                     errors.append(f"{module_id}: durability declarations are not arrays")
                     continue
-                declarations = active + reserved
+                declarations = active + reserved + notifications
                 for stage in declarations:
                     if isinstance(stage, dict):
                         stages.append((module_id, stage))

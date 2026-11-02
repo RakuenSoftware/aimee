@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
@@ -81,6 +82,35 @@ type Family struct {
 	// reads. It also wraps RunDB transactions, so independently hosted callers
 	// obey the same domain invariant. Read-only operations remain concurrent.
 	TransactionLockSQL string
+	// Changed, when set, is called with the operation's name after one of its
+	// transactions commits having written something. A transaction that matched
+	// no row wrote nothing and calls nothing, so a consumer's own housekeeping
+	// sweep that found nothing to do cannot wake that consumer again. The family
+	// announces its changes through this (ouroboros ring D14) instead of its
+	// consumers asking on a timer.
+	Changed func(op string)
+	// Noted, when set, receives each topic an operation passed to Note, once the
+	// operation succeeded and its writes committed. It announces a narrower
+	// event than Changed: one an operation decides it caused, such as a queued
+	// learning projection, rather than "this family wrote".
+	Noted func(topic string)
+}
+
+type notesKey struct{}
+
+type notes struct {
+	mu     sync.Mutex
+	topics map[string]struct{}
+}
+
+// Note records that the running operation caused topic, for its family's Noted
+// hook after it commits. Outside an operation with a hook it does nothing.
+func Note(ctx context.Context, topic string) {
+	if n, ok := ctx.Value(notesKey{}).(*notes); ok {
+		n.mu.Lock()
+		n.topics[topic] = struct{}{}
+		n.mu.Unlock()
+	}
 }
 
 // Handler builds the bus handler for this family against a database.
@@ -186,6 +216,20 @@ type statementTagger interface {
 }
 
 func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint32, []string, error) {
+	if f.Noted == nil {
+		return f.runOp(ctx, db, spec, fields)
+	}
+	n := &notes{topics: map[string]struct{}{}}
+	status, reply, err := f.runOp(context.WithValue(ctx, notesKey{}, n), db, spec, fields)
+	if err == nil && status == StatusOK {
+		for topic := range n.topics {
+			f.Noted(topic)
+		}
+	}
+	return status, reply, err
+}
+
+func (f Family) runOp(ctx context.Context, db DB, spec Op, fields []string) (uint32, []string, error) {
 	// Everything this operation runs is attributed to it, including inside a
 	// transaction: the store sees "runtime_state_get did this", not "some
 	// connection did this".
@@ -194,6 +238,10 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	}
 	if f.TransactionLockSQL != "" {
 		db = transactionLockDB{DB: db, sql: f.TransactionLockSQL}
+	}
+	if f.Changed != nil {
+		name, changed := spec.Name, f.Changed
+		db = changeWatchDB{DB: db, changed: func() { changed(name) }}
 	}
 	if spec.RunDB != nil {
 		return spec.RunDB(ctx, db, fields)
@@ -231,6 +279,43 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 		return 0, nil, err
 	}
 	return status, reply, nil
+}
+
+// wroteSQL asks whether the transaction has written anything. PostgreSQL
+// assigns a transaction id at its first write, and not for reads, advisory locks
+// or an UPDATE that matched no row.
+const wroteSQL = "SELECT pg_catalog.txid_current_if_assigned() IS NOT NULL"
+
+type changeWatchDB struct {
+	DB
+	changed func()
+}
+
+func (d changeWatchDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := d.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &changeWatchTx{Tx: tx, changed: d.changed}, nil
+}
+
+type changeWatchTx struct {
+	Tx
+	changed func()
+}
+
+func (t *changeWatchTx) Commit(ctx context.Context) error {
+	wrote := true // a question that cannot be answered announces: one extra sweep is cheap
+	if row := t.Tx.QueryRow(ctx, wroteSQL); row == nil || row.Scan(&wrote) != nil {
+		wrote = true
+	}
+	if err := t.Tx.Commit(ctx); err != nil {
+		return err
+	}
+	if wrote {
+		t.changed()
+	}
+	return nil
 }
 
 type transactionLockDB struct {

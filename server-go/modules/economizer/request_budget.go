@@ -6,14 +6,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
-	"time"
 
 	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
-
-// RequestAdmissionPollInterval keeps the final provider gate responsive after
-// idle periods in both the bundled and independently exported Go process.
-const RequestAdmissionPollInterval = time.Millisecond
 
 const (
 	requestBudgetMagic        uint32 = 0x54474442 // BDGT

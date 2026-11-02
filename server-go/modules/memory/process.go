@@ -36,6 +36,10 @@ func (r processResources) MemoryAuditAction(ctx context.Context, action audit.Ac
 const configStartupWait = 30 * time.Second
 
 func (r processResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
+
+// OnConfigChange has fn called after the configuration changes: the personal
+// indexer re-reads its model endpoint then instead of on a timer.
+func (r processResources) OnConfigChange(fn func()) { r.config.OnChange(fn) }
 func (r processResources) EmbeddingEndpoint() (string, error) {
 	values, err := r.config.Snapshot()
 	if err != nil {
@@ -71,6 +75,8 @@ func openProcessResources(ctx context.Context, socket string) (processResources,
 		closeConnection()
 		return processResources{}, nil, err
 	}
+	// Cache what is read and drop it when the config module announces a change.
+	config.Subscribe(caller)
 	return processResources{Store: db, config: config, auditPublisher: client}, closeConnection, nil
 }
 

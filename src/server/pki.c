@@ -923,9 +923,45 @@ pki_cert_status_t pki_cert_check(const char *serial, long now)
    }
 }
 
+/* Presentations feed the mTLS ramp's "has every enrolled client presented a
+ * certificate yet" question. Noting the same certificate again within this
+ * window changes no answer, so it is not written again: the ramp used to cost a
+ * store write on every request. */
+#define PRESENTATION_NOTE_WINDOW_SECS 300
+#define PRESENTATION_NOTE_SLOTS       64
+
+static struct
+{
+   char serial[DB1_PKI_SERIAL_MAX];
+   long noted_at;
+} g_presented[PRESENTATION_NOTE_SLOTS];
+static pthread_mutex_t g_presented_mu = PTHREAD_MUTEX_INITIALIZER;
+
 int pki_mtls_note_presentation(const char *serial, long now)
 {
-   return db1_pki_note_presentation(serial, now);
+   if (!serial || !serial[0])
+      return db1_pki_note_presentation(serial, now);
+   size_t slot = 0;
+   uint32_t h = 2166136261u;
+   for (const char *p = serial; *p; p++)
+      h = (h ^ (unsigned char)*p) * 16777619u;
+   slot = h % PRESENTATION_NOTE_SLOTS;
+   pthread_mutex_lock(&g_presented_mu);
+   int recent = strcmp(g_presented[slot].serial, serial) == 0 &&
+                now - g_presented[slot].noted_at < PRESENTATION_NOTE_WINDOW_SECS &&
+                now >= g_presented[slot].noted_at;
+   pthread_mutex_unlock(&g_presented_mu);
+   if (recent)
+      return 1; /* already noted: nothing about the ramp can have changed */
+   int rc = db1_pki_note_presentation(serial, now);
+   if (rc == 0)
+   {
+      pthread_mutex_lock(&g_presented_mu);
+      snprintf(g_presented[slot].serial, sizeof g_presented[slot].serial, "%s", serial);
+      g_presented[slot].noted_at = now;
+      pthread_mutex_unlock(&g_presented_mu);
+   }
+   return rc;
 }
 
 int pki_mtls_ramp_init(int configured_mode)

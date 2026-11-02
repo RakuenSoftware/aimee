@@ -109,6 +109,14 @@ func validCodePath(p string) bool {
 }
 
 func (s *postgresDataStore) CodeIndex(ctx context.Context, req CodeIndexRequest) (json.RawMessage, error) {
+	indexed, err := s.codeIndex(ctx, req)
+	if err == nil {
+		s.personal.Wake() // indexed files need embeddings
+	}
+	return indexed, err
+}
+
+func (s *postgresDataStore) codeIndex(ctx context.Context, req CodeIndexRequest) (json.RawMessage, error) {
 	if s.placement != PlacementServer {
 		return nil, errors.New("private code index requires server placement")
 	}

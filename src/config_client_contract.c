@@ -71,6 +71,11 @@ int config_reload_if_changed(void)
 
 int config_present(void)
 {
+   /* A held snapshot nothing has changed answers without fetching it again:
+    * with announcements that costs no module call at all, and without them one
+    * version check instead of the whole snapshot. */
+   if (config_client_changed() == 0)
+      return 1;
    return config_client_refresh() == 0;
 }
 

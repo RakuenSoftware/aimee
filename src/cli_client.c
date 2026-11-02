@@ -331,6 +331,15 @@ static int safe_request_line(const cli_http_options_t *o)
          return 0;
    return 1;
 }
+/* This process's runner channel, sent with every request while it is set. */
+static char g_runner_channel[64];
+
+void cli_http_set_runner_channel(const char *channel)
+{
+   snprintf(g_runner_channel, sizeof(g_runner_channel), "%s",
+            channel && safe_header("X-Aimee-Runner", channel) ? channel : "");
+}
+
 static char *request_bytes(const cli_http_options_t *o, const char *host, size_t *length)
 {
    if (!safe_request_line(o) || (o->body_length && !o->body) || o->header_count > 256 ||
@@ -359,8 +368,13 @@ static char *request_bytes(const cli_http_options_t *o, const char *host, size_t
    if (o->bearer && o->bearer[0] && aimee_core_bearer_value(auth, sizeof(auth), o->bearer))
       return NULL;
    size_t capacity = 256;
-   size_t pieces[] = {o->body_length, strlen(o->method), strlen(o->path),
-                      strlen(host),   strlen(auth),      extra};
+   size_t pieces[] = {o->body_length,
+                      strlen(o->method),
+                      strlen(o->path),
+                      strlen(host),
+                      strlen(auth),
+                      extra,
+                      sizeof(g_runner_channel) + 20};
    for (size_t i = 0; i < sizeof(pieces) / sizeof(pieces[0]); ++i)
    {
       if (pieces[i] > SIZE_MAX - capacity)
@@ -394,6 +408,8 @@ static char *request_bytes(const cli_http_options_t *o, const char *host, size_t
       ADD("Authorization: %s\r\n", auth);
    for (size_t i = 0; i < o->header_count; i++)
       ADD("%s: %s\r\n", o->headers[i].name, o->headers[i].value);
+   if (g_runner_channel[0])
+      ADD("X-Aimee-Runner: %s\r\n", g_runner_channel);
    if (!have_type)
       ADD("Content-Type: application/json\r\n");
    ADD("Content-Length: %zu\r\nConnection: close\r\n\r\n", o->body_length);

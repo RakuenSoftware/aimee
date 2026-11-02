@@ -387,6 +387,13 @@ static time_t docker_utc_epoch(int y, int mo, int d, int h, int mi, int s)
  * turn is never removed. Returns the count removed, or -1 on a docker error. */
 int delegate_backend_docker_reap_aged(int max_age_secs)
 {
+   return delegate_backend_docker_reap_aged_next(max_age_secs, NULL);
+}
+
+int delegate_backend_docker_reap_aged_next(int max_age_secs, time_t *next_due)
+{
+   if (next_due)
+      *next_due = 0;
    const char *list_argv[] = {resolve_docker_bin(), "ps", "--format",
                               "{{.ID}} {{.Names}} {{.CreatedAt}}", NULL};
    char *out = NULL;
@@ -418,8 +425,17 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
          off_secs = (long)(oh * 3600 + om * 60) * (off[0] == '-' ? -1 : 1);
       }
       time_t created = docker_utc_epoch(yy, mo, dd, hh, mi, ss) - off_secs;
-      if (created <= 0 || (long)(now - created) < max_age_secs)
+      if (created <= 0)
          continue;
+      if ((long)(now - created) < max_age_secs)
+      {
+         /* Not aged yet: it comes due at a known time, so the caller can sleep
+          * until then instead of asking again on a timer. */
+         time_t due = created + max_age_secs;
+         if (next_due && (*next_due == 0 || due < *next_due))
+            *next_due = due;
+         continue;
+      }
       const char *rm_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
       if (run_docker(rm_argv) == 0)
          removed++;

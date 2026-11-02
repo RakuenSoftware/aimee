@@ -77,9 +77,45 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <signal.h>
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
+
+/* The park loop's doorbell: written by a signal, by an announced config change
+ * and by shutdown; read by the loop. An eventfd write is async-signal-safe. */
+static int g_park_fd = -1;
+
+void server_park_wake(void)
+{
+   int fd = g_park_fd;
+   if (fd >= 0)
+   {
+      uint64_t one = 1;
+      ssize_t ignored = write(fd, &one, sizeof one);
+      (void)ignored;
+   }
+}
+
+/* Sleep until woken or timeout_ms passes (negative: until woken). */
+static void server_park_sleep(int timeout_ms)
+{
+   if (g_park_fd < 0)
+      g_park_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+   if (g_park_fd < 0)
+   {
+      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0}; /* no eventfd: the old cadence */
+      nanosleep(&ts, NULL);
+      return;
+   }
+   struct pollfd park = {.fd = g_park_fd, .events = POLLIN};
+   if (poll(&park, 1, timeout_ms) > 0)
+   {
+      uint64_t count;
+      ssize_t ignored = read(g_park_fd, &count, sizeof count);
+      (void)ignored;
+   }
+}
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -367,6 +403,10 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+/* Weak so unit binaries that link the dispatcher without the readiness sampler
+ * resolve it to NULL and report no verdict; the server always links it. */
+int server_ready_summary(char *boundary, size_t n) __attribute__((weak));
+
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
@@ -375,6 +415,16 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    /* Probe DB1 directly; module registry state survives death for about 37s. */
    cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   /* The verdict the container is judged by, so this answer cannot say the
+    * server is fine while /v1/ready -- and every governed action -- says not. */
+   if (server_ready_summary)
+   {
+      char not_ready[96];
+      int ready = server_ready_summary(not_ready, sizeof not_ready);
+      cJSON_AddBoolToObject(resp, "ready", ready);
+      if (!ready)
+         cJSON_AddStringToObject(resp, "not_ready", not_ready);
+   }
    obs_bus_capture_health_t capture;
    obs_bus_capture_health(&capture);
    cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
@@ -2252,14 +2302,25 @@ int server_run(server_ctx_t *ctx)
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so
-    * run_server() can tear everything down. The 1s tick also drives idle-reaping
-    * of per-webuser code-server editors (WP-I lifecycle) via reap_tick. */
+    * run_server() can tear everything down. The park sleeps until there is
+    * something to do -- a SIGHUP, an announced config change, shutdown -- and
+    * otherwise wakes only while it has a deadline: idle code-server editors to
+    * reap, or a startup reconciliation to retry. It used to wake every second. */
+   /* Seed from the real state: startup's attempt usually runs before the store
+    * module has attached, and a park with no deadline would never retry it. */
+   int reconcile_failed = server_delegate_startup_reconcile() != 0;
    while (ctx->running)
    {
-      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-      nanosleep(&ts, NULL);
+      int timeout_ms = -1;
+      if (reconcile_failed)
+         timeout_ms = 1000;
+      else if (webuser_editor_running() > 0)
+         timeout_ms = WEBUSER_EDITOR_REAP_EVERY_SECS * 1000;
+      server_park_sleep(timeout_ms);
+      if (!ctx->running)
+         break;
       webuser_editor_reap_tick();
-      (void)server_delegate_startup_reconcile();
+      reconcile_failed = server_delegate_startup_reconcile() != 0;
       /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
        * signal path, since config_reload takes a mutex and does file I/O. */
       if (g_config_reload_requested)

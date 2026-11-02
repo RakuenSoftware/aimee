@@ -77,6 +77,7 @@ typedef struct
 {
    char path[128];
    const char *response;
+   int delay_ms; /* hold the response this long after reading the request */
 } stub_arg_t;
 
 static const char *test_tmpdir(void)
@@ -104,6 +105,8 @@ static void *stub_server(void *a)
       char req[2048];
       ssize_t r = read(c, req, sizeof(req) - 1); /* drain the request */
       (void)r;
+      if (s->delay_ms > 0)
+         usleep((useconds_t)s->delay_ms * 1000);
       ssize_t w = write(c, s->response, strlen(s->response));
       (void)w;
       close(c);
@@ -115,7 +118,7 @@ static void *stub_server(void *a)
 
 static cJSON *run_stub_case(const char *response, int *status_out)
 {
-   stub_arg_t arg;
+   stub_arg_t arg = {0};
    snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_test_%d.sock", test_tmpdir(), (int)getpid());
    arg.response = response;
    pthread_t th;
@@ -165,7 +168,7 @@ static void test_manifest_auth_refusal_diagnosis(void)
    const char *resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
                       "Content-Length: 21\r\nConnection: close\r\n\r\n"
                       "{\"error\":\"forbidden\"}";
-   stub_arg_t arg;
+   stub_arg_t arg = {0};
    snprintf(arg.path, sizeof(arg.path), "%s/aimee_manifest_test_%d.sock", test_tmpdir(),
             (int)getpid());
    arg.response = resp;
@@ -201,6 +204,61 @@ static void test_manifest_auth_refusal_diagnosis(void)
    assert(strstr(diagnosis, "aimee remote enroll") != NULL);
    assert(strstr(diagnosis, "older than this client") == NULL);
    printf("  manifest_auth_refusal_diagnosis: ok\n");
+}
+
+/* Two threads resolving a route while the manifest is still in flight must both
+ * see it. The MCP bridge's tool-list watcher and its request loop do exactly
+ * this at startup; marking the manifest fetched before the GET returned gave the
+ * second thread no route, and the bridge reported the server unavailable. The
+ * stub serves one connection, so a second fetch would also fail the lookup. */
+static void *resolve_mcp_call(void *out)
+{
+   const char *verb = NULL;
+   *(const char **)out = cli_v1_route_for_method("mcp.call", &verb);
+   return NULL;
+}
+
+static void test_manifest_concurrent_first_fetch(void)
+{
+   cli_v1_manifest_reset_for_test();
+   char home[160];
+   snprintf(home, sizeof(home), "%s/aimee_manifest_home_%d", test_tmpdir(), (int)getpid());
+   setenv("AIMEE_HOME", home, 1);
+
+   static const char body[] = "{\"manifest_version\":1,\"routes\":["
+                              "{\"op\":\"mcp.call\",\"verb\":\"POST\",\"path\":\"/v1/mcp/call\"}]}";
+   char resp[512];
+   snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(body), body);
+   stub_arg_t arg = {0};
+   snprintf(arg.path, sizeof(arg.path), "%s/aimee_manifest_race_%d.sock", test_tmpdir(),
+            (int)getpid());
+   arg.response = resp;
+   arg.delay_ms = 300;
+   pthread_t server;
+   assert(pthread_create(&server, NULL, stub_server, &arg) == 0);
+   usleep(30000);
+   char endpoint[180];
+   snprintf(endpoint, sizeof(endpoint), "unix:%s", arg.path);
+   setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+
+   const char *first = NULL, *second = NULL;
+   pthread_t a, b;
+   assert(pthread_create(&a, NULL, resolve_mcp_call, &first) == 0);
+   usleep(50000); /* the first lookup's GET is now held by the stub */
+   assert(pthread_create(&b, NULL, resolve_mcp_call, &second) == 0);
+   pthread_join(a, NULL);
+   pthread_join(b, NULL);
+   pthread_join(server, NULL);
+   unsetenv("AIMEE_API_ENDPOINT");
+   unsetenv("AIMEE_HOME");
+
+   assert(first && strcmp(first, "/v1/mcp/call") == 0);
+   assert(second && strcmp(second, "/v1/mcp/call") == 0);
+   cli_v1_manifest_reset_for_test();
+   printf("  manifest_concurrent_first_fetch: ok\n");
 }
 
 /* ---- method -> /v1 route lookup, over a server-supplied manifest ---- */
@@ -337,6 +395,7 @@ int main(void)
    test_refuse_before_connect();
 #endif
    test_manifest_auth_refusal_diagnosis();
+   test_manifest_concurrent_first_fetch();
    test_v1_route_map();
    test_served_dispatch();
    test_served_marshal();

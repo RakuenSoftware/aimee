@@ -15,6 +15,8 @@
 #ifndef DEC_DELEGATE_BACKEND_DOCKER_H
 #define DEC_DELEGATE_BACKEND_DOCKER_H 1
 
+#include <time.h>
+
 #include <aimee/delegates/delegate_backend.h>
 
 #ifdef __cplusplus
@@ -54,6 +56,11 @@ extern "C"
     * release() never fires. max_age_secs must exceed the in-tool job cap so a live
     * turn is never removed. Returns removed count or -1. */
    int delegate_backend_docker_reap_aged(int max_age_secs);
+
+   /* The same reap, also reporting in *next_due when the oldest delegate
+    * container that is not aged yet will be (0: there is none, so nothing can
+    * come due until another delegate starts). */
+   int delegate_backend_docker_reap_aged_next(int max_age_secs, time_t *next_due);
 
    /* Translate a path as seen inside the server container into the Docker-host
     * source path that backs it. `mount_table` is one destination<TAB>source pair

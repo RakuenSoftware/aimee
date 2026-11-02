@@ -231,6 +231,12 @@ static agent_slot_t *make_handle(int ctx_index)
 }
 
 /* Create+count a brand-new context (g.lock held, caps already checked). */
+/* The delegate monitor sleeps without a timeout while nothing is admitted, so
+ * the first admission after idle wakes it to watch for a wedged slot. Weak: a
+ * binary without the monitor links this file too. Only the monitor's own lock
+ * is taken, and the monitor never holds it while asking us, so no inversion. */
+extern void server_delegate_monitor_wake(void) __attribute__((weak));
+
 static agent_slot_t *admit_new_context_locked(const agent_admit_req_t *req)
 {
    int idx = -1;
@@ -254,7 +260,8 @@ static agent_slot_t *admit_new_context_locked(const agent_admit_req_t *req)
    snprintf(c->ctx, sizeof(c->ctx), "%s", req->ctx_handle);
    snprintf(c->agent, sizeof(c->agent), "%s", req->agent);
    snprintf(c->model, sizeof(c->model), "%s", req->model);
-   g.global_active++;
+   if (g.global_active++ == 0 && server_delegate_monitor_wake)
+      server_delegate_monitor_wake();
    ac->active++;
    mc->active++;
    return make_handle(idx);
