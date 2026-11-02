@@ -483,6 +483,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-aimee-client \
                $(TESTPREFIX)/unit-test-cli-remote \
                $(TESTPREFIX)/unit-test-util-url \
+               $(TESTPREFIX)/unit-test-mirror-sync-wire \
                $(TESTPREFIX)/unit-test-delivery-target \
                $(TESTPREFIX)/unit-test-embed-result \
                $(TESTPREFIX)/unit-test-kb-sidecar-admission \
@@ -3518,6 +3519,9 @@ $(TESTPREFIX)/unit-test-cli-remote: $(OBJDIR)/tests/test_cli_remote.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) $(TLS_LIBS) -lz
 
 $(TESTPREFIX)/unit-test-util-url: $(OBJDIR)/tests/test_util_url.o $(OBJDIR)/util_url.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-mirror-sync-wire: $(OBJDIR)/tests/test_mirror_sync_wire.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delivery-target: $(OBJDIR)/tests/test_delivery_target.o \

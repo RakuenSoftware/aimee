@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* --- mock git runner --- */
 static char g_last_cmd[512]; /* space-joined args of the last call */
@@ -80,6 +82,34 @@ int main(void)
    assert(workspace_mirror_ensure(mock_git, NULL, "https://host/r.git",
                                   "/nonexistent/mirror/dir") == 0);
    assert(strstr(g_last_cmd, "clone --mirror https://host/r.git") != NULL);
+
+   /* --- ensure on an existing mirror: re-point origin, then fetch ---
+    * A mirror keeps the URL it was cloned with; the runner swaps in the
+    * transport URL only where the remote appears in the arguments, so origin
+    * must be set from the remote on every fetch or a mirror cloned over a URL
+    * the server can no longer use fails every fetch from then on. */
+   {
+      char existing[] = "/tmp/aimee-test-mirror-XXXXXX";
+      assert(mkdtemp(existing) != NULL);
+      char objects[sizeof(existing) + 16];
+      snprintf(objects, sizeof(objects), "%s/objects", existing);
+      assert(mkdir(objects, 0700) == 0);
+      g_cmd_log[0] = '\0';
+      g_fetch_rc = 0;
+      assert(workspace_mirror_ensure(mock_git, NULL, "git@host:o/r.git", existing) == 0);
+      char want_set[256], want_fetch[256];
+      snprintf(want_set, sizeof(want_set), "-C %s remote set-url origin git@host:o/r.git\n",
+               existing);
+      snprintf(want_fetch, sizeof(want_fetch), "-C %s fetch --prune origin\n", existing);
+      const char *set_at = strstr(g_cmd_log, want_set);
+      const char *fetch_at = strstr(g_cmd_log, want_fetch);
+      assert(set_at && fetch_at && set_at < fetch_at);
+      assert(strstr(g_cmd_log, "clone") == NULL);
+      g_fetch_rc = 1;
+      assert(workspace_mirror_ensure(mock_git, NULL, "git@host:o/r.git", existing) == -1);
+      g_fetch_rc = 0;
+      assert(rmdir(objects) == 0 && rmdir(existing) == 0);
+   }
 
    /* --- head read via rev-parse --- */
    g_rev_parse_head = "deadbeef";

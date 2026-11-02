@@ -116,6 +116,34 @@ typedef struct
  * No credential → the local ops + ambient-cred clone run unchanged via the
  * shared provider's exec seam. The same env is harmlessly present for the local
  * git ops (rev-parse / worktree / apply) too. */
+/* Log a failed mirror git step: the subcommand (the first argument that is
+ * not -C or its directory), the exit status, and git's output on one line. */
+static void ws_mirror_log_git_failure(const char *const args[], int rc, const char *output)
+{
+   const char *sub = "?";
+   for (int i = 0; args[i]; i++)
+   {
+      if (strcmp(args[i], "-C") == 0 && args[i + 1])
+      {
+         i++;
+         continue;
+      }
+      sub = args[i];
+      break;
+   }
+   char text[400];
+   size_t n = 0;
+   for (const char *p = output ? output : ""; *p && n + 1 < sizeof(text); p++)
+   {
+      char c = *p == '\n' || *p == '\r' || *p == '\t' ? ' ' : *p;
+      if (c == ' ' && n > 0 && text[n - 1] == ' ')
+         continue;
+      text[n++] = c;
+   }
+   text[n] = '\0';
+   LOG_WARN("workspace", "mirror git %s failed (rc=%d): %s", sub, rc, n ? text : "(no output)");
+}
+
 static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, size_t out_cap)
 {
    const ws_mirror_runner_ctx_t *rctx = (const ws_mirror_runner_ctx_t *)ctx;
@@ -141,6 +169,18 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    int token_fd = -1;
    char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, NULL, environ, &token_fd);
 
+   /* The server holds no SSH key of its own: with a vaulted HTTPS token and an
+    * SSH remote (git@github.com:..., the usual developer origin), git would use
+    * SSH and fail with "Permission denied (publickey)", so no SSH-origin
+    * checkout could be mirrored. Use the transport the credential can
+    * authenticate -- the same rule the clone path applies -- wherever the remote
+    * appears (clone --mirror, the worktree's origin, the mirror's origin). */
+   char *transport = (envp && remote) ? git_cred_transport_url(remote, envp) : NULL;
+   if (transport && strcmp(transport, remote) != 0)
+      for (int i = 1; argv[i]; i++)
+         if (strcmp(argv[i], remote) == 0)
+            argv[i] = transport;
+
    char *cap = NULL;
    int rc;
    if (envp)
@@ -162,11 +202,25 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    }
    if (token_fd >= 0)
       close(token_fd);
+   /* Say why a step failed: the lifecycle caller often passes no output buffer,
+    * and its own warning names only the workspace, so without this a refused
+    * clone was indistinguishable from any other failure. The token never
+    * reaches git's output (it rides the askpass shim), so the text is safe. */
+   if (rc != 0)
+      ws_mirror_log_git_failure(args, rc, cap);
    if (out && out_cap)
       snprintf(out, out_cap, "%s%s", cap ? cap : "",
                rc == SAFE_EXEC_TIMEOUT ? "git command timed out after 30 seconds\n" : "");
    free(cap);
+   free(transport);
    return rc;
+}
+
+int workspace_turn_mirror_git_for_test(const char *remote, const char *const args[], char *out,
+                                       size_t out_cap)
+{
+   ws_mirror_runner_ctx_t rctx = {.remote = remote};
+   return ws_mirror_git_runner(&rctx, args, out, out_cap);
 }
 
 /* Drive the mirror lifecycle for `root` (the matched workspace) and, on success,

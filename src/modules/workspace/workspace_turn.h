@@ -118,6 +118,11 @@ int workspace_turn_container_bound(void);
  * thread-bound state; 0/1 pin it. For tests exercising the container-delegate exemption. */
 void workspace_turn_set_container_bound_for_test(int bound);
 
+/* Run one git step through the mirror runner for `remote`, as the mirror
+ * lifecycle does (credential env, transport URL, failure log). Tests only. */
+int workspace_turn_mirror_git_for_test(const char *remote, const char *const args[], char *out,
+                                       size_t out_cap);
+
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);
