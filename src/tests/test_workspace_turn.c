@@ -394,7 +394,11 @@ static void test_mirror_runner_transport_and_failure_log(void)
    char *no_agent[] = {path_env, NULL};
    char *agent[] = {path_env, "SSH_AUTH_SOCK=/run/test-agent.sock", NULL};
    const char *remote = "git@github.com:Owner/repo.git";
-   const char *clone[] = {"clone", "--mirror", remote, "/tmp/aimee-test-never-created", NULL};
+   char never_created[640], mirror_dir[640];
+   snprintf(never_created, sizeof(never_created), "%s/never-created", dir);
+   snprintf(mirror_dir, sizeof(mirror_dir), "%s/mirror", dir);
+   const char *clone[] = {"clone", "--mirror", remote, never_created, NULL};
+   char want[1400];
    char out[512];
    char got[2048];
 
@@ -414,7 +418,9 @@ static void test_mirror_runner_transport_and_failure_log(void)
    close(logfd);
    assert(rc != 0);
    read_file(calls, got, sizeof(got));
-   assert(strstr(got, "clone --mirror https://transport.test/rewritten /tmp/") != NULL);
+   snprintf(want, sizeof(want), "clone --mirror https://transport.test/rewritten %s",
+            never_created);
+   assert(strstr(got, want) != NULL);
    assert(strstr(got, "@github.com") == NULL);
    assert(strstr(out, "could not read from remote repository") != NULL);
 
@@ -433,17 +439,18 @@ static void test_mirror_runner_transport_and_failure_log(void)
    git_cred_test_env = agent;
    assert(workspace_turn_mirror_git_for_test(remote, clone, out, sizeof(out)) != 0);
    read_file(calls, got, sizeof(got));
-   assert(strstr(got, "clone --mirror git@github.com:Owner/repo.git /tmp/") != NULL);
+   snprintf(want, sizeof(want), "clone --mirror git@github.com:Owner/repo.git %s", never_created);
+   assert(strstr(got, want) != NULL);
 
    /* Only the remote argument is replaced. */
    assert(unlink(calls) == 0);
    git_cred_test_env = no_agent;
-   const char *set_url[] = {"-C", "/tmp/aimee-test-mirror", "remote", "set-url", "origin", remote,
-                            NULL};
+   const char *set_url[] = {"-C", mirror_dir, "remote", "set-url", "origin", remote, NULL};
    (void)workspace_turn_mirror_git_for_test(remote, set_url, out, sizeof(out));
    read_file(calls, got, sizeof(got));
-   assert(strstr(got, "-C /tmp/aimee-test-mirror remote set-url origin "
-                      "https://transport.test/rewritten") != NULL);
+   snprintf(want, sizeof(want), "-C %s remote set-url origin https://transport.test/rewritten",
+            mirror_dir);
+   assert(strstr(got, want) != NULL);
 
    git_cred_test_env = NULL;
    char rm[700];

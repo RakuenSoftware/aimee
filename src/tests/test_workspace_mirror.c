@@ -89,7 +89,10 @@ int main(void)
     * must be set from the remote on every fetch or a mirror cloned over a URL
     * the server can no longer use fails every fetch from then on. */
    {
-      char existing[] = "/tmp/aimee-test-mirror-XXXXXX";
+      const char *tmp = getenv("TMPDIR");
+      char existing[512];
+      snprintf(existing, sizeof(existing), "%s/aimee-test-mirror-XXXXXX",
+               tmp && tmp[0] ? tmp : "/tmp");
       assert(mkdtemp(existing) != NULL);
       char objects[sizeof(existing) + 16];
       snprintf(objects, sizeof(objects), "%s/objects", existing);
@@ -97,7 +100,7 @@ int main(void)
       g_cmd_log[0] = '\0';
       g_fetch_rc = 0;
       assert(workspace_mirror_ensure(mock_git, NULL, "git@host:o/r.git", existing) == 0);
-      char want_set[256], want_fetch[256];
+      char want_set[700], want_fetch[700];
       snprintf(want_set, sizeof(want_set), "-C %s remote set-url origin git@host:o/r.git\n",
                existing);
       snprintf(want_fetch, sizeof(want_fetch), "-C %s fetch --prune origin\n", existing);
