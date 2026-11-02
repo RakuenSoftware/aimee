@@ -215,19 +215,6 @@ static void test_normalize_key(void)
    assert(strcmp(buf, "i answer seattle") == 0);
 }
 
-static void test_stem_word(void)
-{
-   char buf[64];
-   stem_word("running", buf, sizeof(buf));
-   assert(strcmp(buf, "runn") == 0);
-
-   stem_word("tested", buf, sizeof(buf));
-   assert(strcmp(buf, "test") == 0);
-
-   stem_word("go", buf, sizeof(buf));
-   assert(strcmp(buf, "go") == 0);
-}
-
 static void test_is_likely_path(void)
 {
    assert(is_likely_path("/usr/bin/test") == 1);
@@ -621,7 +608,6 @@ int main(void)
    test_parse_utc_ts_accepts_both_spellings();
    test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();
-   test_stem_word();
    test_is_likely_path();
    test_trim_partial_utf8();
    test_sanitize_utf8();

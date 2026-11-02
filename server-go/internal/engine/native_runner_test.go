@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	appconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -596,16 +597,6 @@ func (a *concurrentPanelAgents) DelegateGroup(ctx context.Context, requests []De
 	return testDelegateGroup(ctx, requests, a.Delegate)
 }
 
-func (a *temporaryFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
-	a.mu.Lock()
-	a.requests = append(a.requests, request)
-	a.mu.Unlock()
-	if request.Delegate == "kimi" {
-		return DelegateResult{}, errors.New("subscription temporarily exhausted")
-	}
-	return DelegateResult{Output: canonical.TextResponse(`{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`)}, nil
-}
-
 type recordingAgents struct {
 	mu             sync.Mutex
 	requests       []DelegateRequest
@@ -628,29 +619,6 @@ type repairingReviewAgents struct {
 	mu       sync.Mutex
 	requests [][]DelegateRequest
 	invalid  string
-}
-
-func (a *repairingReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return DelegateResult{}, errors.New("unexpected direct delegation")
-}
-
-func (a *repairingReviewAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.requests = append(a.requests, append([]DelegateRequest(nil), requests...))
-	if len(a.requests) == 1 {
-		a.invalid = `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request\nwithout drift"},"verdict":"approve","findings":[]}`
-		return []DelegateGroupResult{{
-			Participant: "opaque-seat-token",
-			Output:      canonical.TextResponse(a.invalid),
-			CostUSD:     1.25,
-		}}
-	}
-	return []DelegateGroupResult{{
-		Participant: "opaque-seat-token",
-		Output:      canonical.TextResponse(withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, requests[0])),
-		CostUSD:     0.25,
-	}}
 }
 
 type firstPanelSeatUnavailableAgents struct {
@@ -737,14 +705,6 @@ func (a firstPanelSeatUnavailableAgents) Delegate(_ context.Context, request Del
 	return DelegateResult{Output: canonical.TextResponse(response)}, nil
 }
 
-func (a *scriptedReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	response := a.responses[0]
-	a.responses = a.responses[1:]
-	return DelegateResult{Output: canonical.TextResponse(response)}, nil
-}
-
 func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.mu.Lock()
 	a.requests = append(a.requests, request)
@@ -764,10 +724,6 @@ func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (
 }
 
 func (a *recordingAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
-	return testDelegateGroup(ctx, requests, a.Delegate)
-}
-
-func (a *scriptedReviewAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	return testDelegateGroup(ctx, requests, a.Delegate)
 }
 

@@ -44,43 +44,6 @@ fail:
    return -1;
 }
 
-int ensemble_continuation_request(const aimee_request_t *task, const char *persona,
-                                  const char *context, int max_tokens, double temperature,
-                                  aimee_request_t *out)
-{
-   if (!task || ensemble_synthesis_request(task, context, out))
-      return -1;
-   if (persona && persona[0])
-   {
-      aimee_block_t *blocks = realloc(out->system, (size_t)(out->n_system + 1) * sizeof *blocks);
-      if (!blocks)
-         goto fail;
-      out->system = blocks;
-      aimee_block_t *added = &blocks[out->n_system++];
-      *added = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(persona)};
-      if (!added->text)
-         goto fail;
-      aimee_ir_block_set_context(added, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
-                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                                 0);
-   }
-   if (!out->has_max_tokens && max_tokens > 0)
-   {
-      out->max_tokens = max_tokens;
-      out->has_max_tokens = 1;
-   }
-   if (!out->has_temperature && temperature >= 0)
-   {
-      out->temperature = temperature;
-      out->has_temperature = 1;
-   }
-   if (!aimee_ir_request_admit(out))
-      return 0;
-fail:
-   aimee_request_free(out);
-   return -1;
-}
-
 /* Canonical block ownership crosses the model boundary intact. Terminal usage,
  * diagnostics and native response-root metadata stay with the source result. */
 int ensemble_request_add_response(aimee_request_t *request, const char *label,
@@ -116,18 +79,4 @@ fail:
    aimee_response_free(&copy);
    aimee_request_free(&next);
    return -1;
-}
-
-int ensemble_response_context(const aimee_request_t *task, const char *label,
-                              const aimee_response_t *response, aimee_request_t *out)
-{
-   aimee_request_t next = {0};
-   if (aimee_ir_request_clone(task, &next) || ensemble_request_add_response(&next, label, response))
-   {
-      aimee_request_free(&next);
-      return -1;
-   }
-   aimee_request_free(out);
-   *out = next;
-   return 0;
 }

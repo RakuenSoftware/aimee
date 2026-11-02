@@ -396,8 +396,8 @@ class DescriptorTests(unittest.TestCase):
         cases = (
             ("aimee", "go_assets",
              "server-go/modules/aimee/families/schema_personal_memory_retirement_retries.sql"),
-            ("roundtable", "sources", "src/modules/roundtable/roundtable_verify.c"),
-            ("roundtable", "private_headers", "src/modules/roundtable/roundtable_verify.h"),
+            ("roundtable", "sources", "src/modules/roundtable/roundtable_activation.c"),
+            ("roundtable", "private_headers", "src/modules/roundtable/roundtable_activation.h"),
             ("protocols", "sources", "src/modules/protocols/acp/acp_server.c"),
             ("protocols", "private_headers",
              "src/modules/protocols/mcp/mcp_tools_gateway.h"),

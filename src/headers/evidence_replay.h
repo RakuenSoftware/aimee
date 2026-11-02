@@ -54,22 +54,6 @@ extern "C"
       int (*project_count)(void);
    } replay_backend_t;
 
-   /* The currently-registered backend, or NULL. */
-   const replay_backend_t *evidence_replay_active_backend(void);
-
-   /* Replay against an explicit backend (for tests). A NULL `be` degrades
-    * (INDEX_UNAVAILABLE) — there is no index to ground against. */
-   replay_status_t evidence_replay_with(const replay_backend_t *be, const review_evidence_t *ev,
-                                        reduced_record_t *out);
-
-   /* Stable lowercase token for a status (for audit logs / reason codes). */
-   const char *replay_status_str(replay_status_t s);
-
-   /* sha256-hex of `n` "file:line" strings, sorted ascending, joined by '\n'.
-    * Writes into out[REPLAY_IDKEY_HEX]. Exposed for tests (determinism). */
-   void evidence_idkey(const char (*files)[MAX_PATH_LEN], const int *lines, int n,
-                       char out[REPLAY_IDKEY_HEX]);
-
 #ifdef __cplusplus
 }
 #endif

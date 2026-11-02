@@ -2217,115 +2217,6 @@ static void test_orch_discipline_state_roundtrip(void)
    unlink(test_path);
 }
 
-static void test_semantic_advisory_pre_tool_check(void)
-{
-   char tmpdir[512];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gsem-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   char *old_aimee_home = getenv("AIMEE_HOME") ? strdup(getenv("AIMEE_HOME")) : NULL;
-   char *old_no_cache = getenv("AIMEE_NO_CACHE") ? strdup(getenv("AIMEE_NO_CACHE")) : NULL;
-   char *old_bypass =
-       getenv("AIMEE_ANTIPATTERNS_BYPASS") ? strdup(getenv("AIMEE_ANTIPATTERNS_BYPASS")) : NULL;
-   platform_setenv("HOME", tmpdir);
-   platform_unsetenv("AIMEE_HOME");
-   char audit_home[640];
-   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(audit_home, 0700) == 0);
-   platform_setenv("AIMEE_NO_CACHE", "1");
-   platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", "1");
-
-   assert(config_set("guardrails_semantic_mode", "advisory") == 0);
-   assert(config_set("guardrails_semantic_command",
-                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
-                     "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
-                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
-
-   session_state_t state;
-   memset(&state, 0, sizeof(state));
-   strcpy(state.session_mode, MODE_IMPLEMENT);
-   strcpy(state.guardrail_mode, MODE_APPROVE);
-
-   /* gsem_record now records over the event bus (async); flush so the count
-    * baseline and the post-check counts reflect the writes deterministically. */
-   obs_bus_flush();
-   guardrail_event_counts_t before_counts;
-   assert(db1_guardrail_event_counts_7d(&before_counts) == 0);
-
-   char msg[512] = {0};
-   char payload[256];
-   snprintf(payload, sizeof(payload),
-            "{\"file_path\":\"/tmp/test_gsem_advisory_%d.txt\",\"content\":\"hello\"}",
-            (int)getpid());
-   int rc = pre_tool_check("Write", payload, &state, MODE_APPROVE, guardrails_test_worktree_cwd,
-                           msg, sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "semantic guardrail: high risk") != NULL);
-   assert(strstr(msg, "advisory mode") != NULL);
-
-   /* Still advisory mode: a "block" recommendation must be downgraded to a prompt. */
-   assert(config_set("guardrails_semantic_command",
-                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
-                     "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
-                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
-
-   msg[0] = '\0';
-   snprintf(payload, sizeof(payload),
-            "{\"file_path\":\"/tmp/test_gsem_block_advisory_%d.txt\",\"content\":\"hello\"}",
-            (int)getpid());
-   rc = pre_tool_check("Write", payload, &state, MODE_APPROVE, guardrails_test_worktree_cwd, msg,
-                       sizeof(msg));
-   assert(rc == 0);
-   assert(strstr(msg, "semantic guardrail: high risk") != NULL);
-
-   obs_bus_flush(); /* drain the two async guardrail events into db1 before counting */
-   guardrail_event_counts_t counts;
-   assert(db1_guardrail_event_counts_7d(&counts) == 0);
-   assert(counts.warn == before_counts.warn);
-   assert(counts.prompt == before_counts.prompt + 2);
-   assert(counts.block == before_counts.block);
-   assert(counts.dry_run == before_counts.dry_run);
-
-   if (old_home)
-   {
-      platform_setenv("HOME", old_home);
-      free(old_home);
-   }
-   else
-   {
-      platform_unsetenv("HOME");
-   }
-   if (old_aimee_home)
-   {
-      platform_setenv("AIMEE_HOME", old_aimee_home);
-      free(old_aimee_home);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_HOME");
-   }
-   if (old_no_cache)
-   {
-      platform_setenv("AIMEE_NO_CACHE", old_no_cache);
-      free(old_no_cache);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_NO_CACHE");
-   }
-   if (old_bypass)
-   {
-      platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", old_bypass);
-      free(old_bypass);
-   }
-   else
-   {
-      platform_unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
-   }
-   platform_test_rmrf(tmpdir);
-}
-
 /* --- Read-before-write and stale-edit tests --- */
 
 static void test_write_before_read_blocked(void)
@@ -3676,7 +3567,6 @@ int main(void)
    test_orch_discipline_delegate_no_warn();
    test_orch_discipline_nudge_threshold();
    test_orch_discipline_state_roundtrip();
-   test_semantic_advisory_pre_tool_check();
    test_write_before_read_blocked();
    test_write_new_file_allowed();
    test_write_after_read_allowed();

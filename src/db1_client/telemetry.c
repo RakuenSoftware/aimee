@@ -647,30 +647,6 @@ int db1_guardrail_event_insert(const guardrail_event_t *e)
    return write_result(db1_call(&family, AIMEE_DB1_OP_GUARDRAIL_EVENT_INSERT, fields, 12, NULL, NULL, 0, NULL));
 }
 
-int db1_guardrail_event_counts_7d(guardrail_event_counts_t *out)
-{
-   if (!out)
-      return -1;
-   const char *const *fields = NULL;
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   char slot3[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, slot1, slot2, slot3};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_GUARDRAIL_EVENT_COUNTS_7D, fields, 0, values, caps, 4, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->dry_run = (int)strtol(slot0, NULL, 10);
-   out->warn = (int)strtol(slot1, NULL, 10);
-   out->prompt = (int)strtol(slot2, NULL, 10);
-   out->block = (int)strtol(slot3, NULL, 10);
-   return 0;
-}
-
 int db1_guardrail_event_session_advisory_count(const char *session_id, int *out)
 {
    if (!session_id || !session_id[0] || !out)

@@ -80,10 +80,6 @@ type Client interface {
 
 type AuthorizeFunc func(context.Context, uint64, Request) (Decision, error)
 
-func (f AuthorizeFunc) Authorize(ctx context.Context, traceID uint64, request Request) (Decision, error) {
-	return f(ctx, traceID, request)
-}
-
 type moduleCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
 }
@@ -332,8 +328,8 @@ func validDigest(value string) bool {
 }
 
 // egressBlockedIPv4 are the ranges a module-initiated call must not reach.
-// Deliberately in step with server-go/modules/delegates/proxyguard.go and
-// server-go/modules/sandbox/proxy_policy.go: the same destination must not be
+// Deliberately in step with server-go/modules/sandbox/proxy_policy.go and the
+// C web egress guard (src/posix/web_egress.c): the same destination must not be
 // refused on one plane and dialed on another. The stdlib predicates alone are
 // not enough -- IsPrivate covers RFC1918 and fc00::/7 but not CGNAT, the
 // TEST-NETs, or the reserved space.

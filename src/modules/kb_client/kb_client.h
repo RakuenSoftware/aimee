@@ -242,15 +242,6 @@ char *kb_client_workers_json(void);
  * response has {"status":"error","message":"..."}. */
 char *kb_client_curiosity_list_json(const char *state, int limit);
 
-/* Curiosity backlog write/read RPCs forwarded to aimee-kb. Each
- * returns a heap-allocated JSON response (caller frees) of shape
- * {"status":"ok",...} on success, or
- * {"status":"error","message":"..."} on failure. */
-char *kb_client_curiosity_create_json(const char *gap_type, const char *target_entity,
-                                      const char *target_topic, const char *evidence,
-                                      double importance, double novelty,
-                                      const char *source_session);
-
 /* Investigation-note RPCs forwarded to aimee-kb. Each returns a
  * heap-allocated JSON response (caller frees) of shape
  * {"status":"ok",...} on success, or
@@ -337,17 +328,8 @@ int kb_client_anti_pattern_extract_from_failures(void);
 
 int kb_client_memory_learn_style(void);
 
-/* Decision-log + anti-pattern CRUD via aimee-kb (the KB_STORE owner).
- * Each mirrors the local kb_store_* signature; row-out variants populate
- * |out| if non-NULL.  Reads return number of rows written; writes
- * return 0 on success, -1 on failure / kb-unreachable. */
-int kb_client_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
-                                  const char *rationale, const char *assumptions,
-                                  kb_store_decision_log_row_t *out);
 int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max);
-int kb_client_anti_pattern_insert(const char *pattern, const char *description, const char *source,
-                                  const char *source_ref, double confidence, anti_pattern_t *out);
 
 /* Rules + feedback CRUD via aimee-kb (the KB_STORE owner).  Mirrors the
  * local kb_store_* signatures.  rules.delete / update_directive_type
@@ -356,8 +338,6 @@ int kb_client_anti_pattern_insert(const char *pattern, const char *description, 
  * iff the row was an existing reinforcement rather than a fresh
  * insert. */
 int kb_client_rules_delete(int id);
-int kb_client_feedback_record(const char *polarity, const char *title, const char *description,
-                              int weight, int *reinforced_out);
 
 /* Session-wrapup maintenance routines that also touch KB_STORE — wrapped
  * on the kb side.  expire_session_directives returns 0 on success
@@ -435,11 +415,6 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
  * Returns 0 / -1.  Mirrors memory_compact_windows(). */
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
 
-/* Assemble the agent context block via aimee-kb.  Returns a heap-allocated
- * markdown string (caller frees) or NULL on failure / kb unreachable.
- * Mirrors memory_assemble_context(). */
-char *kb_client_memory_assemble_context(const char *task_hint);
-
 /* Assemble the default temporal-learning context (current semantic assertions,
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
@@ -451,11 +426,6 @@ char *kb_client_memory_assemble_typed_context(const char *query);
 /* Forward the Go owner's budget contract unchanged. The JSON is borrowed. */
 char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
                                                           const cJSON *context_limits);
-
-/* Insert a rule via aimee-kb.  Returns 0 on success, -1 on failure /
- * kb unreachable.  Mirrors kb_store_rules_insert(). */
-int kb_client_rules_insert(const char *polarity, const char *title, const char *description,
-                           int weight);
 
 /* Look up a single tool registry entry via aimee-kb.  Returns 0 on
  * success (out_found set to 0/1), -1 on failure / kb unreachable.
@@ -482,10 +452,6 @@ int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeou
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */
 
-/* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
- * 1 for a valid missing row, or -1 when the service/result is unavailable. */
-int kb_client_memory_get(int64_t id, memory_t *out);
-
 /* The EVENT-time verdict for an `as_of` query, kept as a tri-state because the
  * three answers are genuinely different. UNKNOWN is the service saying "I could
  * not tell"; folding it into NO is how a bitemporal query lies. UNASKED is the
@@ -498,21 +464,6 @@ typedef enum
    KB_VALID_AT_NO,
    KB_VALID_AT_UNKNOWN
 } kb_valid_at_t;
-
-/* Read-by-id JSON variant for lossless presentation/audit surfaces. The
- * returned memory object belongs to the caller. Unlike memory_t, its content
- * is not capped at 2047 bytes. Returns 0 on hit, 1 on miss, -1 on failure. */
-int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
-                                    kb_valid_at_t *verdict);
-
-/* As-of variant of kb_client_memory_get: forwards `as_of` to aimee-kb, which
- * owns the valid_from/valid_until interval, and hands back its verdict. The
- * plain entry point above cannot express this -- memory_t has no field for it
- * (the valid_at in memory.h belongs to memory_relation_t, a different struct),
- * so a caller that wants the time answer has to receive it separately.
- * `as_of` NULL or empty asks nothing and leaves *verdict at UNASKED. */
-int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
-                               kb_valid_at_t *verdict);
 
 /* Insert a memory row via aimee-kb (the KB_STORE owner).  The full
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on

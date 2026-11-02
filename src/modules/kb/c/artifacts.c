@@ -313,23 +313,6 @@ int kb_store_artifact_set_state(const char *id, const char *new_state)
    return 0;
 }
 
-int kb_store_artifact_set_target_surface(const char *id, const char *target_surface)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !id || !target_surface)
-      return -1;
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "UPDATE artifacts SET target_surface = ?1 WHERE id = ?2", err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", target_surface);
-   aimee_pg_bind_text(st, "?2", id);
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
-}
-
 int kb_store_artifact_touch(const char *id)
 {
    void *conn = kb_store_conn();

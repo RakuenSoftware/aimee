@@ -219,17 +219,6 @@ fail:
    return -1;
 }
 
-int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoint, const char *ca,
-                                const char *cc, const char *ck, const char *expected_issuer,
-                                const char *expected_serial, const char *expected_fp)
-{
-   uint64_t now = monotonic_ms();
-   return now == UINT64_MAX
-              ? -1
-              : kb_mgmt_client_session_open_deadline(s, endpoint, ca, cc, ck, expected_issuer,
-                                                     expected_serial, expected_fp, now + 30000, 0);
-}
-
 static int session_request_deadline(kb_mgmt_client_session_t *s, const char *method,
                                     const char *path, const char *body, const char *extra_headers,
                                     uint64_t deadline, char *resp, size_t cap, int *status_out,
@@ -348,29 +337,4 @@ kb_mgmt_client_send_result_t kb_mgmt_client_session_action_deadline(kb_mgmt_clie
    if (rc == 0)
       return KB_MGMT_CLIENT_SENT_RESPONSE;
    return sent ? KB_MGMT_CLIENT_SENT_AMBIGUOUS : KB_MGMT_CLIENT_NOT_SENT;
-}
-
-int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *method,
-                                   const char *path, const char *body, const char *extra_headers,
-                                   char *resp, size_t cap, int *status_out)
-{
-   uint64_t now = monotonic_ms();
-   return now == UINT64_MAX
-              ? -1
-              : kb_mgmt_client_session_request_deadline(s, method, path, body, extra_headers,
-                                                        now + 30000, resp, cap, status_out);
-}
-
-int kb_mgmt_client_request_auth(const char *ep, const char *ca, const char *cc, const char *ck,
-                                const char *m, const char *path, const char *b, const char *auth,
-                                char *r, size_t n, int *st)
-{
-   if (kb_mgmt_endpoint_validate(ep) != 0 || !ca || !m || !path || !r || !n)
-      return -1;
-   kb_mgmt_client_session_t session;
-   if (kb_mgmt_client_session_open(&session, ep, ca, cc, ck, NULL, NULL, NULL) != 0)
-      return -1;
-   int rc = kb_mgmt_client_session_request(&session, m, path, b, auth, r, n, st);
-   kb_mgmt_client_session_close(&session);
-   return rc;
 }

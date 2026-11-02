@@ -81,5 +81,16 @@ class SuiteSelectionTest(unittest.TestCase):
             CHECK.selected_tests(rules)
 
 
+class OrphanSourceTest(unittest.TestCase):
+    def test_a_longer_target_does_not_hide_a_shorter_source(self):
+        rules = "unit-test-kb-store: $(OBJDIR)/tests/test_kb_store.o\n"
+        self.assertTrue(CHECK.source_is_named("test_kb_store", rules))
+        self.assertFalse(CHECK.source_is_named("test_kb", rules))
+
+    def test_object_and_source_spellings_count(self):
+        self.assertTrue(CHECK.source_is_named("test_kb", "x: $(OBJDIR)/tests/test_kb.o\n"))
+        self.assertTrue(CHECK.source_is_named("test_kb", "SRC = tests/test_kb.c\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

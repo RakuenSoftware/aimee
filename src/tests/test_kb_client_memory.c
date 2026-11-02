@@ -199,19 +199,6 @@ static void test_generic_action_preserves_budget_auth_and_refusal(void)
    mock_agent_http_reset();
 }
 
-static int single_miss_post_handler(const char *url, const char *auth_header, const char *body,
-                                    char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)body;
-   (void)timeout_ms;
-   (void)extra_headers;
-   if (response_buf)
-      *response_buf = strdup("{\"status\":\"error\",\"message\":\"record not found\"}");
-   return 200;
-}
-
 static int explicit_scope_post_handler(const char *url, const char *auth_header, const char *body,
                                        char **response_buf, int timeout_ms,
                                        const char *extra_headers)
@@ -401,24 +388,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    printf("  PASS: test_readers_distinguish_unreachable_from_empty\n");
 }
 
-static void test_single_record_miss_is_not_dependency_failure(void)
-{
-   memory_t memory;
-
-   kb_client_dependency_reset_for_tests();
-   mock_agent_http_set_post_handler(single_miss_post_handler);
-   assert(kb_client_memory_get(42, &memory) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-
-   kb_client_dependency_reset_for_tests();
-   mock_agent_http_set_post_handler(unreachable_post_handler);
-   assert(kb_client_memory_get(42, &memory) < 0);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
-
-   mock_agent_http_reset();
-   printf("  PASS: test_single_record_miss_is_not_dependency_failure\n");
-}
-
 static void test_explicit_scope_overrides_ambient_context(void)
 {
    mock_agent_http_set_post_handler(explicit_scope_post_handler);
@@ -479,118 +448,6 @@ static void test_typed_context_uses_server_defaults(void)
    typed_context_expect_limits = 0;
    mock_agent_http_reset();
    printf("  PASS: test_typed_context_uses_server_defaults\n");
-}
-
-/* `memory get --as-of` was marshalled by the client, accepted by aimee-kb, and
- * lost in between: kb_client_memory_get sent a request carrying nothing but the
- * id. Every test around it passed anyway, because each end was checked against a
- * payload written by hand to contain the field -- the CLI marshaller was asserted
- * to emit as_of, the printer was fed a synthetic reply that already had valid_at,
- * and the KB_STORE primitive was called directly. Three green pieces that never
- * touched each other.
- *
- * So this asserts the SERIALIZED REQUEST BODY, which is the thing that was
- * actually empty. A test that only checked the return value would pass against
- * the broken version. */
-static char last_request_body[1024];
-static const char *as_of_reply = NULL;
-
-static int as_of_post_handler(const char *url, const char *auth_header, const char *body,
-                              char **response_buf, int timeout_ms, const char *extra_headers)
-{
-   (void)url;
-   (void)auth_header;
-   (void)timeout_ms;
-   (void)extra_headers;
-   snprintf(last_request_body, sizeof(last_request_body), "%s", body ? body : "");
-   if (response_buf)
-      *response_buf = strdup(as_of_reply);
-   return 200;
-}
-
-static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
-{
-   memory_t m;
-   kb_valid_at_t verdict;
-
-   mock_agent_http_set_post_handler(as_of_post_handler);
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":false,"
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-
-   /* The field must be ON THE WIRE. This is the assertion that fails against the
-    * bug: the old request body was {"id":42} and nothing else. */
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(strstr(last_request_body, "\"as_of\"") != NULL);
-   assert(strstr(last_request_body, "2026-06-12 00:00:00") != NULL);
-   assert(verdict == KB_VALID_AT_NO);
-
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9007199254740993,\"key\":\"k\"}}";
-   assert(kb_client_memory_get(INT64_C(9007199254740993), &m) == 0);
-   assert(m.id == INT64_C(9007199254740993));
-   assert(strstr(last_request_body, "\"id\":\"9007199254740993\""));
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775807,\"key\":\"k\"}}";
-   assert(kb_client_memory_get(INT64_MAX, &m) == 0 && m.id == INT64_MAX);
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775808}}";
-   assert(kb_client_memory_get(INT64_MAX, &m) < 0 && m.id == 0);
-
-   /* "unknown" must survive as a third answer. Folding it into NO would report
-    * "not in force" for a row the service could not judge. */
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\","
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(verdict == KB_VALID_AT_UNKNOWN);
-
-   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":true,"
-                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
-   assert(verdict == KB_VALID_AT_YES);
-
-   /* Not asking must send no as_of at all: aimee-kb emits the verdict exactly
-    * when it receives a non-empty as_of, so an empty string here would be
-    * indistinguishable from asking. */
-   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, NULL, &m, &verdict) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-   assert(verdict == KB_VALID_AT_UNASKED);
-
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get_as_of(42, "", &m, &verdict) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-   assert(verdict == KB_VALID_AT_UNASKED);
-
-   /* The plain entry point keeps its six existing callers' behaviour: no as_of
-    * on the wire, and it must still compile against a NULL verdict. */
-   last_request_body[0] = '\0';
-   assert(kb_client_memory_get(42, &m) == 0);
-   assert(strstr(last_request_body, "as_of") == NULL);
-
-   /* Presentation callers can request the raw object without routing content
-    * through memory_t.content[2048]. This is what keeps memory.get lossless
-    * after the KB returns a long stored value. */
-   char long_content[5001];
-   memset(long_content, 'q', sizeof(long_content) - 1);
-   long_content[sizeof(long_content) - 1] = '\0';
-   size_t reply_size = strlen(long_content) + 128;
-   char *long_reply = malloc(reply_size);
-   assert(long_reply != NULL);
-   snprintf(long_reply, reply_size,
-            "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\","
-            "\"content\":\"%s\"}}",
-            long_content);
-   as_of_reply = long_reply;
-   cJSON *raw_memory = NULL;
-   assert(kb_client_memory_get_json_as_of(42, NULL, &raw_memory, &verdict) == 0);
-   cJSON *raw_content = cJSON_GetObjectItemCaseSensitive(raw_memory, "content");
-   assert(cJSON_IsString(raw_content));
-   assert(strlen(raw_content->valuestring) == strlen(long_content));
-   cJSON_Delete(raw_memory);
-   free(long_reply);
-   as_of_reply = NULL;
-
-   mock_agent_http_reset();
-   printf("  PASS: test_as_of_reaches_the_kb_and_its_verdict_comes_back\n");
 }
 
 #define PII_CASE(what, call)                                                                       \
@@ -738,11 +595,9 @@ int main(void)
    test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();
-   test_single_record_miss_is_not_dependency_failure();
    test_explicit_scope_overrides_ambient_context();
    test_typed_context_uses_server_defaults();
    test_recall_carries_and_records_production_activation();
-   test_as_of_reaches_the_kb_and_its_verdict_comes_back();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");

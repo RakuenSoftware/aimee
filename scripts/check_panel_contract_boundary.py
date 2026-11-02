@@ -19,7 +19,6 @@ TEMPORARY_ENSEMBLE_CONSUMERS = {
     # wfe_live_panel.c paid this debt off: its delegate_ensemble.h include was
     # dead (the compiler builds the TU without it), so it was deleted rather
     # than migrated. The list only ever shrinks.
-    "src/modules/workflows/wfe_panel_roundtable.h",
     "src/server/server_compute.c",
     "src/server/server_sweep.c",
 }

@@ -3,11 +3,11 @@ package families
 import (
 	"bytes"
 	"encoding/json"
+
 	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 func validSessionIREvent(encoded []byte) bool { return canonical.ValidSessionEvent(encoded) }
-func validIRBlock(encoded []byte) bool        { return canonical.ValidBlock(encoded) }
 func decodeIR(encoded []byte, out any) bool   { return canonical.Decode(encoded, out) }
 
 // Avoid HTML-escaping a 1 MiB payload into a >3 MiB envelope. The browser receives

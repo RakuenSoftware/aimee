@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"errors"
-	"strings"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -570,5 +569,3 @@ FROM memories WHERE (key=$1 OR starts_with(key,$1||'#v')) AND `+historicalMemory
 	}
 	return records, err
 }
-
-func normalizeMatchText(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

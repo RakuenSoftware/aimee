@@ -68,14 +68,6 @@ type ChunkPlanResponse struct {
 	Assembly Assembly  `json:"assembly"`
 }
 
-// ChunkNeeded reports whether origin exceeds the budget at all.
-func ChunkNeeded(origin string, budgetBytes int) bool {
-	if budgetBytes <= 0 {
-		return false
-	}
-	return len(origin) > budgetBytes
-}
-
 // PlanChunks splits origin into spans of at most budgetBytes, preferring to
 // break on the last newline in the window so a chunk holds whole lines.
 func PlanChunks(origin string, budgetBytes int) ChunkPlan {

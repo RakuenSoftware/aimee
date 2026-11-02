@@ -228,14 +228,3 @@ func newHandler(s blobStore) ring.ModuleHandler {
 		}
 	}
 }
-
-// Handle is the production entry point for kind 11777, stage 1.
-func Handle(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
-	// Kept for the tests that drive the wire directly. The served handler is
-	// built by Binds with the store it was given.
-	return newHandler(pgStore{})(invocation, frame)
-}
-
-// Close is a no-op: the pool belongs to the module, not to this family, and is
-// released by the module's own shutdown.
-func Close() {}

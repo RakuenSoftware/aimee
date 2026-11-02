@@ -43,10 +43,6 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
  * chair/verify headers need the result type). The delegate_roundtable_* entry
  * points below still produce and free those types. */
 
-int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
-                            const aimee_request_t *task, const roundtable_opts_t *opts,
-                            roundtable_result_t *out);
-
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
  * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */
 int ensemble_panelist_eligible(const agent_t *ag);
@@ -87,22 +83,5 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
  * two-seat fallback when no preset exists. */
 int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel,
                                    const agent_config_t *acfg, char *err, size_t err_n);
-
-/* Persona name for panelist `model_index`: a configured
- * ensemble.reference_personas[model_index] if set (any mode), else a mode default
- * — DRAFT uses the built-in `engineer` persona for every panelist, REVIEW
- * round-robins the diverse default lineup keyed on the stable model index.
- * Borrowed pointer (string literal or config field) — do not free. Exposed for
- * tests. */
-/* Lifetime: the returned string is either a compile-time constant or an
- * accessor's thread-local buffer, so it is valid until the next call to the
- * SAME accessor on this thread. Consume it before calling back in. */
-const char *panel_persona_name(roundtable_mode_t mode, int model_index);
-
-/* The pure resolution table behind panel_persona_name, exposed for testing:
- * configured_slot is the slot's configured persona (NULL/"" when unset or out of
- * range), default_persona the configured default. No config read, no I/O. */
-const char *panel_persona_for_slot(roundtable_mode_t mode, int model_index,
-                                   const char *configured_slot, const char *default_persona);
 
 #endif /* DEC_DELEGATE_ENSEMBLE_H */
