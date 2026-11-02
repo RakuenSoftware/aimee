@@ -13,6 +13,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+#include "mirror_sync_wire.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
 #include <aimee/audit/obs_bus.h>
@@ -1566,10 +1567,16 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
-       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},
+       {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},
+       {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},
+       {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST},
+       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       /* Explicit, and shared with the clients that size their chunks by it. */
+       {"workspace.mirror-sync", MIRROR_SYNC_MAX_BODY},
        {NULL, LIMIT_DEFAULT},
    };
 

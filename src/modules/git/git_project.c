@@ -385,16 +385,6 @@ done:
    return result;
 }
 
-/* True if `envp` carries an SSH_AUTH_SOCK entry — i.e. git_cred_inject wired up
- * the user's in-memory ssh-agent because they have a vaulted SSH key. */
-static int env_has_ssh_sock(char *const *envp)
-{
-   for (int i = 0; envp && envp[i]; i++)
-      if (strncmp(envp[i], "SSH_AUTH_SOCK=", 14) == 0)
-         return 1;
-   return 0;
-}
-
 int git_project_clone(const char *principal, const char *url, const char *name, const char *org_in,
                       const char *token, char *out_path, size_t path_cap, char *out_ref,
                       size_t ref_cap, char *err, size_t errlen)
@@ -652,7 +642,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       char *clone_url_norm = NULL;
       const char *clone_url;
       int ssh_clone = 0;
-      if (util_url_is_ssh(url) && env_has_ssh_sock(envp))
+      if (util_url_is_ssh(url) && git_cred_env_has_ssh_agent(envp))
       {
          clone_url = url;
          ssh_clone = 1;

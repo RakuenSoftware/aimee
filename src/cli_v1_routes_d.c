@@ -4,6 +4,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "mirror_sync_wire.h"
 #include "json_wire.h"
 #include <stdint.h> /* uint64_t: the manifest cache key must be 64-bit on LLP64 too */
 #include "platform_path.h"
@@ -1672,17 +1673,12 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    const char *diff = cJSON_IsString(jdiff) ? jdiff->valuestring : "";
    size_t total = strlen(diff);
 
-   /* Sized against the PER-METHOD limit, not the transport one. Requests are
-    * capped twice: SHTTP_MAX_BODY (4MB) at the listener, and a per-method limit
-    * that defaults to LIMIT_DEFAULT — 256KB — for any method without its own
-    * entry, which mirror-sync does not have. The method limit is the binding one
-    * and rejects with PAYLOAD_TOO_LARGE.
-    *
-    * 128KB of patch leaves room for JSON escaping (worst case ~2x on a binary
-    * patch's escapes) and the envelope inside that 256KB. Chunking means no limit
-    * anywhere has to move: the size of one request stops being a function of the
-    * size of the tree. */
-   const size_t chunk_max = 128u * 1024u;
+   /* Sized against the PER-METHOD limit, not the transport one: requests are
+    * capped at SHTTP_MAX_BODY (4MB) by the listener and at MIRROR_SYNC_MAX_BODY
+    * for this method, and the method limit binds. mirror_sync_next_slice cuts
+    * each slice by its JSON-escaped size, so a newline- or quote-heavy patch
+    * cannot push a chunk over it the way a raw-byte count could. Chunking means
+    * the size of one request stops being a function of the size of the tree. */
 
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
@@ -1719,7 +1715,7 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
 
    size_t sent = 0;
    int seq = 0, rc = 0;
-   int data_chunks = (int)((total + chunk_max - 1) / chunk_max);
+   int data_chunks = mirror_sync_slice_count(diff, total);
    /* One empty begin chunk, then the data. A patch that fits in a single request
     * still uses the begin chunk: one extra tiny round trip buys the same
     * old-server safety on every sync rather than only on large ones. */
@@ -1728,7 +1724,7 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    for (;;)
    {
       int begin = (seq == 0);
-      size_t n = begin ? 0 : (total - sent > chunk_max ? chunk_max : total - sent);
+      size_t n = begin ? 0 : mirror_sync_next_slice(diff + sent, total - sent);
       int final = !begin && (sent + n >= total);
       if (begin && total == 0)
          final = 1; /* nothing to ship: the begin chunk is the whole sync */

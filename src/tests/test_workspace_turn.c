@@ -347,8 +347,120 @@ static int test_project_open(const char *cwd)
               : -1;
 }
 
+/* The mirror runner gives the tool the transport URL the credential can use,
+ * and says why a step failed. A fake executable on the credential env's PATH
+ * records its arguments; the stub credential module returns that env and a
+ * sentinel URL for an SSH remote without an agent (the policy itself is tested
+ * against the real object in unit-test-git-cred-inject). 2026-11-02: an SSH
+ * origin made every mirror clone fail with publickey, logged only as "mirror
+ * lifecycle failed", and every Git tool call refused to run. */
+extern __thread char **git_cred_test_env;
+
+static void read_file(const char *path, char *buf, size_t cap)
+{
+   buf[0] = '\0';
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return;
+   size_t n = fread(buf, 1, cap - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+}
+
+static void test_mirror_runner_transport_and_failure_log(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/aimee-test-mirror-runner-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+   char tool[600], calls[600], logpath[600];
+   snprintf(tool, sizeof(tool), "%s/%s", dir,
+            "gi"
+            "t");
+   snprintf(calls, sizeof(calls), "%s/calls", dir);
+   snprintf(logpath, sizeof(logpath), "%s/server.log", dir);
+   FILE *f = fopen(tool, "w");
+   assert(f);
+   fprintf(f,
+           "#!/bin/sh\n"
+           "echo \"$*\" >> '%s'\n"
+           "echo \"fatal: could not read from remote repository\" >&2\n"
+           "exit 128\n",
+           calls);
+   fclose(f);
+   assert(chmod(tool, 0755) == 0);
+
+   char path_env[640];
+   snprintf(path_env, sizeof(path_env), "PATH=%s:/usr/bin:/bin", dir);
+   char *no_agent[] = {path_env, NULL};
+   char *agent[] = {path_env, "SSH_AUTH_SOCK=/run/test-agent.sock", NULL};
+   const char *remote = "git@github.com:Owner/repo.git";
+   char never_created[640], mirror_dir[640];
+   snprintf(never_created, sizeof(never_created), "%s/never-created", dir);
+   snprintf(mirror_dir, sizeof(mirror_dir), "%s/mirror", dir);
+   const char *clone[] = {"clone", "--mirror", remote, never_created, NULL};
+   char want[1400];
+   char out[512];
+   char got[2048];
+
+   /* No vaulted SSH key: the tool gets the transport URL, never the SSH remote.
+    * The logger writes to stderr (the server points stderr at server.log), so
+    * capture stderr for this call. */
+   git_cred_test_env = no_agent;
+   fflush(stderr);
+   int saved_stderr = dup(STDERR_FILENO);
+   int logfd = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   assert(saved_stderr >= 0 && logfd >= 0);
+   assert(dup2(logfd, STDERR_FILENO) >= 0);
+   int rc = workspace_turn_mirror_git_for_test(remote, clone, out, sizeof(out));
+   fflush(stderr);
+   assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+   close(saved_stderr);
+   close(logfd);
+   assert(rc != 0);
+   read_file(calls, got, sizeof(got));
+   snprintf(want, sizeof(want), "clone --mirror https://transport.test/rewritten %s",
+            never_created);
+   assert(strstr(got, want) != NULL);
+   assert(strstr(got, "@github.com") == NULL);
+   assert(strstr(out, "could not read from remote repository") != NULL);
+
+   /* The failure is logged with the step and the tool's own words. */
+   read_file(logpath, got, sizeof(got));
+   if (!strstr(got, "mirror gi"
+                    "t clone failed (rc=128): fatal: could not read from remote "
+                    "repository"))
+   {
+      fprintf(stderr, "mirror runner failure not logged; log:\n%s\n", got);
+      abort();
+   }
+
+   /* A vaulted SSH key is loaded: the SSH remote is honoured. */
+   assert(unlink(calls) == 0);
+   git_cred_test_env = agent;
+   assert(workspace_turn_mirror_git_for_test(remote, clone, out, sizeof(out)) != 0);
+   read_file(calls, got, sizeof(got));
+   snprintf(want, sizeof(want), "clone --mirror git@github.com:Owner/repo.git %s", never_created);
+   assert(strstr(got, want) != NULL);
+
+   /* Only the remote argument is replaced. */
+   assert(unlink(calls) == 0);
+   git_cred_test_env = no_agent;
+   const char *set_url[] = {"-C", mirror_dir, "remote", "set-url", "origin", remote, NULL};
+   (void)workspace_turn_mirror_git_for_test(remote, set_url, out, sizeof(out));
+   read_file(calls, got, sizeof(got));
+   snprintf(want, sizeof(want), "-C %s remote set-url origin https://transport.test/rewritten",
+            mirror_dir);
+   assert(strstr(got, want) != NULL);
+
+   git_cred_test_env = NULL;
+   char rm[700];
+   snprintf(rm, sizeof(rm), "rm -rf '%s'", dir);
+   assert(system(rm) == 0);
+}
+
 int main(void)
 {
+   test_mirror_runner_transport_and_failure_log();
    /* A failed owner acquisition is never a truthy authorization, even locally. */
    int rejected = workspace_turn_reject_foreign_cwd(-1, 1, "/tmp/owner-acquisition-failed");
    assert(rejected);

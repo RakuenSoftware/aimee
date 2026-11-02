@@ -15,6 +15,7 @@
  * server on another host (e.g. a container). */
 #include "cli_client.h"
 #include "cli_v1_routes_internal.h"
+#include "mirror_sync_wire.h"
 #include "platform_process.h"
 #include "platform_random.h"
 #include "workspace_provider_detached.h"
@@ -840,13 +841,17 @@ static int rc_ship_chunk(const char *endpoint, const char *bearer, const char *r
       client then sees only EPIPE on a write it had not finished -- reported as
       "could not reach the endpoint", which blames a server that is up and
       answering. Refuse it here, where the size is known and can be said. */
+   /* The binding limit is the server's per-method one for mirror-sync, not the
+      listener's CLI_V1_MAX_BODY: a body between them draws 413 after the
+      whole upload. mirror_sync_next_slice keeps a slice inside it; this only
+      catches an envelope that outgrew its reserve. */
    size_t body_len = strlen(body);
-   if (body_len >= CLI_V1_MAX_BODY)
+   if (body_len > MIRROR_SYNC_MAX_BODY)
    {
       fprintf(stderr,
-              "aimee: a single mirror-sync chunk came to %zu bytes, over the %d-byte request "
-              "ceiling; the working-tree diff cannot be shipped\n",
-              body_len, (int)CLI_V1_MAX_BODY);
+              "aimee: a single mirror-sync chunk came to %zu bytes, over the %u-byte "
+              "mirror-sync limit; the working-tree diff cannot be shipped\n",
+              body_len, (unsigned)MIRROR_SYNC_MAX_BODY);
       free(body);
       return -1;
    }
@@ -899,12 +904,10 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
    const char *text = patch ? patch : "";
    size_t total = strlen(text);
 
-   /* Raw bytes per chunk. Well under the ceiling so that JSON escaping, which
-      can lengthen a byte into six, cannot push a chunk over it. */
-   const size_t chunk_max = 512u * 1024u;
-
+   /* Slices are sized by their JSON-escaped length against the server's
+      mirror-sync limit (mirror_sync_wire.h), not by a raw byte count. */
    int rc;
-   if (total <= chunk_max)
+   if (mirror_sync_next_slice(text, total) == total)
    {
       /* One request, and deliberately WITHOUT seq/final: a server that predates
          chunking treats a bare request as a whole transfer, which is what this
@@ -923,9 +926,9 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
       }
       rc = 0;
       int seq = 0;
-      for (size_t at = 0; at < total && rc == 0; at += chunk_max, seq++)
+      for (size_t at = 0, len = 0; at < total && rc == 0; at += len, seq++)
       {
-         size_t len = total - at < chunk_max ? total - at : chunk_max;
+         len = mirror_sync_next_slice(text + at, total - at);
          int final = (at + len >= total);
          rc = rc_ship_chunk(endpoint, bearer, root, base, branch, upstream, transfer, seq, final,
                             text + at, len);
