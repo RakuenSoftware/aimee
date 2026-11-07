@@ -34,7 +34,23 @@ def strings(value):
             yield from strings(child)
 
 
-def inside(output):
+def shared_lane_enabled(profile, remote, api, check):
+    if profile not in ('owner-client', 'public-reference'):
+        raise ValueError('unknown shared memory qualification profile')
+    if profile == 'owner-client':
+        return remote
+    # This declared profile has no Server shared-memory owner client. A failed
+    # owner-client request never switches profiles or turns into a passing skip.
+    status, reply = api('/v1/memory/recall', dict(store='kb', query='native-profile-boundary', scope='all'))
+    check('public-reference Server shared recall is explicitly unavailable without data',
+          status == 200 and reply.get('status') == 'unavailable'
+          and reply.get('message') == 'memory bus service unavailable or unsupported'
+          and reply.get('retryable') is True and reply.get('dependency') == 'kb'
+          and not any(key in reply for key in ('recall', 'memory', 'memories', 'results')))
+    return False
+
+
+def inside(output, shared_profile='owner-client'):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
     checks, captures, runs, provider_errors, request_sizes = [], [], [], [], []
@@ -326,7 +342,8 @@ def inside(output):
 
     try:
         # Exercise configured automatic recall without changing product defaults.
-        has_shared = config('get', 'kb_mode')['value'] == 'remote'
+        shared_remote = config('get', 'kb_mode')['value'] == 'remote'
+        has_shared = shared_lane_enabled(shared_profile, shared_remote, api, check)
         previous_recall = config('get', 'memory_recall_enabled')['value']
         config('set', 'memory_recall_enabled', '1')
         check('native fixture explicitly enables automatic recall',
@@ -610,6 +627,7 @@ def inside(output):
             provider.server_close()
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                shared_profile=shared_profile, shared_server_scenarios_qualified=has_shared,
                 provider_intervention_errors=provider_errors, provider_intervention_retries=mutation_retries,
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
@@ -624,9 +642,10 @@ def main():
     parser.add_argument('--server')
     parser.add_argument('--output', required=True)
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--shared-profile', choices=('owner-client', 'public-reference'), default='owner-client')
     args = parser.parse_args()
     if args.inside:
-        return inside(args.output)
+        return inside(args.output, args.shared_profile)
     if not args.server or not args.server.startswith('aimee-e2e-server-') or not args.server.endswith('-aimee-server-1'):
         parser.error('requires a disposable deployment-matrix Server')
     inspected = json.loads(subprocess.check_output(['docker', 'inspect', args.server], text=True))[0]
@@ -645,7 +664,8 @@ def main():
     try:
         subprocess.run(['docker', 'cp', str(Path(__file__).resolve()), args.server + ':' + remote], check=True)
         run_result = subprocess.run(['docker', 'exec', '-u', '1000', '-e', 'AIMEE_NATIVE_ASYNC_FIXTURE=1',
-            args.server, 'python3', remote, '--inside', '--output', result], timeout=600)
+            args.server, 'python3', remote, '--inside', '--shared-profile', args.shared_profile,
+            '--output', result], timeout=600)
         subprocess.run(['docker', 'cp', args.server + ':' + result, args.output], check=True)
         if run_result.returncode:
             return run_result.returncode

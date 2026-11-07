@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/mcp"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func probe() error {
@@ -19,12 +19,12 @@ func probe() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	client, err := bus.ConnectClient(ctx, os.Args[1], 1, 200+egress.PluginClientOffset)
+	client, err := ring.ConnectClient(ctx, os.Args[1], 1, 200+egress.PluginClientOffset)
 	if err != nil {
 		return err
 	}
 	defer client.Detach()
-	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
 	if err != nil {
 		return err
 	}
