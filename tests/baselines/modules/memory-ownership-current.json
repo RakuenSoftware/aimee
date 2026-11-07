@@ -3186,7 +3186,17 @@
       "symbols": [
         "kb_client_memory_audit_note"
       ],
-      "sha256": "60644de6a523fcfee0697b32d0a6262b4355429dd12eb29d3e08e4ff71b9bd14"
+      "sha256": "9a03a41c9470819b077623b86aa1a326e53a6533355da0744ce7fd2b9b3d8206",
+      "source_revisions": [
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_audit_note"
+          ],
+          "sha256": "60644de6a523fcfee0697b32d0a6262b4355429dd12eb29d3e08e4ff71b9bd14"
+        }
+      ],
+      "boundary_review": "PR #3091 sanitizer fixture closure: added only an aborting caller-bound module dispatch seam to the unbound facts-envelope transport fixture. Existing actor validation, exact envelopes, refusals and memory audit fixture are unchanged. The seam cannot return a successful caller-custody result. Full prior reviewed row is retained; this is not approval of native memory policy."
     },
     "src/tests/test_server_memory_benchmark.c": {
       "disposition": "host-fixture",

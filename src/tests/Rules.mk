@@ -7113,7 +7113,7 @@ $(TESTPREFIX)/unit-test-module-json-call: EXTRA_L_FLAGS += -lcrypto
 
 # These fixtures exercise module dispatch through the real registry and OSV gate.
 $(addprefix $(TESTPREFIX)/unit-test-,oauth-pkce oauth-reauth oauth-refresh-diagnostics policy-arms approach-memory curiosity-resolve eval-candidates server-mgmt-status web-search-fuse bus-shutdown-race): \
-    $(TEST_MEMORY_TRANSPORT_OBJS) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o $(OBJDIR)/tests/support/mock_agent_http.o $(OURO_RING_LIB)
+    $(TEST_MEMORY_TRANSPORT_OBJS) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o $(OBJDIR)/server/model_provider.o $(OBJDIR)/tests/support/mock_agent_http.o $(OURO_RING_LIB)
 
 $(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/tests/support/log_stub.o
 $(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/server/host_original_text.o

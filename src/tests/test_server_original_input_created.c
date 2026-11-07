@@ -17,7 +17,13 @@ static cJSON *minted;
 static char *stored_wire;
 static char stored_turn[128];
 static int random_calls;
-int __wrap_RAND_bytes(unsigned char *p, int n)
+/* The linker, rather than a C call site, names this fixture. Keep its exact
+ * symbol through LTO in both the ordinary and PostgreSQL link variants. */
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((externally_visible))
+#endif
+__attribute__((used)) int
+__wrap_RAND_bytes(unsigned char *p, int n)
 {
    memset(p, ++random_calls, (size_t)n);
    return 1;
