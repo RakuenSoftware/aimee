@@ -166,6 +166,7 @@ Subcommands:
   store            Store a memory
   list             List memories
   get              Read a memory by id (--as-of <ts>: was it in force then?)
+  delete <id>      Remove a memory from current recall (--store user|kb)
   evidence <id>    Inspect authorized evidence lineage (--json)
   health           Receipt-backed health (--window 24h --project P --workspace W --traces --json)
   receipt <request-id>  Inspect durable provider attempts (--json)
