@@ -58,9 +58,9 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 	}
 	user := &ring.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
 	model := &ring.CommandContext{Authenticated: true, Principal: "fixture:agent", TransportIdentity: "fixture:mcp"}
-	call := func(caller *ring.CommandContext, req DataRequest) DataResponse {
+	callOn := func(connection *pgx.Conn, caller *ring.CommandContext, req DataRequest) DataResponse {
 		t.Helper()
-		tx, err := conn.Begin(ctx)
+		tx, err := connection.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,6 +82,7 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 		}
 		return out
 	}
+	call := func(caller *ring.CommandContext, req DataRequest) DataResponse { return callOn(conn, caller, req) }
 	one := func(out DataResponse) Record {
 		t.Helper()
 		if len(out.Records) != 1 {
@@ -164,6 +165,50 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 			t.Fatal("authorized revocation failed", out)
 		}
 	}
+
+	t.Run("delayed automatic archive cannot reactivate human retirement", func(t *testing.T) {
+		archive := put(model, "archive:synthetic-project/retired-instruction", "archive", "L1", "synthetic archived instruction")
+		if !call(user, DataRequest{Operation: "delete", Authority: AuthorityUser, ID: archive.ID}).Deleted {
+			t.Fatal("human archive retirement failed")
+		}
+		retiredGeneration := generation()
+		fresh, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fresh.Close(context.Background())
+		if _, err := fresh.Exec(ctx, "SET search_path="+schema+",public"); err != nil {
+			t.Fatal(err)
+		}
+		// The automatic archive hook supplies no user authority. Even a fresh
+		// connection and the original payload must honor the retained same key.
+		request := DataRequest{Operation: "store", Authority: AuthorityModel, Kind: "archive", Key: archive.Key, Tier: "L1", Content: archive.Content, Confidence: &confidence}
+		refused := callOn(fresh, model, request)
+		if refused.Code == nil || *refused.Code != MutationReviewRequired || len(refused.Records) != 0 {
+			t.Fatal("delayed automatic archive reactivated retirement", refused)
+		}
+		if generation() != retiredGeneration || len(callOn(fresh, nil, DataRequest{Operation: "get", ID: archive.ID}).Records) != 0 {
+			t.Fatal("automatic archive changed generation or current read")
+		}
+		search := callOn(fresh, nil, DataRequest{Operation: "search", Query: "synthetic archived instruction", Kind: "archive", Limit: 10})
+		for _, row := range search.Records {
+			if row.ID == archive.ID {
+				t.Fatal("retired archive returned by current search")
+			}
+		}
+		var retainedID int64
+		var retainedState string
+		if err := fresh.QueryRow(ctx, "SELECT id,lifecycle_state FROM user_memories WHERE kind='archive' AND key=$1", archive.Key).Scan(&retainedID, &retainedState); err != nil || retainedID != archive.ID || retainedState != "retired" {
+			t.Fatal("canonical retirement did not survive fresh-connection upsert", err, retainedID, retainedState)
+		}
+		// This is suppression of automatic recreation, not a permanent ban on
+		// a new authenticated user instruction restoring the same identity.
+		request.Authority = AuthorityUser
+		restored := callOn(fresh, user, request)
+		if len(restored.Records) != 1 || restored.Records[0].ID != archive.ID || len(callOn(fresh, nil, DataRequest{Operation: "get", ID: archive.ID}).Records) != 1 {
+			t.Fatal("explicit user reactivation contract changed", restored)
+		}
+	})
 	for _, sql := range []string{
 		`UPDATE user_memories SET content='raw overwrite' WHERE key='human'`,
 		`UPDATE user_memories SET provenance_category='agent_message' WHERE key='human'`,

@@ -62,6 +62,7 @@
      "  store            Store a memory\n"
      "  list             List memories\n"
      "  get              Read a memory by id (--as-of <ts>: was it in force then?)\n"
+     "  delete <id>      Remove a memory from current recall (--store user|kb)\n"
      "  evidence <id>    Inspect authorized evidence lineage (--json)\n"
      "  health           Receipt-backed health (--window 24h --project P --workspace W --traces "
      "--json)\n"
