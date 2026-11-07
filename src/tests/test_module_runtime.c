@@ -1165,6 +1165,56 @@ static void smoke_host_gateway_plan(ouro_client_t *host)
    puts("memory: authenticated host/Go process gateway plans and ingress policy passed");
 }
 
+/* The Docker credential fixture adds a real policy before starting the bus.
+ * Validate that exact template with the pinned runtime, so an invalid grant
+ * cannot masquerade as an application health timeout. */
+static void check_egress_fixture_policy(const char *executable)
+{
+   const char *fixture = "tests/e2e/fixtures/egress-vault-probe/probe.grant.in";
+   FILE *input = fopen(fixture, "r");
+   if (!input)
+      input = fopen("../tests/e2e/fixtures/egress-vault-probe/probe.grant.in", "r");
+   assert(input != NULL);
+   char source[4096] = {0}, body[8192], directory[256], path[PATH_MAX];
+   size_t size = fread(source, 1, sizeof(source) - 1, input);
+   assert(size > 0 && !ferror(input) && feof(input));
+   assert(fclose(input) == 0);
+   const char *marker = strstr(source, "@EXECUTABLE@");
+   assert(marker && !strstr(marker + strlen("@EXECUTABLE@"), "@EXECUTABLE@"));
+   int length = snprintf(body, sizeof(body), "%.*s%s%s", (int)(marker - source), source, executable,
+                         marker + strlen("@EXECUTABLE@"));
+   assert(length > 0 && (size_t)length < sizeof(body));
+   snprintf(directory, sizeof(directory), "%s/aimee-egress-policy-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(directory));
+   assert(snprintf(path, sizeof(path), "%s/probe.grant", directory) > 0);
+   FILE *output = fopen(path, "w");
+   assert(output && fwrite(body, 1, (size_t)length, output) == (size_t)length);
+   assert(fclose(output) == 0 && chmod(path, 0600) == 0);
+   ouro_runtime_policy_t *policy = NULL;
+   assert(ouro_runtime_policy_load_dir(directory, &policy) == 0);
+   size_t count = 0;
+   const ouro_runtime_grant_t *grants = ouro_runtime_policy_grants(policy, &count);
+   assert(grants && count == 1 && grants[0].principal_class == 1 &&
+          grants[0].principal_ref == 712 && grants[0].uid == OURO_RUNTIME_SELF_UID &&
+          strcmp(grants[0].executable, executable) == 0 && grants[0].publish_count == 0 &&
+          grants[0].subscribe_count == 0 && grants[0].serve_count == 0 &&
+          grants[0].request_count == 4);
+   const uint32_t expected[] = {AIMEE_EGRESS_EVENT_SSE_OPEN, AIMEE_EGRESS_EVENT_SSE_SEND,
+                                AIMEE_EGRESS_EVENT_SSE_RECV, AIMEE_EGRESS_EVENT_SSE_CLOSE};
+   for (size_t i = 0; i < 4; i++)
+      assert(grants[0].request[i] == expected[i]);
+   ouro_runtime_policy_free(&policy);
+   /* The old range spelling is rejected by this same real parser. */
+   char *request = strstr(body, "request=");
+   assert(request);
+   strcpy(request, "request=12291-12294\nserve=\n");
+   output = fopen(path, "w");
+   assert(output && fputs(body, output) >= 0 && fclose(output) == 0);
+   assert(ouro_runtime_policy_load_dir(directory, &policy) != 0);
+   ouro_runtime_policy_free(&policy);
+   assert(unlink(path) == 0 && rmdir(directory) == 0);
+}
+
 int main(int argc, char **argv)
 {
    assert(argc >= 1 && argc <= 4);
@@ -1198,6 +1248,7 @@ int main(int argc, char **argv)
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
+   check_egress_fixture_policy(executable);
 
    char module_executable[PATH_MAX];
    if (argc >= 2)

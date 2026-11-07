@@ -98,6 +98,24 @@ def configure_probe_overlay(stack, fixture, network):
     stack.network_override.write_text(overlay)
 
 
+def startup_diagnostics(stack):
+    """Collect this ancillary stack before cleanup using the fixed safe grammar."""
+    result = dict(role=stack.role, readiness=matrix.container_readiness_probe(stack), states={})
+    for label, container in (('application', stack.application), ('embedder', stack.embedder)):
+        try:
+            state = json.loads(matrix.command('docker', 'inspect', '--format', '{{json .State}}', container))
+            result['states'][label] = matrix.safe_container_state(state)
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError):
+            result['states'][label] = dict(diagnostics='unavailable')
+    try:
+        logs = subprocess.run(['docker', 'logs', '--tail', '2000', stack.application],
+                              capture_output=True, text=True, timeout=15)
+        result['container_log'] = matrix.safe_startup_log_summary(logs.stdout + logs.stderr)
+    except (OSError, subprocess.SubprocessError):
+        result['container_log'] = dict(diagnostics='unavailable')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -198,9 +216,10 @@ print(json.dumps(rows))
             matrix.command('docker', 'compose', *stack.compose_args(), 'run', '--rm', '--no-deps', '-T',
                 '--entrypoint', '/usr/sbin/runuser', 'aimee-' + role, '-u', 'aimee', '--', 'aimee-' + role,
                 '--bootstrap-vault-stdin', env=stack.env, data='AIMEE_MCP_712_TOKEN=' + state['token'] + '\0')
-            grant = '\n'.join(['version=1', 'principal_class=1', 'principal_ref=712', 'uid=self',
-                'executable=/opt/aimee-e2e/egress-vault-probe', 'publish=', 'subscribe=',
-                'request=12291-12294', 'serve=', ''])
+            grant = (ROOT / 'tests/e2e/fixtures/egress-vault-probe/probe.grant.in').read_text()
+            if grant.count('@EXECUTABLE@') != 1:
+                raise RuntimeError('invalid probe executable template')
+            grant = grant.replace('@EXECUTABLE@', '/opt/aimee-e2e/egress-vault-probe')
             install = """import os,sys
 from pathlib import Path
 p=Path('/var/lib/aimee/modules.d')/sys.argv[1]/'egress-vault-probe.grant'
@@ -276,6 +295,8 @@ p.write_text(sys.stdin.read());p.chmod(0o600);os.chown(p,1000,1000)
         print('FAIL installed credential handoff: ' + str(error), flush=True)
     finally:
         (args.output / 'egress-vault.json').write_text(json.dumps(checks, indent=2) + '\n')
+        (args.output / 'egress-vault-startup.json').write_text(json.dumps(
+            [startup_diagnostics(stack) for stack in stacks], indent=2) + '\n')
         for stack in reversed(stacks):
             stack.compose('down', '--volumes', '--remove-orphans')
         provider.shutdown()

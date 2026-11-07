@@ -3,6 +3,8 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
+import json
 import unittest
 from unittest.mock import patch
 import yaml
@@ -53,6 +55,29 @@ class ProbeOverlayTests(unittest.TestCase):
             self.assertEqual(document['services']['aimee-server']['volumes'],
                              [str(output / 'probe') + ':/opt/aimee-e2e:ro'])
             self.assertNotIn(GATE.matrix.REFERENCE_TARGET, stack.network_override.read_text())
+
+    def test_ancillary_startup_diagnostics_never_export_raw_health_or_logs(self):
+        stack = SimpleNamespace(role='kb', application='owned-kb', embedder='owned-embedder')
+        state = dict(Status='running', ExitCode=0, Health=dict(Status='unhealthy',
+            FailingStreak=2, Log=[dict(ExitCode=1, Output='test-credential-must-not-escape')]))
+        logs = SimpleNamespace(stdout='WARN commands: module bus failed test-credential-must-not-escape', stderr='')
+        with patch.object(GATE.matrix, 'command', return_value=json.dumps(state)), \
+             patch.object(GATE.matrix, 'container_readiness_probe', return_value={'transport': 'connection_refused'}), \
+             patch.object(GATE.subprocess, 'run', return_value=logs):
+            diagnostics = GATE.startup_diagnostics(stack)
+        self.assertNotIn('test-credential-must-not-escape', json.dumps(diagnostics))
+        self.assertEqual(diagnostics['states']['application']['health_exit_codes'], [1])
+        self.assertEqual(diagnostics['readiness']['transport'], 'connection_refused')
+        self.assertEqual(diagnostics['container_log']['messages']['module bus failed'], 1)
+
+    def test_missing_ancillary_container_has_safe_diagnostics(self):
+        stack = SimpleNamespace(role='kb', application='missing', embedder='missing')
+        with patch.object(GATE.matrix, 'command', side_effect=RuntimeError('private-output')), \
+             patch.object(GATE.matrix, 'container_readiness_probe', return_value={'transport': 'probe_unavailable'}), \
+             patch.object(GATE.subprocess, 'run', side_effect=OSError('private-output')):
+            diagnostics = GATE.startup_diagnostics(stack)
+        self.assertNotIn('private-output', json.dumps(diagnostics))
+        self.assertEqual(diagnostics['states']['application'], {'diagnostics': 'unavailable'})
 
 if __name__ == '__main__':
     unittest.main()
