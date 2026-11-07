@@ -231,7 +231,7 @@ BUS_TEST_OBJS = $(OBS_BUS_LINK_OBJS) \
                 $(OURO_RING_LIB)
 # The delegate loop builds requests and imports history through translation.
 # Carry its complete IR boundary in every fixture that links the runtime bundle.
-TEST_WORKSPACE_OBJS_EXTRA += $(OBJDIR)/server/module_native_tools.o
+TEST_WORKSPACE_OBJS_EXTRA += $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/server/server_active_project.o
 # Actual runtime owners shared by every fixture linking the workspace/delegate loop.
 TEST_WORKSPACE_OBJS_EXTRA += $(DB1_CLIENT_OBJS) \
     $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o \
@@ -5384,7 +5384,7 @@ AGENT_CONTEXT_REFUSAL_TEST_COMMON = $(OBJDIR)/server/agent_admission.o \
     $(OBJDIR)/modules/translation/aimee_frontend_responses.o
 
 $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON)
-	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/server_active_project.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS)
 
 # Links the real dispatch TU against the shared test object sets — no stubs needed
 # (TEST_DATA_OBJS + TEST_WORKSPACE_OBJS_EXTRA already cover every td_* handler's
@@ -6981,7 +6981,7 @@ $(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audi
 	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(OBJDIR)/modules/delegates/delegate_launch_args.o $(filter-out $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/posix/agent_runtime.o $(OBJDIR)/server/agent_result_cache.o,$(AGENT_CONTEXT_REFUSAL_TEST_COMMON)) $(OBJDIR)/tests/job_progress_agent_runtime.o $(OBJDIR)/tests/job_progress_result_cache.o $(OBJDIR)/tests/agent_job_progress_owner.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
-	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS) -Wl,--wrap=db1_delegation_spawn_is_stopped -Wl,--wrap=db1_delegation_spawn_stop_reason
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/module_commands.o $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/server_active_project.o,$^) $(OURO_RING_LIB) $(TEST_L_FLAGS) -Wl,--wrap=db1_delegation_spawn_is_stopped -Wl,--wrap=db1_delegation_spawn_stop_reason
 
 # Actual thin-CLI forwarding consumers share the canonical identity closure.
 $(TESTPREFIX)/unit-test-cli-argspec \
@@ -7087,16 +7087,16 @@ $(TESTPREFIX)/unit-test-server-chat-ir: $(OBJDIR)/server/host_original_submissio
 $(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/server/server_compute_lifetime.o $(OBJDIR)/server/host_original_submission.o
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/command_registry.o
 
-$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/modules/vault/vault_store.o
+$(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o
 
-$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
 
-$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: EXTRA_L_FLAGS += -lm
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: EXTRA_L_FLAGS += -lm
 
-$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/server/tool_args_coerce.o
+$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/tool_args_coerce.o
 
 $(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live $(TESTPREFIX)/unit-test-oauth-pkce $(TESTPREFIX)/unit-test-oauth-reauth $(TESTPREFIX)/unit-test-oauth-refresh-diagnostics: $(OBJDIR)/modules/audit/obs_bus_call.o
-$(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
+
 $(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/command_registry.o
 
 # Preserve explicit fixture peers while linking the remaining real protocol API.
@@ -7110,3 +7110,13 @@ $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/te
 $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/guardrail_telemetry_protocol_client.o
 
 $(TESTPREFIX)/unit-test-module-json-call: EXTRA_L_FLAGS += -lcrypto
+
+# These fixtures exercise module dispatch through the real registry and OSV gate.
+$(addprefix $(TESTPREFIX)/unit-test-,oauth-pkce oauth-reauth oauth-refresh-diagnostics policy-arms approach-memory curiosity-resolve eval-candidates server-mgmt-status web-search-fuse bus-shutdown-race): \
+    $(TEST_MEMORY_TRANSPORT_OBJS) $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o $(OBJDIR)/tests/support/mock_agent_http.o $(OURO_RING_LIB)
+
+$(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/tests/support/log_stub.o
+$(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/server/host_original_text.o
+$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: $(KB_MCP_OBJS)
+$(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/server/tool_args_coerce.o
+$(TESTPREFIX)/unit-test-server-dispatch: $(OURO_RING_LIB)

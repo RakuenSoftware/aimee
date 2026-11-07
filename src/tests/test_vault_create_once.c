@@ -512,7 +512,7 @@ static void immutable_lifecycle(void)
    assert(create(p, "fixed", "other value") == VAULT_CREATE_ONCE_RETIRED && !generation[0]);
    assert(sync_calls == before_retry); /* Retired create refuses without I/O. */
    assert(!vault_store_delete(p, "opaque-provider", "fixed"));
-   assert(sync_calls == before_retry + 2); /* Retirement retry re-syncs file + directory. */
+   assert(sync_calls == before_retry + 3); /* Re-sync file, vault directory and its parent. */
    after = blob(p);
    assert(!strcmp(after, retired_blob));
    free(after);
@@ -771,7 +771,7 @@ static void failures(void)
    assert(create(p, "ambiguous-commit", "committed value") == VAULT_CREATE_ONCE_IO &&
           !fail_directory_sync && !generation[0] && sync_calls == committed_syncs + 2);
    assert(create(p, "ambiguous-commit", "committed value") == VAULT_CREATE_ONCE_REPLAY &&
-          !strcmp(committed_pin, generation) && sync_calls == committed_syncs + 4);
+          !strcmp(committed_pin, generation) && sync_calls == committed_syncs + 5);
    char *replayed = blob(p);
    assert(!strcmp(committed, replayed));
    free(committed);
@@ -792,12 +792,12 @@ static void failures(void)
           !generation[0]);
    assert(sync_calls == retired_syncs);
    /* An earlier rename is visible despite an unknown durability outcome.
-    * The same delete must not acknowledge until both sync barriers succeed. */
+    * The same delete must not acknowledge until all three sync barriers succeed. */
    fail_directory_sync = 1;
    assert(vault_store_delete(p, "opaque-provider", "ambiguous-retire") != 0 &&
           !fail_directory_sync && sync_calls == retired_syncs + 2);
    assert(!vault_store_delete(p, "opaque-provider", "ambiguous-retire") &&
-          sync_calls == retired_syncs + 4);
+          sync_calls == retired_syncs + 5);
    char *before = blob(p);
    replace(p, "malformed vault json");
    assert(create(p, "new", "value") == VAULT_CREATE_ONCE_IO);
@@ -847,14 +847,14 @@ static void batch_retirement_retry_durability(void)
    assert(vault_store_write_batch(p, key, "opaque-provider", deletes, 2) != 0 &&
           !fail_directory_sync && sync_calls == before + 2);
    assert(!vault_store_write_batch(p, key, "opaque-provider", deletes, 2) &&
-          sync_calls == before + 4);
+          sync_calls == before + 5);
    char out[64];
    assert(vault_store_get_server_generation(p, key, "opaque-provider", "batch-retired", pin, out,
                                             sizeof out) == VAULT_STORE_RETIRED);
    vault_store_write_t mixed[] = {{"batch-retired", NULL}, {"mutable", "safe batch value"}};
    before = sync_calls;
    assert(!vault_store_write_batch(p, key, "opaque-provider", mixed, 2) &&
-          sync_calls == before + 2);
+          sync_calls == before + 3);
    vault_store_write_t absent[] = {{"absent", NULL}};
    before = sync_calls;
    assert(!vault_store_write_batch(p, key, "opaque-provider", absent, 1) && sync_calls == before);

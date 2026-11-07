@@ -3144,8 +3144,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "1670c3f61a75f61d4dfd6a0a19895ca02706cb816cc54f7ea0998825c9d0aa87",
-      "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+      "sha256": "5da4b5992212821d3507441ffe618df4c0a471be0c327e4247fd69bfa704e0f2",
+      "boundary_review": "PR #3091 CI fixture closure: reviewed the added dispatch-only memory.protected-intake marker using the existing stub_handler pattern, and the asserting, fail-closed OSV-discovery seam for an unexercised module-launch path. Existing memory data/scope/stat fixtures and dispatch authorization assertions are unchanged. The full prior reviewed row is retained in source_revisions; this does not approve a C memory implementation or grant source authority.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3156,6 +3156,28 @@
           ],
           "sha256": "30df99c7b311f0669a23528e462d3738e0c67ee71aa0c58845f97822104ce400",
           "boundary_review": "2026-10-20 PR #3052: Hook resource-provider fixtures now cover nested acquisition, approved mirror cwd and enclosing binding restoration. Reversing only hook_test_exec/provider peers, pre_tool_check fixture and test_hooks_pre_remote_workspace_scope reproduces the pinned fixture byte-for-byte. Memory data/scope/stat fixtures are unchanged. 2026-10-20 PR #3052: Added only fail-closed filesystem/project custody stubs to the minimal dispatcher fixture for the new scoped learning reader. Exact reversal restores the prior reviewed hash. Production memory ownership and existing fixture assertions are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the new local-source identity stub, delegating to the existing refusing resource stub. Removing exactly that function restores the prior reviewed hash. No memory fixture or source authority is granted; not independent production approval. 2026-10-20 PR #3052: Added only the primary-session adapter include and an asserting refusal stub for browser history opening in this dispatch-only fixture. Exact removal restores the prior reviewed hash byte-for-byte. Existing memory fixtures and authority remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only an asserting refusal stub for the new DB1 exact operator cancellation entry point to the dispatch-only fixture; every call fails the fixture. Existing assertions, memory symbols and memory owner routing remain unchanged. This is source-boundary review, not independent production approval."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_clear",
+            "memory_stats",
+            "server_module_memory_data"
+          ],
+          "sha256": "1670c3f61a75f61d4dfd6a0a19895ca02706cb816cc54f7ea0998825c9d0aa87",
+          "boundary_review": "PR #3091 upstream merge: reviewed canonical IR request/catalog/capture migration, Ouroboros ring protocol names, removed retired host API callers and transport-only fixture changes. No C memory policy or fallback implementation is introduced.",
+          "source_revisions": [
+            {
+              "disposition": "host-fixture",
+              "symbols": [
+                "kb_client_memory_scope_context_clear",
+                "memory_stats",
+                "server_module_memory_data"
+              ],
+              "sha256": "30df99c7b311f0669a23528e462d3738e0c67ee71aa0c58845f97822104ce400",
+              "boundary_review": "2026-10-20 PR #3052: Hook resource-provider fixtures now cover nested acquisition, approved mirror cwd and enclosing binding restoration. Reversing only hook_test_exec/provider peers, pre_tool_check fixture and test_hooks_pre_remote_workspace_scope reproduces the pinned fixture byte-for-byte. Memory data/scope/stat fixtures are unchanged. 2026-10-20 PR #3052: Added only fail-closed filesystem/project custody stubs to the minimal dispatcher fixture for the new scoped learning reader. Exact reversal restores the prior reviewed hash. Production memory ownership and existing fixture assertions are unchanged; not independent production approval. 2026-10-20 PR #3052: Added only the new local-source identity stub, delegating to the existing refusing resource stub. Removing exactly that function restores the prior reviewed hash. No memory fixture or source authority is granted; not independent production approval. 2026-10-20 PR #3052: Added only the primary-session adapter include and an asserting refusal stub for browser history opening in this dispatch-only fixture. Exact removal restores the prior reviewed hash byte-for-byte. Existing memory fixtures and authority remain unchanged; not independent production approval. 2026-10-21 PR #3057: Adds only an asserting refusal stub for the new DB1 exact operator cancellation entry point to the dispatch-only fixture; every call fails the fixture. Existing assertions, memory symbols and memory owner routing remain unchanged. This is source-boundary review, not independent production approval."
+            }
+          ]
         }
       ]
     },

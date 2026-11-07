@@ -1337,6 +1337,11 @@ jobs:
           for db in aimee_pam_ci aimee_resid_ci; do
             docker exec aimee-live-pg createdb -U aimee "$db"
           done
+      - name: Set up pinned Go for the auth reference fixture
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: server-go/go.sum
       - name: Build the stack and the rig drivers
         id: build
         # aimee-kb FORKS aimee-kb-resolver from beside its own executable, so `all`
@@ -1366,8 +1371,16 @@ jobs:
       # Root for the trust bundle (a root-owned 0600 single-link file); -E so the
       # build's environment survives sudo. The rig provisions its own throwaway
       # database, so the connecting role is the image's superuser.
+      - name: Build the external memory reference for the tier action fixture
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/live-auth-memory-reference"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/live-auth-memory-reference/aimee-module-memory"
       - name: The tier gate, end to end
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          AIMEE_LIVE_REFERENCE_MEMORY_OWNER: ${{ runner.temp }}/live-auth-memory-reference/aimee-module-memory
         run: sudo -E bash scripts/run-write-tier-enforce-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_enforce_ci
 
       # The PAM half of acceptance §11, against a real PAM stack.
@@ -1649,7 +1662,14 @@ jobs:
           # Exercise the real root-UDS browser operator boundary, without changing server authorization.
           sudo -n true
           echo 'AIMEE_TEST_NATIVE_BROWSER_OPERATOR=1' >> "$GITHUB_ENV"
+      - name: Build the external reference policy for the actual grading journey
+        run: |
+          git fetch --no-tags --depth=1 origin 0e29dd14f8c96de8f8366d763dfe56992aedc2b0
+          mkdir -p "$RUNNER_TEMP/execution-grade-memory-reference"
+          python3 scripts/build_reference_memory_fixture.py --output "$RUNNER_TEMP/execution-grade-memory-reference/aimee-module-memory"
       - name: Client/server integration harness with actual native SDKs
+        env:
+          AIMEE_TEST_EXECUTION_GRADE_MEMORY_OWNER: ${{ runner.temp }}/execution-grade-memory-reference/aimee-module-memory
         run: cd src && make -j$(nproc) integration-tests
 
   init-migrate-service-test:

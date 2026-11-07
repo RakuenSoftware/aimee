@@ -3,6 +3,11 @@
 import hashlib
 import importlib.util
 import json
+import io
+import contextlib
+import http.client
+import pathlib
+import types
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,16 +59,20 @@ class ReferenceSelectionTests(unittest.TestCase):
     def test_only_executable_is_changed(self):
         manifest = 'config\t/bin/config\nmemory\t/bin/memory\npostgres\t/bin/postgres'
         grant = 'version=1\nprincipal_ref=7\nuid=self\nexecutable=/bin/memory\nserve=5889,6143\nrequest=\n'
-        with patch.object(MATRIX, 'command', side_effect=[manifest, grant]) as call:
+        with patch.object(MATRIX, 'command', side_effect=[manifest, grant, grant, grant]) as call:
             overlay = MATRIX.reference_overlay('server', 'candidate:image', self.binary, self.root, 'test')
         self.assertEqual((self.root / 'test-reference.modules').read_text(),
                          manifest.replace('memory\t/bin/memory', 'memory\t' + MATRIX.REFERENCE_TARGET) + '\n')
         self.assertEqual((self.root / 'test-reference.grant').read_text(),
                          grant.replace('executable=/bin/memory', 'executable=' + MATRIX.REFERENCE_TARGET))
-        self.assertEqual(overlay.count('read_only: true'), 3)
+        self.assertEqual(overlay.count('read_only: true'), 5)
         self.assertIn(MATRIX.REFERENCE_TARGET, overlay)
         self.assertNotIn('target: "/usr/local/libexec', overlay)
         self.assertTrue(all('--network' in row.args and '--read-only' in row.args for row in call.call_args_list))
+        for name in ('memory-postgres', 'memory-egress'):
+            self.assertEqual((self.root / ('test-reference.' + name + '.grant')).read_text(),
+                             grant.replace('executable=/bin/memory', 'executable=' + MATRIX.REFERENCE_TARGET))
+            self.assertIn('/server/' + name + '.grant', overlay)
         saved = json.loads((self.root / 'test-reference.json').read_text())
         self.assertEqual(saved['purpose'], 'external-reference-not-shipped')
         self.assertEqual(saved['binary_sha256'], self.provenance['binary_sha256'])
@@ -94,6 +103,103 @@ class ReferenceSelectionTests(unittest.TestCase):
             with self.subTest(manifest=manifest), patch.object(MATRIX, 'command', side_effect=[manifest, grant]):
                 with self.assertRaises(ValueError):
                     MATRIX.reference_overlay('kb', 'candidate', self.binary, self.root, 'test')
+
+    def test_outbound_grants_must_match_selected_service_executable(self):
+        manifest = 'memory\t/bin/memory'
+        grant = 'executable=/bin/memory\nrequest=11266\n'
+        for outgoing in ('memory-postgres', 'memory-egress'):
+            grants = [grant, grant, grant]
+            grants[1 if outgoing == 'memory-postgres' else 2] = 'executable=/bin/wrong\n'
+            with self.subTest(outgoing=outgoing), patch.object(
+                    MATRIX, 'command', side_effect=[manifest, *grants]):
+                with self.assertRaises(ValueError):
+                    MATRIX.reference_overlay('kb', 'candidate', self.binary, self.root, 'bad')
+
+    def test_health_projection_never_exports_free_text(self):
+        secret = 'private-credential-and-request-body'
+        payload = dict(status=secret, ready=secret, postgres_ok=False, reason=secret,
+                       dependencies=dict(db1=secret, kb='disabled', private=secret),
+                       diagnostics=dict(failed_boundary='modules', missing_module=secret,
+                                        breaker_state='closed', last_ingest_at=secret),
+                       pool=dict(size=8, in_use=secret, available=False), private=secret)
+        result = MATRIX.safe_readiness_payload('server', 503, payload)
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertEqual(result['dependencies']['db1'], 'unknown')
+        self.assertEqual(result['diagnostics']['failed_boundary'], 'modules')
+        self.assertFalse(result['postgres_ok'])
+        self.assertNotIn('ready', result)
+        self.assertEqual(result['pool'], dict(size=8, available=False))
+
+    def test_container_health_outputs_are_discarded(self):
+        secret = 'private-health-command-output'
+        result = MATRIX.safe_container_state(dict(Status='running', ExitCode=0, OOMKilled=False,
+            Health=dict(Status='unhealthy', FailingStreak=3, Log=[dict(ExitCode=1, Output=secret),
+                                                               dict(ExitCode=7, Output=secret)])))
+        self.assertEqual(result['health_exit_codes'], [1, 7])
+        self.assertEqual(result['health_failing_streak'], 3)
+        self.assertNotIn(secret, json.dumps(result))
+
+    def test_container_probe_sanitizes_http_and_file_logs_before_returning(self):
+        for role in ('server', 'kb'):
+            payload = dict(status='degraded', ready=False, postgres_ok=False,
+                           private='private-response-secret',
+                           dependencies=dict(db1='fail'), diagnostics=dict(missing_module='memory'))
+            case = self
+            requests = []
+            class Connection:
+                def __init__(self, *args, **kwargs): pass
+                def request(self, *args): requests.append(args)
+                def getresponse(self):
+                    return types.SimpleNamespace(status=503, read=lambda size: json.dumps(payload).encode())
+                def close(self): pass
+            class SourceLog:
+                def __init__(self, path): pass
+                def is_socket(self): return role == 'server'
+                def open(self, mode):
+                    return io.BytesIO(b'private-log-secret\nINFO ready: memory module unavailable\nring: attach denied\n')
+            def execute(*args, **kwargs):
+                case.assertEqual(args[:2], ('docker', 'exec'))
+                code = args[5]
+                capture = io.StringIO()
+                with patch.object(http.client, 'HTTPConnection', Connection), \
+                     patch.object(pathlib, 'Path', SourceLog), \
+                     patch('sys.argv', ['probe', role]), contextlib.redirect_stdout(capture):
+                    exec(code, {})
+                return capture.getvalue()
+            with patch.object(MATRIX, 'command', side_effect=execute):
+                result = MATRIX.container_readiness_probe(types.SimpleNamespace(role=role, application='app'))
+            self.assertEqual(requests, [('GET', '/v1/ready' if role == 'server' else '/v1/health')])
+            self.assertEqual(result['status_code'], 503)
+            self.assertEqual(result['server_file_log']['messages']['ring: attach denied'], 1)
+            self.assertNotIn('private-', json.dumps(result))
+
+    def test_unavailable_probe_returns_only_fixed_category(self):
+        with patch.object(MATRIX, 'command', side_effect=RuntimeError('private-exec-error')):
+            self.assertEqual(MATRIX.container_readiness_probe(
+                types.SimpleNamespace(role='kb', application='app')), dict(transport='probe_unavailable'))
+
+    def test_no_listener_still_collects_sanitized_source_log(self):
+        class Connection:
+            def __init__(self, *args, **kwargs): pass
+            def request(self, *args): raise ConnectionRefusedError('private-socket-detail')
+            def close(self): pass
+        class SourceLog:
+            def __init__(self, path): pass
+            def is_socket(self): return False
+            def open(self, mode):
+                return io.BytesIO(b'config module unavailable: private-source-detail\n')
+        def execute(*args, **kwargs):
+            capture = io.StringIO()
+            with patch.object(http.client, 'HTTPConnection', Connection), \
+                 patch.object(pathlib, 'Path', SourceLog), \
+                 patch('sys.argv', ['probe', 'kb']), contextlib.redirect_stdout(capture):
+                exec(args[5], {})
+            return capture.getvalue()
+        with patch.object(MATRIX, 'command', side_effect=execute):
+            result = MATRIX.container_readiness_probe(types.SimpleNamespace(role='kb', application='app'))
+        self.assertEqual(result['transport'], 'connection_refused')
+        self.assertEqual(result['server_file_log']['messages']['config module unavailable'], 1)
+        self.assertNotIn('private-', json.dumps(result))
 
 
 if __name__ == '__main__':

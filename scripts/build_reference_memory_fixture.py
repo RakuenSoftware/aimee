@@ -53,8 +53,7 @@ def extract_source(blob: bytes, directory: Path) -> None:
                 raise ValueError("frozen source archive contains a non-regular entry")
 
 
-def build(output: Path) -> dict:
-    output, sidecar = output_paths(output)
+def fixture_manifest() -> dict:
     manifest = json.loads(MANIFEST.read_text())
     if manifest != {
         "schema_version": 1, "source_commit": SOURCE_COMMIT,
@@ -63,6 +62,28 @@ def build(output: Path) -> dict:
         "go_version": "go1.26.10", "purpose": "external-reference-not-shipped",
     }:
         raise ValueError("reference fixture manifest differs from its reviewed frozen pin")
+    return manifest
+
+
+def verify_reference_fixture(path: Path) -> dict:
+    if not path.is_absolute() or path.name != "aimee-module-memory":
+        raise ValueError("reference owner must be an absolute aimee-module-memory path")
+    sidecar = path.with_name(path.name + ".json")
+    if (path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK)
+            or sidecar.is_symlink() or not sidecar.is_file()):
+        raise ValueError("reference owner requires a regular executable and provenance sidecar")
+    manifest = fixture_manifest()
+    receipt = json.loads(sidecar.read_text())
+    if (not isinstance(receipt, dict) or
+            any(receipt.get(key) != value for key, value in manifest.items()) or
+            receipt.get("binary_sha256") != hashlib.sha256(path.read_bytes()).hexdigest()):
+        raise ValueError("reference owner does not match its frozen provenance")
+    return receipt
+
+
+def build(output: Path) -> dict:
+    output, sidecar = output_paths(output)
+    manifest = fixture_manifest()
     actual_tree = subprocess.check_output(
         ["git", "rev-parse", f"{SOURCE_COMMIT}:server-go"], cwd=ROOT, text=True).strip()
     if actual_tree != SOURCE_TREE:
@@ -100,10 +121,13 @@ def build(output: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--output", type=Path)
+    action.add_argument("--verify", type=Path,
+                        help="verify an existing explicit reference without building or installing")
     args = parser.parse_args()
     try:
-        receipt = build(args.output)
+        receipt = verify_reference_fixture(args.verify) if args.verify else build(args.output)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"reference-memory-fixture: {error}\n")
     print(json.dumps(receipt, sort_keys=True))

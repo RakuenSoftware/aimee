@@ -11,6 +11,7 @@ import select
 import argparse
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -52,6 +53,159 @@ def command(*argv, env=None, data=None, timeout=300):
 REFERENCE_TARGET = '/opt/aimee-test-memory-reference/aimee-module-memory'
 
 
+def safe_readiness_payload(role, status_code, payload):
+    """Project only fixed readiness keys, enums and booleans; never error text."""
+    result = {'status_code': status_code if type(status_code) is int and 100 <= status_code <= 599 else -1}
+    if not isinstance(payload, dict):
+        return result
+    value = payload.get('status')
+    result['status'] = value if value in ('ok', 'degraded', 'unknown', 'error') else 'unknown'
+    reasons = {'no readiness provider registered': 'provider_absent',
+               'readiness provider returned an invalid status': 'provider_status_invalid',
+               'readiness provider wrote no body': 'provider_body_absent',
+               'readiness provider returned 200 without ready:true': 'provider_success_contradiction',
+               'readiness provider returned 503 with ready:true': 'provider_failure_contradiction'}
+    if 'reason' in payload:
+        value = payload['reason']
+        result['reason_category'] = reasons.get(value, 'unknown') if isinstance(value, str) else 'unknown'
+    for key in ('ready', 'capture_ok', 'postgres_ok', 'knowledge_tables_ok',
+                'pgvec_ok', 'pgvec_collection_ok', 'embed_ok'):
+        if type(payload.get(key)) is bool:
+            result[key] = payload[key]
+    dependencies = payload.get('dependencies')
+    if isinstance(dependencies, dict):
+        result['dependencies'] = {key: dependencies[key] if dependencies.get(key) in
+                                  ('ok', 'disabled', 'fail', 'unknown') else 'unknown'
+                                  for key in ('db1', 'kb', 'retrieval', 'modules')}
+    diagnostics = payload.get('diagnostics')
+    if isinstance(diagnostics, dict):
+        allowed = {
+            'failed_boundary': ('', 'unknown', 'kb_transport', 'kb_store', 'kb_schema',
+                                'pgvector', 'vector_collection', 'embedder', 'kb_breaker',
+                                'local_store', 'modules', 'audit_capacity'),
+            'breaker_state': ('', 'unknown', 'disabled', 'open', 'closed', 'half_open'),
+            'missing_module': ('', 'unknown', 'config', 'postgres', 'memory', 'learning', 'routing', 'delegates',
+                               'tools', 'workspace', 'git', 'skills', 'response-composition', 'runtime-web'),
+        }
+        result['diagnostics'] = {key: diagnostics.get(key) if diagnostics.get(key) in values
+                                 else 'unknown' for key, values in allowed.items()}
+    pool = payload.get('pool')
+    if isinstance(pool, dict):
+        result['pool'] = {key: pool[key] for key in ('size', 'in_use', 'waiters',
+                          'lease_timeouts', 'stuck', 'poisoned')
+                          if type(pool.get(key)) is int and 0 <= pool[key] <= 2147483647}
+        if type(pool.get('available')) is bool:
+            result['pool']['available'] = pool['available']
+    return result
+
+
+def safe_startup_log_summary(text):
+    """Counts of known messages/components only, including logs with no listener."""
+    text = text[-262144:]
+    lower = text.lower()
+    messages = ('config module unavailable', 'module bus failed', 'memory module unavailable',
+                'memory capability unavailable', 'ring: attach denied', 'capability absent',
+                'kb_store not ready', 'vault initialization failed',
+                'operator authority/status unavailable', 'http listener failed',
+                'startup rejected', 'permission denied', 'connection refused')
+    components = ('ready', 'vault', 'kb_http', 'config', 'event-bus', 'commands')
+    return {'sample_characters': len(text),
+            'messages': {name: lower.count(name) for name in messages},
+            'components': {name: len(re.findall(r'\b(?:ERROR|WARN|INFO|DEBUG)\s+' +
+                           re.escape(name) + r':', text)) for name in components}}
+
+
+def safe_container_state(state):
+    if not isinstance(state, dict):
+        state = {}
+    health = state.get('Health', {})
+    if not isinstance(health, dict):
+        health = {}
+    integer = lambda value: value if type(value) is int and -2147483648 <= value <= 2147483647 else -1
+    records = health.get('Log', [])
+    if not isinstance(records, list):
+        records = []
+    return dict(status=state.get('Status') if state.get('Status') in
+                ('created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead') else 'unknown',
+                health=health.get('Status') if health.get('Status') in
+                ('healthy', 'unhealthy', 'starting') else 'absent',
+                exit_code=integer(state.get('ExitCode')), oom_killed=state.get('OOMKilled') is True,
+                health_failing_streak=integer(health.get('FailingStreak')),
+                health_exit_codes=[integer(row.get('ExitCode')) for row in records[-8:]
+                                   if isinstance(row, dict)])
+
+
+def container_readiness_probe(stack):
+    # Sanitize inside the container: HTTP bodies and source logs never leave it.
+    code = ('import http.client,json,socket,sys,pathlib,re\n' +
+            inspect.getsource(safe_readiness_payload) + '\n' +
+            inspect.getsource(safe_startup_log_summary) + '\n' + r'''
+role = sys.argv[1]
+result = {'transport': 'io_error'}
+connection = None
+try:
+    if role == 'server':
+        class UnixConnection(http.client.HTTPConnection):
+            def connect(self):
+                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.sock.settimeout(4)
+                self.sock.connect('/var/lib/aimee/aimee-http.sock')
+        connection = UnixConnection('localhost', timeout=4)
+        path = '/v1/ready'
+    else:
+        connection = http.client.HTTPConnection('127.0.0.1', 8741, timeout=4)
+        path = '/v1/health'
+    connection.request('GET', path)
+    response = connection.getresponse()
+    raw = response.read(65537)
+    result = {'transport': 'http', 'status_code': response.status}
+    if len(raw) > 65536:
+        result['transport'] = 'response_too_large'
+    else:
+        try:
+            result.update(safe_readiness_payload(role, response.status, json.loads(raw)))
+            result['json_valid'] = True
+        except (ValueError, UnicodeError):
+            result['json_valid'] = False
+except FileNotFoundError:
+    result = {'transport': 'socket_missing'}
+except ConnectionRefusedError:
+    result = {'transport': 'connection_refused'}
+except PermissionError:
+    result = {'transport': 'permission_denied'}
+except TimeoutError:
+    result = {'transport': 'timeout'}
+except (OSError, http.client.HTTPException):
+    result = {'transport': 'io_error'}
+finally:
+    if connection:
+        connection.close()
+try:
+    result['server_socket_present'] = pathlib.Path('/var/lib/aimee/aimee-http.sock').is_socket()
+except OSError:
+    result['server_socket_present'] = False
+log = pathlib.Path('/var/lib/aimee/server.log')
+result['server_file_log'] = {'present': False}
+try:
+    with log.open('rb') as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - 262144))
+        sample = stream.read(262144).decode('utf-8', errors='replace')
+    result['server_file_log'] = dict(safe_startup_log_summary(sample), present=True,
+                                    truncated=size > 262144)
+except OSError:
+    pass
+print(json.dumps(result))
+''')
+    try:
+        result = json.loads(command('docker', 'exec', stack.application, 'python3', '-c',
+                                    code, stack.role, timeout=15))
+        return result if isinstance(result, dict) else {'transport': 'probe_unavailable'}
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError):
+        return {'transport': 'probe_unavailable'}
+
+
 def validate_reference_owner(path):
     """Accept only the explicitly pinned, external test implementation."""
     path = Path(path).absolute()
@@ -73,23 +227,28 @@ def reference_overlay(role, image, owner, output, project):
     """Change the selected executable; retain every existing grant capability."""
     path, provenance = validate_reference_owner(owner)
     manifest_target = f'/opt/aimee/module-grants/{role}.modules'
-    grant_target = f'/opt/aimee/module-grants/{role}/memory.grant'
     def metadata(target):
         return command('docker', 'run', '--rm', '--network', 'none', '--read-only',
                        '--entrypoint', 'cat', image, target)
     manifest = metadata(manifest_target).splitlines()
     rows = [i for i, row in enumerate(manifest) if row.split('\t', 1)[0] == 'memory']
-    grant = metadata(grant_target).splitlines()
-    executables = [i for i, row in enumerate(grant) if row.startswith('executable=')]
-    if len(rows) != 1 or len(executables) != 1:
-        raise ValueError('candidate must declare exactly one memory owner and executable grant')
-    old = manifest[rows[0]].split('\t')
-    if len(old) != 2 or grant[executables[0]] != 'executable=' + old[1]:
-        raise ValueError('candidate memory manifest and grant disagree')
+    if len(rows) != 1 or len(manifest[rows[0]].split('\t')) != 2:
+        raise ValueError('candidate must declare exactly one memory owner')
+    previous_executable = manifest[rows[0]].split('\t')[1]
     manifest[rows[0]] = 'memory\t' + REFERENCE_TARGET
-    grant[executables[0]] = 'executable=' + REFERENCE_TARGET
+    overlays = [('modules', manifest, manifest_target)]
+    # The real owner also attaches its PostgreSQL/config and egress callers.
+    # Their existing refs/capabilities must attest the same selected executable.
+    for name in ('memory', 'memory-postgres', 'memory-egress'):
+        target = f'/opt/aimee/module-grants/{role}/{name}.grant'
+        grant = metadata(target).splitlines()
+        executables = [i for i, row in enumerate(grant) if row.startswith('executable=')]
+        if len(executables) != 1 or grant[executables[0]] != 'executable=' + previous_executable:
+            raise ValueError('candidate memory manifest and grant disagree')
+        grant[executables[0]] = 'executable=' + REFERENCE_TARGET
+        overlays.append(('grant' if name == 'memory' else name + '.grant', grant, target))
     mounts = [(path, REFERENCE_TARGET)]
-    for name, lines, target in (('modules', manifest, manifest_target), ('grant', grant, grant_target)):
+    for name, lines, target in overlays:
         overlay = output.resolve() / (project + '-reference.' + name)
         overlay.write_text('\n'.join(lines) + '\n')
         overlay.chmod(0o644)
@@ -1512,14 +1671,11 @@ def main():
                 states = {}
                 for label, container in (('application', stack.application), ('embedder', stack.embedder)):
                     state = json.loads(command('docker', 'inspect', '--format', '{{json .State}}', container))
-                    health = state.get('Health', {}).get('Status', 'absent')
-                    status = state.get('Status', 'unknown')
-                    states[label] = dict(
-                        status=status if status in ('created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead') else 'unknown',
-                        health=health if health in ('healthy', 'unhealthy', 'starting', 'absent') else 'unknown',
-                        exit_code=int(state.get('ExitCode', -1)), oom_killed=state.get('OOMKilled') is True)
+                    states[label] = safe_container_state(state)
                 startup.append(dict(role=stack.role, states=states,
-                                    categories=[category for category in categories if category in text]))
+                                    categories=[category for category in categories if category in text],
+                                    readiness=container_readiness_probe(stack),
+                                    container_log=safe_startup_log_summary(logs.stdout + logs.stderr)))
                 for operation, trace, status, kind in pattern.findall(logs.stdout + logs.stderr):
                     failures.append(dict(role=stack.role, operation=operation, trace=trace,
                                          status=int(status), error_class=kind))

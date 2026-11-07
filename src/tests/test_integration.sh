@@ -47,6 +47,8 @@ if [ -n "$LEGACY_MEMORY_OWNER" ]; then
     MEMORY_EXPECTED_KIND='"kind":"invalid_argument"'
 fi
 
+EXECUTION_GRADE_MEMORY_OWNER="${AIMEE_TEST_EXECUTION_GRADE_MEMORY_OWNER:-}"
+EXECUTION_GRADE_MEMORY_SELECTED=0
 # Resolve paths relative to repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -57,6 +59,12 @@ fi
 
 AIMEE="$REPO_ROOT/aimee"
 AIMEE_SERVER="$REPO_ROOT/aimee-server"
+# Only the graded compatibility phase may select this reviewed real owner.
+# Verify its frozen provenance before installing any grants or creating HOME.
+if [ -n "$EXECUTION_GRADE_MEMORY_OWNER" ]; then
+    [ -z "$LEGACY_MEMORY_OWNER" ] || { echo "grade-only and whole-run memory selections are mutually exclusive"; exit 2; }
+    python3 "$REPO_ROOT/scripts/build_reference_memory_fixture.py" --verify "$EXECUTION_GRADE_MEMORY_OWNER" >/dev/null || exit 2
+fi
 export PATH="$REPO_ROOT:$PATH"
 # Keep the real HOME's Go caches. HOME is about to become a temp dir, and a Go
 # build under it would re-download the module graph on every run and then leave
@@ -357,15 +365,16 @@ MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
 MEMORY_MODULE_PID=""
 MEMORY_MODULE_ENABLED=0
 install_memory_module() {
-    [ -n "$LEGACY_MEMORY_OWNER" ] || return 0
-    cp "$LEGACY_MEMORY_OWNER" "$MEMORY_MODULE"
+    local selected="${LEGACY_MEMORY_OWNER:-$EXECUTION_GRADE_MEMORY_OWNER}"
+    [ -n "$selected" ] || return 0
+    cp "$selected" "$MEMORY_MODULE"
     chmod 0755 "$MEMORY_MODULE"
     install_generated_grant memory "$MEMORY_MODULE"
     install_generated_grant memory-postgres "$MEMORY_MODULE"
     install_generated_grant memory-egress "$MEMORY_MODULE"
 }
 start_memory_module() {
-    [ -n "$LEGACY_MEMORY_OWNER" ] || return 0
+    [ -n "$LEGACY_MEMORY_OWNER" ] || [ "$EXECUTION_GRADE_MEMORY_SELECTED" -eq 1 ] || return 0
     stop_memory_module
     AIMEE_MODULE_PLACEMENT=server "$MEMORY_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-memory.log" 2>&1 &
     MEMORY_MODULE_PID=$!
@@ -1363,12 +1372,16 @@ rm -rf "$TCP_HOME" || true
 # Rebuild only the thin client with a new build ID. The existing server should
 # remain usable because compatibility is gated by major version, not build ID.
 SERVER_PID_BEFORE="$SERVER_PID"
-(
-    cd "$REPO_ROOT/src"
+if ! (
+    cd "$REPO_ROOT/src" || exit 1
     sleep 1
-    date +%s > build/build_id.txt
-    make ../aimee >/dev/null 2>&1
-)
+    date +%s > build/build_id.txt || exit 1
+    make ../aimee
+) >"$HOME/cli-build-drift.log" 2>&1; then
+    echo "integration: thin-client build drift prerequisite failed"
+    tail -n 60 "$HOME/cli-build-drift.log"
+    exit 1
+fi
 
 check_output "client survives same-major build drift" "aimee" $AIMEE version
 check "server survives same-major build drift" kill -0 "$SERVER_PID_BEFORE"
@@ -2560,13 +2573,59 @@ stop_execution_grade_fixture() {
         wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
         GRADE_FIXTURE_PID=""
     fi
+    if [ "$EXECUTION_GRADE_MEMORY_SELECTED" -eq 1 ]; then
+        restore_execution_grade_memory || return 1
+    fi
 }
+restart_owned_integration_services() {
+    local workflow_was_running=0
+    [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
+    if [ -n "$SERVER_PID" ]; then
+        kill -KILL "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
+        SERVER_PID=""
+    fi
+    GRADE_SERVER_PAUSED=0
+    stop_workflow_module
+    stop_db1_module
+    stop_pg_module
+    stop_config_module
+    stop_providers_module
+    stop_delegates_module
+    stop_memory_module
+    stop_policy_module
+    stop_tools_module
+    stop_git_module
+    stop_learning_module
+    stop_economizer_module
+    stop_routing_module
+    rm -f "$HTTP_SOCK" "$MODULE_BUS_SOCK"
+    cp "$SERVER_LOG" "$SERVER_LOG.before-grade-restart" 2>/dev/null || true
+    start_server || return 1
+    if [ "$workflow_was_running" -eq 1 ]; then
+        start_workflow_module || return 1
+    fi
+}
+
+restore_execution_grade_memory() {
+    [ "$EXECUTION_GRADE_MEMORY_SELECTED" -eq 1 ] || return 0
+    stop_memory_module
+    MEMORY_MODULE_ENABLED=0
+    # Keep the phase marked selected until the fresh owned daemon has proved
+    # unavailability; no later Native request may inherit a half-restored state.
+    restart_owned_integration_services || return 1
+    local unavailable=""
+    unavailable=$(srv_auth_req '{"method":"memory.get","store":"user"}') || unavailable=""
+    case "$unavailable" in *'"kind":"unavailable"'*) ;; *) return 1 ;; esac
+    EXECUTION_GRADE_MEMORY_SELECTED=0
+}
+
 run_execution_grade_fixture() {
     local fixture="${1:-$REPO_ROOT/src/tests/test_execution_grade_live.py}"
     local fixture_log="${2:-$EXECUTION_GRADE_LOG}"
     local request="$AIMEE_HOME/execution-grade-recovery.request"
     local acknowledgement="$AIMEE_HOME/execution-grade-recovery.ack"
-    local action="" previous="" stage="running" workflow_was_running=0
+    local action="" previous="" stage="running"
     local deadline=$((SECONDS + 1200))
     rm -f "$request" "$acknowledgement"
     AIMEE_TEST_GRADE_LIFECYCLE=1 AIMEE_TEST_NATIVE_LIFECYCLE=1 AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$fixture" >"$fixture_log" 2>&1 &
@@ -2609,36 +2668,45 @@ run_execution_grade_fixture() {
                         stage="killed"
                         ;;
                     restart-owned-server:paused|restart-owned-server:killed)
-                        [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
-                        if [ -n "$SERVER_PID" ]; then
-                            kill -KILL "$SERVER_PID" 2>/dev/null || true
-                            wait "$SERVER_PID" 2>/dev/null || true
-                            SERVER_PID=""
-                        fi
-                        GRADE_SERVER_PAUSED=0
-                        stop_workflow_module
-                        stop_db1_module
-                        stop_pg_module
-                        stop_config_module
-                        stop_providers_module
-                        stop_delegates_module
-                        stop_memory_module
-                        stop_policy_module
-                        stop_tools_module
-                        stop_git_module
-                        stop_learning_module
-                        stop_economizer_module
-                        stop_routing_module
-                        # Only known sockets of the now-reaped disposable daemon.
-                        # A stale file must not trick start_server's ready probes.
-                        rm -f "$HTTP_SOCK" "$MODULE_BUS_SOCK"
-                        cp "$SERVER_LOG" "$SERVER_LOG.before-grade-restart" 2>/dev/null || true
-                        if ! start_server; then
+                        if ! restart_owned_integration_services; then
                             printf '%s:error\n' "$action" >"$acknowledgement"
                             stop_execution_grade_fixture
                             return 1
                         fi
-                        if [ "$workflow_was_running" -eq 1 ] && ! start_workflow_module; then
+                        stage="restarted"
+                        ;;
+                    select-grade-memory:running|select-grade-memory:restarted)
+                        if [ "$fixture" != "$REPO_ROOT/src/tests/test_execution_grade_live.py" ] ||
+                           [ -z "$EXECUTION_GRADE_MEMORY_OWNER" ] ||
+                           [ "$EXECUTION_GRADE_MEMORY_SELECTED" -ne 0 ]; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        EXECUTION_GRADE_MEMORY_SELECTED=1
+                        MEMORY_MODULE_ENABLED=1
+                        start_memory_module
+                        local ready=0 probe=""
+                        for attempt in $(seq 1 100); do
+                            probe=$(srv_auth_req '{"method":"memory.get","store":"user"}') || probe=""
+                            case "$probe" in *'"kind":"invalid_argument"'*) ready=1; break ;; esac
+                            kill -0 "$MEMORY_MODULE_PID" 2>/dev/null || break
+                            sleep 0.1
+                        done
+                        if [ "$ready" -ne 1 ]; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        ;;
+                    unselect-grade-memory:running|unselect-grade-memory:restarted)
+                        if [ "$fixture" != "$REPO_ROOT/src/tests/test_execution_grade_live.py" ] ||
+                           [ "$EXECUTION_GRADE_MEMORY_SELECTED" -ne 1 ]; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        if ! restore_execution_grade_memory; then
                             printf '%s:error\n' "$action" >"$acknowledgement"
                             stop_execution_grade_fixture
                             return 1
@@ -2666,6 +2734,9 @@ run_execution_grade_fixture() {
         GRADE_SERVER_PAUSED=0
         return 1
     fi
+    if [ "$EXECUTION_GRADE_MEMORY_SELECTED" -eq 1 ]; then
+        restore_execution_grade_memory || return 1
+    fi
     return "$status"
 }
 if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
@@ -2690,6 +2761,11 @@ else
 fi
 
 fi  # independent Docker grading belongs to the ordinary integration profile
+
+if [ "$EXECUTION_GRADE_MEMORY_SELECTED" -ne 0 ]; then
+    echo "integration: grade-only policy owner could not be unselected; refusing later execution"
+    exit 1
+fi
 
 # Extended native qualification uses explicitly supplied executable descriptors.
 # Baseline service runs do not discover or install an ambient provider SDK.

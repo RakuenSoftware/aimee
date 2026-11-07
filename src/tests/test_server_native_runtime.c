@@ -110,6 +110,27 @@ char *const *agent_tools_bind_bash_environment(char *const environment[])
    shell_environment = environment;
    return previous;
 }
+/* This transport fixture owns a controlled builtin executor, not a module
+ * callback. Keep the actual empty module registry/buffered-input query linked;
+ * entering a module callback transaction is an unexpected effect, never a
+ * permissive fake implementation of its scheduling/custody contract. */
+void agent_tools_module_read_enter_v1(agent_module_read_scope_v1 *scope, int trusted_read)
+{
+   (void)scope;
+   (void)trusted_read;
+   assert(!"native transport fixture unexpectedly entered a module callback");
+}
+void agent_tools_module_read_commit_v1(agent_module_read_scope_v1 *scope, int successful)
+{
+   (void)scope;
+   (void)successful;
+   assert(!"native transport fixture unexpectedly committed a module callback");
+}
+void agent_tools_module_read_leave_v1(void *scope)
+{
+   (void)scope;
+   assert(!"native transport fixture unexpectedly left a module callback");
+}
 void agent_tools_set_effect_authorized(int authorized)
 {
    effect_authorized = authorized;
@@ -2447,8 +2468,8 @@ static void test_native_supervised_execution(const agent_t *selected,
           {.space = "aimee", .name = "bash", .registry_name = "bash"},
           {.space = "aimee", .name = "read_file", .registry_name = "read_file"}};
       server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
-          selected, &selected_owner, "session-a", &profile, mode >= 10 ? bindings : bindings + 1,
-          mode >= 10 ? 2 : 1, NULL);
+          selected, &selected_owner, "session-a", &profile, shell_mode ? bindings : bindings + 1,
+          shell_mode ? 2 : 1, NULL);
       assert(runtime && !server_native_runtime_attest_launch(runtime, transport_launch));
       cJSON_Delete(schema);
       atomic_store(&expected_capture, capture);
@@ -2548,7 +2569,11 @@ static void test_native_supervised_execution(const agent_t *selected,
        * uncertain-effect and duplicate callbacks cannot create SDK counters. */
       server_native_runtime_quiesce(runtime);
       server_native_runtime_tool_counts(runtime, &committed_calls, &committed_successes);
-      int expected_committed = mode != 6 && !(mode >= 4 && mode != 9 && mode < 10);
+      int expected_committed =
+          mode != 6 && !(mode >= 4 && mode != 9 && mode < 10) && mode != 14 && mode != 15;
+      if (committed_calls != expected_committed)
+         fprintf(stderr, "native fixture mode %d committed %d calls, expected %d\n", mode,
+                 committed_calls, expected_committed);
       assert(committed_calls == expected_committed);
       assert(committed_successes == (expected_committed && mode != 1 && mode != 2 && mode != 3));
       rc = server_native_runtime_execute_tool(&call, &result, runtime);

@@ -143,7 +143,7 @@ def assert_delegate_experience(row, parent, actor, project, model, job, qualifie
 def request_owned_lifecycle(home, action):
     """Private disposable-harness handshake; never accepts a PID or command."""
     assert os.environ.get("AIMEE_TEST_GRADE_LIFECYCLE") == "1", "literal restart requires the integration harness lifecycle owner"
-    assert action in ("pause-owned-server", "restart-owned-server"), action
+    assert action in ("pause-owned-server", "restart-owned-server", "select-grade-memory", "unselect-grade-memory"), action
     request = home / "execution-grade-recovery.request"
     acknowledgement = home / "execution-grade-recovery.ack"
     acknowledgement.unlink(missing_ok=True)
@@ -161,7 +161,7 @@ def request_owned_lifecycle(home, action):
         time.sleep(0.05)
 
 
-def main():
+def run_grade_fixture():
     required = os.environ.get("AIMEE_PRIVATE_TEST_REQUIRE_DOCKER") == "1" or os.environ.get("CI", "").lower() in ("true", "1")
     docker = shutil.which("docker")
     ready = docker and subprocess.run([docker, "version"], capture_output=True, timeout=15).returncode == 0
@@ -169,6 +169,7 @@ def main():
         assert not required, "actual daemon grading journey requires Docker in CI"
         print("SKIP: independently graded daemon execution/reuse (real Docker unavailable)")
         return
+    assert (os.environ.get("AIMEE_TEST_EXECUTION_GRADE_MEMORY_OWNER") or os.environ.get("AIMEE_TEST_LEGACY_MEMORY_OWNER")), "project-scoped grade reuse requires an explicit real reference policy owner"
     assert Path("/var/run/docker.sock").is_socket(), "production private verifier socket unavailable"
     image = "ubuntu:22.04"
     if subprocess.run([docker, "image", "inspect", image], capture_output=True, timeout=15).returncode:
@@ -575,6 +576,19 @@ def main():
         provider.server_close()
         if cleanup_errors:
             raise AssertionError(("execution-grade attachment cleanup failed", cleanup_errors))
+
+
+def main():
+    selected = bool(os.environ.get("AIMEE_TEST_EXECUTION_GRADE_MEMORY_OWNER"))
+    home = Path(os.environ["AIMEE_HOME"])
+    if selected:
+        request_owned_lifecycle(home, "select-grade-memory")
+    try:
+        run_grade_fixture()
+    finally:
+        if selected:
+            request_owned_lifecycle(home, "unselect-grade-memory")
+            print("execution grade: real frozen reference selected only for this phase; default unavailable owner restored")
 
 
 if __name__ == "__main__":

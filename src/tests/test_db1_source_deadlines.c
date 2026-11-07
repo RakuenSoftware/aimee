@@ -4,10 +4,47 @@
 #include "db1_client/interaction_events.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/transport.h"
+#include "module_json_call.h"
+#include <stdlib.h>
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+/* sessions.c retains shipping source APIs even in a narrow wrapper test. These
+ * operations must use the db1_call seam below, never variable-width bus reads.
+ * Abort on that unrelated path rather than simulating a successful transport. */
+static _Noreturn void unexpected_variable_reply_path(void)
+{
+   fputs("source deadline wrapper unexpectedly entered variable reply transport\n", stderr);
+   abort();
+}
+int obs_bus_module_available(uint32_t event_kind)
+{
+   unexpected_variable_reply_path();
+}
+int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *need_out)
+{
+   unexpected_variable_reply_path();
+}
+void db1_request_encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
+{
+   unexpected_variable_reply_path();
+}
+int db1_reply_frame_validate(const uint8_t *frame, size_t length, uint32_t *status, uint32_t *count)
+{
+   unexpected_variable_reply_path();
+}
+uint64_t aimee_module_call_deadline_ns(int timeout_ms)
+{
+   unexpected_variable_reply_path();
+}
+ouro_module_call_result_t
+obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t deadline,
+                    const void *request, uint32_t request_len, void *response, uint32_t capacity,
+                    uint32_t *length, ouro_module_cancelled_fn cancelled, void *cancel_context)
+{
+   unexpected_variable_reply_path();
+}
 static uint32_t expected_op;
 static uint64_t expected_budget;
 static int calls;

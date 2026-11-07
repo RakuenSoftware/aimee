@@ -142,3 +142,13 @@ int agent_http_post_content_type_bytes(const char *url, const char *auth_header,
       *response_length = strlen(*response_buf);
    return status;
 }
+
+int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
+                          size_t body_len, char **response_buf, int timeout_ms,
+                          const char *extra_headers)
+{
+   size_t response_length = 0;
+   return agent_http_post_content_type_bytes(url, auth_header, "application/json", body, body_len,
+                                             response_buf, &response_length, timeout_ms,
+                                             extra_headers);
+}

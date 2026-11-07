@@ -189,6 +189,8 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 // checks cannot consume the reader/writer and exact-retry budget.
 func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	root := livePool(t)
+	started := time.Now()
+	phase := func(name string) { t.Logf("large checkpoint phase=%s elapsed=%s", name, time.Since(started)) }
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	schema := fmt.Sprintf("session_history_%d", time.Now().UnixNano())
@@ -220,6 +222,7 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	}
 	save := func(id, scope, actor, history string, commit bool) {
 		t.Helper()
+		defer phase("save:" + id)
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -239,6 +242,7 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	}
 	load := func(scope, actor string) (uint32, string) {
 		t.Helper()
+		defer phase("load")
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -257,8 +261,11 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	// superseded; this is a checkpoint replacement, not initial publication.
 	save("initial", "primary", "alice", `[{"role":"user","blocks":[{"type":"text","text":"keep constraints"}]}]`, true)
 	// Each event fits the log contract; the complete history exceeds the old 1 MiB load ceiling.
-	large := []map[string]any{{"role": "user", "blocks": []map[string]any{{"type": "text", "text": strings.Repeat("x", 700000)}}}, {"role": "assistant", "blocks": []map[string]any{{"type": "text", "text": strings.Repeat("y", 700000)}}}}
+	large := []map[string]any{{"role": "user", "blocks": []map[string]any{{"type": "text", "text": strings.Repeat("x", (1<<19)+1)}}}, {"role": "assistant", "blocks": []map[string]any{{"type": "text", "text": strings.Repeat("y", (1<<19)+1)}}}}
 	encoded, _ := json.Marshal(large)
+	if len(encoded) <= 1<<20 {
+		t.Fatal("large checkpoint must exceed the former 1 MiB load ceiling")
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -267,6 +274,7 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	if status, _, err := sessionIRHistorySave(ctx, sessionIRLiveTx{tx}, []string{"s", "large", "primary", "alice", string(encoded)}); err != nil || status != store.StatusOK {
 		t.Fatalf("large checkpoint: %d %v", status, err)
 	}
+	phase("large-uncommitted")
 	// Paged history owns a consistent source view: a distinct reader must wait
 	// for the checkpoint writer's session lock, then see its complete commit.
 	type readAnswer struct {
@@ -305,6 +313,7 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 			t.Fatal("observe concurrent history row-lock wait", err)
 		}
 		if waiting {
+			phase("reader-lock-wait")
 			break
 		}
 		select {
@@ -323,8 +332,10 @@ func TestSessionIRLiveLargeHistoryCheckpointAtomicReloadAndRetry(t *testing.T) {
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	phase("writer-committed")
 	select {
 	case answer := <-readerDone:
+		phase("concurrent-reader-complete")
 		if answer.err != nil || answer.status != store.StatusOK || len(answer.cells) != 1 || answer.cells[0] != string(encoded) {
 			t.Fatalf("concurrent reader did not see whole committed checkpoint: status=%d cells=%d err=%v", answer.status, len(answer.cells), answer.err)
 		}

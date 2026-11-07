@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 import unittest
 import subprocess
+import sys
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,27 @@ def archive(name="server-go/go.mod", kind=tarfile.REGTYPE):
 
 
 class ReferenceMemoryFixtureTests(unittest.TestCase):
+    def test_verify_cli_checks_existing_artifact_without_building(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            owner = Path(temporary) / 'aimee-module-memory'
+            owner.write_bytes(b'unit-verification-artifact-not-functional-owner')
+            owner.chmod(0o700)
+            receipt = json.loads(builder.MANIFEST.read_text())
+            receipt['binary_sha256'] = hashlib.sha256(owner.read_bytes()).hexdigest()
+            owner.with_name(owner.name + '.json').write_text(json.dumps(receipt))
+            command = [sys.executable, str(ROOT / 'scripts/build_reference_memory_fixture.py'),
+                       '--verify', str(owner)]
+            # No Go/Git executable can be discovered by this subprocess.
+            environment = dict(os.environ, PATH='')
+            result = subprocess.run(command, env=environment, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), receipt)
+            owner.write_bytes(b'tampered')
+            result = subprocess.run(command, env=environment, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('frozen provenance', result.stderr)
+            self.assertEqual(owner.read_bytes(), b'tampered')
+
     def test_fresh_absolute_external_output_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
