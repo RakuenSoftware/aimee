@@ -48,7 +48,8 @@ func nativeUnansweredCalls(observations []interruptionObservation) ([]canonical.
 		if e.Kind != "message" {
 			continue
 		}
-		if !canonical.ValidMessage(e.Payload) || e.MessageID == "" {
+		// ValidSessionEvent already validates every message block and payload field.
+		if e.MessageID == "" {
 			return nil, fmt.Errorf("invalid native interruption message")
 		}
 		var owned nativeOwnedMessage

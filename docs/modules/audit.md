@@ -111,16 +111,13 @@ named tests remain with their actual subsystem or integration boundary; a filena
 | `test_vault_audit.c` | Vault-to-server audit emission through the core log | Not assigned; this is a vault/server/log integration test |
 
 The direct tests deliberately separate the shared chain primitive from the SQLite store that consumes
-it. That is complementary coverage, not duplicate ownership. The CMake suite registers the action and
-ledger tests; the Make unit-test suite registers the WORM store and chain tests. Issue #1753 records the
-evidence used to resolve this classification.
+it. That is complementary coverage, not duplicate ownership. The Make unit-test suite registers the
+action, ledger, WORM store and chain tests. Issue #1753 records the evidence used to resolve this
+classification.
 
-Build membership is intentionally not uniform today. Make's `CORE_SRCS` contains all four audit sources;
-its KB projection removes only the SQLite-specific `audit_worm.c`, retaining the pure shared chain.
-CMake's `CORE_SRCS`, and therefore the `aimee-core` static library plus its server/KB projections, contains
-only `audit_action.c` and `audit_ledger.c`. The descriptor records canonical source ownership; it does not
-claim that the current Make and CMake products expose identical WORM capabilities. Closing that existing
-build-profile gap requires a separate behavior and dependency slice.
+Make's `CORE_SRCS` contains all four audit sources; its KB projection removes only the SQLite-specific
+`audit_worm.c`, retaining the pure shared chain. CMake builds only the thin client, which contains no
+audit source.
 
 Current governed-action emission is best-effort: hashing writes a stable sentinel on failure, and WORM
 loss does not block the action while legacy logging is authoritative.

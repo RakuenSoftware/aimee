@@ -87,16 +87,6 @@ int aimee_command_register(const aimee_command_t *cmd)
    return 0;
 }
 
-int aimee_command_register_many(const aimee_command_t *cmds, size_t n)
-{
-   if (!cmds)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      if (aimee_command_register(&cmds[i]) != 0)
-         return -1;
-   return 0;
-}
-
 size_t aimee_command_unregister_module(const char *module)
 {
    if (!module || !module[0])

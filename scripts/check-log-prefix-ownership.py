@@ -53,7 +53,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Widening to all of server-go was measured and would fire zero times today
 # across 47 further files -- but that is not a reason to do it. Zero hits says
 # the rule does not currently misfire there; it says nothing about whether the
-# premise holds, and outside modules/ it does not: server-go/bus is a package,
+# premise holds, and outside modules/ it does not: the ring is a package,
 # not a module with a principal ref, so there is no owner for a prefix to
 # disagree with. Extending a rule into a directory where its premise is absent
 # buys coverage that cannot mean anything.

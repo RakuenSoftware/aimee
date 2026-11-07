@@ -5,26 +5,25 @@
 
 /* Optional versioned tool-result interception. Absence leaves ordinary tool
  * execution unchanged; concrete policy and side effects belong to its owner. */
-const unsigned aimee_tool_intercept_contract_v1
-    __attribute__((used, externally_visible, retain)) = 1;
-extern int aimee_module_tool_intercept_result_v1(const aimee_block_t *,
-                                                 const char *, cJSON *,
+const unsigned aimee_tool_intercept_contract_v1 __attribute__((used, externally_visible, retain)) =
+    1;
+extern int aimee_module_tool_intercept_result_v1(const aimee_block_t *, const char *, cJSON *,
                                                  const char *, char *, size_t)
     __attribute__((weak));
-int server_memory_intercept(const aimee_block_t *call, const char *cwd,
-                            cJSON *request, const char *client, char *message,
-                            size_t capacity) {
-  if (!aimee_module_tool_intercept_result_v1)
-    return 0;
-  if (!message || !capacity)
-    return 2;
-  int result = aimee_module_tool_intercept_result_v1(call, cwd, request, client,
-                                                     message, capacity);
-  if (result == 0 || result == 2)
-    return result;
-  memset(message, 0, capacity);
-  snprintf(message, capacity, "Tool interception unavailable.");
-  return 2;
+int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *request,
+                            const char *client, char *message, size_t capacity)
+{
+   if (!aimee_module_tool_intercept_result_v1)
+      return 0;
+   if (!message || !capacity)
+      return 2;
+   int result =
+       aimee_module_tool_intercept_result_v1(call, cwd, request, client, message, capacity);
+   if (result == 0 || result == 2)
+      return result;
+   memset(message, 0, capacity);
+   snprintf(message, capacity, "Tool interception unavailable.");
+   return 2;
 }
 
 int hooks_ensure_cwd_worktree(session_state_t *state, const char *sid, const char *cwd)

@@ -92,6 +92,13 @@ int workspace_mirror_ensure(ws_git_runner_fn run, void *ctx, const char *remote_
    snprintf(objects, sizeof(objects), "%s/objects", mirror_dir);
    if (dir_exists(objects))
    {
+      /* Re-point origin at the remote before fetching: a mirror keeps the URL it
+       * was cloned with, and the runner substitutes the transport URL only where
+       * the remote appears in the arguments. Without this, a mirror cloned over a
+       * URL the server can no longer use (an SSH origin, once the credential is
+       * an HTTPS token) would fail every fetch. Best effort: the fetch reports. */
+      const char *set_url[] = {"-C", mirror_dir, "remote", "set-url", "origin", remote_url, NULL};
+      (void)run(ctx, set_url, NULL, 0);
       const char *fetch[] = {"-C", mirror_dir, "fetch", "--prune", "origin", NULL};
       return run(ctx, fetch, NULL, 0) == 0 ? 0 : -1;
    }

@@ -118,7 +118,17 @@ int db1_cron_jobs_load(cron_job_t *out, int max, int enabled_only)
 /* dedup -> create) runs hermetically, with no real git or DB.           */
 /* ------------------------------------------------------------------ */
 
-static char g_home[512] = "/tmp/aimee-test";
+static char g_home[512];
+static void cleanup_test_home(void)
+{
+   platform_test_rmrf(g_home);
+}
+static void new_test_home(void)
+{
+   cleanup_test_home();
+   snprintf(g_home, sizeof g_home, "%s/aimee-trigtest-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(g_home));
+}
 static char g_symref_out[256];      /* canned `git symbolic-ref` stdout ("" -> rc!=0) */
 static char g_lstree_out[8192];     /* canned `git ls-tree` stdout */
 static char g_lstree_ref[256];      /* captured ref arg passed to ls-tree */
@@ -686,70 +696,6 @@ static void test_cron_context_preamble_sanitizes_fields(void)
    printf("  PASS: test_cron_context_preamble_sanitizes_fields\n");
 }
 
-static void test_cron_job_prompt_assembles_context_blocks(void)
-{
-   char buf[4096];
-   int n = cron_build_job_prompt(buf, sizeof(buf), "Summarize issues.", "/repo", "kb-health",
-                                 "previous alert", "script says OK", "telegram:home");
-   assert(n > 0);
-   assert(strstr(buf, "=== Cron context ===") != NULL);
-   assert(strstr(buf, "WORKDIR: /repo") != NULL);
-   assert(strstr(buf, "SKILLS: kb-health") != NULL);
-   assert(strstr(buf, "DELIVERY_TARGET: telegram:home") != NULL);
-   char *script = strstr(buf, "SCRIPT_OUTPUT:\nscript says OK\n");
-   char *prior = strstr(buf, "PRIOR JOB OUTPUT:\nprevious alert\n");
-   char *prompt = strstr(buf, "JOB PROMPT:\nSummarize issues.\n");
-   assert(script != NULL);
-   assert(prior != NULL);
-   assert(prompt != NULL);
-   assert(script < prior);
-   assert(prior < prompt);
-   printf("  PASS: test_cron_job_prompt_assembles_context_blocks\n");
-}
-
-static void test_cron_job_prompt_omits_empty_optional_blocks(void)
-{
-   char buf[2048];
-   assert(cron_build_job_prompt(buf, sizeof(buf), "Check status.", NULL, NULL, "", NULL, NULL) > 0);
-   assert(strstr(buf, "SCRIPT_OUTPUT:") == NULL);
-   assert(strstr(buf, "PRIOR JOB OUTPUT:") == NULL);
-   assert(strstr(buf, "JOB PROMPT:\nCheck status.\n") != NULL);
-   printf("  PASS: test_cron_job_prompt_omits_empty_optional_blocks\n");
-}
-
-static void test_cron_job_prompt_caps_prior_output_to_8k_tail(void)
-{
-   size_t total = 9000;
-   char *prior = malloc(total + 1);
-   assert(prior != NULL);
-   memset(prior, 'a', total);
-   prior[100] = 'H';
-   prior[total - 1] = 'Z';
-   prior[total] = '\0';
-
-   char *buf = malloc(12000);
-   assert(buf != NULL);
-   int n = cron_build_job_prompt(buf, 12000, "Act.", "/repo", "ops", prior, NULL, "local");
-   assert(n > 0);
-   assert(strstr(buf, "[truncated to last 8192 bytes]") != NULL);
-   assert(strstr(buf, "H") == NULL);
-   assert(strstr(buf, "Z\n\nJOB PROMPT:\nAct.") != NULL);
-   free(buf);
-   free(prior);
-   printf("  PASS: test_cron_job_prompt_caps_prior_output_to_8k_tail\n");
-}
-
-static void test_cron_job_prompt_reports_truncation_like_snprintf(void)
-{
-   char tiny[32];
-   int n =
-       cron_build_job_prompt(tiny, sizeof(tiny), "Act.", "/repo", "ops", "prior", NULL, "local");
-   assert(n >= (int)sizeof(tiny));
-   assert(tiny[sizeof(tiny) - 1] == '\0');
-   assert(cron_build_job_prompt(NULL, 0, "Act.", NULL, NULL, NULL, NULL, NULL) == -1);
-   printf("  PASS: test_cron_job_prompt_reports_truncation_like_snprintf\n");
-}
-
 static void test_parse_ls_tree_valid_multiline(void)
 {
    const char *out =
@@ -820,8 +766,7 @@ static int file_equals(const char *path, const char *want)
 static void test_scan_proposals_end_to_end(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
-   mkdir(g_home, 0700); /* trigger_mkdir_parents() creates triggers/ + triggers/proposals/ */
+   new_test_home();
 
    /* schedule empty -> ref resolves via the symbolic-ref fallback. */
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
@@ -892,8 +837,7 @@ static void test_scan_proposals_end_to_end(void)
 static void test_scan_proposals_honors_explicit_mode(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-mode-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
 
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
@@ -921,8 +865,7 @@ static void test_scan_proposals_honors_explicit_mode(void)
 static void test_scan_proposals_honors_autonomy_kill_switch(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "%s/aimee-trigtest-kill-%d", platform_tmpdir(), (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
    snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# Proposal A\n");
@@ -955,8 +898,7 @@ static void test_scan_proposals_honors_autonomy_kill_switch(void)
 static void test_scan_proposals_requires_workspace_and_workflow(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_lstree_out, sizeof g_lstree_out,
             "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n");
@@ -986,8 +928,7 @@ static void test_scan_proposals_requires_workspace_and_workflow(void)
 static void test_scan_proposals_custom_event_and_schedule(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    /* Non-empty schedule -> used verbatim as the ref; symbolic-ref must NOT be needed. */
    snprintf(g_lstree_out, sizeof g_lstree_out,
             "100644 blob abababababababababababababababababababab\trfcs/x.md\n");
@@ -1033,8 +974,7 @@ static void test_scheduled_ref_refreshes_origin(void)
 
 static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
 {
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
 
    trigger_rule_t rule;
 
@@ -1075,8 +1015,7 @@ static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
 static void test_scan_proposals_notifies_scheduler(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-notify-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
    snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# Proposal A\n");
@@ -1106,8 +1045,7 @@ static void test_scan_proposals_notifies_scheduler(void)
 static void test_scan_proposals_applies_cost_cap(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-cap-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
    snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
@@ -1159,8 +1097,7 @@ static void test_scan_proposals_applies_cost_cap(void)
 static void test_scan_proposals_enforces_max_concurrent(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-conc-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
    snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
@@ -1202,8 +1139,7 @@ static void test_scan_proposals_enforces_max_concurrent(void)
 static void test_scan_proposals_supersedes_legacy_interactive_binding(void)
 {
    trig_stub_reset();
-   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-legacy-%d", (int)getpid());
-   mkdir(g_home, 0700);
+   new_test_home();
    snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
    snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
    snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
@@ -1304,6 +1240,8 @@ static void test_scheduled_trigger_refuses_entropy_failure(void)
 
 int main(void)
 {
+   new_test_home();
+   assert(atexit(cleanup_test_home) == 0);
    printf("test_trigger\n");
    test_wildcard_always_matches();
    test_exact_minute_match();
@@ -1332,10 +1270,6 @@ int main(void)
    test_cron_context_preamble_includes_operational_guidance();
    test_cron_context_preamble_defaults_and_truncation();
    test_cron_context_preamble_sanitizes_fields();
-   test_cron_job_prompt_assembles_context_blocks();
-   test_cron_job_prompt_omits_empty_optional_blocks();
-   test_cron_job_prompt_caps_prior_output_to_8k_tail();
-   test_cron_job_prompt_reports_truncation_like_snprintf();
    test_parse_ls_tree_valid_multiline();
    test_parse_ls_tree_filters_non_md_and_non_blob();
    test_parse_ls_tree_empty_and_garbage();

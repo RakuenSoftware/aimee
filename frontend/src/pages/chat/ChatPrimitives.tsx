@@ -1,5 +1,5 @@
-import { memo, useMemo, useState } from 'react';
-import { Button, tokens, DiffViewer } from '@rakuensoftware/smoothgui';
+import { memo, useMemo } from 'react';
+import { Button, tokens } from '@rakuensoftware/smoothgui';
 import { escHtml, renderMd } from './markdown';
 
 interface BootstrapStack {
@@ -92,54 +92,3 @@ export const ToolBlock = memo(function ToolBlock({ name, args, result, unknownOu
     </details>
   );
 });
-
-export const TurnSummaryCard = memo(function TurnSummaryCard({ text }: { text: string }) {
-  return (
-    <details style={{ margin: '2px 0', padding: '6px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
-      <summary style={{ cursor: 'pointer', color: tokens.textSecondary, fontStyle: 'italic', userSelect: 'none' }}>Turn summary</summary>
-      <div style={{ marginTop: '6px', fontSize: '12px', color: tokens.textPale, lineHeight: 1.5 }}>{text}</div>
-    </details>
-  );
-});
-
-export const DiffBlock = memo(function DiffBlock({ path, diff }: { path?: string; diff: string }) {
-  return (
-    <details style={{ margin: '4px 0', padding: '8px 10px', background: 'var(--sg-dark-surface)', borderLeft: '3px solid var(--sg-text-muted)', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
-      <summary style={{ cursor: 'pointer', color: 'var(--sg-primary)', fontSize: '12px', fontFamily: 'monospace' }}>{path ? `diff: ${path}` : 'diff'}</summary>
-      <DiffViewer diff={diff} />
-    </details>
-  );
-});
-
-export function RewindMarker({ snapshotId, sid }: { snapshotId: number; sid: string }) {
-  const [status, setStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
-
-  async function handleRewind() {
-    setStatus('pending');
-    try {
-      const resp = await fetch('/api/chat/rewind', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Id': sid },
-        body: JSON.stringify({ snapshot_id: snapshotId }),
-        credentials: 'include',
-      });
-      setStatus(resp.ok ? 'done' : 'error');
-    } catch {
-      setStatus('error');
-    }
-  }
-
-  return (
-    <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 10px', margin: '2px 0', background: tokens.surfaceAlt, border: `1px solid ${tokens.borderLight}`, borderRadius: '8px', fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
-      <span>Snapshot #{snapshotId}</span>
-      {status === 'idle' && (
-        <button onClick={handleRewind} style={{ padding: '2px 8px', fontSize: '11px', fontFamily: 'system-ui', background: 'transparent', color: tokens.primary, border: `1px solid ${tokens.primary}`, borderRadius: '6px', cursor: 'pointer' }}>
-          Rewind to here
-        </button>
-      )}
-      {status === 'pending' && <span style={{ color: tokens.textHint }}>Rewinding…</span>}
-      {status === 'done' && <span style={{ color: 'var(--sg-success)' }}>Restored - conversation cleared</span>}
-      {status === 'error' && <span style={{ color: 'var(--sg-danger-light)' }}>Rewind failed</span>}
-    </div>
-  );
-}

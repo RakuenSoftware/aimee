@@ -214,35 +214,6 @@ struct revcache_ent
 static struct revcache_ent g_revcache[REVCACHE_MAX];
 static pthread_mutex_t g_revcache_lock = PTHREAD_MUTEX_INITIALIZER;
 
-void kb_store_enrollment_cache_flush(void)
-{
-   pthread_mutex_lock(&g_revcache_lock);
-   memset(g_revcache, 0, sizeof(g_revcache));
-   pthread_mutex_unlock(&g_revcache_lock);
-}
-
-static int revcache_get(const char *fp, int *revoked)
-{
-   time_t now = time(NULL);
-   pthread_mutex_lock(&g_revcache_lock);
-   for (int i = 0; i < REVCACHE_MAX; i++)
-   {
-      if (g_revcache[i].fp[0] && strcmp(g_revcache[i].fp, fp) == 0)
-      {
-         if (now - g_revcache[i].at <= REVCACHE_TTL_SECS)
-         {
-            *revoked = g_revcache[i].revoked;
-            pthread_mutex_unlock(&g_revcache_lock);
-            return 1;
-         }
-         g_revcache[i].fp[0] = '\0'; /* expired */
-         break;
-      }
-   }
-   pthread_mutex_unlock(&g_revcache_lock);
-   return 0;
-}
-
 static void revcache_put(const char *fp, int revoked)
 {
    time_t now = time(NULL);
@@ -266,98 +237,6 @@ static void revcache_put(const char *fp, int revoked)
    g_revcache[slot].revoked = revoked;
    g_revcache[slot].at = now;
    pthread_mutex_unlock(&g_revcache_lock);
-}
-
-/* Throttled warning when the revocation check fails open (at most once/60s), so
- * an outage-induced revocation gap is visible without flooding the log. */
-static void revcache_warn_failopen(const char *fingerprint, const char *why)
-{
-   static time_t last = 0;
-   time_t now = time(NULL);
-   if (now - last < 60)
-      return;
-   last = now;
-   aimee_log(LOG_WARN, "kb_enroll",
-             "revocation check FAILED OPEN (%s) for fingerprint %.12s — a revoked cert may be "
-             "accepted until the DB recovers",
-             why ? why : "?", fingerprint ? fingerprint : "");
-}
-
-int kb_store_enrollment_is_revoked(const char *fingerprint)
-{
-   if (!fingerprint || !fingerprint[0])
-      return 0;
-   int cached = 0;
-   if (revcache_get(fingerprint, &cached))
-      return cached;
-
-   /* Fail-open decision (documented in docs/KB_CONSOLE.md): on a DB outage an
-    * UNKNOWN cert is treated as not-revoked, trading a bounded revocation gap for
-    * availability — fail-closed would let a DB blip lock out every mTLS client of
-    * the shared kb. KNOWN revocations still hold through an outage because revoke
-    * primes the cache with revoked=1 (checked above, before this DB path). The
-    * fail-open is logged (throttled) so an operator can see it. */
-   void *conn = kb_store_conn();
-   if (!conn)
-   {
-      revcache_warn_failopen(fingerprint, "db unavailable");
-      return 0;
-   }
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT state FROM kb_enrollments WHERE fingerprint=?1", err, sizeof(err));
-   if (!st)
-   {
-      revcache_warn_failopen(fingerprint, err);
-      return 0;
-   }
-   aimee_pg_bind_text(st, "?1", fingerprint);
-   int revoked = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *state = aimee_pg_column_text(st, 0);
-      revoked = (state && strcmp(state, "revoked") == 0) ? 1 : 0;
-   }
-   aimee_pg_finalize(st);
-   revcache_put(fingerprint, revoked);
-   return revoked;
-}
-
-/* Per-request revocation by the IMMUTABLE (cert_issuer, cert_serial_norm) key
- * (P1 I5/I6). Unlike the fingerprint check this does NOT consult the local cache:
- * the invariant requires each request re-read revocation from the source of truth
- * (the primary), so a revoked cert stops authorizing on the very next request even
- * over a pooled/keep-alive mTLS connection. Returns 1 revoked, 0 active/unknown.
- * Fail-open on DB outage (matching kb_store_enrollment_is_revoked), throttled-logged. */
-int kb_store_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm)
-{
-   if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
-      return 0;
-   void *conn = kb_store_conn();
-   if (!conn)
-   {
-      revcache_warn_failopen(cert_serial_norm, "db unavailable");
-      return 0;
-   }
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT state FROM kb_enrollments WHERE cert_issuer=?1 AND cert_serial_norm=?2", err,
-       sizeof(err));
-   if (!st)
-   {
-      revcache_warn_failopen(cert_serial_norm, err);
-      return 0;
-   }
-   aimee_pg_bind_text(st, "?1", cert_issuer);
-   aimee_pg_bind_text(st, "?2", cert_serial_norm);
-   int revoked = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *state = aimee_pg_column_text(st, 0);
-      revoked = (state && strcmp(state, "revoked") == 0) ? 1 : 0;
-   }
-   aimee_pg_finalize(st);
-   return revoked;
 }
 
 int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
@@ -432,66 +311,6 @@ int kb_store_enrollment_authority_resolve(const char *fingerprint, const char *c
       rc = -1;
    aimee_pg_finalize(st);
    return rc;
-}
-
-/* Eager one-time backfill of the immutable revocation key on legacy enrollments
- * (P1 I5): populate cert_issuer + cert_serial_norm for every active row that has a
- * serial but no normalized key yet, so revocation-by-key works immediately — no
- * window where a legacy cert has no revocation key. `ca_issuer_dn` is the
- * enrollment CA's issuer DN (the single issuer for all enrolled certs). Returns
- * the number of rows updated, or -1 on error. */
-int kb_store_enrollment_backfill_cert_keys(const char *ca_issuer_dn)
-{
-   if (!ca_issuer_dn || !ca_issuer_dn[0])
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   char err[256] = "";
-   aimee_pg_stmt_t *sel = aimee_pg_prepare(
-       conn, "SELECT id, serial FROM kb_enrollments WHERE cert_serial_norm='' AND serial<>''", err,
-       sizeof(err));
-   if (!sel)
-      return -1;
-   /* Collect first (id, normalized-serial), then update — avoid nested statements
-    * on one connection. */
-   struct
-   {
-      int64_t id;
-      char norm[128];
-   } rows[512];
-   int nrows = 0;
-   while (nrows < (int)(sizeof(rows) / sizeof(rows[0])) &&
-          aimee_pg_step(sel, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      int64_t id = aimee_pg_column_int64(sel, 0);
-      const char *serial = aimee_pg_column_text(sel, 1);
-      char norm[128];
-      if (serial && kb_cert_serial_normalize(serial, norm, sizeof(norm)) == 0 && norm[0])
-      {
-         rows[nrows].id = id;
-         snprintf(rows[nrows].norm, sizeof(rows[nrows].norm), "%s", norm);
-         nrows++;
-      }
-   }
-   aimee_pg_finalize(sel);
-
-   int updated = 0;
-   for (int i = 0; i < nrows; ++i)
-   {
-      aimee_pg_stmt_t *up = aimee_pg_prepare(
-          conn, "UPDATE kb_enrollments SET cert_issuer=?1, cert_serial_norm=?2 WHERE id=?3", err,
-          sizeof(err));
-      if (!up)
-         return -1;
-      aimee_pg_bind_text(up, "?1", ca_issuer_dn);
-      aimee_pg_bind_text(up, "?2", rows[i].norm);
-      aimee_pg_bind_int64(up, "?3", rows[i].id);
-      if (aimee_pg_step(up, err, sizeof(err)) != AIMEE_PG_ERR)
-         updated++;
-      aimee_pg_finalize(up);
-   }
-   return updated;
 }
 
 /* --- debounced last-seen --- */

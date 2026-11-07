@@ -223,22 +223,21 @@ static agent_t *skill_server_select_agent(agent_config_t *config, const char *re
    return NULL;
 }
 
-static int skill_server_trial_run(void *opaque, const char *system_prompt, const char *prompt,
-                                  int max_tokens, char **response_out,
-                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+static int skill_server_trial_run(void *opaque, const aimee_request_t *request,
+                                  aimee_response_t *response_out, skill_trial_usage_t *usage_out,
+                                  char *errbuf, size_t errbuf_len)
 {
    skill_server_trial_runner_t *runner = opaque;
    agent_result_t result = {0};
-   memset(&result, 0, sizeof(result));
-   if (agent_generate(&runner->config, runner->agent_name, system_prompt, prompt, max_tokens, 0.0,
-                      &result) != 0)
+   if (agent_generate(&runner->config, runner->agent_name, request, &result) != 0 ||
+       aimee_ir_response_complete_text_valid(&result.canonical_response))
    {
       snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
       agent_result_clear_response(&result);
       return -1;
    }
-   *response_out = agent_result_take_text(&result);
-   result.response = NULL;
+   *response_out = result.canonical_response;
+   memset(&result.canonical_response, 0, sizeof result.canonical_response);
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = result.prompt_tokens;
    usage_out->completion_tokens = result.completion_tokens;
@@ -262,7 +261,7 @@ static int skill_server_trial_run(void *opaque, const char *system_prompt, const
    int priced = 0;
    usage_out->cost_usd =
        token_estimate_cost_ex(result.model[0] ? result.model : served, &token_usage, &priced);
-   usage_out->cost_unknown = !priced;
+   usage_out->cost_unknown = !priced || agent_result_usage_is_unobserved(&result);
    return 0;
 }
 

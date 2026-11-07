@@ -4,7 +4,9 @@
 static const char *owner_reply;
 static int selected_native, owner_calls;
 int aimee_module_tool_source_mode(const char *tool)
-{ return selected_native && !strcmp(tool,"search_memory") ? -1 : 0; }
+{
+   return selected_native && !strcmp(tool, "search_memory") ? -1 : 0;
+}
 static kb_client_result_status_t transport_status = KB_CLIENT_RESULT_OK;
 void kb_client_memory_scope_context_apply(cJSON *request)
 {

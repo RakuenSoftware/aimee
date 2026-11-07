@@ -26,6 +26,8 @@ export type Block = {
   context?: Record<string, unknown>;
 };
 export type Message = { role: string; blocks: Block[]; content_scalar?: boolean };
+/** Provider diagnostics only; grants no permission or retry authority. */
+export type RefusalDetails = { category: string | null; explanation: string | null };
 export type Delta = {
   type: 'TURN_START' | 'BLOCK_START' | 'BLOCK_DELTA' | 'BLOCK_STOP' | 'TURN_STOP' | 'ERROR';
   block_id?: number;
@@ -43,6 +45,7 @@ export type Delta = {
   tool_args_delta?: string;
   stop_reason?: string;
   raw_stop_reason?: string;
+  refusal?: RefusalDetails | null;
   usage_in?: number;
   usage_out?: number;
   usage_cache_read?: number;
@@ -50,7 +53,7 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
-export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number; omitted_request_controls?: number; omitted_empty_messages?: number; host_context_blocks_as_text?: number; history_messages_as_text?: number; unverified_external_tool_reports?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 /** Host custody metadata. Browser schema admission grants no execution authority. */
 export type DelegateLearningBinding = {
@@ -87,6 +90,7 @@ export type ProjectedMessage = Message & {
   cancelled?: boolean;
   stopReason?: string;
   nativeStopReason?: string;
+  refusal?: RefusalDetails | null;
   usage?: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number };
 };
 export type Control = {
@@ -117,6 +121,15 @@ const kinds = new Set(['text', 'thinking', 'tool_use', 'tool_result', 'image', '
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
+function validRefusalDetails(value: unknown): value is RefusalDetails {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const details = value as Record<string, unknown>;
+  if (Object.keys(details).length !== 2 || !Object.prototype.hasOwnProperty.call(details, 'category') || !Object.prototype.hasOwnProperty.call(details, 'explanation')) return false;
+  if (!([['category', 64], ['explanation', 4096]] as const).every(([key, limit]) =>
+    details[key] === null || (typeof details[key] === 'string' && !details[key].includes('\0') && new TextEncoder().encode(details[key]).length <= limit))) return false;
+  try { stringifyJSON(details); return true; } catch { return false; }
+}
+
 function validDelegateLearningBinding(value: unknown): value is DelegateLearningBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const binding = value as Record<string, unknown>;
@@ -278,7 +291,13 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const report = event.payload;
       if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks < 0 ||
           !Number.isSafeInteger(report.omitted_cache_controls ?? 0) || (report.omitted_cache_controls ?? 0) < 0 ||
-          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0) ||
+          (report.omitted_empty_messages !== undefined && (!Number.isSafeInteger(report.omitted_empty_messages) || report.omitted_empty_messages < 0 || report.omitted_empty_messages > 4096)) ||
+          (report.omitted_request_controls !== undefined && (!Number.isSafeInteger(report.omitted_request_controls) || report.omitted_request_controls < 0 || report.omitted_request_controls > 4096)) ||
+          (report.host_context_blocks_as_text !== undefined && (!Number.isSafeInteger(report.host_context_blocks_as_text) || report.host_context_blocks_as_text < 0 || report.host_context_blocks_as_text > 4096)) ||
+          (report.history_messages_as_text !== undefined && (!Number.isSafeInteger(report.history_messages_as_text) || report.history_messages_as_text < 0 || report.history_messages_as_text > 4096)) ||
+          (report.unverified_external_tool_reports !== undefined && (!Number.isSafeInteger(report.unverified_external_tool_reports) || report.unverified_external_tool_reports < 0 || report.unverified_external_tool_reports > 4096)) ||
+          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0 && (report.omitted_request_controls ?? 0) === 0 && (report.omitted_empty_messages ?? 0) === 0 &&
+            (report.host_context_blocks_as_text ?? 0) === 0 && (report.history_messages_as_text ?? 0) === 0 && (report.unverified_external_tool_reports ?? 0) === 0) ||
           !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
           report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');
       next.projections = [...(state.projections ?? []), { ...report, id: envelope.event_id, turn: envelope.turn_id }];
@@ -425,6 +444,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         message.usage = previous.usage;
         message.stopReason = previous.stopReason;
         message.nativeStopReason = previous.nativeStopReason;
+        if (previous.refusal !== undefined) message.refusal = previous.refusal;
         message.error = previous.error;
         message.cancelled = previous.cancelled;
         next.messages = state.messages.map((m, i) => i === index ? message : m);
@@ -434,6 +454,8 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     case 'delta': {
       if (!nonempty(event.message_id) || !nonempty(event.role)) throw new Error('Delta requires message identity');
       const d = event.payload;
+      if (d.refusal !== undefined && (d.type !== 'TURN_STOP' || (d.refusal !== null &&
+          (d.stop_reason !== 'content_filter' || !validRefusalDetails(d.refusal))))) throw new Error('Invalid provider refusal metadata');
       const index = state.messages.findIndex(m => m.id === event.message_id);
       if (d.message_group !== undefined && (!Number.isInteger(d.message_group) || d.message_group < 1 || d.message_group > 4096 || d.type !== 'BLOCK_START' || d.kind !== 'text')) throw new Error('Invalid authored message group');
       for (const key of ['thinking_id', 'encrypted_content'] as const) {
@@ -474,12 +496,13 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
             throw new Error('Invalid model usage');
         }
-        message.usage = { input: d.usage_in || 0, output: d.usage_out || 0,
+        message.usage = [d.usage_in, d.usage_out, d.usage_cache_read, d.usage_cache_write, d.usage_reasoning].some(value => value !== undefined) ? { input: d.usage_in || 0, output: d.usage_out || 0,
           ...(d.usage_cache_read !== undefined ? { cacheRead: d.usage_cache_read } : {}),
           ...(d.usage_cache_write !== undefined ? { cacheWrite: d.usage_cache_write } : {}),
-          ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) };
+          ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) } : undefined;
         message.stopReason = d.stop_reason;
         message.nativeStopReason = d.raw_stop_reason;
+        if (d.refusal !== undefined) message.refusal = d.refusal === null ? null : { ...d.refusal };
         message.complete = true;
         message.awaitingStop = false;
         return next;

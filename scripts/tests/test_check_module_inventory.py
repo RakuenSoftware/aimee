@@ -296,7 +296,7 @@ class ModuleInventoryTest(unittest.TestCase):
     # Event kinds are carved from a ref as 4096 + ref*256 + stage, so a ref
     # reserves a whole 256-kind block. A module handed a ref inside the band
     # reserved for plugin instances would have its kinds land where a provisioned
-    # plugin may already be serving, and bus_host_serve_kind() binds one kind to
+    # plugin may already be serving, and ouro_host_serve_kind() binds one kind to
     # exactly one slot -- the loser is denied at attach with nothing in its own
     # log to say why. A live aimee-kb reproduced exactly that when the plugin
     # range still sat at 11264, which is postgres's block.

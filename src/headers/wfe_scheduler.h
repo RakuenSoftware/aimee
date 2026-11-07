@@ -9,19 +9,8 @@
 #ifndef DEC_WFE_SCHEDULER_H
 #define DEC_WFE_SCHEDULER_H 1
 
-/* Start the scheduler thread. Idempotent; safe to call once at server_init. */
-void wfe_scheduler_init(void);
-
 /* Wake the scheduler immediately (non-blocking): call after creating a work item
  * or after a human gate is satisfied so a parked run resumes promptly. */
 void wfe_scheduler_notify(void);
-
-/* Stop the scheduler thread. Idempotent; safe at server_shutdown. */
-void wfe_scheduler_shutdown(void);
-
-/* Drive every active autonomous work item from one snapshot, synchronously, on
- * the calling thread. Exposed for deterministic tests; the production background
- * loop uses a live capacity-aware dispatcher so new arrivals can fill spare slots. */
-void wfe_scheduler_run_once(void);
 
 #endif /* DEC_WFE_SCHEDULER_H */

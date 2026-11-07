@@ -106,9 +106,8 @@ int main(void)
    assert(set("memory.backend", hillock) == -1 && writes == 0);
    assert(set("memory_backend_token", "\"fixture-secret\"") == -1 && seals == 0);
    administrator = 1;
-   const char *valid[] = {
-       "{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"bearer\"}",
-       "{\"engine\":\"aimee-native\",\"endpoint\":\"\",\"auth\":\"none\"}"};
+   const char *valid[] = {"{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"bearer\"}",
+                          "{\"engine\":\"aimee-native\",\"endpoint\":\"\",\"auth\":\"none\"}"};
    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++)
    {
       assert(set("memory.backend", valid[i]) == 0);

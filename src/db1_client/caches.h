@@ -27,27 +27,7 @@ extern "C"
 
    /* --- Context cache --- */
 
-   /* Read a cached assembly by hash. Returns 0 on hit, -1 on miss or expired. */
-   int db1_context_cache_get(const char *hash, char *out, size_t out_len);
-
-   /* Insert or replace a cached assembly. No-op on error. */
-   void db1_context_cache_put(const char *hash, const char *output);
-
-   /* Delete every row in the context cache. */
-   void db1_context_cache_invalidate(void);
-
    /* --- Context snapshots --- */
-
-   int db1_context_snapshot_insert(const char *session_id, int64_t memory_id,
-                                   double relevance_score);
-   int db1_context_snapshot_count_memories_with_min_samples(int min_samples);
-   int db1_context_snapshot_list_memory_ids_with_min_samples(int min_samples, int64_t *out,
-                                                             int max);
-   int db1_context_snapshot_count_for_memory(int64_t memory_id);
-   int db1_context_snapshot_list_sessions_for_memory(int64_t memory_id,
-                                                     char (*out)[DB1_CONTEXT_SNAPSHOT_SESSION_LEN],
-                                                     int max);
-   int db1_context_snapshot_has_memory(int64_t memory_id);
 
    /* Record an injection against the turn it happened on. The turn-less form
     * above stays for callers that only need "this was sampled"; anything that

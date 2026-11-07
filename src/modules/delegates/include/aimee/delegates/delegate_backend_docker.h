@@ -15,6 +15,8 @@
 #ifndef DEC_DELEGATE_BACKEND_DOCKER_H
 #define DEC_DELEGATE_BACKEND_DOCKER_H 1
 
+#include <time.h>
+
 #include <aimee/delegates/delegate_backend.h>
 
 #ifdef __cplusplus
@@ -55,18 +57,10 @@ extern "C"
     * turn is never removed. Returns removed count or -1. */
    int delegate_backend_docker_reap_aged(int max_age_secs);
 
-   /* Build the docker exec command-string used by exec(). Pure
-    * string assembly. Shape:
-    *   docker exec -i <container_name> bash -c '<base64-encoded-script>'
-    * The script is base64-encoded so quoting in `wrapped_script`
-    * (single quotes, backticks, dollar signs) survives transit
-    * through docker's shell unmolested. Same pattern as the SSH
-    * backend's b64 envelope.
-    *
-    * Returns 0 + sets *out_cmd (caller frees), or -1 on NULL/empty
-    * inputs or allocation failure. */
-   int delegate_backend_docker_build_exec_command(const char *container_name,
-                                                  const char *wrapped_script, char **out_cmd);
+   /* The same reap, also reporting in *next_due when the oldest delegate
+    * container that is not aged yet will be (0: there is none, so nothing can
+    * come due until another delegate starts). */
+   int delegate_backend_docker_reap_aged_next(int max_age_secs, time_t *next_due);
 
    /* Translate a path as seen inside the server container into the Docker-host
     * source path that backs it. `mount_table` is one destination<TAB>source pair

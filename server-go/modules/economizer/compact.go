@@ -2,8 +2,6 @@ package economizer
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 )
 
 // Tool-result body shrink — the single algorithm both reduction seams use.
@@ -43,29 +41,6 @@ type CompactConfig struct {
 	HeadBytes int // 0 = CompactDefaultHeadBytes
 	TailBytes int // 0 = CompactDefaultTailBytes
 	PerTool   []PerToolCompact
-}
-
-// cFormatG reproduces C's "%g": 6 significant digits, then trailing zeros and a
-// trailing decimal point removed.
-//
-// Go's %g defaults to the shortest representation that round-trips, which is a
-// DIFFERENT string for the same double (C gives 1.23457e-06 where Go gives
-// 1.234567e-06). Since this text lands in a cache-sensitive prefix, the C
-// spelling is the one that matters.
-func cFormatG(v float64) string {
-	s := strconv.FormatFloat(v, 'g', 6, 64)
-	if !strings.ContainsAny(s, ".") {
-		return s
-	}
-	mant, exp, hasExp := strings.Cut(s, "e")
-	if strings.Contains(mant, ".") {
-		mant = strings.TrimRight(mant, "0")
-		mant = strings.TrimSuffix(mant, ".")
-	}
-	if hasExp {
-		return mant + "e" + exp
-	}
-	return mant
 }
 
 // boundBuf reproduces the C summary buffer's snprintf semantics exactly.

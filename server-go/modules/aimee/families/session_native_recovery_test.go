@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -53,8 +53,8 @@ func TestSessionNativeRecoveryRequiresHostAndExactInput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-		if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+		if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal("ordinary user invoked host recovery", status, db.executed)
 		}
 	}
@@ -90,8 +90,8 @@ func TestSessionNativeActiveOwnedRequiresHostAndExactSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+	if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal("untrusted discovery bypassed host admission", status, db.executed)
 	}
 }

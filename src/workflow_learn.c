@@ -15,11 +15,10 @@ extern cJSON *aimee_module_host_command_context(void) __attribute__((weak));
 
 static int workflow_dispatch(const cJSON *args, const cJSON *context, cJSON **result)
 {
-   return context ? aimee_module_commands_dispatch_internal_context_timeout(
-                        "memory.runtime", args, context, 60000, result)
+   return context ? aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", args,
+                                                                            context, 60000, result)
                   : aimee_module_commands_dispatch_internal("memory.runtime", args, result);
 }
-
 
 cJSON *workflow_execute(const cJSON *input)
 {
@@ -119,8 +118,8 @@ void workflow_observe_bash(const char *command)
       {
          char *wire_refs = cJSON_PrintUnformatted(refs);
          if (wire_refs)
-            learning_implicit_record_workflow_evidence(workspace, signal,
-                                                       jo_cstr(result, "rule"), wire_refs);
+            learning_implicit_record_workflow_evidence(workspace, signal, jo_cstr(result, "rule"),
+                                                       wire_refs);
          free(wire_refs);
       }
       else

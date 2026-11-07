@@ -9,7 +9,8 @@ const char *session_id(void)
 {
    return "learning-transport-session";
 }
-int aimee_module_commands_dispatch_internal_caller(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_caller(const char *method, const cJSON *args,
+                                                   cJSON **result)
 {
    assert(strcmp(method, "memory.runtime") == 0);
    cJSON_Delete(last_request);

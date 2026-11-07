@@ -53,6 +53,9 @@ typedef struct
    /* Host-owned execution intent, never read from transport/model arguments.
     * A delegated model retains its actor's data access, not human attribution. */
    int model_execution;
+   /* Host-only operator reply capability from an admitted chat control scope.
+    * Async snapshots may retain or restrict it; identity alone never grants it. */
+   int control_reply_capability;
    /* Host-only provenance of an authenticated direct operator's script. Its
     * worker is still untrusted/model execution; this permits only the existing
     * unbound action path. Actual model entry clears it; canonical captures and
@@ -84,6 +87,11 @@ typedef struct
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];
    char aimee_tool_transport[16];
+   /* X-Aimee-Runner: the private runner channel ("runner:" + 32 hex) of the
+    * CLI that sent this request. A detached workspace's ops for this request
+    * go to that channel, so the client that asked runs them, not whichever
+    * client polled the tree first. Empty when absent or malformed. */
+   char runner_channel[40];
 } request_context_t;
 
 /* Durable sessions are owned by the host-attested actor, which can differ
@@ -134,6 +142,8 @@ void request_context_clear(void);
 /* Convenience: the idempotency key for the active request, or "" if none / no
  * context. Never returns NULL. */
 const char *request_context_idempotency_key(void);
+/* The request's runner channel, "" when it has none. */
+const char *request_context_runner_channel(void);
 
 /* Convenience: the principal for the active request, or "" if none / no
  * context / untrusted. Never returns NULL. */

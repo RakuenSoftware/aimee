@@ -13,8 +13,8 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -93,10 +93,10 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 		t.Fatal(e)
 	}
 	handler := GuardrailState.Handler(explorationLiveDB{liveQueryer{pool}})
-	call := func(principal string, req map[string]any) ([]byte, bus.ModuleStatus) {
+	call := func(principal string, req map[string]any) ([]byte, ring.ModuleStatus) {
 		body, _ := json.Marshal(req)
 		frame, _ := wire.EncodeFields(8, []string{principal, "session", string(body)})
-		return handler(bus.ModuleInvocation{StageID: StageGuardrailState}, frame)
+		return handler(ring.ModuleInvocation{StageID: StageGuardrailState}, frame)
 	}
 	t.Run("canonical actor bounds and exact ownership", func(t *testing.T) {
 		longActor := "webuser:" + strings.Repeat("a", 151)
@@ -111,8 +111,8 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 			contract := map[string]any{"id": "actor-bound", "revision": 1, "binding": binding, "plan_digest": "plan", "source_versions_digest": "versions", "query_class": "symbol", "coverage_complete": true, "confidence_provenance": "uncalibrated", "supported_classes": []string{"raw_scan"}, "created": now.Add(-time.Second), "expires": now.Add(time.Hour), "limits": map[string]any{"enabled": true, "raw_scans": 0}, "tier": "enforce"}
 			body, _ := json.Marshal(map[string]any{"operation": "issue", "binding": binding, "contract": contract})
 			frame, _ := wire.EncodeFields(8, []string{actor, sid, string(body)})
-			raw, ms := handler(bus.ModuleInvocation{StageID: StageGuardrailState}, frame)
-			if ms != bus.ModuleStatusOK {
+			raw, ms := handler(ring.ModuleInvocation{StageID: StageGuardrailState}, frame)
+			if ms != ring.ModuleStatusOK {
 				t.Fatalf("module status %v", ms)
 			}
 			code, _, ok := store.DecodeRequest(raw)
@@ -146,7 +146,7 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 		bindings = append(bindings, b)
 		c := map[string]any{"id": fmt.Sprint(i), "revision": 1, "binding": b, "plan_digest": "plan", "source_versions_digest": "versions", "query_class": "symbol", "coverage_complete": true, "confidence_provenance": "uncalibrated", "supported_classes": []string{"raw_scan"}, "created": now.Add(-time.Second), "expires": now.Add(time.Hour), "limits": map[string]any{"enabled": true, "raw_scans": 0}, "tier": "enforce"}
 		reply, status := call("alice", map[string]any{"operation": "issue", "binding": b, "contract": c})
-		if status != bus.ModuleStatusOK || len(reply) < 8 || storeStatus(reply) != store.StatusOK {
+		if status != ring.ModuleStatusOK || len(reply) < 8 || storeStatus(reply) != store.StatusOK {
 			t.Fatalf("issue %v %v", status, reply)
 		}
 	}
@@ -163,7 +163,7 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 				delete(req, "binding")
 			}
 			reply, status := call("alice", req)
-			if status != bus.ModuleStatusOK || storeStatus(reply) != store.StatusOK {
+			if status != ring.ModuleStatusOK || storeStatus(reply) != store.StatusOK {
 				t.Errorf("reserve failed %v", status)
 				return
 			}
@@ -189,8 +189,8 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 		t.Fatal(e)
 	}
 	legacyFrame, _ := wire.EncodeFields(opSessionStateSave, saveFrame("session"))
-	legacyReply, legacyStatus := handler(bus.ModuleInvocation{StageID: StageGuardrailState}, legacyFrame)
-	if legacyStatus != bus.ModuleStatusOK || storeStatus(legacyReply) != store.StatusOK {
+	legacyReply, legacyStatus := handler(ring.ModuleInvocation{StageID: StageGuardrailState}, legacyFrame)
+	if legacyStatus != ring.ModuleStatusOK || storeStatus(legacyReply) != store.StatusOK {
 		t.Fatal("legacy save failed")
 	}
 	if e = pool.QueryRow(ctx, `SELECT exploration_state FROM session_state WHERE session_id='session'`).Scan(&afterSave); e != nil || beforeSave != afterSave {
@@ -200,7 +200,7 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	handler = GuardrailState.Handler(explorationLiveDB{liveQueryer{pool}})
 	req := map[string]any{"operation": "inspect", "binding": bindings[0]}
 	restored, restoredStatus := call("alice", req)
-	if restoredStatus != bus.ModuleStatusOK || storeStatus(restored) != store.StatusOK {
+	if restoredStatus != ring.ModuleStatusOK || storeStatus(restored) != store.StatusOK {
 		t.Fatal("restored inspection unavailable")
 	}
 	_, cells, ok := store.DecodeRequest(restored)
@@ -223,12 +223,12 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 			delete(retry, "binding")
 		}
 		r, st := call("alice", retry)
-		if st != bus.ModuleStatusOK || storeStatus(r) != store.StatusOK {
+		if st != ring.ModuleStatusOK || storeStatus(r) != store.StatusOK {
 			t.Fatal("restart retry failed")
 		}
 	}
 	r, st := call("alice", req)
-	if st != bus.ModuleStatusOK {
+	if st != ring.ModuleStatusOK {
 		t.Fatal(st)
 	}
 	_, cells, ok = store.DecodeRequest(r)
@@ -241,12 +241,12 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	}
 
 	reply, status := call("mallory", req)
-	if status != bus.ModuleStatusOK || storeStatus(reply) == store.StatusOK {
+	if status != ring.ModuleStatusOK || storeStatus(reply) == store.StatusOK {
 		t.Fatal("foreign session accepted")
 	}
 	raw, _ := json.Marshal(req)
 	frame, _ := wire.EncodeFields(8, []string{"alice", "session", string(raw)})
-	if _, status = handler(bus.ModuleInvocation{StageID: StageGuardrailState, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+	if _, status = handler(ring.ModuleInvocation{StageID: StageGuardrailState, PrincipalRef: 73}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("non-host caller accepted")
 	}
 }

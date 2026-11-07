@@ -157,6 +157,7 @@
      "                   --backend X --task-id Y [--image I] [--host H]\n"
      "                   [--no-hibernate] \"<cmd>\"\n"},
     {"model", "Model roster management", AIMEE_CMD_TIER_ADVANCED, 0,
+     "  generate         Tool-free canonical text completion (JSON request on stdin)\n"
      "  list             List configured models\n"
      "  add              Add or update a model\n"
      "  setup            Run a provider's attended OAuth setup\n"
@@ -406,9 +407,10 @@
     {"verify", "Verify the working tree against its remote", AIMEE_CMD_TIER_ADMIN, 1,
      "  Same command as `aimee git verify`; both spellings route to git.verify.\n"},
     {"get-help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
-     "  <topic>          Explain a topic -- work queue, delegation, memory,\n"
-     "                   git, build, conventions. The words are joined, so\n"
-     "                   `aimee get-help work queue` is one topic.\n"},
+     "  <topic>          Explain a topic -- mcp tools, delegate, memory, code\n"
+     "                   index, verification, build, git, pr workflow,\n"
+     "                   conventions, diagnostics. The words are joined, so\n"
+     "                   `aimee get-help pr workflow` is one topic.\n"},
     {"get_help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 1,
      "  Underscore spelling of `aimee get-help`; both route to help.get.\n"},
 

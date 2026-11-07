@@ -1,5 +1,9 @@
 # Event bus
 
+> The transport described here is the **ouroboros ring**, which now has its own repository and
+> contract ([RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring)). This
+> page describes what aimee carries on it and how aimee hosts it.
+
 The event bus is the new spine inside `aimee-server` and `aimee-kb`. It replaces scattered
 in-process side channels with one typed, ordered, bounded transport.
 
@@ -72,7 +76,7 @@ The current process catalog contains 26 Go identities: `config`, `memory`, `lear
 `providers`, `server` and `kb`. Placement and activation select the running set; the Server and
 KB role identities never run together. The catalog contains no supervised C KB_STORE process.
 The Go PostgreSQL module serves both placements. Transitional module-owned C resource/domain
-code remains, and C adapters used as parity fixtures do not establish a second policy owner.
+code remains; it calls the module processes and owns no policy of its own.
 
 The depth of each Go owner differs. Memory owns retrieval, mutations and lifecycle orchestration;
 providers owns request preparation; role modules own composition. Some other migrated stages
@@ -157,7 +161,7 @@ finished its work. Callers that need read-after-write behavior use the bridge fl
 Requests and replies use a correlation ID. A missing server returns `capability_absent`. A reply
 goes only to its requester. Notifications fan out to the authorized observers registered for that
 kind. Wire version 3 permits a correlated request or reply to span ordered inline fragments:
-`BUS_F_MORE` is set on every non-final fragment, and the first frame without it completes the
+`OURO_F_MORE` is set on every non-final fragment, and the first frame without it completes the
 message. The host keeps the route pending until the request is complete, and cancellation retires
 any partial request or reply.
 
@@ -173,12 +177,12 @@ sequenceDiagram
     participant Tap as Ordered tap
 
     Caller->>CallerOut: request(kind, stage, correlation, deadline)
-    CallerOut->>Host: one frame or BUS_F_MORE fragments
+    CallerOut->>Host: one frame or OURO_F_MORE fragments
     Host->>Tap: accepted frames in host sequence
     Host->>ModuleIn: route only after complete request
     ModuleIn->>Module: bounded AMOD request body
     Module->>ModuleOut: correlated reply or typed failure
-    ModuleOut->>Host: one frame or BUS_F_MORE fragments
+    ModuleOut->>Host: one frame or OURO_F_MORE fragments
     Host->>Tap: accepted reply frames
     Host->>CallerIn: reply only to original requester
     CallerIn-->>Caller: success, timeout, cancellation, or capability error
@@ -196,27 +200,21 @@ records `bus.producer_reaped` with the discarded sequence, event kind, and sourc
 
 ## Payloads
 
-Small payloads ride inside a ring slot. Trusted in-daemon publishers can put larger event payloads
-in a lease in the shared arena:
+Small payloads ride inside a ring slot. Larger event payloads go in a lease in the shared arena,
+which only code in the host's process can allocate; any attached client reads them in place. How
+leases, generations and release work is the ring's, in
+[`docs/arena-payloads.md`](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/docs/arena-payloads.md). aimee's arena publishers are
+trusted code inside the daemon.
 
-1. the producer allocates and fills a span;
-2. the frame carries its offset, length, and generation;
-3. the host assigns references to the destination set;
-4. each consumer releases its reference after reading;
-5. the last release reclaims the span.
-
-Generation checks reject stale references. Client reap releases abandoned references. Capture
-materializes arena bytes into the record, so replay never depends on a live arena.
-
-Arena allocation is for trusted code co-located with the host. Separately shipped module processes
-do not allocate arena leases: the module protocol fragments request and reply bodies above the
-negotiated inline budget and reassembles them at the endpoints. The current module-message limit is
-16 MiB; an oversized or malformed stream is rejected and drained without being delivered to a
-handler.
+Separately shipped module processes do not allocate arena leases: the module protocol fragments
+request and reply bodies above the negotiated inline budget and reassembles them at the endpoints.
+The current module-message limit is 16 MiB; an oversized or malformed stream is rejected and drained
+without being delivered to a handler.
 
 ## Capture and replay
 
-The host tap writes CRC-checked, length-framed capture files under `AIMEE_CAPTURE_DIR` when set, or
+The host tap writes capture files in the ring's frozen capture format (D10), CRC-checked and
+length-framed, under `AIMEE_CAPTURE_DIR` when set, or
 the aimee config directory otherwise. A record contains the original frame and materialized payload.
 Retention keeps the newest 16 capture sessions and prunes older files when a new capture starts.
 
@@ -249,10 +247,33 @@ The control region is read-only. Every admitted client maps only its queue pair 
 arena; it cannot enumerate or map another client's rings. The arena is cooperative isolation for
 trusted native modules, not a sandbox for hostile code.
 
-The bus is intra-daemon. `aimee-server` and `aimee-kb` each host their own bus from the same
-`libaimee-core-event-bus.a`; the thin client does not link it. Traffic between `aimee-server`, `aimee-kb`,
-browsers, thin clients, and providers uses the authenticated `/v1` network surfaces through the
-shared connection layer.
+The bus is intra-daemon. Traffic between `aimee-server`, `aimee-kb`, browsers, thin clients, and
+providers uses the authenticated `/v1` network surfaces through the shared connection layer.
+
+## Which binaries link the ring
+
+Where the ring links is aimee's decision, not the ring's. It began as "no shipping binary links the
+ring"; aimee's first module migration ended that, when the governed-action audit row stopped writing
+the file directly and started publishing over the ring through `src/modules/audit/obs_bus.c`, whose
+consumer thread drains it to the ledger. There is no parallel direct path, so the ring is
+load-bearing.
+
+- **Source.** Only `src/modules/audit/obs_bus.c`, the audit replay reader and the ring tests include a
+  ring host header. Product modules use the `obs_bus` API.
+- **Consumers.** `aimee-server` and `aimee-kb` link `libouroboros-ring.a` and each host an independent
+  ring for the modules in their own container. Module processes link only
+  `libouroboros-ring-client.a`, which defines no host entry point.
+- **Non-consumers.** The thin client does not link the ring. The ring never carries traffic between
+  machines.
+
+`scripts/check_bus_blast_radius.sh` enforces all of this in CI.
+
+**Durability.** The old direct write flushed each row before returning. The ring path is
+asynchronous: the producer publishes and returns, and the consumer writes it sub-millisecond later.
+A graceful shutdown drains losslessly (`obs_bus_stop`, also via `atexit`); a hard kill can lose the
+few rows still in the ring. That matches the audit row's earlier best-effort contract and is the
+trade for moving the write off the caller's thread. `test_bus_audit_durability` holds the
+exactly-once drain, and `scripts/check_audit_bus_budget.sh` the caller-side enqueue cost.
 
 ## Admitting a module process
 
@@ -327,11 +348,14 @@ Keep the contract small:
 - add C/Go vectors when the wire contract changes;
 - test shutdown, queue exhaustion, malformed frames, client reap, and capture replay.
 
-Use `bus_client_publish` for ordinary inline events. Use the arena for a trusted co-located event
+Use `ouro_client_publish` for ordinary inline events. Use the arena for a trusted co-located event
 publisher that needs a lease. Use the module request API for module calls; it selects ordered inline
 fragmentation when a request or reply exceeds the inline budget.
 
-Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client and
-module process runtime are under `server-go/bus/`. Both runtimes implement the same AMOD envelope,
-fragmentation, deadline, cancellation, heartbeat, and host-epoch behavior. The source headers hold
-the wire and arena invariants.
+The ring itself lives in
+[RakuenSoftware/ouroboros-ring](https://github.com/RakuenSoftware/ouroboros-ring); aimee names the
+release range it accepts in `dependencies/ouroboros-ring.json` and links an installed ring through
+the ring's own package. The public C client is `<ouroboros/client.h>`; the pure-Go
+client and module process runtime are the `github.com/RakuenSoftware/ouroboros-ring/go/ring`
+package. Both implement the same AMOD envelope, fragmentation, deadline, cancellation, heartbeat,
+and host-epoch behavior, held to the ring's contract (`spec/`) and frozen vectors (`vectors/`).

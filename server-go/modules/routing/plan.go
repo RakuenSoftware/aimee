@@ -5,7 +5,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const EventPlan uint32 = 6402
@@ -110,28 +110,28 @@ func Plan(req PlanRequest) int {
 	return order[0]
 }
 
-func handlePlan(inv bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handlePlan(inv ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	var req PlanRequest
 	if len(request) > 128*1024 || json.Unmarshal(request, &req) != nil || req.Version != 1 ||
 		req.InputTokens < 0 || req.OutputTokens < 0 || len(req.Candidates) == 0 || len(req.Candidates) > 16 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	seen := map[string]bool{}
 	for _, c := range req.Candidates {
 		if c.Name == "" || seen[c.Name] || c.Competence < 0 || c.Competence > 100 || len(c.Bands) > 8 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		seen[c.Name] = true
 	}
 	selected := Plan(req)
 	if inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	out, _ := json.Marshal(struct {
 		Selected int `json:"selected"`
 	}{selected})
-	return out, bus.ModuleStatusOK
+	return out, ring.ModuleStatusOK
 }

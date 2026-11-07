@@ -28,9 +28,7 @@ static int frame(const char *json, aimee_harness_ir_t *s, int codex)
 {
    cJSON *f = cJSON_Parse(json);
    assert(f);
-   int rc = codex == 2 ? aimee_acp_frame_ir(f, s)
-            : codex    ? aimee_codex_frame_ir(f, s)
-                       : aimee_claude_frame_ir(f, s);
+   int rc = codex ? aimee_codex_frame_ir(f, s) : aimee_claude_frame_ir(f, s);
    cJSON_Delete(f);
    return rc;
 }
@@ -38,250 +36,63 @@ static const char *string(const cJSON *o, const char *name)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, name));
 }
-static cJSON *block(int index)
+/* The original native gateway owns all model/history/tool observations.
+ * This adapter must never synthesize a competing transcript, in any mode. */
+static void native_capture_owner(void)
 {
-   cJSON *e = cJSON_GetArrayItem(events, index);
-   return cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(e, "payload"), "blocks"), 0);
-}
-static void claude(void)
-{
-   aimee_harness_ir_t s = {0};
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{"
-                "\"id\":\"a1\",\"role\":\"assistant\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":"
-                "0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":"
-                "0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Inspecting\"}}}",
-                &s, 0) == 0);
-   assert(
-       frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}",
-             &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"delta\":{"
-                "\"stop_reason\":\"end_turn\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}", &s, 0) == 0);
-   assert(cJSON_GetArraySize(events) == 5);
-   assert(!strcmp(string(cJSON_GetArrayItem(events, 0), "message_id"), "a1"));
-   assert(frame("{\"type\":\"assistant\",\"message\":{\"id\":\"a1\",\"role\":\"assistant\","
-                "\"content\":[{\"type\":\"thinking\",\"thinking\":\"Reason\",\"signature\":"
-                "\"signed\"},{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{"
-                "\"command\":\"pwd\"}}],\"stop_reason\":\"tool_use\"}}",
-                &s, 0) == 0);
-   assert(!strcmp(string(block(5), "type"), "thinking"));
-   assert(!strcmp(string(block(5), "signature"), "signed"));
-   assert(frame("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_"
-                "result\",\"tool_use_id\":\"t1\",\"content\":\"/workspace\",\"is_error\":true}]}}",
-                &s, 0) == 0);
-   assert(!strcmp(string(block(6), "tool_id"), "t1"));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(block(6), "is_error")));
-   assert(frame("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"prompt echo\"}}",
-                &s, 0) == 0);
-   assert(cJSON_GetArraySize(events) == 7);
-   reject = 1;
-   assert(frame("{\"type\":\"assistant\",\"message\":{\"id\":\"a2\",\"role\":\"assistant\","
-                "\"content\":[{\"type\":\"text\",\"text\":\"Fail closed\"}]}}",
-                &s, 0) < 0);
-   reject = 0;
-   aimee_harness_ir_free(&s);
-}
-static void claude_block_snapshots(void)
-{
-   aimee_harness_ir_t s = {0};
+   const char *claude_frames[] = {
+       "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{\"id\":\"m\","
+       "\"role\":\"assistant\"}}}",
+       "{\"type\":\"assistant\",\"message\":{\"id\":\"m\",\"role\":\"assistant\",\"content\":[{"
+       "\"type\":\"text\",\"text\":\"PRIVATE_MODEL_TEXT\"}]}}",
+       "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+       "\"tool_use_id\":\"call\",\"content\":\"PRIVATE_TOOL_RESULT\"}]}}",
+       "{\"type\":\"result\",\"is_error\":false,\"result\":\"PRIVATE_RESULT\"}"};
+   aimee_harness_ir_t state = {0};
    int before = cJSON_GetArraySize(events);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{"
-                "\"id\":\"multi\",\"role\":\"assistant\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":"
-                "0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":"
-                "0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"assistant\",\"message\":{\"id\":\"multi\",\"role\":\"assistant\","
-                "\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}}",
-                &s, 0) == 0);
-   assert(cJSON_GetArraySize(events) == before + 3); /* snapshot cannot close the message yet */
-   assert(
-       frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}",
-             &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":"
-                "1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Read\","
-                "\"input\":{}}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":"
-                "1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}}",
-                &s, 0) == 0);
-   assert(
-       frame("{\"type\":\"assistant\",\"message\":{\"id\":\"multi\",\"role\":\"assistant\","
-             "\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Read\",\"input\":{}}]}}",
-             &s, 0) == 0);
-   assert(
-       frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":1}}",
-             &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"delta\":{"
-                "\"stop_reason\":\"end_turn\"}}}",
-                &s, 0) == 0);
-   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}", &s, 0) == 0);
-   assert(cJSON_GetArraySize(events) == before + 9);
-   cJSON *last = cJSON_GetArrayItem(events, before + 8);
-   cJSON *blocks = cJSON_GetObjectItem(cJSON_GetObjectItem(last, "payload"), "blocks");
-   assert(cJSON_GetArraySize(blocks) == 2);
-   assert(!strcmp(string(cJSON_GetArrayItem(blocks, 0), "text"), "hello"));
-   assert(!strcmp(string(cJSON_GetArrayItem(blocks, 1), "tool_id"), "t2"));
-   aimee_harness_ir_free(&s);
-}
-static void codex(void)
-{
-   aimee_harness_ir_t s = {0};
-   int before = cJSON_GetArraySize(events);
-   assert(frame("{\"method\":\"item/"
-                "started\",\"params\":{\"item\":{\"id\":\"cmd:1\",\"type\":\"commandExecution\","
-                "\"command\":\"pwd\",\"cwd\":\"/work\"}}}",
-                &s, 1) == 0);
-   assert(frame("{\"method\":\"item/"
-                "completed\",\"params\":{\"item\":{\"id\":\"cmd:1\",\"type\":\"commandExecution\","
-                "\"aggregatedOutput\":\"denied\",\"exitCode\":1,\"status\":\"failed\"}}}",
-                &s, 1) == 0);
-   assert(!strcmp(string(block(before), "tool_id"), string(block(before + 1), "tool_id")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(block(before + 1), "is_error")));
-   assert(frame("{\"method\":\"item/agentMessage/"
-                "delta\",\"params\":{\"itemId\":\"answer\",\"delta\":\"First\"}}",
-                &s, 1) == 0);
-   assert(frame("{\"method\":\"item/"
-                "completed\",\"params\":{\"item\":{\"id\":\"answer\",\"type\":\"agentMessage\","
-                "\"text\":\"First answer\"}}}",
-                &s, 1) == 0);
-   assert(frame("{\"id\":7,\"method\":\"item/commandExecution/"
-                "requestApproval\",\"params\":{\"command\":\"pwd\"}}",
-                &s, 1) == 0);
-   int n = cJSON_GetArraySize(events);
-   assert(frame("{\"id\":7,\"result\":{\"server_response\":true}}", &s, 1) == 0);
-   assert(cJSON_GetArraySize(events) == n); /* inbound id namespace is distinct */
+   for (size_t i = 0; i < sizeof claude_frames / sizeof *claude_frames; i++)
+   {
+      assert(!frame(claude_frames[i], &state, 0));
+      assert(cJSON_GetArraySize(events) == before);
+   }
+   const char *types[] = {"agentMessage",     "userMessage", "reasoning",       "plan",
+                          "commandExecution", "mcpToolCall", "dynamicToolCall", "fileChange",
+                          "webSearch",        "imageView"};
+   for (size_t i = 0; i < sizeof types / sizeof *types; i++)
+      for (int complete = 0; complete < 2; complete++)
+      {
+         char raw[512];
+         snprintf(raw, sizeof raw,
+                  "{\"method\":\"item/"
+                  "%s\",\"params\":{\"item\":{\"id\":\"m\",\"type\":\"%s\",\"text\":\"PRIVATE_"
+                  "MODEL_TEXT\"}}}",
+                  complete ? "completed" : "started", types[i]);
+         assert(!frame(raw, &state, 1));
+         assert(cJSON_GetArraySize(events) == before);
+      }
+   assert(!frame("{\"method\":\"item/agentMessage/"
+                 "delta\",\"params\":{\"itemId\":\"m\",\"delta\":\"PRIVATE_DELTA\"}}",
+                 &state, 1));
+   assert(cJSON_GetArraySize(events) == before);
+   /* Incoming controls still persist once and resolve in their own ID space. */
+   assert(!frame("{\"id\":7,\"method\":\"item/commandExecution/"
+                 "requestApproval\",\"params\":{\"command\":\"pwd\"}}",
+                 &state, 1));
+   assert(cJSON_GetArraySize(events) == before + 1);
    cJSON *reply = cJSON_Parse("{\"id\":7,\"result\":{\"decision\":\"accept\"}}");
-   assert(aimee_codex_reply_ir(reply, &s) == 0);
+   assert(reply && !aimee_codex_reply_ir(reply, &state));
+   assert(cJSON_GetArraySize(events) == before + 2);
+   assert(!strcmp(string(cJSON_GetArrayItem(events, before + 1), "kind"), "control_response"));
+   assert(!aimee_codex_reply_ir(reply, &state));
+   assert(cJSON_GetArraySize(events) == before + 2);
    cJSON_Delete(reply);
-   assert(cJSON_GetArraySize(events) == n + 1);
-   assert(!strcmp(string(cJSON_GetArrayItem(events, n), "kind"), "control_response"));
    assert(frame("{\"method\":\"item/"
                 "completed\",\"params\":{\"item\":{\"id\":\"unknown\",\"type\":\"futureItem\"}}}",
-                &s, 1) < 0);
-   aimee_harness_ir_free(&s);
+                &state, 1) < 0);
+   aimee_harness_ir_free(&state);
+   next_execution();
 }
-static void codex_tool_results(void)
-{
-   const struct
-   {
-      const char *item;
-      int error;
-      const char *output;
-   } cases[] = {
-       {"{\"type\":\"commandExecution\",\"exitCode\":7}", 1, NULL},
-       {"{\"type\":\"commandExecution\",\"exitCode\":0}", 0, NULL},
-       {"{\"type\":\"commandExecution\",\"exitCode\":null}", 0, NULL},
-       {"{\"type\":\"dynamicToolCall\",\"tool\":\"lookup\",\"namespace\":\"catalog\","
-        "\"success\":false,\"contentItems\":[{\"type\":\"inputText\",\"text\":\"no match\"}]}",
-        1, "no match"},
-       {"{\"type\":\"dynamicToolCall\",\"tool\":\"lookup\",\"namespace\":\"catalog\","
-        "\"success\":true,\"contentItems\":[{\"type\":\"inputText\",\"text\":\"found\"}]}",
-        0, "found"},
-       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
-        "\"result\":{\"isError\":true,\"content\":[]}}",
-        1, NULL},
-       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
-        "\"error\":{\"message\":\"transport failed\"}}",
-        1, NULL},
-       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
-        "\"result\":{\"content\":[]},\"error\":null}",
-        0, NULL}};
-   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
-   {
-      aimee_harness_ir_t state = {0};
-      cJSON *item = cJSON_Parse(cases[i].item);
-      assert(item);
-      cJSON_AddStringToObject(item, "id", "full-call:identity");
-      cJSON_AddStringToObject(item, "status", "completed");
-      cJSON *arguments = cJSON_AddObjectToObject(item, "arguments");
-      cJSON_AddNumberToObject(arguments, "value", 7);
-      cJSON *event = cJSON_CreateObject();
-      cJSON_AddStringToObject(event, "method", "item/started");
-      cJSON *params = cJSON_AddObjectToObject(event, "params");
-      cJSON_AddItemToObject(params, "item", item);
-      int before = cJSON_GetArraySize(events);
-      assert(aimee_codex_frame_ir(event, &state) == 0);
-      cJSON *use = block(before);
-      if (strcmp(string(item, "type"), "commandExecution"))
-      {
-         assert(cJSON_Compare(cJSON_GetObjectItem(use, "input"), arguments, 1));
-         assert(!strcmp(string(use, "namespace"),
-                        !strcmp(string(item, "type"), "mcpToolCall") ? "mcp__fixture" : "catalog"));
-      }
-      cJSON_SetValuestring(cJSON_GetObjectItem(event, "method"), "item/completed");
-      assert(aimee_codex_frame_ir(event, &state) == 0);
-      cJSON *result = block(before + 1);
-      assert(cJSON_IsTrue(cJSON_GetObjectItem(result, "is_error")) == cases[i].error);
-      assert(!strcmp(string(use, "tool_id"), string(result, "tool_id")));
-      if (cases[i].output)
-      {
-         const cJSON *content = cJSON_GetObjectItem(result, "content");
-         const cJSON *output = cJSON_GetArrayItem(cJSON_GetObjectItem(content, "output"), 0);
-         assert(!strcmp(string(output, "text"), cases[i].output));
-      }
-      cJSON_Delete(event);
-      aimee_harness_ir_free(&state);
-   }
-}
-static void acp(void)
-{
-   aimee_harness_ir_t s = {0};
-   int before = cJSON_GetArraySize(events);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_thought_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Inspect\"}}}}",
-                &s, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Answer\"}}}}",
-                &s, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call\",\"toolCallId\":"
-                "\"acp:1\",\"title\":\"Read\",\"status\":\"in_progress\",\"rawInput\":{\"path\":"
-                "\"README\"}}}}",
-                &s, 2) == 0);
-   int use = cJSON_GetArraySize(events) - 1;
-   assert(!strcmp(string(block(use), "type"), "tool_use"));
-   assert(
-       frame(
-           "{\"method\":\"session/"
-           "update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":"
-           "\"acp:1\",\"status\":\"completed\",\"rawOutput\":{\"text\":\"file contents\"}}}}",
-           &s, 2) == 0);
-   int result = cJSON_GetArraySize(events) - 1;
-   assert(!strcmp(string(block(result), "tool_id"), "acp:1"));
-   assert(!strcmp(string(block(result), "type"), "tool_result"));
-   assert(!strcmp(string(block(result - 1), "name"), "Read"));
-   assert(frame("{\"id\":9,\"method\":\"session/"
-                "request_permission\",\"params\":{\"options\":[{\"optionId\":\"allow\"}]}}",
-                &s, 2) == 0);
-   cJSON *reply = cJSON_Parse(
-       "{\"id\":9,\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"allow\"}}}");
-   assert(aimee_codex_reply_ir(reply, &s) == 0);
-   cJSON_Delete(reply);
-   assert(!strcmp(string(cJSON_GetArrayItem(events, cJSON_GetArraySize(events) - 1), "kind"),
-                  "control_response"));
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\","
-                "\"content\":{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"AA==\"}}}}",
-                &s, 2) == 0);
-   assert(!strcmp(string(block(cJSON_GetArraySize(events) - 1), "media_ref"),
-                  "data:image/png;base64,AA=="));
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"unknown_content\"}}}",
-                &s, 2) < 0);
-   assert(cJSON_GetArraySize(events) > before);
-   aimee_harness_ir_free(&s);
-}
+
 static void control_outputs(void)
 {
    cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
@@ -426,86 +237,69 @@ static void native_compactions(void)
    aimee_harness_ir_free(&state);
 }
 
-static void owned_results(void)
+/* SDK 2.1.177 stdout serializes the reserved error field without a flag.
+ * Unknown is observed in a synthetic local HTTP400 control; known values below
+ * are constructed source-contract cases, not a claim about a live failure. */
+static void claude_legacy_diagnostic(void)
 {
-   next_execution();
-   aimee_harness_ir_t state = {0};
-   aimee_response_t result = {0};
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_thought_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Reason\"}}}}",
-                &state, 2) == 0);
-   assert(aimee_harness_ir_response(&state, &result) < 0 && !result.content);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"text\",\"text\":\"Answer\"}}}}",
-                &state, 2) == 0);
-   assert(frame("{\"method\":\"session/"
-                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
-                "\"content\":{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"AA==\"}}}}",
-                &state, 2) == 0);
-   assert(frame("{\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}", &state, 2) == 0);
-   assert(!aimee_harness_ir_response(&state, &result));
-   assert(result.n_content == 3);
-   assert(result.content[0].type == AIMEE_BLK_THINKING &&
-          !strcmp(result.content[0].text, "Reason"));
-   assert(result.content[1].type == AIMEE_BLK_TEXT && !strcmp(result.content[1].text, "Answer"));
-   assert(result.content[2].type == AIMEE_BLK_IMAGE &&
-          !strcmp(result.content[2].media_ref, "data:image/png;base64,AA=="));
-   assert(result.content[0].message_group != result.content[1].message_group);
-   aimee_harness_ir_free(&state);
-   assert(!strcmp(result.content[0].text, "Reason")); /* Not borrowed from the frame/state. */
-   aimee_response_free(&result);
-
-   next_execution();
-   assert(frame("{\"id\":3,\"result\":{\"content\":\"legacy native "
-                "text\",\"stopReason\":\"max_tokens\"}}",
-                &state, 2) == 0);
-   assert(!aimee_harness_ir_response(&state, &result));
-   aimee_harness_ir_free(&state);
-   assert(result.n_content == 1 && !strcmp(result.content[0].text, "legacy native text"));
-   assert(result.stop_reason == AIMEE_STOP_MAX_TOKENS);
-   assert(!strcmp(result.raw_stop_reason, "max_tokens"));
-   aimee_response_free(&result);
-
-   next_execution();
-   assert(frame("{\"method\":\"item/agentMessage/"
-                "delta\",\"params\":{\"itemId\":\"native-id\",\"delta\":\"prefix\"}}",
-                &state, 1) == 0);
-   assert(aimee_harness_ir_response(&state, &result) < 0);
-   assert(frame("{\"method\":\"item/"
-                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
-                "\"text\":\"prefix completed\"}}}",
-                &state, 1) == 0);
-   assert(!aimee_harness_ir_response(&state, &result));
-   assert(result.n_content == 1 && !strcmp(result.content[0].text, "prefix completed"));
-   assert(!strcmp(result.id, "native-id"));
-   /* Repeated immutable snapshots cannot duplicate the display/result. */
-   assert(frame("{\"method\":\"item/"
-                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
-                "\"text\":\"prefix completed\"}}}",
-                &state, 1) == 0);
-   assert(!aimee_harness_ir_response(&state, &result) && result.n_content == 1);
-   aimee_block_t *retained = result.content;
-   assert(frame("{\"method\":\"item/"
-                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
-                "\"text\":\"contradictory\"}}}",
-                &state, 1) < 0);
-   assert(aimee_ir_session_capture_failed());
-   assert(aimee_harness_ir_response(&state, &result) < 0 && result.content == retained);
-   aimee_harness_ir_free(&state);
-   aimee_response_free(&result);
-   next_execution();
+   const char *codes[] = {"unknown", "rate_limit", "invalid_request"};
+   int before = cJSON_GetArraySize(events);
+   for (size_t i = 0; i < sizeof codes / sizeof *codes; i++)
+   {
+      aimee_harness_ir_t state = {0};
+      char raw[1024];
+      snprintf(raw, sizeof raw,
+               "{\"type\":\"assistant\",\"error\":\"%s\",\"session_id\":\"native-one\","
+               "\"uuid\":\"sdk-uuid\",\"parent_tool_use_id\":null,\"message\":{"
+               "\"id\":\"sdk-diagnostic\",\"role\":\"assistant\",\"content\":[{"
+               "\"type\":\"text\",\"text\":\"PRIVATE_DIAGNOSTIC\"}]}}",
+               codes[i]);
+      assert(!frame(raw, &state, 0));
+      assert(cJSON_GetArraySize(events) == before);
+      assert(state.failure == (i == 1   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
+                               : i == 2 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
+                                        : AIMEE_HARNESS_FAILURE_NONE));
+      /* Each malformed case changes exactly one otherwise complete field. */
+      if (i == 0)
+      {
+         for (int bad_parent = 0; bad_parent < 2; bad_parent++)
+         {
+            cJSON *bad = cJSON_Parse(raw);
+            assert(bad);
+            if (bad_parent)
+               assert(cJSON_ReplaceItemInObjectCaseSensitive(bad, "parent_tool_use_id",
+                                                             cJSON_CreateString("subagent-tool")));
+            else
+               assert(cJSON_ReplaceItemInObjectCaseSensitive(
+                   cJSON_GetObjectItemCaseSensitive(bad, "message"), "role",
+                   cJSON_CreateString("user")));
+            char *malformed = cJSON_PrintUnformatted(bad);
+            assert(malformed && frame(malformed, &state, 0) < 0);
+            assert(state.failure == AIMEE_HARNESS_FAILURE_NONE &&
+                   cJSON_GetArraySize(events) == before);
+            free(malformed);
+            cJSON_Delete(bad);
+            next_execution();
+         }
+      }
+      aimee_harness_ir_free(&state);
+   }
+   /* A non-diagnostic assistant may carry unrelated SDK metadata. */
+   aimee_harness_ir_t normal = {0};
+   assert(!frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
+                 "\"future_metadata\":true,\"message\":{\"role\":\"assistant\","
+                 "\"content\":[{\"type\":\"text\",\"text\":\"invalid_request\"}]}}",
+                 &normal, 0));
+   assert(normal.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
+   aimee_harness_ir_free(&normal);
 }
-
 static void claude_failure_classification(void)
 {
    const char *codes[] = {"rate_limit", "invalid_request", "unknown_new_code",
                           "PRIVATE_PROVIDER_DIAGNOSTIC"};
    int before = cJSON_GetArraySize(events);
-   for (int host = 0; host < 2; host++)
    {
-      aimee_harness_ir_t state = {.host_model_capture = host};
+      aimee_harness_ir_t state = {0};
       for (unsigned i = 0; i < sizeof codes / sizeof *codes; i++)
       {
          char raw[1024];
@@ -518,7 +312,7 @@ static void claude_failure_classification(void)
          assert(state.failure == (i == 0   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
                                   : i == 1 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
                                            : AIMEE_HARNESS_FAILURE_NONE));
-         assert(cJSON_GetArraySize(events) == before && !state.claude_message);
+         assert(cJSON_GetArraySize(events) == before);
       }
       assert(
           !frame("{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"rate_limit\","
@@ -530,25 +324,30 @@ static void claude_failure_classification(void)
       aimee_harness_ir_free(&state);
    }
    /* Ordinary assistant content and non-boolean lookalikes cannot classify. */
-   aimee_harness_ir_t state = {.host_model_capture = 1};
+   aimee_harness_ir_t state = {0};
    assert(
-       !frame("{\"type\":\"assistant\",\"is_api_error_message\":\"true\",\"error\":\"rate_limit\","
-              "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
-              "\"text\":\"rate_limit\"}]}}",
-              &state, 0));
+       frame("{\"type\":\"assistant\",\"is_api_error_message\":\"true\",\"error\":\"rate_limit\","
+             "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
+             "\"text\":\"rate_limit\"}]}}",
+             &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
-   assert(!frame(
-       "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
-       &state, 0));
+   assert(
+       frame(
+           "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
+           &state, 0) < 0);
+   next_execution();
    /* Camel case belongs to the internal conversation log, not print stdout. */
-   assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
-                 "\"message\":{\"role\":\"assistant\"}}",
-                 &state, 0));
+   assert(frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+                "\"message\":{\"role\":\"assistant\"}}",
+                &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
    /* Provider text and result errors are not SDK API classification authority. */
-   assert(!frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
-                 "\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\"}}",
-                 &state, 0));
+   assert(frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
+                "\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\"}}",
+                &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
    assert(!frame("{\"type\":\"result\",\"is_error\":true,"
                  "\"errors\":[\"invalid_request\",\"PRIVATE_PROVIDER_DIAGNOSTIC\"]}",
@@ -561,7 +360,6 @@ int main(void)
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
-   owned_results();
    cJSON_Delete(events);
    events = cJSON_CreateArray();
    native_compactions();
@@ -582,17 +380,11 @@ int main(void)
    assert(cJSON_IsObject(cJSON_GetObjectItem(form, "schema")));
    aimee_harness_ir_free(&form_state);
    cJSON_DeleteItemFromArray(events, 0);
+   native_capture_owner();
+   next_execution();
+   claude_legacy_diagnostic();
    claude_failure_classification();
    next_execution();
-   claude();
-   next_execution();
-   claude_block_snapshots();
-   next_execution();
-   codex();
-   next_execution();
-   codex_tool_results();
-   next_execution();
-   acp();
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(events);
    puts("harness IR boundary tests passed");

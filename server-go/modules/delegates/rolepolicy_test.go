@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Ported from test_delegate_role.c.
@@ -154,9 +154,9 @@ func rolePolicyRequestBytesHolding(role string, maxTurns int, explicitTools, hol
 }
 
 func TestRolePolicyStageRoundTrip(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytes("implement", 8, false))
-	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen ||
+	if status != ring.ModuleStatusOK || len(response) != rolePolicyResponseLen ||
 		binary.LittleEndian.Uint32(response[0:4]) != rolePolicyResponseMagic {
 		t.Fatalf("status %d, %d bytes", status, len(response))
 	}
@@ -172,7 +172,7 @@ func TestRolePolicyStageRoundTrip(t *testing.T) {
 	}
 
 	// diagnose has one, and a one-turn probe still gets no implicit tools.
-	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, _ = Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytes("diagnose", 1, false))
 	if int32(binary.LittleEndian.Uint32(response[20:24])) != 12 {
 		t.Error("diagnose lost its early-final turn")
@@ -188,16 +188,16 @@ func TestRolePolicyStageRoundTrip(t *testing.T) {
 // so a stage that asked about the role would say yes here no matter what the
 // caller resolved.
 func TestTheStageAnswersAutoToolsFromTheCarriedPermission(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytesHolding("code", 8, false, false))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	if binary.LittleEndian.Uint32(response[16:20]) != 0 {
 		t.Error("a run that does not hold tools was given them")
 	}
 
-	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, _ = Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytesHolding("code", 8, false, true))
 	if binary.LittleEndian.Uint32(response[16:20]) == 0 {
 		t.Error("a run holding tools did not get them")
@@ -212,19 +212,19 @@ func TestTheStageAnswersAutoToolsFromTheCarriedPermission(t *testing.T) {
 func TestRolePolicyStageRejectsInvalidEnvelope(t *testing.T) {
 	good := rolePolicyRequestBytes("code", 4, false)
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
-		good[:rolePolicyRequestLen-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
+		good[:rolePolicyRequestLen-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("truncated status = %d", status)
 	}
 
 	lying := rolePolicyRequestBytes("code", 4, false)
 	binary.LittleEndian.PutUint32(lying[12:16], uint32(roleMax+1))
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("over-long role status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy, DeadlineNS: 1},
-		good); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy, DeadlineNS: 1},
+		good); status != ring.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
 	}
 }
@@ -252,18 +252,18 @@ func TestRoleNeedsParentDiffEvidence(t *testing.T) {
 }
 
 func TestRolePolicyStageCarriesParentDiffEvidence(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, status := Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytes("review", -1, false))
-	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen {
+	if status != ring.ModuleStatusOK || len(response) != rolePolicyResponseLen {
 		t.Fatalf("status %v len %d", status, len(response))
 	}
 	if binary.LittleEndian.Uint32(response[24:28]) == 0 {
 		t.Error("review needs the parent diff and the wire should say so")
 	}
 
-	response, status = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+	response, status = Handle(ring.ModuleInvocation{StageID: StageRolePolicy},
 		rolePolicyRequestBytes("code", -1, false))
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
 	if binary.LittleEndian.Uint32(response[24:28]) != 0 {

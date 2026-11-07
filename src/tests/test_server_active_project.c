@@ -170,12 +170,12 @@ int main(void)
       assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
       assert(strcmp(out, "settle") == 0);
 
-      /* THE REGRESSION TEST: the identity names nothing indexed, so fall through
-       * to the registered root rather than returning a project that cannot
-       * answer. */
+      /* Canonical owner wins even when a prior index used a manual label for
+       * this path. Existing data remains queryable by explicit --project; an
+       * indexed alias cannot silently replace manifest/forge/persisted identity. */
       g_identity = "3014e417-337b-444f-9aaf-432838cdcf82";
       assert(server_active_project_from_cwd("/srv/settle/app", out, sizeof(out)) == 0);
-      assert(strcmp(out, "settle") == 0);
+      assert(strcmp(out, g_identity) == 0);
 
       /* A different project's first scan must not make an existing unindexed
        * repository lose its active identity. This is the live GUI/native case:

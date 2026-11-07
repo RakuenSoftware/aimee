@@ -1476,39 +1476,6 @@ void test_registration_grouping(void)
    unlink(agent_config_path());
 }
 
-/* The prefix helper remains for display/diagnostic use. */
-void test_registration_prefix(void)
-{
-   char buf[MAX_AGENT_NAME];
-
-   agent_registration_prefix("codex:gpt-5.6-sol", buf, sizeof(buf));
-   assert(strcmp(buf, "codex") == 0);
-
-   /* A legacy agent has no ':' and is its own registration, so it simply has no
-    * siblings — the same-registration pass finds nothing and costs it nothing. */
-   agent_registration_prefix("claude", buf, sizeof(buf));
-   assert(strcmp(buf, "claude") == 0);
-
-   /* Only the FIRST ':' separates; a model id containing one stays intact. */
-   agent_registration_prefix("gw:vendor:model", buf, sizeof(buf));
-   assert(strcmp(buf, "gw") == 0);
-
-   /* Degenerate inputs must not read past the buffer or invent a prefix. */
-   agent_registration_prefix(":leading", buf, sizeof(buf));
-   assert(buf[0] == '\0');
-   agent_registration_prefix("", buf, sizeof(buf));
-   assert(buf[0] == '\0');
-   agent_registration_prefix(NULL, buf, sizeof(buf));
-   assert(buf[0] == '\0');
-
-   /* Truncation is bounded by the output buffer. */
-   char small[4];
-   agent_registration_prefix("abcdefgh:model", small, sizeof(small));
-   assert(strlen(small) == 3);
-
-   printf("  PASS: test_registration_prefix\n");
-}
-
 /* Fine-grained role routing WORKS TODAY; it is the DEFAULT that is permissive.
  *
  * An earlier note in the routing proposal claimed role filtering was "bypassed
@@ -2069,9 +2036,4 @@ void test_cost_selection_filters_before_learning(void)
    assert(agent_route_last_was_module_fault());
    agent_set_route_cost_provider(NULL);
    agent_reset_route_selection_authority();
-   /* Legacy transport diagnostics use registration keys too. */
-   provider_health_update("routing-account-east", 401);
-   provider_health_update("routing-account-west", 200);
-   assert(provider_health_get("routing-account-east")->available == 0);
-   assert(provider_health_get("routing-account-west")->available == 1);
 }

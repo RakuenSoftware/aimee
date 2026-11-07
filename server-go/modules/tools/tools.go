@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -36,31 +36,31 @@ const metadataMagic uint32 = 0x4154454d
 const metadataLen = 16
 
 // Handle classifies a tool name without dispatching the tool itself.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StageActionResource {
 		return handleActionResource(invocation, request)
 	}
 	if invocation.StageID != StageDispatch || len(request) < 8 ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[5] != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	enriched := request[4] == metadataVersion
 	nameLength := int(request[6])
 	if enriched {
 		nameLength = int(binary.LittleEndian.Uint16(request[6:8]))
 		if nameLength == 0 || nameLength > 4095 || len(request) != nameLength+8 || bytes.IndexByte(request[8:], 0) >= 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	} else if request[4] != wireVersion || len(request) != requestLen || request[7] != 0 || nameLength == 0 || nameLength > nameMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	name := string(request[8 : 8+nameLength])
 	if enriched {
 		if catalogError != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		value := metadata(name)
 		response := make([]byte, metadataLen)
@@ -68,10 +68,10 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 		binary.LittleEndian.PutUint32(response[4:8], value.Class)
 		binary.LittleEndian.PutUint32(response[8:12], value.Primary)
 		binary.LittleEndian.PutUint32(response[12:16], value.Categories)
-		return response, bus.ModuleStatusOK
+		return response, ring.ModuleStatusOK
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], classify(name))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

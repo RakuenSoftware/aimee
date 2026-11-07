@@ -191,11 +191,7 @@ static aimee_request_t request(void)
 }
 static server_native_cache_t *begin(aimee_request_t *req, const char *turn)
 {
-   return server_native_cache_begin("s", "owner", turn, "codex", scope, req);
-}
-static int recover(const aimee_request_t *req, const char *turn)
-{
-   return server_native_cache_recover("s", "owner", turn, "codex", scope, req);
+   return server_native_cache_begin_epoch("s", "owner", turn, "codex", scope, req, "0", NULL);
 }
 static void seeded(aimee_request_t *req, const char *native_id)
 {
@@ -289,7 +285,6 @@ static void epoch_and_qualified_claim(void)
    server_native_cache_t *cache = server_native_cache_begin_epoch(
        "s", "owner", "qualified", "codex", scope, &req, epoch, &owner);
    assert(cache && owner_calls == 1 && !server_native_cache_resume(cache));
-   assert(server_native_cache_metadata_key(cache));
    cJSON *claim = server_native_cache_claim_json(cache);
    assert(claim &&
           !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "epoch")), epoch));
@@ -314,8 +309,37 @@ static void epoch_and_qualified_claim(void)
    cJSON_Delete(published_claim);
    published_claim = NULL;
 }
+static void host_context_keeps_exact_history_fence(void)
+{
+   reset();
+   aimee_request_t req = request();
+   req.n_messages = 1;
+   aimee_block_t context[] = {
+       system_block, {.type = AIMEE_BLK_TEXT, .text = "independently scoped host evidence"}};
+   aimee_ir_block_set_context(&context[1], AIMEE_CTX_ORIGIN_MEMORY, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "host",
+                              "scope", 1);
+   req.system = context;
+   req.n_system = 2;
+   source(&req);
+   lifecycle("host-context", "running");
+   server_native_cache_t *cache = begin(&req, "host-context");
+   assert(cache && !server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+   aimee_request_t projection = {0};
+   assert(!aimee_ir_request_project_model(&req, &projection));
+   assert(projection.n_system == 1 && projection.n_messages == 2 &&
+          projection.messages[0].n_blocks == 2 && projection.messages[1].n_blocks == 1);
+   int before = cas_calls;
+   assert(!begin(&projection, "host-context"));
+   assert(cas_calls == before); /* Egress evidence never acquires source-history custody. */
+   assert(req.n_messages == 1 && req.messages[0].n_blocks == 1);
+   aimee_request_free(&projection);
+}
+
 int main(void)
 {
+   host_context_keeps_exact_history_fence();
    epoch_and_qualified_claim();
    unresolved_source_refuses();
    aimee_request_t req;
@@ -433,12 +457,6 @@ int main(void)
       assert(!begin(&req, "next-run"));
       append_failure = bind_failure = cas_failure = 0;
       server_native_cache_close(cache); /* host lost the finalization object */
-      int recovered = recover(&req, "failed-finish");
-      assert(recovered == 0);
-      cache = begin(&req, "next-run");
-      assert(cache && !server_native_cache_resume(cache));
-      assert(!server_native_cache_abort(cache));
-      server_native_cache_close(cache);
    }
    seeded(&req, "corrupted-proof");
    lifecycle("corrupt", "running");
@@ -464,49 +482,6 @@ int main(void)
    assert(cache);
    server_native_cache_close(cache);
    assert(!begin(&req, "abandoned")); /* close is not evidence that the native child stopped */
-   int recovered = recover(&req, "abandoned");
-   assert(recovered < 0); /* running source is not recoverable */
-   lifecycle("abandoned", "failed");
-   page_failure = 1;
-   recovered = recover(&req, "abandoned");
-   assert(recovered < 0);
-   page_failure = 0;
-   cas_failure = cas_calls + 1;
-   recovered = recover(&req, "abandoned");
-   assert(recovered < 0);
-   cas_failure = 0;
-   recovered = recover(&req, "wrong-turn");
-   assert(recovered < 0);
-   recovered = recover(&req, "abandoned");
-   assert(recovered == 0);
-   recovered = recover(&req, "abandoned");
-   assert(recovered == 1);
-   lifecycle("after-recovery", "running");
-   cache = begin(&req, "after-recovery");
-   assert(cache && !server_native_cache_resume(cache));
-   recovered = recover(&req, "abandoned");
-   assert(recovered < 0); /* late recovery cannot invalidate the replacement */
-   assert(!server_native_cache_abort(cache));
-   server_native_cache_close(cache);
-
-   /* Recovery invalidates an old object too; a late completion cannot bind it. */
-   seeded(&req, "before-recovery");
-   lifecycle("late", "running");
-   cache = begin(&req, "late");
-   assert(cache);
-   req.n_messages = 4;
-   source(&req);
-   lifecycle("late", "completed");
-   recovered = recover(&req, "late");
-   assert(recovered == 0);
-   assert(server_native_cache_complete(cache, "late-native-handle") < 0);
-   server_native_cache_close(cache);
-   lifecycle("replacement", "running");
-   cache = begin(&req, "replacement");
-   assert(cache && !server_native_cache_resume(cache));
-   assert(!server_native_cache_abort(cache));
-   server_native_cache_close(cache);
-
    seeded(&req, "before-native-compaction");
    lifecycle("compacting", "running");
    cache = begin(&req, "compacting");

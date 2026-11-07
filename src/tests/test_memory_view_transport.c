@@ -19,11 +19,21 @@ static request_context_t provider;
 static int has_provider, selected_native, accepts, refuses, accept_result;
 extern char *kb_client_session_briefing_commitments(int limit);
 extern char *kb_client_session_briefing_directives(int limit);
-const request_context_t *request_context_get(void) { return has_provider ? &provider : NULL; }
+const request_context_t *request_context_get(void)
+{
+   return has_provider ? &provider : NULL;
+}
 int request_context_refuse_assembly(const char *kind)
-{ assert(!strcmp(kind, "unavailable")); refuses++; return 0; }
+{
+   assert(!strcmp(kind, "unavailable"));
+   refuses++;
+   return 0;
+}
 int aimee_module_tool_source_mode(const char *name)
-{ assert(!strcmp(name, "prospective_memory")); return selected_native ? -1 : 0; }
+{
+   assert(!strcmp(name, "prospective_memory"));
+   return selected_native ? -1 : 0;
+}
 int ingress_preinject_accept_native_projection(const cJSON *projection)
 {
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(projection, "native_context")));
@@ -45,7 +55,6 @@ char *kb_v1_action_request(const char *method, cJSON *args)
    cJSON_Delete(args);
    return reply ? strdup(reply) : NULL;
 }
-
 
 int kb_store_is_initialized(void)
 {
@@ -79,13 +88,17 @@ int main(void)
    kb_client_memory_scope_context_restore(&saved);
    cJSON *nested = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(nested);
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(nested,"include_all")));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(nested,"project")),"outer-project"));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(nested,"workspace")),"outer-workspace"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(nested, "include_all")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(nested, "project")),
+                  "outer-project"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(nested, "workspace")),
+                  "outer-workspace"));
    cJSON_Delete(nested);
    kb_client_memory_scope_context_restore(NULL);
-   nested = cJSON_CreateObject();kb_client_memory_scope_context_apply(nested);
-   assert(cJSON_GetArraySize(nested)==0);cJSON_Delete(nested);
+   nested = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(nested);
+   assert(cJSON_GetArraySize(nested) == 0);
+   cJSON_Delete(nested);
 
    char text[12001];
    memset(text, 'x', sizeof(text) - 1);
@@ -144,9 +157,9 @@ int main(void)
    /* Controlled prompt consumers enroll exact native text before returning it.
     * Both direct and remote KB wrappers preserve proof; no callback is needed
     * for ordinary human/session-start presentation-only exports. */
-   char *(*briefings[])(int) = {session_briefing_render_commitments,
-      session_briefing_render_directives, kb_client_session_briefing_commitments,
-      kb_client_session_briefing_directives};
+   char *(*briefings[])(int) = {
+       session_briefing_render_commitments, session_briefing_render_directives,
+       kb_client_session_briefing_commitments, kb_client_session_briefing_directives};
    selected_native = 1;
    has_provider = 1;
    provider.model_execution = 1;
@@ -154,7 +167,8 @@ int main(void)
    {
       expected_operation = i % 2 ? "directive-briefing" : "prospective-briefing";
       expected_limit = 1;
-      reply = "{\"status\":\"ok\",\"block\":\"exact native text\",\"body\":\"exact native text\",\"native_context\":{\"text\":\"exact native text\"}}";
+      reply = "{\"status\":\"ok\",\"block\":\"exact native text\",\"body\":\"exact native "
+              "text\",\"native_context\":{\"text\":\"exact native text\"}}";
       int before_accept = accepts;
       value = briefings[i](1);
       assert(value && !strcmp(value, "exact native text"));
@@ -163,7 +177,8 @@ int main(void)
       accept_result = -1;
       assert(briefings[i](1) == NULL);
       accept_result = 0;
-      reply = "{\"status\":\"ok\",\"block\":\"changed\",\"body\":\"changed\",\"native_context\":{\"text\":\"original\"}}";
+      reply = "{\"status\":\"ok\",\"block\":\"changed\",\"body\":\"changed\",\"native_context\":{"
+              "\"text\":\"original\"}}";
       before_accept = accepts;
       assert(briefings[i](1) == NULL && accepts == before_accept);
       reply = "{\"status\":\"ok\",\"block\":\"unfenced\",\"body\":\"unfenced\"}";

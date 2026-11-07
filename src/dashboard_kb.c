@@ -157,7 +157,8 @@ char *api_memory_stats(void)
    cJSON *req = cJSON_CreateObject();
    cJSON *resp = NULL;
    cJSON_AddStringToObject(req, "operation", "stats-dashboard");
-   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", req, 60000, &resp);
+   int rc =
+       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", req, 60000, &resp);
    if (rc <= 0 || !cJSON_IsObject(resp) || strcmp(jo_cstr(resp, "status"), "ok") != 0)
    {
       cJSON_Delete(resp);
@@ -183,15 +184,13 @@ char *api_logs(void)
       {
          dashboard_log_row_t *row = &rows[row_count++];
          memset(row, 0, sizeof(*row));
-         snprintf(row->timestamp, sizeof(row->timestamp), "%.*s",
-                  (int)sizeof(row->timestamp) - 1, dl[i].created_at);
+         snprintf(row->timestamp, sizeof(row->timestamp), "%.*s", (int)sizeof(row->timestamp) - 1,
+                  dl[i].created_at);
          snprintf(row->source, sizeof(row->source), "%s", "decision");
-         snprintf(row->who, sizeof(row->who), "%.*s",
-                  (int)sizeof(row->who) - 1, dl[i].chosen);
-         snprintf(row->what, sizeof(row->what), "%.*s",
-                  (int)sizeof(row->what) - 1, dl[i].options);
-         snprintf(row->detail, sizeof(row->detail), "%.*s",
-                  (int)sizeof(row->detail) - 1, dl[i].rationale);
+         snprintf(row->who, sizeof(row->who), "%.*s", (int)sizeof(row->who) - 1, dl[i].chosen);
+         snprintf(row->what, sizeof(row->what), "%.*s", (int)sizeof(row->what) - 1, dl[i].options);
+         snprintf(row->detail, sizeof(row->detail), "%.*s", (int)sizeof(row->detail) - 1,
+                  dl[i].rationale);
          snprintf(row->tag, sizeof(row->tag), "%s", "decision");
       }
    }
@@ -202,24 +201,24 @@ char *api_logs(void)
    {
       dashboard_log_row_t *row = &rows[row_count++];
       memset(row, 0, sizeof(*row));
-      snprintf(row->timestamp, sizeof(row->timestamp), "%.*s",
-                  (int)sizeof(row->timestamp) - 1, audit_events[i].timestamp);
+      snprintf(row->timestamp, sizeof(row->timestamp), "%.*s", (int)sizeof(row->timestamp) - 1,
+               audit_events[i].timestamp);
       snprintf(row->source, sizeof(row->source), "%s", "audit");
-      snprintf(row->who, sizeof(row->who), "%.*s",
-                  (int)sizeof(row->who) - 1, audit_events[i].event);
+      snprintf(row->who, sizeof(row->who), "%.*s", (int)sizeof(row->who) - 1,
+               audit_events[i].event);
       if (strcmp(audit_events[i].event, "plugin-hook") == 0)
       {
          snprintf(row->what, sizeof(row->what), "%s", audit_events[i].rc == 0 ? "ok" : "failure");
       }
       else
       {
-         snprintf(row->what, sizeof(row->what), "%.*s",
-                  (int)sizeof(row->what) - 1, audit_events[i].event);
+         snprintf(row->what, sizeof(row->what), "%.*s", (int)sizeof(row->what) - 1,
+                  audit_events[i].event);
       }
-      snprintf(row->detail, sizeof(row->detail), "%.*s",
-                  (int)sizeof(row->detail) - 1, audit_events[i].detail);
-      snprintf(row->tag, sizeof(row->tag), "%.*s",
-                  (int)sizeof(row->tag) - 1, audit_events[i].event);
+      snprintf(row->detail, sizeof(row->detail), "%.*s", (int)sizeof(row->detail) - 1,
+               audit_events[i].detail);
+      snprintf(row->tag, sizeof(row->tag), "%.*s", (int)sizeof(row->tag) - 1,
+               audit_events[i].event);
    }
 
    qsort(rows, (size_t)row_count, sizeof(rows[0]), dashboard_log_row_compare_desc);
@@ -252,8 +251,8 @@ char *api_dashboard_reminders(void)
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "prospective-dashboard");
    cJSON_AddBoolToObject(args, "native_source_mode", 0);
-   int rc =
-       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000,
+                                                                   &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);
@@ -271,8 +270,8 @@ char *api_dashboard_recall(void)
 {
    cJSON *args = cJSON_CreateObject(), *response = NULL;
    cJSON_AddStringToObject(args, "operation", "recall-dashboard");
-   int rc =
-       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000,
+                                                                   &response);
    cJSON_Delete(args);
    if (rc <= 0 || !cJSON_IsObject(response))
    {
@@ -294,8 +293,8 @@ char *api_dashboard_directives(void)
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "directive-dashboard");
    cJSON_AddBoolToObject(args, "native_source_mode", 0);
-   int rc =
-       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000, &response);
+   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", args, 60000,
+                                                                   &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);

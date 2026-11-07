@@ -21,6 +21,12 @@ int server_error_kind_http_status(const char *kind)
    return 0;
 }
 
+static int transport_notifications;
+static void transport_completed(void *expected, int status)
+{
+   assert(expected == &transport_notifications && status != HTTP_RETRY_ADMISSION_REFUSED);
+   transport_notifications++;
+}
 static request_context_t context;
 static econ_request_budget_result_t admission;
 static int admission_calls;
@@ -54,12 +60,8 @@ econ_request_budget_result_t econ_module_request_budget_with_policy(unsigned rou
 
 static void operator_policy(const char *value)
 {
-#ifdef _WIN32
-   assert(_putenv_s("AIMEE_PROVIDER_CONTEXT_LIMITS", value ? value : "") == 0);
-#else
    assert((value ? setenv("AIMEE_PROVIDER_CONTEXT_LIMITS", value, 1)
                  : unsetenv("AIMEE_PROVIDER_CONTEXT_LIMITS")) == 0);
-#endif
 }
 
 static void test_external_backend_cannot_ignore_hard_limits(void)
@@ -365,9 +367,14 @@ static void test_stream_receipt_admission_and_commitment(void)
          stream_after_failure = scenario == 3 ? -1 : 0;
          stream_before_calls = stream_after_calls = stream_transport_calls = 0;
          stream_consumed = stream_observed_bytes = 0;
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
          int status = wire_fence_post_stream("fixture", "secret-header", "abc", 3, consume_stream,
                                              NULL, 1000, "secret-extra", "fixture", "fixture-model",
                                              (wire_fence_route_t)route);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == stream_transport_calls);
          if (stream_refuse)
          {
             assert(status == HTTP_RETRY_ADMISSION_REFUSED && stream_before_calls == 1);
@@ -409,8 +416,8 @@ static void test_send_guard_refusal_replaces_stale_pipeline_error(void)
          have_context = 1;
          wire_fence_t *snapshot = NULL;
          wire_fence_bytes_t selected = {0};
-         assert(wire_fence_select(0, (wire_fence_route_t)route, "abc", 3, &snapshot,
-                                  &selected) == 0);
+         assert(wire_fence_select(0, (wire_fence_route_t)route, "abc", 3, &snapshot, &selected) ==
+                0);
          /* A successful selection leaves the old default error behind. The
           * later socket-send refusal must classify its own failure. */
          assert(!strcmp(wire_fence_last_error(), "request_pipeline_unavailable"));
@@ -420,13 +427,13 @@ static void test_send_guard_refusal_replaces_stale_pipeline_error(void)
          stream_refuse = stream_abort = stream_after_failure = 0;
          stream_before_calls = stream_after_calls = stream_transport_calls = 0;
          stream_consumed = 0;
-         int status = wire_fence_post_stream("fixture", "", "abc", 3, consume_stream,
-                                             NULL, 1000, "", "fixture", "fixture-model",
-                                             (wire_fence_route_t)route);
+         int status =
+             wire_fence_post_stream("fixture", "", "abc", 3, consume_stream, NULL, 1000, "",
+                                    "fixture", "fixture-model", (wire_fence_route_t)route);
          assert(status == HTTP_RETRY_ADMISSION_REFUSED);
          assert(send_acquires == 1 && send_releases == 1 && !stream_transport_calls);
-         assert(!strcmp(wire_fence_last_error(), refusal == 2
-                            ? "protected_context_overflow" : "unavailable"));
+         assert(!strcmp(wire_fence_last_error(),
+                        refusal == 2 ? "protected_context_overflow" : "unavailable"));
       }
    memset(&context, 0, sizeof(context));
    send_refuse = 0;
@@ -452,6 +459,7 @@ int http_retry_post_observed_bytes(const char *url, const char *auth, const void
       if (observer->before(observer->context, body, length) != 0)
          return HTTP_RETRY_ADMISSION_REFUSED;
       retry_transport_calls++;
+      observer->after(observer->context, 200, NULL, 0);
    }
    return 200;
 }
@@ -469,8 +477,16 @@ static void test_retry_reserves_every_actual_provider_attempt(void)
          retry_calls = retry_transport_calls = 0;
          retry_refuse = refuse;
          char *response = NULL;
-         int rc = wire_fence_post("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0, "fixture",
-                                  "fixture-model", "session", WIRE_FENCE_OPENAI_CHAT);
+         wire_fence_observation_t observation = {.transport_attempts = 99};
+         transport_notifications = 0;
+         wire_fence_transport_observer_t previous = wire_fence_transport_observer_bind(
+             (wire_fence_transport_observer_t){transport_completed, &transport_notifications});
+         int rc = wire_fence_post_observed("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0,
+                                           "fixture", "fixture-model", "session",
+                                           WIRE_FENCE_OPENAI_CHAT, &observation);
+         (void)wire_fence_transport_observer_bind(previous);
+         assert(transport_notifications == retry_transport_calls);
+         assert(observation.transport_attempts == (refuse ? refuse - 1 : 2));
          assert(rc == (refuse ? HTTP_RETRY_ADMISSION_REFUSED : 200));
          assert(retry_calls == (refuse ? refuse : 2));
          assert(retry_transport_calls == (refuse ? refuse - 1 : 2));

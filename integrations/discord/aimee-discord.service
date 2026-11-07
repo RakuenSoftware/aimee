@@ -1,6 +1,6 @@
 [Unit]
-Description=Aimee Discord chatbot with Gemma4 E2B
-After=network-online.target aimee-discord-e2b.service
+Description=Aimee Discord chatbot through the Aimee thin client
+After=network-online.target
 Wants=network-online.target
 
 [Service]

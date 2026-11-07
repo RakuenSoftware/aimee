@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"testing"
 	"time"
 )
@@ -50,7 +50,7 @@ func TestOpaqueDataJSONEnvelopeErrorsDoNotReachAuthority(t *testing.T) {
 	}
 }
 func TestOpaqueDataJSONPreservesActualAuthorityRefusalWithoutRetry(t *testing.T) {
-	for _, failure := range []error{bus.ErrModuleCallCapabilityAbsent, bus.ErrModuleCallCancelled, bus.ErrModuleCallDeadline, &bus.ModuleCallStatusError{Status: bus.ModuleStatusInvalidRequest}} {
+	for _, failure := range []error{ring.ErrModuleCallCapabilityAbsent, ring.ErrModuleCallCancelled, ring.ErrModuleCallDeadline, &ring.ModuleCallStatusError{Status: ring.ModuleStatusInvalidRequest}} {
 		calls := 0
 		client, _ := NewClient(sdkCallFunc(func(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error) {
 			calls++

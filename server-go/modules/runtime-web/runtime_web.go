@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/runtime-web/policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -41,17 +41,17 @@ func decodeRequest(request []byte) (string, bool) {
 }
 
 // Handle maps one server-classified RPC fault kind onto runtime-web's HTTP status.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	kind, valid := decodeRequest(request)
 	if invocation.StageID != StageClassify || !valid {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], wireVersion)
 	binary.LittleEndian.PutUint32(response[8:12], uint32(policy.HTTPStatusForRPCFault(kind)))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

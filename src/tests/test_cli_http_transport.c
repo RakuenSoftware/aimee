@@ -1,5 +1,5 @@
 /* test_cli_http_transport.c — unit tests for the CLI /v1 HTTP transport
- * primitives (cli_transport_parse / cli_http_build_request / cli_http_request).
+ * primitives (cli_transport_parse / cli_http_request).
  *
  * The round-trip test stands up a one-shot stub HTTP server on a Unix socket in
  * a background thread and drives the real cli_http_request client against it, so
@@ -17,6 +17,49 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#ifdef AIMEE_TEST_CONNECT_WRAPPED
+#include <aimee/core/connection/socket.h>
+static int tcp_connect_calls;
+aimee_core_result_t __wrap_aimee_core_socket_connect_controlled(const char *host, const char *port,
+                                                                unsigned flags,
+                                                                const aimee_core_control_t *control,
+                                                                int *out_fd)
+{
+   (void)host;
+   (void)port;
+   (void)flags;
+   (void)control;
+   ++tcp_connect_calls;
+   *out_fd = -1;
+   return AIMEE_CORE_IO_ERROR;
+}
+static void test_refuse_before_connect(void)
+{
+   cli_http_header_t header = {"aUtHoRiZaTiOn", "Bearer fixture"};
+   cli_http_options_t options = {.endpoint = "tcp:198.51.100.1:1", .method = "GET", .path = "/x"};
+   for (int kind = 0; kind < 4; ++kind)
+   {
+      options.bearer = kind == 0 ? "fixture" : NULL;
+      options.headers = kind == 1 ? &header : NULL;
+      options.header_count = kind == 1;
+      options.path = kind == 2 ? "/x\tinvalid" : kind == 3 ? "/x\177invalid" : "/x";
+      cli_http_stream_t *stream = cli_http_stream_new();
+      tcp_connect_calls = 0;
+      assert(cli_http_stream_open(stream, &options) == -1);
+      assert(tcp_connect_calls == 0);
+      cli_http_stream_free(stream);
+   }
+   /* Counter control: admitted credential-free TCP reaches the intercepted
+    * connect. No test ever opens a non-loopback network connection. */
+   options.path = "/x";
+   options.endpoint = "tcp:127.0.0.1:1";
+   cli_http_stream_t *stream = cli_http_stream_new();
+   assert(cli_http_stream_open(stream, &options) == -1);
+   assert(tcp_connect_calls == 1);
+   cli_http_stream_free(stream);
+}
+#endif
+
 /* ---- 1. transport string -> enum ---- */
 static void test_transport_parse(void)
 {
@@ -29,39 +72,12 @@ static void test_transport_parse(void)
    printf("  transport_parse: ok\n");
 }
 
-/* ---- 2. request builder ---- */
-static void test_build_request(void)
-{
-   char buf[1024];
-   int n = cli_http_build_request("GET", "/v1/models", NULL, NULL, NULL, buf, sizeof(buf));
-   assert(n > 0);
-   assert(strstr(buf, "GET /v1/models HTTP/1.1\r\n"));
-   assert(strstr(buf, "Host: localhost\r\n"));
-   assert(strstr(buf, "Content-Length: 0\r\n"));
-   assert(strstr(buf, "Connection: close\r\n\r\n"));
-   assert(strstr(buf, "Authorization:") == NULL);
-
-   const char *body = "{\"x\":1}"; /* strlen == 7 */
-   n = cli_http_build_request("POST", "/v1/runs", "example", "tok123", body, buf, sizeof(buf));
-   assert(n > 0);
-   assert(strstr(buf, "POST /v1/runs HTTP/1.1\r\n"));
-   assert(strstr(buf, "Host: example\r\n"));
-   assert(strstr(buf, "Authorization: Bearer tok123\r\n"));
-   assert(strstr(buf, "Content-Length: 7\r\n"));
-   assert(strstr(buf, "\r\n\r\n{\"x\":1}"));
-   assert((size_t)n == strlen(buf));
-
-   /* too-small buffer -> -1, no overflow */
-   char tiny[8];
-   assert(cli_http_build_request("GET", "/v1/models", NULL, NULL, NULL, tiny, sizeof(tiny)) == -1);
-   printf("  build_request: ok\n");
-}
-
 /* ---- 3. end-to-end round trip against a stub UDS HTTP server ---- */
 typedef struct
 {
    char path[128];
    const char *response;
+   int delay_ms; /* hold the response this long after reading the request */
 } stub_arg_t;
 
 static const char *test_tmpdir(void)
@@ -78,7 +94,8 @@ static void *stub_server(void *a)
    struct sockaddr_un addr;
    memset(&addr, 0, sizeof(addr));
    addr.sun_family = AF_UNIX;
-   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", s->path);
+   assert(strlen(s->path) < sizeof(addr.sun_path));
+   memcpy(addr.sun_path, s->path, strlen(s->path) + 1);
    unlink(s->path);
    assert(bind(srv, (struct sockaddr *)&addr, sizeof(addr)) == 0);
    assert(listen(srv, 1) == 0);
@@ -88,6 +105,8 @@ static void *stub_server(void *a)
       char req[2048];
       ssize_t r = read(c, req, sizeof(req) - 1); /* drain the request */
       (void)r;
+      if (s->delay_ms > 0)
+         usleep((useconds_t)s->delay_ms * 1000);
       ssize_t w = write(c, s->response, strlen(s->response));
       (void)w;
       close(c);
@@ -99,7 +118,7 @@ static void *stub_server(void *a)
 
 static cJSON *run_stub_case(const char *response, int *status_out)
 {
-   stub_arg_t arg;
+   stub_arg_t arg = {0};
    snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_test_%d.sock", test_tmpdir(), (int)getpid());
    arg.response = response;
    pthread_t th;
@@ -141,40 +160,6 @@ static void test_http_round_trip(void)
    printf("  http_round_trip: ok\n");
 }
 
-/* ---- 4. streaming round trip: cli_http_request_stream parses SSE events ---- */
-static int count_cb(cJSON *event, void *userdata)
-{
-   (void)event;
-   (*(int *)userdata)++;
-   return 0;
-}
-
-static void test_http_stream(void)
-{
-   const char *resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
-                      "data: {\"i\":1}\n\ndata: {\"i\":2}\n\ndata: [DONE]\n\n";
-   stub_arg_t arg;
-   snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_stream_%d.sock", test_tmpdir(),
-            (int)getpid());
-   arg.response = resp;
-   pthread_t th;
-   assert(pthread_create(&th, NULL, stub_server, &arg) == 0);
-   usleep(30000);
-
-   int n = 0, status = 0;
-   cJSON *last = cli_http_request_stream(arg.path, "POST", "/v1/chat/completions", "{}", NULL, 2000,
-                                         &status, count_cb, &n);
-   pthread_join(th, NULL);
-
-   assert(status == 200);
-   assert(n == 2);
-   assert(last != NULL);
-   cJSON *i = cJSON_GetObjectItemCaseSensitive(last, "i");
-   assert(cJSON_IsNumber(i) && i->valueint == 2);
-   cJSON_Delete(last);
-   printf("  http_stream: ok\n");
-}
-
 /* A reachable server that refuses this identity is not an old server. Pin the
  * operator-facing distinction because the wrong diagnosis sends people toward
  * an upgrade when they actually need to inspect or renew enrollment. */
@@ -183,7 +168,7 @@ static void test_manifest_auth_refusal_diagnosis(void)
    const char *resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
                       "Content-Length: 21\r\nConnection: close\r\n\r\n"
                       "{\"error\":\"forbidden\"}";
-   stub_arg_t arg;
+   stub_arg_t arg = {0};
    snprintf(arg.path, sizeof(arg.path), "%s/aimee_manifest_test_%d.sock", test_tmpdir(),
             (int)getpid());
    arg.response = resp;
@@ -219,6 +204,61 @@ static void test_manifest_auth_refusal_diagnosis(void)
    assert(strstr(diagnosis, "aimee remote enroll") != NULL);
    assert(strstr(diagnosis, "older than this client") == NULL);
    printf("  manifest_auth_refusal_diagnosis: ok\n");
+}
+
+/* Two threads resolving a route while the manifest is still in flight must both
+ * see it. The MCP bridge's tool-list watcher and its request loop do exactly
+ * this at startup; marking the manifest fetched before the GET returned gave the
+ * second thread no route, and the bridge reported the server unavailable. The
+ * stub serves one connection, so a second fetch would also fail the lookup. */
+static void *resolve_mcp_call(void *out)
+{
+   const char *verb = NULL;
+   *(const char **)out = cli_v1_route_for_method("mcp.call", &verb);
+   return NULL;
+}
+
+static void test_manifest_concurrent_first_fetch(void)
+{
+   cli_v1_manifest_reset_for_test();
+   char home[160];
+   snprintf(home, sizeof(home), "%s/aimee_manifest_home_%d", test_tmpdir(), (int)getpid());
+   setenv("AIMEE_HOME", home, 1);
+
+   static const char body[] = "{\"manifest_version\":1,\"routes\":["
+                              "{\"op\":\"mcp.call\",\"verb\":\"POST\",\"path\":\"/v1/mcp/call\"}]}";
+   char resp[512];
+   snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(body), body);
+   stub_arg_t arg = {0};
+   snprintf(arg.path, sizeof(arg.path), "%s/aimee_manifest_race_%d.sock", test_tmpdir(),
+            (int)getpid());
+   arg.response = resp;
+   arg.delay_ms = 300;
+   pthread_t server;
+   assert(pthread_create(&server, NULL, stub_server, &arg) == 0);
+   usleep(30000);
+   char endpoint[180];
+   snprintf(endpoint, sizeof(endpoint), "unix:%s", arg.path);
+   setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+
+   const char *first = NULL, *second = NULL;
+   pthread_t a, b;
+   assert(pthread_create(&a, NULL, resolve_mcp_call, &first) == 0);
+   usleep(50000); /* the first lookup's GET is now held by the stub */
+   assert(pthread_create(&b, NULL, resolve_mcp_call, &second) == 0);
+   pthread_join(a, NULL);
+   pthread_join(b, NULL);
+   pthread_join(server, NULL);
+   unsetenv("AIMEE_API_ENDPOINT");
+   unsetenv("AIMEE_HOME");
+
+   assert(first && strcmp(first, "/v1/mcp/call") == 0);
+   assert(second && strcmp(second, "/v1/mcp/call") == 0);
+   cli_v1_manifest_reset_for_test();
+   printf("  manifest_concurrent_first_fetch: ok\n");
 }
 
 /* ---- method -> /v1 route lookup, over a server-supplied manifest ---- */
@@ -351,13 +391,15 @@ int main(void)
 {
    printf("cli_http_transport:\n");
    test_transport_parse();
-   test_build_request();
+#ifdef AIMEE_TEST_CONNECT_WRAPPED
+   test_refuse_before_connect();
+#endif
    test_manifest_auth_refusal_diagnosis();
+   test_manifest_concurrent_first_fetch();
    test_v1_route_map();
    test_served_dispatch();
    test_served_marshal();
    test_http_round_trip();
-   test_http_stream();
    printf("All cli_http_transport tests passed.\n");
    return 0;
 }

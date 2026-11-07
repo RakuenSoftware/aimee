@@ -17,7 +17,8 @@ extern int agent_tools_module_native_input_admit_v1(const char *, const cJSON *)
     __attribute__((weak));
 const unsigned aimee_ir_module_input_admission_contract_v1
     __attribute__((used, externally_visible, retain)) = 1;
-static int module_input_event_admit(const aimee_session_event_t *event) {
+static int module_input_event_admit(const aimee_session_event_t *event)
+{
    if (!event)
       return -1;
    if (!agent_tools_module_native_input_selected_v1 ||
@@ -33,7 +34,8 @@ static int module_input_event_admit(const aimee_session_event_t *event) {
        event->message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
        (event->message->n_blocks && !event->message->blocks))
       return -1;
-   for (int i = 0; i < event->message->n_blocks; i++) {
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
       const aimee_block_t *b = event->message->blocks + i;
       if (b->type != AIMEE_BLK_TOOL_USE || (b->tool_namespace && b->tool_namespace[0]))
          continue;
@@ -62,16 +64,18 @@ static void capture_failure_note(const char *phase, int event_kind, int result)
    {
       if (row >= 64)
          return;
-   } while (!atomic_compare_exchange_weak_explicit(&rows, &row, row + 1,
-                                                   memory_order_relaxed, memory_order_relaxed));
+   } while (!atomic_compare_exchange_weak_explicit(&rows, &row, row + 1, memory_order_relaxed,
+                                                   memory_order_relaxed));
    int saved_errno = errno;
-   fprintf(stderr, "AIMEE_IR_CAPTURE_PHASE {\"schema_version\":1,\"sequence\":%u,"
-                   "\"phase\":\"%s\",\"event_kind\":%d,\"result\":%d}\n",
+   fprintf(stderr,
+           "AIMEE_IR_CAPTURE_PHASE {\"schema_version\":1,\"sequence\":%u,"
+           "\"phase\":\"%s\",\"event_kind\":%d,\"result\":%d}\n",
            row, phase, event_kind, result);
    errno = saved_errno;
 }
 
-static const char *block_kind(aimee_block_type_t type) {
+static const char *block_kind(aimee_block_type_t type)
+{
    static const char *const names[] = {"text",     "tool_use", "tool_result", "image",
                                        "document", "thinking", "unknown"};
    return type >= AIMEE_BLK_TEXT && type <= AIMEE_BLK_UNKNOWN ? names[type] : NULL;
@@ -165,12 +169,15 @@ cJSON *aimee_ir_message_json(const aimee_message_t *message)
    if (!message || !message->role || !message->role[0] || message->n_blocks < 0 ||
        message->n_blocks > 4096 || (message->n_blocks && !message->blocks))
       return NULL;
-   if (message->content_scalar != 0 && message->content_scalar != 1)
+   if ((message->content_scalar != 0 && message->content_scalar != 1) ||
+       (message->compaction_boundary != 0 && message->compaction_boundary != 1))
       return NULL;
    cJSON *out = cJSON_CreateObject(), *blocks = cJSON_CreateArray();
    if (!out || !blocks || !add_string(out, "role", message->role))
       goto fail;
    if (message->content_scalar && !cJSON_AddBoolToObject(out, "content_scalar", 1))
+      goto fail;
+   if (message->compaction_boundary && !cJSON_AddBoolToObject(out, "_compaction_boundary", 1))
       goto fail;
    for (int i = 0; i < message->n_blocks; i++)
    {
@@ -278,8 +285,8 @@ static int parse_block(const cJSON *json, aimee_block_t *out)
        read_string(json, "cache_ttl", &out->cache_ttl, 0))
       return -1;
    const cJSON *attachment = cJSON_GetObjectItemCaseSensitive(json, "input_attachment");
-   if (attachment && (out->type != AIMEE_BLK_TEXT ||
-                      !aimee_ir_input_attachment_shape_valid(attachment)))
+   if (attachment &&
+       (out->type != AIMEE_BLK_TEXT || !aimee_ir_input_attachment_shape_valid(attachment)))
       return -1;
    if (attachment && !(out->input_attachment = cJSON_Duplicate(attachment, 1)))
       return -1;
@@ -347,6 +354,10 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
    if (scalar && !cJSON_IsBool(scalar))
       goto fail;
    out->content_scalar = cJSON_IsTrue(scalar);
+   const cJSON *boundary = cJSON_GetObjectItemCaseSensitive(json, "_compaction_boundary");
+   if (boundary && !cJSON_IsBool(boundary))
+      goto fail;
+   out->compaction_boundary = cJSON_IsTrue(boundary);
    int count = cJSON_GetArraySize(blocks);
    if (count)
    {
@@ -366,6 +377,33 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
 fail:
    aimee_message_free(out);
    return -1;
+}
+
+cJSON *aimee_ir_history_clone(const cJSON *messages)
+{
+   if (messages && !cJSON_IsArray(messages))
+      return NULL;
+   cJSON *out = cJSON_CreateArray();
+   if (!out)
+      return NULL;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, messages)
+   {
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(item, &message))
+         goto fail;
+      cJSON *copy = aimee_ir_message_json(&message);
+      aimee_message_free(&message);
+      if (!copy || !cJSON_AddItemToArray(out, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
 }
 
 static _Atomic(aimee_ir_host_history_admission_fn) host_history_admission;
@@ -615,6 +653,8 @@ cJSON *aimee_ir_request_json(const aimee_request_t *request)
        !add_string(out, "cache_policy",
                    request->cache_policy == AIMEE_CACHE_STABLE_PREFIX ? "stable_prefix" : "native"))
       goto fail;
+   if (request->system_scalar && !cJSON_AddBoolToObject(out, "system_scalar", 1))
+      goto fail;
    cJSON *system = cJSON_AddArrayToObject(out, "system"),
          *messages = cJSON_AddArrayToObject(out, "messages"),
          *tools = cJSON_AddArrayToObject(out, "tools");
@@ -782,7 +822,15 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    if (!delta || delta->type < AIMEE_DELTA_TURN_START || delta->type > AIMEE_DELTA_ERROR ||
        (delta->type == AIMEE_DELTA_TURN_STOP &&
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
-         delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
+         delta->usage_cache_write < 0 || delta->usage_reasoning < 0 ||
+         (delta->usage_unobserved != 0 && delta->usage_unobserved != 1) ||
+         (delta->usage_unobserved &&
+          (delta->usage_in || delta->usage_out || delta->usage_cache_read ||
+           delta->usage_cache_write || delta->usage_reasoning)))))
+      return NULL;
+   if (delta->refusal &&
+       (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(delta->refusal)))
       return NULL;
    if (delta->message_group &&
        (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
@@ -842,12 +890,24 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
               add_string(out, "tool_args_delta", delta->tool_args_delta);
    }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
-      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason)) &&
-           cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
-           cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   {
+      ok = ok && add_string(out, "stop_reason", aimee_stop_reason_name(delta->stop_reason));
+      if (!delta->usage_unobserved)
+         ok = ok && cJSON_AddNumberToObject(out, "usage_in", delta->usage_in) != NULL &&
+              cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
+   }
    if (delta->type == AIMEE_DELTA_TURN_STOP)
    {
       ok = ok && add_string(out, "raw_stop_reason", delta->raw_stop_reason);
+      if (delta->refusal)
+      {
+         cJSON *details = aimee_refusal_details_json(delta->refusal);
+         if (!details || !cJSON_AddItemToObject(out, "refusal", details))
+         {
+            cJSON_Delete(details);
+            ok = 0;
+         }
+      }
       if (delta->usage_cache_read)
          ok = ok &&
               cJSON_AddNumberToObject(out, "usage_cache_read", delta->usage_cache_read) != NULL;
@@ -1105,7 +1165,21 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
-          (!event->projection_reasoning && !event->projection_cache_controls) ||
+          event->projection_empty_messages < 0 ||
+          event->projection_empty_messages > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_request_controls < 0 ||
+          event->projection_request_controls > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_history_messages_as_text < 0 ||
+          event->projection_history_messages_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_host_context_blocks_as_text < 0 ||
+          event->projection_host_context_blocks_as_text > AIMEE_IR_MAX_BLOCKS ||
+          event->projection_unverified_external_tool_reports < 0 ||
+          event->projection_unverified_external_tool_reports > AIMEE_IR_MAX_BLOCKS ||
+          (!event->projection_reasoning && !event->projection_cache_controls &&
+           !event->projection_request_controls && !event->projection_empty_messages &&
+           !event->projection_history_messages_as_text &&
+           !event->projection_host_context_blocks_as_text &&
+           !event->projection_unverified_external_tool_reports) ||
           event->projection_opaque < 0 || event->projection_opaque > event->projection_reasoning ||
           !event->projection_boundary ||
           (strcmp(event->projection_boundary, "request") &&
@@ -1121,7 +1195,22 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
                                    event->projection_opaque) ||
           (event->projection_cache_controls &&
            !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
-                                    event->projection_cache_controls)))
+                                    event->projection_cache_controls)) ||
+          (event->projection_empty_messages &&
+           !cJSON_AddNumberToObject(payload, "omitted_empty_messages",
+                                    event->projection_empty_messages)) ||
+          (event->projection_request_controls &&
+           !cJSON_AddNumberToObject(payload, "omitted_request_controls",
+                                    event->projection_request_controls)) ||
+          (event->projection_host_context_blocks_as_text &&
+           !cJSON_AddNumberToObject(payload, "host_context_blocks_as_text",
+                                    event->projection_host_context_blocks_as_text)) ||
+          (event->projection_history_messages_as_text &&
+           !cJSON_AddNumberToObject(payload, "history_messages_as_text",
+                                    event->projection_history_messages_as_text)) ||
+          (event->projection_unverified_external_tool_reports &&
+           !cJSON_AddNumberToObject(payload, "unverified_external_tool_reports",
+                                    event->projection_unverified_external_tool_reports)))
          goto fail;
       break;
    case AIMEE_SESSION_CHILD_EXECUTION:
@@ -1229,9 +1318,10 @@ aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context)
    return session_sink;
 }
 
-static int session_emit_checked(const aimee_session_event_t *event,
-                                 aimee_ir_capture_cause_t *cause) {
-   if (cause) *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
+static int session_emit_checked(const aimee_session_event_t *event, aimee_ir_capture_cause_t *cause)
+{
+   if (cause)
+      *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    /* A producer that ignores an admission error still cannot emit subsequent
     * argument chunks. Host lifecycle/failed terminals retain their old path. */
    int refused_data = session_capture_failed && agent_tools_module_native_input_selected_v1 &&
@@ -1240,8 +1330,9 @@ static int session_emit_checked(const aimee_session_event_t *event,
    int rc = refused_data ? -1 : module_input_event_admit(event);
    if (rc)
    {
-      if (cause) *cause = refused_data ? AIMEE_IR_CAPTURE_CAUSE_PREVIOUS_FAILURE
-                                      : AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
+      if (cause)
+         *cause = refused_data ? AIMEE_IR_CAPTURE_CAUSE_PREVIOUS_FAILURE
+                               : AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
       capture_failure_note(refused_data ? "capture_already_failed" : "event_tool_admission",
                            event ? (int)event->kind : -1, rc);
    }
@@ -1250,7 +1341,8 @@ static int session_emit_checked(const aimee_session_event_t *event,
       rc = session_sink ? session_sink(event, session_context) : 0;
       if (rc)
       {
-         if (cause) *cause = AIMEE_IR_CAPTURE_CAUSE_SINK;
+         if (cause)
+            *cause = AIMEE_IR_CAPTURE_CAUSE_SINK;
          capture_failure_note("session_sink", event ? (int)event->kind : -1, rc);
       }
    }
@@ -1260,19 +1352,24 @@ static int session_emit_checked(const aimee_session_event_t *event,
       *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    return rc;
 }
-int aimee_ir_session_emit(const aimee_session_event_t *event) {
+int aimee_ir_session_emit(const aimee_session_event_t *event)
+{
    return session_emit_checked(event, NULL);
 }
 
-void aimee_ir_session_fail_capture(void) {
+void aimee_ir_session_fail_capture(void)
+{
    if (session_sink)
       session_capture_failed = 1;
 }
 
-int aimee_ir_session_capture_failed(void) { return session_capture_failed; }
+int aimee_ir_session_capture_failed(void)
+{
+   return session_capture_failed;
+}
 
 static int session_emit_response_checked(const aimee_response_t *response, const char *message_id,
-                                          aimee_ir_capture_cause_t *cause)
+                                         aimee_ir_capture_cause_t *cause)
 {
    if (!response)
       return -1;
@@ -1299,7 +1396,8 @@ int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *resp
                                                     const char *message_id,
                                                     aimee_ir_capture_cause_t *cause)
 {
-   if (cause) *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
+   if (cause)
+      *cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    if (!response)
       return -1;
    static _Thread_local unsigned long long counter;
@@ -1314,8 +1412,10 @@ int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *resp
                               .blocks = response->content,
                               .n_blocks = response->n_content};
    aimee_session_event_t pending_event = {.kind = AIMEE_SESSION_MESSAGE, .message = &pending};
-   if (module_input_event_admit(&pending_event)) {
-      if (cause) *cause = AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
+   if (module_input_event_admit(&pending_event))
+   {
+      if (cause)
+         *cause = AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION;
       capture_failure_note("buffered_tool_admission", AIMEE_SESSION_MESSAGE, -1);
       session_capture_failed = 1;
       return -1;
@@ -1331,10 +1431,12 @@ int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *resp
       capture_failure_note("buffered_start", event.kind, rc);
       return rc;
    }
-   if (response->error_message) {
+   if (response->error_message)
+   {
       delta = (aimee_delta_t){.type = AIMEE_DELTA_ERROR, .error_message = response->error_message};
       rc = session_emit_checked(&event, cause);
-   } else
+   }
+   else
       rc = session_emit_response_checked(response, message_id, cause);
    if (rc)
    {
@@ -1346,11 +1448,13 @@ int aimee_ir_session_emit_buffered_response_checked(const aimee_response_t *resp
    delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
                            .stop_reason = response->stop_reason,
                            .raw_stop_reason = response->raw_stop_reason,
+                           .refusal = response->refusal,
                            .usage_in = response->usage_in,
                            .usage_out = response->usage_out,
                            .usage_cache_read = response->usage_cache_read,
                            .usage_cache_write = response->usage_cache_write,
                            .usage_reasoning = response->usage_reasoning};
+   delta.usage_unobserved = response->usage_unobserved;
    rc = session_emit_checked(&event, cause);
    if (rc)
       capture_failure_note("buffered_stop", event.kind, rc);
@@ -1573,13 +1677,22 @@ int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaqu
 int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
                                               int cache_controls, const char *boundary)
 {
-   if (!reasoning && !opaque && !cache_controls)
+   return aimee_ir_session_emit_projection_full(model, reasoning, opaque, cache_controls, 0,
+                                                boundary);
+}
+
+int aimee_ir_session_emit_projection_full(const char *model, int reasoning, int opaque,
+                                          int cache_controls, int empty_messages,
+                                          const char *boundary)
+{
+   if (!reasoning && !opaque && !cache_controls && !empty_messages)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = model && model[0] ? model : "selected model",
                                   .projection_boundary = boundary,
                                   .projection_reasoning = reasoning,
                                   .projection_opaque = opaque,
-                                  .projection_cache_controls = cache_controls};
+                                  .projection_cache_controls = cache_controls,
+                                  .projection_empty_messages = empty_messages};
    return aimee_ir_session_emit(&event);
 }

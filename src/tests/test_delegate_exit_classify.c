@@ -21,21 +21,6 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return NULL;
 }
 
-int db1_delegate_learning_record(const char *sid, const char *role, const char *mode,
-                                 const char *lesson, const char *evidence, double confidence)
-{
-   assert(!strcmp(sid, "receipt-session") && !strcmp(role, "execute"));
-   assert(mode && lesson && evidence && confidence >= 0);
-   cJSON *observed = cJSON_Parse(evidence);
-   assert(cJSON_IsObject(observed));
-   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(observed, "had_writes")));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "verification")),
-                  "ungraded"));
-   cJSON_Delete(observed);
-   learning_calls++;
-   return learning_rc;
-}
-
 int db1_interaction_event_record(const char *sid, const char *type, const char *actor,
                                  const char *payload, const char *outcome)
 {
@@ -44,13 +29,6 @@ int db1_interaction_event_record(const char *sid, const char *type, const char *
    snprintf(stored_payload, sizeof stored_payload, "%s", payload);
    exit_calls++;
    return exit_rc;
-}
-
-int approach_store_record_no_progress(const char *goal, const char *failure, const char *ref)
-{
-   assert(!strcmp(goal, "actual goal") && failure && !strcmp(ref, "receipt-delegate"));
-   approach_calls++;
-   return approach_rc;
 }
 
 static void test_no_progress_is_specific_and_round_trips(void)

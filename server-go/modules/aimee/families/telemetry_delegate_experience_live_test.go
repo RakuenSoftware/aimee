@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"strings"
 	"sync"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,8 +44,8 @@ func TestDelegateExperienceHostCustodyAndCanonicalSchema(t *testing.T) {
 	for _, operation := range []uint32{opDelegateExecutionExperienceRecord, opDelegateExecutionTerminalLookup} {
 		frame, _ := wire.EncodeFields(operation, []string{"operator", "{}"})
 		other := newDelDB()
-		_, wireStatus := Telemetry.Handler(other)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 8}, frame)
-		if wireStatus != bus.ModuleStatusInvalidRequest || len(other.executed) != 0 {
+		_, wireStatus := Telemetry.Handler(other)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 8}, frame)
+		if wireStatus != ring.ModuleStatusInvalidRequest || len(other.executed) != 0 {
 			t.Fatal("foreign module publisher/lookup", operation, wireStatus)
 		}
 	}

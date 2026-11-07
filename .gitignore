@@ -269,3 +269,6 @@ benchmarks/compaction-quality/.cache-ab/
 
 # Rust workspace build output
 rust/target/
+
+# Local shared thinclient build output.
+/libaimee-client.so

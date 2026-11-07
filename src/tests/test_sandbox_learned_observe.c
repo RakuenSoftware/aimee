@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <aimee/core/event_bus/module_client.h>
+#include <ouroboros/module_client.h>
 #include <aimee/sandbox/module_api.h>
 
 #include "cJSON.h"
@@ -51,11 +51,11 @@ int obs_bus_module_available(uint32_t event_kind)
    return g_available;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    (void)trace_id, (void)cancelled, (void)cancel_context;
    /* A learning call must never be able to hold a delegate turn open. */
@@ -72,11 +72,11 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    const char *reply = "{\"parsed\":1,\"recorded\":1,\"packages\":[\"tree\"]}";
    uint32_t len = (uint32_t)strlen(reply);
    if (len > response_capacity)
-      return AIMEE_MODULE_CALL_TRANSPORT;
+      return OURO_MODULE_CALL_TRANSPORT;
    memcpy(response_body, reply, len);
    if (response_len)
       *response_len = len;
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 /* ---- helpers ------------------------------------------------------------- */

@@ -7,6 +7,7 @@
 #include "cJSON.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -26,16 +27,15 @@ static const char *const ACP_SLASH_COMMANDS[] = {"/help",  "/skill", "/personali
 static int acp_emit(cJSON *root, char *out, size_t out_n)
 {
    int rc = -1;
+   if (out && out_n)
+      out[0] = 0;
    char *s = cJSON_PrintUnformatted(root);
-   if (s)
+   if (s && out && strlen(s) < out_n)
    {
-      if (out && out_n)
-         snprintf(out, out_n, "%s", s);
-      free(s);
+      memcpy(out, s, strlen(s) + 1);
       rc = 1;
    }
-   else if (out && out_n)
-      out[0] = '\0';
+   free(s);
    cJSON_Delete(root);
    return rc;
 }
@@ -340,7 +340,8 @@ int acp_build_update_notification(const char *session_id, const char *delta, cha
 int acp_build_tool_update(const char *session_id, const char *tool_call_id, const char *phase,
                           const char *tool_name, char *out, size_t out_n)
 {
-   int completed = (phase && strcmp(phase, "completed") == 0);
+   int failed = phase && !strcmp(phase, "failed");
+   int completed = failed || (phase && strcmp(phase, "completed") == 0);
    cJSON *root = cJSON_CreateObject();
    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
    cJSON_AddStringToObject(root, "method", "session/update");
@@ -353,7 +354,10 @@ int acp_build_tool_update(const char *session_id, const char *tool_call_id, cons
                                                              : (tool_name ? tool_name : ""));
    if (!completed)
       cJSON_AddStringToObject(update, "title", tool_name ? tool_name : "");
-   cJSON_AddStringToObject(update, "status", completed ? "completed" : "in_progress");
+   cJSON_AddStringToObject(update, "status",
+                           failed      ? "failed"
+                           : completed ? "completed"
+                                       : "in_progress");
    return acp_emit(root, out, out_n);
 }
 
@@ -411,25 +415,40 @@ int acp_server_run(acp_prompt_dispatch_fn dispatch)
             continue;
          }
          char *reply = dispatch ? dispatch(content, session[0] ? session : NULL) : NULL;
+         char *owned = NULL;
+         const char *output = out;
+         int built = -1;
          if (reply)
          {
-            /* The dispatch streams the reply via session/update as it runs. A
-             * standard client reads it there and only needs the stopReason; a
-             * legacy client gets the full text back in result.content. */
             if (kind == 2)
-               acp_build_prompt_stop(id_json, "end_turn", out, sizeof(out));
+               built = acp_build_prompt_stop(id_json, "end_turn", out, sizeof out);
             else
-               acp_build_prompt_result(id_json, reply, out, sizeof(out));
+            {
+               size_t n = strlen(reply), cap = n <= (SIZE_MAX - 1024) / 6 ? 6 * n + 1024 : 0;
+               owned = cap ? malloc(cap) : NULL;
+               if (owned)
+                  built = acp_build_prompt_result(id_json, reply, owned, cap);
+               if (built == 1)
+                  output = owned;
+            }
             free(reply);
          }
-         else
+         if (built != 1)
          {
             cJSON *id = id_json[0] ? cJSON_Parse(id_json) : NULL;
-            acp_error(id, -32000, "turn dispatch failed", out, sizeof(out));
+            if (acp_error(id, -32000, "turn dispatch or output serialization failed", out,
+                          sizeof out) != 1)
+            {
+               free(owned);
+               return 1;
+            }
+            output = out;
          }
-         fputs(out, stdout);
-         fputc('\n', stdout);
-         fflush(stdout);
+         int written =
+             fputs(output, stdout) != EOF && fputc('\n', stdout) != EOF && !fflush(stdout);
+         free(owned);
+         if (!written)
+            return 1;
          continue;
       }
       if (acp_server_handle_line(line, out, sizeof(out)) == 1 && out[0])

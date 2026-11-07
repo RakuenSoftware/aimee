@@ -48,7 +48,8 @@ void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
       cJSON_AddStringToObject(edge, "provenance", blast->dependent_meta[i].provenance);
       cJSON_AddStringToObject(edge, "confidence", blast->dependent_meta[i].confidence);
       cJSON_AddStringToObject(edge, "project", blast->dependent_meta[i].project);
-      cJSON_AddItemToObject(edge, "generation", jo_i64_value_exact(blast->dependent_meta[i].generation));
+      cJSON_AddItemToObject(edge, "generation",
+                            jo_i64_value_exact(blast->dependent_meta[i].generation));
       cJSON_AddStringToObject(edge, "freshness", blast->dependent_meta[i].freshness);
       cJSON_AddItemToArray(dependent_edges, edge);
    }
@@ -63,7 +64,8 @@ void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
       cJSON_AddStringToObject(edge, "provenance", blast->dependency_meta[i].provenance);
       cJSON_AddStringToObject(edge, "confidence", blast->dependency_meta[i].confidence);
       cJSON_AddStringToObject(edge, "project", blast->dependency_meta[i].project);
-      cJSON_AddItemToObject(edge, "generation", jo_i64_value_exact(blast->dependency_meta[i].generation));
+      cJSON_AddItemToObject(edge, "generation",
+                            jo_i64_value_exact(blast->dependency_meta[i].generation));
       cJSON_AddStringToObject(edge, "freshness", blast->dependency_meta[i].freshness);
       cJSON_AddItemToArray(dependency_edges, edge);
    }

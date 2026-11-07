@@ -15,6 +15,7 @@ function ProviderEditor({ connection, onClose, onSaved }: {
   const [provider, setProvider] = useState(connection?.provider || "openai");
   const [endpoint, setEndpoint] = useState(connection?.endpoint || "");
   const [auth, setAuth] = useState(connection?.auth_type || "bearer");
+  const [nativeCodex, setNativeCodex] = useState(connection?.backend === "provider-cli" && connection?.cli_kind === "codex");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -26,6 +27,10 @@ function ProviderEditor({ connection, onClose, onSaved }: {
       await providerRequest("/api/providers/save", {
         name: name.trim(), provider, endpoint: endpoint.trim(), auth_type: auth,
         create: !connection, ...(key.trim() ? { api_key: key.trim() } : {}),
+        ...(provider === "chatgpt" ? {
+          backend: nativeCodex ? "provider-cli" : "http",
+          ...(nativeCodex ? { cli_kind: "codex", cli_cmd: connection?.cli_cmd || "codex", session_reuse: connection?.session_reuse ?? true } : {}),
+        } : connection?.provider === "chatgpt" && provider !== connection.provider ? { backend: "http" } : {}),
       });
       onSaved();
     } catch (err) {
@@ -42,17 +47,24 @@ function ProviderEditor({ connection, onClose, onSaved }: {
           </label>
           <label>Provider type
             <select style={inputStyle} value={provider} disabled={busy || !!connection?.model_count}
-              onChange={e => { setProvider(e.target.value); setAuth(e.target.value === "anthropic" ? "x-api-key" : e.target.value === "claude" ? "none" : "bearer"); }}>
+              onChange={e => { setProvider(e.target.value); setNativeCodex(false); setAuth(e.target.value === "anthropic" ? "x-api-key" : e.target.value === "claude" ? "none" : e.target.value === "chatgpt" ? "codex-oauth" : "bearer"); }}>
               {[...new Set([...protocols, provider])].map(p => <option key={p}>{p}</option>)}
             </select>
           </label>
+          {provider === "chatgpt" && <label>Execution
+            <select style={inputStyle} value={nativeCodex ? "codex" : "http"} disabled={busy}
+              onChange={e => setNativeCodex(e.target.value === "codex")}>
+              <option value="http">Direct model API</option>
+              <option value="codex">Codex agent</option>
+            </select>
+          </label>}
           <label>Endpoint
             <input style={inputStyle} value={endpoint} onChange={e => setEndpoint(e.target.value)} disabled={busy}
               placeholder="https://api.example.com/v1" required={provider !== "claude" && provider !== "claude-code"} />
           </label>
           <label>Authentication
             <select style={inputStyle} value={auth} onChange={e => setAuth(e.target.value)} disabled={busy}>
-              {[...new Set(["bearer", "x-api-key", "none", auth])].map(a => <option key={a}>{a}</option>)}
+              {[...new Set(["bearer", "x-api-key", "none", "codex-oauth", "claude-oauth", auth])].map(a => <option key={a}>{a}</option>)}
             </select>
           </label>
           {auth !== "none" && <label>{connection ? "API key (leave blank to keep current)" : "API key"}

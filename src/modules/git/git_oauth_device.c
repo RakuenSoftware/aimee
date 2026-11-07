@@ -162,12 +162,6 @@ int oauth_dev_set_client_id(oauth_dev_provider_t p, const char *host, const char
    return vault_service_set_server(DEV_CID_AGENT, key, client_id) == VAULT_OK ? 0 : -1;
 }
 
-int oauth_dev_available(oauth_dev_provider_t p, const char *host)
-{
-   char id[256];
-   return oauth_dev_get_client_id(p, host, id, sizeof(id));
-}
-
 int oauth_dev_start(oauth_dev_provider_t p, const char *host, const char *principal,
                     char *user_code, size_t uc_len, char *verify_uri, size_t vu_len, int *interval,
                     char *err, size_t errlen)

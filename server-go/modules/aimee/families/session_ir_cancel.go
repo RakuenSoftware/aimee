@@ -70,6 +70,17 @@ func sessionIRCancel(ctx context.Context, q store.Queryer, f []string) (uint32, 
 		return 0, nil, err
 	}
 	if native {
+		// Refusal remains a refusal. The host may signal an exact local native
+		// worker only when every outstanding blocker belongs to this open turn;
+		// another turn's abandoned custody never authorizes that fallback.
+		var exact bool
+		err = q.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM session_native_reservations WHERE session_id=$1 AND state='active' AND (actor<>$2 OR turn_id<>$3)) AND NOT EXISTS(SELECT 1 FROM session_native_cache_owners c WHERE c.session_id=$1 AND c.terminal_sequence IS NULL AND NOT EXISTS(SELECT 1 FROM session_native_reservations r WHERE r.session_id=c.session_id AND r.harness=c.harness AND r.binding_sha256=c.binding_sha256 AND r.owner_id=c.owner_id AND r.turn_id=c.turn_id AND r.actor=c.actor AND r.claim_id=c.claim_id AND r.containment_sha256=c.containment_sha256 AND r.epoch=c.cache_epoch AND r.state IN ('finished','reconciled') AND r.terminal_sequence IS NOT NULL) AND (c.actor<>$2 OR c.turn_id<>$3))`, session, actor, turn).Scan(&exact)
+		if err != nil {
+			return 0, nil, err
+		}
+		if exact {
+			return store.StatusInvalid, []string{"native-active"}, nil
+		}
 		return store.StatusInvalid, nil, nil
 	}
 	sources, err := operatorInterruptionSources(ctx, q, session, turn, actor)

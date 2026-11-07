@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "agent_types.h"
 #include "session_compact.h"
+#include <aimee/ir/aimee_ir.h>
 
 struct cJSON;
 
@@ -20,12 +21,9 @@ extern "C"
       const char *aimee_session_id;
       const char *active_turn_id; /* Server-owned capture turn; never client input. */
       const char *cwd;
-      const char *system_prompt;
-      const char *user_prompt;
+      const aimee_request_t *request;
       /* Borrowed native user request, for bounded Go-owned task obligations. */
       const struct cJSON *task_request;
-      int max_tokens;
-      double temperature;
    } primary_session_request_t;
 
    int primary_session_adapter_can_handle(const agent_t *agent);

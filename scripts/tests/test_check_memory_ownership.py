@@ -35,6 +35,7 @@ class MemoryOwnershipTest(unittest.TestCase):
             "disposition": "host", "symbols": ["kb_client_memory_recall"],
             "sha256": hashlib.sha256((root / "host.c").read_bytes()).hexdigest()}}}
         (root / checker.LEDGER).write_text(json.dumps(ledger))
+        (root / checker.RETIREMENT).write_text(json.dumps({"source_commit": checker.RETIREMENT_SOURCE, "files": {}}))
         return root, ledger
 
     def test_accepts_classified_external_c_host(self):
@@ -57,6 +58,42 @@ class MemoryOwnershipTest(unittest.TestCase):
         (root / "host.c").write_text(original)
         (root / "evidence.go").write_text("package changed")
         with self.assertRaisesRegex(ValueError, "generated input needs ownership review"):
+            checker.validate(root)
+
+    def test_retirement_snapshot_requires_frozen_source_reference(self):
+        root, _ = self.fixture()
+        for snapshot in ({"files": {}}, {"source_commit": "unreviewed", "files": {}}):
+            (root / checker.RETIREMENT).write_text(json.dumps(snapshot))
+            with self.assertRaisesRegex(ValueError, "original external retirement source reference changed"):
+                checker.validate(root)
+
+    def test_retirement_preserves_findings_and_refuses_restoration(self):
+        root, ledger = self.fixture()
+        original = ledger["external_files"].pop("host.c")
+        (root / checker.RETIREMENT).write_text(json.dumps({"source_commit": checker.RETIREMENT_SOURCE, "files": {"host.c": original}}))
+        ledger["retired_external_files"] = {"host.c": {**original, "retirement": {
+            "reason": "unlinked owner retired", "evidence": ["evidence.go"]}}}
+        content = (root / "host.c").read_text()
+        (root / "host.c").unlink()
+        def save():
+            (root / checker.LEDGER).write_text(json.dumps(ledger))
+        save()
+        checker.validate(root)
+        for restored in (content, "/* empty renamed implementation */"):
+            (root / "host.c").write_text(restored)
+            with self.assertRaisesRegex(ValueError, "retired external file restored"):
+                checker.validate(root)
+            (root / "host.c").unlink()
+        row = ledger["retired_external_files"]["host.c"]
+        for key in ("symbols", "sha256", "disposition"):
+            saved = row.pop(key)
+            save()
+            with self.assertRaisesRegex(ValueError, "retired external finding changed"):
+                checker.validate(root)
+            row[key] = saved
+        ledger["retired_external_files"].clear()
+        save()
+        with self.assertRaisesRegex(ValueError, "missing retired external finding disposition"):
             checker.validate(root)
 
     def test_rejects_unreviewed_new_caller(self):

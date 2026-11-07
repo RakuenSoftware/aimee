@@ -30,7 +30,7 @@ void module_bus_stub_reply_bytes(const void *body, uint32_t len);
 void module_bus_stub_absent(void);
 
 /* Attached, but the call fails with this transport result. */
-void module_bus_stub_fail(aimee_module_call_result_t result);
+void module_bus_stub_fail(ouro_module_call_result_t result);
 
 int module_bus_stub_calls(void);
 uint32_t module_bus_stub_last_event(void);

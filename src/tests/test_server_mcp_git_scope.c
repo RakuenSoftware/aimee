@@ -122,6 +122,11 @@ int mcp_chdir_git_root_authorized(char *old, size_t capacity, cJSON *args, char 
    *error = mismatch ? strdup("mismatched checkout") : NULL;
    return resolution;
 }
+int mcp_git_bind_clone_cwd(cJSON *args)
+{
+   (void)args;
+   return 0;
+}
 static cJSON *git_handler(void)
 {
    assert(!strcmp(run_cmd_get_cwd(), "/resolved") && !strcmp(session_id(), "resolver-owner"));

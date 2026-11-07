@@ -64,41 +64,6 @@ int providers_decode_capability(cJSON *v, model_capability_t *out)
    }
    return 1;
 }
-int model_alias_resolve(const char *alias, model_info_t *out)
-{
-   cJSON *r = call("metadata.alias", NULL, NULL, alias);
-   cJSON *v = cJSON_GetObjectItem(r, "model");
-   int ok = out && cJSON_IsObject(v);
-   if (ok)
-   {
-      snprintf(out->provider, sizeof(out->provider), "%s", string(v, "provider"));
-      snprintf(out->model_id, sizeof(out->model_id), "%s", string(v, "model"));
-   }
-   cJSON_Delete(r);
-   return ok;
-}
-const char *model_detect_provider(const char *id)
-{
-   static _Thread_local char provider[MODEL_PROVIDER_MAX];
-   cJSON *r = call("metadata.detect", NULL, id, NULL);
-   snprintf(provider, sizeof(provider), "%s", string(r, "provider"));
-   cJSON_Delete(r);
-   return provider[0] ? provider : NULL;
-}
-int model_alias_list(model_info_t *out, int max)
-{
-   cJSON *r = call("metadata.aliases", NULL, NULL, NULL);
-   cJSON *a = cJSON_GetObjectItem(r, "models");
-   int n = number(r, "count");
-   for (int i = 0; out && i < max && i < n; i++)
-   {
-      cJSON *v = cJSON_GetArrayItem(a, i);
-      snprintf(out[i].provider, sizeof(out[i].provider), "%s", string(v, "provider"));
-      snprintf(out[i].model_id, sizeof(out[i].model_id), "%s", string(v, "model"));
-   }
-   cJSON_Delete(r);
-   return n;
-}
 int model_capability_get(const char *provider, const char *id, model_capability_t *out)
 {
    cJSON *r = call("metadata.show", provider, id, NULL);
@@ -156,33 +121,7 @@ int model_capability_list(model_capability_t *out, int max, unsigned required, i
    cJSON_Delete(r);
    return n;
 }
-int model_capability_refresh(char *msg, size_t n)
-{
-   cJSON *r = call("metadata.refresh", NULL, NULL, NULL);
-   if (msg && n)
-      snprintf(msg, n, "%s", string(r, "message"));
-   int count = number(r, "count");
-   cJSON_Delete(r);
-   return count;
-}
 /* Enum/string conversion is part of the native ABI, with no catalog policy. */
-unsigned model_capability_flag_from_name(const char *name)
-{
-   static const char *names[] = {"reasoning", "tools",     "vision",           "pdf",
-                                 "audio",     "streaming", "thinking_adaptive"};
-   if (!name)
-      return 0;
-   for (int i = 0; i < 7; i++)
-      if (!strcasecmp(name, names[i]))
-         return 1u << i;
-   if (!strcasecmp(name, "tool"))
-      return MODEL_CAP_TOOLS;
-   if (!strcasecmp(name, "image"))
-      return MODEL_CAP_VISION;
-   if (!strcasecmp(name, "stream"))
-      return MODEL_CAP_STREAMING;
-   return 0;
-}
 void model_capability_format_flags(unsigned flags, char *buf, size_t n)
 {
    static const char *names[] = {"reasoning", "tools",     "vision",           "pdf",
@@ -197,8 +136,4 @@ void model_capability_format_flags(unsigned flags, char *buf, size_t n)
          if (len < n)
             snprintf(buf + len, n - len, "%s%s", len ? "," : "", names[i]);
       }
-}
-void model_capability_flags_string(unsigned flags, char *buf, size_t n)
-{
-   model_capability_format_flags(flags, buf, n);
 }

@@ -20,7 +20,8 @@
  * the exact aimee_module_call_result_t numeric value, or -1 before a call.
  * BODY_READY follows this API's existing JSON/raw-node construction; callers
  * remain responsible for strict private DTO/receipt validation. */
-typedef enum {
+typedef enum
+{
    AIMEE_COMMAND_UNSENT = 0,
    AIMEE_COMMAND_SDK_RESULT = 1,
    AIMEE_COMMAND_FRAME_INVALID = 2,
@@ -28,15 +29,15 @@ typedef enum {
    AIMEE_COMMAND_BODY_READY = 4,
    AIMEE_COMMAND_LOCAL_FAILURE = 5
 } aimee_module_command_stage_v1;
-typedef struct {
+typedef struct
+{
    uint32_t schema_version;
    aimee_module_command_stage_v1 stage;
    int sdk_result;
 } aimee_module_command_outcome_v1;
 extern const unsigned aimee_module_command_outcome_contract_v1;
 int aimee_module_commands_dispatch_internal_raw_outcome_context_timeout_v1(
-    const char *, const cJSON *, const cJSON *, int, cJSON **,
-    aimee_module_command_outcome_v1 *);
+    const char *, const cJSON *, const cJSON *, int, cJSON **, aimee_module_command_outcome_v1 *);
 
 /* Principal refs reserved for plugin instances. MUST match
  * PluginRefFirst/PluginRefLimit in server-go/modules/mcp/mcp.go, and the
@@ -102,8 +103,8 @@ int aimee_module_commands_capture_caller_context(cJSON **context);
  * for native adapters. Borrowed arguments, owned exact JSON result; 0 means no
  * installed handler, -1 means selected failure and must never trigger a second
  * transport. No authority or destination is selected by this SDK helper. */
-int aimee_module_commands_owner_action_raw(const char *method, const cJSON *args,
-                                           int timeout_ms, char **result);
+int aimee_module_commands_owner_action_raw(const char *method, const cJSON *args, int timeout_ms,
+                                           char **result);
 
 /* The host may attach verified request context to the same internal fixed-module
  * route. This does not publish the command or permit plugin context claims. */
@@ -209,7 +210,6 @@ void aimee_module_commands_report(cJSON *resp);
  * It owns custody policy and verified-subject binding. This is not a model
  * command, and absence must never fall back to an ordinary memory store. */
 int aimee_module_protected_intake_raw(const char *operation_uuid, const void *raw_value,
-                                     size_t raw_length, int timeout_ms,
-                                     char **safe_response_json);
+                                      size_t raw_length, int timeout_ms, char **safe_response_json);
 
 #endif /* DEC_MODULE_COMMANDS_H */

@@ -114,15 +114,15 @@ __attribute__((used, externally_visible, retain))
 const unsigned aimee_original_input_outcome_callback_contract_v1 = 1;
 HOST_ENTRY
 int host_original_submission_install_outcome_provider_v1(
-    const host_original_submission_owner *expected,
-    host_original_submission_outcome_fn callback, void *state)
+    const host_original_submission_owner *expected, host_original_submission_outcome_fn callback,
+    void *state)
 {
    if (!expected || !callback)
       return -1;
    pthread_mutex_lock(&installation_lock);
    int ok = installed && !sealed && !configured_outcome && configured_state == state &&
-       expected->capture == configured.capture && expected->consume == configured.consume &&
-       expected->finish == configured.finish && expected->destroy == configured.destroy;
+            expected->capture == configured.capture && expected->consume == configured.consume &&
+            expected->finish == configured.finish && expected->destroy == configured.destroy;
    if (ok)
       configured_outcome = callback;
    pthread_mutex_unlock(&installation_lock);
@@ -144,8 +144,7 @@ cJSON *host_original_submission_outcome_json_v1(const host_original_submission *
    pthread_mutex_unlock(&registry_lock);
    cJSON *result = NULL;
    if (accepted == 0 && out.json && out.length && out.length <= 4096 &&
-       out.capacity == out.length + 1 &&
-       memchr(out.json, 0, out.capacity) == out.json + out.length)
+       out.capacity == out.length + 1 && memchr(out.json, 0, out.capacity) == out.json + out.length)
    {
       result = aimee_ir_json_parse_frame(out.json, out.length);
       if (!cJSON_IsObject(result))
@@ -163,15 +162,15 @@ __attribute__((used, externally_visible, retain))
 const unsigned aimee_original_input_delivered_callback_contract_v1 = 1;
 HOST_ENTRY
 int host_original_submission_install_delivered_provider_v1(
-    const host_original_submission_owner *expected,
-    host_original_submission_outcome_fn callback, void *state)
+    const host_original_submission_owner *expected, host_original_submission_outcome_fn callback,
+    void *state)
 {
    if (!expected || !callback)
       return -1;
    pthread_mutex_lock(&installation_lock);
    int ok = installed && !sealed && !configured_delivered && configured_state == state &&
-       expected->capture == configured.capture && expected->consume == configured.consume &&
-       expected->finish == configured.finish && expected->destroy == configured.destroy;
+            expected->capture == configured.capture && expected->consume == configured.consume &&
+            expected->finish == configured.finish && expected->destroy == configured.destroy;
    if (ok)
       configured_delivered = callback;
    pthread_mutex_unlock(&installation_lock);
@@ -193,8 +192,7 @@ cJSON *host_original_submission_delivered_json_v1(const host_original_submission
    pthread_mutex_unlock(&registry_lock);
    cJSON *result = NULL;
    if (accepted == 0 && out.json && out.length && out.length <= 32768 &&
-       out.capacity == out.length + 1 &&
-       memchr(out.json, 0, out.capacity) == out.json + out.length)
+       out.capacity == out.length + 1 && memchr(out.json, 0, out.capacity) == out.json + out.length)
    {
       result = aimee_ir_json_parse_frame(out.json, out.length);
       if (!cJSON_IsObject(result))
@@ -274,8 +272,8 @@ static void destroy_pending(void *slot)
 {
    host_original_submission_destroy(slot);
 }
-static host_text_status capture_mode(const char *headers, const char *frame,
-                                     size_t length, host_original_submission **out, int source_only)
+static host_text_status capture_mode(const char *headers, const char *frame, size_t length,
+                                     host_original_submission **out, int source_only)
 {
    if (!out)
       return HOST_TEXT_INVALID;
@@ -339,13 +337,14 @@ static host_text_status capture_mode(const char *headers, const char *frame,
 }
 HOST_ENTRY
 host_text_status host_original_submission_capture(const char *headers, const char *frame,
-                                                   size_t length, host_original_submission **out)
+                                                  size_t length, host_original_submission **out)
 {
    return capture_mode(headers, frame, length, out, 0);
 }
 HOST_ENTRY
-host_text_status host_original_submission_capture_user_source(const char *headers, const char *frame,
-                                                               size_t length, host_original_submission **out)
+host_text_status host_original_submission_capture_user_source(const char *headers,
+                                                              const char *frame, size_t length,
+                                                              host_original_submission **out)
 {
    /* The trusted compiled entry chooses this mode. JSON cannot select it.
     * Original owner capture/consume still resolve all actual User authority. */
@@ -359,8 +358,7 @@ int host_original_submission_user_source_only(const host_original_submission *ca
    const host_original_submission *found = submissions;
    while (found && found != cap)
       found = found->next;
-   int selected = found && found->user_source_only &&
-                  atomic_load(&found->phase) == FINISHED &&
+   int selected = found && found->user_source_only && atomic_load(&found->phase) == FINISHED &&
                   atomic_load(&found->admitted) && pthread_equal(found->worker, pthread_self());
    pthread_mutex_unlock(&registry_lock);
    return selected;
@@ -402,17 +400,17 @@ host_text_status host_original_submission_consume(host_original_submission *cap,
       char actual[65];
       const char *expected =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(out->attachment, "text_sha256"));
-      if (result == HOST_TEXT_ALREADY_DELIVERED && cap->delivered &&
-          !out->text && !out->text_len && !out->text_capacity && !out->attachment)
+      if (result == HOST_TEXT_ALREADY_DELIVERED && cap->delivered && !out->text && !out->text_len &&
+          !out->text_capacity && !out->attachment)
       {
          cap->already_delivered = 1;
          atomic_store(&cap->phase, ACTIVE);
       }
       else if (result == HOST_TEXT_OK && out->text && out->text[0] && out->text_len > 0 &&
-          out->text_len <= HOST_TEXT_MAX_OUTPUT && out->text_capacity == out->text_len + 1 &&
-          memchr(out->text, 0, out->text_capacity) == out->text + out->text_len &&
-          aimee_ir_input_attachment_shape_valid(out->attachment) && expected &&
-          !aimee_sha256_hex(out->text, out->text_len, actual) && !strcmp(actual, expected))
+               out->text_len <= HOST_TEXT_MAX_OUTPUT && out->text_capacity == out->text_len + 1 &&
+               memchr(out->text, 0, out->text_capacity) == out->text + out->text_len &&
+               aimee_ir_input_attachment_shape_valid(out->attachment) && expected &&
+               !aimee_sha256_hex(out->text, out->text_len, actual) && !strcmp(actual, expected))
          atomic_store(&cap->phase, ACTIVE);
       else
       {

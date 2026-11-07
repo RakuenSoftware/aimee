@@ -79,8 +79,16 @@ int kb_memory_facts_drain(int batch)
       if (encoded)
       {
          kb_store_lease_release_idle();
-         output = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, prompt->valuestring, encoded,
-                                     NULL, "", 8192, error, sizeof(error));
+         aimee_request_t model_request = {0};
+         aimee_response_t model_response = {0};
+         int rc = kb_curator_llm_request_init(&model_request, prompt->valuestring, encoded, NULL);
+         if (!rc)
+            rc = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, &model_request, &model_response,
+                                    error, sizeof error);
+         if (!rc)
+            output = kb_curator_llm_text(&model_response, error, sizeof error);
+         aimee_request_free(&model_request);
+         aimee_response_free(&model_response);
       }
       free(encoded);
       if (complete_job(work, output, output != NULL, output ? "" : error) != 0)

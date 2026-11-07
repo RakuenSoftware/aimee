@@ -3,13 +3,6 @@
 
 #include <stdint.h>
 
-/* Called once per user turn, after dogfood_autolabel_next_turn_live().
- * Emits citation_then_repair (polarity=negative) or citation_then_continuation
- * (polarity=positive) implicit learning signals when the respective
- * learning_implicit_citation_repair / learning_implicit_citation_continuation
- * config flags are on. No-op when both flags are off. */
-void learning_implicit_detect_turn(const char *user_text);
-
 /* Called from the dogfood write path when the (session, tool, query_hash)
  * triple has already appeared this month. Emits a repeat_question implicit
  * signal when learning_implicit_repeat_question is on. */

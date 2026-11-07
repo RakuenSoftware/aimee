@@ -33,23 +33,6 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static int get_current_branch(char *buf, size_t len)
-{
-   int rc;
-   char *out = mcp_git_run("git rev-parse --abbrev-ref HEAD 2>/dev/null", &rc);
-   if (rc != 0 || !out)
-   {
-      free(out);
-      return -1;
-   }
-   char *nl = strchr(out, '\n');
-   if (nl)
-      *nl = '\0';
-   snprintf(buf, len, "%s", out);
-   free(out);
-   return 0;
-}
-
 /* Get the canonical git repo root for the current cwd. Returns 0 on success.
  * In a worktree, --show-toplevel returns the worktree root, not the main repo.
  * We use --git-common-dir to find the shared .git dir and derive the main root,
@@ -242,12 +225,4 @@ cJSON *branch_own_guard_for(const char *branch, const char *operation)
       return mcp_text(buf);
    }
    return NULL; /* allowed */
-}
-
-cJSON *branch_own_guard(const char *operation)
-{
-   char branch[256];
-   if (get_current_branch(branch, sizeof(branch)) != 0)
-      return NULL; /* can't determine branch — allow */
-   return branch_own_guard_for(branch, operation);
 }

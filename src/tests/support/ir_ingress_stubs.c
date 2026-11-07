@@ -1,8 +1,6 @@
-/* ir_ingress_stubs.c -- WEAK no-op stubs for the IR/router hooks wired into
- * anthropic_http.c / openai_chat.c. The minimal-link ingress tests (#include the
- * ingress .c to exercise tool-policing / memory / SSE) don't test the IR path, so
- * they don't need the real (heavy) router_advise + IR chain linked. These stubs are
- * WEAK: if a test does link the real objects, the strong definitions win. */
+/* External service/transport fixtures for the ingress tests. Canonical codecs
+ * and request stages come from their real linked owners; these weak defaults
+ * cover only the remaining unrelated peers. */
 #include <stddef.h>
 #include <string.h>
 
@@ -156,64 +154,6 @@ __attribute__((weak)) const char *server_http_identity_principal(void)
    return "";
 }
 
-__attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int frontend)
-{
-   (void)req;
-   (void)frontend;
-}
-
-__attribute__((weak)) int aimee_ir_path_enabled(void)
-{
-   return 0;
-}
-
-/* Slice 5-wire: the incremental IR-delta relay. The flag stub returns 0 (legacy
- * relay), so the delta helpers below are never CALLED by the ingress tests -- they
- * exist only to resolve the link. Real definitions (aimee_ir_serve/aimee_ir_stream)
- * win when linked. */
-__attribute__((weak)) int aimee_ir_stream_relay_enabled(void)
-{
-   return 0;
-}
-
-__attribute__((weak)) void openai_stream_state_init(void *st)
-{
-   (void)st;
-}
-
-__attribute__((weak)) int openai_chunk_to_deltas(const void *chunk, void *st, void *out, int max)
-{
-   (void)chunk;
-   (void)st;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-__attribute__((weak)) int anthropic_delta_emit(const void *d, void *st, const char *msg_id,
-                                               const char *model, void *emit, void *ctx)
-{
-   (void)d;
-   (void)st;
-   (void)msg_id;
-   (void)model;
-   (void)emit;
-   (void)ctx;
-   return 0;
-}
-
-__attribute__((weak)) char *aimee_ir_build_provider_body(const void *req, const char *driver_name,
-                                                         const char *agent_model,
-                                                         int max_tokens_override, int want_stream)
-{
-   (void)req;
-   (void)driver_name;
-   (void)agent_model;
-   (void)max_tokens_override;
-   (void)want_stream;
-   return NULL;
-}
-
 /* IR observability counters. The ingress increments these on the legacy-fallback and
  * shadow-compare paths; the minimal-link tests don't link the metrics table, so the
  * counter is inert here. Real aimee_ir_metrics.o wins when linked. */
@@ -221,20 +161,6 @@ __attribute__((weak)) void aimee_ir_metric_inc(int metric, int frontend)
 {
    (void)metric;
    (void)frontend;
-}
-
-__attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err,
-                                               unsigned long errn)
-{
-   (void)resp;
-   (void)out;
-   (void)err;
-   (void)errn;
-   return -1;
-}
-__attribute__((weak)) void aimee_response_free(aimee_response_t *r)
-{
-   (void)r;
 }
 
 /* The ingress governance resolver (anthropic_governance_enabled) reads this env default; the
@@ -252,21 +178,6 @@ __attribute__((weak)) int config_module_enabled(int config_tristate, int env_def
    if (config_tristate == 0 || config_tristate == 1)
       return config_tristate;
    return env_default ? 1 : 0;
-}
-
-__attribute__((weak)) int openai_stream_finish(void *state, void *out, int max)
-{
-   (void)state;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-/* Minimal ingress fixtures do not start module-owned request stages. The real
- * host implementation overrides this when linked into the server. */
-__attribute__((weak)) void aimee_ir_apply_native_request_stages(void *request)
-{
-   (void)request;
 }
 
 /* Advisory routing is independent of the ingress codec fixtures. */

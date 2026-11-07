@@ -2,8 +2,8 @@
 #include "transport.h"
 #include "db1_module_api.h"
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 #include <stdlib.h>
@@ -38,8 +38,7 @@ int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *ne
       if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
-      if (need > AIMEE_MODULE_MESSAGE_MAX_BODY - 4u ||
-          n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
+      if (need > OURO_MODULE_MESSAGE_MAX_BODY - 4u || n > OURO_MODULE_MESSAGE_MAX_BODY - need - 4u)
          return -1;
       need += 4u + n;
    }
@@ -76,11 +75,12 @@ void db1_request_encode(uint8_t *out, uint32_t op, const char *const *fields, ui
    a fixed shape pass NULL. */
 int db1_reply_frame_validate(const uint8_t *frame, size_t length, uint32_t *status, uint32_t *count)
 {
-   if (!frame || !status || !count || length < 8u || length > AIMEE_MODULE_MESSAGE_MAX_BODY)
+   if (!frame || !status || !count || length < 8u || length > OURO_MODULE_MESSAGE_MAX_BODY)
       return -1;
    uint32_t reply_status = aimee_db1_get_u32(frame);
    uint32_t total = aimee_db1_get_u32(frame + 4);
-   if (reply_status > AIMEE_DB1_STATUS_CONFLICT || (reply_status == AIMEE_DB1_STATUS_CONFLICT && total))
+   if (reply_status > AIMEE_DB1_STATUS_CONFLICT ||
+       (reply_status == AIMEE_DB1_STATUS_CONFLICT && total))
       return -1;
    size_t at = 8u;
    if (total > (length - at) / 4u)
@@ -116,7 +116,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
       call to make, and saying so beats waiting out a deadline. */
    if (!obs_bus_module_available(family->event_kind))
    {
-      warn_unreachable(family, AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      warn_unreachable(family, OURO_MODULE_CALL_CAPABILITY_ABSENT);
       return -1;
    }
 
@@ -128,8 +128,8 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
    size_t response_cap = 8u;
    for (uint32_t i = 0; i < slots; ++i)
    {
-      if (response_cap > AIMEE_MODULE_MESSAGE_MAX_BODY - 4u ||
-          caps[i] > AIMEE_MODULE_MESSAGE_MAX_BODY - response_cap - 4u)
+      if (response_cap > OURO_MODULE_MESSAGE_MAX_BODY - 4u ||
+          caps[i] > OURO_MODULE_MESSAGE_MAX_BODY - response_cap - 4u)
          return -1;
       response_cap += 4u + caps[i];
    }
@@ -145,13 +145,13 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
 
    uint32_t response_len = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(family->timeout_ms);
-   aimee_module_call_result_t rc = obs_bus_module_call(
+   ouro_module_call_result_t rc = obs_bus_module_call(
        family->event_kind, family->stage_id, 0, deadline, request, (uint32_t)request_len, response,
        (uint32_t)response_cap, &response_len, NULL, NULL);
    free(request);
 
    int result = -1;
-   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u || response_len > response_cap)
+   if (rc != OURO_MODULE_CALL_OK || response_len < 8u || response_len > response_cap)
       warn_unreachable(family, (int)rc);
    else
    {

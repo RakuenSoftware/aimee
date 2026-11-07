@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // StateMax is the rolling window kept in the ledger. It matches
@@ -230,16 +230,16 @@ func sameTree(a, b string) bool {
 
 // handleVerifyState serves stage 6. An operation it does not know is refused
 // rather than answered, so a newer caller against an older module fails closed.
-func handleVerifyState(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleVerifyState(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded VerifyStateRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if strings.HasPrefix(decoded.Op, "snapshot-") {
 		return handleVerificationSnapshot(invocation, request)
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	var response VerifyStateResponse
@@ -257,7 +257,7 @@ func handleVerifyState(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		response.Entries, response.OK = readEntries(decoded.ProjectRoot), true
 	case "state-write":
 		if decoded.Hash == "" {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		err := writeState(decoded.ProjectRoot, StateEntry{
 			Timestamp:   decoded.Timestamp,
@@ -268,12 +268,12 @@ func handleVerifyState(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		})
 		response.OK = err == nil
 	default:
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	encoded, err := json.Marshal(response)
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

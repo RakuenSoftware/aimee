@@ -1,5 +1,6 @@
 /* git_cred_inject.c — vault-sourced git credential env. See git_cred_inject.h. */
 #define _GNU_SOURCE 1
+#include "util_url.h"
 #include "git_cred_inject.h"
 #include "forge_credentials.h" /* forge_cred_askpass_shim / forge_cred_server_identity */
 #include "git_forge_vault.h"   /* git_forge_vault_token */
@@ -313,4 +314,22 @@ void git_cred_inject_free_env(char **envp)
       free(envp[i]);
    }
    free(envp);
+}
+
+int git_cred_env_has_ssh_agent(char *const *envp)
+{
+   for (int i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], "SSH_AUTH_SOCK=", 14) == 0)
+         return 1;
+   return 0;
+}
+
+char *git_cred_transport_url(const char *url, char *const *envp)
+{
+   if (!url || !url[0])
+      return NULL;
+   if (!util_url_is_ssh(url) || git_cred_env_has_ssh_agent(envp))
+      return strdup(url);
+   char *https = util_url_normalize(url);
+   return https ? https : strdup(url);
 }

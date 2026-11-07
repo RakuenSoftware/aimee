@@ -41,7 +41,8 @@ typedef struct
  * Prepare returns owned closed delivery JSON. Recover returns an owned opaque
  * documentary result only when the target operation is durably delivered or
  * terminal. A negative result is unknown: no generic acknowledgment occurs. */
-typedef int (*server_input_prepare_delivery_fn)(const server_input_prepared_cap_t *, char **, void *);
+typedef int (*server_input_prepare_delivery_fn)(const server_input_prepared_cap_t *, char **,
+                                                void *);
 typedef enum
 {
    SERVER_INPUT_DELIVERY_UNKNOWN = -1,
@@ -53,14 +54,18 @@ typedef server_input_delivery_outcome_t (*server_input_recover_delivery_fn)(
 /* Trusted startup installation only, one immutable receiver/actor binding.
  * No callback, actor, receiver or subject can be selected by Model arguments. */
 int server_input_delivery_install_owner_v1(const char *, const char *,
-    server_input_prepare_delivery_fn, server_input_recover_delivery_fn, void *);
+                                           server_input_prepare_delivery_fn,
+                                           server_input_recover_delivery_fn, void *);
 int server_input_prepared_view(const server_input_prepared_cap_t *, server_input_prepared_view_t *);
-int server_input_created_delivery_view(const server_input_created_cap_t *, server_input_created_delivery_view_t *);
+int server_input_created_delivery_view(const server_input_created_cap_t *,
+                                       server_input_created_delivery_view_t *);
 int server_input_created_delivery_ack_v1(const server_input_created_cap_t *, const char *);
-int server_input_committed_delivery_view(const server_input_committed_delivery_cap_t *, server_input_committed_delivery_view_t *);
+int server_input_committed_delivery_view(const server_input_committed_delivery_cap_t *,
+                                         server_input_committed_delivery_view_t *);
 /* Immutable cached INPUT result only for the actual current callback cap/thread.
  * Never new source/actor authority; NULL for pending/background recovery. */
-const char *server_input_committed_delivery_completed_receipt_v1(const server_input_committed_delivery_cap_t *);
+const char *
+server_input_committed_delivery_completed_receipt_v1(const server_input_committed_delivery_cap_t *);
 
 /* Explicit modification/recovery entry points. Zero means missing/no callback;
  * positive means a documentary terminal/delivered result, never model execution.

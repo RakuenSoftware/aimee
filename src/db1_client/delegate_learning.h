@@ -48,17 +48,6 @@ typedef struct
 void classify_delegate_exit(const dl_exit_metrics_t *metrics, dl_classification_t *out);
 
 /*
- * delegate_learning_record — insert a learning record into DB1.
- * Returns 0 on success, -1 on failure.
- */
-int db1_delegate_learning_record(const char *session_id, const char *role, const char *failure_mode,
-                                 const char *lesson, const char *evidence_json, double confidence);
-
-/* Legacy wire tombstone: role-wide unqualified injection is retired. Returns
- * NULL; reviewed procedure reuse uses canonical memory context instead. */
-char *db1_delegate_learning_inject_prompt(const char *role, const char *system_prompt, int top_n);
-
-/*
  * dl_failure_mode_to_string — convert enum to string for storage/logging.
  */
 const char *dl_failure_mode_to_string(dl_failure_mode_t mode);

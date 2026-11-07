@@ -72,10 +72,10 @@ int main(void)
       for (int enabled = 0; enabled < 2; enabled++)
       {
          const char *raw =
-             wire == 0 ? "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,"
-                         "\"tool_calls\":[{\"id\":\"n1\",\"type\":\"function\",\"function\":{"
-                         "\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"safe\\\"}\"}}]},"
-                         "\"finish_reason\":\"tool_calls\"}]}"
+             wire == 0   ? "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,"
+                           "\"tool_calls\":[{\"id\":\"n1\",\"type\":\"function\",\"function\":{"
+                           "\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"safe\\\"}\"}}]},"
+                           "\"finish_reason\":\"tool_calls\"}]}"
              : wire == 1 ? "{\"id\":\"r\",\"object\":\"response\",\"status\":\"completed\","
                            "\"output\":[{\"type\":\"function_call\",\"call_id\":\"n1\",\"name\":"
                            "\"bash\",\"arguments\":\"{\\\"command\\\":\\\"safe\\\"}\"}]}"

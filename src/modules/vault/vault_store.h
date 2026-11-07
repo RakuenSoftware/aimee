@@ -111,11 +111,11 @@ int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT
 /* Strong retained deployment contract: immutable generations plus Retired slots. */
 extern const unsigned aimee_vault_immutable_custody_contract_v2;
 extern const unsigned aimee_vault_generation_fenced_use_contract_v1;
-#define VAULT_IMMUTABLE_GENERATION_CAP 33
-#define VAULT_STORE_GENERATION_MISMATCH 3
-#define VAULT_STORE_RETIRED 4
+#define VAULT_IMMUTABLE_GENERATION_CAP     33
+#define VAULT_STORE_GENERATION_MISMATCH    3
+#define VAULT_STORE_RETIRED                4
 #define VAULT_STORE_GENERATION_UNSUPPORTED (-2)
-#define VAULT_STORE_USE_FAILED 5 /* callback may already have consumed/acted */
+#define VAULT_STORE_USE_FAILED             5 /* callback may already have consumed/acted */
 typedef int (*vault_store_secret_use_fn)(const char *secret, size_t length, void *context);
 
 /* Closed result for provider-atomic server-wrapped immutable creation. The
@@ -145,16 +145,19 @@ typedef enum
  * NEVER emulate with get followed by set. Secret <=64KiB; principal/slot names
  * use existing bounded identifiers. A failed durable commit may have committed:
  * retry the SAME tuple/value to reconcile, never assume failure means absence. */
-vault_create_once_result_t vault_store_create_server_once(
-    const char *principal, const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
-    const char *cred, const char *secret, char *generation, size_t generation_capacity);
+vault_create_once_result_t vault_store_create_server_once(const char *principal,
+                                                          const uint8_t server_kek[VAULT_KEK_LEN],
+                                                          const char *agent, const char *cred,
+                                                          const char *secret, char *generation,
+                                                          size_t generation_capacity);
 /* Marked entries refuse legacy raw get/get_server/snapshot paths.
  * Trusted low-level versioned use. Expected generation and marker must match;
  * ordinary raw getters do NOT provide this contract. Non-success clears out.
  * Missing backend support is explicit, never emulated with separate reads. */
 int vault_store_get_server_generation(const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *expected_generation, char *out, size_t out_len);
+                                      const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                                      const char *cred, const char *expected_generation, char *out,
+                                      size_t out_len);
 
 /* Optional provider-backed entry-retirement/write fence spans exact generation
  * check, decryption and one synchronous trusted callback. No plaintext result.
@@ -165,8 +168,10 @@ int vault_store_get_server_generation(const char *principal,
  * Callback failure/VAULT_STORE_USE_FAILED may follow effects: never auto-retry.
  * Existing master-key rotation remains an OFFLINE operation. */
 int vault_store_use_server_generation_fenced(const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *expected_generation, vault_store_secret_use_fn use, void *context);
+                                             const uint8_t server_kek[VAULT_KEK_LEN],
+                                             const char *agent, const char *cred,
+                                             const char *expected_generation,
+                                             vault_store_secret_use_fn use, void *context);
 
 /* Decrypt the (agent, cred) credential for `principal` using the SERVER wrap
  * ("wrapped_dek_server") under `server_kek` — NO user KEK / unlock required. This
@@ -265,7 +270,7 @@ extern const unsigned aimee_vault_generation_retirement_contract_v1;
  * unchanged. On failure the output is empty when capacity permits. */
 vault_retire_generation_result_t
 vault_store_close_server_slot_once(const char *principal, const char *agent, const char *cred,
-                                  char *closed_generation, size_t generation_capacity);
+                                   char *closed_generation, size_t generation_capacity);
 extern const unsigned aimee_vault_slot_closure_contract_v1;
 
 #endif /* DEC_VAULT_STORE_H */

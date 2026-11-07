@@ -61,11 +61,6 @@ extern "C"
    css_stylesheet_t *css_analyze(const char *text, size_t len);
    void css_stylesheet_free(css_stylesheet_t *ss);
 
-   /* Compute CSS specificity (a,b,c) for ONE selector (no comma lists). Sets
-    * *uncertain to 1 when the selector contains constructs outside the handled
-    * subset. Any out-param may be non-NULL; all are written. Exposed for tests. */
-   void css_selector_specificity(const char *selector, int *a, int *b, int *c, int *uncertain);
-
 #define CSS_CLASS_TOKEN_MAX 128
 
    /* Extract the set of static class tokens used by a component's markup

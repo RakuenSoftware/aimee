@@ -46,7 +46,7 @@ struct script_rpc_execution
    atomic_int *cancel;
    agent_request_cancel_scope_t cancellation;
    char cwd[MAX_PATH_LEN], session[128], principal[VAULT_PRINCIPAL_MAX];
-   int job;
+   agent_job_progress_t *job_progress;
    char attempt_prefix[33];
    unsigned long long attempts;
 };
@@ -93,7 +93,7 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    scope->cancel = agent_get_request_cancel();
    scope->cancellation.flag = &srv->stop;
    scope->cancellation.parent = agent_request_cancel_scope_current();
-   scope->job = agent_get_durable_job_id();
+   scope->job_progress = agent_job_progress_capture();
    return 0;
 }
 
@@ -107,6 +107,7 @@ static void script_rpc_release(script_rpc_server_t *srv)
    request_context_snapshot_clear(&scope->request);
    server_control_scope_release(scope->controls);
    server_session_capture_release(scope->capture);
+   agent_job_progress_release(scope->job_progress);
    free(scope);
    srv->execution = NULL;
 }
@@ -432,7 +433,7 @@ static void *script_rpc_thread(void *arg)
    session_id_set_override(scope->session);
    agent_set_request_cancel(scope->cancel);
    agent_request_cancel_scope_bind(&scope->cancellation);
-   agent_set_durable_job(scope->job);
+   agent_job_progress_binding_t previous_job = agent_job_progress_bind(scope->job_progress);
    script_rpc_serve(arg);
    /* The caller's resource lease still encloses this entire joined worker. */
    agent_source_authority_snapshot_t empty_source = {.active = 1};
@@ -446,7 +447,7 @@ static void *script_rpc_thread(void *arg)
    agent_set_request_vault_principal(NULL);
    agent_set_request_cancel(NULL);
    agent_request_cancel_scope_bind(NULL);
-   agent_set_durable_job(0);
+   agent_job_progress_restore(previous_job);
    request_context_clear();
    server_control_scope_bind(previous_controls);
    server_session_capture_bind(previous_capture);

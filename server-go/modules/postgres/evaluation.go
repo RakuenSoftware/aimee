@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -140,8 +140,8 @@ func (c evaluationCaller) Call(ctx context.Context, kind, stage uint32, trace ui
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	body, status := s.handler.handleContext(ctx, bus.ModuleInvocation{StageID: stage, TraceID: trace}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := s.handler.handleContext(ctx, ring.ModuleInvocation{StageID: stage, TraceID: trace}, request)
+	if status != ring.ModuleStatusOK {
 		return nil, fmt.Errorf("postgres evaluation: SQL transport status %d", status)
 	}
 	return body, nil

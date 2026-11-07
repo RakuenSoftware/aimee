@@ -524,9 +524,12 @@ static void test_terminal_observers_preserve_primary_resource(void)
           .owner = owner, .expected_success = mode == 0, .expected_rows = mode < 2 ? 1 : 0};
       terminal_resource_t observer = primary;
       assert(!server_session_capture_after_terminal(owner, terminal_resource, &primary));
-      assert(!server_session_capture_observe_terminal(owner, terminal_resource, &observer));
-      assert(server_session_capture_observe_terminal(owner, terminal_resource, &primary) < 0);
-      assert(server_session_capture_observe_terminal(owner, terminal_resource, &observer) < 0);
+      assert(
+          !server_session_capture_observe_verification(owner, NULL, terminal_resource, &observer));
+      assert(server_session_capture_observe_verification(owner, NULL, terminal_resource, &primary) <
+             0);
+      assert(server_session_capture_observe_verification(owner, NULL, terminal_resource,
+                                                         &observer) < 0);
       if (mode < 3)
       {
          reject_append = mode == 2;
@@ -545,7 +548,8 @@ static void test_terminal_observers_preserve_primary_resource(void)
    assert(refused);
    terminal_resource_t observer = {.owner = refused, .expected_success = 0, .expected_rows = 1};
    assert(!server_session_capture_after_terminal(refused, terminal_resource_refuses, refused));
-   assert(!server_session_capture_observe_terminal(refused, terminal_resource, &observer));
+   assert(
+       !server_session_capture_observe_verification(refused, NULL, terminal_resource, &observer));
    aimee_session_event_t completed = {.kind = AIMEE_SESSION_EXECUTION,
                                       .execution_status = "completed"};
    assert(!server_session_capture_sink(&completed, refused));
@@ -562,7 +566,8 @@ static void test_terminal_observers_preserve_primary_resource(void)
    {
       observers[i] =
           (terminal_resource_t){.owner = owner, .expected_success = 0, .expected_rows = 0};
-      int rc = server_session_capture_observe_terminal(owner, terminal_resource, &observers[i]);
+      int rc = server_session_capture_observe_verification(owner, NULL, terminal_resource,
+                                                           &observers[i]);
       if (rc)
          break;
       admitted++;
@@ -679,11 +684,143 @@ static void test_registered_owner_recovery_hint(void)
    assert(!server_session_capture_has_owner("owned", "alice", "turn"));
 }
 
+/* Commit is the DB-owner seam: real op53 receipt/transaction coverage lives in
+ * the Go PG fixture. No synthetic canonical receipt is inserted here. */
+static int external_cancel_result, external_cancel_calls;
+static int external_cancel_commit(const char *actor, const char *session, const char *turn,
+                                  char sequence[32])
+{
+   assert(!strcmp(actor, "alice") && !strcmp(session, "private-child") &&
+          !strcmp(turn, "external"));
+   external_cancel_calls++;
+   if (!external_cancel_result)
+      strcpy(sequence, "71");
+   return external_cancel_result;
+}
+static void test_external_operator_cancel(void)
+{
+   for (int status = -1; status <= 2; status++)
+   {
+      reset();
+      external_cancel_calls = 0;
+      external_cancel_result = status;
+      server_session_capture_t *owner =
+          server_session_capture_open("private-child", "external", "alice", "parent");
+      assert(owner);
+      terminal_resource_t primary = {.owner = owner, .expected_success = 0, .expected_rows = 0};
+      terminal_resource_t observer = primary;
+      assert(!server_session_capture_after_terminal(owner, terminal_resource, &primary));
+      assert(
+          !server_session_capture_observe_verification(owner, NULL, terminal_resource, &observer));
+      char sequence[32];
+      assert(server_session_capture_cancel_owned("bob", "private-child", "external", sequence,
+                                                 external_cancel_commit) == 1);
+      assert(!external_cancel_calls && server_session_capture_accepting(owner));
+      assert(server_session_capture_cancel_owned("alice", "private-child", "external", sequence,
+                                                 external_cancel_commit) == status);
+      assert(external_cancel_calls == 1);
+      if (!status)
+      {
+         assert(!strcmp(sequence, "71") && server_session_capture_operator_cancelled(owner));
+         assert(!server_session_capture_accepting(owner) && !server_session_capture_failed(owner));
+         assert(primary.calls == 1 && observer.calls == 1);
+         assert(server_session_capture_after_terminal(owner, terminal_resource, &primary) < 0);
+         aimee_session_event_t completed = {.kind = AIMEE_SESSION_EXECUTION,
+                                            .execution_status = "completed"};
+         assert(server_session_capture_sink(&completed, owner) < 0);
+         assert(!server_session_capture_cancel_owned("alice", "private-child", "external", sequence,
+                                                     external_cancel_commit));
+         assert(external_cancel_calls == 1 && !strcmp(sequence, "71"));
+      }
+      else
+      {
+         assert(!server_session_capture_operator_cancelled(owner));
+         assert(server_session_capture_accepting(owner) && !primary.calls && !observer.calls);
+      }
+      server_session_capture_close(owner);
+      assert(primary.calls == 1 && observer.calls == 1 && !cJSON_GetArraySize(rows));
+   }
+}
+
+static pthread_mutex_t cancel_barrier = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cancel_changed = PTHREAD_COND_INITIALIZER;
+static int commit_entered, commit_release, append_started, append_finished, append_result;
+static server_session_capture_t *raced_owner;
+static int held_cancel_commit(const char *actor, const char *session, const char *turn,
+                              char sequence[32])
+{
+   pthread_mutex_lock(&cancel_barrier);
+   commit_entered = 1;
+   pthread_cond_broadcast(&cancel_changed);
+   while (!commit_release)
+      pthread_cond_wait(&cancel_changed, &cancel_barrier);
+   pthread_mutex_unlock(&cancel_barrier);
+   return external_cancel_commit(actor, session, turn, sequence);
+}
+static void *cancel_raced_owner(void *unused)
+{
+   (void)unused;
+   char sequence[32];
+   assert(!server_session_capture_cancel_owned("alice", "private-child", "external", sequence,
+                                               held_cancel_commit));
+   assert(!strcmp(sequence, "71"));
+   return NULL;
+}
+static void *append_after_cancel_started(void *unused)
+{
+   (void)unused;
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "completed"};
+   pthread_mutex_lock(&cancel_barrier);
+   append_started = 1;
+   pthread_cond_broadcast(&cancel_changed);
+   pthread_mutex_unlock(&cancel_barrier);
+   append_result = server_session_capture_sink(&event, raced_owner);
+   pthread_mutex_lock(&cancel_barrier);
+   append_finished = 1;
+   pthread_cond_broadcast(&cancel_changed);
+   pthread_mutex_unlock(&cancel_barrier);
+   return NULL;
+}
+static void test_cancel_serializes_late_writer(void)
+{
+   reset();
+   external_cancel_result = 0;
+   external_cancel_calls = 0;
+   commit_entered = commit_release = append_started = append_finished = 0;
+   raced_owner = server_session_capture_open("private-child", "external", "alice", "parent");
+   assert(raced_owner);
+   terminal_resource_t resource = {.owner = raced_owner, .expected_success = 0, .expected_rows = 0};
+   assert(!server_session_capture_after_terminal(raced_owner, terminal_resource, &resource));
+   pthread_t canceller, writer;
+   assert(!pthread_create(&canceller, NULL, cancel_raced_owner, NULL));
+   pthread_mutex_lock(&cancel_barrier);
+   while (!commit_entered)
+      pthread_cond_wait(&cancel_changed, &cancel_barrier);
+   pthread_mutex_unlock(&cancel_barrier);
+   assert(!pthread_create(&writer, NULL, append_after_cancel_started, NULL));
+   pthread_mutex_lock(&cancel_barrier);
+   while (!append_started)
+      pthread_cond_wait(&cancel_changed, &cancel_barrier);
+   assert(!append_finished && !resource.calls);
+   commit_release = 1;
+   pthread_cond_broadcast(&cancel_changed);
+   pthread_mutex_unlock(&cancel_barrier);
+   assert(!pthread_join(canceller, NULL) && !pthread_join(writer, NULL));
+   assert(append_finished && append_result < 0 && resource.calls == 1);
+   assert(!cJSON_GetArraySize(rows) && external_cancel_calls == 1);
+   char sequence[32];
+   server_session_capture_cursor(raced_owner, sequence);
+   assert(!strcmp(sequence, "71") && !server_session_capture_failed(raced_owner));
+   server_session_capture_close(raced_owner);
+}
+
 int main(void)
 {
    server_session_capture_t *absent = NULL;
    int captured = server_session_capture_retain_current(NULL, NULL, &absent);
    assert(!captured && !absent);
+   test_cancel_serializes_late_writer();
+   test_external_operator_cancel();
    test_registered_owner_recovery_hint();
    test_concurrent_owner();
    test_host_turn_generation_and_source_claims();

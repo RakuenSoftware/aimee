@@ -60,7 +60,6 @@
 #include "agent_help_data.h"
 int agent_load_config(agent_config_t *cfg);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* printf-append into buf at pos, returning the new pos clamped to [0, cap].
  * snprintf returns the would-be length, so the raw `pos += snprintf(...)` idiom
@@ -252,11 +251,37 @@ cJSON *tool_get_help(cJSON *args)
 
    if (!section_start)
    {
-      char errmsg[256];
-      snprintf(errmsg, sizeof(errmsg),
-               "unknown topic '%s'. Call get_help() with no args for topic list.", topic);
+      /* Name the topics here: the CLI's `aimee get-help` with no topic prints its
+       * own usage rather than this index, so "call it with no args" leads nowhere. */
+      size_t cap = 256 + strlen(topic) + agent_help_data_len;
+      char *errmsg = malloc(cap);
+      if (!errmsg)
+      {
+         free(doc);
+         return text_content("error: out of memory");
+      }
+      int n = snprintf(errmsg, cap, "unknown topic '%s'. Topics:", topic);
+      size_t pos = (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+      const char *sep = " ";
+      for (const char *q = (const char *)agent_help_data;
+           q < (const char *)agent_help_data + agent_help_data_len;)
+      {
+         const char *end = memchr(q, '\n', (const char *)agent_help_data + agent_help_data_len - q);
+         size_t linelen = end ? (size_t)(end - q)
+                              : (size_t)((const char *)agent_help_data + agent_help_data_len - q);
+         if (linelen > 3 && q[0] == '#' && q[1] == '#' && q[2] == ' ')
+         {
+            n = snprintf(errmsg + pos, cap - pos, "%s%.*s", sep, (int)(linelen - 3), q + 3);
+            if (n > 0 && (size_t)n < cap - pos)
+               pos += (size_t)n;
+            sep = ", ";
+         }
+         q = end ? end + 1 : q + linelen;
+      }
       free(doc);
-      return text_content(errmsg);
+      cJSON *content = text_content(errmsg);
+      free(errmsg);
+      return content;
    }
 
    cJSON *result = text_content(section_start);
@@ -1615,7 +1640,7 @@ cJSON *tool_job_start(cJSON *args)
    int added = 0;
    for (int i = 0; i < plan.step_count; i++)
    {
-      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "engineer") > 0)
+      if (db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", NULL, "", "engineer") > 0)
          added++;
    }
 
@@ -1845,6 +1870,21 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
       return text_content("error: session worktree is unavailable (chdir failed). Refusing to run "
                           "git operation on the main repository.");
    }
+   /* A clone runs in its cwd, which is not a repository yet, so the resolver above
+    * found no root there and left no directory bound. The command then reached
+    * the detached runner with the server's own home as its directory
+    * ("cd: /var/lib/aimee: No such file or directory") and cloned into whatever
+    * directory the runner happened to start in (2026-10-27). */
+   if (strcmp(tool, "git_clone") == 0 && mcp_git_bind_clone_cwd(args) < 0)
+   {
+      run_cmd_set_cwd(NULL);
+      (void)workspace_turn_scope_end(workspace_scope);
+      if (sid && sid[0])
+         session_id_clear_override();
+      free(mismatch_err);
+      return text_content("error: clone cwd is outside every registered workspace; register it "
+                          "first (`aimee workspace add <dir>`), or let `aimee git clone` do so");
+   }
    /* Resolve the handler + mutating-ness from the one git-tool table. git_verify
     * is not in the table (different handler signature); it is dispatched below. */
    git_tool_fn git_fn = NULL;
@@ -2043,8 +2083,8 @@ void mcp_session_register(server_conn_t *conn, const char *sid)
 {
    if (!conn || !sid || !sid[0] || !is_safe_id(sid))
       return;
-   db1_server_session_t existing;
-   if (db1_server_session_get(sid, &existing) == 0)
+   db1_server_session_owner_t existing;
+   if (db1_server_session_owner_get(sid, &existing) == 0)
       return; /* already registered */
    char principal[32];
    snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
@@ -2275,24 +2315,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       return rc;
    }
 
-   /* Delegate reply: forward to existing handler */
-   if (strcmp(tool, "delegate_reply") == 0)
-   {
-      cJSON *dreq = cJSON_CreateObject();
-      cJSON_AddStringToObject(dreq, "method", "delegate.reply");
-      cJSON *jid = cJSON_GetObjectItemCaseSensitive(jargs, "delegation_id");
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "content");
-      if (cJSON_IsString(jid))
-         cJSON_AddStringToObject(dreq, "delegation_id", jid->valuestring);
-      if (cJSON_IsString(jc))
-         cJSON_AddStringToObject(dreq, "content", jc->valuestring);
-      int rc = handle_delegate_reply(ctx, conn, dreq);
-      cJSON_Delete(dreq);
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return rc;
-   }
-
    /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
     * pipeline_* tool to its handler, which sends its own response on conn (like
     * roundtable_review/delegate). Capability is enforced against the matching
@@ -2362,7 +2384,17 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
    }
    if (!content)
-      content = mcp_gateway_tool_dispatch(tool, jargs);
+   {
+      cJSON *gateway_result = mcp_gateway_tool_dispatch(tool, jargs);
+      if (gateway_result)
+      {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(gateway_result, "isError")))
+            served_outcome("error", "tool_error");
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_ok(conn, gateway_result);
+      }
+   }
    if (!content)
       content = server_mcp_process_tool(tool, jargs);
    if (!content)

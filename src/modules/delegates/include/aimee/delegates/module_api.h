@@ -1078,10 +1078,11 @@ static inline int aimee_delegates_noopwrite_response_decode(const uint8_t *in, s
  * the coord job, and the task rows stays with the caller, which owns the
  * database. */
 
-#define AIMEE_DELEGATES_EVENT_LAUNCHPLAN          6675u
-#define AIMEE_DELEGATES_STAGE_LAUNCHPLAN          19u
-#define AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC  0x514c5044u /* "DPLQ" */
-#define AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC 0x534c5044u /* "DPLS" */
+#define AIMEE_DELEGATES_EVENT_LAUNCHPLAN         6675u
+#define AIMEE_DELEGATES_STAGE_LAUNCHPLAN         19u
+#define AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC 0x514c5044u /* "DPLQ" */
+#define AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC                                                  \
+   0x494c5044u /* "DPLI": canonical launch message IR */
 
 /* A bounded append cursor. Once it overflows it stays overflowed, so a caller
  * may build the whole request and check once at the end rather than after every
@@ -1225,6 +1226,8 @@ static inline int aimee_delegates_launchplan_response_begin(aimee_delegates_rd_t
 
 #define AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED (1u << 0)
 #define AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY  (1u << 1)
+/* Role policy only: empty report and no report-specific fact flags. */
+#define AIMEE_DELEGATES_REVIEW_POLICY_ONLY (1u << 2)
 
 #define AIMEE_DELEGATES_REVIEW_GUARDED        (1u << 0)
 #define AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS (1u << 1)
@@ -1240,7 +1243,11 @@ static inline int aimee_delegates_reviewev_request_encode(const char *role, cons
 {
    size_t role_len = role ? strlen(role) : 0;
    size_t response_len = response ? strlen(response) : 0;
-   if (!out || role_len > AIMEE_DELEGATES_REVIEW_ROLE_MAX)
+   unsigned known = AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED | AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY |
+                    AIMEE_DELEGATES_REVIEW_POLICY_ONLY;
+   if (!out || role_len > AIMEE_DELEGATES_REVIEW_ROLE_MAX || (flags & ~known) ||
+       ((flags & AIMEE_DELEGATES_REVIEW_POLICY_ONLY) &&
+        (flags != AIMEE_DELEGATES_REVIEW_POLICY_ONLY || response_len != 0)))
       return -1;
    size_t need = AIMEE_DELEGATES_REVIEWEV_HEADER_LEN + role_len + response_len;
    if (need > cap)

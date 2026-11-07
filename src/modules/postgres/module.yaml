@@ -33,6 +33,7 @@
     "server-go/modules/postgres/canonical_source_pages_test.go",
     "server-go/modules/postgres/checksum_test.go",
     "server-go/modules/postgres/health_test.go",
+    "server-go/modules/postgres/no_database_test.go",
     "server-go/modules/postgres/shared_database_test.go",
     "server-go/modules/postgres/shared_history_test.go",
     "server-go/modules/postgres/shared_legacy_history_test.go",
@@ -49,7 +50,8 @@
     "server-go/modules/postgres/sessions_test.go",
     "server-go/modules/postgres/local_session_test.go",
     "server-go/modules/postgres/runtime_policy_test.go",
-    "server-go/modules/postgres/operator_policy_test.go"
+    "server-go/modules/postgres/operator_policy_test.go",
+    "server-go/modules/postgres/history_page_completion_test.go"
   ],
   "public_headers": [
     "src/modules/postgres/include/aimee/postgres/module_api.h",

@@ -22,6 +22,10 @@ import sys
 import tempfile
 from typing import Any
 
+# The ring's include flag, relative or absolute, for any installation under the
+# build tree's deps/ouroboros-ring.
+RING_INCLUDE_FLAG = re.compile(r"-I\S*deps/ouroboros-ring/\S*")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BASE = "cccb1490560810a3da92691f381f9ab59040bb7c"
@@ -92,6 +96,19 @@ def build_files_match(candidate_commit: str) -> bool:
     if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
         return False
     candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
+    # Oct 29: the dead roadmap dispatch loop and its module directory were
+    # removed; roadmap.h, its one header, moved to src/kb. The probe includes
+    # nothing from it. Remove only that obsolete flag, and only while the
+    # directory is truly gone.
+    if (ROOT / "src/modules/roadmap").exists():
+        return False
+    candidate[0] = candidate[0].replace(" -Imodules/roadmap", "")
+    # Oct 29: the aimee-gateway delivery binary and src/gateway were retired.
+    # The probe includes nothing from it. Remove only that obsolete test
+    # include flag, and only while the directory is truly gone.
+    if (ROOT / "src/gateway").exists():
+        return False
+    candidate[1] = candidate[1].replace(" -Igateway", "")
     # KB_STORE retirement relocates the same knowledge headers and removes libpq
     # from native linking. This SQLite-backed probe has no PostgreSQL calls.
     # Normalize only those two reviewed changes; retain every other build input.
@@ -134,7 +151,23 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
                     "$(OBJDIR)/" + old, "$(OBJDIR)/" + replacement if replacement else "")
                 candidate[file] = candidate[file].replace(old, replacement)
     frozen_plan = build_plan(*candidate)
-    return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
+    # Oct 27: the ring moved to github.com/RakuenSoftware/ouroboros-ring and is
+    # linked as an installed package under build/deps/ouroboros-ring. Its include
+    # path replaced core/event_bus/include in C_FLAGS, and thin-client objects
+    # (platform, dstr) no longer carry it at all because CLIENT_C_FLAGS is fixed
+    # before the ring include is added. The probe's 42 sources include no ring
+    # header directly. Drop exactly the ring's include flag, wherever the
+    # installation it names lives, and the old core one.
+    # Oct 27: GCC builds add -fno-ipa-bit-cp to compile and LTO link (GCC 15.2
+    # miscompiles a live int parameter as constant 0). It disables one
+    # optimization pass and adds no input; drop exactly that token.
+    # Every other flag, input and command must still match.
+    def without_ring_include(plan: list[str]) -> list[str]:
+        return [" ".join(token for token in line.split()
+                         if token not in ("-Icore/event_bus/include", "-fno-ipa-bit-cp")
+                         and not RING_INCLUDE_FLAG.fullmatch(token))
+                for line in plan]
+    return without_ring_include(frozen_plan) == without_ring_include(build_plan(*current))
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.
@@ -369,7 +402,12 @@ def main() -> int:
         args.output.write_text(rendered)
     else:
         sys.stdout.write(rendered)
-    return 1 if args.assert_release_candidate and result["release_candidate_errors"] else 0
+    if args.assert_release_candidate and result["release_candidate_errors"]:
+        # The report may be written to a file CI never prints; say why here.
+        for error in result["release_candidate_errors"]:
+            print(f"validate_s1_release_candidate: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

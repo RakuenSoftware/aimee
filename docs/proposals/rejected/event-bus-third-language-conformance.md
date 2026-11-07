@@ -28,7 +28,7 @@ layouts are not in the specification's prose and the wire vectors cover frames o
 were read from the C public headers. That gap is closed. `src/tests/fixtures/bus/layout_vectors.tsv`,
 generated from the specification and the decision record rather than any header, freezes every layout
 a client needs, and the C, Go and Rust clients are each held to it in both directions. See
-[D11](../../dev/EVENT_BUS_DECISIONS.md#d11-the-rust-reference-client-is-a-third-independent-client).
+[D11](https://github.com/RakuenSoftware/ouroboros-ring/blob/main/spec/decisions.md#d11-the-rust-reference-client-is-a-third-independent-client).
 
 This file stays in `rejected/` because the pending-audit manifests record it there as the archived
 residual of the wire spec.

@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -19,15 +19,15 @@ const (
 	patchTaskRecordLen = 9*4 + patchStateLen*3 + patchNoteLen
 )
 
-func handlePatchCoord(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handlePatchCoord(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < patchReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != patchRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	taskCount := int(binary.LittleEndian.Uint32(request[8:12]))
 	if taskCount > patchMaxTasks {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	c := &economicsCursor{buf: request, at: patchReqHeaderLen}
@@ -46,15 +46,15 @@ func handlePatchCoord(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 			Result: c.str(resultLen),
 		}
 		if c.bad {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		tasks = append(tasks, task)
 	}
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	report := BuildPatchReport(tasks)
@@ -94,7 +94,7 @@ func handlePatchCoord(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		putFixed(rec[off+3*patchStateLen:], tr.Note)
 		response = append(response, rec...)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func boolInt(b bool) int {

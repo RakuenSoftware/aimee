@@ -111,7 +111,10 @@ char *kb_client_query_escape(const char *s)
 
 /* Graph storage is scripted here solely to qualify the real response producer's
  * integer wire encoding, not projection authorization or SQL transactionality. */
-int kb_store_is_initialized(void) { return 1; }
+int kb_store_is_initialized(void)
+{
+   return 1;
+}
 int64_t kb_store_code_projection_generation_create(const char *project)
 {
    assert(!strcmp(project, "p"));
@@ -149,7 +152,8 @@ int kb_store_code_projection_communities_replace(int64_t generation, const char 
    assert(!strcmp(project, "p") && generation == g_producer_generation && count == 0);
    return 0;
 }
-int kb_graph_communities(const kb_graph_edge_t *edges, int count, kb_graph_community_t *out, int max)
+int kb_graph_communities(const kb_graph_edge_t *edges, int count, kb_graph_community_t *out,
+                         int max)
 {
    (void)edges;
    (void)count;
@@ -494,10 +498,10 @@ static void test_scan_refusal_preserves_kb_error(void)
 
 static void test_exact_retained_integer_tokens(void)
 {
-   const char *valid[] = {"9007199254740993", "9223372036854775807",
-                          "-9223372036854775808", "-9007199254740993", "0"};
+   const char *valid[] = {"9007199254740993", "9223372036854775807", "-9223372036854775808",
+                          "-9007199254740993", "0"};
    const int64_t expected[] = {INT64_C(9007199254740993), INT64_MAX, INT64_MIN,
-                              -INT64_C(9007199254740993), 0};
+                               -INT64_C(9007199254740993), 0};
    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
    {
       cJSON *number = cJSON_Parse(valid[i]);
@@ -514,8 +518,15 @@ static void test_exact_retained_integer_tokens(void)
       cJSON_Delete(encoded);
       cJSON_Delete(number);
    }
-   const char *invalid[] = {"9223372036854775808", "-9223372036854775809", "1.0",
-                            "1e0", "-0", "\"+1\"", "\"01\"", "\"-0\"", "null"};
+   const char *invalid[] = {"9223372036854775808",
+                            "-9223372036854775809",
+                            "1.0",
+                            "1e0",
+                            "-0",
+                            "\"+1\"",
+                            "\"01\"",
+                            "\"-0\"",
+                            "null"};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
    {
       cJSON *number = cJSON_Parse(invalid[i]);
@@ -580,7 +591,8 @@ static void test_blast_generations_survive_actual_transport(void)
    g_next_get_response = original_wire;
    cJSON *response = cJSON_Parse(g_next_get_response);
    char why[64];
-   cJSON_ReplaceItemInObjectCaseSensitive(response, "generation", cJSON_CreateNumber(9007199254740992.0));
+   cJSON_ReplaceItemInObjectCaseSensitive(response, "generation",
+                                          cJSON_CreateNumber(9007199254740992.0));
    assert(!kb_client_index_blast_response_valid(response, why, sizeof(why)));
    const char *invalid[] = {"0", "-1", "1.5", "1e0", "9223372036854775808"};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
@@ -592,14 +604,18 @@ static void test_blast_generations_survive_actual_transport(void)
       free(wire);
    }
    cJSON_ReplaceItemInObjectCaseSensitive(response, "generation", cJSON_Parse("9007199254740993"));
-   cJSON *dependency = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependency_edges"), 0);
-   cJSON *dependent = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependent_edges"), 0);
+   cJSON *dependency =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependency_edges"), 0);
+   cJSON *dependent =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(response, "dependent_edges"), 0);
    cJSON *edges[] = {dependency, dependent};
    for (size_t i = 0; i < sizeof(edges) / sizeof(edges[0]); ++i)
    {
-      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation", cJSON_Parse("9223372036854775808"));
+      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation",
+                                             cJSON_Parse("9223372036854775808"));
       assert(!kb_client_index_blast_response_valid(response, why, sizeof(why)));
-      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation", cJSON_Parse("9007199254740993"));
+      cJSON_ReplaceItemInObjectCaseSensitive(edges[i], "generation",
+                                             cJSON_Parse("9007199254740993"));
       assert(kb_client_index_blast_response_valid(response, why, sizeof(why)));
    }
    cJSON_Delete(response);
@@ -608,15 +624,15 @@ static void test_blast_generations_survive_actual_transport(void)
 
 static void test_graph_sync_generation_roundtrip(void)
 {
-   const char *valid[] = {"7", "9007199254740993", "9223372036854775807",
-                          "\"9007199254740993\""};
-   const int64_t expected[] = {7, INT64_C(9007199254740993), INT64_MAX,
-                              INT64_C(9007199254740993)};
+   const char *valid[] = {"7", "9007199254740993", "9223372036854775807", "\"9007199254740993\""};
+   const int64_t expected[] = {7, INT64_C(9007199254740993), INT64_MAX, INT64_C(9007199254740993)};
    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
    {
       char response[256];
-      snprintf(response, sizeof(response), "{\"status\":\"ok\",\"project\":\"p\","
-               "\"generation_id\":%s,\"edge_count\":0}", valid[i]);
+      snprintf(response, sizeof(response),
+               "{\"status\":\"ok\",\"project\":\"p\","
+               "\"generation_id\":%s,\"edge_count\":0}",
+               valid[i]);
       g_next_action_response = response;
       kb_client_graph_sync_result_t out;
       assert(kb_client_graph_sync_code("p", &out) == 0 && out.ok &&
@@ -635,8 +651,10 @@ static void test_graph_sync_generation_roundtrip(void)
       cJSON_AddStringToObject(request, "project", "p");
       assert(handle_graph_sync_code(NULL, NULL, request) == 0);
       cJSON *sent = cJSON_Parse(g_server_wire);
-      assert(sent && jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
-                                             &reread) && reread == expected[i]);
+      assert(sent &&
+             jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
+                                     &reread) &&
+             reread == expected[i]);
       cJSON_Delete(sent);
       cJSON_Delete(request);
       /* Full real KB response producer -> actual client -> real server handler. */
@@ -646,8 +664,10 @@ static void test_graph_sync_generation_roundtrip(void)
       cJSON_AddStringToObject(request, "project", "p");
       assert(handle_graph_sync_code(NULL, NULL, request) == 0);
       sent = cJSON_Parse(g_server_wire);
-      assert(sent && jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
-                                             &reread) && reread == expected[i]);
+      assert(sent &&
+             jo_read_i64_token_exact(cJSON_GetObjectItemCaseSensitive(sent, "generation_id"),
+                                     &reread) &&
+             reread == expected[i]);
       cJSON_Delete(sent);
       cJSON_Delete(request);
       g_actual_graph_producer = 0;
@@ -660,8 +680,10 @@ static void test_graph_sync_generation_roundtrip(void)
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
    {
       char response[256];
-      snprintf(response, sizeof(response), "{\"status\":\"ok\",\"generation_id\":%s,"
-               "\"edge_count\":0}", invalid[i]);
+      snprintf(response, sizeof(response),
+               "{\"status\":\"ok\",\"generation_id\":%s,"
+               "\"edge_count\":0}",
+               invalid[i]);
       g_next_action_response = response;
       kb_client_graph_sync_result_t out;
       assert(kb_client_graph_sync_code("p", &out) == -1 && !out.ok);

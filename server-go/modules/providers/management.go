@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Resources is the core's existing credential and execution storage boundary.
@@ -26,7 +26,6 @@ type Manager struct {
 	egress    egress.Executor
 	config    Config
 	metadata  *Metadata
-	worker    *probeWorker
 }
 
 func NewManager(store *Store, resources Resources) *Manager {
@@ -41,16 +40,16 @@ type Request struct {
 	credentials        *[]credentialChange
 }
 
-func (m *Manager) Handle(inv bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (m *Manager) Handle(inv ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	if inv.StageID != StageManage {
 		return Rules(inv, body)
 	}
 	if inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	var req Request
 	if json.Unmarshal(body, &req) != nil || req.Operation == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inv.Remaining(30*time.Second))
 	defer cancel()
@@ -60,9 +59,9 @@ func (m *Manager) Handle(inv bus.ModuleInvocation, body []byte) ([]byte, bus.Mod
 	}
 	b, err := json.Marshal(reply)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return b, bus.ModuleStatusOK
+	return b, ring.ModuleStatusOK
 }
 func (m *Manager) credential(ctx context.Context, req Request, name, key string) error {
 	if key == "" || strings.HasPrefix(key, "$") {
@@ -126,6 +125,16 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 		}
 		return reply, err
 	}
+	var codexDefault object
+	var codexRevision string
+	if req.Operation == "model.register_subscription" && str(req.Arguments, "vendor") == "codex" {
+		var existing object
+		var err error
+		codexDefault, codexRevision, existing, err = m.prepareCodexSubscription(ctx)
+		if err != nil || existing != nil {
+			return existing, err
+		}
+	}
 	changes := []credentialChange{}
 	req.credentials = &changes
 	result, err := m.store.transactionBeforeCommit(!read, func(root object) (reply object, err error) {
@@ -137,7 +146,15 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 		}()
 		switch req.Operation {
 		case "model.register_subscription":
-			return subscription(root, str(req.Arguments, "vendor"))
+			if str(req.Arguments, "vendor") == "codex" {
+				if find(rows(root, "models"), "codex") != nil {
+					return object{"status": "ok", "agent": "codex"}, nil
+				}
+				if revision(root) != codexRevision {
+					return nil, errors.New("configuration changed during Codex model discovery; retry registration")
+				}
+			}
+			return subscription(root, str(req.Arguments, "vendor"), codexDefault)
 		case "snapshot.load":
 			config := copyObject(root)
 			config["revision"] = revision(root)
@@ -228,7 +245,13 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 						count++
 					}
 				}
-				out = append(out, object{"name": str(p, "name"), "provider": str(p, "provider"), "endpoint": str(p, "endpoint"), "auth_type": str(p, "auth_type"), "model_count": count})
+				view := object{"name": str(p, "name"), "provider": str(p, "provider"), "endpoint": str(p, "endpoint"), "auth_type": str(p, "auth_type"), "model_count": count}
+				for _, field := range []string{"backend", "cli_kind", "cli_cmd", "session_reuse"} {
+					if value, present := p[field]; present {
+						view[field] = value
+					}
+				}
+				out = append(out, view)
 			}
 			return object{"status": "ok", "providers": out}, nil
 		case "provider.save_connection":
@@ -301,7 +324,19 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 			return nil, errors.New("remove attached models before changing provider type")
 		}
 	}
+	previousCommand := str(p, "cli_cmd")
+	previousTransport := copyObject(p)
+	if normalizeModel(previousTransport) == nil {
+		previousCommand = str(previousTransport, "cli_cmd")
+	}
 	key := str(a, "api_key")
+	transport := copyObject(p)
+	transport["provider"], transport["endpoint"], transport["auth_type"] = protocol, endpoint, auth
+	if err := applyConnectionTransport(transport, a); err != nil {
+		return nil, err
+	}
+	_, commandRequested := a["cli_cmd"]
+	updateInheritedCommand := commandRequested && previousCommand != str(transport, "cli_cmd")
 	if err := m.credential(ctx, req, name, key); err != nil {
 		return nil, err
 	}
@@ -311,8 +346,20 @@ func (m *Manager) saveProvider(ctx context.Context, req Request, root object) (o
 		delete(p, "api_key_ref")
 	}
 	p["provider"], p["endpoint"], p["auth_type"] = protocol, endpoint, auth
+	for _, field := range []string{"backend", "cli_kind", "cli_cmd", "session_reuse"} {
+		if value, ok := transport[field]; ok {
+			p[field] = value
+		} else {
+			delete(p, field)
+		}
+	}
 	for _, model := range rows(root, "models") {
 		if owns(p, model) {
+			// Explicit connection edits update inherited commands. Distinct legacy
+			// per-model executables remain intact during reads and unrelated edits.
+			if updateInheritedCommand && str(model, "cli_cmd") == previousCommand {
+				delete(model, "cli_cmd")
+			}
 			applyConnection(model, p)
 		}
 	}
@@ -502,6 +549,19 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 			}
 		}
 	default:
+		var injectRespond *bool
+		if raw, ok := opts["inject-respond-tool"]; ok {
+			var value bool
+			switch raw {
+			case "on", "true", "1":
+				value = true
+			case "off", "false", "0":
+				value = false
+			default:
+				return nil, errors.New("inject-respond-tool must be on or off")
+			}
+			injectRespond = &value
+		}
 		if v, ok := opts["model"]; ok && v != str(model, "model") {
 			delete(model, "competence")
 		}
@@ -540,11 +600,17 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 		}
 		for option, field := range map[string]string{"tools": "tools_enabled", "enabled": "enabled", "primary-only": "primary_only"} {
 			if v, ok := opts[option]; ok {
-				model[field] = v == "on" || v == "true" || v == "1"
-				if option == "tools" {
-					model["inject_respond_tool"] = model[field]
+				value := v == "on" || v == "true" || v == "1"
+				// Full-dialog saves resend tools; preserve the independent respond
+				// policy unless the operator actually changes tool availability.
+				if option == "tools" && value != boolean(model, field, true) {
+					model["inject_respond_tool"] = value
 				}
+				model[field] = value
 			}
+		}
+		if injectRespond != nil {
+			model["inject_respond_tool"] = *injectRespond
 		}
 		for _, field := range []string{"roles", "personas", "exec-roles"} {
 			if v, ok := opts[field]; ok {

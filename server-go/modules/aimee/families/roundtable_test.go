@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- the column spec is the contract -------------------------------------------
@@ -307,8 +307,8 @@ func rtCall(t *testing.T, db store.DB, op uint32, fields []string) (uint32, []st
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	response, status := Roundtable.Handler(db)(bus.ModuleInvocation{StageID: StageRoundtable}, frame)
-	if status != bus.ModuleStatusOK {
+	response, status := Roundtable.Handler(db)(ring.ModuleInvocation{StageID: StageRoundtable}, frame)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("wire status = %v, want OK", status)
 	}
 	inBand, cells, err := wire.DecodeFields(response)

@@ -14,9 +14,10 @@
  * It must also accept a partial non-NULL purpose on prepare failure. Neither
  * callbacks nor caller may infer a successful module mutation from admission.
  */
-extern int aimee_module_owned_user_source_prepare_v1(const char *headers,
-    const char *opaque_body, size_t body_length, char **frame, size_t *frame_length,
-    void **purpose) __attribute__((weak));
+extern int aimee_module_owned_user_source_prepare_v1(const char *headers, const char *opaque_body,
+                                                     size_t body_length, char **frame,
+                                                     size_t *frame_length, void **purpose)
+    __attribute__((weak));
 extern void aimee_module_owned_user_source_release_v1(void *purpose) __attribute__((weak));
 /* Separate completed-action contract. Zero declines selection WITHOUT effect
  * and with empty output; one supplies bounded completed DATA; two supplies
@@ -28,7 +29,7 @@ extern void aimee_module_owned_user_source_release_v1(void *purpose) __attribute
  * == length+1 <=16385. The host never wipes or reads an invalid length. Callback
  * must use scoped cleanup on
  * cancellation/exit and must preserve the caller's cancellation state/type. */
-extern int aimee_module_owned_user_action_v1(const char *, const char *, size_t,
-    char **, size_t *, size_t *) __attribute__((weak));
+extern int aimee_module_owned_user_action_v1(const char *, const char *, size_t, char **, size_t *,
+                                             size_t *) __attribute__((weak));
 extern const unsigned aimee_owned_user_action_handoff_contract_v1;
 #endif

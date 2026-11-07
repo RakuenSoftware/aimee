@@ -11,9 +11,6 @@ typedef struct server_native_cache server_native_cache_t;
  * Begin verifies the durable source and consumes any resume checkpoint before
  * returning a handle. Missing/mismatched context or prefix selects fresh full
  * adoption; store failure/corruption and an outstanding claim refuse. */
-server_native_cache_t *server_native_cache_begin(const char *session, const char *actor,
-                                                 const char *turn, const char *harness,
-                                                 const char *scope, const aimee_request_t *request);
 /* Qualified ownership is host-supplied; publish durably records the exact
  * intended claim before its atomic DB registration. epoch "0" preserves the
  * original cache namespace; later epochs isolate every context in the directory. */
@@ -31,7 +28,6 @@ server_native_cache_t *server_native_cache_begin_epoch(const char *session, cons
                                                        const server_native_cache_owner_t *owner);
 int server_native_cache_epoch_binding(const char *binding, const char *epoch, char out[65]);
 cJSON *server_native_cache_claim_json(const server_native_cache_t *cache);
-const char *server_native_cache_metadata_key(const server_native_cache_t *cache);
 const char *server_native_cache_resume(const server_native_cache_t *cache);
 int server_native_cache_history_offset(const server_native_cache_t *cache);
 /* Call after the child has exited and the source owner durably completed the
@@ -42,13 +38,4 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
  * canonical source history. Close alone leaves an unresolved claim fail-closed. */
 int server_native_cache_abort(server_native_cache_t *cache);
 void server_native_cache_close(server_native_cache_t *cache);
-/* Recovery after losing the in-memory claim. The host must independently prove
- * the exact source turn's native child is quiescent before calling. Requires its
- * durable terminal lifecycle and CAS-invalidates only that turn's pending or
- * finishing revision. Never publishes/resumes a native handle. Same attested
- * profile/context as the abandoned request. Returns 0 recovered, 1 no unresolved
- * claim, -1 refusal/unavailable/stale; canonical source history is retained. */
-int server_native_cache_recover(const char *session, const char *actor, const char *turn,
-                                const char *harness, const char *scope,
-                                const aimee_request_t *request);
 #endif

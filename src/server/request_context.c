@@ -106,6 +106,11 @@ void request_context_clear(void)
    g_req_ctx_set = 0;
 }
 
+const char *request_context_runner_channel(void)
+{
+   return g_req_ctx_set ? g_req_ctx.runner_channel : "";
+}
+
 const char *request_context_idempotency_key(void)
 {
    return g_req_ctx_set ? g_req_ctx.idempotency_key : "";

@@ -1,3 +1,4 @@
+#include "db1_client/agent_jobs.h"
 #include "aimee.h"
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
@@ -178,13 +179,22 @@ agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope)
    request_cancel_scope = scope;
    return previous;
 }
-int agent_get_durable_job_id(void)
+int fixture_job_get(int id, db1_agent_job_t *out)
 {
-   return 0;
+   (void)id;
+   (void)out;
+   abort();
 }
-void agent_set_durable_job(int job)
+void fixture_job_free(db1_agent_job_t *out)
 {
-   (void)job;
+   (void)out;
+}
+void fixture_job_heartbeat_ext(int id, const char *tool, int count)
+{
+   (void)id;
+   (void)tool;
+   (void)count;
+   abort();
 }
 
 /* Session-file persistence is outside this framing-only fixture. */

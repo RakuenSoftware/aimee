@@ -145,43 +145,6 @@ static void test_mdl_config_defaults(void)
    printf("  PASS  test_mdl_config_defaults\n");
 }
 
-static void test_mdl_drift_fires(void)
-{
-   /* prompt_bump_drift_fires fixture: compact pre-bump vs verbose hedged post-bump.
-    * The post-bump candidate is much longer/more expensive to compress relative to
-    * the evidence, so drift fraction should exceed 0.30. */
-   const char *evidence =
-       "Configuration defaults are loaded from YAML. Overrides can be applied via environment "
-       "variables or a runtime config patch.";
-   const char *pre_candidates[] = {
-       "Config: YAML defaults, env-var overrides, runtime patch.",
-   };
-   const char *post_candidates[] = {
-       "It appears that configuration defaults may potentially be loaded from YAML files, with "
-       "possible overrides potentially applicable via environment variables or a runtime config "
-       "patch, if supported.",
-   };
-   int rc = kb_mdl_drift_alert(pre_candidates, 1, post_candidates, 1, evidence, 0.30);
-   assert(rc == 1);
-   printf("  PASS  test_mdl_drift_fires\n");
-}
-
-static void test_mdl_drift_stable(void)
-{
-   /* prompt_bump_stable_no_alert fixture: both pre and post candidates are compact
-    * and similar in MDL cost; drift fraction should be below 0.30. */
-   const char *evidence = "The embedding model is text-embedding-ada-002.";
-   const char *pre_candidates[] = {
-       "Embedding model: text-embedding-ada-002.",
-   };
-   const char *post_candidates[] = {
-       "Uses text-embedding-ada-002 for embeddings.",
-   };
-   int rc = kb_mdl_drift_alert(pre_candidates, 1, post_candidates, 1, evidence, 0.30);
-   assert(rc == 0);
-   printf("  PASS  test_mdl_drift_stable\n");
-}
-
 int main(void)
 {
    printf("=== test_kb_mdl ===\n");
@@ -193,8 +156,6 @@ int main(void)
    test_mdl_select_respects_agreement_cluster();
    test_mdl_select_rejects_ambiguous_clusters();
    test_mdl_config_defaults();
-   test_mdl_drift_fires();
-   test_mdl_drift_stable();
    printf("All kb_mdl tests passed.\n");
    return 0;
 }

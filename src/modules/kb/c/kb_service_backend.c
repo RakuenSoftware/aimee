@@ -963,8 +963,7 @@ static void route_curiosity_build_question(const curiosity_item_t *it, char *out
       return;
    /* Keep the established byte-limited question, including its truncation
     * order. The full evidence is forwarded separately to the memory owner. */
-   const char *parts[] = {prefix, target,
-                          include_evidence && evidence[0] ? ": " : "",
+   const char *parts[] = {prefix, target, include_evidence && evidence[0] ? ": " : "",
                           include_evidence ? evidence : ""};
    size_t used = 0;
    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)

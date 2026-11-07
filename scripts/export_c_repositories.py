@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the versioned C core and language-specific module repositories.
+"""Materialize the language-specific module repositories.
 
 The monorepo remains a checked vendored mirror during the migration.  This
 export is deliberately fail-closed: it only writes into a new output directory,
@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from pathlib import PurePosixPath
 import re
 import shutil
 import subprocess
@@ -31,37 +30,6 @@ CORE_VERSION_FILE = ROOT / "src/core/VERSION"
 REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
-C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
-# Optional validated preprocessor switches let a descriptor reproduce its
-# audited standalone mode. Third-party sources a module compiles but does not
-# own are also optional; they remain restricted to src/vendor/ so "not owned"
-# cannot quietly mean "owned by somebody else".
-C_BUILD_OPTIONAL_KEYS = {
-    "compile_definitions", "generated_headers", "header_dependencies", "shared_sources",
-    "vendor_sources",
-}
-VENDOR_ROOT = "src/vendor/"
-# First-party utilities that belong to no module and that several compile.
-# The same rule vendor_sources follows -- one copy, owned by nobody, compiled by
-# whoever needs it -- applied to code we wrote. The list is explicit rather than
-# a directory prefix because "shared" must stay a decision somebody made, not a
-# door onto the core tree: a module reaching for storage or config through here
-# would be linking the daemon back together one file at a time.
-#
-# A copy would be the alternative, and a copy of a growable string is not free:
-# KB_STORE already promoted its own from src/dstr.c, and a fix to one is silently not
-# a fix to the others.
-SHARED_SOURCES = ("src/dstr.c",)
-BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
-C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-CMAKE_TARGET_PACKAGES = {
-    "OpenSSL::Crypto": "OpenSSL",
-    "OpenSSL::SSL": "OpenSSL",
-    "Threads::Threads": "Threads",
-    "ZLIB::ZLIB": "ZLIB",
-}
-
-
 class ExportError(RuntimeError):
     """An operator-readable export failure."""
 
@@ -94,6 +62,16 @@ def copy_file(relative: str, destination: Path) -> None:
     target = destination / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
+
+
+def notification_grant(module_id: str, contract: dict[str, object]) -> tuple[str, str]:
+    """A process's publish= and subscribe= grant lines: the change notifications
+    it announces, and those it is named a subscriber of."""
+    document = load_json(process_contracts.CONTRACTS)
+    publish = ",".join(str(kind) for kind in process_contracts.notification_kinds(contract))
+    subscribe = ",".join(
+        str(kind) for kind in process_contracts.subscriptions(document).get(module_id, []))
+    return publish, subscribe
 
 
 def write_text(path: Path, value: str) -> None:
@@ -158,78 +136,6 @@ def core_files() -> list[Path]:
     return files
 
 
-def export_core(output_root: Path, timestamp: str) -> dict[str, object]:
-    repository = output_root / "aimee-core-c"
-    repository.mkdir()
-    shutil.copytree(ROOT / "src/core", repository, dirs_exist_ok=True)
-    shutil.copytree(ROOT / "examples/c-connection-client", repository / "examples/connection-client")
-    shutil.copytree(ROOT / "examples/c-event-bus-module", repository / "examples/event-bus-module")
-    shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
-    shutil.copy2(ROOT / "NOTICE", repository / "NOTICE")
-    version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-    for example in ("connection-client", "event-bus-module"):
-        cmake_file = repository / "examples" / example / "CMakeLists.txt"
-        cmake_text = cmake_file.read_text(encoding="utf-8")
-        cmake_text = re.sub(
-            r"find_package\(aimee-core [^) ]+ EXACT CONFIG REQUIRED\)",
-            f"find_package(aimee-core {version} EXACT CONFIG REQUIRED)",
-            cmake_text,
-        )
-        write_text(cmake_file, cmake_text)
-    write_text(
-        repository / "README.md",
-        f"""# Aimee C core
-
-Version `{version}` is the single C implementation of connection, TLS/mTLS,
-Bearer authentication, deadlines/cancellation, and HTTP framing used by the
-thin client, server, and KB.  On Linux it also provides the local shared-memory
-event bus used independently inside each server or KB container.
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cmake --install build --prefix /opt/aimee-core
-```
-""",
-    )
-    write_text(
-        repository / ".github/workflows/ci.yml",
-        """name: core-c
-on: [push, pull_request]
-permissions:
-  contents: read
-jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PWD/prefix\"
-        shell: bash
-      - run: cmake --build build --config Release --parallel 2 && cmake --install build --config Release
-        shell: bash
-      - run: cmake -S examples/connection-client -B consumer -DCMAKE_PREFIX_PATH=\"$PWD/prefix\" && cmake --build consumer --config Release --parallel 2
-        shell: bash
-      - if: runner.os == 'Linux'
-        run: cmake -S examples/event-bus-module -B module -DCMAKE_PREFIX_PATH=\"$PWD/prefix\" && cmake --build module --config Release --parallel 2
-        shell: bash
-""",
-    )
-    remote = f"{REMOTE_ROOT}/aimee-core-c.git"
-    commit = initialize_repository(repository, remote, timestamp, version)
-    return {
-        "id": "aimee-core-c",
-        "repository": remote,
-        "ref": f"v{version}",
-        "version": version,
-        "commit": commit,
-        "source_sha256": digest_files(core_files()),
-    }
-
-
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
     """Return descriptor-owned source-tree inputs for the module repository."""
     result = [f"src/modules/{module_id}/module.yaml"]
@@ -239,379 +145,14 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
         result.extend(values)
-    build = descriptor.get("c_build")
-    if isinstance(build, dict):
-        for header in c_generated_headers(module_id, build):
-            entries = header["entries"]
-            assert isinstance(entries, list)
-            result.extend(str(entry["source"]) for entry in entries)
     if len(result) != len(set(result)):
         raise ExportError(f"{module_id}: duplicate owned file")
     return result
 
 
 def module_repository_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
-    """Return owned files plus explicit non-owned standalone build inputs."""
-    owned = module_owned_files(module_id, descriptor)
-    build = descriptor.get("c_build")
-    dependencies = c_header_dependencies(module_id, build) if isinstance(build, dict) else []
-    result = [*owned, *dependencies]
-    if len(result) != len(set(result)):
-        raise ExportError(f"{module_id}: duplicate repository file")
-    return result
-
-
-NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-
-def c_process_init_symbol(module_id: str, descriptor: dict) -> str | None:
-    """The symbol the process must call before it serves, if it declares one.
-
-    A module owning process-wide state -- an open database, a cache -- has to
-    build it before the runtime registers its stages. Declaring the symbol here
-    rather than hard-coding a call keeps the generated main the same shape for
-    every module, and makes "this module needs setting up" a reviewable line in
-    its descriptor instead of something the reader has to infer from absence.
-    """
-    symbol = descriptor.get("c_init")
-    if symbol is None:
-        return None
-    if not isinstance(symbol, str) or not NAME_PATTERN.fullmatch(symbol):
-        raise ExportError(f"{module_id}: c_init must be a C identifier")
-    return symbol
-
-
-def module_main(
-    module_id: str,
-    principal_ref: int,
-    stages: list[dict[str, object]],
-    has_handler: bool = False,
-    init_symbol: str | None = None,
-) -> str:
-    entries = "\n".join(
-        f"   {{{stage['event_kind']}u, {stage['id']}u}},"
-        for stage in stages
-    )
-    handler_declaration = """
-extern aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *, const uint8_t *, uint32_t, uint8_t *, uint32_t,
-    uint32_t *, void *);
-""" if has_handler else ""
-    handler_value = "aimee_module_handler" if has_handler else "NULL"
-    # A module that owns process-wide state has to open it before it serves.
-    # Without this the process attaches, registers its stages and answers every
-    # one of them against an unopened store -- which reads to a caller as "the
-    # row is not there" rather than "this module cannot serve", so the failure
-    # is invisible exactly where it matters.
-    init_declaration = f"""
-extern int {init_symbol}(void);
-""" if init_symbol else ""
-    init_call = f"""   if ({init_symbol}() != 0)
-   {{
-      fprintf(stderr, "{module_id}: {init_symbol} failed; refusing to serve\\n");
-      return 1;
-   }}
-""" if init_symbol else ""
-    return f"""#include <aimee/core/event_bus/module_runtime.h>
-
-#include <stdio.h>
-{handler_declaration}{init_declaration}
-
-static const aimee_module_stage_t stages[] = {{
-{entries}
-}};
-
-int main(int argc, char **argv)
-{{
-   if (argc != 2)
-   {{
-      fprintf(stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", argv[0]);
-      return 2;
-   }}
-{init_call}   const aimee_module_process_config_t config = {{
-       .socket_path = argv[1],
-       .module_name = "{module_id}",
-       .principal_class = {PRINCIPAL_CLASS}u,
-       .principal_ref = {principal_ref}u,
-       .stages = stages,
-       .stage_count = sizeof stages / sizeof stages[0],
-       .handler = {handler_value},
-   }};
-   return aimee_module_process_run(&config);
-}}
-"""
-
-
-def c_header_dependencies(module_id: str, build: dict[str, object]) -> list[str]:
-    """Return validated non-owned headers copied into an isolated C export."""
-    dependencies = build.get("header_dependencies", [])
-    if not isinstance(dependencies, list) or not all(
-            isinstance(item, str) for item in dependencies):
-        raise ExportError(f"{module_id}: c_build.header_dependencies must be a string array")
-    if dependencies != sorted(set(dependencies)):
-        raise ExportError(
-            f"{module_id}: c_build.header_dependencies must be sorted and unique")
-    module_prefix = f"src/modules/{module_id}/"
-    for dependency in dependencies:
-        pure = PurePosixPath(dependency)
-        if (not dependency.startswith("src/") or "\\" in dependency or pure.is_absolute() or
-                "." in pure.parts or ".." in pure.parts or
-                pure.as_posix() != dependency or pure.suffix != ".h"):
-            raise ExportError(f"{module_id}: unsafe header dependency {dependency!r}")
-        if dependency.startswith(module_prefix):
-            raise ExportError(
-                f"{module_id}: module-local header dependency {dependency!r} must be owned")
-    return list(dependencies)
-
-
-def c_generated_headers(module_id: str, build: dict[str, object]) -> list[dict[str, object]]:
-    """Return validated deterministic text-header declarations."""
-    generated = build.get("generated_headers", [])
-    if not isinstance(generated, list):
-        raise ExportError(f"{module_id}: c_build.generated_headers must be an array")
-    result: list[dict[str, object]] = []
-    previous_output = ""
-    for index, header in enumerate(generated):
-        if not isinstance(header, dict) or set(header) != {"entries", "output"}:
-            raise ExportError(f"{module_id}: generated header {index} has invalid keys")
-        output = header["output"]
-        pure_output = PurePosixPath(output) if isinstance(output, str) else None
-        if (not isinstance(output, str) or "\\" in output or output <= previous_output or
-                pure_output is None or pure_output.name != output or pure_output.suffix != ".h"):
-            raise ExportError(
-                f"{module_id}: generated header outputs must be sorted unique .h basenames")
-        previous_output = output
-        entries = header["entries"]
-        if not isinstance(entries, list) or not entries:
-            raise ExportError(f"{module_id}: {output} entries must be a nonempty array")
-        parsed: list[dict[str, str]] = []
-        previous_entry: tuple[str, str] | None = None
-        seen_symbols: set[str] = set()
-        for entry in entries:
-            if not isinstance(entry, dict) or set(entry) != {"source", "symbol"}:
-                raise ExportError(f"{module_id}: {output} entry has invalid keys")
-            source, symbol = entry["source"], entry["symbol"]
-            pure_source = PurePosixPath(source) if isinstance(source, str) else None
-            if (not isinstance(source, str) or not source or "\\" in source or
-                    pure_source is None or pure_source.is_absolute() or
-                    "." in pure_source.parts or ".." in pure_source.parts or
-                    pure_source.as_posix() != source):
-                raise ExportError(f"{module_id}: unsafe generated input {source!r}")
-            if not isinstance(symbol, str) or not C_DEFINE.fullmatch(symbol):
-                raise ExportError(f"{module_id}: unsafe generated symbol {symbol!r}")
-            key = (symbol, source)
-            if previous_entry is not None and key <= previous_entry:
-                raise ExportError(f"{module_id}: {output} entries must be sorted and unique")
-            if symbol in seen_symbols:
-                raise ExportError(f"{module_id}: {output} symbols must be unique")
-            previous_entry = key
-            seen_symbols.add(symbol)
-            parsed.append({"source": source, "symbol": symbol})
-        result.append({"output": output, "entries": parsed})
-    return result
-
-
-def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
-        list[str], list[str], list[str], list[dict[str, object]], list[str], list[str]]:
-    """Return validated C sources, includes, definitions, codegen, pkg-config, and links."""
-    sources = descriptor.get("sources")
-    if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
-        raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
-    c_sources = [item for item in sources if PurePosixPath(item).suffix == ".c"]
-    if len(c_sources) != len(sources):
-        raise ExportError(f"{module_id}: C process sources must all be .c files")
-    if c_sources != sorted(set(c_sources)):
-        raise ExportError(f"{module_id}: C process sources must be sorted and unique")
-    build = descriptor.get("c_build")
-    if not isinstance(build, dict) or not C_BUILD_KEYS <= set(build) or \
-            not set(build) <= C_BUILD_KEYS | C_BUILD_OPTIONAL_KEYS:
-        raise ExportError(f"{module_id}: C process must declare exact c_build fields")
-    vendored = build.get("vendor_sources", [])
-    if not isinstance(vendored, list) or not all(isinstance(item, str) for item in vendored):
-        raise ExportError(f"{module_id}: c_build.vendor_sources must be a string array")
-    if vendored != sorted(set(vendored)):
-        raise ExportError(f"{module_id}: c_build.vendor_sources must be sorted and unique")
-    for entry in vendored:
-        pure = PurePosixPath(entry)
-        if (not entry.startswith(VENDOR_ROOT) or pure.is_absolute() or ".." in pure.parts or
-                pure.suffix != ".c" or pure.as_posix() != entry):
-            raise ExportError(
-                f"{module_id}: vendor_sources entry {entry!r} must be a .c file under "
-                f"{VENDOR_ROOT}; anything else is a source some module owns")
-
-    shared = build.get("shared_sources", [])
-    if not isinstance(shared, list) or not all(isinstance(item, str) for item in shared):
-        raise ExportError(f"{module_id}: c_build.shared_sources must be a string array")
-    if shared != sorted(set(shared)):
-        raise ExportError(f"{module_id}: c_build.shared_sources must be sorted and unique")
-    for entry in shared:
-        if entry not in SHARED_SOURCES:
-            raise ExportError(
-                f"{module_id}: shared_sources entry {entry!r} is not one of the shared "
-                f"first-party utilities ({', '.join(SHARED_SOURCES)}); anything else is a "
-                f"source some module owns")
-
-    definitions = build.get("compile_definitions", [])
-    if not isinstance(definitions, list) or not all(
-            isinstance(item, str) for item in definitions):
-        raise ExportError(f"{module_id}: c_build.compile_definitions must be a string array")
-    if definitions != sorted(set(definitions)):
-        raise ExportError(
-            f"{module_id}: c_build.compile_definitions must be sorted and unique")
-    for definition in definitions:
-        if not C_DEFINE.fullmatch(definition):
-            raise ExportError(
-                f"{module_id}: unsafe c_build.compile_definitions token {definition!r}")
-
-    c_header_dependencies(module_id, build)
-
-    parsed: dict[str, list[str]] = {}
-    for field in sorted(C_BUILD_KEYS):
-        entries = build[field]
-        if not isinstance(entries, list) or not all(isinstance(item, str) for item in entries):
-            raise ExportError(f"{module_id}: c_build.{field} must be a string array")
-        if entries != sorted(set(entries)):
-            raise ExportError(f"{module_id}: c_build.{field} must be sorted and unique")
-        if field == "include_roots" and not entries:
-            raise ExportError(f"{module_id}: c_build.include_roots must not be empty")
-        for entry in entries:
-            if field == "include_roots":
-                pure = PurePosixPath(entry)
-                if (not entry or "\\" in entry or pure.is_absolute() or "." in pure.parts or
-                        ".." in pure.parts or pure.as_posix() != entry):
-                    raise ExportError(f"{module_id}: unsafe include root {entry!r}")
-            elif not BUILD_TOKEN.fullmatch(entry):
-                raise ExportError(f"{module_id}: unsafe c_build.{field} token {entry!r}")
-            elif field == "system_libraries" and "::" in entry and entry not in CMAKE_TARGET_PACKAGES:
-                raise ExportError(f"{module_id}: unsupported imported CMake target {entry!r}")
-        parsed[field] = entries
-    # Vendored sources compile with the module but are not its own: they are
-    # appended here rather than merged into `sources`, so ownership keeps
-    # meaning what it says everywhere else.
-    # Sorted as one list: the bundle requires it, and vendor_sources only ever
-    # satisfied that by accident, since "src/vendor" happened to sort after the
-    # module's own paths. A shared source under src/ does not.
-    return (sorted(c_sources + list(shared) + list(vendored)), parsed["include_roots"],
-            definitions,
-            c_generated_headers(module_id, build),
-            parsed["pkg_config"], parsed["system_libraries"])
-
-
-def c_process_cmake(module_id: str, binary: str, version: str,
-                    descriptor: dict[str, object]) -> str:
-    """Generate the standalone build for a descriptor-owned C process."""
-    sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
-        module_id, descriptor)
-    source_lines = "\n".join(f"    {source}" for source in sources)
-    generated_setup = ""
-    generated_source_lines = ""
-    generated_include_line = ""
-    if generated:
-        commands: list[str] = [
-            "find_package(Python3 REQUIRED COMPONENTS Interpreter)",
-            'set(MODULE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")',
-        ]
-        outputs: list[str] = []
-        for header in generated:
-            output = str(header["output"])
-            entries = header["entries"]
-            assert isinstance(entries, list)
-            output_expr = f'${{MODULE_GENERATED_DIR}}/{output}'
-            outputs.append(output_expr)
-            entry_lines = "\n".join(
-                f'            --entry {entry["symbol"]} '
-                f'"${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
-                for entry in entries
-            )
-            dependency_lines = "\n".join(
-                f'        "${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
-                for entry in entries
-            )
-            commands.append(f"""add_custom_command(
-    OUTPUT "{output_expr}"
-    COMMAND ${{CMAKE_COMMAND}} -E make_directory "${{MODULE_GENERATED_DIR}}"
-    COMMAND ${{Python3_EXECUTABLE}}
-            "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
-            --output "{output_expr}"
-{entry_lines}
-    DEPENDS
-        "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
-{dependency_lines}
-    VERBATIM
-)
-""")
-        generated_setup = "\n".join(commands) + "\n"
-        generated_source_lines = "\n".join(f'    "{output}"' for output in outputs) + "\n"
-        generated_include_line = "    ${MODULE_GENERATED_DIR}\n"
-    include_lines = "\n".join(
-        f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
-    )
-    definition_lines = "\n".join(f"    {definition}" for definition in definitions)
-    definition_block = ""
-    if definition_lines:
-        definition_block = f"""target_compile_definitions({binary} PRIVATE
-{definition_lines}
-)
-"""
-    package_names = sorted({
-        CMAKE_TARGET_PACKAGES[library]
-        for library in libraries
-        if library in CMAKE_TARGET_PACKAGES
-    })
-    discovery: list[str] = [f"find_package({package} REQUIRED)" for package in package_names]
-    link_items = ["aimee::aimee-core-event-bus-client"]
-    if pkg_config:
-        discovery.extend([
-            "find_package(PkgConfig REQUIRED)",
-            f"pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET {' '.join(pkg_config)})",
-        ])
-        link_items.append("PkgConfig::MODULE_PKG")
-    link_items.extend(libraries)
-    discovery_text = "\n".join(discovery)
-    if discovery_text:
-        discovery_text += "\n"
-    link_lines = "\n".join(f"    {item}" for item in link_items)
-    return f"""cmake_minimum_required(VERSION 3.16)
-project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
-
-include(GNUInstallDirs)
-find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-{discovery_text}{generated_setup}if(NOT TARGET aimee::aimee-core-event-bus-client)
-    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
-endif()
-add_executable({binary}
-    runtime/main.c
-{generated_source_lines}\
-{source_lines}
-)
-target_compile_features({binary} PRIVATE c_std_11)
-# Match the runtime bundle: only the declared process stages enter this binary.
-# Unused legacy surface cannot import another module's retired implementation.
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options({binary} PRIVATE -ffunction-sections -fdata-sections)
-    if(APPLE)
-        target_link_options({binary} PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options({binary} PRIVATE -Wl,--gc-sections)
-    endif()
-endif()
-target_include_directories({binary} PRIVATE
-{generated_include_line}\
-{include_lines}
-)
-{definition_block}target_link_libraries({binary} PRIVATE
-{link_lines}
-)
-configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
-install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
-install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
-        DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
-"""
-
-
-def c_process_has_handler(sources: list[str]) -> bool:
-    """A C process owns a handler when any declared source is its module adapter."""
-    return any(PurePosixPath(source).name == "module_adapter.c" for source in sources)
+    """Return the files a module repository carries: exactly the ones it owns."""
+    return module_owned_files(module_id, descriptor)
 
 
 def go_module_main(module_id: str, principal_ref: int,
@@ -627,16 +168,13 @@ def go_module_main(module_id: str, principal_ref: int,
     if module_id in {"economizer", "egress"}:
         handler = "handler.NewHandler()"
     extra_imports = ""
-    watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
-\t\tos.Exit(code)
-\t}
-""" if module_id == "delegates" else ""
+    watchdog = ""
     if module_id == "providers":
-        watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
+        watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
-    process_options = "\t\tMaxIdlePollInterval: handler.RequestAdmissionPollInterval,\n" if module_id == "economizer" else ""
+    process_options = ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
@@ -645,15 +183,22 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tos.Exit(1)
 \t}
 """
+    if module_id == "delegates":
+        handler = "moduleHandler"
+        process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1])
+\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+"""
     if module_id == "aimee":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
         handler = "moduleHandler.Handle"
-        process_setup = """\tmoduleHandler, err := process.New(ctx, os.Args[1])
+        process_setup = """\tannouncer := process.NewAnnouncer()
+\tmoduleHandler, err := process.New(ctx, os.Args[1], announcer)
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
 \t}
 """
+        process_options = "\t\tStarted: func(publisher ring.Publisher) { announcer.Start(ctx, publisher) },\n"
     if module_id == "postgres":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/postgres/storage"\n'
         handler = "moduleHandler"
@@ -667,7 +212,7 @@ def go_module_main(module_id: str, principal_ref: int,
 """
         process_setup = """\tsqlHandler := handler.NewSQLHandler()
 \tsessionHandler := handler.NewSessionHandler(ctx)
-\tmoduleHandler := func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+\tmoduleHandler := func(invocation ring.ModuleInvocation, frame []byte) ([]byte, ring.ModuleStatus) {
 \t\tswitch invocation.StageID {
 \t\tcase handler.StageSQL: return sqlHandler(invocation, frame)
 \t\tcase handler.StageSession: return sessionHandler(invocation, frame)
@@ -707,7 +252,7 @@ import (
 \t"os/signal"
 \t"syscall"
 
-\t"github.com/JBailes/aimee/server-go/bus"
+\t"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 {handler_import}{extra_imports})
 
 func main() {{
@@ -721,15 +266,15 @@ func main() {{
 \tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 \tdefer stop()
 {process_setup}\
-\tconfig := bus.ModuleProcessConfig{{
+\tconfig := ring.ModuleProcessConfig{{
 \t\tSocketPath: os.Args[1], ModuleName: "{module_id}",
 \t\tPrincipalClass: {PRINCIPAL_CLASS}, PrincipalRef: {principal_ref},
-\t\tStages: []bus.ModuleStage{{
+\t\tStages: []ring.ModuleStage{{
 {entries}
 \t\t}},
 \t\tHandler: {handler},
 {process_options}\t}}
-\tif err := bus.RunModuleProcess(ctx, config); err != nil {{
+\tif err := ring.RunModuleProcess(ctx, config); err != nil {{
 \t\tfmt.Fprintf(os.Stderr, "aimee-module-{module_id}: %v\\n", err)
 \t\tos.Exit(1)
 \t}}
@@ -737,33 +282,18 @@ func main() {{
 """
 
 
-def go_bus_sources(module_id: str | None = None) -> list[str]:
-    """Return the canonical, non-test Go bus implementation shared by exports."""
-    return sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "server-go/bus").glob("*.go")
-        if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"aimee", "delegates", "roundtable", "providers", "memory"})
-    )
-
-
-# Shared contracts and pure helpers outside an implementation module, mapped to
-# the modules that import them. Each is deliberately not owned by the module it
-# talks to: every peer that calls delegates may import server-go/delegate, and
-# every peer that calls runtime-domain operations may import server-go/aimee without importing
-# the serving module. Add entries here in lockstep with the caller's process
-# contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
-    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance"},
+    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance", "roundtable", "providers"},
     "server-go/memory": {"memory"},
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers", "memory"},
-    "server-go/modules/egress": {"providers", "memory", "git", "roundtable"},
+    "server-go/modules/egress": {"providers", "memory", "git", "roundtable", "delegates"},
     "server-go/modules/audit": {"memory"},
+    "server-go/modules/translation": {"providers"},
     "server-go/modules/execution-policy": {"aimee", "tools"},
-    "server-go/delegate": {"delegates", "roundtable"},
+    "server-go/delegate": {"delegates", "roundtable", "workflows"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory", "postgres"},
 }
@@ -830,7 +360,7 @@ def external_module_pin(
         pin["runtime"] = contract["runtime"]
         pin["principal_class"] = PRINCIPAL_CLASS
         pin["principal_ref"] = contract["principal_ref"]
-        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+        pin["serve"] = [stage["event_kind"] for stage in process_contracts.process_stages(contract)]
     return pin
 
 
@@ -844,7 +374,7 @@ def go_language_version() -> str:
 
 def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
-    direct = ["golang.org/x/sys"]
+    direct = ["golang.org/x/sys", "github.com/RakuenSoftware/ouroboros-ring/go"]
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
@@ -887,10 +417,6 @@ def export_module(
         return pin
     owned = module_owned_files(module_id, descriptor)
     repository_files = module_repository_files(module_id, descriptor)
-    declared_sources = descriptor.get("sources", [])
-    assert isinstance(declared_sources, list)
-    has_handler = c_process_has_handler(declared_sources)
-    init_symbol = c_process_init_symbol(module_id, descriptor)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
     for relative in repository_files:
@@ -901,9 +427,10 @@ def export_module(
     runtime = contract.get("runtime")
     if execution == "process":
         principal_ref = contract["principal_ref"]
-        stages = contract["stages"]
+        stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         write_text(
             repository / "grants/module.grant.in",
             f"""version=1
@@ -911,68 +438,18 @@ principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable=@CMAKE_INSTALL_FULL_BINDIR@/{binary}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """,
         )
-        if runtime == "c":
-            build = descriptor.get("c_build")
-            assert isinstance(build, dict)
-            if c_generated_headers(module_id, build):
-                copy_file("scripts/generate_c_embedded_header.py", repository)
-            write_text(
-                repository / "runtime/main.c",
-                module_main(module_id, principal_ref, stages, has_handler, init_symbol),
-            )
-            write_text(
-                repository / "CMakeLists.txt",
-                c_process_cmake(module_id, binary, version, descriptor),
-            )
-            handler_text = (
-                "Its repository-owned handler implements the declared stage contract."
-                if has_handler
-                else "The boundary returns typed `capability_absent` until its "
-                     "repository-owned handler is ported; it never echoes a request or "
-                     "reports false success."
-            )
-            runtime_text = f"""It builds `{binary}` as a separate C process for the
-{', '.join(contract['placements'])} bus. Its generated grant serves exactly the
-declared stage event kinds. {handler_text}
-"""
-            workflow = f"""name: module
-on: [push, pull_request]
-permissions:
-  contents: read
-jobs:
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: RakuenSoftware/aimee-core-c
-          ref: v{version}
-          path: _aimee-core
-      - run: cmake -S _aimee-core -B _core-build -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build _core-build --parallel 2
-      - run: cmake --install _core-build --prefix "$PWD/_prefix"
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/_prefix"
-      - run: cmake --build build --parallel 2
-      - run: test -x build/{binary}
-"""
-        elif runtime == "go":
+        if runtime == "go":
             go_sources = descriptor.get("go_sources", [])
             if (not isinstance(go_sources, list) or not go_sources) and \
                     "external_source" not in descriptor:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
-            bus_sources = go_bus_sources(module_id)
-            if not bus_sources:
-                raise ExportError("canonical Go bus has no production sources")
             shared_sources = go_process_shared_sources(module_id)
-            for relative in bus_sources:
-                copy_file(relative, repository)
             for relative in shared_sources:
                 copy_file(relative, repository)
             shutil.copy2(ROOT / "server-go/go.sum", repository / "go.sum")
@@ -997,7 +474,7 @@ require (
             )
             cmake_dependencies = "\n".join(
                 f"        ${{CMAKE_CURRENT_SOURCE_DIR}}/{relative}"
-                for relative in ["runtime/main.go", *go_sources, *bus_sources, *shared_sources,
+                for relative in ["runtime/main.go", *go_sources, *shared_sources,
                                  *descriptor.get("contracts", []), *descriptor.get("go_assets", []),
                                  "go.mod", "go.sum"]
             )
@@ -1026,15 +503,14 @@ install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
             )
             if module_id == "config":
                 runtime_text = f"""It builds `{binary}` as a pure-Go process for the
-{', '.join(contract['placements'])} bus. The exported repository includes the
+{', '.join(contract['placements'])} ring. The exported repository includes the
 exact canonical Go bus client/runtime snapshot, caller contract, handler,
 validation, and persistent store. It contains no C implementation or bridge.
 """
             else:
                 runtime_text = f"""It builds `{binary}` as a separate Go process for the
-{', '.join(contract['placements'])} bus. The exported repository includes the
-exact canonical Go bus client/runtime snapshot and its repository-owned handler;
-the retained C adapter is a wire-parity fixture, not the production executable.
+{', '.join(contract['placements'])} ring. The exported repository includes the
+exact canonical Go bus client/runtime snapshot and its repository-owned handler.
 """
             workflow = f"""name: module
 on: [push, pull_request]
@@ -1048,7 +524,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-      - run: go test ./server-go/bus{" ./server-go/config" if module_id == "config" else ""} ./server-go/modules/{module_id}
+      - run: go test{" ./server-go/config" if module_id == "config" else ""} ./server-go/modules/{module_id}
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel 2
       - run: test -x build/{binary}
@@ -1091,10 +567,6 @@ jobs:
     repository_note = """The descriptor-owned production sources, tests, contracts,
 and documentation are preserved at their canonical paths so their migration
 history remains auditable.
-"""
-    if runtime != "go":
-        repository_note += """Any non-owned compatibility headers required by the standalone C build are
-declared separately, copied at canonical paths, and bound into the source digest.
 """
     write_text(repository / ".github/workflows/ci.yml", workflow)
     write_text(
@@ -1141,7 +613,7 @@ This is the independent `{module_id}` source-ownership repository.
         pin["runtime"] = contract["runtime"]
         pin["principal_class"] = PRINCIPAL_CLASS
         pin["principal_ref"] = contract["principal_ref"]
-        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+        pin["serve"] = [stage["event_kind"] for stage in process_contracts.process_stages(contract)]
     return pin
 
 
@@ -1156,7 +628,6 @@ def export_runtime_bundle(output_root: Path) -> int:
     placement_rows: dict[str, list[str]] = {"server": [], "kb": []}
     runtimes: dict[str, str] = {}
     go_modules: list[str] = []
-    c_builds: list[dict[str, object]] = []
     count = 0
     for module_id, contract in contracts.items():
         if contract["execution"] != "process":
@@ -1165,7 +636,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         module_repository_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
-        stages = contract["stages"]
+        stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         binary = f"aimee-module-{module_id}"
         # The grant pins the exact executable that may attach as this principal.
@@ -1176,48 +647,23 @@ def export_runtime_bundle(output_root: Path) -> int:
         runtime = contract["runtime"]
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
-        if runtime == "c":
-            sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
-                module_id, descriptor
-            )
-            has_handler = c_process_has_handler(sources)
-            init_symbol = c_process_init_symbol(module_id, descriptor)
-            main_path = f"src/{binary}.c"
-            write_text(
-                output_root / main_path,
-                module_main(module_id, principal_ref, stages, has_handler, init_symbol),
-            )
-            build_row: dict[str, object] = {
-                "id": module_id,
-                "binary": binary,
-                "main": main_path,
-                "sources": sources,
-                "include_roots": include_roots,
-                "compile_definitions": definitions,
-                "pkg_config": pkg_config,
-                "system_libraries": libraries,
-            }
-            header_dependencies = c_header_dependencies(module_id, descriptor["c_build"])
-            if header_dependencies:
-                build_row["header_dependencies"] = header_dependencies
-            if generated:
-                build_row["generated_headers"] = generated
-            c_builds.append(build_row)
-        else:
-            go_sources = descriptor.get("go_sources", [])
-            if (not isinstance(go_sources, list) or not go_sources) and \
-                    "external_source" not in descriptor:
-                raise ExportError(f"{module_id}: Go process has no go_sources")
-            if hosted_by is None:
-                go_modules.append(module_id)
+        if runtime != "go":
+            raise ExportError(f"{module_id}: unsupported process runtime {runtime!r}")
+        go_sources = descriptor.get("go_sources", [])
+        if (not isinstance(go_sources, list) or not go_sources) and \
+                "external_source" not in descriptor:
+            raise ExportError(f"{module_id}: Go process has no go_sources")
+        if hosted_by is None:
+            go_modules.append(module_id)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        publish, subscribe = notification_grant(module_id, contract)
         grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
 executable={executable}
-publish=
-subscribe=
+publish={publish}
+subscribe={subscribe}
 request=
 serve={serve}
 """
@@ -1229,37 +675,56 @@ serve={serve}
             if enabled and hosted_by is None:
                 placement_rows[placement].append(f"{module_id}\t{executable}")
         count += 1
+    host_services = [{"owner": module_id, "stage": stage["id"], "event_kind": stage["event_kind"], "hosted_by": stage["hosted_by"], "principal_class": 0, "principal_ref": 0, "placements": contract["placements"]}
+                     for module_id, contract in contracts.items() if contract["execution"] == "process"
+                     for stage in contract["stages"] if "hosted_by" in stage]
+    write_text(output_root / "host-services.json", json.dumps({"schema_version": 1, "services": host_services}, indent=2)+"\n")
     # Bus clients request stages but serve none, so they get a grant and no
     # manifest row: nothing supervises them, they are already running.
     contract_doc = load_json(process_contracts.CONTRACTS)
+    subscribed = process_contracts.subscriptions(contract_doc)
     for client in contract_doc.get("clients", []):
         request = ",".join(str(kind) for kind in client["request"])
         publish = ",".join(str(kind) for kind in client.get("publish", []))
+        subscribe = ",".join(str(kind) for kind in subscribed.get(client["id"], []))
         client_grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={client["principal_ref"]}
 uid=self
 executable={client["executable"]}
 publish={publish}
-subscribe=
+subscribe={subscribe}
 request={request}
 serve=
 """
         for placement in client["placements"]:
             write_text(output_root / "grants" / placement / f"{client['id']}.grant", client_grant)
+    # The ring's telemetry exporter (D16): granted the host's telemetry ring,
+    # serving and requesting nothing, supervised wherever a ring is hosted.
+    telemetry = contract_doc["telemetry"]
+    telemetry_grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={telemetry["principal_ref"]}
+uid=self
+executable={telemetry["executable"]}
+publish=
+subscribe=
+request=
+serve=
+telemetry=yes
+"""
+    for placement in telemetry["placements"]:
+        write_text(output_root / "grants" / placement / f"{telemetry['id']}.grant", telemetry_grant)
+        placement_rows[placement].append(f"{telemetry['id']}\t{telemetry['executable']}")
+    go_modules.append(telemetry["id"])
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")
-    c_builds.sort(key=lambda row: str(row["id"]))
-    write_text(
-        output_root / "c-build.json",
-        json.dumps({"schema_version": 1, "modules": c_builds}, indent=2) + "\n",
-    )
     write_text(
         output_root / "MANIFEST.json",
         json.dumps(
             {"schema_version": 1, "contracts": str(process_contracts.CONTRACTS.relative_to(ROOT)),
-             "c_build": "c-build.json", "process_count": count,
+             "process_count": count,
              "runtimes": runtimes, "placements": placement_rows},
             indent=2,
         ) + "\n",
@@ -1271,9 +736,8 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
     """Pin the lock to clean, tagged repositories updated from an export."""
     lock = load_json(LOCK)
     version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
-    core = lock.get("core")
     modules = lock.get("modules")
-    if not isinstance(core, dict) or not isinstance(modules, list):
+    if "core" in lock or not isinstance(modules, list):
         raise ExportError(f"{LOCK}: invalid lock structure")
     inventory = load_json(INVENTORY)
     required = inventory.get("required")
@@ -1283,26 +747,25 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
     required_ids = set(required)
     known_ids = required_ids | set(optional)
     contracts = process_contracts.validate()
-    entries = [core, *modules]
+    entries = modules
     for entry in entries:
         repository_id = entry.get("id")
         if not isinstance(repository_id, str):
             raise ExportError(f"{LOCK}: repository entry has no id")
-        if repository_id != "aimee-core-c":
-            if repository_id not in known_ids:
-                raise ExportError(f"{LOCK}: unknown module repository {repository_id}")
-            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            external_pin = external_module_pin(
-                repository_id,
-                "required" if repository_id in required_ids else "optional",
-                descriptor,
-                contracts[repository_id],
-            )
-            if external_pin is not None:
-                entry.clear()
-                entry.update(external_pin)
-                continue
-        directory_name = repository_id if repository_id == "aimee-core-c" else f"aimee-module-{repository_id}"
+        if repository_id not in known_ids:
+            raise ExportError(f"{LOCK}: unknown module repository {repository_id}")
+        descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
+        external_pin = external_module_pin(
+            repository_id,
+            "required" if repository_id in required_ids else "optional",
+            descriptor,
+            contracts[repository_id],
+        )
+        if external_pin is not None:
+            entry.clear()
+            entry.update(external_pin)
+            continue
+        directory_name = f"aimee-module-{repository_id}"
         repository = repository_root / directory_name
         if not (repository / ".git").is_dir():
             raise ExportError(f"missing Git repository: {repository}")
@@ -1317,14 +780,10 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
         entry["version"] = version
         entry["ref"] = f"v{version}"
         entry["commit"] = head
-        if repository_id == "aimee-core-c":
-            entry["source_sha256"] = digest_files(core_files())
-        else:
-            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            repository_files = module_repository_files(repository_id, descriptor)
-            entry["source_sha256"] = digest_files(
-                [ROOT / relative for relative in repository_files]
-            )
+        repository_files = module_repository_files(repository_id, descriptor)
+        entry["source_sha256"] = digest_files(
+            [ROOT / relative for relative in repository_files]
+        )
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     return len(entries)
 
@@ -1383,7 +842,6 @@ def main(argv: list[str] | None = None) -> int:
         contracts = process_contracts.validate()
         lock: dict[str, object] = {
             "schema_version": 1,
-            "core": export_core(output_root, timestamp),
             "modules": [],
         }
         modules: list[dict[str, object]] = []
@@ -1409,7 +867,7 @@ def main(argv: list[str] | None = None) -> int:
     except ExportError as exc:
         print(f"export_c_repositories: error: {exc}", file=sys.stderr)
         return 1
-    print(f"export_c_repositories: wrote {1 + len(modules)} repositories to {output_root}")
+    print(f"export_c_repositories: wrote {len(modules)} repositories to {output_root}")
     print(f"export_c_repositories: wrote lock {LOCK}")
     return 0
 

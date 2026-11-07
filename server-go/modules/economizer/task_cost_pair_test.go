@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -31,7 +31,7 @@ func TestTaskCostPairsPreserveCoverageAndRefuseCherryPicking(t *testing.T) {
 		t.Fatal(out, err)
 	}
 	raw, _ := json.Marshal(r)
-	if _, status := NewHandler()(bus.ModuleInvocation{StageID: StageTaskCost}, raw); status != bus.ModuleStatusOK {
+	if _, status := NewHandler()(ring.ModuleInvocation{StageID: StageTaskCost}, raw); status != ring.ModuleStatusOK {
 		t.Fatal("paired wire unavailable", status)
 	}
 	for _, name := range []string{"missing", "wrong task", "changed corpus", "duplicate"} {

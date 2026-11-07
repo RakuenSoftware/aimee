@@ -2,7 +2,7 @@
  * Builds a real repo (+ a local bare remote) under a webuser's scope and drives
  * status/log/branch/diff/commit/checkout/push/pull, plus the refusal paths. */
 #include <aimee/git/git_ops.h>
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/workspace/module_api.h>
 
 #include "modules/workspace/workspace_scope.h"
@@ -14,11 +14,11 @@
 #include <string.h>
 #include <unistd.h>
 
-extern aimee_module_status_t aimee_workspace_module_handler(const aimee_module_invocation_t *,
-                                                            const uint8_t *, uint32_t, uint8_t *,
-                                                            uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_workspace_module_handler(const ouro_module_invocation_t *,
+                                                           const uint8_t *, uint32_t, uint8_t *,
+                                                           uint32_t, uint32_t *, void *);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -28,11 +28,11 @@ static int validate_workspace_ref_via_module(const char *ref, size_t ref_len, in
 {
    uint8_t request[AIMEE_WORKSPACE_REQUEST_LEN], response[AIMEE_WORKSPACE_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_WORKSPACE_STAGE_ACCESS};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_WORKSPACE_STAGE_ACCESS};
    return aimee_workspace_request_encode(ref, ref_len, request, sizeof(request)) == 0 &&
                   aimee_workspace_module_handler(&invocation, request, sizeof(request), response,
                                                  sizeof(response), &response_len,
-                                                 NULL) == AIMEE_MODULE_STATUS_OK
+                                                 NULL) == OURO_MODULE_STATUS_OK
               ? aimee_workspace_response_decode(response, response_len, allowed)
               : -1;
 }

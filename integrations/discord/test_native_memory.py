@@ -270,7 +270,7 @@ class NativeBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.key = self.root / "key"
         self.key.write_text("test-only-token")
         self.key.chmod(0o600)
-        self.config = Config(self.root / "webhook", self.key, self.key,
+        self.config = Config(self.root / "webhook", self.key,
             10000000000000001, 20000000000000001, memory_profile="aims-native-v1",
             knowledge_endpoint="http://127.0.0.1:8741/v1/actions", knowledge_key_file=self.key,
             native_state_directory=self.root / "native", system_context="Bounded instructions")
@@ -278,9 +278,9 @@ class NativeBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.directory.cleanup()
 
-    def test_native_configuration_requires_direct_tls_and_durable_completion_path(self):
+    def test_native_configuration_refuses_incompatible_thinclient_contract(self):
         from bridge import Config
-        value = {"webhook_file": str(self.key), "bot_token_file": str(self.key), "model_key_file": str(self.key),
+        value = {"webhook_file": str(self.key), "bot_token_file": str(self.key),
             "guild_id": "10000000000000001", "channel_id": "20000000000000001",
             "memory_profile": "aims-native-v1", "knowledge_endpoint": "http://127.0.0.1:8741/v1/actions",
             "knowledge_key_file": str(self.key), "native_state_directory": str(self.root / "state"),
@@ -288,49 +288,34 @@ class NativeBridgeTests(unittest.IsolatedAsyncioTestCase):
             "tokenizer_endpoint": "https://127.0.0.1:18764", "tokenizer_tls_dir": str(self.root / "tls")}
         file = self.root / "config.json"
         file.write_text(json.dumps(value))
-        self.assertEqual(Config.load(file).memory_profile, "aims-native-v1")
-        for changes in ({"aimee_socket": str(self.root / "aimee.sock")}, {"native_state_directory": "relative"},
-                        {"knowledge_endpoint": None}, {"tokenizer_endpoint": None},
-                        {"model_tls_dir": None, "endpoint": "http://127.0.0.1:18764/v1/chat/completions"}):
-            file.write_text(json.dumps({**value, **changes}))
-            with self.assertRaises(ValueError): Config.load(file)
+        with self.assertRaisesRegex(ValueError, "exact provider-byte custody contract is not supported"):
+            Config.load(file)
 
-    async def test_actual_model_wrapper_uses_native_transport_without_local_history_replay(self):
+    async def test_native_model_wrapper_refuses_before_context_or_dispatch(self):
         from bridge import ModelClient
         client = ModelClient(self.config, None)
-        native = SimpleNamespace(context=AsyncMock(return_value="Exact native source"), transmit=AsyncMock(return_value={
-            "usage": {"prompt_tokens": 5}, "choices": [{"message": {"content": "A bounded reply."}}]}))
+        client.client.chat = AsyncMock()
+        native = SimpleNamespace(context=AsyncMock(), transmit=AsyncMock())
         client.native_conversation = lambda channel_id=None: native
-        client.prompt_budget.fit = AsyncMock(return_value={"prompt_tokens": 5})
-        reply = await client.reply([{"role":"assistant", "content":"old revoked memory must not be replayed"}], "latest question")
-        self.assertEqual(reply, "A bounded reply.")
-        body = native.transmit.call_args.args[2]
-        self.assertEqual(len(body["messages"]), 2)
-        self.assertNotIn("old revoked memory", json.dumps(body))
-        self.assertIn("Exact native source", body["messages"][0]["content"])
-        self.assertNotIn("Confirm matching facts", body["messages"][0]["content"])
-        self.assertNotIn("latest authenticated human constraint", body["messages"][0]["content"])
-        self.assertEqual(native.transmit.call_args.kwargs["purpose"], "model")
-        with self.assertRaisesRegex(RuntimeError, "refused"):
-            await client.reply([], "latest", memory_unavailable=True)
-        self.assertEqual(native.transmit.await_count, 1)
+        for unavailable in (False, True):
+            with self.assertRaisesRegex(RuntimeError, "native dispatch refused"):
+                await client.reply([{"role":"assistant", "content":"old revoked memory"}],
+                                   "latest question", memory_unavailable=unavailable)
+        client.client.chat.assert_not_awaited()
+        native.context.assert_not_awaited()
+        native.transmit.assert_not_awaited()
+        with self.assertRaisesRegex(RuntimeError, "native dispatch refused"):
+            await client.memory_context("latest question")
+        native.context.assert_not_awaited()
 
-    async def test_actual_tokenizer_wrapper_routes_source_bytes_through_active_native_context(self):
-        from bridge import ModelClient
-        config = replace(self.config, tokenizer_endpoint="https://127.0.0.1:18764", tokenizer_tls_dir=self.root / "tls")
-        client = ModelClient(config, None)
-        active = SimpleNamespace(transmit=AsyncMock(return_value={"prompt":"Exact native source", "tokens":[1]}))
-        client.native_memory = active
-        client.native_conversation = lambda channel=None: self.fail("tokenizer must not remap the active thread to default channel")
-        tls = SimpleNamespace(verify_flags=0, minimum_version=None, load_cert_chain=lambda *args: None)
-        with patch("bridge.ssl.create_default_context", return_value=tls):
-            await client.tokenizer_request("/apply-template", {"messages":[{"role":"system","content":"Exact native source"}]})
-            self.assertEqual(active.transmit.call_args.kwargs["purpose"], "model_template")
-            await client.tokenizer_request("/tokenize", {"content":"Exact native source"})
-            self.assertEqual(active.transmit.call_args.kwargs["purpose"], "model_tokenize")
-            with self.assertRaisesRegex(RuntimeError,"lacks actual native context"):
-                await client.tokenizer_request("/unknown", {"content":"source"})
-        self.assertEqual(active.transmit.await_count, 2)
+    async def test_native_startup_refuses_before_delivery_or_client_creation(self):
+        from bridge import ChatBot
+        bot = ChatBot(self.config)
+        with patch("bridge.aiohttp.ClientSession") as session:
+            with self.assertRaisesRegex(RuntimeError, "native dispatch refused"):
+                await bot.setup_hook()
+            session.assert_not_called()
+        await bot.close()
 
     async def test_native_event_mapping_does_not_assert_user_authority(self):
         from bridge import Turn

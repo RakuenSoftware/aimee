@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -77,10 +79,6 @@ type Client interface {
 
 type AuthorizeFunc func(context.Context, uint64, Request) (Decision, error)
 
-func (f AuthorizeFunc) Authorize(ctx context.Context, traceID uint64, request Request) (Decision, error) {
-	return f(ctx, traceID, request)
-}
-
 type moduleCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
 }
@@ -130,18 +128,18 @@ type policy struct {
 	allowPrivateMCP    bool // tests only; production constructors leave this false
 }
 
-func NewHandler() bus.ModuleHandler {
+func NewHandler() ring.ModuleHandler {
 	return newHandler(net.DefaultResolver)
 }
 
-func newHandler(r resolver) bus.ModuleHandler {
+func newHandler(r resolver) ring.ModuleHandler {
 	return newHandlerWithCredentials(r, nil)
 }
 
-func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleHandler {
+func newHandlerWithCredentials(r resolver, vault credentialResolver) ring.ModuleHandler {
 	var once sync.Once
-	var initialized bus.ModuleHandler
-	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+	var initialized ring.ModuleHandler
+	return func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 		once.Do(func() {
 			broker, err := newCredentialBroker()
 			if err != nil {
@@ -149,9 +147,9 @@ func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleH
 			}
 			p := policy{resolver: r, credentials: broker, backendCredentials: vault}
 			s := newStreamService(p, vault)
-			initialized = func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+			initialized = func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 				if invocation.PrincipalClass != 1 {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				if invocation.StageID == StageHTTP {
 					return p.handleHTTP(invocation, body)
@@ -161,33 +159,33 @@ func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleH
 				}
 				if invocation.StageID == StageCredentialKey {
 					if len(body) != 0 || invocation.Cancelled() {
-						return nil, bus.ModuleStatusInvalidRequest
+						return nil, ring.ModuleStatusInvalidRequest
 					}
 					return broker.publicReply()
 				}
 				if invocation.StageID != StageAuthorize {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				var request Request
 				if json.Unmarshal(body, &request) != nil {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				decision := p.decide(invocation, request)
 				encoded, err := json.Marshal(decision)
-				if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-					return nil, bus.ModuleStatusInternal
+				if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+					return nil, ring.ModuleStatusInternal
 				}
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
 		})
 		if initialized == nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		return initialized(invocation, body)
 	}
 }
 
-func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decision {
+func (p policy) decide(invocation ring.ModuleInvocation, request Request) Decision {
 	deny := func(reason string) Decision {
 		return Decision{Reason: reason, PolicyRevision: PolicyRevision}
 	}
@@ -205,6 +203,13 @@ func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decisio
 	if !callerPurposeAllowed(invocation.PrincipalRef, request, parsed) {
 		return deny("caller is not allowed for this purpose or destination")
 	}
+	return p.resolveTarget(invocation, request, parsed)
+}
+
+// The HTTP owner also uses the same public-address checks for a signed log URL
+// obtained from an already authorised GitHub job-log response.
+func (p policy) resolveTarget(invocation ring.ModuleInvocation, request Request, parsed *url.URL) Decision {
+	deny := func(reason string) Decision { return Decision{Reason: reason, PolicyRevision: PolicyRevision} }
 	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(decisionTimeout))
 	defer cancel()
 	addresses, err := p.resolver.LookupIPAddr(ctx, parsed.Hostname())
@@ -264,6 +269,9 @@ func forgeTargetAllowed(method, path string) bool {
 	if len(parts) == 3 {
 		return method == "GET"
 	}
+	if method == "GET" && forgeAttributionReadAllowed(parts) {
+		return true
+	}
 	if parts[3] != "pulls" {
 		return false
 	}
@@ -274,6 +282,35 @@ func forgeTargetAllowed(method, path string) bool {
 		return method == "GET" || method == "PATCH"
 	}
 	return len(parts) == 6 && parts[5] == "merge" && method == "PUT"
+}
+
+// Only the read-only evidence used by the shared attribution policy. This is
+// also checked against the credential's exact repository and merge operation.
+func forgeAttributionReadAllowed(parts []string) bool {
+	if len(parts) < 4 {
+		return false
+	}
+	positive := func(s string) bool { n, err := strconv.Atoi(s); return err == nil && n > 0 && strconv.Itoa(n) == s }
+	sha := func(s string) bool {
+		return regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`).MatchString(s) && strings.Trim(s, "0") != ""
+	}
+	switch parts[3] {
+	case "issues":
+		return len(parts) == 4 || len(parts) == 5 && positive(parts[4])
+	case "commits":
+		return len(parts) == 6 && sha(parts[4]) && (parts[5] == "pulls" || parts[5] == "check-runs")
+	case "compare":
+		if len(parts) != 5 {
+			return false
+		}
+		refs := strings.Split(parts[4], "...")
+		return len(refs) == 2 && sha(refs[0]) && sha(refs[1])
+	case "check-runs":
+		return (len(parts) == 5 || len(parts) == 6 && parts[5] == "annotations") && positive(parts[4])
+	case "actions":
+		return len(parts) >= 6 && positive(parts[5]) && (len(parts) == 6 && (parts[4] == "jobs" || parts[4] == "runs") || len(parts) == 7 && parts[4] == "jobs" && parts[6] == "logs")
+	}
+	return false
 }
 
 func validDigest(value string) bool {
@@ -289,8 +326,8 @@ func validDigest(value string) bool {
 }
 
 // egressBlockedIPv4 are the ranges a module-initiated call must not reach.
-// Deliberately in step with server-go/modules/delegates/proxyguard.go and
-// server-go/modules/sandbox/proxy_policy.go: the same destination must not be
+// Deliberately in step with server-go/modules/sandbox/proxy_policy.go and the
+// C web egress guard (src/posix/web_egress.c): the same destination must not be
 // refused on one plane and dialed on another. The stdlib predicates alone are
 // not enough -- IsPrivate covers RFC1918 and fc00::/7 but not CGNAT, the
 // TEST-NETs, or the reserved space.

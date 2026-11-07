@@ -1,7 +1,10 @@
 # IR sole path: implementation and qualification residual
 
-- **State:** PENDING. Implementation is complete for the supported browser/Linux
-  runtime; final exact-head qualification and production promotion remain pending.
+- **State:** PENDING. The supported browser/Linux cutovers are implemented;
+  live testing still exposes consumer repairs. Canonical output-limit retry
+  classification is repaired; browser failure-terminal delivery is being qualified.
+  Final-source acceptance and production promotion remain
+  pending. See the current handoff for completed cases and retained failures.
 
 **Archived parent:** [`ir-sole-path-and-pluggable-stages.md`](../done/ir-sole-path-and-pluggable-stages.md)
 

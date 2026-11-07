@@ -23,6 +23,8 @@ static cJSON *stored_intent;
 static int calls, dispatched, outcomes, guard_held, guard_released;
 static int fail_resource, fail_verify, fail_store, memory_required, stale;
 static const char *replay_state;
+static int nested_ids;
+static char last_outcome_action[64];
 static const char *expected_actor = "alice";
 static const char *capture_source = "session";
 #ifndef GOVERNED_ACTION_CAPTURE_EXTERNAL
@@ -192,7 +194,10 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
          cJSON_AddStringToObject(stored_intent, "turn_session_id", host_session);
          cJSON_AddStringToObject(stored_intent, "turn_id", host_turn);
       }
-      cJSON_AddStringToObject(stored_intent, "action_id", "action");
+      char action_id[64] = "action";
+      if (nested_ids)
+         snprintf(action_id, sizeof action_id, "nested-action-%d", nested_ids++);
+      cJSON_AddStringToObject(stored_intent, "action_id", action_id);
       cJSON_AddStringToObject(stored_intent, "policy_generation", "policy");
    }
    if (!strcmp(op, "issue") || !strcmp(op, "inspect"))
@@ -224,6 +229,8 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
    {
       assert(!guard_held);
       outcomes++;
+      snprintf(last_outcome_action, sizeof last_outcome_action, "%s",
+               text(cJSON_GetObjectItem(j, "intent"), "action_id"));
       const cJSON *o = cJSON_GetObjectItem(j, "outcome");
       assert(!strcmp(text(o, "state"), fail_verify ? "outcome_unknown" : "effect_confirmed"));
       assert(strcmp(text(o, "object_version"), "forged"));
@@ -295,8 +302,60 @@ static void test_canonical_capture_binding(void)
 }
 #endif
 
+static void test_nested_action_receipt_ownership(void)
+{
+   memset(&context, 0, sizeof context);
+   snprintf(context.principal, sizeof context.principal, "alice");
+   snprintf(context.request_id, sizeof context.request_id, "nested-request");
+   expected_actor = "alice";
+   fail_verify = fail_store = fail_resource = memory_required = stale = 0;
+   nested_ids = 1;
+   cJSON *outer = input(), *inner = input();
+   policy_action_attempt("attempt");
+   assert(!policy_action_begin("write_file", &outer, "/workspace", "session", 1));
+   char outer_id[64];
+   snprintf(outer_id, sizeof outer_id, "%s", text(stored_intent, "action_id"));
+   policy_action_scope_t *scope = NULL, *nested = NULL;
+   assert(!policy_action_scope_push(&scope));
+   assert(policy_action_scope_push(&scope)); /* Cannot overwrite a retained owner. */
+   policy_action_attempt("attempt");
+   assert(!policy_action_begin("write_file", &inner, "/workspace", "session", 1));
+   char inner_id[64];
+   snprintf(inner_id, sizeof inner_id, "%s", text(stored_intent, "action_id"));
+   assert(strcmp(inner_id, outer_id));
+   assert(!policy_action_scope_push(&nested));
+   assert(policy_action_scope_pop(scope)); /* LIFO, no mutation on rejection. */
+   assert(!policy_action_scope_pop(nested));
+   int error = 1;
+   char *receipt = policy_action_finish("ok", strdup("inner effect"), &error);
+   assert(receipt && !error && !strcmp(last_outcome_action, inner_id));
+   free(receipt);
+   assert(!policy_action_scope_pop(scope));
+   receipt = policy_action_finish("ok", strdup("outer effect"), &error);
+   assert(receipt && !error && !strcmp(last_outcome_action, outer_id));
+   free(receipt);
+   /* Error cleanup discards an unfinished inner owner's allocations, restoring
+    * the original outer receipt instead of rebinding it to the inner action. */
+   policy_action_attempt("attempt");
+   assert(!policy_action_begin("write_file", &outer, "/workspace", "session", 1));
+   snprintf(outer_id, sizeof outer_id, "%s", text(stored_intent, "action_id"));
+   scope = NULL;
+   assert(!policy_action_scope_push(&scope));
+   policy_action_attempt("attempt");
+   assert(!policy_action_begin("write_file", &inner, "/workspace", "session", 1));
+   assert(!policy_action_scope_pop(scope));
+   receipt = policy_action_finish("ok", strdup("outer after inner failure"), &error);
+   assert(receipt && !error && !strcmp(last_outcome_action, outer_id));
+   free(receipt);
+   nested_ids = 0;
+   cJSON_Delete(outer);
+   cJSON_Delete(inner);
+}
+
 int main(void)
 {
+   test_nested_action_receipt_ownership();
+   calls = dispatched = outcomes = guard_held = guard_released = 0;
    snprintf(context.principal, sizeof(context.principal), "alice");
    snprintf(context.request_id, sizeof(context.request_id), "request");
    policy_action_attempt("attempt");

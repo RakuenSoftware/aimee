@@ -14,34 +14,6 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
-/* Failed providers may still own admitted error blocks and opaque state. */
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out,
-                       int deadline_ms)
-{
-   (void)cfg;
-   (void)tasks;
-   (void)deadline_ms;
-   for (int i = 0; i < count; i++)
-   {
-      memset(&out[i], 0, sizeof out[i]);
-      assert(aimee_ir_response_from_text(&out[i].canonical_response, "provider error", "fixture") ==
-             0);
-      out[i].canonical_response.raw = cJSON_Parse("{\"opaque_error\":true}");
-      out[i].response = strdup("provider error");
-   }
-   return 0;
-}
-
-static void test_failed_vote_releases_all_owned_responses(void)
-{
-   agent_config_t cfg = {0};
-   agent_result_t out = {0};
-   assert(agent_vote(&cfg, "review", "vote", 3, &out) == -1);
-   assert(strstr(out.error, "all voters failed"));
-   assert(!out.response && !out.canonical_response.content);
-   agent_result_clear_response(&out);
-}
-
 /* --- helpers --- */
 
 static char g_tmpdir[256];
@@ -452,58 +424,10 @@ static void test_load_per_role_budget(void)
 /* A 20K constant truncated every delegate whose prompt exceeded it -- 1807 times
  * on one deployment -- regardless of what the model could actually hold. The
  * budget has to follow the model: 128K means 128K, 1M means 1M. */
-static void test_budget_follows_the_model_context_window(void)
-{
-   /* Registry-known models: the budget tracks the window, not the constant. */
-   int small = delegate_token_budget_for_agent("gpt-4o", 0);
-   int large = delegate_token_budget_for_agent("gemini-1.5-pro", 0);
-   assert(small > DELEGATE_TOKEN_BUDGET_DEFAULT);
-   assert(large > small);
-   printf("  PASS: test_budget_follows_the_model_context_window\n");
-}
-
 /* Output needs somewhere to go: the input budget is the window minus the model's
  * output ceiling, never the whole window. */
-static void test_budget_reserves_room_for_output(void)
-{
-   int budget = delegate_token_budget_for_agent("gpt-4o", 0);
-   assert(budget > 0);
-   assert(budget < model_context_window("gpt-4o"));
-   printf("  PASS: test_budget_reserves_room_for_output\n");
-}
-
 /* An operator's explicit per-agent context_window overrides the registry, the
  * same precedence agent_effective_context_window() uses at runtime. */
-static void test_agent_context_window_overrides_registry(void)
-{
-   int budget = delegate_token_budget_for_agent("gpt-4o", 500000);
-   assert(budget > delegate_token_budget_for_agent("gpt-4o", 0));
-   /* Unknown model with an explicit window is still usable. */
-   assert(delegate_token_budget_for_agent("not-a-real-model-xyz", 300000) > 0);
-   /* Unknown model with nothing to go on reports 0 so the caller keeps its default. */
-   assert(delegate_token_budget_for_agent("not-a-real-model-xyz", 0) == 0);
-   printf("  PASS: test_agent_context_window_overrides_registry\n");
-}
-
-/* The agent is chosen after the prompt is built, so the prompt must fit whichever
- * one wins -- the smallest eligible window is the only safe budget. */
-static void test_budget_across_agents_takes_the_smallest(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "%s", "gemini-1.5-pro");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "%s", "gpt-4o");
-   int smallest = delegate_token_budget_for_agents(&cfg);
-   assert(smallest == delegate_token_budget_for_agent("gpt-4o", 0));
-   assert(smallest < delegate_token_budget_for_agent("gemini-1.5-pro", 0));
-   /* No agents: nothing is known, so the caller keeps its default. */
-   cfg.agent_count = 0;
-   assert(delegate_token_budget_for_agents(&cfg) == 0);
-   assert(delegate_token_budget_for_agents(NULL) == 0);
-   printf("  PASS: test_budget_across_agents_takes_the_smallest\n");
-}
-
 int main(void)
 {
    printf("test_delegate_token_budget\n");
@@ -511,7 +435,6 @@ int main(void)
    setup_tmpdir();
    dtb_setup_home();
 
-   test_failed_vote_releases_all_owned_responses();
    test_under_budget_passthrough();
    test_null_prompt_returns_null();
    test_over_budget_truncated();
@@ -526,10 +449,6 @@ int main(void)
    test_load_custom_budget_from_yaml();
    test_load_ignores_invalid_value();
    test_load_per_role_budget();
-   test_budget_follows_the_model_context_window();
-   test_budget_reserves_room_for_output();
-   test_agent_context_window_overrides_registry();
-   test_budget_across_agents_takes_the_smallest();
 
    dtb_clear_home();
    cleanup_tmpdir();

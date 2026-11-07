@@ -99,8 +99,8 @@ static int agent_is_named_in_fallback_chain(const agent_config_t *cfg, const cha
 }
 
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
-                                 const char *system_prompt, const char *user_prompt, int max_tokens,
-                                 int enforce_writes, agent_result_t *out, int rc)
+                                 const aimee_request_t *request, int enforce_writes,
+                                 agent_result_t *out, int rc)
 {
    agent_t *ag = current ? *current : NULL;
    /* Proceed for a retryable failure OR a saturation refusal (AGENT_RC_AT_LIMIT):
@@ -132,7 +132,8 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
          if ((pass == 0) != (same_reg != 0))
             continue;
          if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
-             !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
+             !agent_supports_delegate_role(peer, role) ||
+             !agent_is_available_for_execution(peer, cfg->route_execution) ||
              agent_is_named_in_fallback_chain(cfg, peer->name))
             continue;
          if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)
@@ -155,17 +156,13 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
 
          peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         agent_result_clear_response(out);
-         out->response = NULL;
-         out->error[0] = '\0';
-
          aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
                    peer->name, pass == 0 ? "same" : "other");
          /* Through the single guarded executor: enforces peer->max_parallel and
           * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
           * non-zero so the loop simply moves to the next same-tier peer. */
-         rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                                 0.3, 1 /* use_tools */, out);
+         agent_result_clear_response(out);
+         rc = agent_dispatch_one(peer, &cfg->network, role, request, 1 /* use_tools */, out);
          if (rc == 0)
          {
             ag = peer;

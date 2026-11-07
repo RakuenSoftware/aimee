@@ -45,47 +45,6 @@ static int load_key(unsigned char key[WFE_KEY_LEN])
    return n == (ssize_t)WFE_KEY_LEN ? 0 : -1;
 }
 
-int wfe_approval_ensure_key(void)
-{
-   unsigned char key[WFE_KEY_LEN];
-   if (load_key(key) == 0)
-      return 0;
-   char path[1024];
-   wfe_approval_key_path(path, sizeof path);
-   /* Atomic, 0600-from-creation, no-symlink-follow: no world-readable window and
-    * no first-run race corrupting the key. */
-   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-   if (fd < 0)
-   {
-      /* Someone else created it concurrently — accept it iff it loads + perms ok. */
-      if (load_key(key) == 0)
-         return 0;
-      return -1;
-   }
-   FILE *r = fopen("/dev/urandom", "rb");
-   if (!r)
-   {
-      close(fd);
-      unlink(path);
-      return -1;
-   }
-   size_t got = fread(key, 1, WFE_KEY_LEN, r);
-   fclose(r);
-   int ok = 0;
-   if (got == WFE_KEY_LEN)
-   {
-      ssize_t w = write(fd, key, WFE_KEY_LEN);
-      ok = (w == (ssize_t)WFE_KEY_LEN);
-   }
-   close(fd);
-   if (!ok)
-   {
-      unlink(path);
-      return -1;
-   }
-   return 0;
-}
-
 /* HMAC-SHA256(key, msg) -> 32-byte mac, using the workflow SHA-256. */
 static void hmac_sha256(const unsigned char *key, size_t keylen, const char *msg,
                         unsigned char mac[32])
@@ -212,29 +171,4 @@ int wfe_approval_present(const char *wi, const char *gate, const char *content_h
    }
    free(evs);
    return ok;
-}
-
-/* gate.human executor: advance iff a valid approval matches the current
- * artifact hash; otherwise park pending_human. */
-static wfe_step_result_t exec_human(wfe_ctx *ctx, const wfe_node_t *node)
-{
-   const char *wi = wfe_ctx_work_item(ctx);
-   /* current artifact hash = the work item's recorded content_hash */
-   db1_work_item_t row;
-   char hash[72] = "";
-   if (wi && db1_work_item_get(wi, &row) == 1)
-      snprintf(hash, sizeof hash, "%s", row.content_hash);
-
-   if (wfe_approval_present(wi, node->id, hash))
-   {
-      char handle[80];
-      snprintf(handle, sizeof handle, "%s.out", node->id);
-      return wfe_step_advanced(handle, hash, 0.0);
-   }
-   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN);
-}
-
-void wfe_register_human_gate(void)
-{
-   wfe_register_block_executor(WFE_BLK_GATE_HUMAN, exec_human);
 }

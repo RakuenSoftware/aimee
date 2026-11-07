@@ -81,8 +81,9 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    agent_config_t agents;
    const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
-   db1_server_session_t session;
-   if (!sid || !sid[0] || !conn->vault_principal[0] || db1_server_session_get(sid, &session) ||
+   db1_server_session_owner_t session;
+   if (!sid || !sid[0] || !conn->vault_principal[0] ||
+       db1_server_session_owner_get(sid, &session) ||
        strcmp(session.principal, conn->vault_principal))
       return server_send_error(conn, "trajectory batch requires an owned session_id", NULL);
    agent_request_creds_t previous;

@@ -196,10 +196,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
          if (!memory_backend_value_valid(value))
-            return server_send_error(
-                conn,
-                "memory: only native is supported; export and migrate retired backend data before switching",
-                NULL);
+            return server_send_error(conn,
+                                     "memory: only native is supported; export and migrate retired "
+                                     "backend data before switching",
+                                     NULL);
          if (config_client_set_value(key, cJSON_Duplicate(value, 1)) != 0 || config_reload() < 0)
             return server_send_error(conn, "memory: could not save backend configuration", NULL);
          cJSON *resp = jo_ok();
@@ -209,8 +209,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddBoolToObject(resp, "applied_live", 0);
          return server_send_ok(conn, resp);
       }
-      return server_send_error(conn, "memory: save the complete memory.backend configuration; external backends are retired",
-                               NULL);
+      return server_send_error(
+          conn,
+          "memory: save the complete memory.backend configuration; external backends are retired",
+          NULL);
    }
 
    /* Do not let the generic config surface bypass the roundtable preset API's

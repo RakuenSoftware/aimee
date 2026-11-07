@@ -32,8 +32,109 @@ static const char *OPENAI =
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
     "\"required\":[\"path\"]}}}]}";
 
+static int refusal_emits;
+static void refusal_chat(void *context, const char *json)
+{
+   (void)context;
+   (void)json;
+   refusal_emits++;
+}
+static void refusal_sse(void *context, const char *event, const char *json)
+{
+   (void)context;
+   (void)event;
+   (void)json;
+   refusal_emits++;
+}
+static void unrepresentable_refusal(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category",
+                                      .explanation = "Diagnostic only"};
+   aimee_response_t response = {.role = "assistant",
+                                .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                                .raw_stop_reason = "refusal",
+                                .refusal = &details};
+   char buffer[4096];
+   assert(!openai_frontend_render(&response));
+   assert(!responses_frontend_render(&response));
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 0, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 1, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_emit_chat_response(&response, "r", "model", 1, refusal_chat, NULL) < 0);
+   assert(aimee_openai_emit_responses_tail(&response, "r", "model", 1, refusal_sse, NULL) < 0);
+   assert(!refusal_emits && response.refusal == &details);
+   assert(!strcmp(response.refusal->category, "future_category"));
+   assert(!strcmp(response.refusal->explanation, "Diagnostic only"));
+   details.category = details.explanation = NULL;
+   assert(!openai_frontend_render(&response) && !responses_frontend_render(&response));
+   response.refusal = NULL;
+   cJSON *chat = openai_frontend_render(&response),
+         *responses = responses_frontend_render(&response);
+   assert(chat && responses); /* Legacy content_filter without details remains representable. */
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+}
+
+static void test_unobserved_usage_projection(void)
+{
+   aimee_response_t response = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .usage_unobserved = 1};
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *responses = responses_frontend_render(&response);
+   assert(chat && responses);
+   assert(!cJSON_GetObjectItem(chat, "usage"));
+   assert(cJSON_IsNull(cJSON_GetObjectItem(responses, "usage")));
+   /* Anthropic requires numeric usage; it cannot truthfully render this state. */
+   assert(!anthropic_frontend_render(&response));
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+   response.usage_unobserved = 0;
+   chat = openai_frontend_render(&response);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(chat, "usage"), "total_tokens")->valueint == 0);
+   cJSON_Delete(chat);
+   chat = anthropic_frontend_render(&response);
+   assert(chat);
+   cJSON_Delete(chat);
+}
+
+static void test_canonical_success_usage_and_truncation(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "the answer"};
+   aimee_response_t response = {
+       .role = "assistant", .content = &text, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   response.usage_in = 100;
+   response.usage_out = 5;
+   response.usage_cache_read = 80;
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *reply = responses_frontend_render(&response);
+   assert(chat && reply);
+   const cJSON *usage = cJSON_GetObjectItem(reply, "usage");
+   assert(cJSON_GetObjectItem(usage, "total_tokens")->valueint == 105);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(usage, "input_tokens_details"), "cached_tokens")
+              ->valueint == 80);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "completed"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+   response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   reply = responses_frontend_render(&response);
+   chat = openai_frontend_render(&response);
+   assert(reply && chat);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")), "incomplete"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetObjectItem(reply, "incomplete_details"), "reason")),
+                  "max_output_tokens"));
+   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(chat, "choices"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "finish_reason")), "length"));
+   cJSON_Delete(chat);
+   cJSON_Delete(reply);
+}
+
 int main(void)
 {
+   test_canonical_success_usage_and_truncation();
+   test_unobserved_usage_projection();
+   unrepresentable_refusal();
    printf("aimee-frontend: ");
    char err[128];
 

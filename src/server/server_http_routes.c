@@ -32,6 +32,7 @@
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
 #include "turn_registry.h"
+#include "server_session_capture.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/server_sessions.h"
 #include "request_context.h"
@@ -1290,9 +1291,12 @@ static void protected_http_wipe_strings(cJSON *value)
 {
    for (cJSON *item = value; item; item = item->next)
    {
-      if (item->child) protected_http_wipe_strings(item->child);
-      if (item->valuestring) OPENSSL_cleanse(item->valuestring, strlen(item->valuestring));
-      if (item->string) OPENSSL_cleanse(item->string, strlen(item->string));
+      if (item->child)
+         protected_http_wipe_strings(item->child);
+      if (item->valuestring)
+         OPENSSL_cleanse(item->valuestring, strlen(item->valuestring));
+      if (item->string)
+         OPENSSL_cleanse(item->string, strlen(item->string));
    }
 }
 
@@ -1302,21 +1306,26 @@ static void protected_http_wipe_strings(cJSON *value)
 static int rh_protected_intake(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = rq->body && rq->body_len > 0
-                    ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len) : NULL;
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(body, "operation_uuid");
    const cJSON *value = cJSON_GetObjectItemCaseSensitive(body, "value");
-   int valid = cJSON_IsObject(body) && cJSON_GetArraySize(body) == 2 &&
-               cJSON_IsString(operation) && strlen(operation->valuestring) == 36 &&
-               cJSON_IsString(value) && strlen(value->valuestring) <= 64 * 1024;
-   enum { LINE_CAPACITY = 6 * 64 * 1024 + 1024 };
+   int valid = cJSON_IsObject(body) && cJSON_GetArraySize(body) == 2 && cJSON_IsString(operation) &&
+               strlen(operation->valuestring) == 36 && cJSON_IsString(value) &&
+               strlen(value->valuestring) <= 64 * 1024;
+   enum
+   {
+      LINE_CAPACITY = 6 * 64 * 1024 + 1024
+   };
    char *line = valid ? calloc(1, LINE_CAPACITY) : NULL;
    int printed = line && cJSON_AddStringToObject(body, "method", "memory.protected-intake") &&
-                  cJSON_PrintPreallocated(body, line, LINE_CAPACITY, 0);
+                 cJSON_PrintPreallocated(body, line, LINE_CAPACITY, 0);
    protected_http_wipe_strings(body);
    cJSON_Delete(body);
    if (!printed)
    {
-      if (line) OPENSSL_cleanse(line, LINE_CAPACITY);
+      if (line)
+         OPENSSL_cleanse(line, LINE_CAPACITY);
       free(line);
       return err_json(resp, cap, valid ? 503 : 400,
                       valid ? "protected intake unavailable" : "invalid protected intake envelope");
@@ -1398,8 +1407,8 @@ static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "exact session_id and turn_id required");
    }
-   db1_server_session_t owner;
-   if (db1_server_session_get(session, &owner))
+   db1_server_session_owner_t owner;
+   if (db1_server_session_owner_get(session, &owner))
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 503, "session ownership unavailable");
@@ -1409,22 +1418,33 @@ static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 403, "session ownership mismatched");
    }
-   int local = turn_registry_cancel_exact(session, turn);
+   int local = turn_registry_match_exact(session, turn);
    char sequence[32] = "";
-   int rc = local ? local < 0 ? 1 : 0
-                  : db1_session_ir_cancel(identity.vault_principal, session, turn, sequence);
-   if (rc)
+   int rc = local < 0 ? 1
+                      : server_session_capture_cancel_owned(identity.vault_principal, session, turn,
+                                                            sequence, db1_session_ir_cancel);
+   /* Only the durable owner's exact native-active refusal authorizes a local
+    * native stop without an operator terminal. Generic refusals never do. */
+   if (rc == 2 && local != 1)
+      rc = 1;
+   if (rc != 0 && rc != 2)
    {
       cJSON_Delete(body);
       return err_json(resp, cap, rc == 1 ? 409 : 503,
                       "exact turn cancellation refused or unavailable");
    }
+   int flagged = turn_registry_cancel_exact(session, turn);
+   if (rc == 2 && flagged != 1)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 409, "native turn is no longer locally owned");
+   }
    cJSON *result = cJSON_CreateObject();
    cJSON_AddStringToObject(result, "status", "ok");
    cJSON_AddStringToObject(result, "session_id", session);
    cJSON_AddStringToObject(result, "turn_id", turn);
-   cJSON_AddStringToObject(result, "disposition", local ? "stopping" : "cancelled");
-   if (!local)
+   cJSON_AddStringToObject(result, "disposition", flagged == 1 ? "stopping" : "cancelled");
+   if (rc == 0)
       cJSON_AddStringToObject(result, "terminal_sequence", sequence);
    char *wire = cJSON_PrintUnformatted(result);
    int n = wire ? snprintf(resp, (size_t)cap, "%s", wire) : -1;
@@ -1509,6 +1529,16 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "missing workspace_id");
+   }
+   /* A CLI that has finished closes its private channel (no op is fetched). */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(body, "close")))
+   {
+      int closed = ws_runner_registry_close_channel(wsid);
+      cJSON_Delete(body);
+      if (closed != 0)
+         return err_json(resp, cap, 400, "only a runner channel can be closed");
+      snprintf(resp, (size_t)cap, "{\"ok\":true,\"closed\":true}");
+      return 200;
    }
    int unserved = 0; /* poll paces an unserved tree itself; see its header */
    (void)ws_runner_registry_register_configured(wsid);
@@ -1644,7 +1674,8 @@ const http_route_t g_v1_routes[] = {
      * remote_writes=off and allows them only at remote_writes=data/full after
      * capability checks. caps still derive from the op. */
     {"POST", "/v1/console/memory", NULL, RM_EXACT, NULL, CAP_MEMORY_ADMIN, rh_module_console_admin},
-    {"POST", "/v1/console/memory/", NULL, RM_EXACT, NULL, CAP_MEMORY_ADMIN, rh_module_console_admin},
+    {"POST", "/v1/console/memory/", NULL, RM_EXACT, NULL, CAP_MEMORY_ADMIN,
+     rh_module_console_admin},
     {"POST", "/v1/memory/store", NULL, RM_EXACT, "memory.store", 0, rh_dispatch_op},
     {"POST", "/v1/memory/protected-intake", NULL, RM_EXACT, "memory.protected-intake", 0,
      rh_protected_intake},
@@ -1799,6 +1830,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/model/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
     {"GET", "/v1/model/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
     {"POST", "/v1/model/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/model/generate", NULL, RM_EXACT, "model.generate", 0, rh_dispatch_op},
     {"POST", "/v1/model/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
     {"POST", "/v1/model/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
     {"POST", "/v1/model/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0,
@@ -1947,6 +1979,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/toolsets/resolve", NULL, RM_EXACT, "toolset.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/blast_radius/preview", NULL, RM_EXACT, "blast_radius.preview", 0, rh_dispatch_op},
     {"GET", "/v1/mcp/tools_list", NULL, RM_EXACT, "mcp.tools_list", 0, rh_dispatch_op},
+    {"POST", "/v1/mcp/tools_wait", NULL, RM_EXACT, "mcp.tools_wait", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/audit", NULL, RM_EXACT, "mcp.audit", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/recheck", NULL, RM_EXACT, "mcp.recheck", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/call", NULL, RM_EXACT, "mcp.call", 0, rh_dispatch_op},
@@ -2371,7 +2404,7 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       if (!server_http_json_body_is_single_value(body, body_len))
          return err_json(resp, resp_cap, 400, "invalid JSON body");
       return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
-                                      server_http_identity_principal(),
+                                      server_http_identity_workflow_principal(),
                                       (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
    }
    char id[256];

@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
@@ -92,8 +92,8 @@ func ownedInputCall(db ownedInputDB, op uint32, args ...string) (uint32, []strin
 	if e != nil {
 		return 0, nil, e
 	}
-	b, s := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 0}, f)
-	if s != bus.ModuleStatusOK {
+	b, s := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 0}, f)
+	if s != ring.ModuleStatusOK {
 		return 0, nil, fmt.Errorf("module status %d", s)
 	}
 	status, cells, ok := store.DecodeRequest(b)
@@ -245,10 +245,10 @@ func TestOwnedDeliveryServer(t *testing.T) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	handler := Sessions.Handler(db)
-	wrapped := func(i bus.ModuleInvocation, f []byte) ([]byte, bus.ModuleStatus) {
+	wrapped := func(i ring.ModuleInvocation, f []byte) ([]byte, ring.ModuleStatus) {
 		b, s := handler(i, f)
 		op, a, ok := store.DecodeRequest(f)
-		if os.Getenv("OWNED_INPUT_DROP_AFTER_COMMIT") == "1" && ok && op == 58 && len(a) == 6 && a[0] == "broker-delivery-lost" && s == bus.ModuleStatusOK {
+		if os.Getenv("OWNED_INPUT_DROP_AFTER_COMMIT") == "1" && ok && op == 58 && len(a) == 6 && a[0] == "broker-delivery-lost" && s == ring.ModuleStatusOK {
 			status, _, valid := store.DecodeRequest(b)
 			if valid && status == store.StatusOK {
 				os.Exit(0)
@@ -256,7 +256,7 @@ func TestOwnedDeliveryServer(t *testing.T) {
 		}
 		return b, s
 	}
-	if e := bus.RunModuleProcess(ctx, bus.ModuleProcessConfig{SocketPath: os.Getenv("OWNED_INPUT_BUS_SOCKET"), ModuleName: "owned-input-delivery", PrincipalClass: 1, PrincipalRef: 30, Stages: []bus.ModuleStage{{EventKind: 11782, StageID: StageSessions}}, Handler: wrapped, MaxIdlePollInterval: time.Millisecond}); e != nil {
+	if e := ring.RunModuleProcess(ctx, ring.ModuleProcessConfig{SocketPath: os.Getenv("OWNED_INPUT_BUS_SOCKET"), ModuleName: "owned-input-delivery", PrincipalClass: 1, PrincipalRef: 30, Stages: []ring.ModuleStage{{EventKind: 11782, StageID: StageSessions}}, Handler: wrapped, MaxIdlePollInterval: time.Millisecond}); e != nil {
 		t.Fatal(e)
 	}
 }

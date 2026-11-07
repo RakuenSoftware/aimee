@@ -9,7 +9,7 @@
     "build:console": "tsc -b && vite build --config vite.console.config.ts",
     "check": "tsc -b",
     "test": "vitest run",
-    "test:browser": "node ../scripts/test-setup-browser.cjs",
+    "test:browser": "node --test ../tests/e2e/native-recall-contract.test.cjs ../tests/e2e/native-recall-history.test.cjs && node ../scripts/test-setup-browser.cjs",
     "test:browser:webchat": "node ../scripts/test-webchat-browser.cjs"
   },
   "dependencies": {
@@ -24,7 +24,7 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.1",
     "jsdom": "^26.1.0",
-    "playwright": "1.55.0",
+    "playwright": "1.64.1",
     "typescript": "~5.8.3",
     "vite": "^6.3.1",
     "vite-plugin-singlefile": "^2.0.1",

@@ -47,8 +47,6 @@ func newConfig(port int, certFile, keyFile, socketPath, dbPath, spaPath string) 
 		certFile:   certFile,
 		keyFile:    keyFile,
 		socketPath: socketPath,
-		wfeEngine:  strings.TrimSpace(os.Getenv("AIMEE_WFE_ENGINE")),
-		wfeSocket:  strings.TrimSpace(os.Getenv("AIMEE_WFE_HTTP_SOCKET")),
 		dbPath:     dbPath,
 		spaPath:    spaPath,
 		pamService: pamServiceFromEnv(),

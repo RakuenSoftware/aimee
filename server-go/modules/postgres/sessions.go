@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -63,7 +63,7 @@ type sessionHandler struct {
 	discarded atomic.Uint64
 }
 
-func NewSessionHandler(ctx context.Context) bus.ModuleHandler {
+func NewSessionHandler(ctx context.Context) ring.ModuleHandler {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -161,10 +161,10 @@ func (h *sessionHandler) close() {
 		s.unlock()
 	}
 }
-func (h *sessionHandler) acquire(ctx context.Context) ([]byte, bus.ModuleStatus) {
+func (h *sessionHandler) acquire(ctx context.Context) ([]byte, ring.ModuleStatus) {
 	pool, err := h.poolFn(ctx)
 	if err != nil || pool == nil {
-		return refuse(statusFailed, "08001", "PostgreSQL runtime pool unavailable"), bus.ModuleStatusOK
+		return refuse(statusFailed, "08001", "PostgreSQL runtime pool unavailable"), ring.ModuleStatusOK
 	}
 	// Leave capacity for the existing transactional Go clients and health probes.
 	limit := int(pool.Config().MaxConns) / 2
@@ -178,7 +178,7 @@ func (h *sessionHandler) acquire(ctx context.Context) ([]byte, bus.ModuleStatus)
 	if h.stopped || len(h.sessions)+h.opening >= limit {
 		h.refused.Add(1)
 		h.mu.Unlock()
-		return refuse(statusLimitExceeded, "53300", "PostgreSQL session capacity reached"), bus.ModuleStatusOK
+		return refuse(statusLimitExceeded, "53300", "PostgreSQL session capacity reached"), ring.ModuleStatusOK
 	}
 	h.opening++
 	h.mu.Unlock()
@@ -193,18 +193,18 @@ func (h *sessionHandler) acquire(ctx context.Context) ([]byte, bus.ModuleStatus)
 	h.opening--
 	defer h.mu.Unlock()
 	if err != nil {
-		return refuse(statusFailed, "08001", "PostgreSQL session acquisition failed"), bus.ModuleStatusOK
+		return refuse(statusFailed, "08001", "PostgreSQL session acquisition failed"), ring.ModuleStatusOK
 	}
 	if h.stopped {
 		conn.Release()
-		return refuse(statusFailed, "08003", "PostgreSQL session provider stopped"), bus.ModuleStatusOK
+		return refuse(statusFailed, "08003", "PostgreSQL session provider stopped"), ring.ModuleStatusOK
 	}
 	var id uint64
 	for id == 0 || h.sessions[id] != nil {
 		var bytes [8]byte
 		if _, err := rand.Read(bytes[:]); err != nil {
 			conn.Release()
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		id = binary.LittleEndian.Uint64(bytes[:])
 	}
@@ -213,7 +213,7 @@ func (h *sessionHandler) acquire(ctx context.Context) ([]byte, bus.ModuleStatus)
 	w := &writer{}
 	w.header(statusOK, "", "")
 	w.u64(id)
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 func (h *sessionHandler) release(id uint64, s *postgresSession) error {
 	h.mu.Lock()
@@ -248,49 +248,49 @@ func (h *sessionHandler) release(id uint64, s *postgresSession) error {
 	s.conn.Release()
 	return nil
 }
-func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (h *sessionHandler) handle(inv ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	// Only the embedding daemon can request host sessions. Public and module
 	// principals use their existing operation contracts, never this capability.
-	if inv.StageID != StageSession || inv.PrincipalRef != 0 || len(body) > int(bus.ModuleMessageMaxBody) {
-		return nil, bus.ModuleStatusInvalidRequest
+	if inv.StageID != StageSession || inv.PrincipalRef != 0 || len(body) > int(ring.ModuleMessageMaxBody) {
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	r := &reader{buf: body, cellLimit: maxSessionCellBytes}
 	op, err := r.u32()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	id, err := r.u64()
 	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if op < sessionAcquire || op > sessionStats {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	var sql string
 	var args []any
 	if op == sessionExec || op == sessionQuery {
 		sql, err = r.strLimit(maxSessionStatementBytes)
 		if err != nil || sql == "" || len(sql) > maxSessionStatementBytes {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		args, err = r.args()
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	var waitMS uint32
 	if op == sessionWait {
 		waitMS, err = r.u32()
 		if err != nil || waitMS == 0 || waitMS > 60000 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 	if r.at != len(body) || (op == sessionAcquire || op == sessionStats) != (id == 0) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	remaining := inv.Remaining(maxStatementTime)
 	if remaining <= 0 || inv.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, remaining)
 	keepContext := false
@@ -305,7 +305,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 	if op == sessionStats {
 		pool, err := h.poolFn(ctx)
 		if err != nil || pool == nil {
-			return refuse(statusFailed, "08001", "PostgreSQL pool unavailable"), bus.ModuleStatusOK
+			return refuse(statusFailed, "08001", "PostgreSQL pool unavailable"), ring.ModuleStatusOK
 		}
 		limit := int(pool.Config().MaxConns) / 2
 		if limit < 1 {
@@ -324,25 +324,25 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 		w.u64(h.refused.Load())
 		w.u64(h.expired.Load())
 		w.u64(h.discarded.Load())
-		return w.buf, bus.ModuleStatusOK
+		return w.buf, ring.ModuleStatusOK
 	}
 
 	h.mu.Lock()
 	s := h.sessions[id]
 	h.mu.Unlock()
 	if s == nil {
-		return refuse(statusFailed, "08003", "PostgreSQL session expired or closed"), bus.ModuleStatusOK
+		return refuse(statusFailed, "08003", "PostgreSQL session expired or closed"), ring.ModuleStatusOK
 	}
 	if !s.take(ctx) {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	defer s.unlock()
 	if s.closed {
-		return refuse(statusFailed, "08003", "PostgreSQL session expired or closed"), bus.ModuleStatusOK
+		return refuse(statusFailed, "08003", "PostgreSQL session expired or closed"), ring.ModuleStatusOK
 	}
 	defer func() { s.used = time.Now() }()
 	if s.rows != nil && (op == sessionExec || op == sessionQuery || op == sessionWait) {
-		return refuse(statusFailed, "55000", "PostgreSQL result must be consumed before another statement"), bus.ModuleStatusOK
+		return refuse(statusFailed, "55000", "PostgreSQL result must be consumed before another statement"), ring.ModuleStatusOK
 	}
 	w := &writer{}
 	switch op {
@@ -354,7 +354,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 		w.header(statusOK, "", "")
 	case sessionRelease:
 		if err := h.release(id, s); err != nil {
-			return refuse(statusFailed, "08006", "PostgreSQL session reset failed; connection discarded"), bus.ModuleStatusOK
+			return refuse(statusFailed, "08006", "PostgreSQL session reset failed; connection discarded"), ring.ModuleStatusOK
 		}
 		w.header(statusOK, "", "")
 	case sessionState:
@@ -364,7 +364,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 		execArgs := append([]any{pgx.QueryExecModeSimpleProtocol}, args...)
 		tag, err := s.conn.Exec(ctx, sql, execArgs...)
 		if err != nil {
-			return failure(err, "session exec"), bus.ModuleStatusOK
+			return failure(err, "session exec"), ring.ModuleStatusOK
 		}
 		w.header(statusOK, "", "")
 		w.buf = append(w.buf, s.conn.Conn().PgConn().TxStatus())
@@ -377,7 +377,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 		if errors.Is(err, context.DeadlineExceeded) {
 			notified = 0
 		} else if err != nil {
-			return failure(err, "session notification"), bus.ModuleStatusOK
+			return failure(err, "session notification"), ring.ModuleStatusOK
 		}
 		w.header(statusOK, "", "")
 		w.u32(notified)
@@ -386,19 +386,19 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 			queryArgs := append([]any{pgx.QueryExecModeSimpleProtocol}, args...)
 			rows, err := s.conn.Query(ctx, sql, queryArgs...)
 			if err != nil {
-				return failure(err, "session query"), bus.ModuleStatusOK
+				return failure(err, "session query"), ring.ModuleStatusOK
 			}
 			s.rows, s.cancelRows = rows, cancel
 		} else if s.rows == nil {
-			return refuse(statusFailed, "55000", "PostgreSQL session has no pending result"), bus.ModuleStatusOK
+			return refuse(statusFailed, "55000", "PostgreSQL session has no pending result"), ring.ModuleStatusOK
 		}
 		result, more, err := s.resultPage()
 		if err != nil {
 			s.closeRows(true)
 			if errors.Is(err, errResultTooLarge) {
-				return refuse(statusLimitExceeded, "54000", "PostgreSQL row exceeds session reply bounds"), bus.ModuleStatusOK
+				return refuse(statusLimitExceeded, "54000", "PostgreSQL row exceeds session reply bounds"), ring.ModuleStatusOK
 			}
-			return failure(err, "session query"), bus.ModuleStatusOK
+			return failure(err, "session query"), ring.ModuleStatusOK
 		}
 		if more {
 			keepContext = op == sessionQuery
@@ -410,7 +410,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 		w.buf = append(w.buf, result...)
 
 	}
-	return w.buf, bus.ModuleStatusOK
+	return w.buf, ring.ModuleStatusOK
 }
 
 // Pages preserve exact PostgreSQL text and the original query snapshot. The
@@ -430,7 +430,7 @@ func (s *postgresSession) resultPage() ([]byte, bool, error) {
 		metadata.str(field.Name)
 		metadata.u32(field.DataTypeOID)
 	}
-	budget := int(bus.ModuleMessageMaxBody) - len(metadata.buf) - 64
+	budget := int(ring.ModuleMessageMaxBody) - len(metadata.buf) - 64
 	cells := &writer{}
 	count, more := 0, false
 	for count < maxRowsPerReply {

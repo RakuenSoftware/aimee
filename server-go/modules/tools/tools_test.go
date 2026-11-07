@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func toolRequest(name string) []byte {
@@ -40,8 +40,8 @@ func TestToolClassificationParity(t *testing.T) {
 		"not_registered":          ClassUnknown,
 	}
 	for name, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, toolRequest(name))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, toolRequest(name))
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != want {
 			t.Errorf("%q response = %x, status = %d, want class %d", name, response, status, want)
@@ -52,11 +52,11 @@ func TestToolClassificationParity(t *testing.T) {
 func TestToolsRejectInvalidWire(t *testing.T) {
 	request := toolRequest("bash")
 	request[7] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("reserved-byte status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageDispatch, DeadlineNS: 1},
-		toolRequest("bash")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageDispatch, DeadlineNS: 1},
+		toolRequest("bash")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
@@ -79,8 +79,8 @@ func TestCompleteCatalogMetadataWire(t *testing.T) {
 	}
 	for name, want := range catalog {
 		request := metadataRequest(name)
-		response, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, request)
-		if status != bus.ModuleStatusOK || len(response) != metadataLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, request)
+		if status != ring.ModuleStatusOK || len(response) != metadataLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != metadataMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != want.Class ||
 			binary.LittleEndian.Uint32(response[8:12]) != want.Primary ||
@@ -109,7 +109,7 @@ func TestMetadataRefusesMalformedWire(t *testing.T) {
 	} {
 		request := metadataRequest("read_file")
 		mutate(request)
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, request); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, request); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("malformed metadata wire accepted: %v", status)
 		}
 	}
@@ -120,17 +120,17 @@ func TestMetadataRefusesMalformedWire(t *testing.T) {
 
 func TestMetadataPreservesLongQualifiedNamesAndRefusesBounds(t *testing.T) {
 	name := "remote:" + strings.Repeat("x", 300)
-	wire, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, metadataRequest(name))
-	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint32(wire[4:8]) != ClassRemote {
+	wire, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, metadataRequest(name))
+	if status != ring.ModuleStatusOK || binary.LittleEndian.Uint32(wire[4:8]) != ClassRemote {
 		t.Fatal("long external name refused", status)
 	}
 	for _, name := range []string{strings.Repeat("x", 4096), "remote:x\x00hidden"} {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, metadataRequest(name)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, metadataRequest(name)); status != ring.ModuleStatusInvalidRequest {
 			t.Fatal("invalid name accepted", status)
 		}
 	}
 	request := append(metadataRequest("read_file"), 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageDispatch}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("trailing bytes accepted")
 	}
 }

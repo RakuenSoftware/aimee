@@ -2,7 +2,7 @@
  *
  * Extracted from agent_runtime.c (which is pinned at the 2000-line cap). Runs N
  * agent_task_t concurrently — each task either on its named participant agent
- * (agent_run_named) or by role (agent_run_ex) — under a compute-budget thread
+ * (agent_run_named) or by role (agent_run) — under a compute-budget thread
  * ceiling, and reports how many succeeded. Used by the MoA ensemble fan-out
  * (delegate_ensemble.c) and the sibling vote (agent_coord.c).
  */
@@ -10,6 +10,7 @@
 #include "agent_config.h" /* agent_request_creds_t: inherit per-turn creds */
 #include "agent_exec.h"
 #include "request_context.h"
+#include "server_session_control.h"
 #include "config.h" /* aimee_resolve_compute_threads */
 #include "log.h"
 
@@ -95,6 +96,21 @@ typedef struct
    int owns_process_permit;
 } parallel_ctx_t;
 
+static int run_task(agent_config_t *cfg, const agent_task_t *task, agent_result_t *out)
+{
+   agent_run_require_initial_tool_call(task->use_tools && task->require_initial_tool_call);
+   int rc;
+   if (task->agent && task->agent[0])
+      rc = (task->use_tools ? agent_run_named_with_tools
+                            : agent_run_named)(cfg, task->agent, task->role, &task->request, out);
+   else if (task->use_tools)
+      rc = agent_run_with_tools_write_enforce(cfg, task->role, &task->request, 1, out);
+   else
+      rc = agent_run(cfg, task->role, &task->request, out);
+   agent_run_require_initial_tool_call(0);
+   return rc;
+}
+
 static void *parallel_worker(void *arg)
 {
    parallel_ctx_t *ctx = (parallel_ctx_t *)arg;
@@ -105,22 +121,7 @@ static void *parallel_worker(void *arg)
    request_context_restore(ctx->request_context);
    run_cmd_set_cwd(ctx->cwd[0] ? ctx->cwd : NULL);
    agent_set_request_cancel(&ctx->cancel);
-   /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
-   double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
-   agent_run_require_initial_tool_call(ctx->task->use_tools &&
-                                       ctx->task->require_initial_tool_call);
-   if (ctx->task->agent && ctx->task->agent[0])
-      (ctx->task->use_tools ? agent_run_named_with_tools : agent_run_named)(
-          ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
-          ctx->task->user_prompt, ctx->task->max_tokens, temp, ctx->result);
-   else if (ctx->task->use_tools)
-      agent_run_with_tools_write_enforce(ctx->cfg, ctx->task->role, ctx->task->system_prompt,
-                                         ctx->task->user_prompt, ctx->task->max_tokens, 1,
-                                         ctx->result);
-   else
-      agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
-                   ctx->task->max_tokens, temp, ctx->result);
-   agent_run_require_initial_tool_call(0);
+   run_task(ctx->cfg, ctx->task, ctx->result);
    agent_set_request_cancel(NULL);
    request_context_clear();
    run_cmd_set_cwd(NULL);
@@ -173,6 +174,11 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    agent_request_creds_snapshot(&creds);
    request_context_snapshot_t request_context;
    request_context_snapshot(&request_context);
+   server_control_scope_t *controls = server_control_scope_current();
+   if (request_context.active && controls)
+      request_context.value.control_reply_capability =
+          request_context.value.control_reply_capability &&
+          server_control_scope_can_reply(controls);
    /* Parallel seats inherit the worktree that was active when this fan-out was
     * invoked. Later parent-thread changes are intentionally not observed. */
    const char *parent_cwd = run_cmd_get_cwd();
@@ -269,21 +275,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       return 0;
    if (task_count == 1 && deadline_ms <= 0)
    {
-      double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
-      int rc;
-      agent_run_require_initial_tool_call(tasks[0].use_tools && tasks[0].require_initial_tool_call);
-      if (tasks[0].agent && tasks[0].agent[0])
-         rc = (tasks[0].use_tools ? agent_run_named_with_tools : agent_run_named)(
-             cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
-             tasks[0].max_tokens, temp, &out[0]);
-      else if (tasks[0].use_tools)
-         rc = agent_run_with_tools_write_enforce(cfg, tasks[0].role, tasks[0].system_prompt,
-                                                 tasks[0].user_prompt, tasks[0].max_tokens, 1,
-                                                 &out[0]);
-      else
-         rc = agent_run_ex(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
-                           tasks[0].max_tokens, temp, &out[0]);
-      agent_run_require_initial_tool_call(0);
+      int rc = run_task(cfg, &tasks[0], &out[0]);
       return rc == 0 ? 1 : 0;
    }
 
@@ -314,6 +306,11 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
    agent_request_creds_snapshot(&creds);
    request_context_snapshot_t request_context;
    request_context_snapshot(&request_context);
+   server_control_scope_t *controls = server_control_scope_current();
+   if (request_context.active && controls)
+      request_context.value.control_reply_capability =
+          request_context.value.control_reply_capability &&
+          server_control_scope_can_reply(controls);
    /* Capture-at-call-time, matching the deadline path above. */
    const char *parent_cwd = run_cmd_get_cwd();
 

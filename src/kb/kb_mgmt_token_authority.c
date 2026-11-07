@@ -223,11 +223,6 @@ static int canonical_subject(const char *s)
    return serial && strlen(serial + 1) <= 79;
 }
 
-int kb_identity_token_authority_subject_valid(const char *subject)
-{
-   return canonical_subject(subject) ? 1 : 0;
-}
-
 int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *r)
 {
    if (!r || (r->newly_admitted != 0 && r->newly_admitted != 1) ||

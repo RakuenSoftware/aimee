@@ -3,6 +3,7 @@
 /* clang-format off */
 #include "agent_log.h"
 #include "coord_jobs.h"
+#include "cJSON.h"
 #include "db1_client/db1_cron_jobs.h"
 #include "db1_client/db1_trigger.h"
 
@@ -10,8 +11,8 @@
 #include "transport.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_client.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_client.h>
+#include <ouroboros/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 
@@ -19,25 +20,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <aimee/ir/session_event.h>
 
 static db1_family_t family = {"db1.agent_work", "agent work", AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_STAGE_AGENT_WORK, 2000, 0};
-
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
-
-
-
-
-
-
-
-
-
 
 long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
 {
@@ -142,163 +133,6 @@ int db1_agent_log_list_recent(db1_agent_log_display_t *out, int max)
    return wire_rows;
 }
 
-int db1_agent_log_list_by_session(const char *session_id, db1_agent_log_display_t *out, int max)
-{
-   if (!session_id || !session_id[0] || !out || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {session_id, arg1};
-   char **wire_values = malloc((size_t)max * 13u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 13u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 8u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 13u + 0u] = wire_scratch[wire_row * 8u + 0u];
-      wire_caps[wire_row * 13u + 0u] = sizeof wire_scratch[wire_row * 8u + 0u];
-      wire_values[wire_row * 13u + 1u] = out[wire_row].agent_name;
-      wire_caps[wire_row * 13u + 1u] = sizeof out[wire_row].agent_name;
-      wire_values[wire_row * 13u + 2u] = out[wire_row].role;
-      wire_caps[wire_row * 13u + 2u] = sizeof out[wire_row].role;
-      wire_values[wire_row * 13u + 3u] = wire_scratch[wire_row * 8u + 1u];
-      wire_caps[wire_row * 13u + 3u] = sizeof wire_scratch[wire_row * 8u + 1u];
-      wire_values[wire_row * 13u + 4u] = wire_scratch[wire_row * 8u + 2u];
-      wire_caps[wire_row * 13u + 4u] = sizeof wire_scratch[wire_row * 8u + 2u];
-      wire_values[wire_row * 13u + 5u] = wire_scratch[wire_row * 8u + 3u];
-      wire_caps[wire_row * 13u + 5u] = sizeof wire_scratch[wire_row * 8u + 3u];
-      wire_values[wire_row * 13u + 6u] = wire_scratch[wire_row * 8u + 4u];
-      wire_caps[wire_row * 13u + 6u] = sizeof wire_scratch[wire_row * 8u + 4u];
-      wire_values[wire_row * 13u + 7u] = wire_scratch[wire_row * 8u + 5u];
-      wire_caps[wire_row * 13u + 7u] = sizeof wire_scratch[wire_row * 8u + 5u];
-      wire_values[wire_row * 13u + 8u] = wire_scratch[wire_row * 8u + 6u];
-      wire_caps[wire_row * 13u + 8u] = sizeof wire_scratch[wire_row * 8u + 6u];
-      wire_values[wire_row * 13u + 9u] = wire_scratch[wire_row * 8u + 7u];
-      wire_caps[wire_row * 13u + 9u] = sizeof wire_scratch[wire_row * 8u + 7u];
-      wire_values[wire_row * 13u + 10u] = out[wire_row].session_id;
-      wire_caps[wire_row * 13u + 10u] = sizeof out[wire_row].session_id;
-      wire_values[wire_row * 13u + 11u] = out[wire_row].created_at;
-      wire_caps[wire_row * 13u + 11u] = sizeof out[wire_row].created_at;
-      wire_values[wire_row * 13u + 12u] = out[wire_row].error;
-      wire_caps[wire_row * 13u + 12u] = sizeof out[wire_row].error;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_LIST_BY_SESSION, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 13), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 13u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 13u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 8u + 0u], NULL, 10);
-      out[wire_row].prompt_tokens = (int)strtol(wire_scratch[wire_row * 8u + 1u], NULL, 10);
-      out[wire_row].completion_tokens = (int)strtol(wire_scratch[wire_row * 8u + 2u], NULL, 10);
-      out[wire_row].latency_ms = (int)strtol(wire_scratch[wire_row * 8u + 3u], NULL, 10);
-      out[wire_row].success = (int)strtol(wire_scratch[wire_row * 8u + 4u], NULL, 10);
-      out[wire_row].turns = (int)strtol(wire_scratch[wire_row * 8u + 5u], NULL, 10);
-      out[wire_row].tool_calls = (int)strtol(wire_scratch[wire_row * 8u + 6u], NULL, 10);
-      out[wire_row].confidence = (int)strtol(wire_scratch[wire_row * 8u + 7u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
-int db1_agent_log_search_session_ids_by_role(const char *pattern, char (*out_ids)[DB1_AL_SESSION_LEN], int max)
-{
-   if (!pattern || !pattern[0] || !out_ids || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {pattern, arg1};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      return -1;
-   }
-   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = out_ids[wire_row];
-      wire_caps[wire_row * 1u + 0u] = sizeof out_ids[wire_row];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_SEARCH_SESSIONS_BY_ROLE, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   return wire_rows;
-}
-
-int db1_agent_log_count_per_role(const char *since_or_null, db1_agent_log_role_count_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {since_or_null ? since_or_null : "", arg1};
-   char **wire_values = malloc((size_t)max * 2u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 2u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 2u + 0u] = out[wire_row].role;
-      wire_caps[wire_row * 2u + 0u] = sizeof out[wire_row].role;
-      wire_values[wire_row * 2u + 1u] = wire_scratch[wire_row * 1u + 0u];
-      wire_caps[wire_row * 2u + 1u] = sizeof wire_scratch[wire_row * 1u + 0u];
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_COUNT_PER_ROLE, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 2), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 2u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 2u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out[wire_row].count = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
 int db1_agent_log_failures_since_seconds(int max_rows, int since_secs, db1_agent_log_failure_t *out)
 {
    if (!out || max_rows <= 0)
@@ -338,164 +172,6 @@ int db1_agent_log_failures_since_seconds(int max_rows, int since_secs, db1_agent
       return -1;
    }
    int wire_rows = (int)(wire_filled / 3u);
-   return wire_rows;
-}
-
-int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", since_days);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {arg0, arg1};
-   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 1u + 0u] = out[wire_row].error;
-      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row].error;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT_ERRORS, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 1), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
-   {
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 1u);
-   return wire_rows;
-}
-
-int db1_agent_log_list_delegation_patterns(int since_days, int min_total, db1_agent_log_delegation_pattern_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", since_days);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", min_total);
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", max);
-   const char *fields[] = {arg0, arg1, arg2};
-   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 8u + 0u] = out[wire_row].role;
-      wire_caps[wire_row * 8u + 0u] = sizeof out[wire_row].role;
-      wire_values[wire_row * 8u + 1u] = out[wire_row].agent_name;
-      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].agent_name;
-      wire_values[wire_row * 8u + 2u] = wire_scratch[wire_row * 5u + 0u];
-      wire_caps[wire_row * 8u + 2u] = sizeof wire_scratch[wire_row * 5u + 0u];
-      wire_values[wire_row * 8u + 3u] = wire_scratch[wire_row * 5u + 1u];
-      wire_caps[wire_row * 8u + 3u] = sizeof wire_scratch[wire_row * 5u + 1u];
-      wire_values[wire_row * 8u + 4u] = wire_scratch[wire_row * 5u + 2u];
-      wire_caps[wire_row * 8u + 4u] = sizeof wire_scratch[wire_row * 5u + 2u];
-      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 5u + 3u];
-      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 5u + 3u];
-      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 5u + 4u];
-      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 5u + 4u];
-      wire_values[wire_row * 8u + 7u] = out[wire_row].recent_error;
-      wire_caps[wire_row * 8u + 7u] = sizeof out[wire_row].recent_error;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS, fields, 3, wire_values, wire_caps,
-                           (uint32_t)(max * 8), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 8u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out[wire_row].wins = (int)strtol(wire_scratch[wire_row * 5u + 0u], NULL, 10);
-      out[wire_row].fails = (int)strtol(wire_scratch[wire_row * 5u + 1u], NULL, 10);
-      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 5u + 2u], NULL, 10);
-      out[wire_row].avg_turns = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
-      out[wire_row].avg_tools = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
-   }
-   free(wire_scratch);
-   return wire_rows;
-}
-
-int db1_agent_log_list_failure_episode_seeds(int since_days, int min_fails, db1_agent_log_failure_episode_seed_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 64)
-      max = 64;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", since_days);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", min_fails);
-   char arg2[32];
-   snprintf(arg2, sizeof arg2, "%d", max);
-   const char *fields[] = {arg0, arg1, arg2};
-   char **wire_values = malloc((size_t)max * 4u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 4u * sizeof *wire_caps);
-   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
-   if (!wire_values || !wire_caps || !wire_scratch)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_scratch);
-      return -1;
-   }
-   memset(out, 0, (size_t)max * sizeof *out);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 4u + 0u] = out[wire_row].role;
-      wire_caps[wire_row * 4u + 0u] = sizeof out[wire_row].role;
-      wire_values[wire_row * 4u + 1u] = out[wire_row].agent_name;
-      wire_caps[wire_row * 4u + 1u] = sizeof out[wire_row].agent_name;
-      wire_values[wire_row * 4u + 2u] = wire_scratch[wire_row * 1u + 0u];
-      wire_caps[wire_row * 4u + 2u] = sizeof wire_scratch[wire_row * 1u + 0u];
-      wire_values[wire_row * 4u + 3u] = out[wire_row].errors;
-      wire_caps[wire_row * 4u + 3u] = sizeof out[wire_row].errors;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_FAILURE_SEEDS, fields, 3, wire_values, wire_caps,
-                           (uint32_t)(max * 4), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 4u != 0u)
-   {
-      free(wire_scratch);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 4u);
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      out[wire_row].fails = (int)strtol(wire_scratch[wire_row * 1u + 0u], NULL, 10);
-   }
-   free(wire_scratch);
    return wire_rows;
 }
 
@@ -668,25 +344,6 @@ int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs)
    return 0;
 }
 
-int db1_agent_log_session_outcome(const char *session_id, int *successes_out, int *total_out)
-{
-   if (!session_id || !session_id[0] || !successes_out || !total_out)
-      return -1;
-   const char *fields[] = {session_id};
-   char slot0[32];
-   char slot1[32];
-   char *const values[] = {slot0, slot1};
-   const size_t caps[] = {sizeof slot0, sizeof slot1};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME, fields, 1, values, caps, 2, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   *successes_out = (int)strtol(slot0, NULL, 10);
-   *total_out = (int)strtol(slot1, NULL, 10);
-   return 0;
-}
-
 int db1_agent_log_prometheus(db1_agent_log_prometheus_t *out, int max)
 {
    if (!out || max <= 0)
@@ -748,34 +405,6 @@ int db1_agent_log_prometheus(db1_agent_log_prometheus_t *out, int max)
    }
    free(wire_scratch);
    return wire_rows;
-}
-
-int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
-{
-   if (!out)
-      return -1;
-   const char *fields[] = {since_or_null ? since_or_null : ""};
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   char slot3[32];
-   char slot4[32];
-   char slot5[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_AGENT_LOG_STATS, fields, 1, values, caps, 6, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->total = (int)strtol(slot0, NULL, 10);
-   out->turns = (int64_t)strtoll(slot1, NULL, 10);
-   out->tool_calls = (int64_t)strtoll(slot2, NULL, 10);
-   out->prompt_tokens = (int64_t)strtoll(slot3, NULL, 10);
-   out->completion_tokens = (int64_t)strtoll(slot4, NULL, 10);
-   out->successes = (int)strtol(slot5, NULL, 10);
-   return 0;
 }
 
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task, const char *workspace, const char *metadata)
@@ -844,17 +473,34 @@ int db1_coord_job_create(int plan_id, int max_concurrent)
    return (int)strtoll(slot0, NULL, 10);
 }
 
-int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const char *prompt, const char *cwd, const char *persona)
+int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const aimee_message_t *message, const char *cwd, const char *persona)
 {
+   aimee_request_t view = {.messages = (aimee_message_t *)message, .n_messages = message ? 1 : 0};
+   if (message && (aimee_ir_request_admit(&view) || strcmp(message->role, "user") || message->raw))
+      return -1;
+   /* Native sidecars have their own source-owned cache boundary; queue message
+    * JSON must never silently discard them. */
+   for (int i = 0; message && i < message->n_blocks; i++)
+      if (message->blocks[i].raw)
+         return -1;
+   cJSON *json = message ? aimee_ir_message_json(message) : NULL;
+   char *encoded = json ? cJSON_PrintUnformatted(json) : NULL;
+   cJSON_Delete(json);
+   if (message && (!encoded || strlen(encoded) >= DB1_COORD_MESSAGE_LEN))
+   {
+      free(encoded);
+      return -1;
+   }
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", job_id);
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", step_id);
-   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", prompt ? prompt : "", cwd ? cwd : "", persona ? persona : ""};
+   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", encoded ? encoded : "", cwd ? cwd : "", persona ? persona : ""};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_COORD_TASK_ADD, fields, 7, values, caps, 1, NULL);
+   free(encoded);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -886,22 +532,6 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    return out->id;
 }
 
-int db1_coord_job_complete_task(int task_id, const char *result)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", task_id);
-   const char *fields[] = {arg0, result ? result : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_TASK_COMPLETE, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_coord_job_fail_task(int task_id, const char *error)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", task_id);
-   const char *fields[] = {arg0, error ? error : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_TASK_FAIL, fields, 2, NULL, NULL, 0, NULL));
-}
-
 int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result)
 {
    if (!claimed_by || !claimed_by[0])
@@ -928,16 +558,6 @@ int db1_coord_job_release_task(int task_id)
    snprintf(arg0, sizeof arg0, "%d", task_id);
    const char *fields[] = {arg0};
    return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_TASK_RELEASE, fields, 1, NULL, NULL, 0, NULL));
-}
-
-int db1_coord_job_release_task_bounded(int task_id, int max_requeues)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", task_id);
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max_requeues);
-   const char *fields[] = {arg0, arg1};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by, int max_requeues)
@@ -1082,25 +702,6 @@ int db1_coord_job_cancel(int job_id)
    return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_JOB_CANCEL, fields, 1, NULL, NULL, 0, NULL));
 }
 
-int db1_coord_job_refresh_status(int job_id)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", job_id);
-   const char *fields[] = {arg0};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_COORD_JOB_REFRESH_STATUS, fields, 1, NULL, NULL, 0, NULL));
-}
-
-int db1_coord_job_has_file_conflict(int job_id, const char *files_json)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", job_id);
-   const char *fields[] = {arg0, files_json ? files_json : ""};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_COORD_JOB_FILE_CONFLICT, fields, 2, NULL, NULL, 0, NULL);
-   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   return wire_status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;
-}
-
 int db1_coord_job_list_recent(db1_coord_job_t *out, int max)
 {
    if (!out || max <= 0)
@@ -1213,21 +814,29 @@ int db1_coord_job_list_active_ids(int *out_ids, int max)
    return wire_rows;
 }
 
-int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out, size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
+int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, aimee_message_t *message_out, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
 {
-   if (!role_out || role_cap == 0 || !prompt_out || prompt_cap == 0 || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+   if (!role_out || role_cap == 0 || !message_out || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+      return -1;
+   char *message_json = malloc(DB1_COORD_MESSAGE_LEN);
+   if (!message_json)
       return -1;
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", task_id);
    const char *fields[] = {arg0};
-   char *const values[] = {role_out, prompt_out, files_out, cwd_out, persona_out};
-   const size_t caps[] = {role_cap, prompt_cap, files_cap, cwd_cap, persona_cap};
+   char *const values[] = {role_out, message_json, files_out, cwd_out, persona_out};
+   const size_t caps[] = {role_cap, DB1_COORD_MESSAGE_LEN, files_cap, cwd_cap, persona_cap};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH, fields, 1, values, caps, 5, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
+      free(message_json);
       return -1;
    }
-   return 0;
+   cJSON *json = cJSON_Parse(message_json);
+   free(message_json);
+   int rc = json ? aimee_ir_message_parse(json, message_out) : -1;
+   cJSON_Delete(json);
+   return rc;
 }
 
 int db1_cron_job_upsert(const cron_job_t *job)
@@ -1392,7 +1001,7 @@ int db1_cron_job_delete(const char *job_id)
    return write_result(db1_call(&family, AIMEE_DB1_OP_CRON_JOB_DELETE, fields, 1, NULL, NULL, 0, NULL));
 }
 
-int db1_cron_job_record_run(const char *job_id, const char *status, int silent, int delivered, const char *output, const char *error, const char *output_hash)
+int db1_cron_job_record_run_ir(const char *job_id, const char *status, int silent, int delivered, const char *output, const char *error, const char *output_hash, const char *output_ir)
 {
    if (!job_id || !job_id[0] || !status || !status[0])
       return -1;
@@ -1400,14 +1009,20 @@ int db1_cron_job_record_run(const char *job_id, const char *status, int silent, 
    snprintf(arg2, sizeof arg2, "%d", silent);
    char arg3[32];
    snprintf(arg3, sizeof arg3, "%d", delivered);
-   const char *fields[] = {job_id, status, arg2, arg3, output ? output : "", error ? error : "", output_hash ? output_hash : ""};
+   const char *fields[] = {job_id, status, arg2, arg3, output ? output : "", error ? error : "", output_hash ? output_hash : "", output_ir ? output_ir : ""};
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 7, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_RECORD_RUN, fields, 8, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_cron_job_record_run(const char *job_id, const char *status, int silent, int delivered,
+                            const char *output, const char *error, const char *output_hash)
+{
+   return db1_cron_job_record_run_ir(job_id, status, silent, delivered, output, error, output_hash, NULL);
 }
 
 char *db1_cron_jobs_list_json()
@@ -1450,24 +1065,37 @@ char *db1_cron_job_history_json(const char *job_id, int limit)
    return shrunk ? shrunk : value;
 }
 
-char *db1_cron_job_latest_output(const char *job_id)
+int db1_cron_job_latest_snapshot(const char *job_id, char **output_out, char **output_ir_out)
 {
-   if (!job_id || !job_id[0])
-      return NULL;
+   if (output_out)
+      *output_out = NULL;
+   if (output_ir_out)
+      *output_ir_out = NULL;
+   if (!job_id || !job_id[0] || !output_out || !output_ir_out)
+      return -1;
    const char *fields[] = {job_id};
-   char *value = malloc(262144u);
-   if (!value)
-      return NULL;
-   char *const values[] = {value};
-   const size_t caps[] = {262144u};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT, fields, 1, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   char *value = calloc(1, 1048577u), *ir = calloc(1, 1048577u);
+   if (!value || !ir)
    {
       free(value);
-      return NULL;
+      free(ir);
+      return -1;
    }
-   char *shrunk = realloc(value, strlen(value) + 1u);
-   return shrunk ? shrunk : value;
+   char *const values[] = {value, ir};
+   const size_t caps[] = {1048577u, 1048577u};
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT, fields, 1, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      free(value);
+      free(ir);
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+   }
+   if (ir[0])
+      *output_ir_out = ir;
+   else
+      free(ir);
+   *output_out = value;
+   return 0;
 }
 
 char *db1_cron_job_last_output_hash(const char *job_id)

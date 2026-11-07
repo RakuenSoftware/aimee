@@ -10,8 +10,8 @@ int aimee_tool_source_visible_valid(const cJSON *source, const char *visible)
    if (!visible || !aimee_ir_tool_source_shape_valid(source))
       return 0;
    char digest[65];
-   const char *expected = cJSON_GetStringValue(
-       cJSON_GetObjectItemCaseSensitive(source, "visible_sha256"));
+   const char *expected =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "visible_sha256"));
    return aimee_sha256_hex(visible, strlen(visible), digest) == 0 && expected &&
           strcmp(digest, expected) == 0;
 }

@@ -3,7 +3,7 @@
 #endif
 #include "kb_client.h"
 #include <aimee/core/connection/auth.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
@@ -68,16 +68,6 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
 static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {DEPENDENCY_BREAKER_INITIALIZER,
                                                                    DEPENDENCY_BREAKER_INITIALIZER};
 static int64_t (*g_kb_dependency_clock)(void);
-#if defined(_MSC_VER)
-static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
-static __declspec(thread) char g_kb_last_dependency[32] = "kb";
-static __declspec(thread) int64_t g_kb_last_observed_generation;
-static __declspec(thread) int64_t g_kb_last_current_generation;
-static __declspec(thread) int64_t g_kb_last_observed_dimension;
-static __declspec(thread) int64_t g_kb_last_current_dimension;
-static __declspec(thread) int64_t g_kb_last_retry_after_ms;
-static __declspec(thread) int g_kb_last_suppressed;
-#else
 static _Thread_local kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 static _Thread_local char g_kb_last_dependency[32] = "kb";
 static _Thread_local int64_t g_kb_last_observed_generation;
@@ -88,7 +78,6 @@ static _Thread_local int64_t g_kb_last_retry_after_ms;
 /* Set when the local breaker refused the call, so the typed error can say the
  * KB was never contacted instead of blaming the operation the caller asked for. */
 static _Thread_local int g_kb_last_suppressed;
-#endif
 
 static int64_t kb_dependency_now_ms(void)
 {
@@ -996,135 +985,9 @@ char *kb_client_ingest_status_json(void)
    return kb_error_json("knowledge service /v1/ingest/status did not respond");
 }
 
-char *kb_client_queue_status_json(void)
-{
-   int http_status = -1;
-   char *resp =
-       kb_client_v1_get_json("/v1/pipeline/status", CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/pipeline/status returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/pipeline/status did not respond");
-}
-
-char *kb_client_corpus_pipeline_status_json(void)
-{
-   int http_status = -1;
-   char *resp =
-       kb_client_v1_get_json("/v1/corpus/pipeline/status", CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/corpus/pipeline/status returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/corpus/pipeline/status did not respond");
-}
-
-char *kb_client_job_status_json(int64_t job_id)
-{
-   if (job_id <= 0)
-      return kb_error_json("invalid job id");
-   char path[64];
-   snprintf(path, sizeof(path), "/v1/jobs/%lld", (long long)job_id);
-   int http_status = -1;
-   char *resp = kb_client_v1_get_json(path, CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service %s returned HTTP %d", path, http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/jobs did not respond");
-}
-
-char *kb_client_queue_drain_json(const char *embedding_command, int timeout_secs)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   cJSON_AddNumberToObject(req, "timeout", timeout_secs);
-   /* Drains block until the queue empties or timeout elapses; size the
-    * RPC timeout a bit above the caller's timeout so the network wait
-    * outlasts the drain.  Cap at 10 minutes so a wedged drain can't
-    * hang the CLI indefinitely. */
-   int req_timeout = (timeout_secs > 0 ? timeout_secs + 30 : 600) * 1000;
-   if (req_timeout > 10 * 60 * 1000)
-      req_timeout = 10 * 60 * 1000;
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/drain", req, req_timeout, &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/drain returned HTTP %d", http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/drain did not respond");
-}
-
-char *kb_client_corpus_pipeline_drain_json(int limit)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddNumberToObject(req, "limit", limit);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/corpus/pipeline/drain", req, CLIENT_DEFAULT_TIMEOUT_MS,
-                                       &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/corpus/pipeline/drain returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/corpus/pipeline/drain did not respond");
-}
-
 /* Reconcile scans KB_STORE and issues pgvector deletes; size the timeout generously
  * but bounded. */
 #define KB_CLIENT_RECONCILE_TIMEOUT_MS (2 * 60 * 1000)
-
-char *kb_client_reconcile_json(int dry_run)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddBoolToObject(req, "dry_run", dry_run ? 1 : 0);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/maintenance/reconcile", req,
-                                       KB_CLIENT_RECONCILE_TIMEOUT_MS, &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/maintenance/reconcile returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/maintenance/reconcile did not respond");
-}
 
 #define KB_CLIENT_DIRECTIVE_TIMEOUT_MS (60 * 1000)
 
@@ -1151,9 +1014,10 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
       {
          cJSON_Delete(req);
          cJSON *validated = selected == 1 && owned &&
-                                    strnlen(owned, AIMEE_MODULE_MESSAGE_MAX_BODY + 1u) <=
-                                        AIMEE_MODULE_MESSAGE_MAX_BODY
-                                ? cJSON_ParseWithOpts(owned, NULL, 1) : NULL;
+                                    strnlen(owned, OURO_MODULE_MESSAGE_MAX_BODY + 1u) <=
+                                        OURO_MODULE_MESSAGE_MAX_BODY
+                                ? cJSON_ParseWithOpts(owned, NULL, 1)
+                                : NULL;
          int valid = cJSON_IsObject(validated);
          cJSON_Delete(validated);
          if (valid)
@@ -1165,13 +1029,18 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
 
    /* Memory is a bus-owned service. HTTP is only its web edge, never an
     * internal owner transport, including when no owner is installed. */
-   static const char *memory_owned_actions[] = {
-       "session_briefing.commitments", "session_briefing.directives",
-       "evidence.emit_retrieval_event", "evidence.merge_retrieval_event",
-       "evidence.trace_retrieval_event", "evidence.provenance_retrieval_event",
-       "evidence.fidelity_retrieval_event", "ranker.emit_event", "ranker.record_outcome"};
+   static const char *memory_owned_actions[] = {"session_briefing.commitments",
+                                                "session_briefing.directives",
+                                                "evidence.emit_retrieval_event",
+                                                "evidence.merge_retrieval_event",
+                                                "evidence.trace_retrieval_event",
+                                                "evidence.provenance_retrieval_event",
+                                                "evidence.fidelity_retrieval_event",
+                                                "ranker.emit_event",
+                                                "ranker.record_outcome"};
    int memory_owned = !strncmp(action, "memory.", 7);
-   for (size_t i = 0; !memory_owned && i < sizeof(memory_owned_actions) / sizeof(memory_owned_actions[0]); i++)
+   for (size_t i = 0;
+        !memory_owned && i < sizeof(memory_owned_actions) / sizeof(memory_owned_actions[0]); i++)
       memory_owned = !strcmp(action, memory_owned_actions[i]);
    if (memory_owned)
    {
@@ -1229,67 +1098,6 @@ char *kb_client_curiosity_list_json(const char *state, int limit)
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
    return kb_v1_action_request("curiosity.list", req);
-}
-
-char *kb_client_curiosity_create_json(const char *gap_type, const char *target_entity,
-                                      const char *target_topic, const char *evidence,
-                                      double importance, double novelty, const char *source_session)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "gap_type", gap_type ? gap_type : "");
-   /* evidence quotes the material that raised the gap -- the field most likely
-    * to carry a verbatim span of whatever the session was handling. */
-   if (kb_client_pii_identifier_sensitive(target_entity) ||
-       kb_client_pii_add_string(req, "target_topic", target_topic) != 0 ||
-       kb_client_pii_add_string(req, "evidence", evidence) != 0)
-   {
-      cJSON_Delete(req);
-      return kb_client_pii_withheld_json();
-   }
-   if (target_entity && target_entity[0])
-      cJSON_AddStringToObject(req, "target_entity", target_entity);
-   cJSON_AddNumberToObject(req, "importance", importance);
-   cJSON_AddNumberToObject(req, "novelty", novelty);
-   if (source_session && source_session[0])
-      cJSON_AddStringToObject(req, "source_session", source_session);
-   return kb_v1_action_request("curiosity.create", req);
-}
-
-char *kb_client_curiosity_sweep_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_action_request("curiosity.sweep", req);
-}
-
-char *kb_client_curiosity_rescore_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_action_request("curiosity.rescore", req);
-}
-
-char *kb_client_curiosity_get_json(int64_t id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   return kb_v1_action_request("curiosity.get", req);
-}
-
-char *kb_client_curiosity_update_state_json(int64_t id, const char *new_state)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   cJSON_AddStringToObject(req, "state", new_state ? new_state : "");
-   return kb_v1_action_request("curiosity.update_state", req);
-}
-
-char *kb_client_curiosity_route_top_json(int limit, const char *source_session)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   if (source_session && source_session[0])
-      cJSON_AddStringToObject(req, "source_session", source_session);
-   return kb_v1_action_request("curiosity.route_top", req);
 }
 
 char *kb_client_note_create_json(const char *title, const char *content, const char *tags,
@@ -1392,57 +1200,7 @@ char *kb_client_learning_policy_select_json(const char *decision_point)
    return kb_v1_learning_action_request("learning.policy_select", req);
 }
 
-static char *kb_v1_learning_mutate(const char *method, int id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", id);
-   return kb_v1_learning_action_request(method, req);
-}
-
-char *kb_client_learning_get_proposal_json(int id)
-{
-   return kb_v1_learning_mutate("learning.get_proposal", id);
-}
-
-char *kb_client_learning_accept_proposal_json(int id)
-{
-   return kb_v1_learning_mutate("learning.accept_proposal", id);
-}
-
-char *kb_client_learning_reject_proposal_json(int id)
-{
-   return kb_v1_learning_mutate("learning.reject_proposal", id);
-}
-
 /* artifacts.list_proposed / artifacts.set_state wrappers              */
-
-char *kb_client_artifacts_list_proposed_json(const char *target_surface, int limit)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (target_surface && target_surface[0])
-      cJSON_AddStringToObject(req, "target_surface", target_surface);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   return kb_v1_learning_action_request("artifacts.list_proposed", req);
-}
-
-char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
-                                        const char *verdict_tag, const char *verdict_scope,
-                                        const char *counter_example, const char *reason)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "id", id ? id : "");
-   cJSON_AddStringToObject(req, "new_state", new_state ? new_state : "");
-   if (verdict_tag && verdict_tag[0])
-      cJSON_AddStringToObject(req, "verdict_tag", verdict_tag);
-   if (verdict_scope && verdict_scope[0])
-      cJSON_AddStringToObject(req, "verdict_scope", verdict_scope);
-   if (counter_example && counter_example[0])
-      cJSON_AddStringToObject(req, "counter_example", counter_example);
-   if (reason && reason[0])
-      cJSON_AddStringToObject(req, "reason", reason);
-   return kb_v1_learning_action_request("artifacts.set_state", req);
-}
 
 /* Search may embed a query and hit pgvector; be generous but bounded so
  * a hung sidecar doesn't wedge the CLI indefinitely. */
@@ -1695,12 +1453,6 @@ char *kb_client_v1_post_json_keep_error(const char *path, cJSON *body, int timeo
    return kb_client_v1_post_json_impl(path, body, timeout_ms, status_out, 1);
 }
 
-char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms, int *status_out)
-{
-   return kb_client_v1_post_body_with_type(path, body, "Content-Type: application/json", timeout_ms,
-                                           status_out);
-}
-
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {
@@ -1803,12 +1555,6 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 
    kb_transport_complete(path, NULL, -1);
    return NULL;
-}
-
-char *kb_client_search_json(const char *project, const char *query, const char *embedding_command,
-                            int max_results, const char *format)
-{
-   return kb_client_search_json_ex(project, query, embedding_command, max_results, format, NULL);
 }
 
 char *kb_client_search_json_ex(const char *project, const char *query,
@@ -1965,23 +1711,6 @@ char *kb_client_vector_status_json(void)
 char *kb_client_workers_json(void)
 {
    return kb_client_v1_get_json("/v1/workers", CLIENT_DEFAULT_TIMEOUT_MS, NULL);
-}
-
-int kb_client_canonical_index_scan(const char *project, const char *root_path, int force)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return -1;
-   cJSON_AddStringToObject(req, "project", project ? project : "");
-   cJSON_AddStringToObject(req, "root_path", root_path ? root_path : "");
-   if (force)
-      cJSON_AddTrueToObject(req, "force");
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/code/scan", req, 60000, &http_status);
-   cJSON_Delete(req);
-   int ok = (resp != NULL);
-   free(resp);
-   return ok ? 0 : -1;
 }
 
 /* ------------------------------------------------------------------ */

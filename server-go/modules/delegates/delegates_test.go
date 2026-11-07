@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func delegateRequest(role string) []byte {
@@ -26,8 +26,8 @@ func TestRoleCanonicalizationParity(t *testing.T) {
 		"planner": "plan", "planning": "plan", "custom": "custom",
 	}
 	for role, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageInvoke}, delegateRequest(role))
-		if status != bus.ModuleStatusOK || len(response) != messageLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageInvoke}, delegateRequest(role))
+		if status != ring.ModuleStatusOK || len(response) != messageLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			response[4] != wireVersion || int(response[6]) != len(want) ||
 			string(response[8:8+int(response[6])]) != want {
@@ -39,11 +39,11 @@ func TestRoleCanonicalizationParity(t *testing.T) {
 func TestDelegatesRejectInvalidAndExpiredWire(t *testing.T) {
 	request := delegateRequest("code")
 	request[5] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageInvoke}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("reserved-byte status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageInvoke, DeadlineNS: 1},
-		delegateRequest("code")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageInvoke, DeadlineNS: 1},
+		delegateRequest("code")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }

@@ -22,12 +22,3 @@ void db1_primary_session_row_clear(db1_primary_session_row_t *row)
    free(row->messages_json);
    memset(row, 0, sizeof(*row));
 }
-
-void db1_primary_session_rows_free(db1_primary_session_row_t *rows, int count)
-{
-   if (!rows)
-      return;
-   for (int i = 0; i < count; i++)
-      free(rows[i].messages_json);
-   free(rows);
-}

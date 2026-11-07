@@ -46,6 +46,11 @@ permissions:
   # A future write-capable job must opt in with its own minimal permissions.
   contents: read
 
+# Every Linux job names ubuntu-24.04 rather than ubuntu-latest. GitHub began moving
+# ubuntu-latest to Ubuntu 26 on 2026-10-19, and on that image sudo ignores -E (the
+# live-auth rigs lose AIMEE_STORE_URL), Playwright has no supported browser build,
+# and two unit tests fail that pass on 24.04 (PR #3064, 2026-10-27). Move to 26 as
+# one deliberate change, not by the label drifting under every PR.
 jobs:
   cppcheck-shards:
     name: Cppcheck (${{ matrix.shard }}/8)
@@ -194,7 +199,7 @@ jobs:
   # when an entire workflow is skipped by a path filter. Job-level skips report
   # success, so required checks remain mergeable for documentation-only PRs.
   change-scope:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # No job here had a timeout, so a hung one ran until GitHub's 6-hour
     # default. That is not hypothetical: five jobs on one run sat in_progress
     # for three hours, `lint` stuck the whole time on "Install clang-format" --
@@ -276,7 +281,7 @@ jobs:
   lint:
     needs: change-scope
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -298,7 +303,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          i=0; until timeout 240 sudo apt-get install -y -q clang-format-19 ripgrep; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
+          i=0; until timeout 240 sudo apt-get install -y -q clang-format-19 ripgrep; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Check formatting
         if: needs.change-scope.outputs.docs_only != 'true'
         run: cd src && make lint
@@ -344,7 +349,7 @@ jobs:
   frontend-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -397,7 +402,7 @@ jobs:
   go-unit-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -408,11 +413,11 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      # runtime-web reaches PAM through an indirect cgo dependency, so `go test`
-      # needs the header even though no Go file in the tree includes it. Without
-      # this the job fails at BUILD, not at a test -- which reads as a broken
-      # module rather than a missing package. Only this one header is missing:
-      # gcc and make are preinstalled, and no other Go module here uses cgo.
+      # runtime-web needs PAM through an indirect cgo dependency. The workflow
+      # facade regression also compiles the actual C identity/control adapter,
+      # whose identity header includes OpenSSL. The shared thinclient CGo binding
+      # also uses pkg-config. Declare these dependencies; gcc and make are
+      # preinstalled on this runner.
       - name: Install dependencies
         run: |
           # Same apt hardening as the sibling jobs: runner images preinstall
@@ -420,7 +425,7 @@ jobs:
           # `apt-get update` hard, though nothing we install comes from them.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q libpam0g-dev
+          i=0; until timeout 240 sudo apt-get install -y -q libpam0g-dev libssl-dev pkg-config; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Go unit tests
         run: |
           # Populate all module caches with bounded retries before tests fan out.
@@ -449,41 +454,10 @@ jobs:
       - name: Reject reachable Go vulnerabilities
         run: make -C src go-vulncheck GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
 
-  # The Rust reference bus client: the third independent client of the single
-  # C host. Its own job because it needs a toolchain no other job installs, and
-  # folded into the `unit-tests` aggregate below so it gates.
-  rust-bus-tests:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # Pinned in rust/rust-toolchain.toml so coverage cannot change with a
-      # runner image bump. rustup is preinstalled on the image; the toolchain
-      # it installs is the pinned one, not the image's.
-      - name: Install the pinned Rust toolchain
-        working-directory: rust
-        run: |
-          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
-          test -n "$channel"
-          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
-          cargo --version
-      - name: Fetch crates
-        working-directory: rust
-        run: |
-          for attempt in 1 2 3 4 5; do
-            cargo fetch --locked && break
-            test "$attempt" -lt 5 || exit 1
-            sleep $((attempt * 5))
-          done
-      - name: Rust bus client conformance
-        run: make -C src rust-bus-tests
-
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -507,9 +481,9 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev curl
+            libpq-dev curl; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Build
         run: |
           cd src && make -j$(nproc) all server build/obj/aimee-module-config
@@ -588,7 +562,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install pinned Codex for proxy compatibility
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.163.0
       - name: Thin-client proxy regression suite (including real Codex config parser)
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
@@ -598,7 +572,7 @@ jobs:
           make -C src -j2 build/obj/tests/unit-test-cli-codex
           # The descriptor launcher attests the actual pinned executable, not
           # npm's JavaScript dispatcher. Resolve the same platform package used
-          # by the installed Codex entry point before running all five modes.
+          # by the installed Codex entry point before running both owned modes.
           codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$(npm root -g)/@openai/codex")
           python3 src/tests/test_codex_native_adoption.py \
             --adapter-binary src/build/obj/tests/unit-test-cli-codex \
@@ -607,7 +581,7 @@ jobs:
   build-integrity:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -631,9 +605,9 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make cmake \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make cmake \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Build integrity
         run: cd src && make -j"$(nproc)" build-integrity
 
@@ -642,21 +616,13 @@ jobs:
       # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
       - name: Build the shipping set
         run: cd src && make -j"$(nproc)" all
-      - name: Native CMake canonical capture fixtures
-        run: |
-          cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
-          cmake --build build/native-ir-cmake --parallel "$(nproc)" \
-            --target test_server_chat_ir test_server_session_log test_server_native_runtime test_server_native_replay test_server_learning_application
-          ctest --test-dir build/native-ir-cmake \
-            -R '^test_server_(chat_ir|session_log|native_runtime|native_replay|learning_application)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 
   unit-test-shards:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: unit-tests (${{ matrix.label }}/4)
     # The sqlite-shim registry runs ONCE, under ASan and UBSan. It used to run
@@ -737,9 +703,9 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make ccache \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client
+            libpq-dev postgresql-client; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 30); do
@@ -749,12 +715,18 @@ jobs:
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
         run: |
+          exec > >(tee "$RUNNER_TEMP/unit-tests.log") 2>&1
           # Runner image metadata is outside the repository's control. Install
           # deterministic root-owned copies so the positive path exercises the
           # production trust walk without depending on /usr/bin ownership/mode.
           sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          # Built from the repo, not copied from /usr/bin: the helper is exec'd
+          # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
-            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+            gcc -O2 -Wall -Werror -DFIXTURE_$(echo "$helper" | tr a-z A-Z) \
+              -o "$RUNNER_TEMP/aimee-fixture-$helper" \
+              src/tests/support/workload_helper_fixture.c
+            sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
               "/run/aimee-test-helpers/$helper"
           done
           sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
@@ -783,6 +755,9 @@ jobs:
             UNIT_TEST_SKIP_PROXY=1 \
             sanitizers
           ccache --show-stats
+      - name: Name the unit test failure
+        if: failure()
+        run: scripts/ci-annotate-log-tail.sh "$RUNNER_TEMP/unit-tests.log" "unit tests failed"
 
   # The same unit-test binaries, linked against real libpq instead of the sqlite
   # shim, so KB domain SQL is EXECUTED by the engine that runs it in production rather
@@ -805,7 +780,7 @@ jobs:
   unit-test-shards-pg:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     name: unit-tests-pg (${{ matrix.label }})
     # The live workflow database/API suite used to ride on shard 1, making it
@@ -875,9 +850,9 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make ccache \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client
+            libpq-dev postgresql-client; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 30); do
@@ -888,12 +863,18 @@ jobs:
       - name: Unit tests (real Postgres)
         if: matrix.part == 'unit'
         run: |
+          exec > >(tee "$RUNNER_TEMP/unit-tests-pg.log") 2>&1
           # Same deterministic root-owned helpers the sqlite shards install: the
           # trust-walk tests assert on ownership and mode, which runner image
           # metadata does not guarantee.
           sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          # Built from the repo, not copied from /usr/bin: the helper is exec'd
+          # by descriptor, which Ubuntu 26.04's multi-call coreutils refuses.
           for helper in cat env yes true; do
-            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+            gcc -O2 -Wall -Werror -DFIXTURE_$(echo "$helper" | tr a-z A-Z) \
+              -o "$RUNNER_TEMP/aimee-fixture-$helper" \
+              src/tests/support/workload_helper_fixture.c
+            sudo install -o root -g root -m 0755 "$RUNNER_TEMP/aimee-fixture-$helper" \
               "/run/aimee-test-helpers/$helper"
           done
           printf '%s\n' 'deterministic root-owned test fixture' | \
@@ -918,6 +899,9 @@ jobs:
             UNIT_TEST_SKIP_PROXY=1 \
             unit-tests-pg
           ccache --show-stats
+      - name: Name the real-Postgres unit test failure
+        if: failure() && matrix.part == 'unit'
+        run: scripts/ci-annotate-log-tail.sh "$RUNNER_TEMP/unit-tests-pg.log" "unit tests failed"
       - name: Live workflow database and API tests
         if: matrix.part == 'workflow'
         env:
@@ -935,7 +919,7 @@ jobs:
   postgres-knowledge-replay:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     name: postgres-knowledge-replay (${{ matrix.part }})
     strategy:
@@ -983,7 +967,7 @@ jobs:
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i*4))
           done
-          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -1034,12 +1018,12 @@ jobs:
   lsp-real-providers:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    # The Linux leg runs everywhere. The macOS leg runs where the macOS thin
-    # client is gated: pull requests into main, pushes and the merge queue.
+    # Linux only: the LSP client is part of aimee proper, which is Linux-only;
+    # the macOS and Windows thin client carries no LSP code.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((github.event_name != 'pull_request' || github.base_ref == 'main') && '[{"os":"ubuntu-24.04","artifact":"linux"},{"os":"macos-latest","artifact":"macos"}]' || '[{"os":"ubuntu-24.04","artifact":"linux"}]') }}
+        include: [{"os": "ubuntu-24.04", "artifact": "linux"}]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -1047,7 +1031,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
         uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
@@ -1057,15 +1040,11 @@ jobs:
         with:
           node-version: 20.19.2
       - name: Install native build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           timeout 240 sudo apt-get update -q
-          timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
-            libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
-      - name: Install native build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install libpq openssl@3 zstd
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
+            libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Install pinned real language servers
         env:
           GOBIN: ${{ runner.temp }}/lsp-tools/go/bin
@@ -1078,21 +1057,13 @@ jobs:
             pyright@1.1.413
       - name: Build the LSP probe
         run: |
+          exec > >(tee "$RUNNER_TEMP/lsp-probe-build.log") 2>&1
           jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
-          if [ "$RUNNER_OS" = macOS ]; then
-            libpq="$(brew --prefix libpq)"
-            openssl="$(brew --prefix openssl@3)"
-            zstd="$(brew --prefix zstd)"
-            export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
-            make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -Wno-deprecated-declarations -I$libpq/include -I$openssl/include -I$zstd/include" \
-              EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
-              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
-              build/obj/tests/unit-test-lsp
-          else
-            make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              build/obj/tests/unit-test-lsp
-          fi
+          make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            build/obj/tests/unit-test-lsp
+      - name: Name the LSP probe build failure
+        if: failure()
+        run: scripts/ci-annotate-log-tail.sh "$RUNNER_TEMP/lsp-probe-build.log" "LSP probe build failed"
       - name: Assert the pinned S0 real-provider baseline
         run: |
           python3 benchmarks/live-semantic-context/run_s0_baseline.py \
@@ -1140,9 +1111,9 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, rust-bus-tests, memory-backends, frontend-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Confirm complete unit gate
@@ -1154,7 +1125,6 @@ jobs:
           POSTGRES_REPLAY_RESULT: ${{ needs.postgres-knowledge-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
-          RUST_BUS_RESULT: ${{ needs.rust-bus-tests.result }}
           MEMORY_BACKENDS_RESULT: ${{ needs.memory-backends.result }}
           FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
@@ -1191,10 +1161,6 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
-          [ "$RUST_BUS_RESULT" = success ] || {
-            echo "Rust bus client result: $RUST_BUS_RESULT" >&2
-            exit 1
-          }
           [ "$FRONTEND_RESULT" = success ] || {
             echo "Frontend unit/browser result: $FRONTEND_RESULT" >&2
             exit 1
@@ -1203,7 +1169,7 @@ jobs:
             echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, the Rust bus client, frontend unit/browser tests, and the real-provider LSP baseline passed."
+          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1244,7 +1210,7 @@ jobs:
   identity-mint-e2e:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1299,7 +1265,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive LC_ALL=C
           echo "memlock soft=$(ulimit -l) hard=$(ulimit -H -l)"
           apt-get update -q
-          apt-get install -y -q gcc make pkg-config \
+          apt-get install -y -q gcc make cmake pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3
           cd /src/src
@@ -1330,7 +1296,7 @@ jobs:
   live-auth-rigs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1355,10 +1321,10 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
-            libpam-modules passwd
+            libpam-modules passwd; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -1530,7 +1496,7 @@ jobs:
   p1-rls-gate:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1549,7 +1515,7 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          i=0; until timeout 240 sudo apt-get install -y -q postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
+          i=0; until timeout 240 sudo apt-get install -y -q postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -1572,7 +1538,7 @@ jobs:
   integration-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_integration_ci
@@ -1637,9 +1603,9 @@ jobs:
           # Same transient-apt-mirror workaround the sibling jobs carry.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client
+            libpq-dev postgresql-client; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
       # shallow and detached, and never records which branch the remote calls
       # default. aimee's git surface resolves a session's worktree base from
@@ -1674,7 +1640,7 @@ jobs:
       - name: Install pinned native SDKs for canonical server integration
         run: |
           native_prefix="$RUNNER_TEMP/aimee-native-sdks"
-          npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
+          npm install --prefix "$native_prefix" @openai/codex@0.163.0 @anthropic-ai/claude-code@2.1.227
           codex_native="$native_prefix/node_modules/.bin/codex"
           claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
           test -x "$codex_native"
@@ -1689,7 +1655,7 @@ jobs:
   init-migrate-service-test:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1713,9 +1679,9 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
 
@@ -1743,9 +1709,7 @@ jobs:
       - name: Workflow name resolution
         run: cd src && make workflow-name-resolution-test
 
-  # The only Windows thin-client build. A second job, windows-cmake, built the
-  # same target with the same flags (its one difference, -DWITH_UI=OFF, is
-  # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
+  # The only Windows build: Windows gets the thin client and nothing else.
   windows-build:
     needs: change-scope
     # Shared native headers/build contracts also change on testing-target PRs.
@@ -1808,17 +1772,8 @@ jobs:
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Download SQLite amalgamation
-        shell: powershell
-        run: |
-          $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip
-          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
-          New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.h src\vendor\sqlite3\
       - name: Configure with CMake
-        run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+        run: cmake -B build -G "MinGW Makefiles"
       # Windows ships only the thin client (aimee.exe); server/kb/gateway/webchat
       # are Linux/Docker components and are not built here.
       - name: Build the thin client
@@ -1890,7 +1845,7 @@ jobs:
       # release build. Secure Transport and the pinned libcrypto above both
       # contain the two required slices.
       - name: Configure with CMake (universal arm64+x86_64)
-        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
       - name: Build the thin client
         run: |
           cmake --build build --parallel 3 --target aimee
@@ -1953,7 +1908,7 @@ jobs:
   e2e-docker:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -1984,6 +1939,15 @@ jobs:
       AIMEE_POSTGRES_STORAGE: ${{ matrix.storage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The legs load the application, PostgreSQL and embedder images and then
+      # boot a KB and a Server stack; T2-luks ran the runner down to 2 MB free
+      # and the Server never became healthy. Drop toolchains this job never
+      # uses, and print free space so a disk shortfall names itself.
+      - name: Free runner disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       - name: Build the unified application
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -2087,7 +2051,7 @@ jobs:
     # fresh `aimee` client against a native aimee-server holding the default
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_adoption_ci
@@ -2141,9 +2105,9 @@ jobs:
           # retry update with backoff.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client
+            libpq-dev postgresql-client; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Thin-client adoption E2E
         run: scripts/aimee-thinclient-adoption-e2e.sh
       - name: Server log on failure
@@ -2159,7 +2123,7 @@ jobs:
   treesitter:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -2179,8 +2143,8 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make git \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make git \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Build + run the opt-in tree-sitter test
         run: |
           cd src
@@ -2193,7 +2157,7 @@ jobs:
     name: vault-pkcs11-token
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -2204,9 +2168,9 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev softhsm2 opensc
+            libpq-dev softhsm2 opensc; do i=$((i+1)); [ "$i" -ge 3 ] && { echo "apt-get install failed after $i attempts"; exit 1; }; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); sudo dpkg --configure -a || true; done
       - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)
         env:
           AIMEE_PKCS11_GATE_REQUIRE: "1"

@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Which agents in a fleet may serve a delegate packet.
@@ -32,11 +32,11 @@ const (
 )
 
 // handleRouteFilter returns a keep decision per agent, in the order sent.
-func handleRouteFilter(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRouteFilter(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < routeFilterReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != routeFilterRequestMagic ||
 		request[4] != wireVersion || request[5] > 1 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	dropDeprecated := request[5] == 1
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
@@ -45,7 +45,7 @@ func handleRouteFilter(invocation bus.ModuleInvocation, request []byte) ([]byte,
 
 	if count > routeFilterMaxAgents ||
 		len(request) != routeFilterReqHeaderLen+count*routeFilterAgentLen {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	agents := make([]RouteAgent, count)
@@ -65,7 +65,7 @@ func handleRouteFilter(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		}
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	result := RouteFilter(agents, requiredCaps, minContext, dropDeprecated)
@@ -78,5 +78,5 @@ func handleRouteFilter(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	for i, keep := range result.Keep {
 		putBool(response[16+i*4:20+i*4], keep)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

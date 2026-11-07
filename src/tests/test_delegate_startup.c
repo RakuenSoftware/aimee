@@ -18,12 +18,6 @@ void http_set_progress_cb(http_progress_cb_t cb)
    (void)cb;
    abort();
 }
-void cli_session_set_heartbeat_cb(cli_session_heartbeat_cb_t cb, void *ud)
-{
-   (void)cb;
-   (void)ud;
-   abort();
-}
 int db1_agent_job_list_running_ids(int *ids, int max)
 {
    (void)ids;
@@ -50,9 +44,10 @@ int agent_admission_reap_idle(int seconds)
    (void)seconds;
    abort();
 }
-int delegate_backend_docker_reap_aged(int seconds)
+int delegate_backend_docker_reap_aged_next(int seconds, time_t *next_due)
 {
    (void)seconds;
+   (void)next_due;
    abort();
 }
 

@@ -86,54 +86,25 @@ extern "C"
 
    typedef struct
    {
-      /* Owned canonical response. Text fields below are application projections. */
+      /* The canonical response is the sole model-result authority. */
       aimee_response_t ir;
-      char *content;                  /* malloc'd completion text; NULL if none. Caller frees. */
-      char *reasoning;                /* malloc'd reasoning/chain-of-thought, when the provider
-                                       * returned any: either as `reasoning_content` (llama.cpp
-                                       * --jinja, DeepSeek/Qwen APIs) or as a <think> preamble on
-                                       * an inlining endpoint. Kept SEPARATE from content rather
-                                       * than discarded — dropping it silently is what left the
-                                       * curator unable to say why an extraction went wrong, and
-                                       * the canonical IR models it as AIMEE_BLK_THINKING. NULL
-                                       * when the provider sent none. Caller frees. */
-      int prompt_tokens;              /* from usage; 0 when absent. */
-      int completion_tokens;          /* from usage; 0 when absent. */
-      char model[PROVIDER_MODEL_LEN]; /* provider-reported model id; "" when absent. */
-      char finish_reason[32];         /* OpenAI finish_reason; "" when absent. */
-      int http_status;                /* last HTTP status (or <0 on a network error). */
+      int http_status; /* last HTTP status (or <0 on a network error). */
    } provider_completion_t;
 
 #define PROVIDER_CLIENT_DEFAULT_TIMEOUT_MS 120000
 #define PROVIDER_CLIENT_DEFAULT_ATTEMPTS   3
 
-   /* Build the OpenAI chat-completions request body for `def` + `messages` (a
-    * cJSON array of {role, content}). When `json_schema` is non-NULL it is sent as
-    * response_format:{type:"json_schema", json_schema:{name, schema, strict:true}}
-    * so a grammar-capable endpoint (llama.cpp --jinja, OpenAI) returns constrained
-    * JSON. `messages`/`json_schema` are NOT taken over — the result references deep
-    * copies. Returns a new cJSON object (caller cJSON_Delete) or NULL on failure. */
-   struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJSON *messages,
-                                              struct cJSON *json_schema);
-
    /* Parse an OpenAI chat-completions response `body` into `out` (zeroed first).
     * Returns 0 for an admitted textual completion, -1 otherwise. The owned IR
-    * retains reasoning/media/tool blocks; free the result after success or failure. Usage,
-    * model and finish_reason are filled when present. `http_status` is left 0
-    * here — provider_client_complete sets it after the transport call. */
+    * retains reasoning/media/tool blocks; free the result after success or failure. All model
+    * metadata remains in IR. `http_status` is left 0 here — provider_client_complete_ir sets it
+    * after the transport call. */
    int provider_client_parse_openai(const char *body, provider_completion_t *out);
 
    /* Canonical entry for internal callers. The request is borrowed; provider
     * configuration controls model/sampling and serialization stays at egress. */
    int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t *request,
                                    provider_completion_t *out, char *errbuf, size_t errlen);
-
-   /* Build + POST (with retry) + parse. Returns 0 on success; on failure returns
-    * -1 and writes a message into errbuf (when errlen > 0). `out` is zeroed on
-    * entry and is always safe to pass to provider_completion_free afterward. */
-   int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
-                                struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
-                                size_t errlen);
 
    /* Free heap-owned fields of `out` (idempotent; does not free `out` itself). */
    void provider_completion_free(provider_completion_t *out);

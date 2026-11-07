@@ -11,10 +11,10 @@ import (
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	learning "github.com/JBailes/aimee/server-go/modules/learning"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,8 +26,8 @@ func TestLearningProjectionHostOnly(t *testing.T) {
 		}
 		frame, _ := wire.EncodeFields(operation, args)
 		db := newDelDB()
-		_, status := Telemetry.Handler(db)(bus.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
-		if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, status := Telemetry.Handler(db)(ring.ModuleInvocation{StageID: StageTelemetry, PrincipalRef: 7}, frame)
+		if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal("untrusted recovery", status, db.executed)
 		}
 	}
@@ -116,6 +116,40 @@ func (f *projectionTest) claim() []projectionTicket {
 	}
 	return batch.Items
 }
+// claimDue claims and returns how long the reply says to wait before looking
+// again with nothing announced.
+func (f *projectionTest) claimDue() (int, int64) {
+	f.t.Helper()
+	status, fields := f.run(learningProjectionClaim)
+	if status != store.StatusOK {
+		f.t.Fatal(status)
+	}
+	var batch struct {
+		Items   []projectionTicket `json:"items"`
+		NextDue *int64             `json:"next_due_ms"`
+	}
+	if json.Unmarshal([]byte(fields[0]), &batch) != nil || batch.NextDue == nil {
+		f.t.Fatal(fields)
+	}
+	return len(batch.Items), *batch.NextDue
+}
+
+func TestLearningProjectionClaimSaysWhenToLookAgain(t *testing.T) {
+	f := newProjectionTest(t)
+	if n, due := f.claimDue(); n != 0 || due != -1 {
+		t.Fatalf("empty queue: %d items, next due %d; want none and -1", n, due)
+	}
+	f.append("due-1")
+	n, due := f.claimDue()
+	if n != 1 {
+		t.Fatalf("claimed %d, want the queued source", n)
+	}
+	// The only pending item is now leased: the lease's expiry is what is due.
+	if due < 170000 || due > 180000 {
+		t.Fatalf("next due %dms, want the 180s lease expiry", due)
+	}
+}
+
 func (f *projectionTest) observe(source executionGradeSource) {
 	f.t.Helper()
 	raw := mustJSON(map[string]any{"schema_version": 1, "source": source, "observed_status": "completed", "verification": "ungraded"})
@@ -353,15 +387,15 @@ func TestLearningProjectionPostgresWaitsForEveryOwnedGrade(t *testing.T) {
 		}
 		record := learning.ExecutionRecord{Version: 1, Session: "s", Turn: "proofs", Sequence: source.Sequence, EventID: source.Event, Actor: "alice", Event: json.RawMessage(body)}
 		args, _ := json.Marshal(learning.ExecutionTestGradeRequest{Record: record, Proof: proof})
-		command, err := bus.EncodeCommandWithContext("grade", args, bus.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:isolated-project-verification"})
+		command, err := ring.EncodeCommandWithContext("grade", args, ring.CommandContext{Authenticated: true, Principal: "alice", TransportIdentity: "host:isolated-project-verification"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reply, moduleStatus := learning.Handle(bus.ModuleInvocation{StageID: learning.StageExecution}, command)
-		if moduleStatus != bus.ModuleStatusOK {
+		reply, moduleStatus := learning.Handle(ring.ModuleInvocation{StageID: learning.StageExecution}, command)
+		if moduleStatus != ring.ModuleStatusOK {
 			t.Fatal("Learning refused owned fixture", moduleStatus)
 		}
-		raw, err := bus.DecodeCommandResult(reply)
+		raw, err := ring.DecodeCommandResult(reply)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -20,7 +20,7 @@
 #include "headers/module_json_call.h"
 
 #include <aimee/audit/obs_bus.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/sandbox/module_api.h>
 #include <stdio.h>
 #include <stdlib.h>

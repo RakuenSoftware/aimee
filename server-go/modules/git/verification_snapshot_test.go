@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func snapshotFixture(t *testing.T) verificationSnapshotRequest {
@@ -47,8 +47,8 @@ func snapshotFixture(t *testing.T) verificationSnapshotRequest {
 func snapshotCall(t *testing.T, request verificationSnapshotRequest) verificationSnapshotResponse {
 	t.Helper()
 	raw, _ := json.Marshal(request)
-	body, status := Handle(bus.ModuleInvocation{StageID: StageVerifyRun}, raw)
-	if status != bus.ModuleStatusOK {
+	body, status := Handle(ring.ModuleInvocation{StageID: StageVerifyRun}, raw)
+	if status != ring.ModuleStatusOK {
 		t.Fatal("snapshot stage refused", status)
 	}
 	var response verificationSnapshotResponse
@@ -142,10 +142,10 @@ func TestVerificationSnapshotRefusesForeignSourceAndPathSubstitution(t *testing.
 func TestVerificationSnapshotRequiresHostWireAndJoinsCancelledGit(t *testing.T) {
 	request := snapshotFixture(t)
 	raw, _ := json.Marshal(request)
-	for _, invocation := range []bus.ModuleInvocation{
+	for _, invocation := range []ring.ModuleInvocation{
 		{StageID: StageVerifyRun, PrincipalRef: 1}, {StageID: StageVerifyRun, DeadlineNS: 1},
 	} {
-		if _, status := Handle(invocation, raw); status == bus.ModuleStatusOK {
+		if _, status := Handle(invocation, raw); status == ring.ModuleStatusOK {
 			t.Fatal("foreign or expired snapshot request accepted")
 		}
 	}

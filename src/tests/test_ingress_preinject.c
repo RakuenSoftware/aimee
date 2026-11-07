@@ -107,7 +107,9 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    if (g_grade_plan_case && operation && !strcmp(operation, "ingress-begin"))
    {
-      *result = cJSON_Parse("{\"status\":\"ok\",\"active\":true,\"mode\":\"on\",\"legacy_preview\":false,\"facts\":false,\"temporal\":false,\"task\":false,\"assembly\":{\"operation\":\"ingress-assemble\"}}");
+      *result = cJSON_Parse("{\"status\":\"ok\",\"active\":true,\"mode\":\"on\",\"legacy_preview\":"
+                            "false,\"facts\":false,\"temporal\":false,\"task\":false,\"assembly\":{"
+                            "\"operation\":\"ingress-assemble\"}}");
       assert(*result);
       if (g_grade_plan_case == 2 || g_grade_plan_case == 3)
          cJSON_AddBoolToObject(*result, "execution_grades", g_grade_plan_case == 2);
@@ -124,7 +126,8 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
          assert(!cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades"));
       else
          assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "execution_test_grades")));
-      *result = cJSON_Parse("{\"status\":\"ok\",\"envelope\":\"Selected native context.\",\"source_release_ticket\":\"fixture-grade-plan-ticket\"}");
+      *result = cJSON_Parse("{\"status\":\"ok\",\"envelope\":\"Selected native "
+                            "context.\",\"source_release_ticket\":\"fixture-grade-plan-ticket\"}");
       assert(*result);
       return 1;
    }
@@ -556,17 +559,7 @@ const char *config_default_dir(void)
 {
    return "/tmp/aimee-test";
 }
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
-{
-   (void)turn_id;
-   (void)role;
-   (void)query_fingerprint;
-   (void)ids;
-   (void)n_ids;
-   return 0;
-}
+
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)

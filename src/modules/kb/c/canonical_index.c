@@ -516,7 +516,7 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
        strcmp(ext, ".js") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".vue") == 0 ||
        strcmp(ext, ".svelte") == 0)
    {
-      char (*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
+      char(*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
       if (!tokens)
          return;
       int nt = canonical_index_css_extract_class_tokens(content, len, tokens, 512);

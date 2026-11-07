@@ -8,14 +8,13 @@
 #include <string.h>
 extern int aimee_module_owned_feature_status_v1(const char *) __attribute__((weak));
 extern char *aimee_module_owned_feature_management_query_v1(const char *, const char *,
-                                                           const char *) __attribute__((weak));
+                                                            const char *) __attribute__((weak));
 /* Versioned compiled choke-point evidence, not request or data authority. */
 #if defined(__GNUC__) && !defined(__clang__)
-#define AIMEE_OWNED_GUARD_CONTRACT_V1(name) \
+#define AIMEE_OWNED_GUARD_CONTRACT_V1(name)                                                        \
    __attribute__((used, retain, externally_visible)) const unsigned name = 1
 #else
-#define AIMEE_OWNED_GUARD_CONTRACT_V1(name) \
-   __attribute__((used, retain)) const unsigned name = 1
+#define AIMEE_OWNED_GUARD_CONTRACT_V1(name) __attribute__((used, retain)) const unsigned name = 1
 #endif
 /* 0 alone means no selected owner. Unknown/failed ownership is fail-closed. */
 static inline int aimee_owned_feature_status(const char *kind)
@@ -38,12 +37,11 @@ static inline cJSON *aimee_owned_feature_outcome(const char *status)
 static inline cJSON *aimee_owned_feature_management_json(const char *kind, const char *operation,
                                                          const char *stable_request)
 {
-   if (aimee_owned_feature_status(kind) != 1 ||
-       !aimee_module_owned_feature_management_query_v1)
+   if (aimee_owned_feature_status(kind) != 1 || !aimee_module_owned_feature_management_query_v1)
       return aimee_owned_feature_outcome("unavailable");
    char *wire = aimee_module_owned_feature_management_query_v1(kind, operation, stable_request);
-   cJSON *out = wire && strlen(wire) <= 900u * 1024u
-                    ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
+   cJSON *out =
+       wire && strlen(wire) <= 900u * 1024u ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
    free(wire);
    if (!cJSON_IsObject(out))
    {

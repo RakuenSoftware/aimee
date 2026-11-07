@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func policyWire(active bool, names []string, stopReason string) []byte {
@@ -54,9 +54,9 @@ func TestGovernanceDecisionParity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate},
+			response, status := Handle(ring.ModuleInvocation{StageID: StageEvaluate},
 				policyWire(test.active, test.tools, test.stopReason))
-			if status != bus.ModuleStatusOK {
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("status = %d", status)
 			}
 			mask, drops, reason := decision(t, response)
@@ -88,11 +88,11 @@ func TestGovernanceRejectsMalformedWire(t *testing.T) {
 		string(policyWire(true, make([]string, 17), "tool_use")),
 	}
 	for i, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate}, []byte(request)); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: StageEvaluate}, []byte(request)); status != ring.ModuleStatusInvalidRequest {
 			t.Errorf("malformed %d accepted: %s", i, request)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate + 1}, []byte(valid)); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageEvaluate + 1}, []byte(valid)); status != ring.ModuleStatusInvalidRequest {
 		t.Fatal("wrong stage accepted")
 	}
 }
@@ -109,8 +109,8 @@ func TestGovernanceCompleteCanonicalIdentity(t *testing.T) {
 	if !ok || decoded.Tools[0].Name != name || decoded.Tools[0].Namespace != namespace || decoded.Tools[1].Namespace != namespace {
 		t.Fatal("identity lost")
 	}
-	response, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate}, encoded)
-	if status != bus.ModuleStatusOK {
+	response, status := Handle(ring.ModuleInvocation{StageID: StageEvaluate}, encoded)
+	if status != ring.ModuleStatusOK {
 		t.Fatal(status)
 	}
 	mask, drops, reason := decision(t, response)
@@ -120,11 +120,11 @@ func TestGovernanceCompleteCanonicalIdentity(t *testing.T) {
 }
 
 func TestGovernanceHonorsCancellationAfterValidation(t *testing.T) {
-	invocation := bus.ModuleInvocation{StageID: StageEvaluate, DeadlineNS: 1}
-	if _, status := Handle(invocation, policyWire(true, []string{"Task"}, "tool_use")); status != bus.ModuleStatusCancelled {
+	invocation := ring.ModuleInvocation{StageID: StageEvaluate, DeadlineNS: 1}
+	if _, status := Handle(invocation, policyWire(true, []string{"Task"}, "tool_use")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
-	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(invocation, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed expired-request status = %d", status)
 	}
 }

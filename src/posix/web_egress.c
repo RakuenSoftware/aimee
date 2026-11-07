@@ -29,8 +29,8 @@
 
 /* 1 if this IPv4 (host byte order) is in a private/reserved/link-local range. */
 /* Every range a model- or ranking-chosen destination has no business reaching.
- * Kept deliberately in step with blockedIPv4Nets in
- * server-go/modules/delegates/proxyguard.go and the table in
+ * Kept deliberately in step with egressBlockedIPv4 in
+ * server-go/modules/egress/egress.go and the table in
  * server-go/modules/sandbox/proxy_policy.go: the same destination must not be
  * refused on one plane and dialed on another. */
 static int ipv4_blocked(uint32_t a)

@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	domain "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
 	"testing"
@@ -29,7 +29,7 @@ type historyWireCaller struct {
 
 func (c *historyWireCaller) Call(ctx context.Context, kind, stage uint32, id uint64, deadline time.Duration, body []byte) ([]byte, error) {
 	reply, err := c.sharedStoreCaller.Call(ctx, kind, stage, id, deadline, body)
-	if len(reply) > int(bus.ModuleMessageMaxBody) {
+	if len(reply) > int(ring.ModuleMessageMaxBody) {
 		return nil, fmt.Errorf("test transport refused oversized production SQL reply: %d", len(reply))
 	}
 	if bytes.Contains(body, []byte("WITH owned AS MATERIALIZED")) {
@@ -107,9 +107,9 @@ func TestSharedCanonicalHistoryPagesEscapedArchiveAndLongLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, status := families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
+	reply, status := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
 	result, cells, err := wire.DecodeFields(reply)
-	if status != bus.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 {
+	if status != ring.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 {
 		t.Fatalf("history refused: transport=%d result=%d err=%v cells=%v", status, result, err, cells)
 	}
 	messages, err := canonical.DecodeMessages([]byte(cells[0]))
@@ -124,9 +124,9 @@ func TestSharedCanonicalHistoryPagesEscapedArchiveAndLongLog(t *testing.T) {
 	after := 0
 	for after < sequence {
 		pageRequest, _ := wire.EncodeFields(29, []string{"history", fmt.Sprint(after), "128", "actor"})
-		pageReply, pageStatus := families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, pageRequest)
+		pageReply, pageStatus := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, pageRequest)
 		pageResult, pageCells, pageErr := wire.DecodeFields(pageReply)
-		if pageStatus != bus.ModuleStatusOK || pageErr != nil || pageResult != domain.StatusOK || len(pageCells) != 1 {
+		if pageStatus != ring.ModuleStatusOK || pageErr != nil || pageResult != domain.StatusOK || len(pageCells) != 1 {
 			t.Fatal("browse refused", after, pageStatus, pageResult, pageErr)
 		}
 		var observations []struct {
@@ -157,9 +157,9 @@ func TestSharedCanonicalHistoryPagesEscapedArchiveAndLongLog(t *testing.T) {
 		}
 	}
 	request, _ = wire.EncodeFields(33, []string{"history", "primary", "other", ""})
-	reply, status = families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
+	reply, status = families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
 	result, cells, err = wire.DecodeFields(reply)
-	if status != bus.ModuleStatusOK || err != nil || result != domain.StatusMissing || len(cells) != 0 {
+	if status != ring.ModuleStatusOK || err != nil || result != domain.StatusMissing || len(cells) != 0 {
 		t.Fatal("foreign history escaped", status, result, cells, err)
 	}
 }
@@ -195,15 +195,15 @@ func TestSharedCanonicalLargeImportUsesBoundedOperationBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, status := families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
+	reply, status := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
 	result, cells, err := wire.DecodeFields(reply)
-	if status != bus.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 || cells[0] != "imported" {
+	if status != ring.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 || cells[0] != "imported" {
 		t.Fatalf("large import failed: transport=%d result=%d err=%v disposition=%v", status, result, err, cells)
 	}
 	request, _ = wire.EncodeFields(33, []string{"import", "primary", "actor", ""})
-	reply, status = families.Sessions.Handler(store)(bus.ModuleInvocation{StageID: families.StageSessions}, request)
+	reply, status = families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
 	result, cells, err = wire.DecodeFields(reply)
-	if status != bus.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 {
+	if status != ring.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 {
 		t.Fatal(status, result, cells, err)
 	}
 	var recovered []json.RawMessage

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // newRepo makes a real repository with one commit. The ledger keys on tree
@@ -32,15 +32,15 @@ func newRepo(t *testing.T) string {
 	return root
 }
 
-func call(t *testing.T, request VerifyStateRequest) (VerifyStateResponse, bus.ModuleStatus) {
+func call(t *testing.T, request VerifyStateRequest) (VerifyStateResponse, ring.ModuleStatus) {
 	t.Helper()
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	body, status := Handle(bus.ModuleInvocation{StageID: StageVerifyRun}, encoded)
+	body, status := Handle(ring.ModuleInvocation{StageID: StageVerifyRun}, encoded)
 	var response VerifyStateResponse
-	if status == bus.ModuleStatusOK {
+	if status == ring.ModuleStatusOK {
 		if err := json.Unmarshal(body, &response); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
@@ -52,7 +52,7 @@ func TestVerifyStateHashesAndDirtiness(t *testing.T) {
 	root := newRepo(t)
 
 	tree, status := call(t, VerifyStateRequest{Op: "tree-hash", ProjectRoot: root})
-	if status != bus.ModuleStatusOK || !tree.OK || len(tree.Hash) != 40 {
+	if status != ring.ModuleStatusOK || !tree.OK || len(tree.Hash) != 40 {
 		t.Fatalf("tree-hash = %#v status %d", tree, status)
 	}
 	commit, _ := call(t, VerifyStateRequest{Op: "commit-hash", ProjectRoot: root})
@@ -174,14 +174,14 @@ func TestVerifyStateSharesOneLedgerAcrossWorktrees(t *testing.T) {
 }
 
 func TestVerifyStateRefusesBadRequests(t *testing.T) {
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageVerifyRun}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageVerifyRun}, []byte("{")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON accepted")
 	}
-	if _, status := call(t, VerifyStateRequest{Op: "no-such-op"}); status != bus.ModuleStatusInvalidRequest {
+	if _, status := call(t, VerifyStateRequest{Op: "no-such-op"}); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown op accepted")
 	}
 	// A write with no tree to key on would produce an entry nothing can match.
-	if _, status := call(t, VerifyStateRequest{Op: "state-write", ProjectRoot: t.TempDir()}); status != bus.ModuleStatusInvalidRequest {
+	if _, status := call(t, VerifyStateRequest{Op: "state-write", ProjectRoot: t.TempDir()}); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("hashless write accepted")
 	}
 }
@@ -189,8 +189,8 @@ func TestVerifyStateRefusesBadRequests(t *testing.T) {
 // The native gate requires a real boolean. Omitting false makes a clean tree
 // indistinguishable from an incomplete reply and must never authorize reuse.
 func TestVerifyCleanStateIsExplicitOnWire(t *testing.T) {
-	body, status := Handle(bus.ModuleInvocation{StageID: StageVerifyRun}, []byte(`{"op":"worktree-dirty","project_root":`+strconv.Quote(newRepo(t))+`}`))
-	if status != bus.ModuleStatusOK {
+	body, status := Handle(ring.ModuleInvocation{StageID: StageVerifyRun}, []byte(`{"op":"worktree-dirty","project_root":`+strconv.Quote(newRepo(t))+`}`))
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status %d", status)
 	}
 	var fields map[string]json.RawMessage

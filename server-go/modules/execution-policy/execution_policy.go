@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -342,19 +342,19 @@ approval:
 	return response{Allowed: true, Reason: "operator policy allows the action"}
 }
 
-func newHandler(load policyLoader) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func newHandler(load policyLoader) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 		if invocation.StageID != StageTool || invocation.Cancelled() {
 			if invocation.Cancelled() {
-				return nil, bus.ModuleStatusCancelled
+				return nil, ring.ModuleStatusCancelled
 			}
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		var req request
 		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields()
 		if err := decodeSingle(decoder, &req); err != nil || req.Tool == "" || len(req.Arguments) == 0 {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		policy, err := load()
 		decision := response{}
@@ -365,9 +365,9 @@ func newHandler(load policyLoader) bus.ModuleHandler {
 		}
 		encoded, err := json.Marshal(decision)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 }
 

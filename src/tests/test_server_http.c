@@ -15,6 +15,7 @@
 #include "presence.h"
 #include "turn_registry.h"
 #include "server_compute_impl.h"
+#include "server_session_capture.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -48,7 +49,21 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
+/* HTTP policy seam only. Private mint/constructor and callback activation are
+ * tested in separate fixtures with explicit seams; this cannot mint a grant. */
+static int fixture_native_service_admitted;
+int server_native_runtime_forward_service_admitted(void)
+{
+   return fixture_native_service_admitted;
+}
+
 static int history_open_effects;
+
+/* This is a route-only fixture, without a source/Vault/workspace owner. Never
+ * invent delegated execution authority merely to satisfy the link. Actual
+ * issuer success and refusal paths are covered by native-source-issuers and
+ * the HMAC/TLS owner fixture, both using the same production issuer code. */
+
 static char *kb_agent_surfaces_stub(void)
 {
    return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
@@ -340,8 +355,8 @@ int agent_http_post_bytes(const char *url, const char *auth, const void *body, s
 /* This surface fixture never opens a provider connection or acquires a send
  * guard. Actual guard/effect behavior is tested by test_http_send_guard.c. */
 int agent_http_post_guarded_bytes(const char *url, const char *auth, const void *body,
-                                  size_t body_len, char **response, int timeout,
-                                  const char *extra, const agent_http_send_guard_t *guard)
+                                  size_t body_len, char **response, int timeout, const char *extra,
+                                  const agent_http_send_guard_t *guard)
 {
    if (guard)
    {
@@ -422,6 +437,13 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       assert(conn->capabilities == CAP_DELEGATE);
       assert(!owner->caller_authorization[0] && !owner->request_budget_present);
    }
+   if (!strcmp(g_disp_method, "delegate.reply"))
+   {
+      cJSON *request = cJSON_Parse(g_disp_body);
+      int rc = handle_delegate_reply(ctx, conn, request);
+      cJSON_Delete(request);
+      return rc;
+   }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
@@ -446,8 +468,8 @@ static int primary_store_fixture;
 static int cancel_store_calls, cancel_store_status;
 static int attach_store_fixture, attach_store_calls, attach_store_creates;
 static char attach_store_actor[160], attach_store_owner[160];
-static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
-                                                     void *body, uint32_t cap, uint32_t *length)
+static ouro_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
+                                                    void *body, uint32_t cap, uint32_t *length)
 {
    uint32_t op = aimee_db1_get_u32(wire), count = aimee_db1_get_u32(wire + 4), at = 8;
    char fields[3][160] = {{0}};
@@ -463,7 +485,7 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
    }
    attach_store_calls++;
    if (attach_store_fixture == 2)
-      return AIMEE_MODULE_CALL_TRANSPORT;
+      return OURO_MODULE_CALL_TRANSPORT;
    uint32_t status = AIMEE_DB1_STATUS_OK, values = 0;
    if (op == AIMEE_DB1_OP_SERVER_SESSION_CREATE)
    {
@@ -475,13 +497,13 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
       if (attach_store_fixture == 4)
          status = AIMEE_DB1_STATUS_INVALID; /* Same-actor concurrent INSERT. */
       if (attach_store_fixture == 5)
-         return AIMEE_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
+         return OURO_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
    }
    else
    {
       assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
       if (attach_store_fixture == 6 && attach_store_owner[0])
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       if (!attach_store_owner[0])
          status = AIMEE_DB1_STATUS_MISSING;
       else
@@ -501,7 +523,7 @@ static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32
       memcpy(out + *length + 4, cells[i], n);
       *length += 4 + n;
    }
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 static int primary_fixture_get(const char *actor, const char *sid, char *out, size_t cap)
@@ -585,9 +607,9 @@ int primary_session_history_open(const char *session, const char *actor)
    history_open_calls++;
    return history_open_fixture == 3 ? -1 : 0;
 }
-static aimee_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
-                                                           uint32_t request_len, void *body,
-                                                           uint32_t capacity, uint32_t *length)
+static ouro_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
+                                                          uint32_t request_len, void *body,
+                                                          uint32_t capacity, uint32_t *length)
 {
    uint32_t count = aimee_db1_get_u32(wire + 4), at = 8;
    char fields[4][128] = {{0}};
@@ -603,7 +625,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
    }
    if (op == AIMEE_DB1_OP_SERVER_SESSION_GET && ++history_open_gets == 1 &&
        history_open_fixture == 4)
-      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+      return OURO_MODULE_CALL_DEADLINE_EXCEEDED;
    const char *values[10] = {
        "legacy", "primary", history_open_fixture == 2 ? "webuser:other" : "webuser:alice",
        "",       "",        "",
@@ -615,7 +637,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
    {
       assert(count == 4 && history_open_calls == 1 && !strcmp(fields[3], "webuser:alice"));
       if (history_open_pages++)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       values[0] =
           "[{\"version\":1,\"session_id\":\"legacy\",\"sequence\":\"1\",\"event_id\":\"import-"
           "base\","
@@ -645,7 +667,7 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
       memcpy(response + *length + 4, values[i], bytes);
       *length += 4 + bytes;
    }
-   return AIMEE_MODULE_CALL_OK;
+   return OURO_MODULE_CALL_OK;
 }
 
 /* The bus is not started in a unit test, so the module surface is stubbed to
@@ -657,11 +679,11 @@ int obs_bus_module_available(uint32_t event_kind)
           event_kind == AIMEE_DB1_EVENT_SESSIONS;
 }
 
-aimee_module_call_result_t
+ouro_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
                     uint32_t response_capacity, uint32_t *response_len,
-                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+                    ouro_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8 &&
        aimee_db1_get_u32(request_body) == AIMEE_DB1_OP_SESSION_IR_CANCEL)
@@ -678,21 +700,25 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
          at += n;
       }
       assert(at == request_len);
+      turn_entry_t *active = turn_registry_find("cancel-session");
+      assert(!active || !turn_entry_cancelled(active)); /* Commit before signalling. */
       cancel_store_calls++;
       if (cancel_store_status < 0)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       uint8_t *out = response_body;
       aimee_db1_put_u32(out, cancel_store_status ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_OK);
-      aimee_db1_put_u32(out + 4, cancel_store_status ? 0 : 1);
+      aimee_db1_put_u32(out + 4, cancel_store_status == 1 ? 0 : 1);
       *response_len = 8;
-      if (!cancel_store_status)
+      if (cancel_store_status != 1)
       {
-         assert(response_capacity >= 14);
-         aimee_db1_put_u32(out + 8, 2);
-         memcpy(out + 12, "71", 2);
-         *response_len = 14;
+         const char *cell = cancel_store_status == 2 ? "native-active" : "71";
+         size_t n = strlen(cell);
+         assert(response_capacity >= 12 + n);
+         aimee_db1_put_u32(out + 8, (uint32_t)n);
+         memcpy(out + 12, cell, n);
+         *response_len = 12 + n;
       }
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
       return attach_store_reply(request_body, request_len, response_body, response_capacity,
@@ -707,7 +733,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       if ((op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET &&
            op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET) ||
           count > 3)
-         return AIMEE_MODULE_CALL_TRANSPORT;
+         return OURO_MODULE_CALL_TRANSPORT;
       char fields[3][128] = {{0}};
       for (uint32_t i = 0; i < count; ++i)
       {
@@ -734,14 +760,14 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
          memcpy(response + 12, selected, strlen(selected));
          *response_len = 12 + (uint32_t)strlen(selected);
       }
-      return AIMEE_MODULE_CALL_OK;
+      return OURO_MODULE_CALL_OK;
    }
    (void)stage_id;
    (void)trace_id;
    (void)deadline_ns;
    (void)cancelled;
    (void)cancel_context;
-   return AIMEE_MODULE_CALL_TRANSPORT;
+   return OURO_MODULE_CALL_TRANSPORT;
 }
 
 /* The private workflow proxy is gone: the control plane is reached over the
@@ -828,7 +854,8 @@ static void test_browser_attach_admits_exact_durable_owner(void)
 static void test_workflow_control_reports_an_unattached_module(void)
 {
    char response[256];
-   const char *body = "{\"proposal_md\":\"test\"}";
+   const char *body = "{\"proposal_md\":\"test\",\"repo\":\"/route-fixture-unowned\","
+                      "\"execution_scope\":\"caller-cannot-supply-authority\"}";
    int status = workflow_control_request("POST", "/v1/dev/submit", "source=release-test", body,
                                          (int)strlen(body), "webuser:release-test", 1, response,
                                          sizeof(response));
@@ -905,6 +932,7 @@ static void test_role_template_show_reports_what_the_role_came_to(void)
  * the whole connection layer to test header parsing. */
 #include "server_conn_io.h"
 #include "server_tls.h"
+#include "support/config_test_setters.h"
 
 int server_conn_io_has_ssl(int fd)
 {
@@ -1023,6 +1051,32 @@ static void test_stream_handoff_retains_attested_owner(void)
    close(pair[1]);
 }
 
+/* Transport-only error serializer; the compatibility decision is production code. */
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
+{
+   (void)request_id;
+   cJSON *error = cJSON_CreateObject();
+   cJSON_AddStringToObject(error, "status", "error");
+   cJSON_AddStringToObject(error, "message", message);
+   char *encoded = cJSON_PrintUnformatted(error);
+   cJSON_Delete(error);
+   assert(encoded);
+   int result = dprintf(conn->fd, "%s\n", encoded);
+   free(encoded);
+   return result < 0 ? -1 : 0;
+}
+
+static void test_retired_delegate_reply_route(void)
+{
+   const char *body = "{\"delegation_id\":\"active\",\"content\":\"answer\"}";
+   char response[2048];
+   server_http_identity_clear();
+   int status = server_http_route("POST", "/v1/delegate/reply", body, (int)strlen(body), response,
+                                  sizeof response);
+   assert(status >= 400 && strstr(response, "delegate.reply is unavailable"));
+   assert(!strstr(response, "\"status\":\"ok\""));
+}
+
 static void test_operator_control_reply_route(void)
 {
    server_control_scope_t *scope =
@@ -1090,6 +1144,15 @@ static void test_operator_control_reply_route(void)
    server_control_scope_close(scope);
 }
 
+static int cancel_owner_callbacks;
+static void cancelled_owner_callback(int success, void *resource)
+{
+   server_session_capture_t *capture = resource;
+   assert(!success && !cancel_owner_callbacks++);
+   char sequence[32];
+   assert(!server_session_capture_cursor(capture, sequence) && !strcmp(sequence, "71"));
+   assert(!server_session_capture_accepting(capture));
+}
 static void test_operator_exact_cancel_route(void)
 {
    char response[1024];
@@ -1124,13 +1187,37 @@ static void test_operator_exact_cancel_route(void)
       assert(!turn_entry_cancelled(turn) && !cancel_store_calls);
       turn_registry_clear(turn);
       turn = turn_registry_publish("cancel-session", "cancel-turn");
+      server_session_capture_t *capture = server_session_capture_open(
+          "cancel-session", "cancel-turn", "webuser:alice", "cancel-session");
+      assert(capture &&
+             !server_session_capture_after_terminal(capture, cancelled_owner_callback, capture));
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 200);
-      assert(turn_entry_cancelled(turn) && strstr(response, "stopping") && !cancel_store_calls);
+      assert(turn_entry_cancelled(turn) && strstr(response, "stopping") && cancel_store_calls == 1);
+      assert(cancel_owner_callbacks == 1 && server_session_capture_operator_cancelled(capture));
+      server_session_capture_close(capture);
+      assert(cancel_owner_callbacks == 1);
       turn_registry_clear(turn);
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 200);
-      assert(strstr(response, "cancelled") && strstr(response, "71") && cancel_store_calls == 1);
+      assert(strstr(response, "cancelled") && strstr(response, "71") && cancel_store_calls == 2);
+      turn = turn_registry_publish("cancel-session", "cancel-turn");
+      cancel_store_status = 1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409);
+      assert(!turn_entry_cancelled(turn));
+      cancel_store_status = -1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 503);
+      assert(!turn_entry_cancelled(turn));
+      cancel_store_status = 2;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 200);
+      assert(turn_entry_cancelled(turn) && strstr(response, "stopping"));
+      assert(!strstr(response, "terminal_sequence")); /* Native stop is not a durable receipt. */
+      turn_registry_clear(turn);
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409); /* No local native owner. */
       cancel_store_status = 1;
       assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
                                sizeof response) == 409);
@@ -1205,6 +1292,149 @@ static void test_native_http_handoff_preserves_owner_and_caps(void)
    server_http_set_chat_handler(NULL);
 }
 
+static int service_forward_calls;
+static int native_service_probe(const char *body, char *response, int capacity)
+{
+   assert(!strcmp(body, "{}"));
+   const request_context_t *owner = request_context_get();
+   assert(owner && owner->vault_transport == ATTEST_NONE && !owner->trusted &&
+          owner->model_execution == 1 && !owner->operator_script_origin);
+   assert(!strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server"));
+   assert(server_http_identity_transport() == ATTEST_NONE && !server_http_identity_principal()[0] &&
+          !server_http_identity_browser_operator());
+   service_forward_calls++;
+   snprintf(response, (size_t)capacity, "{\"private_service_forward\":true}");
+   return 200;
+}
+static void test_private_service_native_http_forward(void)
+{
+   request_context_t owner = {
+       .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+   strcpy(owner.principal, "server");
+   strcpy(owner.vault_principal, "server");
+   strcpy(owner.session_key, "private-service-session");
+   server_http_set_chat_handler(native_service_probe);
+   service_forward_calls = 0;
+   for (int mode = 0; mode < 8; mode++)
+   {
+      request_context_t current = owner;
+      fixture_native_service_admitted = mode != 0 && mode != 7;
+      if (mode == 3)
+         current.vault_transport = ATTEST_TCP_BEARER;
+      if (mode == 4)
+         current.capabilities = CAP_MEMORY_READ;
+      request_context_set(mode == 6 ? NULL : &current);
+      server_http_identity_clear();
+      if (mode == 2)
+      {
+         request_context_t foreign = owner;
+         foreign.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+         strcpy(foreign.vault_principal, "webuser:foreign");
+         server_http_identity_bind_request_owner(&foreign);
+      }
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      const char *body = mode == 5 ? "{} trailing" : "{}";
+      int rc = server_http_native_forward(pair[0], "POST", "/v1/chat/completions", body,
+                                          (int)strlen(body));
+      shutdown(pair[0], SHUT_WR);
+      char response[2048];
+      ssize_t n = read(pair[1], response, sizeof response - 1);
+      assert(n > 0);
+      response[n] = 0;
+      assert((rc == 0) == (mode == 1));
+      assert(strstr(response, mode == 1 ? "200" : mode == 5 ? "400" : "403"));
+      assert(service_forward_calls == (mode >= 1));
+      if (mode == 1)
+      {
+         assert(strstr(response, "private_service_forward"));
+         assert(request_context_get()->vault_transport == ATTEST_NONE &&
+                !request_context_get()->trusted);
+      }
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   fixture_native_service_admitted = 0;
+   server_http_set_chat_handler(NULL);
+}
+
+static int private_typed_stream_calls[2];
+static void assert_private_stream_owner(const char *body)
+{
+   assert(!strcmp(body, "{\"stream\":true}"));
+   const request_context_t *owner = request_context_get();
+   assert(owner && owner->vault_transport == ATTEST_NONE && !owner->trusted &&
+          owner->model_execution == 1 && !owner->operator_script_origin);
+   assert(!strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server") &&
+          !strcmp(owner->session_key, "native-service-stream") &&
+          !strcmp(owner->request_id, "private-stream-request") && owner->capabilities == CAP_CHAT);
+   assert(server_http_identity_transport() == ATTEST_NONE && !server_http_identity_principal()[0] &&
+          !server_http_identity_browser_operator());
+}
+static int private_responses_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   assert_private_stream_owner(body);
+   private_typed_stream_calls[0]++;
+   emit(ctx, "response.created", "{\"type\":\"response.created\"}");
+   emit(ctx, "response.completed", "{\"type\":\"response.completed\"}");
+   return 0;
+}
+static int private_messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   assert_private_stream_owner(body);
+   private_typed_stream_calls[1]++;
+   emit(ctx, "message_start", "{\"type\":\"message_start\"}");
+   emit(ctx, "message_stop", "{\"type\":\"message_stop\"}");
+   return 0;
+}
+static void test_private_service_typed_stream_routes(void)
+{
+   server_http_set_responses_stream_handler(private_responses_stream);
+   server_http_set_messages_stream_handler(private_messages_stream);
+   fixture_native_service_admitted = 1;
+   for (int mode = 0; mode < 2; mode++)
+   {
+      private_typed_stream_calls[0] = private_typed_stream_calls[1] = 0;
+      request_context_t owner = {
+          .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+      strcpy(owner.principal, "server");
+      strcpy(owner.vault_principal, "server");
+      strcpy(owner.session_key, "native-service-stream");
+      strcpy(owner.request_id, "private-stream-request");
+      request_context_set(&owner);
+      server_http_identity_clear();
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      const char *body = "{\"stream\":true}";
+      assert(!server_http_native_forward(pair[0], "POST", mode ? "/v1/messages" : "/v1/responses",
+                                         body, (int)strlen(body)));
+      shutdown(pair[0], SHUT_WR);
+      char wire[4096];
+      size_t used = 0;
+      ssize_t bytes;
+      while ((bytes = read(pair[1], wire + used, sizeof wire - used - 1)) > 0)
+         used += (size_t)bytes;
+      wire[used] = 0;
+      assert(used && strstr(wire, "200 OK") && strstr(wire, "text/event-stream"));
+      assert(strstr(wire,
+                    mode ? "event: message_stop\ndata: {\"type\":\"message_stop\"}"
+                         : "event: response.completed\ndata: {\"type\":\"response.completed\"}"));
+      assert(!strstr(wire, mode ? "response.completed" : "message_stop"));
+      assert(!strstr(wire, "[DONE]"));
+      assert(private_typed_stream_calls[mode] == 1 && !private_typed_stream_calls[!mode]);
+      assert_private_stream_owner(body); /* Synchronous dispatch retains the exact owner. */
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   fixture_native_service_admitted = 0;
+   server_http_set_responses_stream_handler(NULL);
+   server_http_set_messages_stream_handler(NULL);
+}
+
 static void test_history_open_precedes_sse_headers(void)
 {
    for (int mode = 1; mode <= 4; mode++)
@@ -1250,27 +1480,36 @@ static void test_history_open_precedes_sse_headers(void)
 static host_text_status capture_failure_status;
 static int capture_failure_calls;
 static host_text_status http_capture_failure(const char *headers, const cJSON *request,
-                                              void **owned, void *state)
+                                             void **owned, void *state)
 {
-   (void)headers; (void)request; (void)state;
+   (void)headers;
+   (void)request;
+   (void)state;
    *owned = NULL;
    capture_failure_calls++;
    return capture_failure_status;
 }
 static host_text_status http_capture_unused_consume(void *owner, const cJSON *request,
-    host_original_submission_result *result, void *state)
+                                                    host_original_submission_result *result,
+                                                    void *state)
 {
-   (void)owner; (void)request; (void)result; (void)state;
+   (void)owner;
+   (void)request;
+   (void)result;
+   (void)state;
    abort();
 }
 static void http_capture_unused_finish(void *owner, int admitted, void *state)
 {
-   (void)owner; (void)admitted; (void)state;
+   (void)owner;
+   (void)admitted;
+   (void)state;
    abort();
 }
 static void http_capture_unused_destroy(void *owner, void *state)
 {
-   (void)owner; (void)state;
+   (void)owner;
+   (void)state;
    abort();
 }
 static void test_original_http_capture_failure_status(void)
@@ -1283,22 +1522,25 @@ static void test_original_http_capture_failure_status(void)
       {
          alarm(10);
          capture_failure_status = mode ? HOST_TEXT_REFUSED : HOST_TEXT_UNAVAILABLE;
-         host_original_submission_owner owner = {http_capture_failure,
-             http_capture_unused_consume, http_capture_unused_finish, http_capture_unused_destroy};
+         host_original_submission_owner owner = {http_capture_failure, http_capture_unused_consume,
+                                                 http_capture_unused_finish,
+                                                 http_capture_unused_destroy};
          assert(!host_original_submission_install(&owner, NULL));
          int pair[2];
          assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
          const char *wire = "POST /v1/chat/stream HTTP/1.1\r\nHost: localhost\r\n"
-             "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+                            "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
          assert(write(pair[1], wire, strlen(wire)) == (ssize_t)strlen(wire));
          int effects = history_open_effects;
          handle_conn_inline(pair[0], 0);
          char response[2048];
          ssize_t size = read(pair[1], response, sizeof response - 1);
-         assert(size > 0); response[size] = 0;
+         assert(size > 0);
+         response[size] = 0;
          assert(strstr(response, mode ? "400 Bad Request" : "503 Service Unavailable"));
          assert(capture_failure_calls == 1 && history_open_effects == effects);
-         close(pair[0]); close(pair[1]);
+         close(pair[0]);
+         close(pair[1]);
          _exit(0);
       }
       int status;
@@ -1311,6 +1553,7 @@ int main(void)
    test_original_http_capture_failure_status();
    test_history_open_precedes_sse_headers();
    test_stream_handoff_retains_attested_owner();
+   test_retired_delegate_reply_route();
    test_operator_control_reply_route();
    test_operator_exact_cancel_route();
    extern int server_http_declared_status(const char *json);
@@ -1326,6 +1569,8 @@ int main(void)
 
    test_json_number_serialization_is_exact();
    test_native_http_handoff_preserves_owner_and_caps();
+   test_private_service_native_http_forward();
+   test_private_service_typed_stream_routes();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
@@ -3260,9 +3505,34 @@ int main(void)
       snprintf(op_owner.request_budget_limits, sizeof op_owner.request_budget_limits,
                "{\"max_tokens\":1234}");
       compute_ctx_t inherited = {0};
+      for (int saved = 0; saved <= 1; ++saved)
+         for (int allowed = 0; allowed <= 1; ++allowed)
+         {
+            request_context_t headed = op_owner;
+            headed.control_reply_capability = saved;
+            request_context_set(&headed);
+            server_control_scope_t *controls = server_control_scope_open(
+                "snapshot-chat", "snapshot-turn", op_owner.vault_principal);
+            assert(controls);
+            if (!allowed)
+               server_control_scope_disable_replies(controls);
+            server_control_scope_t *previous = server_control_scope_bind(controls);
+            compute_ctx_capture_request_context(&inherited, NULL);
+            assert(inherited.request_context.active &&
+                   inherited.request_context.value.control_reply_capability == (saved && allowed));
+            server_control_scope_bind(previous);
+            server_control_scope_close(controls);
+            request_context_restore(&inherited.request_context);
+            /* A detached worker retains both the headed grant and explicit denial
+             * after the launching scope ends; no ambient scope is fabricated. */
+            compute_ctx_capture_request_context(&inherited, NULL);
+            assert(inherited.request_context.value.control_reply_capability == (saved && allowed));
+            request_context_snapshot_clear(&inherited.request_context);
+         }
       request_context_set(&op_owner);
       compute_ctx_capture_request_context(&inherited, NULL);
       assert(inherited.conn_caps == CAP_DELEGATE);
+      assert(!inherited.request_context.value.control_reply_capability);
       assert(inherited.attested_transport == ATTEST_WEBCHAT_TRUSTED);
       assert(!strcmp(inherited.vault_principal, "webuser:op-owner"));
       request_context_clear();

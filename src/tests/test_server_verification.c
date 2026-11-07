@@ -162,7 +162,7 @@ int server_session_capture_observe_verification(server_session_capture_t *owner,
    return 0;
 }
 cJSON *aimee_module_json_call(uint32_t event, uint32_t stage, cJSON *request, size_t cap,
-                              int timeout, aimee_module_call_result_t *result)
+                              int timeout, ouro_module_call_result_t *result)
 {
    assert(event == AIMEE_GIT_EVENT_VERIFY_RUN && stage == AIMEE_GIT_STAGE_VERIFY_RUN);
    assert(cap >= 16384 && timeout > 0 && !result);

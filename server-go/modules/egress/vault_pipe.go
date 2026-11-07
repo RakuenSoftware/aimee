@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // PrepareHandler authenticates a private Vault pipe before the owner becomes
@@ -19,7 +19,7 @@ import (
 // requests begin after authenticated bus attach and process hardening.
 // A failed pipe is never reopened by a hardened owner. Done asks its supervisor
 // to restart the owner and establish a new authenticated process boundary.
-func PrepareHandler(ctx context.Context) (bus.ModuleHandler, func(), <-chan struct{}, error) {
+func PrepareHandler(ctx context.Context) (ring.ModuleHandler, func(), <-chan struct{}, error) {
 	helper := os.Getenv("AIMEE_EGRESS_CREDENTIAL_HELPER")
 	if helper == "" {
 		// Native launches without a Vault helper retain credential-free egress.

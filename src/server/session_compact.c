@@ -750,9 +750,9 @@ static int compact_canonical(cJSON *messages, const compact_history_t *history, 
       const cJSON *raw = cJSON_GetArrayItem(messages, i);
       const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(raw, "blocks");
       const cJSON *block = NULL;
-      cJSON_ArrayForEach(block, blocks)
-         if ((cJSON_HasObjectItem(block, "tool_source") || cJSON_HasObjectItem(block, "input_attachment")))
-            return 0;
+      cJSON_ArrayForEach(block,
+                         blocks) if ((cJSON_HasObjectItem(block, "tool_source") ||
+                                      cJSON_HasObjectItem(block, "input_attachment"))) return 0;
       if (canonical_protected(message) && msg_is_tool_result(message))
          return 0; /* A mixed protected result keeps its preceding cycle intact. */
    }

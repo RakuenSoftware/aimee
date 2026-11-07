@@ -22,8 +22,7 @@ server: `server-go/modules/routing` serves the pointer-free `module_api.h` contr
 supervised Go `aimee-module-routing` process, and `server/module_routing_adapter.c` calls it through the
 shared core module client. Stage 1 balances equal candidates; stage 2 ranks qualified
 delegate candidates by competence preference and estimated request cost. A missing, cancelled, timed-out, or malformed module reply fails the route
-closed. The routing C `module_adapter.c` remains a parity fixture while the rest of `routing.c` is
-migrated. The routing block is otherwise self-contained: its statics are module-local, and no config
+closed. The rest of `routing.c` is being migrated. The routing block is otherwise self-contained: its statics are module-local, and no config
 function calls the routing functions. Therefore, `routing.c` has no module-private header. Delegate-specific
 route overrides and preflight remain in `src/modules/delegates/delegate_routing.c` (the delegates
 module, a routing sibling, calls the same `agent_config.h` role predicates). Advisory

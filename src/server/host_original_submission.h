@@ -33,12 +33,16 @@ typedef struct
  * admission receipt. A callback returns normally without IO/Native calls or
  * nested host calls. Any output is owned even on refusal and must be malloc.
  * This separate versioned API leaves owner-contract-v1's layout unchanged. */
-typedef struct {
+typedef struct
+{
    char *json;
    size_t length, capacity;
 } host_original_submission_outcome;
-typedef int (*host_original_submission_outcome_fn)(const void *, host_original_submission_outcome *, void *);
-int host_original_submission_install_outcome_provider_v1(const host_original_submission_owner *, host_original_submission_outcome_fn, void *);
+typedef int (*host_original_submission_outcome_fn)(const void *, host_original_submission_outcome *,
+                                                   void *);
+int host_original_submission_install_outcome_provider_v1(const host_original_submission_owner *,
+                                                         host_original_submission_outcome_fn,
+                                                         void *);
 /* Only registered source-only caps, on their consuming worker, before release.
  * Caller owns returned strict JSON object; NULL preserves default behavior. */
 struct cJSON *host_original_submission_outcome_json_v1(const host_original_submission *);
@@ -46,7 +50,9 @@ extern const unsigned aimee_original_input_outcome_callback_contract_v1;
 /* Optional owner-verified, already-delivered INPUT disposition. Registration is
  * startup-only and exact-owner-bound. Callback only copies a cached receipt:
  * no IO, Native calls, nested host calls, or new source/model authority. */
-int host_original_submission_install_delivered_provider_v1(const host_original_submission_owner *, host_original_submission_outcome_fn, void *);
+int host_original_submission_install_delivered_provider_v1(const host_original_submission_owner *,
+                                                           host_original_submission_outcome_fn,
+                                                           void *);
 struct cJSON *host_original_submission_delivered_json_v1(const host_original_submission *);
 extern const unsigned aimee_original_input_delivered_callback_contract_v1;
 
@@ -87,8 +93,9 @@ host_text_status host_original_submission_capture(const char *headers, const cha
 /* Compiled authenticated User-source entry only. This mode grants no authority
  * and never permits passthrough when the original admission owner is absent.
  * Immutable on the registered capsule; no JSON field can select it. */
-host_text_status host_original_submission_capture_user_source(const char *headers, const char *frame,
-                                                              size_t length, host_original_submission **);
+host_text_status host_original_submission_capture_user_source(const char *headers,
+                                                              const char *frame, size_t length,
+                                                              host_original_submission **);
 int host_original_submission_user_source_only(const host_original_submission *);
 extern const unsigned aimee_original_user_source_only_contract_v1;
 host_text_status host_original_submission_consume(host_original_submission *, const struct cJSON *,

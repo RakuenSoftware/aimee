@@ -1,6 +1,7 @@
 /* delegate_driver.c: provider driver registry and dispatch helpers */
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
+#include <pthread.h>
 #include <string.h>
 
 /* --- Registry --- */
@@ -9,7 +10,7 @@
 
 static const delegate_driver_t *g_drivers[MAX_DRIVERS];
 static int g_driver_count;
-static int g_drivers_inited;
+static pthread_once_t g_drivers_once = PTHREAD_ONCE_INIT;
 
 /* Forward declarations for built-in drivers */
 extern const delegate_driver_t delegate_driver_openai;
@@ -34,18 +35,21 @@ void delegate_driver_register(const delegate_driver_t *driver)
    g_drivers[g_driver_count++] = driver;
 }
 
-void delegate_drivers_init(void)
+static void register_builtin_drivers(void)
 {
-   if (g_drivers_inited)
-      return;
-   g_drivers_inited = 1;
-
    delegate_driver_register(&delegate_driver_openai);
    delegate_driver_register(&delegate_driver_anthropic);
    delegate_driver_register(&delegate_driver_chatgpt);
    delegate_driver_register(&delegate_driver_openrouter);
    delegate_driver_register(&delegate_driver_mistral);
    delegate_driver_register(&delegate_driver_minimax);
+}
+
+/* Request threads call this concurrently. A flag set before registering let a
+ * second caller return to an empty registry and find no driver. */
+void delegate_drivers_init(void)
+{
+   (void)pthread_once(&g_drivers_once, register_builtin_drivers);
 }
 
 const delegate_driver_t *delegate_driver_get(const char *provider)

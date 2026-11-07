@@ -49,9 +49,6 @@ void delegate_register_economics_provider(delegate_economics_provider_fn provide
 void delegate_economics_build_report(const db1_coord_job_t *job, const db1_coord_task_t *tasks,
                                      int task_count, const agent_config_t *cfg,
                                      delegate_economics_report_t *out);
-void delegate_economics_add_json(cJSON *obj, const delegate_economics_report_t *report);
-
-int delegate_economics_is_tier0_heavy(const delegate_economics_report_t *report);
 
 void delegate_economics_add_agent_result_json(cJSON *obj, const agent_config_t *cfg,
                                               const char *role, const agent_result_t *result,

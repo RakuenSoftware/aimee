@@ -19,12 +19,9 @@
 
 /* Go resolves stored defaults. The table also records failure defaults for native
  * callers; security gates remain enabled when the transport cannot answer. */
-#define CONFIG_NUMBER(name, type, key, fallback)                                                   \
-   type config_##name(void);                                                                       \
-   int config_set_##name(type value);
+#define CONFIG_NUMBER(name, type, key, fallback) type config_##name(void);
 #define CONFIG_STRING(name, key, width)                                                            \
    const char *config_##name(void);                                                                \
-   int config_set_##name(const char *value);                                                       \
    size_t config_##name##_copy(char *out, size_t n);
 #define CONFIG_INDEX_NUMBER(name, type, key, field)  type config_##name(int index);
 #define CONFIG_INDEX_STRING(name, key, field, width) const char *config_##name(int index);
@@ -35,9 +32,7 @@
 #undef CONFIG_INDEX_STRING
 
 int config_mcp_client_count(void);
-int config_set_mcp_client_count(int value);
 const char *config_server_api_bearer_extra(int index);
 int config_server_api_bearer_extra_count(void);
-int config_set_server_api_bearer_extra_count(int value);
 
 #endif

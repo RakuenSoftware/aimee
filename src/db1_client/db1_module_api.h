@@ -183,6 +183,16 @@
 #define AIMEE_DB1_EVENT_DELEGATION 11781u
 #define AIMEE_DB1_STAGE_DELEGATION 5u
 
+/* aimee-delegation-changed: the module announces each committed delegation or
+ * agent-work write (ouroboros ring D14), 4096 + 30*256 + 25, so the delegate
+ * monitor reacts instead of sweeping. */
+#define AIMEE_DB1_EVENT_DELEGATION_CHANGED 11801u
+
+/* aimee-learning-projection-pending: the module announces a commit that queued a
+ * learning projection, 4096 + 30*256 + 26, so the core's delivery worker claims
+ * it instead of polling the queue. */
+#define AIMEE_DB1_EVENT_LEARNING_PROJECTION_PENDING 11802u
+
 #define AIMEE_DB1_OP_DELEGATION_MESSAGE_RECORD               1u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_RECORD                 2u
 #define AIMEE_DB1_OP_DELEGATION_SPAWN_COMPLETE               3u
@@ -227,6 +237,7 @@
 #define AIMEE_DB1_OP_AGENT_LOG_ENTRY_LIST                    42u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
+#define AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION         45u
 
 /* Family 6: server and webchat session rows: who is talking, when they last
  * spoke, and what the conversation was called. */
@@ -243,17 +254,9 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_COUNT                   7u
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_EXPIRED            8u
 #define AIMEE_DB1_OP_SERVER_SESSION_DELETE_EXPIRED          9u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_SAVE                   10u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_LOAD                   11u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_DELETE                 12u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT           13u
-#define AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH           14u
 #define AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST             15u
 #define AIMEE_DB1_OP_SESSION_WRITE_PATH_RECORD              16u
 #define AIMEE_DB1_OP_SESSION_STALE_READS                    17u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET             18u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER  19u
-#define AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND            20u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_SET                       21u
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                       22u
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM  23u
@@ -284,10 +287,10 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET             49u
 #define AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT              50u
 #define AIMEE_DB1_OP_SESSION_IR_CANCEL                      53u
-#define AIMEE_DB1_OP_SESSION_TOOL_SOURCE_APPEND               54u
-#define AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE         55u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN              56u
-#define AIMEE_DB1_OP_SESSION_INPUT_ATTACHMENT_HISTORY_SAVE     57u
+#define AIMEE_DB1_OP_SESSION_TOOL_SOURCE_APPEND             54u
+#define AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE       55u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN           56u
+#define AIMEE_DB1_OP_SESSION_INPUT_ATTACHMENT_HISTORY_SAVE  57u
 #define AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED            46u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
@@ -740,13 +743,13 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
 #define AIMEE_DB1_OP_LEARNING_PROJECTION_ACK   66u
 
 #define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN_DELIVERY 58u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET 59u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_PAGE 60u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_ACK 61u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET   59u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_PAGE  60u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_ACK   61u
 
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PROBE 62u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PLAN_RESERVE 63u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PROBE                  62u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PLAN_RESERVE           63u
 #define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN_PLANNED_DELIVERY 64u
-#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PLAN_TERMINAL 65u
+#define AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_PLAN_TERMINAL          65u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

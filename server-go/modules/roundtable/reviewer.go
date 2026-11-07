@@ -3,8 +3,10 @@ package roundtable
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/delegate"
@@ -76,15 +78,34 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 		stage = "frozen_diff"
 	}
 	original := strings.TrimSpace(request.OriginalRequest)
-	if original == "" {
-		original = "Review the supplied artifact for correctness, completeness, security, and test quality."
+	source := request.Request
+	if source != nil && (!source.Valid() || original != "") {
+		return panel.RunResult{}, panel.ValidationError{Message: "roundtable request must be valid canonical IR without original_request alias"}
 	}
+	if source == nil {
+		if original == "" {
+			original = "Review the supplied artifact for correctness, completeness, security, and test quality."
+		}
+		source = canonical.TaskRequest("", original) // explicit legacy text ingress/domain artifact origin
+	}
+
 	// A caller-supplied run id is the review's identity and is preserved. Without
 	// one, derive it from the request and artifact so an identical review is
 	// identifiable rather than arbitrary.
 	id := strings.TrimSpace(request.RunID)
 	if id == "" {
-		sum := sha256.Sum256([]byte(original + "\x00" + request.Artifact))
+		identity, encodeErr := json.Marshal(struct {
+			Request                            *canonical.Request
+			Brief                              json.RawMessage
+			Artifact, Stage, Focus, Roundtable string
+			Lenses                             []string
+			Pins                               map[string]string
+		}{source, request.Brief, request.Artifact, stage, request.Focus, request.Roundtable, request.Lenses, request.Pins})
+		if encodeErr != nil {
+			return panel.RunResult{}, encodeErr
+		}
+		sum := sha256.Sum256(identity)
+
 		id = fmt.Sprintf("roundtable-%x", sum[:12])
 	}
 
@@ -97,13 +118,14 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	}
 
 	run := panel.Run{
+		Request:          source,
+		Brief:            request.Brief,
 		ID:               id,
 		Stage:            request.Stage,
 		ExecutionVersion: request.ExecutionVersion,
 		ReplayOnly:       request.ReplayOnly,
 		CostLimitUSD:     request.CostLimitUSD,
 		Workdir:          request.Workdir,
-		OriginalRequest:  original,
 		Reviewed: panel.Artifact{
 			Stage:   stage,
 			Content: request.Artifact,
@@ -138,7 +160,7 @@ func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.Delegat
 		Persona:     seat.Persona,
 		Delegate:    seat.Selector,
 		Participant: seat.Participant,
-		Prompt:      seat.Prompt,
+		Input:       seat.Input,
 		Workdir:     run.Workdir,
 		Tools:       seat.Tools,
 		MaxTurnsCap: seat.MaxTurnsCap,
@@ -156,8 +178,15 @@ func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.Delegat
 	}
 }
 
-func seatResult(participant, response string, cost float64, costUnknown bool, err error) panel.SeatResult {
-	out := panel.SeatResult{Participant: participant, Response: response,
+func seatResult(participant string, output *canonical.Response, cost float64, costUnknown bool, err error) panel.SeatResult {
+	if err == nil {
+		if output == nil {
+			err = errors.New("delegate has no canonical response")
+		} else {
+			_, err = output.SemanticText()
+		}
+	}
+	out := panel.SeatResult{Participant: participant, Output: output,
 		CostUSD: cost, CostUnknown: costUnknown, Err: err}
 	if err == nil {
 		return out
@@ -208,7 +237,7 @@ func (s seatBus) Group(ctx context.Context, run panel.Run, seats []panel.SeatReq
 		}
 	}
 	for i, call := range s.client.DelegateGroup(ctx, requests) {
-		out[i] = seatResult(call.Participant, call.Response, call.CostUSD, call.CostUnknown, call.Err)
+		out[i] = seatResult(call.Participant, call.Output, call.CostUSD, call.CostUnknown, call.Err)
 	}
 	return out
 }
@@ -217,5 +246,5 @@ func (s seatBus) One(ctx context.Context, run panel.Run, seat panel.SeatRequest)
 	request := s.request(run, seat)
 	request.MaxCostUSD = run.CostLimitUSD
 	result, err := s.client.Delegate(ctx, request)
-	return seatResult(result.Participant, result.Response, result.CostUSD, result.CostUnknown, err)
+	return seatResult(result.Participant, result.Output, result.CostUSD, result.CostUnknown, err)
 }

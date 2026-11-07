@@ -10,6 +10,7 @@
 #include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
+#include "server_native_runtime.h"
 #include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
@@ -474,13 +475,13 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
          cJSON_Delete(req);
          return err_json(resp, cap, 403, "browser session owner mismatch");
       }
-      db1_server_session_t row;
-      if (db1_server_session_get(session_id, &row) != 0)
+      db1_server_session_owner_t row;
+      if (db1_server_session_owner_get(session_id, &row) != 0)
       {
          /* Creation never updates an existing owner. A concurrent creator or
           * lost acknowledgement is resolved only by reading the durable row. */
          (void)db1_server_session_create(session_id, "webchat", actor);
-         if (db1_server_session_get(session_id, &row) != 0)
+         if (db1_server_session_owner_get(session_id, &row) != 0)
          {
             cJSON_Delete(req);
             return err_json(resp, cap, 503, "browser session admission unavailable");
@@ -921,75 +922,6 @@ int route_completion(server_http_completion_fn fn, const char *body, char *resp,
  * caller (e.g. unit tests) gets the conservative, read-only surface. */
 _Thread_local uint32_t g_rpc_conn_caps = CAPS_READ_ONLY;
 
-/* Dispatch an NDJSON {method,params} body through server_dispatch() over a
- * socketpair loopback and capture the response into resp. The write end is
- * non-blocking so an oversize response can never hang the server thread; if the
- * response is truncated it fails to parse and we return an error rather than a
- * partial body. Returns an HTTP status; resp holds the JSON response body. */
-/* Upper bound on how long the dispatch bridge waits for a reply. Generous because
- * a deferred handler may be running a real tool, and safe because it blocks one
- * connection's own worker thread rather than the listener. */
-#define LOOPBACK_REPLY_TIMEOUT_SECS 30
-
-int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint32_t conn_caps)
-{
-   int sp[2];
-   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) != 0)
-      return err_json(resp, resp_cap, 500, "dispatch route unavailable");
-   int fl = fcntl(sp[1], F_GETFL, 0);
-   if (fl >= 0)
-      fcntl(sp[1], F_SETFL, fl | O_NONBLOCK);
-
-   server_conn_t fake;
-   memset(&fake, 0, sizeof(fake));
-   fake.fd = sp[1];
-   fake.capabilities = conn_caps;
-   /* WP-C.0 hop 2 of 3: the memset above zeroes the attested identity; restore
-    * the real one captured by handle_conn so every /v1 request — which only ever
-    * reaches server_dispatch through this synthesized conn — carries the caller's
-    * vault principal through to create_compute_ctx (same thread, identity live). */
-   server_http_identity_apply(&fake);
-   pthread_mutex_init(&fake.mutex, NULL);
-   pthread_cond_init(&fake.can_close, NULL);
-
-   size_t mlen = body_len > 0 ? (size_t)body_len : strlen(body);
-   server_dispatch(server_active_ctx(), &fake, body, mlen);
-
-   pthread_mutex_destroy(&fake.mutex);
-   pthread_cond_destroy(&fake.can_close);
-
-   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
-   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
-   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
-
-   size_t total = 0;
-   for (;;)
-   {
-      ssize_t n = read(sp[0], resp + total, (size_t)resp_cap - 1 - total);
-      if (n <= 0)
-         break;
-      total += (size_t)n;
-      /* server_dispatch emits one NDJSON response. The newline is the message
-       * boundary; another in-process reference may keep the socket alive, so
-       * waiting for process-wide EOF can otherwise hang this adapter. */
-      if (memchr(resp, '\n', total) != NULL)
-         break;
-      if (total >= (size_t)resp_cap - 1)
-         break;
-   }
-   close(sp[0]);
-   close(sp[1]);
-   resp[total] = '\0';
-   while (total > 0 && (resp[total - 1] == '\n' || resp[total - 1] == '\r'))
-      resp[--total] = '\0';
-   if (total == 0)
-      return err_json(resp, resp_cap, 502, "rpc produced no response");
-   int status = server_http_declared_status(resp);
-   if (!status)
-      return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
-   return status;
-}
-
 int server_http_route(const char *method, const char *path, const char *body, int body_len,
                       char *resp, int resp_cap)
 {
@@ -1115,7 +1047,8 @@ static void chat_ingress_wipe(cJSON *node)
       {
          volatile char *p = item->valuestring;
          size_t n = strlen(item->valuestring);
-         while (n--) *p++ = 0;
+         while (n--)
+            *p++ = 0;
       }
    }
 }
@@ -1149,9 +1082,11 @@ static void handle_native_chat_stream_mode(int fd, const char *headers, const ch
    int previous_cancel;
    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel);
    chat_ingress_scope scope = {0};
-   host_text_status status = source_only
-       ? host_original_submission_capture_user_source(headers, body, body_length, &scope.submission)
-       : host_original_submission_capture(headers, body, body_length, &scope.submission);
+   host_text_status status =
+       source_only
+           ? host_original_submission_capture_user_source(headers, body, body_length,
+                                                          &scope.submission)
+           : host_original_submission_capture(headers, body, body_length, &scope.submission);
    if (status != HOST_TEXT_OK && status != HOST_TEXT_PASSTHROUGH)
    {
       send_response(fd, status == HOST_TEXT_UNAVAILABLE ? 503 : 400,
@@ -1191,7 +1126,12 @@ static void handle_native_chat_stream(int fd, const char *headers, const char *b
 {
    handle_native_chat_stream_mode(fd, headers, body, body_length, conn_caps, request_id, 0);
 }
-struct owned_user_source_scope { char *frame; size_t length; void *purpose; };
+struct owned_user_source_scope
+{
+   char *frame;
+   size_t length;
+   void *purpose;
+};
 static void owned_user_source_cleanup(void *pointer)
 {
    struct owned_user_source_scope *scope = pointer;
@@ -1200,43 +1140,53 @@ static void owned_user_source_cleanup(void *pointer)
    if (scope->frame && scope->length <= HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u)
    {
       volatile char *bytes = scope->frame;
-      for (size_t i = 0; i < scope->length; ++i) bytes[i] = 0;
+      for (size_t i = 0; i < scope->length; ++i)
+         bytes[i] = 0;
    }
    free(scope->frame);
 }
 /* Generic terminal action. No operation, identity, source or module policy
  * is parsed by the host. Normal source-only preparation stays byte-compatible
  * when the optional module callback declines this request. */
-struct owned_user_action_scope { char *result; size_t length, capacity; };
+struct owned_user_action_scope
+{
+   char *result;
+   size_t length, capacity;
+};
 static void owned_user_action_cleanup(void *pointer)
 {
    struct owned_user_action_scope *scope = pointer;
    if (scope->result && scope->capacity <= 16385)
    {
       volatile char *bytes = scope->result;
-      for (size_t i = 0; i < scope->capacity; ++i) bytes[i] = 0;
+      for (size_t i = 0; i < scope->capacity; ++i)
+         bytes[i] = 0;
    }
    free(scope->result);
 }
 static int handle_owned_user_action(int fd, const char *headers, const char *body,
-                                   size_t body_length, const char *request_id)
+                                    size_t body_length, const char *request_id)
 {
-   if (!aimee_module_owned_user_action_v1) return 0;
+   if (!aimee_module_owned_user_action_v1)
+      return 0;
    struct owned_user_action_scope scope = {0};
    volatile int handled = 1;
    pthread_cleanup_push(owned_user_action_cleanup, &scope);
-   int status = aimee_module_owned_user_action_v1(headers, body, body_length,
-                                                &scope.result, &scope.length, &scope.capacity);
-   if (status == 0 && !scope.result && !scope.length && !scope.capacity) handled = 0;
+   int status = aimee_module_owned_user_action_v1(headers, body, body_length, &scope.result,
+                                                  &scope.length, &scope.capacity);
+   if (status == 0 && !scope.result && !scope.length && !scope.capacity)
+      handled = 0;
    else
    {
       cJSON *data = NULL;
-      if ((status == 1 || status == 2) && scope.result && scope.length &&
-          scope.length <= 16384 && scope.capacity == scope.length + 1 &&
+      if ((status == 1 || status == 2) && scope.result && scope.length && scope.length <= 16384 &&
+          scope.capacity == scope.length + 1 &&
           memchr(scope.result, 0, scope.capacity) == scope.result + scope.length)
          data = aimee_ir_json_parse_frame(scope.result, scope.length);
-      if (cJSON_IsObject(data)) send_response(fd, 200, scope.result, request_id);
-      else send_response(fd, 503, "{\"error\":\"owned action unavailable\"}", request_id);
+      if (cJSON_IsObject(data))
+         send_response(fd, 200, scope.result, request_id);
+      else
+         send_response(fd, 503, "{\"error\":\"owned action unavailable\"}", request_id);
       cJSON_Delete(data);
    }
    pthread_cleanup_pop(1);
@@ -1246,10 +1196,10 @@ __attribute__((used, externally_visible, retain))
 const unsigned aimee_owned_user_action_handoff_contract_v1 = 1;
 
 static void handle_owned_user_source(int fd, const char *headers, const char *body,
-                                     size_t body_length, uint32_t conn_caps,
-                                     const char *request_id)
+                                     size_t body_length, uint32_t conn_caps, const char *request_id)
 {
-   if (handle_owned_user_action(fd, headers, body, body_length, request_id)) return;
+   if (handle_owned_user_action(fd, headers, body, body_length, request_id))
+      return;
    if (!aimee_module_owned_user_source_prepare_v1 || !aimee_module_owned_user_source_release_v1)
    {
       send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
@@ -1257,15 +1207,15 @@ static void handle_owned_user_source(int fd, const char *headers, const char *bo
    }
    struct owned_user_source_scope scope = {0};
    pthread_cleanup_push(owned_user_source_cleanup, &scope);
-   int prepared = aimee_module_owned_user_source_prepare_v1(headers, body, body_length,
-       &scope.frame, &scope.length, &scope.purpose);
+   int prepared = aimee_module_owned_user_source_prepare_v1(
+       headers, body, body_length, &scope.frame, &scope.length, &scope.purpose);
    if (prepared || !scope.purpose || !scope.frame || !scope.length ||
        scope.length > HOST_TEXT_MAX_INPUT + HOST_TEXT_MAX_SIDECARS + 8192u ||
        memchr(scope.frame, 0, scope.length + 1) != scope.frame + scope.length)
       send_response(fd, 503, "{\"error\":\"owned user input unavailable\"}", request_id);
    else
-      handle_native_chat_stream_mode(fd, headers, scope.frame, scope.length, conn_caps,
-                                     request_id, 1);
+      handle_native_chat_stream_mode(fd, headers, scope.frame, scope.length, conn_caps, request_id,
+                                     1);
    pthread_cleanup_pop(1);
 }
 __attribute__((used, externally_visible, retain))
@@ -1315,32 +1265,27 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Run a streaming /v1/responses request: write event-stream headers, let the
- * handler emit typed events; the Responses protocol has no `data: [DONE]`
- * terminator (it ends with the handler's `response.completed`). */
-static void handle_responses_stream(int fd, const char *body, const char *request_id)
+/* Responses and Anthropic handlers emit typed SSE with their own terminal
+ * event. Share the live writer without appending the OpenAI [DONE] trailer. */
+static void handle_typed_stream(int fd, const char *body, server_http_responses_stream_fn handler,
+                                const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_responses_stream_handler);
-}
-
-/* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
- * Anthropic typed-event sequence (message_start … message_stop) via the same
- * `event:`/`data:` framer as Responses; unlike the OpenAI SSE path there is no
- * terminal `data: [DONE]` (the stream ends with message_stop). */
-static void handle_messages_stream(int fd, const char *body, const char *request_id)
-{
-   write_sse_headers(fd, request_id);
-   server_http_sse_live_run(fd, body, g_messages_stream_handler);
+   server_http_sse_live_run(fd, body, handler);
 }
 
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
                                int body_len)
 {
    const request_context_t *owner = request_context_get();
-   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0] ||
-       server_http_identity_transport() != owner->vault_transport ||
-       strcmp(server_http_identity_principal(), owner->vault_principal) ||
+   int service_scope = owner && owner->vault_transport == ATTEST_NONE &&
+                       server_native_runtime_forward_service_admitted() &&
+                       server_http_identity_transport() == ATTEST_NONE &&
+                       !server_http_identity_principal()[0];
+   if (!owner || !owner->vault_principal[0] ||
+       (!service_scope && (owner->vault_transport == ATTEST_NONE ||
+                           server_http_identity_transport() != owner->vault_transport ||
+                           strcmp(server_http_identity_principal(), owner->vault_principal))) ||
        server_http_identity_browser_operator() || !method || !path || strncmp(path, "/v1/", 4) ||
        strchr(path, '?') || strchr(path, '#') || body_len < 0 ||
        !server_http_route_allowed_caps(0, owner->capabilities, method, path, 0))
@@ -1360,10 +1305,10 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    int rc = 0;
    if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
        !strcmp(path, "/v1/responses") && g_responses_stream_handler)
-      handle_responses_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_responses_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/messages") && g_messages_stream_handler)
-      handle_messages_stream(fd, body, owner->request_id);
+      handle_typed_stream(fd, body, g_messages_stream_handler, owner->request_id);
    else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
             !strcmp(path, "/v1/chat/completions") && g_chat_stream_handler)
       handle_stream(fd, body, g_chat_stream_handler, owner->request_id);
@@ -1508,7 +1453,7 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
-void handle_conn(int fd, int is_tcp, int is_management)
+static void handle_conn_impl(int fd, int is_tcp, int is_management)
 {
    server_http_keepalive_set(0);
    server_http_gzip_set(0);
@@ -1671,9 +1616,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
       if (mtls_mode == 1)
       {
          long ramp_now = (long)time(NULL);
-         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+         int noted = pki_mtls_note_presentation(rc_serial, ramp_now);
+         if (noted < 0)
             LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
-         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         /* Readiness can only change when a presentation was written. */
+         else if (noted == 0 && pki_mtls_ramp_ready(ramp_now) == 1)
          {
             SSL_CTX *prepared = server_tls_prepare_required();
             if (!prepared)
@@ -2114,15 +2061,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       char shadow_hdr[8] = "";
       int inbound_is_shadow = http_header(buf, "X-Aimee-Shadow", shadow_hdr, sizeof shadow_hdr);
-      shadow_mirror_dispatch(path, body, body_len, inbound_is_shadow);
+      shadow_mirror_begin_request(path, inbound_is_shadow);
    }
 
-   /* Native streaming chat over HTTP — hands off to the async chat worker, which
-    * streams newline-delimited aimee events. The outer route-allowed gate (TCP)
-    * already enforces CAP_CHAT via server_http_route_caps; re-check here so the
-    * UDS path is explicit too. */
-   if (strcmp(method, "POST") == 0 && (strcmp(path, "/v1/chat/stream") == 0 ||
-                                      strcmp(path, "/v1/modules/user-source") == 0))
+   /* Recheck chat capability for UDS as well as the outer TCP route gate. */
+   if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
       uint32_t have = effective_caps;
@@ -2141,20 +2084,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
       if (body)
       {
          volatile char *raw = body;
-         for (int i = 0; i < body_len; i++) raw[i] = 0;
+         for (int i = 0; i < body_len; i++)
+            raw[i] = 0;
       }
       free(body);
       return;
    }
 
-   /* Auditable-correctness P1: for OpenAI-family ingress endpoints, mint the
-    * per-turn retrieval-event id up-front — before any response header is
-    * written — when evidence emission is on. The same id is then (a) surfaced
-    * to the client via the X-Aimee-Retrieval-Event response header and (b)
-    * reused by ingress_preinject_build for the emitted retrieval_event. Gated
-    * on the endpoint + flag so flag-off / non-ingress requests are byte-
-    * identical on the wire (config is read only for these three paths, which
-    * already pay a legacy_config_read inside the ingress builder). */
+   /* Mint the shared retrieval-event ID before writing response headers.
+    * Only supported OpenAI endpoints consult the evidence-emission flag. */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
@@ -2202,14 +2140,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
       if (strcmp(path, "/v1/responses") == 0 && g_responses_stream_handler)
       {
-         handle_responses_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_responses_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;
       }
       if (strcmp(path, "/v1/messages") == 0 && g_messages_stream_handler)
       {
-         handle_messages_stream(fd, body, request_id);
+         handle_typed_stream(fd, body, g_messages_stream_handler, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;
@@ -2235,6 +2173,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
    free(resp);
    free(body);
 }
+/* Scope teardown also covers streaming and every early refusal/keep-alive exit. */
+void handle_conn(int fd, int is_tcp, int is_management)
+{
+   shadow_mirror_end_request();
+   handle_conn_impl(fd, is_tcp, is_management);
+   shadow_mirror_end_request();
+}
+
 /* Per-connection worker: each accepted connection is handled on its own
  * detached thread, so a slow request (e.g. a synchronous chat completion) or an
  * SSE stream cannot block the accept loop, and independent /v1 requests run

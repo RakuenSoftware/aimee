@@ -80,52 +80,6 @@ int kb_store_lessons_record_citation(int64_t outcome_id, const char *node_id,
    return rc;
 }
 
-int kb_store_lessons_node_citation_count(const char *session_id, const char *node_id)
-{
-   void *conn = kb_store_conn();
-   if (!conn || !node_id || !node_id[0])
-      return -1;
-   char err[LES_ERR] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "SELECT COUNT(DISTINCT l.id) FROM lessons_outcome_ledger l"
-                        " JOIN lessons_outcome_citations c ON c.outcome_id = l.id"
-                        " WHERE l.session_id = ?1 AND c.node_id = ?2",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", session_id ? session_id : "");
-   aimee_pg_bind_text(st, "?2", node_id);
-   int n = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      n = (int)aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
-int64_t kb_store_lessons_record_finding_verdict(const char *finding_id, const char *project_id,
-                                                const char *node_id, const char *verdict,
-                                                const char *actor_source, const char *actor_id,
-                                                int confirmed)
-{
-   if (!finding_id || !finding_id[0] || !verdict || !verdict[0])
-      return -1;
-   /* 'confirmed' verdict = the inferred edge is real (useful); 'refuted' = dead end.
-    * Any other verdict is a bad argument. */
-   const char *outcome;
-   if (strcmp(verdict, "confirmed") == 0)
-      outcome = "useful";
-   else if (strcmp(verdict, "refuted") == 0)
-      outcome = "dead_end";
-   else
-      return -1;
-   int64_t oid = kb_store_lessons_record_outcome("", "", project_id, 0, outcome, "", finding_id,
-                                                 actor_id, actor_source, confirmed ? 1 : 0);
-   if (oid > 0 && node_id && node_id[0])
-      kb_store_lessons_record_citation(oid, node_id, "useful");
-   return oid;
-}
-
 int kb_store_lessons_list_outcomes(const char *project_id, int64_t community_gen,
                                    kb_store_lessons_outcome_row_t *out, int max)
 {
@@ -173,27 +127,4 @@ int kb_store_lessons_list_outcomes(const char *project_id, int64_t community_gen
    }
    aimee_pg_finalize(st);
    return n;
-}
-
-int kb_store_lessons_confirm_outcome(int64_t outcome_id, const char *confirmed_by)
-{
-   void *conn = kb_store_conn();
-   if (!conn || outcome_id <= 0)
-      return -1;
-   char err[LES_ERR] = "";
-   /* Exactly the transition the append-only trigger permits. */
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE lessons_outcome_ledger"
-                        " SET confirmed = 1, confirmed_by = ?2,"
-                        "     confirmed_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')"
-                        " WHERE id = ?1",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int64(st, "?1", outcome_id);
-   aimee_pg_bind_text(st, "?2", confirmed_by ? confirmed_by : "");
-   int rc = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE) ? 0 : -1;
-   aimee_pg_finalize(st);
-   return rc;
 }

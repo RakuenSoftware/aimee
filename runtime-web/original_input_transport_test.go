@@ -66,7 +66,7 @@ func TestOIForward(t *testing.T) {
 				if e := json.NewDecoder(r.Body).Decode(&body); e != nil {
 					t.Fatal(e)
 				}
-				if string(body["message"]) != `"a☃b"` {
+				if string(body["message"]) != `{"role":"user","blocks":[{"type":"text","text":"a☃b"}]}` {
 					t.Fatal(string(body["message"]))
 				}
 				_, hasID := body["original_input_operation_uuid"]
@@ -87,7 +87,7 @@ func TestOIForward(t *testing.T) {
 			if !enabled {
 				sid = "legacy-session-label"
 			}
-			body := fmt.Sprintf(`{"aimee_session_id":%q,"message":"a☃b","original_input_operation_uuid":%q,"protected_spans":[{"offset":1,"length":3}]}`, sid, oiUUID)
+			body := fmt.Sprintf(`{"aimee_session_id":%q,"message":{"role":"user","blocks":[{"type":"text","text":"a☃b"}]},"original_input_operation_uuid":%q,"protected_spans":[{"offset":1,"length":3}]}`, sid, oiUUID)
 			r := httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(body))
 			addWebSession(t, s, r, "alice")
 			w := httptest.NewRecorder()

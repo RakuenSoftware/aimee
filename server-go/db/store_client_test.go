@@ -686,3 +686,27 @@ func TestFirstFailedCommitCleansSameHandleWithoutRetryOrOutcomeClaim(t *testing.
 		})
 	}
 }
+
+// A connection-class refusal is the store saying its database is unreachable:
+// callers that wait for the store must see it as unavailable. Any other
+// refusal is a verdict and must not be.
+func TestConnectionClassRefusalIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		sqlstate    string
+		unavailable bool
+	}{
+		{"08001", true}, {"08006", true}, {"23505", false}, {"", false}, {"42P01", false},
+	} {
+		store, err := NewStore(&fakeCaller{reply: refusal(tc.sqlstate, "no")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = store.CurrentSchemaVersion(context.Background(), "aimee")
+		var refused *StoreError
+		if errors.Is(err, ErrStoreUnavailable) != tc.unavailable || !errors.As(err, &refused) ||
+			refused.SQLState != tc.sqlstate {
+			t.Fatalf("SQLSTATE %q: err=%v, want unavailable=%v with the store's reason kept",
+				tc.sqlstate, err, tc.unavailable)
+		}
+	}
+}

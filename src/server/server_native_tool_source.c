@@ -119,8 +119,9 @@ static int same_call(const aimee_block_t *a, const aimee_block_t *b)
 }
 static int incarnation(const char *session, const char *actor, char created[DB1_SS_TS_LEN])
 {
-   db1_server_session_t row;
-   if (db1_server_session_get(session, &row) || strcmp(row.principal, actor) || !row.created_at[0])
+   db1_server_session_owner_t row;
+   if (db1_server_session_owner_get(session, &row) || strcmp(row.principal, actor) ||
+       !row.created_at[0])
       return -1;
    snprintf(created, DB1_SS_TS_LEN, "%s", row.created_at);
    return 0;

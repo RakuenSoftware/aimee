@@ -61,8 +61,9 @@ typedef int (*verify_execution_begin_fn)(const char *root, const char *session,
                                          const verify_config_t *cfg, verify_execution_t *out);
 void verify_register_execution_owner(verify_execution_begin_fn begin);
 
-/* Load verify steps from .aimee/project.yaml. Returns 0 on success, -1 if no
- * verify section found. project_root may be NULL (uses cwd). */
+/* Load Aimee's projects/<main-repo-name>/project.yaml, generating missing config
+ * from the repository Makefile. Returns 0 on success, -1 if no verify section
+ * was found. project_root may be NULL (uses cwd). */
 int verify_load_config(const char *project_root, verify_config_t *cfg);
 
 /* The git toplevel for `dir` (ambient cwd when NULL), or -1 when `dir` is not in

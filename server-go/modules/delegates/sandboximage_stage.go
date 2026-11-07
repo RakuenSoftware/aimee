@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // Naming and describing the image a delegate's sandbox is built from.
@@ -39,15 +39,15 @@ const (
 // dropped. Silently building a narrower image than was asked for would leave the
 // delegate missing a tool with nothing to say why -- and quietly accepting the
 // name is how the injection lands.
-func handleImageSpec(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleImageSpec(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < imageSpecReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != imageSpecRequestMagic ||
 		request[4] != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
 	if count > imageSpecMaxPackages {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 
 	c := &economicsCursor{buf: request, at: imageSpecReqHeaderLen}
@@ -72,21 +72,21 @@ func handleImageSpec(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	// reuse the content tag is for.
 	verbatim := readString(imageSpecDockerfileMax)
 	if c.bad || c.at != len(request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if verbatim != "" && (base != "" || len(packages) > 0) {
 		// Two descriptions of one image. Refuse rather than silently pick.
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	dockerfile := verbatim
 	if dockerfile == "" {
 		rendered, err := SandboxDockerfile(base, packages)
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		dockerfile = rendered
 	}
@@ -98,5 +98,5 @@ func handleImageSpec(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	binary.LittleEndian.PutUint32(response[8:12], uint32(len(dockerfile)))
 	response = append(response, tag...)
 	response = append(response, dockerfile...)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

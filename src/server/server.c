@@ -13,6 +13,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+#include "mirror_sync_wire.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
 #include <aimee/audit/obs_bus.h>
@@ -77,9 +78,45 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <signal.h>
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
+
+/* The park loop's doorbell: written by a signal, by an announced config change
+ * and by shutdown; read by the loop. An eventfd write is async-signal-safe. */
+static int g_park_fd = -1;
+
+void server_park_wake(void)
+{
+   int fd = g_park_fd;
+   if (fd >= 0)
+   {
+      uint64_t one = 1;
+      ssize_t ignored = write(fd, &one, sizeof one);
+      (void)ignored;
+   }
+}
+
+/* Sleep until woken or timeout_ms passes (negative: until woken). */
+static void server_park_sleep(int timeout_ms)
+{
+   if (g_park_fd < 0)
+      g_park_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+   if (g_park_fd < 0)
+   {
+      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0}; /* no eventfd: the old cadence */
+      nanosleep(&ts, NULL);
+      return;
+   }
+   struct pollfd park = {.fd = g_park_fd, .events = POLLIN};
+   if (poll(&park, 1, timeout_ms) > 0)
+   {
+      uint64_t count;
+      ssize_t ignored = read(g_park_fd, &count, sizeof count);
+      (void)ignored;
+   }
+}
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -367,6 +404,10 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+/* Weak so unit binaries that link the dispatcher without the readiness sampler
+ * resolve it to NULL and report no verdict; the server always links it. */
+int server_ready_summary(char *boundary, size_t n) __attribute__((weak));
+
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
@@ -375,6 +416,16 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    /* Probe DB1 directly; module registry state survives death for about 37s. */
    cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   /* The verdict the container is judged by, so this answer cannot say the
+    * server is fine while /v1/ready -- and every governed action -- says not. */
+   if (server_ready_summary)
+   {
+      char not_ready[96];
+      int ready = server_ready_summary(not_ready, sizeof not_ready);
+      cJSON_AddBoolToObject(resp, "ready", ready);
+      if (!ready)
+         cJSON_AddStringToObject(resp, "not_ready", not_ready);
+   }
    obs_bus_capture_health_t capture;
    obs_bus_capture_health(&capture);
    cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
@@ -1038,7 +1089,13 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON *dreq = cJSON_CreateObject();
          cJSON_AddStringToObject(dreq, "role", "execute");
          cJSON_AddStringToObject(dreq, "persona", "engineer");
-         cJSON_AddStringToObject(dreq, "prompt", prompt);
+         aimee_request_t input = {0};
+         cJSON *canonical = NULL;
+         if (!aimee_ir_request_from_text(&input, NULL, prompt, 0, 0.3))
+            canonical = aimee_ir_request_json(&input);
+         aimee_request_free(&input);
+         if (canonical)
+            cJSON_AddItemToObject(dreq, "request", canonical);
          if (sid && sid[0])
             cJSON_AddStringToObject(dreq, "session_id", sid);
          if (cwd && cwd[0])
@@ -1185,8 +1242,8 @@ static void session_start_worktree_gc(const char *hook_input)
          int suffix_n = snprintf(suffix, sizeof(suffix), "/.aimee/worktrees/.last-gc-%04d%02d%02d",
                                  tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday);
          size_t root_n = strlen(git_root);
-         if (suffix_n < 0 || (size_t)suffix_n >= sizeof(suffix) ||
-             root_n >= sizeof(marker) || (size_t)suffix_n >= sizeof(marker) - root_n)
+         if (suffix_n < 0 || (size_t)suffix_n >= sizeof(suffix) || root_n >= sizeof(marker) ||
+             (size_t)suffix_n >= sizeof(marker) - root_n)
          {
             cJSON_Delete(hi_json);
             return;
@@ -1225,6 +1282,19 @@ static void session_start_worktree_gc(const char *hook_input)
    cJSON_Delete(hi_json);
 }
 
+/* A harness client name: 1-32 of [a-z0-9_-], the shape every hook installer uses. */
+static int hook_client_name_ok(const char *client)
+{
+   size_t n = strlen(client);
+   if (n == 0 || n > 32)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      if (!((client[i] >= 'a' && client[i] <= 'z') || (client[i] >= '0' && client[i] <= '9') ||
+            client[i] == '-' || client[i] == '_'))
+         return 0;
+   return 1;
+}
+
 static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1243,7 +1313,12 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
 
    const char *hook_client =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
-   if (hook_client && !hmem_scope_for_client(hook_client))
+   /* A hook identity is bound to (session, client, principal), so any well-formed
+    * client name may hold one. Requiring a harness-memory scope here refused every
+    * client but claude: on CT100 all 9,531 codex hooks ran untrusted because each
+    * codex session_start came back 502 (Sep 23 - Oct 26). Memory interception keeps
+    * its own scope check. */
+   if (hook_client && !hook_client_name_ok(hook_client))
       return server_send_error(conn, "unknown harness_client", request_id);
    char hook_token[HOOK_SESSION_TOKEN_CAP] = "";
    time_t hook_token_expires = 0;
@@ -1263,8 +1338,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
     * findable record. Idempotent (SessionStart also fires on resume); best-effort. */
    if (sid && sid[0])
    {
-      db1_server_session_t existing;
-      if (db1_server_session_get(sid, &existing) != 0)
+      db1_server_session_owner_t existing;
+      if (db1_server_session_owner_get(sid, &existing) != 0)
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
@@ -1509,10 +1584,16 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
-       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},
+       {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},
+       {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},
+       {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST},
+       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       /* Explicit, and shared with the clients that size their chunks by it. */
+       {"workspace.mirror-sync", MIRROR_SYNC_MAX_BODY},
        {NULL, LIMIT_DEFAULT},
    };
 
@@ -2193,7 +2274,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
     * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
-    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * precede any toolset_registry_init() / agent_tools_catalog(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */
@@ -2245,14 +2326,25 @@ int server_run(server_ctx_t *ctx)
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so
-    * run_server() can tear everything down. The 1s tick also drives idle-reaping
-    * of per-webuser code-server editors (WP-I lifecycle) via reap_tick. */
+    * run_server() can tear everything down. The park sleeps until there is
+    * something to do -- a SIGHUP, an announced config change, shutdown -- and
+    * otherwise wakes only while it has a deadline: idle code-server editors to
+    * reap, or a startup reconciliation to retry. It used to wake every second. */
+   /* Seed from the real state: startup's attempt usually runs before the store
+    * module has attached, and a park with no deadline would never retry it. */
+   int reconcile_failed = server_delegate_startup_reconcile() != 0;
    while (ctx->running)
    {
-      struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-      nanosleep(&ts, NULL);
+      int timeout_ms = -1;
+      if (reconcile_failed)
+         timeout_ms = 1000;
+      else if (webuser_editor_running() > 0)
+         timeout_ms = WEBUSER_EDITOR_REAP_EVERY_SECS * 1000;
+      server_park_sleep(timeout_ms);
+      if (!ctx->running)
+         break;
       webuser_editor_reap_tick();
-      (void)server_delegate_startup_reconcile();
+      reconcile_failed = server_delegate_startup_reconcile() != 0;
       /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
        * signal path, since config_reload takes a mutex and does file I/O. */
       if (g_config_reload_requested)

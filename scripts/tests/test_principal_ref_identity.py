@@ -113,7 +113,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
     def test_the_shipped_inventory_validates(self) -> None:
         self.assertEqual(run_validator(self.root).returncode, 0)
 
-    def test_c_build_is_reserved_for_c_processes(self) -> None:
+    def test_the_retired_c_build_is_refused(self) -> None:
         for identifier in ("memory", "config"):
             descriptor_path = self.root / f"src/modules/{identifier}/module.yaml"
             original = descriptor_path.read_text(encoding="utf-8")

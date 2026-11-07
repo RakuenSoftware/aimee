@@ -30,6 +30,7 @@ func TestChatCancelExactOwnerProxy(t *testing.T) {
 		r.Header.Set("Origin", "http://example.com")
 		w := httptest.NewRecorder()
 		s.handleChatCancel(w, r)
+		waitFakeV1(t)
 		if w.Code != 400 {
 			t.Errorf("invalid status%d", w.Code)
 		}
@@ -41,7 +42,9 @@ func TestChatCancelExactOwnerProxy(t *testing.T) {
 	r.Header.Set("Origin", "http://example.com")
 	r.Header.Set("X-Aimee-Webuser", "mallory")
 	w := httptest.NewRecorder()
+	beforeFakeV1(t)
 	s.handleChatCancel(w, r)
+	waitFakeV1(t)
 	if calls != 1 || w.Code != 409 || !strings.Contains(w.Body.String(), "stale") {
 		t.Fatalf("route status%d calls%d", w.Code, calls)
 	}
@@ -49,6 +52,7 @@ func TestChatCancelExactOwnerProxy(t *testing.T) {
 	r.Header.Set("Origin", "http://foreign.example")
 	w = httptest.NewRecorder()
 	s.handleChatCancel(w, r)
+	waitFakeV1(t)
 	if w.Code != 403 || calls != 1 {
 		t.Fatal("foreign origin admitted")
 	}

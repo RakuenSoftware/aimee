@@ -164,8 +164,8 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
              !jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(row, "id"), &id))
             return NULL; /* Cannot recover a previously rounded source identity. */
          if (cJSON_IsString(type) && !strcmp(type->valuestring, "memory"))
-            for (const char **field = (const char *[]){"source_ref", "state_ref", NULL};
-                 *field; ++field)
+            for (const char **field = (const char *[]){"source_ref", "state_ref", NULL}; *field;
+                 ++field)
             {
                const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, *field);
                if (value && !module_source_ref_valid(value, id))
@@ -210,8 +210,8 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
                   cJSON_Delete(r);
                   return NULL;
                }
-               const char *origin = cJSON_GetStringValue(
-                   cJSON_GetObjectItemCaseSensitive(it, "reference_origin"));
+               const char *origin =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "reference_origin"));
                if (origin)
                   cJSON_AddStringToObject(r, "reference_origin", origin);
                break;

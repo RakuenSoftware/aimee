@@ -13,6 +13,60 @@ static char recorded[256];
 static int writes, transcript_mode, expected_error, archive_writes, fail_archive;
 static const char *archive_owner = "webuser:alice";
 static char checkpoint_saved[65];
+static int metadata_mode, metadata_frees, metadata_error, metadata_send_error;
+static char metadata_title[2048];
+static const char metadata_client[] = "123456789012345678901234567890123";
+static void metadata_record(db1_server_session_record_t *row)
+{
+   *row = (db1_server_session_record_t){.id = strdup("metadata"),
+                                        .client_type = strdup(metadata_client),
+                                        .principal = strdup("webuser:alice"),
+                                        .title = strdup(metadata_title),
+                                        .created_at = strdup("2026-10-25T00:00:00Z"),
+                                        .last_activity_at = strdup("later"),
+                                        .claude_session_id = strdup("native-id"),
+                                        .outcome = strdup("complete"),
+                                        .source = strdup("opaque-source"),
+                                        .chat_key = strdup("opaque-chat")};
+}
+int db1_server_session_record_get(const char *id, db1_server_session_record_t *out)
+{
+   assert(metadata_mode && !strcmp(id, "metadata"));
+   if (metadata_error)
+      return -1;
+   metadata_record(out);
+   return 0;
+}
+int db1_server_session_record_list_recent(db1_server_session_record_t *out, int limit)
+{
+   assert(metadata_mode && limit == 100);
+   if (metadata_error)
+      return -1;
+   metadata_record(out);
+   metadata_record(out + 1);
+   return 2;
+}
+void db1_server_session_record_free(db1_server_session_record_t *row)
+{
+   free(row->id);
+   free(row->client_type);
+   free(row->principal);
+   free(row->title);
+   free(row->created_at);
+   free(row->last_activity_at);
+   free(row->claude_session_id);
+   free(row->outcome);
+   free(row->source);
+   free(row->chat_key);
+   memset(row, 0, sizeof *row);
+   metadata_frees++;
+}
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
+                           const char *request)
+{
+   (void)kind;
+   return server_send_error(conn, message, request);
+}
 cJSON *jo_ok(void)
 {
    cJSON *value = cJSON_CreateObject();
@@ -29,6 +83,24 @@ int db1_server_session_create(const char *id, const char *client, const char *pr
 int server_send_response(server_conn_t *conn, cJSON *response)
 {
    (void)conn;
+   if (metadata_mode)
+   {
+      const cJSON *rows = cJSON_GetObjectItemCaseSensitive(response, "sessions");
+      int count = rows ? cJSON_GetArraySize(rows) : 1;
+      assert(count == (rows ? 2 : 1));
+      for (int i = 0; i < count; i++)
+      {
+         const cJSON *row = rows ? cJSON_GetArrayItem(rows, i)
+                                 : cJSON_GetObjectItemCaseSensitive(response, "session");
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "title")),
+                        metadata_title));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "client_type")),
+                        metadata_client));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "principal")),
+                        "webuser:alice"));
+      }
+      return metadata_send_error ? -1 : 0;
+   }
    const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "session_id"));
    assert(id && (transcript_mode ? !strcmp(id, "transcript") : strlen(id) == 36));
    return 0;
@@ -42,7 +114,7 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
    return -1;
 }
 
-int db1_server_session_get(const char *id, db1_server_session_t *row)
+int db1_server_session_owner_get(const char *id, db1_server_session_owner_t *row)
 {
    assert(transcript_mode && !strcmp(id, "transcript"));
    memset(row, 0, sizeof *row);
@@ -104,6 +176,30 @@ static void test_external_archive(void)
         "durable failure passed");
 }
 
+static void test_complete_metadata(void)
+{
+   metadata_mode = 1;
+   memset(metadata_title, 'x', sizeof metadata_title - 8);
+   strcpy(metadata_title + sizeof metadata_title - 8, "雪🙂");
+   cJSON *request = cJSON_Parse("{\"session_id\":\"metadata\",\"limit\":100}");
+   assert(request);
+   for (int failed_send = 0; failed_send < 2; failed_send++)
+   {
+      metadata_send_error = failed_send;
+      assert(handle_session_list(NULL, NULL, request) == (failed_send ? -1 : 0));
+      assert(handle_session_get(NULL, NULL, request) == (failed_send ? -1 : 0));
+      assert(metadata_frees == (failed_send + 1) * 3);
+   }
+   metadata_error = expected_error = 1;
+   assert(handle_session_list(NULL, NULL, request) == -1);
+   assert(handle_session_get(NULL, NULL, request) == -1);
+   assert(metadata_frees == 6);
+   cJSON_Delete(request);
+   metadata_mode = expected_error = 0;
+   puts("session metadata: complete 33-byte client/long UTF-8 title and send-failure cleanup "
+        "passed");
+}
+
 int main(void)
 {
    const struct
@@ -134,5 +230,6 @@ int main(void)
    cJSON_Delete(request);
    puts("session ownership: attested browser/certificate/UID identities and spoof refusal passed");
    test_external_archive();
+   test_complete_metadata();
    return 0;
 }

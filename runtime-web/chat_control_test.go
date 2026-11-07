@@ -62,6 +62,7 @@ func TestChatControlReplyPreservesValidatedOriginalBytesAndChildBinding(t *testi
 	request.Header.Set("Origin", "http://example.com")
 	response := httptest.NewRecorder()
 	s.handleChatControlReply(response, request)
+	waitFakeV1(t)
 	if response.Code != http.StatusOK || calls != 1 {
 		t.Fatalf("valid child reply failed: status=%d calls=%d body=%s", response.Code, calls, response.Body.String())
 	}
@@ -96,6 +97,7 @@ func TestChatControlReplyForwardsOnlyVerifiedBrowserActor(t *testing.T) {
 		request.Header.Set("Origin", tc.origin)
 		response := httptest.NewRecorder()
 		s.handleChatControlReply(response, request)
+		waitFakeV1(t)
 		if response.Code != tc.want {
 			t.Fatalf("reply status %d want %d: %s", response.Code, tc.want, response.Body.String())
 		}

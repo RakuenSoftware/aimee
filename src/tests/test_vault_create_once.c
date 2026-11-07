@@ -849,16 +849,15 @@ static void batch_retirement_retry_durability(void)
    assert(!vault_store_write_batch(p, key, "opaque-provider", deletes, 2) &&
           sync_calls == before + 4);
    char out[64];
-   assert(vault_store_get_server_generation(p, key, "opaque-provider", "batch-retired",
-                                          pin, out, sizeof out) == VAULT_STORE_RETIRED);
+   assert(vault_store_get_server_generation(p, key, "opaque-provider", "batch-retired", pin, out,
+                                            sizeof out) == VAULT_STORE_RETIRED);
    vault_store_write_t mixed[] = {{"batch-retired", NULL}, {"mutable", "safe batch value"}};
    before = sync_calls;
    assert(!vault_store_write_batch(p, key, "opaque-provider", mixed, 2) &&
           sync_calls == before + 2);
    vault_store_write_t absent[] = {{"absent", NULL}};
    before = sync_calls;
-   assert(!vault_store_write_batch(p, key, "opaque-provider", absent, 1) &&
-          sync_calls == before);
+   assert(!vault_store_write_batch(p, key, "opaque-provider", absent, 1) && sync_calls == before);
 }
 
 int main(void)

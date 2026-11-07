@@ -13,11 +13,11 @@
 #include <aimee/workspace/workspace.h>
 #include <math.h>
 #include <errno.h>
-#include <aimee/core/event_bus/module_protocol.h>
 #include <openssl/crypto.h>
 
 #pragma weak aimee_module_protected_intake_raw
 #pragma weak request_context_get
+#include <ouroboros/module_protocol.h>
 
 /* --- Memory handlers --- */
 
@@ -190,7 +190,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    }
    char *raw = kb_v1_action_request(method, request);
    kb_client_memory_scope_context_clear();
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -228,7 +228,7 @@ cJSON *memory_hygiene_command(cJSON *req)
    cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
    cJSON_DeleteItemFromObjectCaseSensitive(request, "protocol_version");
    char *raw = kb_v1_action_request("memory.hygiene", request);
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -303,7 +303,7 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
       return transport;
    }
    const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(transport, "json"));
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    const char *status = jo_cstr(parsed, "status");
@@ -407,7 +407,7 @@ int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return send_and_free(conn, reply);
    }
    char *raw = kb_v1_action_request("memory.validity", request);
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -462,12 +462,13 @@ static int protected_operation_uuid(const char *text)
    {
       if (i == 8 || i == 13 || i == 18 || i == 23)
       {
-         if (text[i] != '-') return 0;
+         if (text[i] != '-')
+            return 0;
       }
       else
       {
-         if (!((text[i] >= '0' && text[i] <= '9') ||
-               (text[i] >= 'a' && text[i] <= 'f'))) return 0;
+         if (!((text[i] >= '0' && text[i] <= '9') || (text[i] >= 'a' && text[i] <= 'f')))
+            return 0;
          nonzero |= text[i] != '0';
       }
    }
@@ -481,18 +482,21 @@ static cJSON *protected_intake_web_reply(cJSON *req)
        context->vault_transport == ATTEST_TCP_BEARER || !context->vault_principal[0] ||
        server_account_memory_authority(server_request_account()) != MEMORY_AUTHORITY_USER)
       return server_error_kind_json(SERVER_ERR_PERMISSION_DENIED,
-                                     "protected intake requires an authenticated human", NULL);
+                                    "protected intake requires an authenticated human", NULL);
    int operations = 0, values = 0, methods = 0;
    const cJSON *item = NULL;
    cJSON_ArrayForEach(item, req)
    {
-      if (item->string && !strcmp(item->string, "operation_uuid")) operations++;
-      else if (item->string && !strcmp(item->string, "value")) values++;
-      else if (item->string && !strcmp(item->string, "method") &&
-               cJSON_IsString(item) && !strcmp(item->valuestring, "memory.protected-intake"))
+      if (item->string && !strcmp(item->string, "operation_uuid"))
+         operations++;
+      else if (item->string && !strcmp(item->string, "value"))
+         values++;
+      else if (item->string && !strcmp(item->string, "method") && cJSON_IsString(item) &&
+               !strcmp(item->valuestring, "memory.protected-intake"))
          methods++;
-      else return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                         "invalid protected intake envelope", NULL);
+      else
+         return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                       "invalid protected intake envelope", NULL);
    }
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(req, "operation_uuid");
    const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
@@ -500,31 +504,33 @@ static cJSON *protected_intake_web_reply(cJSON *req)
        !cJSON_IsString(operation) || !protected_operation_uuid(operation->valuestring) ||
        !cJSON_IsString(value) || !value->valuestring[0])
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                     "protected intake requires an operation UUID and value", NULL);
+                                    "protected intake requires an operation UUID and value", NULL);
    size_t length = strlen(value->valuestring);
    if (length > 64 * 1024)
       return server_error_kind_json(SERVER_ERR_PAYLOAD_TOO_LARGE,
-                                     "protected intake exceeds its input budget", NULL);
+                                    "protected intake exceeds its input budget", NULL);
    if (!aimee_module_protected_intake_raw)
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "protected intake unavailable", NULL);
    char *safe = NULL;
    int handled = aimee_module_protected_intake_raw(operation->valuestring, value->valuestring,
                                                    length, 5000, &safe);
-   cJSON *parsed = handled == 1 && safe && strlen(safe) <= AIMEE_MODULE_MESSAGE_MAX_BODY
-                       ? cJSON_ParseWithOpts(safe, NULL, 1) : NULL;
+   cJSON *parsed = handled == 1 && safe && strlen(safe) <= OURO_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(safe, NULL, 1)
+                       : NULL;
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
    const cJSON *http = cJSON_GetObjectItemCaseSensitive(parsed, "http_status");
    int ok = cJSON_IsObject(parsed) && cJSON_IsString(status) &&
-            ((!strcmp(status->valuestring, "ok") && (!http ||
-               (cJSON_IsNumber(http) && http->valuedouble == 200))) ||
+            ((!strcmp(status->valuestring, "ok") &&
+              (!http || (cJSON_IsNumber(http) && http->valuedouble == 200))) ||
              (!strcmp(status->valuestring, "error") && cJSON_IsNumber(http) &&
-               (http->valuedouble == 400 || http->valuedouble == 403 ||
-                http->valuedouble == 409 || http->valuedouble == 503)));
+              (http->valuedouble == 400 || http->valuedouble == 403 || http->valuedouble == 409 ||
+               http->valuedouble == 503)));
    cJSON *reply = ok ? cJSON_CreateRaw(safe) : NULL;
    cJSON_Delete(parsed);
    free(safe);
-   return reply ? reply : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
-                                                  "protected intake unavailable", NULL);
+   return reply ? reply
+                : server_error_kind_json(SERVER_ERR_UNAVAILABLE, "protected intake unavailable",
+                                         NULL);
 }
 
 int handle_memory_protected_intake(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -534,9 +540,9 @@ int handle_memory_protected_intake(server_ctx_t *ctx, server_conn_t *conn, cJSON
    /* The parsed copy is no longer needed, even on refusal. The physical
     * transport retains responsibility for its original input buffer. */
    cJSON *item = NULL;
-   cJSON_ArrayForEach(item, req)
-      if (item->string && !strcmp(item->string, "value") && cJSON_IsString(item))
-         OPENSSL_cleanse(item->valuestring, strlen(item->valuestring));
+   cJSON_ArrayForEach(item, req) if (item->string && !strcmp(item->string, "value") &&
+                                     cJSON_IsString(item))
+       OPENSSL_cleanse(item->valuestring, strlen(item->valuestring));
    return send_and_free(conn, reply);
 }
 
@@ -570,7 +576,7 @@ cJSON *memory_stats_command(const cJSON *req)
    if (!selection)
       return user_memory_owner_command("user-stats", req);
    char *raw = kb_v1_action_request("memory.stats", cJSON_CreateObject());
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    cJSON *reply = NULL;
@@ -709,14 +715,15 @@ static cJSON *memory_served_command(cJSON *req, int card)
    cJSON_AddStringToObject(arguments, "store", selection ? "kb" : "user");
    char *raw = NULL;
    int selected = aimee_module_commands_owner_action_raw
-                     ? aimee_module_commands_owner_action_raw(card ? "memory.claim_card" : "memory.serve",
-                                                               arguments, 60000, &raw)
-                     : 0;
+                      ? aimee_module_commands_owner_action_raw(
+                            card ? "memory.claim_card" : "memory.serve", arguments, 60000, &raw)
+                      : 0;
    cJSON_Delete(arguments);
    cJSON *result = selected == 1 && raw ? cJSON_CreateRaw(raw) : NULL;
    free(raw);
-   return result ? result : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
-                                                    "memory bus query unavailable", NULL);
+   return result ? result
+                 : server_error_kind_json(SERVER_ERR_UNAVAILABLE, "memory bus query unavailable",
+                                          NULL);
 }
 
 cJSON *memory_serve_command(cJSON *req)
@@ -779,8 +786,8 @@ static char *user_memory_recall_json(const char *hint, int limit_tokens, int ses
    if (native_bytes)
       cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
    cJSON_AddBoolToObject(request, "session_start", session_start != 0);
-   cJSON *response = server_invoke_module_caller_operation("memory.runtime", "personal-recall", request,
-                                                    "user memory module unavailable");
+   cJSON *response = server_invoke_module_caller_operation(
+       "memory.runtime", "personal-recall", request, "user memory module unavailable");
    cJSON_Delete(request);
    const char *body = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "json"));
    char *json = body ? strdup(body) : NULL;

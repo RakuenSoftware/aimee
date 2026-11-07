@@ -13,10 +13,10 @@ import (
 	"time"
 
 	wirefields "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,8 +49,8 @@ func (c *sourcePageCaller) Call(ctx context.Context, kind, stage uint32, trace u
 			return nil, err
 		}
 	}
-	body, status := c.provider.handleContext(ctx, bus.ModuleInvocation{StageID: stage}, request)
-	if status != bus.ModuleStatusOK {
+	body, status := c.provider.handleContext(ctx, ring.ModuleInvocation{StageID: stage}, request)
+	if status != ring.ModuleStatusOK {
 		return nil, fmt.Errorf("SQL transport status %d", status)
 	}
 	var err error
@@ -58,7 +58,7 @@ func (c *sourcePageCaller) Call(ctx context.Context, kind, stage uint32, trace u
 		c.max = len(body)
 	}
 	c.calls++
-	if len(body) > int(bus.ModuleMessageMaxBody) {
+	if len(body) > int(ring.ModuleMessageMaxBody) {
 		return nil, fmt.Errorf("SQL reply exceeds real module body limit: %d", len(body))
 	}
 	return body, err
@@ -182,7 +182,7 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 		rows.Close()
 		t.Fatal("unpaged source unexpectedly fit wire limit")
 	}
-	if wire.max <= int(bus.ModuleMessageMaxBody) {
+	if wire.max <= int(ring.ModuleMessageMaxBody) {
 		t.Fatal("negative probe did not reach real frame limit", wire.max, err)
 	}
 	wire.max = 0
@@ -217,7 +217,7 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 	spec := ordinary.Ops[41]
 	spec.Timeout = 2 * time.Second
 	ordinary.Ops[41] = spec
-	rejected, transport := ordinary.Handler(s)(bus.ModuleInvocation{StageID: ordinary.Stage}, frame)
+	rejected, transport := ordinary.Handler(s)(ring.ModuleInvocation{StageID: ordinary.Stage}, frame)
 	wire.blockSecondPage = false // Positive continuation uses the exact original SQL.
 	if err = blocker.Rollback(ctx); err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 		t.Fatal("cancellation did not reach second actual source page")
 	}
 	failedStatus, failedCells, failedDecodeErr := wirefields.DecodeFields(rejected)
-	if transport != bus.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
+	if transport != ring.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
 		t.Fatal("reachable store deadline must be an in-band failed request", transport, failedStatus, failedDecodeErr)
 	}
 	var partial int
@@ -234,9 +234,9 @@ func TestCanonicalNativeInterruptionSourcePagesSQLWire(t *testing.T) {
 		t.Fatal("cancelled scan persisted partial receipts", partial, err)
 	}
 	started := time.Now()
-	reply, transport := families.Sessions.Handler(s)(bus.ModuleInvocation{StageID: families.Sessions.Stage}, frame)
+	reply, transport := families.Sessions.Handler(s)(ring.ModuleInvocation{StageID: families.Sessions.Stage}, frame)
 	status, _, decodeErr := wirefields.DecodeFields(reply)
-	if transport != bus.ModuleStatusOK || decodeErr != nil || status != store.StatusOK {
+	if transport != ring.ModuleStatusOK || decodeErr != nil || status != store.StatusOK {
 		t.Fatal("bounded history dispatcher refused valid source", transport, status, decodeErr)
 	}
 	t.Logf("actual paged native reconciliation %s, largest SQL frame %d", time.Since(started), wire.max)
@@ -286,7 +286,7 @@ func TestCanonicalDelegateExperienceSourcePagesSQLWire(t *testing.T) {
 		rows.Close()
 		t.Fatal("unpaged candidate source unexpectedly fit wire limit")
 	}
-	if wire.max <= int(bus.ModuleMessageMaxBody) {
+	if wire.max <= int(ring.ModuleMessageMaxBody) {
 		t.Fatal("negative probe did not reach real frame limit", wire.max, err)
 	}
 	wire.max = 0
@@ -317,7 +317,7 @@ func TestCanonicalDelegateExperienceSourcePagesSQLWire(t *testing.T) {
 	spec := ordinary.Ops[63]
 	spec.Timeout = 2 * time.Second
 	ordinary.Ops[63] = spec
-	rejected, transport := ordinary.Handler(s)(bus.ModuleInvocation{StageID: ordinary.Stage}, frame)
+	rejected, transport := ordinary.Handler(s)(ring.ModuleInvocation{StageID: ordinary.Stage}, frame)
 	wire.blockSecondPage = false
 	if err = blocker.Rollback(ctx); err != nil {
 		t.Fatal(err)
@@ -326,7 +326,7 @@ func TestCanonicalDelegateExperienceSourcePagesSQLWire(t *testing.T) {
 		t.Fatal("delegate cancellation did not reach second actual source page")
 	}
 	failedStatus, failedCells, failedDecodeErr := wirefields.DecodeFields(rejected)
-	if transport != bus.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
+	if transport != ring.ModuleStatusOK || failedDecodeErr != nil || failedStatus != store.StatusFailed || len(failedCells) != 0 {
 		t.Fatal("reachable delegate store deadline must be an in-band failed request", transport, failedStatus, failedDecodeErr)
 	}
 	var partial int
@@ -334,9 +334,9 @@ func TestCanonicalDelegateExperienceSourcePagesSQLWire(t *testing.T) {
 		t.Fatal("cancelled scan wrote experience", partial, err)
 	}
 	started := time.Now()
-	reply, transport := families.Telemetry.Handler(s)(bus.ModuleInvocation{StageID: families.Telemetry.Stage}, frame)
+	reply, transport := families.Telemetry.Handler(s)(ring.ModuleInvocation{StageID: families.Telemetry.Stage}, frame)
 	status, _, decodeErr := wirefields.DecodeFields(reply)
-	if transport != bus.ModuleStatusOK || decodeErr != nil || status != store.StatusOK {
+	if transport != ring.ModuleStatusOK || decodeErr != nil || status != store.StatusOK {
 		t.Fatal("bounded delegate dispatcher refused valid source", transport, status, decodeErr)
 	}
 	t.Logf("actual paged delegate source projection %s, largest SQL frame %d", time.Since(started), wire.max)

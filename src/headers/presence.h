@@ -28,8 +28,8 @@
  *   5. *outbound routing* — mapping a session-tagged async event (delegate
  *      done, cron/trigger fire, reflection) to the attachments subscribed to
  *      it, dispatched through a delivery callback the server wires to the
- *      gateway's delivery_router (kept behind a function pointer so this core
- *      module stays free of gateway/link dependencies and unit-testable).
+ *      typed notify path (kept behind a function pointer so this core module
+ *      stays free of delivery link dependencies and unit-testable).
  *
  * The durable session set itself (transcript, working set) continues to live
  * in DB1 (src/session_state.c, server_session.c); this module references
@@ -310,8 +310,8 @@ extern "C"
    /* ====================================================================== */
 
    /* Delivery callback signature: deliver `text` to `target` (already parsed).
-    * Returns 0 on success, non-zero on failure. The server wires this to
-    * gateway delivery_router_send at startup; unit tests install a stub. */
+    * Returns 0 on success, non-zero on failure. The server wires this to the
+    * typed notify path (ntfy / local) at startup; unit tests install a stub. */
    typedef int (*presence_delivery_fn)(const delivery_target_t *target, const char *text,
                                        void *user);
 

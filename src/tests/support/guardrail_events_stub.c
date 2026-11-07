@@ -45,13 +45,3 @@ int db1_guardrail_event_insert(const guardrail_event_t *e)
    }
    return 0;
 }
-
-int db1_guardrail_event_counts_7d(guardrail_event_counts_t *out)
-{
-   if (!out)
-   {
-      return -1;
-   }
-   *out = g_counts;
-   return 0;
-}

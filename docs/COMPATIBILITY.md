@@ -6,13 +6,14 @@
 | --- | --- | --- | --- |
 | thin client, MCP, ACP | supported | supported universal binary | supported x86-64 binary |
 | native TLS | OpenSSL | Secure Transport | Schannel |
-| server, KB, workflow plane | supported | development use | use Docker or WSL2 |
-| event-bus host | supported | not in v0 | not in v0 |
+| server, KB, workflow plane | supported | not built; use a Linux host or Docker | not built; use a Linux host, Docker or WSL2 |
+| ouroboros ring host | supported | not built | not built |
 | delegate container backend | supported | through Docker | through Docker/WSL2 |
 
 Debian 13 x86-64 is the main development and deployment target. Ubuntu 22.04+, Proxmox VE 8+, and
-other current glibc distributions use the same server build. The native macOS and Windows products
-are thin clients; POSIX process, PAM, `memfd`, and service-manager features remain server-side.
+other current glibc distributions use the same server build. macOS and Windows get
+only the thin client: aimee proper (server, KB, ring host, module processes) builds and runs only on
+Linux, and `make -C src` refuses other systems.
 
 Linux client enrollment can create an mTLS certificate automatically. macOS and Windows use their
 native TLS stacks but currently need an explicitly provisioned client certificate when mTLS is
@@ -97,9 +98,9 @@ The Makefile is canonical for Linux development. CMake carries portable thin-cli
 
 ## Known limits
 
-- The event-bus v0 host uses Linux `memfd` and `SCM_RIGHTS`.
+- The ouroboros ring host uses Linux `memfd`, `SOCK_SEQPACKET` and `SCM_RIGHTS`.
 - Observational capture does not provide deterministic module execution replay.
-- Native Windows does not host the full server stack.
+- macOS and Windows do not host the server stack.
 - Automatic mTLS CSR enrollment is Linux-only today.
 - Claude Desktop is MCP-only and has no coding-tool hooks.
 - A local provider's claimed OpenAI compatibility may omit tools, usage, or streaming details.

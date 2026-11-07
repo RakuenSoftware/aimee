@@ -2,7 +2,7 @@
 #include "agent_exec.h"
 
 #include <aimee/execution-policy/module_api.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include "computer_use.h"
 #include "headers/module_json_call.h"
@@ -113,7 +113,8 @@ static void policy_observe_memory_owner(cJSON *request)
    cJSON_AddStringToObject(probe, "principal", ctx->principal);
    cJSON_AddStringToObject(probe, "caller_subject", ctx->caller_subject);
    cJSON *reply = NULL;
-   int rc = aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", probe, 500, &reply);
+   int rc =
+       aimee_module_commands_dispatch_internal_caller_timeout("memory.runtime", probe, 500, &reply);
    cJSON_Delete(probe);
    if (rc == 1 && cJSON_IsObject(reply))
    {
@@ -255,11 +256,6 @@ int policy_recheck_action_tool_attempt(const char *tool, const char *effect, con
    return policy_unknown_effect_check(tool, arguments, attempt, resource_categories, 1, reason,
                                       reason_len);
 }
-int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
-                               char *reason, size_t reason_len)
-{
-   return policy_recheck_action_tool_attempt(tool, effect, arguments, NULL, 0, reason, reason_len);
-}
 
 static int policy_check_attempt(const char *tool, const char *effect, const char *args,
                                 const char *attempt, uint32_t categories, char *reason,
@@ -352,15 +348,15 @@ static int policy_baseline(const char *tool_name, const char *side_effect, const
    cJSON_AddItemToObject(computer, "allowed_domains", domains);
    cJSON_AddItemToObject(request, "computer_use", computer);
 
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
+   ouro_module_call_result_t result = OURO_MODULE_CALL_INTERNAL;
    cJSON *response = aimee_module_json_call(
        AIMEE_EXECUTION_POLICY_EVENT_TOOL, AIMEE_EXECUTION_POLICY_STAGE_TOOL, request,
-       AIMEE_MODULE_MESSAGE_MAX_BODY, EXECUTION_POLICY_TIMEOUT_MS, &result);
+       OURO_MODULE_MESSAGE_MAX_BODY, EXECUTION_POLICY_TIMEOUT_MS, &result);
    if (!response)
    {
       char failure[160];
       snprintf(failure, sizeof failure, "execution-policy module failed: %s",
-               aimee_module_call_result_name(result));
+               ouro_module_call_result_name(result));
       set_reason(reason_out, reason_len, failure);
       return -1; /* required authorization is fail-closed */
    }

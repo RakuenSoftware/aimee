@@ -21,9 +21,7 @@
     "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_policy_arms.c",
     "src/modules/learning/learning_regret.c",
-    "src/modules/learning/learning_router.c",
-    "src/modules/learning/learning_signal_policy.c",
-    "src/modules/learning/module_adapter.c"
+    "src/modules/learning/learning_router.c"
   ],
   "go_sources": [
     "server-go/modules/learning/learning.go",
@@ -50,8 +48,7 @@
   "private_headers": [
     "src/modules/learning/learning_bundle.h",
     "src/modules/learning/learning_evidence.h",
-    "src/modules/learning/learning_implicit.h",
-    "src/modules/learning/learning_signal_policy.h"
+    "src/modules/learning/learning_implicit.h"
   ],
   "tests": [
     "src/tests/test_learning_bundle.c"

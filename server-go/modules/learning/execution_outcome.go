@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const EventExecution uint32 = 6147
@@ -42,7 +42,7 @@ type ExecutionSource struct {
 	Actor    string `json:"actor"`
 }
 
-func executionObservation(record ExecutionRecord, caller bus.CommandContext) (ExecutionObservation, bool) {
+func executionObservation(record ExecutionRecord, caller ring.CommandContext) (ExecutionObservation, bool) {
 	var empty ExecutionObservation
 	if !caller.Authenticated || caller.UserAuthority || caller.TransportIdentity != "host:canonical-execution" || caller.Principal == "" || record.Actor != caller.Principal || record.Version != 1 {
 		return empty, false
@@ -72,32 +72,32 @@ func executionObservation(record ExecutionRecord, caller bus.CommandContext) (Ex
 	}, true
 }
 
-func handleExecution(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.ModuleStatus) {
+func handleExecution(invocation ring.ModuleInvocation, raw []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || len(raw) > 2<<20 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
-	verb, args, caller, err := bus.DecodeCommandWithContext(raw)
+	verb, args, caller, err := ring.DecodeCommandWithContext(raw)
 	var record ExecutionRecord
 	if err != nil || caller == nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if verb == "grade" {
 		return handleExecutionTestGrade(args, *caller)
 	}
 	if verb != "observe" || !canonical.Decode(args, &record) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	observation, ok := executionObservation(record, *caller)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	body, err := json.Marshal(map[string]any{"status": "ok", "observation": observation})
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	framed, err := bus.EncodeCommandResult(body)
+	framed, err := ring.EncodeCommandResult(body)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return framed, bus.ModuleStatusOK
+	return framed, ring.ModuleStatusOK
 }

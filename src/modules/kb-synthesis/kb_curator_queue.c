@@ -91,42 +91,6 @@ int kb_curator_queue_docs_for_project(const char *project)
    return enqueued;
 }
 
-int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
-                               int line)
-{
-   if (!project || !file_path || !symbol)
-      return 0;
-   if (!config_kb_curator_extract_code_enabled())
-      return 0;
-
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-
-   static const char *sql =
-       "INSERT INTO kb_code_unit_jobs (project, generation, file_path, symbol, line)"
-       " SELECT ?1, p.current_generation, ?2, ?3, ?4 FROM projects p"
-       " WHERE p.name=?1 AND p.lifecycle_state='current'"
-       " ON CONFLICT(project, generation, file_path, symbol) DO UPDATE SET"
-       " line=excluded.line,"
-       " updated_at=pg_now_text()";
-
-   char err[CQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-   {
-      aimee_log(LOG_WARN, "kb.curator.queue", "failed to prepare code_unit insert: %s", err);
-      return -1;
-   }
-   aimee_pg_bind_text(st, "?1", project);
-   aimee_pg_bind_text(st, "?2", file_path);
-   aimee_pg_bind_text(st, "?3", symbol);
-   aimee_pg_bind_int(st, "?4", line);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-   return 0;
-}
-
 int kb_curator_code_unit_jobs_delete_project(const char *project)
 {
    if (!project || !project[0])
@@ -195,8 +159,8 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
     * kb_code_unit_jobs makes NOT IN drop ALL rows). NOT EXISTS fixes both. */
    /* ONE set-based INSERT, not a row-per-symbol loop. The SELECT below already
     * names exactly the rows to enqueue, so feeding them back one INSERT at a
-    * time only bought a WAL fsync per symbol: each kb_curator_queue_code_unit()
-    * call is its own autocommit transaction.
+    * time only bought a WAL fsync per symbol: each insert was its own
+    * autocommit transaction.
     *
     * That cost dominated indexing. Measured on a 4,018-file repository: the
     * enqueue produced ~183,000 rows, postgres sat in LWLock/WALWrite and

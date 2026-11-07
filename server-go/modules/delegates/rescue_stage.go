@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -84,13 +84,13 @@ func decodeRescueRequest(request []byte) (rescueRequest, bool) {
 // The request carries the caller's tool inventory because deciding whether a
 // rescued name is real needs it and this module may not ask the tools module
 // itself. The names are read and dropped; no caller state is kept here.
-func handleRescue(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRescue(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	req, ok := decodeRescueRequest(request)
 	if !ok {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	response := rescueResponse{Version: 1}
@@ -99,7 +99,7 @@ func handleRescue(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	} else {
 		result, found := RescueParseToolCalls(req.text, req.known, req.allowJSON)
 		if found < 0 || found != len(result.Calls) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if found > 0 {
 			message := ir.Message{Role: "assistant", Blocks: make([]ir.Block, 0, len(result.Calls)+1)}
@@ -110,16 +110,16 @@ func handleRescue(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 			for _, call := range result.Calls {
 				var input json.RawMessage
 				if !strings.HasPrefix(strings.TrimSpace(call.Arguments), "{") || !ir.Decode([]byte(call.Arguments), &input) {
-					return nil, bus.ModuleStatusInvalidRequest
+					return nil, ring.ModuleStatusInvalidRequest
 				}
 				message.Blocks = append(message.Blocks, ir.Block{Type: "tool_use", ToolID: call.ID, Name: call.Name, Input: input})
 			}
 			encoded, err := json.Marshal([]ir.Message{message})
 			if err != nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			if _, err := ir.DecodeMessages(encoded); err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			response.Matched = true
 			response.Message = &message
@@ -127,9 +127,9 @@ func handleRescue(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
 type rescueResponse struct {

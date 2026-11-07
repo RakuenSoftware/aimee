@@ -12,9 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifndef _WIN32
 #include <signal.h>
-#endif
 
 #define FORENSICS_KEEP_DEFAULT 50
 
@@ -90,7 +88,6 @@ static void read_sender_comm(pid_t pid, char *out, size_t out_len)
    if (!out || out_len == 0)
       return;
    out[0] = '\0';
-#ifndef _WIN32
    if (pid <= 0)
       return;
    char path[64];
@@ -114,7 +111,6 @@ static void read_sender_comm(pid_t pid, char *out, size_t out_len)
          break;
       }
    }
-#endif
 }
 
 static long current_rss_kb(void)
@@ -144,13 +140,8 @@ void shutdown_forensics_snapshot(shutdown_ctx_t *out, const char *daemon, int si
    out->inflight_workers = inflight_workers;
    out->rss_kb = current_rss_kb();
 
-#ifndef _WIN32
    const siginfo_t *info = (const siginfo_t *)siginfo;
    out->sender_pid = info ? info->si_pid : 0;
-#else
-   (void)siginfo;
-   out->sender_pid = 0;
-#endif
    read_sender_comm(out->sender_pid, out->sender_comm, sizeof(out->sender_comm));
 }
 
@@ -266,12 +257,6 @@ int shutdown_forensics_write_record(const shutdown_ctx_t *ctx)
       unlink(tmppath);
       return -1;
    }
-#ifdef _WIN32
-   /* Windows rename() will not replace an existing file; the atomic-replace race
-    * it guards against is POSIX-only (the async diagnostic uses /proc), so a
-    * non-atomic remove-then-rename is acceptable here. */
-   unlink(path);
-#endif
    if (rename(tmppath, path) != 0)
    {
       unlink(tmppath);
@@ -280,7 +265,6 @@ int shutdown_forensics_write_record(const shutdown_ctx_t *ctx)
    return 0;
 }
 
-#ifndef _WIN32
 static pid_t read_parent_pid(pid_t pid)
 {
    if (pid <= 0)
@@ -317,16 +301,11 @@ static void build_process_tree(pid_t pid, char *out, size_t out_len)
       pid = read_parent_pid(pid);
    }
 }
-#endif
 
 int shutdown_forensics_spawn_async_diagnostic(const shutdown_ctx_t *ctx)
 {
    if (!ctx)
       return -1;
-#ifdef _WIN32
-   (void)ctx;
-   return 0;
-#else
    pid_t child = fork();
    if (child < 0)
       return -1;
@@ -343,7 +322,6 @@ int shutdown_forensics_spawn_async_diagnostic(const shutdown_ctx_t *ctx)
       _exit(0);
    }
    return 0;
-#endif
 }
 
 int shutdown_forensics_record_signal(const char *daemon, int sig, const void *siginfo,
@@ -530,11 +508,7 @@ static int process_alive(pid_t pid)
 {
    if (pid <= 0)
       return 0;
-#ifdef _WIN32
-   return 0;
-#else
    return kill(pid, 0) == 0 || errno == EPERM;
-#endif
 }
 
 static int has_clean_record(pid_t pid)

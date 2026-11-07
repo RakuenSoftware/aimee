@@ -4,24 +4,24 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // NewHandler serves the sandbox module's learned-toolchain and proxy-policy stages.
 //
 // All carry JSON because commands, git roots, HTTP heads, allowlists, and
 // addresses are variable-length.
-func NewHandler(store *Store) bus.ModuleHandler {
-	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func NewHandler(store *Store) ring.ModuleHandler {
+	return func(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 		switch invocation.StageID {
 		case StageObserve:
 			if store == nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			return handleObserve(store, invocation, request)
 		case StageLoad:
 			if store == nil {
-				return nil, bus.ModuleStatusInternal
+				return nil, ring.ModuleStatusInternal
 			}
 			return handleLoad(store, invocation, request)
 		case StageProxyRequest:
@@ -29,21 +29,21 @@ func NewHandler(store *Store) bus.ModuleHandler {
 		case StageProxyAddress:
 			return handleProxyAddress(invocation, request)
 		default:
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 	}
 }
 
-func handleObserve(store *Store, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleObserve(store *Store, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ObserveRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if decoded.GitRoot == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	parsed := ParseApt(decoded.Command, LearnMax)
 	response := ObserveResponse{Parsed: len(parsed), Packages: parsed}
@@ -59,34 +59,34 @@ func handleObserve(store *Store, invocation bus.ModuleInvocation, request []byte
 			// reading a log.
 			log.Printf("sandbox: recording learned packages for %q failed: %v",
 				decoded.GitRoot, err)
-			return nil, bus.ModuleStatusInternal
+			return nil, ring.ModuleStatusInternal
 		}
 		response.Recorded = added
 	}
 	return encode(response)
 }
 
-func handleLoad(store *Store, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleLoad(store *Store, invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded LoadRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if decoded.GitRoot == "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	return encode(LoadResponse{Packages: store.Load(decoded.GitRoot, LearnMax)})
 }
 
-func encode(value any) ([]byte, bus.ModuleStatus) {
+func encode(value any) ([]byte, ring.ModuleStatus) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	if uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

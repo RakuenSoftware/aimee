@@ -532,33 +532,6 @@ int kb_store_code_projection_generation_update_counts(int64_t gen_id, int64_t ed
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int kb_store_code_projection_cleanup_old(const char *project, int min_days_old)
-{
-   if (!project || !*project || min_days_old < 0)
-      return 0;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return 0;
-   char sql[512];
-   snprintf(sql, sizeof(sql),
-            "DELETE FROM code_projection_generations"
-            " WHERE project = ?1"
-            "   AND state IN ('superseded','aborted')"
-            "   AND started_at < to_char("
-            "       CURRENT_TIMESTAMP - INTERVAL '%d days',"
-            "       'YYYY-MM-DD HH24:MI:SS')",
-            min_days_old);
-   char err[CP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_text(st, "?1", project);
-   int rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE) ? changes : 0;
-}
-
 /* --- Edge ledger --- */
 
 int kb_store_code_projection_edge_record(int64_t gen_id, const char *project, const char *source,

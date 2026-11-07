@@ -212,7 +212,11 @@ static void print_agent_probe(cJSON *resp)
    cJSON *slots = cJSON_GetObjectItemCaseSensitive(resp, "detected_slots");
    cJSON *ctx = cJSON_GetObjectItemCaseSensitive(resp, "detected_context_window");
    cJSON *slots_source = cJSON_GetObjectItemCaseSensitive(resp, "slots_source");
-   printf("  models: %s (%d)\n", cJSON_IsTrue(model_available) ? "ok" : "warn",
+   printf("  models: %s (%d)\n",
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "models_probe_skipped"))
+              ? "not tested"
+          : cJSON_IsTrue(model_available) ? "ok"
+                                          : "warn",
           cJSON_IsNumber(models_status) ? models_status->valueint : 0);
    cJSON *mp = cJSON_GetObjectItemCaseSensitive(resp, "model_probe");
    if (cJSON_IsString(mp) && mp->valuestring[0])
@@ -234,6 +238,8 @@ static void print_agent_probe(cJSON *resp)
       printf("  execution: %s latency=%dms %s\n", cJSON_IsTrue(run) ? "ok" : "failed",
              cJSON_IsNumber(lat) ? lat->valueint : 0, json_str(resp, "execution_message"));
    }
+   else if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(resp, "execution_tested")))
+      printf("  execution: not tested %s\n", json_str(resp, "execution_message"));
 }
 
 static void print_trigger_list(cJSON *resp)

@@ -22,7 +22,7 @@
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/benchmarks/module_api.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_launch_args.h>
@@ -31,6 +31,8 @@
 #include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
 #include "headers/memory_stage_contract.h"
+#include "kb_mdl.h"
+#include "artifacts.h" /* aimee_kb_store_register_mdl_score_provider */
 #include <aimee/response-composition/module_api.h>
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
@@ -103,12 +105,12 @@ cJSON *server_module_memory_data(const cJSON *request)
    if (!encoded)
       return NULL;
    size_t request_len = strlen(encoded);
-   if (request_len == 0 || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (request_len == 0 || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
    {
       free(encoded);
       return NULL;
    }
-   uint8_t *response = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   uint8_t *response = malloc(OURO_MODULE_MESSAGE_MAX_BODY);
    uint32_t response_len = 0;
    if (!response)
    {
@@ -134,7 +136,7 @@ cJSON *server_module_memory_data(const cJSON *request)
                    : 30ULL * 1000000000ULL;
    }
    int rc = call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
-                                    (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                                    (uint32_t)request_len, response, OURO_MODULE_MESSAGE_MAX_BODY,
                                     &response_len, budget);
    free(encoded);
    cJSON *decoded = NULL;
@@ -314,7 +316,7 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
    for (int i = 0; i < count; i++)
    {
       size_t n = strlen(names[i]);
-      if (n > 65535 || capacity > AIMEE_MODULE_MESSAGE_MAX_BODY - 2 - n)
+      if (n > 65535 || capacity > OURO_MODULE_MESSAGE_MAX_BODY - 2 - n)
          return -1;
       capacity += 2 + n;
    }
@@ -331,8 +333,8 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
       return -1;
    }
    size_t response_capacity = length * 6 + 4096u * 128u + 1024u;
-   if (response_capacity > AIMEE_MODULE_MESSAGE_MAX_BODY)
-      response_capacity = AIMEE_MODULE_MESSAGE_MAX_BODY;
+   if (response_capacity > OURO_MODULE_MESSAGE_MAX_BODY)
+      response_capacity = OURO_MODULE_MESSAGE_MAX_BODY;
    char *response = malloc(response_capacity);
    if (!response)
    {
@@ -343,10 +345,10 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only, ai
    int rc = call_module(AIMEE_DELEGATES_EVENT_RESCUE, AIMEE_DELEGATES_STAGE_RESCUE, request,
                         (uint32_t)used, response, (uint32_t)response_capacity, &response_length);
    free(request);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   if (rc != OURO_MODULE_CALL_OK)
    {
       free(response);
-      return rc == AIMEE_MODULE_CALL_CAPABILITY_ABSENT ? 0 : -1;
+      return rc == OURO_MODULE_CALL_CAPABILITY_ABSENT ? 0 : -1;
    }
    const char *end = NULL;
    cJSON *root = cJSON_ParseWithLengthOpts(response, response_length, &end, 0);
@@ -874,11 +876,13 @@ static int delegate_permissions(const uint8_t *request, size_t request_len, uint
 }
 
 extern int agent_tools_module_native_has(const char *) __attribute__((weak));
-extern int agent_tools_module_native_metadata(const char *, aimee_tool_metadata_t *) __attribute__((weak));
+extern int agent_tools_module_native_metadata(const char *, aimee_tool_metadata_t *)
+    __attribute__((weak));
 static int tool_metadata(const char *name, aimee_tool_metadata_t *metadata)
 {
    if (agent_tools_module_native_has && agent_tools_module_native_has(name))
-      return agent_tools_module_native_metadata ? agent_tools_module_native_metadata(name, metadata) : -1;
+      return agent_tools_module_native_metadata ? agent_tools_module_native_metadata(name, metadata)
+                                                : -1;
    uint8_t request[AIMEE_TOOLS_METADATA_REQUEST_MAX], response[AIMEE_TOOLS_METADATA_LEN];
    uint32_t response_len = 0;
    size_t request_len = aimee_tools_metadata_request_encode(name, request, sizeof request);
@@ -928,7 +932,7 @@ static int git_validate_ref(const char *ref, int *allowed)
       return -1;
    int result = call_module(AIMEE_GIT_EVENT_REF_VALIDATE, AIMEE_GIT_STAGE_REF_VALIDATE, request,
                             sizeof(request), response, sizeof(response), &response_len);
-   return result == AIMEE_MODULE_CALL_OK
+   return result == OURO_MODULE_CALL_OK
               ? aimee_git_ref_response_decode(response, response_len, allowed)
               : result;
 }
@@ -970,7 +974,7 @@ static int governance_evaluate(int policy_active, const aimee_tool_identity_view
    uint8_t response[AIMEE_GOVERNANCE_RESPONSE_LEN];
    uint32_t response_len = 0;
    int result = -1;
-   if (request_len && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY && request_len <= UINT32_MAX &&
+   if (request_len && request_len <= OURO_MODULE_MESSAGE_MAX_BODY && request_len <= UINT32_MAX &&
        call_module(AIMEE_GOVERNANCE_EVENT_EVALUATE, AIMEE_GOVERNANCE_STAGE_EVALUATE, encoded,
                    (uint32_t)request_len, response, sizeof(response), &response_len) == 0)
       result = aimee_governance_response_decode(response, response_len, tool_count, decision);
@@ -1020,7 +1024,7 @@ static int skill_trigger_match(const char *content, const char *tool_name, const
    if (!match)
       return -1;
    size_t request_len = aimee_skills_trigger_request_size(content, tool_name, subject);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (!request_len || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_SKILLS_TRIGGER_RESPONSE_LEN];
@@ -1036,38 +1040,6 @@ static int skill_trigger_match(const char *content, const char *tool_name, const
            : -1;
    free(request);
    return rc;
-}
-
-int server_module_benchmark_score(const int64_t *retrieved, uint32_t retrieved_count,
-                                  const int64_t *relevant, uint32_t relevant_count, uint32_t k,
-                                  aimee_benchmarks_ir_scores_t *scores)
-{
-   uint8_t request[AIMEE_BENCHMARKS_REQUEST_LEN], response[AIMEE_BENCHMARKS_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return scores &&
-                  aimee_benchmarks_request_encode(retrieved, retrieved_count, relevant,
-                                                  relevant_count, k, request,
-                                                  sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_RUN, AIMEE_BENCHMARKS_STAGE_RUN, request,
-                              sizeof(request), response, sizeof(response), &response_len) == 0
-              ? aimee_benchmarks_response_decode(response, response_len, scores)
-              : -1;
-}
-
-int server_module_benchmark_latency(const double *latencies, uint32_t count,
-                                    aimee_benchmarks_latency_summary_t *summary)
-{
-   uint8_t request[AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN];
-   uint8_t response[AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   return summary &&
-                  aimee_benchmarks_latency_request_encode(latencies, count, request,
-                                                          sizeof(request)) == 0 &&
-                  call_module(AIMEE_BENCHMARKS_EVENT_LATENCY, AIMEE_BENCHMARKS_STAGE_LATENCY,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
-              ? aimee_benchmarks_latency_response_decode(response, response_len, summary)
-              : -1;
 }
 
 static int runtime_web_http_status(const char *kind, uint32_t *http_status)
@@ -1087,7 +1059,7 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    if (!in || !out || out_cap == 0)
       return -1;
    size_t request_len = aimee_response_request_size(in);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   if (!request_len || request_len > OURO_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_RESPONSE_KEY_MAX + 4u];
@@ -1104,6 +1076,22 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    return rc;
 }
 
+/* The same canonical MDL scorer aimee-kb installs: artifacts the server
+ * commits carry the same MDL features as those the KB commits. */
+static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
+                     double *l_residual, double *total)
+{
+   if (!l_candidate || !l_residual || !total)
+      return -1;
+   kb_mdl_score_t score = {0};
+   if (kb_mdl_score(candidate, evidence, &score) != 0)
+      return -1;
+   *l_candidate = score.l_candidate;
+   *l_residual = score.l_residual;
+   *total = score.total;
+   return 0;
+}
+
 void server_module_tools_adapters_configure(void)
 {
    agent_tools_register_classifier(tool_classify);
@@ -1113,6 +1101,7 @@ void server_module_tools_adapters_configure(void)
 void server_module_stage_adapters_configure(void)
 {
    learning_router_register_signal_classifier(learning_classify);
+   aimee_kb_store_register_mdl_score_provider(score_mdl);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);
    delegate_register_chain_provider(delegate_chain);

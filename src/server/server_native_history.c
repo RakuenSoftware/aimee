@@ -288,50 +288,64 @@ int server_native_history_admit_source(const char *session, const char *actor,
    return result;
 }
 
-
 /* Host source metadata is bounded independently of provider-visible bytes. */
 #define TOOL_SOURCE_META_MAX (8u * 1024u * 1024u)
 extern int aimee_tool_source_visible_valid(const cJSON *, const char *) __attribute__((weak));
-extern int aimee_module_history_tool_source_accept(const cJSON *, const char *) __attribute__((weak));
+extern int aimee_module_history_tool_source_accept(const cJSON *, const char *)
+    __attribute__((weak));
 extern int aimee_module_tool_source_verify(const cJSON *, const char *) __attribute__((weak));
-typedef struct {
+typedef struct
+{
    const char *id, *owner, *digest, *receipt, *visible;
 } tool_source_key_t;
 static int source_key(const aimee_block_t *block, tool_source_key_t *key)
 {
    if (!block || block->type != AIMEE_BLK_TOOL_RESULT || !block->tool_id || !block->tool_id[0] ||
-       !aimee_ir_tool_source_shape_valid(block->tool_source) ||
-       !cJSON_IsString(block->tool_result))
+       !aimee_ir_tool_source_shape_valid(block->tool_source) || !cJSON_IsString(block->tool_result))
       return -1;
-   *key = (tool_source_key_t){block->tool_id, text(block->tool_source,"owner"),
-      text(block->tool_source,"visible_sha256"),text(block->tool_source,"receipt"),
-      cJSON_GetStringValue(block->tool_result)};
+   *key = (tool_source_key_t){block->tool_id, text(block->tool_source, "owner"),
+                              text(block->tool_source, "visible_sha256"),
+                              text(block->tool_source, "receipt"),
+                              cJSON_GetStringValue(block->tool_result)};
    return 0;
 }
 static int key_compare(const void *left, const void *right)
 {
-   const tool_source_key_t *a=left,*b=right;
-   int order=strcmp(a->id,b->id);
-   if (!order) order=strcmp(a->owner,b->owner);
-   if (!order) order=strcmp(a->digest,b->digest);
-   if (!order) order=strcmp(a->receipt,b->receipt);
+   const tool_source_key_t *a = left, *b = right;
+   int order = strcmp(a->id, b->id);
+   if (!order)
+      order = strcmp(a->owner, b->owner);
+   if (!order)
+      order = strcmp(a->digest, b->digest);
+   if (!order)
+      order = strcmp(a->receipt, b->receipt);
    return order;
 }
 static int request_source_bounds(const aimee_request_t *request, size_t *count)
 {
    if (!request || request->n_messages < 0 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
-       (request->n_messages && !request->messages)) return -1;
-   size_t bytes=0;*count=0;
-   for(int i=0;i<request->n_messages;i++) {
-      const aimee_message_t *message=&request->messages[i];
-      if(message->n_blocks<0||message->n_blocks>AIMEE_IR_MAX_BLOCKS||(message->n_blocks&&!message->blocks))return -1;
-      for(int j=0;j<message->n_blocks;j++)if(message->blocks[j].tool_source) {
-         tool_source_key_t key;
-         if(source_key(&message->blocks[j],&key)||++*count>AIMEE_IR_MAX_BLOCKS)return -1;
-         size_t add=strlen(key.id)+strlen(key.owner)+strlen(key.digest)+strlen(key.receipt);
-         if(add>TOOL_SOURCE_META_MAX||bytes>TOOL_SOURCE_META_MAX-add)return -1;
-         bytes+=add;
-      }
+       (request->n_messages && !request->messages))
+      return -1;
+   size_t bytes = 0;
+   *count = 0;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      const aimee_message_t *message = &request->messages[i];
+      if (message->n_blocks < 0 || message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
+          (message->n_blocks && !message->blocks))
+         return -1;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].tool_source)
+         {
+            tool_source_key_t key;
+            if (source_key(&message->blocks[j], &key) || ++*count > AIMEE_IR_MAX_BLOCKS)
+               return -1;
+            size_t add =
+                strlen(key.id) + strlen(key.owner) + strlen(key.digest) + strlen(key.receipt);
+            if (add > TOOL_SOURCE_META_MAX || bytes > TOOL_SOURCE_META_MAX - add)
+               return -1;
+            bytes += add;
+         }
    }
    return 0;
 }
@@ -340,65 +354,106 @@ static int request_source_bounds(const aimee_request_t *request, size_t *count)
  * into source authority; real owner verification still handles every receipt. */
 extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
 extern int aimee_sha256_hex(const void *, size_t, char[65]) __attribute__((weak));
-typedef struct {
+typedef struct
+{
    const char *id;
    char call_hash[65];
    int pending, required, any_required;
 } required_source_id_t;
-typedef struct {
+typedef struct
+{
    const char *id;
    char call_hash[65], result_hash[65];
    unsigned flags;
 } required_source_result_t;
 static int required_id_compare(const void *left, const void *right)
-{return strcmp(((const required_source_id_t *)left)->id, ((const required_source_id_t *)right)->id);}
+{
+   return strcmp(((const required_source_id_t *)left)->id,
+                 ((const required_source_id_t *)right)->id);
+}
 static int required_result_compare(const void *left, const void *right)
 {
-   const required_source_result_t *a=left,*b=right;
-   int order=strcmp(a->id,b->id);
-   if(!order)order=strcmp(a->call_hash,b->call_hash);
-   if(!order)order=strcmp(a->result_hash,b->result_hash);
+   const required_source_result_t *a = left, *b = right;
+   int order = strcmp(a->id, b->id);
+   if (!order)
+      order = strcmp(a->call_hash, b->call_hash);
+   if (!order)
+      order = strcmp(a->result_hash, b->result_hash);
    return order;
 }
 static int required_json_hash(const cJSON *value, char digest[65], size_t *work_bytes)
 {
-   cJSON *canonical=value?aimee_ir_json_canonical_copy(value):cJSON_CreateNull();
-   char *wire=canonical?cJSON_PrintUnformatted(canonical):NULL;
+   cJSON *canonical = value ? aimee_ir_json_canonical_copy(value) : cJSON_CreateNull();
+   char *wire = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
    cJSON_Delete(canonical);
-   if(!wire)return -1;
-   size_t bytes=strlen(wire);
-   int invalid=bytes>TOOL_SOURCE_META_MAX*2u||*work_bytes>TOOL_SOURCE_META_MAX*2u-bytes;
-   if(!invalid){*work_bytes+=bytes;invalid=aimee_sha256_hex(wire,bytes,digest)!=0;}
-   free(wire);return invalid?-1:0;
+   if (!wire)
+      return -1;
+   size_t bytes = strlen(wire);
+   int invalid =
+       bytes > TOOL_SOURCE_META_MAX * 2u || *work_bytes > TOOL_SOURCE_META_MAX * 2u - bytes;
+   if (!invalid)
+   {
+      *work_bytes += bytes;
+      invalid = aimee_sha256_hex(wire, bytes, digest) != 0;
+   }
+   free(wire);
+   return invalid ? -1 : 0;
 }
 /* Match delivered tool bytes, not the JSON type carrying them. Provider
  * codecs unwrap strings and compact-print nonstrings; a string containing
  * JSON and that equivalent object must not evade source custody. */
-static int required_visible_hash(const cJSON *value,char digest[65],size_t *work_bytes)
+static int required_visible_hash(const cJSON *value, char digest[65], size_t *work_bytes)
 {
-   char *owned=NULL;
-   const char *wire=cJSON_IsString(value)?value->valuestring:NULL;
-   if(!wire){owned=value?cJSON_PrintUnformatted(value):strdup("null");wire=owned;}
-   if(!wire)return -1;
-   size_t bytes=strlen(wire);
-   int invalid=bytes>TOOL_SOURCE_META_MAX*2u||*work_bytes>TOOL_SOURCE_META_MAX*2u-bytes;
-   if(!invalid){*work_bytes+=bytes;invalid=aimee_sha256_hex(wire,bytes,digest)!=0;}
-   free(owned);return invalid?-1:0;
+   char *owned = NULL;
+   const char *wire = cJSON_IsString(value) ? value->valuestring : NULL;
+   if (!wire)
+   {
+      owned = value ? cJSON_PrintUnformatted(value) : strdup("null");
+      wire = owned;
+   }
+   if (!wire)
+      return -1;
+   size_t bytes = strlen(wire);
+   int invalid =
+       bytes > TOOL_SOURCE_META_MAX * 2u || *work_bytes > TOOL_SOURCE_META_MAX * 2u - bytes;
+   if (!invalid)
+   {
+      *work_bytes += bytes;
+      invalid = aimee_sha256_hex(wire, bytes, digest) != 0;
+   }
+   free(owned);
+   return invalid ? -1 : 0;
 }
-static int body_hash_compare(const void *left,const void *right)
-{return strcmp(left,right);}
-static int body_hash_pointer_compare(const void *left,const void *right)
-{return strcmp(*(const char *const *)left,*(const char *const *)right);}
+static int body_hash_compare(const void *left, const void *right)
+{
+   return strcmp(left, right);
+}
+static int body_hash_pointer_compare(const void *left, const void *right)
+{
+   return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
 static int required_call_hash(const aimee_block_t *call, char digest[65], size_t *work_bytes)
 {
-   cJSON *identity=cJSON_CreateObject();
-   cJSON *input=call->tool_input?cJSON_Duplicate(call->tool_input,1):cJSON_CreateNull();
-   if(!identity||!input||!cJSON_AddStringToObject(identity,"name",call->tool_name?call->tool_name:"")||
-      !cJSON_AddStringToObject(identity,"namespace",call->tool_namespace?call->tool_namespace:"")){
-      cJSON_Delete(identity);cJSON_Delete(input);return -1;
+   cJSON *identity = cJSON_CreateObject();
+   cJSON *input = call->tool_input ? cJSON_Duplicate(call->tool_input, 1) : cJSON_CreateNull();
+   if (!identity || !input ||
+       !cJSON_AddStringToObject(identity, "name", call->tool_name ? call->tool_name : "") ||
+       !cJSON_AddStringToObject(identity, "namespace",
+                                call->tool_namespace ? call->tool_namespace : ""))
+   {
+      cJSON_Delete(identity);
+      cJSON_Delete(input);
+      return -1;
    }
-   if(!cJSON_AddItemToObject(identity,"input",input)){cJSON_Delete(input);cJSON_Delete(identity);return -1;}
-   int result=required_json_hash(identity,digest,work_bytes);cJSON_Delete(identity);return result;
+   if (!cJSON_AddItemToObject(identity, "input", input))
+   {
+      cJSON_Delete(input);
+      cJSON_Delete(identity);
+      return -1;
+   }
+   int result = required_json_hash(identity, digest, work_bytes);
+   cJSON_Delete(identity);
+   return result;
 }
 /* A namespace is part of canonical tool identity. Never classify an unrelated
  * business tool merely because its local name resembles a selected host tool. */
@@ -421,148 +476,324 @@ static int required_tool_mode(const aimee_block_t *block)
 static int required_tool_sources_preserved(const aimee_request_t *canonical,
                                            const aimee_request_t *retained)
 {
-   if(!aimee_module_tool_source_mode)return 0; /* Unconfigured legacy deployment. */
-   required_source_id_t *ids=calloc(AIMEE_IR_MAX_BLOCKS*2u,sizeof *ids);
-   required_source_result_t *results=NULL;
-   const char **protected_bodies=NULL;size_t protected_count=0;
-   if(!ids)return -1;
-   size_t count=0,unique=0,result_count=0,work_bytes=0;
-   const aimee_request_t *views[]={canonical,retained};
-   int failed=0;
-   for(size_t v=0;v<2&&!failed;v++)for(int i=0;i<views[v]->n_messages&&!failed;i++)
-      for(int j=0;j<views[v]->messages[i].n_blocks;j++){
-         const aimee_block_t *block=&views[v]->messages[i].blocks[j];
-         if(block->type!=AIMEE_BLK_TOOL_USE)continue;
-         if(!block->tool_id||!block->tool_id[0]||!block->tool_name){failed=1;break;}
-         if(!required_tool_mode(block))continue;
-         if(count>=AIMEE_IR_MAX_BLOCKS*2u){failed=1;break;}
-         ids[count++].id=block->tool_id;
-      }
-   if(failed||!count){free(ids);return failed?-1:0;}
-   if(!aimee_sha256_hex){free(ids);return -1;}
-   qsort(ids,count,sizeof *ids,required_id_compare);
-   for(size_t i=0;i<count;i++)if(!unique||strcmp(ids[i].id,ids[unique-1].id))ids[unique++]=ids[i];
-   if(unique>AIMEE_IR_MAX_BLOCKS){free(ids);return -1;}
-   results=calloc(AIMEE_IR_MAX_BLOCKS,sizeof *results);
-   if(!results){free(ids);return -1;}
-   protected_bodies=calloc(AIMEE_IR_MAX_BLOCKS,sizeof *protected_bodies);
-   if(!protected_bodies){free(results);free(ids);return -1;}
-   for(size_t v=0;v<2&&!failed;v++){
-      if(v){
-         for(size_t i=0;i<unique;i++){ids[i].pending=0;ids[i].required=0;ids[i].call_hash[0]=0;}
-         qsort(results,result_count,sizeof *results,required_result_compare);
-         size_t kept=0;
-         for(size_t i=0;i<result_count;i++){
-            if(kept&&!required_result_compare(&results[i],&results[kept-1]))results[kept-1].flags|=results[i].flags;
-            else results[kept++]=results[i];
+   if (!aimee_module_tool_source_mode)
+      return 0; /* Unconfigured legacy deployment. */
+   required_source_id_t *ids = calloc(AIMEE_IR_MAX_BLOCKS * 2u, sizeof *ids);
+   required_source_result_t *results = NULL;
+   const char **protected_bodies = NULL;
+   size_t protected_count = 0;
+   if (!ids)
+      return -1;
+   size_t count = 0, unique = 0, result_count = 0, work_bytes = 0;
+   const aimee_request_t *views[] = {canonical, retained};
+   int failed = 0;
+   for (size_t v = 0; v < 2 && !failed; v++)
+      for (int i = 0; i < views[v]->n_messages && !failed; i++)
+         for (int j = 0; j < views[v]->messages[i].n_blocks; j++)
+         {
+            const aimee_block_t *block = &views[v]->messages[i].blocks[j];
+            if (block->type != AIMEE_BLK_TOOL_USE)
+               continue;
+            if (!block->tool_id || !block->tool_id[0] || !block->tool_name)
+            {
+               failed = 1;
+               break;
+            }
+            if (!required_tool_mode(block))
+               continue;
+            if (count >= AIMEE_IR_MAX_BLOCKS * 2u)
+            {
+               failed = 1;
+               break;
+            }
+            ids[count++].id = block->tool_id;
          }
-         result_count=kept;
-         for(size_t k=0;k<result_count;k++)if(results[k].flags&1u)protected_bodies[protected_count++]=results[k].result_hash;
-         qsort(protected_bodies,protected_count,sizeof *protected_bodies,body_hash_pointer_compare);
-      }
-      for(int i=0;i<views[v]->n_messages&&!failed;i++)for(int j=0;j<views[v]->messages[i].n_blocks&&!failed;j++){
-         const aimee_block_t *block=&views[v]->messages[i].blocks[j];
-         if(block->type!=AIMEE_BLK_TOOL_USE&&block->type!=AIMEE_BLK_TOOL_RESULT)continue;
-         if(!block->tool_id||!block->tool_id[0]){failed=1;break;}
-         char retained_hash[65]={0};int retained_hashed=0;
-         if(v&&block->type==AIMEE_BLK_TOOL_RESULT&&!block->tool_source&&protected_count){
-            if(required_visible_hash(block->tool_result,retained_hash,&work_bytes)){failed=1;break;}
-            retained_hashed=1;const char *wanted=retained_hash;
-            if(bsearch(&wanted,protected_bodies,protected_count,sizeof *protected_bodies,body_hash_pointer_compare)){failed=1;break;}
-         }
-         required_source_id_t query={.id=block->tool_id};
-         required_source_id_t *slot=bsearch(&query,ids,unique,sizeof *ids,required_id_compare);
-         if(!slot)continue; /* Ordinary unrelated business tool. */
-         if(block->type==AIMEE_BLK_TOOL_USE){
-            if(slot->pending||!block->tool_name||required_call_hash(block,slot->call_hash,&work_bytes)){failed=1;break;}
-            slot->pending=1;slot->required=required_tool_mode(block)!=0;continue;
-         }
-         if(!slot->pending){failed=1;break;}
-         slot->pending=0;
-         if(v&&block->tool_source)continue; /* Owner checks, not this classifier, decide trust. */
-         if(v&&slot->required){failed=1;break;}
-         required_source_result_t key={.id=block->tool_id};
-         memcpy(key.call_hash,slot->call_hash,sizeof key.call_hash);
-         if(retained_hashed)memcpy(key.result_hash,retained_hash,sizeof key.result_hash);
-         else if(required_visible_hash(block->tool_result,key.result_hash,&work_bytes)){failed=1;break;}
-         if(!v){
-            if(result_count>=AIMEE_IR_MAX_BLOCKS){failed=1;break;}
-            key.flags=slot->required?1u:2u;results[result_count++]=key;
-            slot->any_required|=slot->required;
-         }else{
-            const required_source_result_t *found=result_count?bsearch(&key,results,result_count,sizeof *results,required_result_compare):NULL;
-            if((found&&(found->flags&1u))||(!found&&slot->any_required))failed=1;
-         }
-      }
+   if (failed || !count)
+   {
+      free(ids);
+      return failed ? -1 : 0;
    }
-   free(protected_bodies);free(results);free(ids);return failed?-1:0;
+   if (!aimee_sha256_hex)
+   {
+      free(ids);
+      return -1;
+   }
+   qsort(ids, count, sizeof *ids, required_id_compare);
+   for (size_t i = 0; i < count; i++)
+      if (!unique || strcmp(ids[i].id, ids[unique - 1].id))
+         ids[unique++] = ids[i];
+   if (unique > AIMEE_IR_MAX_BLOCKS)
+   {
+      free(ids);
+      return -1;
+   }
+   results = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *results);
+   if (!results)
+   {
+      free(ids);
+      return -1;
+   }
+   protected_bodies = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *protected_bodies);
+   if (!protected_bodies)
+   {
+      free(results);
+      free(ids);
+      return -1;
+   }
+   for (size_t v = 0; v < 2 && !failed; v++)
+   {
+      if (v)
+      {
+         for (size_t i = 0; i < unique; i++)
+         {
+            ids[i].pending = 0;
+            ids[i].required = 0;
+            ids[i].call_hash[0] = 0;
+         }
+         qsort(results, result_count, sizeof *results, required_result_compare);
+         size_t kept = 0;
+         for (size_t i = 0; i < result_count; i++)
+         {
+            if (kept && !required_result_compare(&results[i], &results[kept - 1]))
+               results[kept - 1].flags |= results[i].flags;
+            else
+               results[kept++] = results[i];
+         }
+         result_count = kept;
+         for (size_t k = 0; k < result_count; k++)
+            if (results[k].flags & 1u)
+               protected_bodies[protected_count++] = results[k].result_hash;
+         qsort(protected_bodies, protected_count, sizeof *protected_bodies,
+               body_hash_pointer_compare);
+      }
+      for (int i = 0; i < views[v]->n_messages && !failed; i++)
+         for (int j = 0; j < views[v]->messages[i].n_blocks && !failed; j++)
+         {
+            const aimee_block_t *block = &views[v]->messages[i].blocks[j];
+            if (block->type != AIMEE_BLK_TOOL_USE && block->type != AIMEE_BLK_TOOL_RESULT)
+               continue;
+            if (!block->tool_id || !block->tool_id[0])
+            {
+               failed = 1;
+               break;
+            }
+            char retained_hash[65] = {0};
+            int retained_hashed = 0;
+            if (v && block->type == AIMEE_BLK_TOOL_RESULT && !block->tool_source && protected_count)
+            {
+               if (required_visible_hash(block->tool_result, retained_hash, &work_bytes))
+               {
+                  failed = 1;
+                  break;
+               }
+               retained_hashed = 1;
+               const char *wanted = retained_hash;
+               if (bsearch(&wanted, protected_bodies, protected_count, sizeof *protected_bodies,
+                           body_hash_pointer_compare))
+               {
+                  failed = 1;
+                  break;
+               }
+            }
+            required_source_id_t query = {.id = block->tool_id};
+            required_source_id_t *slot =
+                bsearch(&query, ids, unique, sizeof *ids, required_id_compare);
+            if (!slot)
+               continue; /* Ordinary unrelated business tool. */
+            if (block->type == AIMEE_BLK_TOOL_USE)
+            {
+               if (slot->pending || !block->tool_name ||
+                   required_call_hash(block, slot->call_hash, &work_bytes))
+               {
+                  failed = 1;
+                  break;
+               }
+               slot->pending = 1;
+               slot->required = required_tool_mode(block) != 0;
+               continue;
+            }
+            if (!slot->pending)
+            {
+               failed = 1;
+               break;
+            }
+            slot->pending = 0;
+            if (v && block->tool_source)
+               continue; /* Owner checks, not this classifier, decide trust. */
+            if (v && slot->required)
+            {
+               failed = 1;
+               break;
+            }
+            required_source_result_t key = {.id = block->tool_id};
+            memcpy(key.call_hash, slot->call_hash, sizeof key.call_hash);
+            if (retained_hashed)
+               memcpy(key.result_hash, retained_hash, sizeof key.result_hash);
+            else if (required_visible_hash(block->tool_result, key.result_hash, &work_bytes))
+            {
+               failed = 1;
+               break;
+            }
+            if (!v)
+            {
+               if (result_count >= AIMEE_IR_MAX_BLOCKS)
+               {
+                  failed = 1;
+                  break;
+               }
+               key.flags = slot->required ? 1u : 2u;
+               results[result_count++] = key;
+               slot->any_required |= slot->required;
+            }
+            else
+            {
+               const required_source_result_t *found =
+                   result_count ? bsearch(&key, results, result_count, sizeof *results,
+                                          required_result_compare)
+                                : NULL;
+               if ((found && (found->flags & 1u)) || (!found && slot->any_required))
+                  failed = 1;
+            }
+         }
+   }
+   free(protected_bodies);
+   free(results);
+   free(ids);
+   return failed ? -1 : 0;
 }
 
 int server_native_history_tool_sources_preserved(const aimee_request_t *canonical,
-                                                  const aimee_request_t *retained)
+                                                 const aimee_request_t *retained)
 {
-   if(!aimee_ir_original_inputs_preserved(canonical,retained))return -1;
-   size_t count,retained_count;
-   if(request_source_bounds(canonical,&count)||request_source_bounds(retained,&retained_count))return -1;
-   if(required_tool_sources_preserved(canonical,retained))return -1;
-   tool_source_key_t *keys=count?calloc(count,sizeof *keys):NULL;
-   if(count&&!keys)return -1;
-   char (*bodies)[65]=count?calloc(count,sizeof *bodies):NULL;
-   if(count&&!bodies){free(keys);return -1;}
-   size_t body_work=0;
-   size_t n=0;
-   for(int i=0;i<canonical->n_messages;i++)for(int j=0;j<canonical->messages[i].n_blocks;j++)
-      if(canonical->messages[i].blocks[j].tool_source){
-         (void)source_key(&canonical->messages[i].blocks[j],&keys[n]);
-         if(required_visible_hash(canonical->messages[i].blocks[j].tool_result,bodies[n],&body_work)){free(bodies);free(keys);return -1;}
-         n++;
-      }
-   if(count){qsort(keys,count,sizeof *keys,key_compare);qsort(bodies,count,sizeof *bodies,body_hash_compare);}
-   int failed=0;
-   for(int i=0;i<retained->n_messages&&!failed;i++)for(int j=0;j<retained->messages[i].n_blocks&&!failed;j++) {
-      const aimee_block_t *block=&retained->messages[i].blocks[j];
-      if(block->type!=AIMEE_BLK_TOOL_RESULT)continue;
-      if(block->tool_source) {
-         tool_source_key_t key;
-         if(source_key(block,&key)){failed=1;break;}
-         const tool_source_key_t *found=count?bsearch(&key,keys,count,sizeof *keys,key_compare):NULL;
-         if(!found||strcmp(found->visible,key.visible))failed=1;
-      }else {
-         char body[65];
-         if(count&&(required_visible_hash(block->tool_result,body,&body_work)||bsearch(body,bodies,count,sizeof *bodies,body_hash_compare))){failed=1;break;}
-         if(!block->tool_id)continue;
-         /* A retained result with an originally sourced call ID cannot discard
-          * or rewrite its receipt. Ambiguous reused IDs fail conservatively. */
-         size_t lo=0,hi=count;
-         while(lo<hi){size_t mid=lo+(hi-lo)/2;if(strcmp(keys[mid].id,block->tool_id)<0)lo=mid+1;else hi=mid;}
-         if(lo<count&&!strcmp(keys[lo].id,block->tool_id))failed=1;
-      }
+   if (!aimee_ir_original_inputs_preserved(canonical, retained))
+      return -1;
+   size_t count, retained_count;
+   if (request_source_bounds(canonical, &count) || request_source_bounds(retained, &retained_count))
+      return -1;
+   if (required_tool_sources_preserved(canonical, retained))
+      return -1;
+   tool_source_key_t *keys = count ? calloc(count, sizeof *keys) : NULL;
+   if (count && !keys)
+      return -1;
+   char(*bodies)[65] = count ? calloc(count, sizeof *bodies) : NULL;
+   if (count && !bodies)
+   {
+      free(keys);
+      return -1;
    }
-   free(bodies);free(keys);return failed?-1:0;
+   size_t body_work = 0;
+   size_t n = 0;
+   for (int i = 0; i < canonical->n_messages; i++)
+      for (int j = 0; j < canonical->messages[i].n_blocks; j++)
+         if (canonical->messages[i].blocks[j].tool_source)
+         {
+            (void)source_key(&canonical->messages[i].blocks[j], &keys[n]);
+            if (required_visible_hash(canonical->messages[i].blocks[j].tool_result, bodies[n],
+                                      &body_work))
+            {
+               free(bodies);
+               free(keys);
+               return -1;
+            }
+            n++;
+         }
+   if (count)
+   {
+      qsort(keys, count, sizeof *keys, key_compare);
+      qsort(bodies, count, sizeof *bodies, body_hash_compare);
+   }
+   int failed = 0;
+   for (int i = 0; i < retained->n_messages && !failed; i++)
+      for (int j = 0; j < retained->messages[i].n_blocks && !failed; j++)
+      {
+         const aimee_block_t *block = &retained->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TOOL_RESULT)
+            continue;
+         if (block->tool_source)
+         {
+            tool_source_key_t key;
+            if (source_key(block, &key))
+            {
+               failed = 1;
+               break;
+            }
+            const tool_source_key_t *found =
+                count ? bsearch(&key, keys, count, sizeof *keys, key_compare) : NULL;
+            if (!found || strcmp(found->visible, key.visible))
+               failed = 1;
+         }
+         else
+         {
+            char body[65];
+            if (count && (required_visible_hash(block->tool_result, body, &body_work) ||
+                          bsearch(body, bodies, count, sizeof *bodies, body_hash_compare)))
+            {
+               failed = 1;
+               break;
+            }
+            if (!block->tool_id)
+               continue;
+            /* A retained result with an originally sourced call ID cannot discard
+             * or rewrite its receipt. Ambiguous reused IDs fail conservatively. */
+            size_t lo = 0, hi = count;
+            while (lo < hi)
+            {
+               size_t mid = lo + (hi - lo) / 2;
+               if (strcmp(keys[mid].id, block->tool_id) < 0)
+                  lo = mid + 1;
+               else
+                  hi = mid;
+            }
+            if (lo < count && !strcmp(keys[lo].id, block->tool_id))
+               failed = 1;
+         }
+      }
+   free(bodies);
+   free(keys);
+   return failed ? -1 : 0;
 }
 static int message_tool_sources(const aimee_message_t *message, int import)
 {
-   aimee_request_t request={.messages=(aimee_message_t *)message,.n_messages=1};size_t count;
-   if(request_source_bounds(&request,&count))return -1;
-   for(int i=0;i<message->n_blocks;i++) {
-      const aimee_block_t *block=&message->blocks[i];
-      if(!block->tool_source)continue;
-      const char *visible=cJSON_GetStringValue(block->tool_result);
-      if(!aimee_tool_source_visible_valid||!aimee_tool_source_visible_valid(block->tool_source,visible))return -1;
-      if(import) {
-         if(!aimee_module_history_tool_source_accept||aimee_module_history_tool_source_accept(block->tool_source,visible))return -1;
-      }else if(!aimee_module_tool_source_verify||aimee_module_tool_source_verify(block->tool_source,visible))return -1;
+   aimee_request_t request = {.messages = (aimee_message_t *)message, .n_messages = 1};
+   size_t count;
+   if (request_source_bounds(&request, &count))
+      return -1;
+   for (int i = 0; i < message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if (!block->tool_source)
+         continue;
+      const char *visible = cJSON_GetStringValue(block->tool_result);
+      if (!aimee_tool_source_visible_valid ||
+          !aimee_tool_source_visible_valid(block->tool_source, visible))
+         return -1;
+      if (import)
+      {
+         if (!aimee_module_history_tool_source_accept ||
+             aimee_module_history_tool_source_accept(block->tool_source, visible))
+            return -1;
+      }
+      else if (!aimee_module_tool_source_verify ||
+               aimee_module_tool_source_verify(block->tool_source, visible))
+         return -1;
    }
    return 0;
 }
 int server_native_history_verify_message_tool_sources(const aimee_message_t *message)
-{return message_tool_sources(message,0);}
+{
+   return message_tool_sources(message, 0);
+}
 int server_native_history_accept_message_tool_sources(const aimee_message_t *message)
-{return message_tool_sources(message,1);}
+{
+   return message_tool_sources(message, 1);
+}
 int server_native_history_accept_tool_sources(const aimee_request_t *request)
 {
-   size_t count;if(request_source_bounds(request,&count))return -1;
-   for(int i=0;i<request->n_messages;i++)
-      if(server_native_history_accept_message_tool_sources(&request->messages[i]))return -1;
+   size_t count;
+   if (request_source_bounds(request, &count))
+      return -1;
+   for (int i = 0; i < request->n_messages; i++)
+      if (server_native_history_accept_message_tool_sources(&request->messages[i]))
+         return -1;
    return 0;
 }

@@ -10,9 +10,7 @@
 
 #include "agent_exec.h" /* agent_http_post */
 #include "cJSON.h"
-#include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
-#include <limits.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,34 +19,7 @@
 
 /* --- request building --- */
 
-static int provider_import_request(cJSON *messages, cJSON *schema, aimee_request_t *out)
-{
-   cJSON *native = cJSON_CreateObject();
-   if (!native || !cJSON_AddItemToObject(native, "messages", cJSON_Duplicate(messages, 1)))
-   {
-      cJSON_Delete(native);
-      return -1;
-   }
-   char error[128];
-   int rc = openai_frontend_parse(native, out, error, sizeof error);
-   cJSON_Delete(native);
-   if (rc)
-      return -1;
-   if (schema)
-   {
-      out->output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
-                                                   .name = strdup("curator_output"),
-                                                   .schema = cJSON_Duplicate(schema, 1),
-                                                   .strict = AIMEE_STRICT_TRUE};
-      if (!out->output_format.name || !out->output_format.schema)
-      {
-         aimee_request_free(out);
-         return -1;
-      }
-   }
-   return 0;
-}
-static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
+static char *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
 {
    if (!def || !request || aimee_ir_request_admit(request))
       return NULL;
@@ -65,53 +36,10 @@ static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t
       profile.max_tokens = def->max_tokens;
       profile.has_max_tokens = 1;
    }
-   cJSON *native = openai_backend_build(&profile);
-   if (native && def->disable_thinking)
-   {
-      /* A provider-profile extension, added only at the native output boundary. */
-      cJSON *kwargs = cJSON_AddObjectToObject(native, "chat_template_kwargs");
-      if (!kwargs || !cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
-      {
-         cJSON_Delete(native);
-         return NULL;
-      }
-   }
-   return native;
+   return openai_backend_render_local(&profile, def->disable_thinking);
 }
-struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJSON *messages,
-                                           struct cJSON *json_schema)
-{
-   if (!def || !cJSON_IsArray(messages))
-      return NULL;
-   aimee_request_t request = {0};
-   if (provider_import_request(messages, json_schema, &request))
-      return NULL;
-   cJSON *native = provider_build_ir(def, &request);
-   aimee_request_free(&request);
-   return native;
-}
-
 /* --- response parsing --- */
 
-static char *provider_reasoning_text(const aimee_response_t *response)
-{
-   size_t length = 0;
-   int found = 0;
-   for (int i = 0; i < response->n_content; i++)
-      if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
-      {
-         length += strlen(response->content[i].text);
-         found = 1;
-      }
-   if (!found)
-      return NULL;
-   char *text = calloc(length + 1, 1);
-   if (text)
-      for (int i = 0; i < response->n_content; i++)
-         if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
-            strcat(text, response->content[i].text);
-   return text;
-}
 int provider_client_parse_openai(const char *body, provider_completion_t *out)
 {
    if (!out)
@@ -119,46 +47,20 @@ int provider_client_parse_openai(const char *body, provider_completion_t *out)
    memset(out, 0, sizeof *out);
    if (!body)
       return -1;
-   const char *end = NULL;
-   size_t length = strlen(body);
-   cJSON *root = cJSON_ParseWithLengthOpts(body, length, &end, 0);
-   if (end)
-      while (end < body + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
-         end++;
-   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0);
-   const char *finish =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(choice, "finish_reason"));
    char error[128];
-   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
-   int rc = root && end == body + length &&
-                    ((finish && finish[0]) || (failure && !cJSON_IsNull(failure)))
-                ? openai_backend_parse(root, &out->ir, error, sizeof error)
-                : -1;
-   cJSON_Delete(root);
-   if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message)
+   int rc = aimee_backend_parse_wire(body, strlen(body), AIMEE_WIRE_OPENAI_CHAT, &out->ir, error,
+                                     sizeof error);
+   if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message ||
+       out->ir.stop_reason == AIMEE_STOP_CONTENT_FILTER || out->ir.stop_reason == AIMEE_STOP_ERROR)
       return -1;
-   int textual = 0;
+   /* Admission keeps the complete response. The application must choose a
+    * permitted terminal state before projecting authored TEXT into its domain. */
+   int authored_text = 0;
    for (int i = 0; i < out->ir.n_content; i++)
-      textual |= out->ir.content[i].type == AIMEE_BLK_TEXT ||
-                 out->ir.content[i].type == AIMEE_BLK_THINKING;
-   if (!textual)
+      authored_text |= out->ir.content[i].type == AIMEE_BLK_TEXT && out->ir.content[i].text &&
+                       out->ir.content[i].text[0];
+   if (!authored_text)
       return -1;
-   out->content = aimee_ir_response_text_alloc(&out->ir);
-   out->reasoning = provider_reasoning_text(&out->ir);
-   /* Curator JSON recovery may inspect a reasoning-only local-model reply.
-    * This application view does not reclassify the canonical THINKING block. */
-   if ((!out->content || !out->content[0]) && out->reasoning && out->reasoning[0])
-   {
-      free(out->content);
-      out->content = strdup(out->reasoning);
-   }
-   if (!out->content)
-      return -1;
-   out->prompt_tokens = out->ir.usage_in > INT_MAX ? INT_MAX : (int)out->ir.usage_in;
-   out->completion_tokens = out->ir.usage_out > INT_MAX ? INT_MAX : (int)out->ir.usage_out;
-   snprintf(out->model, sizeof out->model, "%s", out->ir.model ? out->ir.model : "");
-   snprintf(out->finish_reason, sizeof out->finish_reason, "%s",
-            out->ir.raw_stop_reason ? out->ir.raw_stop_reason : "");
    return 0;
 }
 
@@ -221,22 +123,13 @@ int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t
       return -1;
    }
 
-   cJSON *req = provider_build_ir(def, request);
-   if (!req)
+   char *body = provider_build_ir(def, request);
+   if (!body)
    {
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "failed to build request");
       return -1;
    }
-   char *body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!body)
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "failed to serialize request");
-      return -1;
-   }
-
    /* URL = base_url + "/chat/completions" (tolerate a trailing slash). snprintf
     * is bounded (no overflow), but a truncated URL/Bearer would silently hit the
     * wrong endpoint or 401 with valid creds, so treat truncation as an error. */
@@ -307,31 +200,9 @@ int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t
    return rc;
 }
 
-int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
-                             struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
-                             size_t errlen)
-{
-   if (out)
-      memset(out, 0, sizeof *out);
-   aimee_request_t request = {0};
-   if (!out || !cJSON_IsArray(messages) || provider_import_request(messages, json_schema, &request))
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "invalid provider request");
-      return -1;
-   }
-   int rc = provider_client_complete_ir(def, &request, out, errbuf, errlen);
-   aimee_request_free(&request);
-   return rc;
-}
-
 void provider_completion_free(provider_completion_t *out)
 {
    if (!out)
       return;
    aimee_response_free(&out->ir);
-   free(out->content);
-   out->content = NULL;
-   free(out->reasoning);
-   out->reasoning = NULL;
 }

@@ -21,7 +21,7 @@ package roundtable
 import (
 	"encoding/json"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // MaxChunks mirrors RTP_MAX_CHUNKS. Running out of slots sets Truncated rather
@@ -66,14 +66,6 @@ type ChunkPlanRequest struct {
 type ChunkPlanResponse struct {
 	Plan     ChunkPlan `json:"plan"`
 	Assembly Assembly  `json:"assembly"`
-}
-
-// ChunkNeeded reports whether origin exceeds the budget at all.
-func ChunkNeeded(origin string, budgetBytes int) bool {
-	if budgetBytes <= 0 {
-		return false
-	}
-	return len(origin) > budgetBytes
 }
 
 // PlanChunks splits origin into spans of at most budgetBytes, preferring to
@@ -151,21 +143,21 @@ func encodeChunkPlan(v ChunkPlanResponse) ([]byte, error) { return json.Marshal(
 // handleChunkPlan serves StageChunkPlan. Plan and assembly come back together
 // because the caller does both back to back on the same artifact, so splitting
 // them would cost a second round trip carrying the artifact again.
-func handleChunkPlan(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleChunkPlan(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	var decoded ChunkPlanRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	plan := PlanChunks(decoded.Origin, decoded.BudgetBytes)
 	encoded, err := encodeChunkPlan(ChunkPlanResponse{
 		Plan:     plan,
 		Assembly: BuildAssembly(plan, decoded.AssemblyBudget),
 	})
-	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
-		return nil, bus.ModuleStatusInternal
+	if err != nil || uint32(len(encoded)) > ring.ModuleMessageMaxBody {
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

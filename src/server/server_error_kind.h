@@ -17,6 +17,6 @@ int server_error_kind_http_status(const char *kind);
 /* Preserve the verifier-owned caller context through an explicitly selected
  * module operation. No host identity is constructed from request arguments. */
 cJSON *server_invoke_module_caller_operation(const char *method, const char *operation,
-                                            const cJSON *args, const char *unavailable_message);
+                                             const cJSON *args, const char *unavailable_message);
 
 #endif

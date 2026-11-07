@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -110,7 +110,7 @@ func TestDelegateReductionAdmission(t *testing.T) {
 			}
 		}
 		response, status := invoke(t, ReduceRequest{Messages: json.RawMessage(PrintJSONUnformatted(messages)), Seam: "delegate", HistoryFold: true})
-		if status != bus.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
+		if status != ring.ModuleStatusOK || response.Mutated || len(response.Messages) != 0 || response.Reason != "reduction_not_admitted" {
 			t.Fatalf("unadmitted native candidate exposed: orphan=%v status=%v reason=%s", orphan, status, response.Reason)
 		}
 	}
@@ -170,7 +170,14 @@ func TestToolSourceSurvivesLossyTransforms(t *testing.T) {
 				t.Fatal("source preservation orphaned its tool call")
 			}
 			changed := messages.Clone()
-			changed.At(1).Get("blocks").At(0).Delete("tool_source")
+			block := changed.At(1).Get("blocks").At(0)
+			for index, key := range block.Keys {
+				if key == "tool_source" {
+					block.Keys = append(block.Keys[:index], block.Keys[index+1:]...)
+					block.Vals = append(block.Vals[:index], block.Vals[index+1:]...)
+					break
+				}
+			}
 			if protectedContextPreserved(messages, changed) {
 				t.Fatal("source dependency stripped while retaining its content")
 			}
@@ -189,17 +196,17 @@ func TestRecordBuildRefusesSourceDependentRange(t *testing.T) {
 	handler := NewHandler()
 	for _, test := range []struct {
 		start, end int
-		want       bus.ModuleStatus
+		want       ring.ModuleStatus
 	}{
-		{0, 3, bus.ModuleStatusInvalidRequest},
-		{1, 2, bus.ModuleStatusInvalidRequest},
-		{2, 3, bus.ModuleStatusOK},
+		{0, 3, ring.ModuleStatusInvalidRequest},
+		{1, 2, ring.ModuleStatusInvalidRequest},
+		{2, 3, ring.ModuleStatusOK},
 	} {
 		body, err := json.Marshal(RecordBuildRequest{Messages: json.RawMessage(raw), Start: test.start, End: test.end})
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, status := handler(bus.ModuleInvocation{StageID: StageRecordBuild}, body)
+		out, status := handler(ring.ModuleInvocation{StageID: StageRecordBuild}, body)
 		if status != test.want {
 			t.Fatalf("range [%d,%d): status=%v body=%s", test.start, test.end, status, out)
 		}

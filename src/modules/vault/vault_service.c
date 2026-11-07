@@ -291,12 +291,15 @@ static void vault_service_migrate_legacy_principal(const char *principal)
    free(shared);
 }
 
-vault_create_once_result_t vault_service_create_server_wrap_once(
-    const char *principal, const char *agent, const char *cred, const char *secret,
-    char *generation, size_t generation_capacity)
+vault_create_once_result_t
+vault_service_create_server_wrap_once(const char *principal, const char *agent, const char *cred,
+                                      const char *secret, char *generation,
+                                      size_t generation_capacity)
 {
-   if (generation && generation_capacity) OPENSSL_cleanse(generation, generation_capacity);
-   if (!generation || generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP || !principal || !principal[0] || !agent || !agent[0] || !cred || !cred[0] || !secret)
+   if (generation && generation_capacity)
+      OPENSSL_cleanse(generation, generation_capacity);
+   if (!generation || generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP || !principal ||
+       !principal[0] || !agent || !agent[0] || !cred || !cred[0] || !secret)
       return VAULT_CREATE_ONCE_BADARG;
    if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
       return VAULT_CREATE_ONCE_UNSUPPORTED;
@@ -305,45 +308,54 @@ vault_create_once_result_t vault_service_create_server_wrap_once(
    if (vault_server_kek(server_kek))
       result = VAULT_CREATE_ONCE_CRYPTO;
    else
-      result = vault_store_create_server_once(principal, server_kek, agent, cred, secret, generation, generation_capacity);
+      result = vault_store_create_server_once(principal, server_kek, agent, cred, secret,
+                                              generation, generation_capacity);
    OPENSSL_cleanse(server_kek, sizeof(server_kek));
-   const char *op = result == VAULT_CREATE_ONCE_CREATED ? "vault.create_server_once.created"
-                    : result == VAULT_CREATE_ONCE_REPLAY ? "vault.create_server_once.replay"
+   const char *op = result == VAULT_CREATE_ONCE_CREATED    ? "vault.create_server_once.created"
+                    : result == VAULT_CREATE_ONCE_REPLAY   ? "vault.create_server_once.replay"
                     : result == VAULT_CREATE_ONCE_CONFLICT ? "vault.create_server_once.conflict"
-                    : result == VAULT_CREATE_ONCE_RETIRED ? "vault.create_server_once.retired"
-                                                        : "vault.create_server_once.refused";
+                    : result == VAULT_CREATE_ONCE_RETIRED  ? "vault.create_server_once.retired"
+                                                           : "vault.create_server_once.refused";
    vault_status_t status = result == VAULT_CREATE_ONCE_CREATED || result == VAULT_CREATE_ONCE_REPLAY
-                              ? VAULT_OK
-                          : result == VAULT_CREATE_ONCE_RETIRED ? VAULT_ERR_RETIRED
-                          : result == VAULT_CREATE_ONCE_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
-                          : result == VAULT_CREATE_ONCE_CRYPTO ? VAULT_ERR_CRYPTO
-                          : result == VAULT_CREATE_ONCE_IO ? VAULT_ERR_IO : VAULT_ERR_BADARG;
+                               ? VAULT_OK
+                           : result == VAULT_CREATE_ONCE_RETIRED     ? VAULT_ERR_RETIRED
+                           : result == VAULT_CREATE_ONCE_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
+                           : result == VAULT_CREATE_ONCE_CRYPTO      ? VAULT_ERR_CRYPTO
+                           : result == VAULT_CREATE_ONCE_IO          ? VAULT_ERR_IO
+                                                                     : VAULT_ERR_BADARG;
    (void)vaudit(op, principal, agent, cred, ATTEST_NONE, status);
    return result;
 }
 
-vault_status_t vault_service_use_server_wrap_generation(
-    const char *principal, const char *agent, const char *cred, const char *expected_generation,
-    vault_secret_use_fn use, void *context)
+vault_status_t vault_service_use_server_wrap_generation(const char *principal, const char *agent,
+                                                        const char *cred,
+                                                        const char *expected_generation,
+                                                        vault_secret_use_fn use, void *context)
 {
    if (!principal || !principal[0] || !agent || !cred || !expected_generation || !use)
       return VAULT_ERR_BADARG;
    if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
       return VAULT_ERR_UNSUPPORTED_OP;
-   enum { CAPACITY = 64 * 1024 + 1 };
+   enum
+   {
+      CAPACITY = 64 * 1024 + 1
+   };
    char *secret = calloc(1, CAPACITY);
-   if (!secret) return VAULT_ERR_IO;
+   if (!secret)
+      return VAULT_ERR_IO;
    uint8_t kek[VAULT_KEK_LEN];
    vault_status_t status = VAULT_ERR_CRYPTO;
    if (!vault_server_kek(kek))
    {
-      int rc = vault_store_get_server_generation(principal, kek, agent, cred,
-                                                 expected_generation, secret, CAPACITY);
+      int rc = vault_store_get_server_generation(principal, kek, agent, cred, expected_generation,
+                                                 secret, CAPACITY);
       status = rc == VAULT_STORE_GENERATION_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
-             : rc == VAULT_STORE_RETIRED ? VAULT_ERR_RETIRED
-             : rc == VAULT_STORE_GENERATION_MISMATCH ? VAULT_ERR_GENERATION_MISMATCH
-             : rc == VAULT_STORE_NO_ENTRY ? VAULT_ERR_GENERATION_MISMATCH
-             : rc ? VAULT_ERR_CRYPTO : use(secret, strlen(secret), context) ? VAULT_ERR_IO : VAULT_OK;
+               : rc == VAULT_STORE_RETIRED              ? VAULT_ERR_RETIRED
+               : rc == VAULT_STORE_GENERATION_MISMATCH  ? VAULT_ERR_GENERATION_MISMATCH
+               : rc == VAULT_STORE_NO_ENTRY             ? VAULT_ERR_GENERATION_MISMATCH
+               : rc                                     ? VAULT_ERR_CRYPTO
+               : use(secret, strlen(secret), context)   ? VAULT_ERR_IO
+                                                        : VAULT_OK;
    }
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(secret, CAPACITY);
@@ -351,36 +363,41 @@ vault_status_t vault_service_use_server_wrap_generation(
    return vaudit("vault.use_server_generation", principal, agent, cred, ATTEST_NONE, status);
 }
 
-__attribute__((used, externally_visible, retain))
-vault_status_t vault_service_use_server_wrap_generation_fenced(
-    const char *principal, const char *agent, const char *cred, const char *expected_generation,
-    vault_secret_use_fn use, void *context)
+__attribute__((used, externally_visible, retain)) vault_status_t
+vault_service_use_server_wrap_generation_fenced(const char *principal, const char *agent,
+                                                const char *cred, const char *expected_generation,
+                                                vault_secret_use_fn use, void *context)
 {
    if (!principal || !principal[0] || !agent || !agent[0] || !cred || !cred[0] ||
        !expected_generation || !use || vault_fenced_use_callback_active() ||
        strnlen(principal, VAULT_PRINCIPAL_MAX) >= VAULT_PRINCIPAL_MAX ||
-       strnlen(agent, sizeof(((vault_store_entry_t *)0)->agent)) >= sizeof(((vault_store_entry_t *)0)->agent) ||
-       strnlen(cred, sizeof(((vault_store_entry_t *)0)->cred)) >= sizeof(((vault_store_entry_t *)0)->cred))
+       strnlen(agent, sizeof(((vault_store_entry_t *)0)->agent)) >=
+           sizeof(((vault_store_entry_t *)0)->agent) ||
+       strnlen(cred, sizeof(((vault_store_entry_t *)0)->cred)) >=
+           sizeof(((vault_store_entry_t *)0)->cred))
       return VAULT_ERR_BADARG;
    if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
       return VAULT_ERR_UNSUPPORTED_OP;
    int previous_cancel;
-   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel)) return VAULT_ERR_IO;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel))
+      return VAULT_ERR_IO;
    uint8_t kek[VAULT_KEK_LEN];
    vault_status_t status = VAULT_ERR_CRYPTO;
    if (!vault_server_kek(kek))
    {
       int rc = vault_store_use_server_generation_fenced(principal, kek, agent, cred,
-                                                         expected_generation, use, context);
+                                                        expected_generation, use, context);
       status = rc == VAULT_STORE_GENERATION_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
-             : rc == VAULT_STORE_RETIRED ? VAULT_ERR_RETIRED
-             : rc == VAULT_STORE_GENERATION_MISMATCH || rc == VAULT_STORE_NO_ENTRY
+               : rc == VAULT_STORE_RETIRED              ? VAULT_ERR_RETIRED
+               : rc == VAULT_STORE_GENERATION_MISMATCH || rc == VAULT_STORE_NO_ENTRY
                    ? VAULT_ERR_GENERATION_MISMATCH
-             : rc == VAULT_STORE_USE_FAILED ? VAULT_ERR_IO
-             : rc ? VAULT_ERR_CRYPTO : VAULT_OK;
+               : rc == VAULT_STORE_USE_FAILED ? VAULT_ERR_IO
+               : rc                           ? VAULT_ERR_CRYPTO
+                                              : VAULT_OK;
    }
    OPENSSL_cleanse(kek, sizeof(kek));
-   status = vaudit("vault.use_server_generation_fenced", principal, agent, cred, ATTEST_NONE, status);
+   status =
+       vaudit("vault.use_server_generation_fenced", principal, agent, cred, ATTEST_NONE, status);
    (void)pthread_setcancelstate(previous_cancel, NULL);
    return status;
 }
@@ -658,10 +675,9 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    return st;
 }
 
-__attribute__((used, externally_visible, retain))
-vault_status_t vault_service_retire_server_wrap_generation(const char *principal, const char *agent,
-                                                           const char *cred,
-                                                           const char *expected_generation)
+__attribute__((used, externally_visible, retain)) vault_status_t
+vault_service_retire_server_wrap_generation(const char *principal, const char *agent,
+                                            const char *cred, const char *expected_generation)
 {
    if (!principal || !principal[0])
       return VAULT_ERR_UNATTESTED;
@@ -677,10 +693,10 @@ vault_status_t vault_service_retire_server_wrap_generation(const char *principal
    return vaudit("vault.retire_server_generation", principal, agent, cred, ATTEST_NONE, status);
 }
 
-__attribute__((used, externally_visible, retain))
-vault_status_t vault_service_close_server_wrap_slot_once(
-    const char *principal, const char *agent, const char *cred,
-    char *closed_generation, size_t generation_capacity)
+__attribute__((used, externally_visible, retain)) vault_status_t
+vault_service_close_server_wrap_slot_once(const char *principal, const char *agent,
+                                          const char *cred, char *closed_generation,
+                                          size_t generation_capacity)
 {
    if (closed_generation && generation_capacity)
       closed_generation[0] = 0;

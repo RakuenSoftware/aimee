@@ -29,11 +29,6 @@ extern "C"
    int kb_store_lessons_record_citation(int64_t outcome_id, const char *node_id,
                                         const char *disposition);
 
-   /* Count how many DISTINCT outcome records in the same session cite `node_id`
-    * (any disposition). Used to corroborate a source before it is trusted. Returns
-    * the count, or -1 on error. */
-   int kb_store_lessons_node_citation_count(const char *session_id, const char *node_id);
-
    /* One (outcome, cited node) row for the S3b reflection pass, with the node's
     * community label (from the given generation's partition, "" if unknown) and
     * the record age as a day ordinal. */
@@ -52,23 +47,6 @@ extern "C"
     * (node, ts) for a stable read. Returns the count written, or -1 on error. */
    int kb_store_lessons_list_outcomes(const char *project_id, int64_t community_gen,
                                       kb_store_lessons_outcome_row_t *out, int max);
-
-   /* Record a verdict on a §1 audit finding (the §1↔§3 loop): writes an outcome
-    * keyed by `finding_id` citing `node_id`. verdict 'confirmed' → a 'useful'
-    * outcome (the inferred edge is real); 'refuted' → 'dead_end'. `confirmed` is
-    * set true ONLY when the actor may confirm (user/reviewer — enforce with
-    * lessons_actor_may_confirm before calling, or pass an already-gated flag), so an
-    * agent verdict stays inert. Returns the new outcome id (> 0) or -1. */
-   int64_t kb_store_lessons_record_finding_verdict(const char *finding_id, const char *project_id,
-                                                   const char *node_id, const char *verdict,
-                                                   const char *actor_source, const char *actor_id,
-                                                   int confirmed);
-
-   /* Confirm an outcome (S3c authority gate lives above this — only a
-    * user/reviewer actor should reach here). Sets confirmed=true + confirmed_by/at;
-    * the append-only trigger permits exactly this transition. Returns 0 on success,
-    * -1 on error. */
-   int kb_store_lessons_confirm_outcome(int64_t outcome_id, const char *confirmed_by);
 
 #ifdef __cplusplus
 }

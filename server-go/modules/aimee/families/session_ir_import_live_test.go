@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strings"
@@ -21,8 +21,8 @@ import (
 func TestSessionIRImportHostAuthority(t *testing.T) {
 	db := newSessDB()
 	f, _ := wire.EncodeFields(50, []string{"session", "primary", "actor", "session", "agent", strings.Repeat("a", 64), "[]", "{}", "model"})
-	_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, f)
-	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+	_, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, f)
+	if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 		t.Fatal(status)
 	}
 }

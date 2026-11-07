@@ -241,7 +241,7 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                     expected_file.write_text(original_expected)
 
             first = run()
-            assert first["text"] == "<S>fixture final 2<E>", first
+            assert first["text"] == ("<E>" if owned_launch else "<S>fixture final 2<E>"), first
             if host_tools:
                 assert len(first["host_calls"]) == 1, first
                 observed = first["host_calls"][0]
@@ -268,7 +268,7 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
             # Retain the adopted items plus the completed turn without reinjection.
             second = run(first["thread_id"])
             assert second["thread_id"] == first["thread_id"], second
-            assert second["text"] == "<S>fixture final 3<E>", second
+            assert second["text"] == ("<E>" if owned_launch else "<S>fixture final 3<E>"), second
             assert not errors, errors
             assert len(requests) == 3, len(requests)
             for number, request in enumerate(requests):
@@ -389,9 +389,15 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-binary", required=True, type=Path)
     parser.add_argument("--codex-binary", required=True, type=Path)
     arguments = parser.parse_args()
+    # The adapter requires an owned launch; ambient SDK/MCP profiles are not a
+    # supported predecessor path. Exercise that refusal before any SDK/provider
+    # work, then qualify both supported host-owned catalog layouts below.
+    refused = subprocess.run([str(arguments.adapter_binary.resolve(strict=True)),
+                              "--ownership-negative-only"], capture_output=True,
+                             text=True, timeout=15, check=False)
+    assert refused.returncode == 0, (refused.stdout, refused.stderr)
     for bounded_sdk_catalog, host_tools, owned_launch, flat_tools in (
-            (False, False, False, False), (True, False, False, False),
-            (True, True, False, False), (True, True, True, False), (True, True, True, True)):
+            (True, True, True, False), (True, True, True, True)):
         qualify(arguments.adapter_binary.resolve(strict=True),
                 arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog,
                 host_tools=host_tools, owned_launch=owned_launch, flat_tools=flat_tools)

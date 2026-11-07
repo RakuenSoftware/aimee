@@ -182,10 +182,12 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_Delete(begin);
       cJSON *conflict = cJSON_CreateObject();
-      if (!conflict) return server_send_error(conn, "out of memory", NULL);
+      if (!conflict)
+         return server_send_error(conn, "out of memory", NULL);
       cJSON_AddStringToObject(conflict, "status", "error");
       cJSON_AddStringToObject(conflict, "kind", "input_delivery_conflict");
-      cJSON_AddStringToObject(conflict, "message", "original input delivery requires reconciliation");
+      cJSON_AddStringToObject(conflict, "message",
+                              "original input delivery requires reconciliation");
       cJSON_AddStringToObject(conflict, "request_id", request_id);
       cJSON_AddNumberToObject(conflict, "http_status", 409);
       return server_send_ok(conn, conflict);

@@ -430,10 +430,17 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                 self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
                 # Exact dispatch/catalog changes do not permit semantic drift,
                 # removed assertions, duplicate blocks or edits to their bodies.
+                # The config stub's only reviewed change is the ring rename, so
+                # its drifts edit a stub body and a renamed result instead.
+                stub = path.endswith("/config_module_stub.c")
                 for drift in (
-                    current.replace("lsp", "unreviewed_lsp", 1),
+                    current.replace("return -1;", "return 0;", 1)
+                    if stub else current.replace("lsp", "unreviewed_lsp", 1),
                     current + blocks[0]["release_text"],
                     current.replace(blocks[0]["release_text"], "", 1),
+                    current.replace("*result = OURO_MODULE_CALL_OK;",
+                                    "*result = OURO_MODULE_CALL_INVALID_REQUEST;", 1)
+                    if stub else
                     current.replace("git_push", "git_status", 1)
                     if "test_mcp" in path else
                     current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)
@@ -509,11 +516,14 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             # Prove these exact changes restore the reviewed host source before
             # any pre-existing host or frozen memory normalization is applied.
             original = current
-            # Normalize the separately reviewed later native callback extraction
-            # and role membership first; search must still restore its own base.
+            # Normalize the separately reviewed later native callback extraction,
+            # role membership and gateway retirement first; search must still
+            # restore its own base.
             for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
                 if ("canonical-git-role-membership:" in block.get("review", "") or
-                        "canonical-native-project-dispatch:" in block.get("review", "")):
+                        "canonical-native-project-dispatch:" in block.get("review", "") or
+                        "retired-delegate-reply:" in block.get("review", "") or
+                        "gateway-retirement:" in block.get("review", "")):
                     self.assertEqual(original.count(block["release_text"]), 1)
                     original = original.replace(block["release_text"], block["frozen_text"], 1)
             for block in blocks:
@@ -547,6 +557,23 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     with self.subTest(path=path, delta=release[:70], drift=label):
                         self.assertNotEqual(current, drift)
                         self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_pins_retired_delegate_reply(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path in ("src/modules/protocols/mcp/mcp_tools.c",
+                     "src/tests/test_mcp_client_registry.c"):
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            for row in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if "retired-delegate-reply:" not in row.get("review", ""):
+                    continue
+                release = row["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, row["frozen_text"], 1)):
+                    self.assertNotEqual(current, drift)
+                    self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
     def test_release_validator_rejects_native_project_dispatch_drift(self) -> None:
         validator = load_release_validator()

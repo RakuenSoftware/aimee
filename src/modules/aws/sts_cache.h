@@ -68,32 +68,6 @@ extern "C"
       sts_cache_entry_t entries[STS_CACHE_MAX];
    } sts_cache_t;
 
-   /* Zero a key (all fields empty). */
-   void sts_cache_key_init(sts_cache_key_t *k);
-
-   /* Build the sorted, comma-joined region string into k->region_set from `regions`
-    * (n entries). Returns 0 on success, -1 on overflow/too many. */
-   int sts_cache_region_set(sts_cache_key_t *k, const char *const *regions, size_t n);
-
-   /* Set k->policy_hash to the SHA-256 hex of `policy_json`. */
-   void sts_cache_set_policy_hash(sts_cache_key_t *k, const char *policy_json);
-
-   /* Exact field-by-field key equality (constant-shape; no memcmp of padding). */
-   int sts_cache_key_eq(const sts_cache_key_t *a, const sts_cache_key_t *b);
-
-   void sts_cache_init(sts_cache_t *c);
-
-   /* Insert/replace the session for `key`. `expiration` is the absolute expiry; it is
-    * clamped so the entry never lives longer than STS_CACHE_TTL_MAX past `now`.
-    * Returns 0 on success, -1 on invalid args. */
-   int sts_cache_put(sts_cache_t *c, const sts_cache_key_t *key, const aws_sts_credentials_t *creds,
-                     long now, long expiration, long generation);
-
-   /* Return the live credentials for `key` ONLY on an exact key match AND now <
-    * expiration AND entry.generation == current_generation; else NULL (miss). */
-   const aws_sts_credentials_t *sts_cache_get(sts_cache_t *c, const sts_cache_key_t *key, long now,
-                                              long current_generation);
-
 #ifdef __cplusplus
 }
 #endif

@@ -18,8 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const verificationSnapshotsMax = 8
@@ -380,16 +380,16 @@ func useVerificationSnapshot(ctx context.Context, request verificationSnapshotRe
 	return verificationSnapshotResponse{OK: ok, Lease: request.Lease, Path: resource.path, Tree: tree, Commit: commit, Clean: ok && dirty == ""}
 }
 
-func handleVerificationSnapshot(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.ModuleStatus) {
+func handleVerificationSnapshot(invocation ring.ModuleInvocation, raw []byte) ([]byte, ring.ModuleStatus) {
 	var request verificationSnapshotRequest
 	if invocation.PrincipalRef != 0 || len(raw) > 16384 || !canonical.Decode(raw, &request) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if request.Op != "snapshot-source-state" && request.Op != "snapshot-create" && request.Op != "snapshot-state" && request.Op != "snapshot-renew" && request.Op != "snapshot-release" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(time.Minute))
 	defer cancel()
@@ -425,11 +425,11 @@ func handleVerificationSnapshot(invocation bus.ModuleInvocation, raw []byte) ([]
 		if request.Op == "snapshot-create" && response.Lease != "" {
 			useVerificationSnapshot(context.Background(), verificationSnapshotRequest{Op: "snapshot-release", Lease: response.Lease})
 		}
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }

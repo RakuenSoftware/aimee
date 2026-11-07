@@ -1,5 +1,6 @@
 /* vault_env_bootstrap.c — first-boot env transport into encrypted Vault. */
 #include "vault_env_bootstrap.h"
+#include "codex_client_version.h"
 #include "runtime_secret.h"
 #include "vault_service.h"
 #include "vault_store.h"
@@ -96,11 +97,6 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
 int vault_env_name_is_credential(const char *name)
 {
    return name_span_is_credential(name, name ? strlen(name) : 0, 0);
-}
-
-int vault_env_name_is_any_credential(const char *name)
-{
-   return name_span_is_credential(name, name ? strlen(name) : 0, 1);
 }
 
 int vault_env_has_credential_environment(void)
@@ -729,6 +725,7 @@ int vault_env_module_resource(void)
          if (json && cJSON_AddStringToObject(json, "token", pair.token) &&
              cJSON_AddStringToObject(json, "account_id", pair.account_id) &&
              cJSON_AddStringToObject(json, "source_digest", pair.source_digest) &&
+             cJSON_AddStringToObject(json, "client_version", AIMEE_CODEX_CLIENT_VERSION) &&
              cJSON_PrintPreallocated(json, value, sizeof value, 0))
             st = VAULT_OK;
          for (cJSON *field = json ? json->child : NULL; field; field = field->next)

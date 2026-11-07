@@ -128,15 +128,10 @@ extern "C"
    cJSON *kb_store_kb_service_feedback_record_json(const char *polarity, const char *title,
                                                    const char *description, int weight);
    cJSON *kb_store_kb_service_directive_expire_session_json(void);
-   /* Dashboard endpoints that walk KB_STORE tables.  Each returns
-    * {"status":"ok","payload":<api_* output>}. */
-   cJSON *kb_store_kb_service_dashboard_memory_stats_json(void);
    cJSON *kb_store_kb_service_dashboard_logs_json(void);
    cJSON *kb_store_kb_service_dashboard_reminders_json(void);
    cJSON *kb_store_kb_service_dashboard_recall_json(void);
    cJSON *kb_store_kb_service_dashboard_directives_json(void);
-   cJSON *kb_store_kb_service_session_briefing_commitments_json(int limit);
-   cJSON *kb_store_kb_service_session_briefing_directives_json(int limit);
    typedef struct
    {
       int64_t id;
@@ -193,7 +188,6 @@ extern "C"
    char *kb_store_kb_file_index_get_content(const char *project, const char *file_path);
    int kb_store_kb_file_index_delete_project(const char *project);
    int kb_store_kb_file_index_delete_current_project(const char *project);
-   cJSON *kb_store_kb_file_index_snapshot_json(const char *project);
 
    int kb_store_kb_service_async_queue_status(kb_store_kb_service_async_queue_stats_t *out);
    int kb_store_kb_service_async_job_get(int64_t job_id, kb_store_kb_service_async_job_t *out);

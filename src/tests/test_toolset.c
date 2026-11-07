@@ -79,7 +79,7 @@ static void test_primary_orchestration(void)
 /* A coding delegate must resolve the git WRITE tools, and a reviewer must not.
  *
  * Registering a tool is not the same as a role being able to call it:
- * agent_tools_filter_for_role drops anything the role's toolset does not name. A
+ * agent_tools_catalog_filter drops anything the role's toolset does not name. A
  * live delegate reported "there is no git_commit tool in my available toolset"
  * while the builtin registry carried it and the server had it wired — the tools
  * were being filtered straight back out here. require_aimee_git tells delegates to
@@ -134,7 +134,7 @@ static void test_find_callers_reaches_reviewers_and_coders(void)
     * would. That is the point of the check: the mechanism must carry a tool all the
     * way from one declaration to a resolved role, through BOTH gates that used to
     * need hand-editing (KNOWN_TOOLS, which silently pruned git_write's four tools,
-    * and toolset membership, which agent_tools_filter_for_role enforces). */
+    * and toolset membership, which agent_tools_catalog_filter enforces). */
    toolset_register_native_tool("index_find_callers", "core");
    toolset_register_native_tool("index_find_callers", "review_indexed");
 

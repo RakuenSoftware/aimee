@@ -8,7 +8,9 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import socket
+import socketserver
 import ssl
 import subprocess
 import tempfile
@@ -268,10 +270,15 @@ def native_main_check(binary: pathlib.Path) -> None:
             assert result.returncode != 0, (result.stdout, result.stderr)
             before = len(NativeHandler.paths)
             for command in (["agent", "token", "private"], ["remote", "set", "tcp:127.0.0.1:1"],
-                            ["--profile", "foreign", "agent", "token", "private"],
-                            ["mcp-serve"]):
+                            ["--profile", "foreign", "agent", "token", "private"]):
                 result = run(command)
                 assert result.returncode != 0 and "never-export-this" not in result.stdout
+            # Native SDKs use this registered stdio service. A clean EOF closes
+            # it successfully without granting ordinary credential/profile access.
+            result = subprocess.run([str(binary), "mcp-serve"], env=env, input="",
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 0 and result.stdout == "", (result.returncode, result.stdout)
+            assert "never-export-this" not in result.stderr
             result = run(["index", "investigate", "no grant"], {"AIMEE_API_BEARER": ""})
             assert result.returncode != 0
             result = run(["index", "investigate", "no endpoint"], {"AIMEE_API_ENDPOINT": ""})
@@ -361,6 +368,248 @@ def network_authority_check(binary: pathlib.Path) -> None:
             thread.join(timeout=1)
 
 
+def network_mcp_bootstrap_check(binary: pathlib.Path) -> None:
+    """The actual network stdio owner must keep bootstrap prose off JSON-RPC.
+
+    HTTP index/catalog responses are explicit service peers; repository identity,
+    collection, ingest and MCP framing run in the real CLI, without owner stubs.
+    """
+    class BootstrapHandler(http.server.BaseHTTPRequestHandler):
+        def respond(self) -> None:
+            size = int(self.headers.get("Content-Length", "0"))
+            request = json.loads(self.rfile.read(size)) if size else None
+            self.server.calls.append((self.path, request))
+            status = 200
+            if self.path == "/v1/cli/manifest":
+                body = {"manifest_version": 1, "routes": [
+                    {"op": "index.list", "verb": "GET", "path": "/v1/index/projects"},
+                    {"op": "mcp.tools_list", "verb": "GET", "path": "/v1/mcp/tools_list"},
+                ]}
+            elif self.path == "/v1/index/projects":
+                if self.server.mode == "bootstrap-failure":
+                    status = 503
+                    body = {"status": "error", "message": "fixture index unavailable"}
+                else:
+                    projects = [{"name": "canonical-mcp-bootstrap", "root": str(repo)}]
+                    body = {"status": "ok", "projects": projects if self.server.mode == "indexed" else []}
+            elif self.path == "/v1/index/ingest":
+                assert request["name"] == "canonical-mcp-bootstrap", request
+                assert request["root"] == str(repo)
+                body = {"status": "ok"}
+            elif self.path == "/v1/mcp/tools_list":
+                if self.server.mode == "tool-failure":
+                    status = 403
+                    body = {"status": "error", "message": "fixture catalog denied"}
+                else:
+                    body = {"status": "ok", "tools": [], "generation": 1}
+            else:
+                status = 404
+                body = {"status": "error", "message": "unexpected fixture route"}
+            raw = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        do_GET = respond
+        do_POST = respond
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    with tempfile.TemporaryDirectory(prefix="aimee-mcp-bootstrap-") as tmp:
+        root = pathlib.Path(tmp)
+        repo, home = root / "repo", root / "home"
+        repo.mkdir()
+        home.mkdir()
+        (repo / "aimee.workspace.yaml").write_text("id: canonical-mcp-bootstrap\n")
+        (repo / "main.py").write_text("print('actual collected source')\n")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), BootstrapHandler)
+        server.calls = []
+        server.mode = "unindexed"
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        env = dict(os.environ, HOME=str(home), AIMEE_HOME=str(home),
+                   AIMEE_API_ENDPOINT=f"tcp:127.0.0.1:{server.server_port}",
+                   AIMEE_API_BEARER="test-only-bootstrap", AIMEE_NO_CLIENT_INTEGRATIONS="1")
+        for name in ("AIMEE_NATIVE_CLI", "AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN",
+                     "AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID"):
+            env.pop(name, None)
+        initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        wire = "".join(json.dumps(frame) + "\n" for frame in (initialize, listing))
+        try:
+            for mode in ("unindexed", "indexed", "bootstrap-failure", "tool-failure"):
+                server.mode, server.calls = mode, []
+                result = subprocess.run([str(binary), "mcp-serve"], env=env, cwd=repo,
+                                        input=wire, capture_output=True, text=True, timeout=20)
+                assert result.returncode == 0, (mode, result.stdout, result.stderr)
+                # Parse every byte-bearing stdout line; do not discard progress
+                # or redirect stdout, which would hide the real protocol defect.
+                try:
+                    frames = [json.loads(line) for line in result.stdout.splitlines()]
+                except json.JSONDecodeError as error:
+                    raise AssertionError(("non-JSON MCP stdout", mode, result.stdout)) from error
+                assert len(frames) == 2 and all(f["jsonrpc"] == "2.0" for f in frames), (mode, frames)
+                assert frames[0]["id"] == 1 and frames[0]["result"]["serverInfo"]["name"] == "aimee"
+                if mode == "tool-failure":
+                    assert frames[1]["id"] == 2 and frames[1]["error"]["code"] == -32603
+                    assert "fixture catalog denied" in frames[1]["error"]["message"]
+                else:
+                    assert frames[1] == {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}
+                ingest = [body for path, body in server.calls if path == "/v1/index/ingest"]
+                if mode in ("unindexed", "tool-failure"):
+                    assert [r["phase"] for r in ingest] == ["begin", "stage", "seal"], ingest
+                    files = {f["rel_path"]: f["content"] for f in ingest[1]["files"]}
+                    assert files["main.py"] == "print('actual collected source')\n"
+                    assert ingest[-1]["expected_files"] == len(files)
+                else:
+                    assert not ingest, (mode, ingest)
+                assert ("could not bootstrap the remote code index" in result.stderr) == (mode == "bootstrap-failure")
+
+            # The same real checkout must not trigger network indexing in
+            # scoped-native mode or when the selected transport is local UDS.
+            # These are framing/transport checks, not affirmative tool grants.
+            for scoped in (True, False):
+                server.calls = []
+                changes = {"AIMEE_NATIVE_CLI": "1"} if scoped else {}
+                sentinel = None
+                if not scoped:
+                    sentinel = LocalUdsSentinel(home / "aimee-http.sock")
+                    sentinel.start()
+                    changes["AIMEE_API_ENDPOINT"] = "unix:" + str(home / "aimee-http.sock")
+                try:
+                    result = subprocess.run([str(binary), "mcp-serve"], env=env | changes,
+                                            cwd=repo, input=json.dumps(initialize) + "\n",
+                                            capture_output=True, text=True, timeout=20)
+                    assert result.returncode == 0, (scoped, result.stdout, result.stderr)
+                    frame = json.loads(result.stdout)
+                    assert frame["id"] == 1 and "result" in frame, (scoped, frame)
+                    assert not server.calls, (scoped, server.calls)
+                    assert "indexing project:" not in result.stdout
+                finally:
+                    if sentinel:
+                        sentinel.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+
+def workspace_served_root_check(binary: pathlib.Path, modes=(True, False, "malformed")) -> None:
+    """Capture the actual HTTP/UDS body after normal served-spec discovery."""
+    definitions = (pathlib.Path(__file__).resolve().parents[1] /
+                   "src/server/cli_argspec_defs_data.h").read_text()
+    row = re.search(r'\{"workspace\.add",\s*((?:"(?:\\.|[^"\\])*"\s*)+)\}', definitions)
+    assert row, "shipping workspace.add argument spec is missing"
+    spec = json.loads("".join(json.loads(token) for token in
+                             re.findall(r'"(?:\\.|[^"\\])*"', row.group(1))))
+    # The server still owns unrelated metadata fields; path finalization must
+    # not replace the served body with the compiled fallback.
+    spec["fields"].append({"json": "served_canary", "from": "const", "type": "const_bool", "value": True})
+
+    class WorkspaceHandler(http.server.BaseHTTPRequestHandler):
+        def respond(self) -> None:
+            size = int(self.headers.get("Content-Length", "0"))
+            request = json.loads(self.rfile.read(size)) if size else None
+            self.server.paths.append(self.path)
+            status = 200
+            if self.path == "/v1/cli/manifest":
+                body = {"manifest_version": 1, "routes": [
+                    {"op": "workspace.add", "verb": "POST", "path": "/v1/workspaces"}],
+                    "marshal": [{"method": "workspace.add", "args": self.server.spec}]
+                    if self.server.served else []}
+            elif self.path == "/v1/workspaces":
+                self.server.bodies.append(request)
+                if request.get("root"):
+                    body = {"path": request["root"], "workspace_state": "registered"}
+                else:
+                    status = 400
+                    body = {"status": "error", "message": "missing root_hint"}
+            else:
+                status = 404
+                body = {"status": "error", "message": "unexpected fixture route"}
+            raw = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        do_GET = respond
+        do_POST = respond
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    class UdsHttpServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+
+    with tempfile.TemporaryDirectory(prefix="aws-") as tmp:
+        root = pathlib.Path(tmp)
+        repo = root / "caller"
+        repo.mkdir()
+        server = UdsHttpServer(str(root / "http.sock"), WorkspaceHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for served in modes:
+                server.served = served
+                server.spec = json.loads(json.dumps(spec))
+                if served == "malformed":
+                    del server.spec["fields"][-1]["type"]
+                cases = [
+                    (["add", ".", "--provider", "shared", "--no-scan"], str(repo) + "/.", 0),
+                    (["add", "--provider", "mirror", "../sibling with spaces", "--remote",
+                      "git@example:r", "--head", ".", "--no-scan"],
+                     str(repo) + "/../sibling with spaces", 2),
+                    (["add", "/virtual/not-created", "--provider", "detached"],
+                     "/virtual/not-created", 0),
+                    (["add"], None, None),
+                    (["add", "x" * 8192], None, None),
+                ]
+                for ordinal, (command, expected, index) in enumerate(cases):
+                    home = root / (str(served) + "-" + str(ordinal))
+                    home.mkdir()
+                    env = dict(os.environ, HOME=str(home), AIMEE_HOME=str(home),
+                               AIMEE_API_ENDPOINT="unix:" + str(root / "http.sock"),
+                               AIMEE_NO_CLIENT_INTEGRATIONS="1")
+                    for key in ("AIMEE_NATIVE_CLI", "AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN",
+                                "AIMEE_API_BEARER", "AIMEE_SESSION_ID", "AIMEE_HOOK_CLIENT"):
+                        env.pop(key, None)
+                    server.bodies, server.paths = [], []
+                    result = subprocess.run([str(binary), "--json", "workspace", *command],
+                                            env=env, cwd=repo, capture_output=True,
+                                            text=True, timeout=20)
+                    if ordinal == 4:
+                        assert result.returncode != 0 and not server.bodies
+                        assert "client's cwd" in result.stderr
+                        continue
+                    assert len(server.bodies) == 1, (served, command, result.returncode, result.stdout, result.stderr, server.paths)
+                    request = server.bodies[0]
+                    if expected is None:
+                        assert result.returncode != 0 and "root" not in request
+                        assert json.loads(result.stdout)["message"] == "missing root_hint"
+                        continue
+                    assert result.returncode == 0, (served, command, result.stdout, result.stderr)
+                    assert request["root"] == expected, ("client-relative root", served, request)
+                    assert request["args"][index] == expected, request
+                    assert json.loads(result.stdout)["path"] == expected
+                    assert request.get("served_canary", False) is (served is True)
+                    if ordinal == 0:
+                        assert request["provider"] == "shared" and request["scan"] is False
+                    if ordinal == 1:
+                        assert request["provider"] == "mirror" and request["scan"] is False
+                        assert request["remote"] == "git@example:r" and request["head"] == "."
+                        assert request["args"][6] == ".", request
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=pathlib.Path)
@@ -440,6 +689,8 @@ def main() -> int:
 
     native_main_check(binary)
     network_authority_check(binary)
+    network_mcp_bootstrap_check(binary)
+    workspace_served_root_check(binary)
     if args.native_proxy_fixture:
         subprocess.run([str(args.native_proxy_fixture.resolve()), str(binary)],
                        check=True, timeout=30)

@@ -27,7 +27,7 @@ class AttributionWorkflowTests(unittest.TestCase):
         self.assertEqual(job.get('name', 'no-coauthor-trailers'), 'no-coauthor-trailers')
         self.assertNotIn('if', job)
         self.assertEqual(data['permissions'], {'contents': 'read'})
-        self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read', 'checks': 'read'})
+        self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read', 'checks': 'read', 'actions': 'read'})
         steps = job['steps']
         live = next(step for step in steps if step.get('run', '').startswith('go run '))
         self.assertTrue(any(step.get('run') ==

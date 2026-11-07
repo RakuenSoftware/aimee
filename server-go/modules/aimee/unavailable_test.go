@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // An unreachable store and a failed request are different facts and must not
@@ -56,9 +56,9 @@ func TestAnUnreachableStoreIsATransportFailureNotARefusal(t *testing.T) {
 	})
 	handler := family.Handler(&fakeDB{})
 
-	reply, status := handler(bus.ModuleInvocation{StageID: 1}, encodeRequest(1))
+	reply, status := handler(ring.ModuleInvocation{StageID: 1}, encodeRequest(1))
 
-	if status != bus.ModuleStatusInternal {
+	if status != ring.ModuleStatusInternal {
 		t.Errorf("module status = %v, want ModuleStatusInternal: an unreachable "+
 			"store is not a request the module refused", status)
 	}
@@ -76,8 +76,8 @@ func TestAWrappedUnavailableIsStillTransport(t *testing.T) {
 	family := probeFamily(func(context.Context, Queryer, []string) (uint32, []string, error) {
 		return 0, nil, errors.Join(errors.New("loading sessions"), ErrStoreUnavailable)
 	})
-	_, status := family.Handler(&fakeDB{})(bus.ModuleInvocation{StageID: 1}, encodeRequest(1))
-	if status != bus.ModuleStatusInternal {
+	_, status := family.Handler(&fakeDB{})(ring.ModuleInvocation{StageID: 1}, encodeRequest(1))
+	if status != ring.ModuleStatusInternal {
 		t.Errorf("wrapped unavailable = %v, want ModuleStatusInternal", status)
 	}
 }
@@ -91,8 +91,8 @@ func TestAnOrdinaryFailureIsStillARefusal(t *testing.T) {
 		return 0, nil, errors.New("probe: the row was not acceptable")
 	})
 
-	reply, status := family.Handler(&fakeDB{})(bus.ModuleInvocation{StageID: 1}, encodeRequest(1))
-	if status != bus.ModuleStatusOK {
+	reply, status := family.Handler(&fakeDB{})(ring.ModuleInvocation{StageID: 1}, encodeRequest(1))
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("module status = %v, want OK: the module answered", status)
 	}
 	if got := replyStatus(t, reply); got != StatusFailed {

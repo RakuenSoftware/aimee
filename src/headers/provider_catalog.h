@@ -121,14 +121,6 @@ catalog_health_t provider_catalog_get_health(const char *agent_name);
  * agents), so a caller can compare against it without special-casing. */
 int provider_catalog_cooldown_seconds(const char *agent_name);
 
-/* Query locality for a named agent. */
-provider_locality_t provider_catalog_get_locality(const char *agent_name);
-
-/* Return the locality-inferred concurrency limit for agent_name.
- * Returns 0 when no inference applies (caller should use its own default).
- * This value is advisory; explicit config overrides always win. */
-int provider_catalog_inferred_concurrency(const char *agent_name);
-
 /* Attempt to acquire one in-flight slot for agent_name.
  * max_parallel: the per-agent cap (from agent_t.max_parallel); 0 = unlimited.
  * Returns 1 if the slot was acquired, 0 if already at the cap. */
@@ -142,10 +134,5 @@ provider_locality_t provider_catalog_classify_endpoint(const char *endpoint);
 /* Human-readable label for display. */
 const char *provider_locality_label(provider_locality_t loc);
 const char *catalog_health_label(catalog_health_t h);
-
-/* Write a JSON array of catalog entries into buf (null-terminated).
- * Returns the number of bytes written (excluding the NUL), or -1 on
- * overflow. */
-int provider_catalog_dump_json(char *buf, size_t cap);
 
 #endif /* DEC_PROVIDER_CATALOG_H */

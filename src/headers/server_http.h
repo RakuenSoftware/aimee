@@ -507,6 +507,13 @@ extern "C"
     * provider above. server_ready_sample_now() forces a synchronous sample so a
     * caller never has to wait on the interval. */
    void server_ready_register(void);
+
+   /* The /v1/ready verdict, for callers that report on the server's health:
+    * 1 ready, 0 not, with the failed boundary ("audit_capacity", "local_store",
+    * ...) copied into boundary. The health method reports it, so `aimee server
+    * status` cannot say "ok" while the readiness check the container is judged
+    * by says otherwise. */
+   int server_ready_summary(char *boundary, size_t n);
    void server_ready_sample_now(void);
 
    /* The readiness decision as a pure function (no globals, locks, or I/O), so

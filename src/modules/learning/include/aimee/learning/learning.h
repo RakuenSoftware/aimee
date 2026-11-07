@@ -60,16 +60,11 @@ typedef struct
 
 struct cJSON;
 
-int learning_router_enabled(void);
 int learning_router_record_signal(const learning_signal_input_t *input,
                                   learning_dispatch_result_t *out);
-int learning_list_proposals(const char *state, const char *sink, int limit,
-                            learning_proposal_t *out, int max);
 int learning_get_proposal(int id, learning_proposal_t *out);
 int learning_accept_proposal(int id, learning_proposal_t *out);
-int learning_reject_proposal(int id, learning_proposal_t *out);
 struct cJSON *learning_proposal_to_json(const learning_proposal_t *proposal);
-int learning_proposal_from_json(const struct cJSON *obj, learning_proposal_t *out);
 struct cJSON *learning_dispatch_result_to_json(const learning_dispatch_result_t *result);
 
 /* --- Phase-2 metrics ---
@@ -90,7 +85,6 @@ typedef struct
    double commit_ratio;         /* committed / max(1, terminal) */
    int window_days;
 } learning_commit_ratio_t;
-int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out);
 
 /* Per-sink rolling-week cap utilization. Reports
  * committed_this_week / weekly_cap per sink in the canonical order
@@ -104,22 +98,6 @@ typedef struct
    int weekly_cap;
    double utilization;
 } learning_sink_cap_t;
-int learning_metrics_per_sink_caps(learning_sink_cap_t *out, int max);
-
-/* Process-local latency telemetry for the signal-ingest path
- * (learning_router_record_signal). Callers not interested in a
- * field can pass NULL. `ingest_ms_max` tracks the slowest call,
- * `ingest_ms_avg` the arithmetic mean across `ingest_calls` samples. */
-void learning_router_metrics(int64_t *ingest_calls, double *ingest_ms_avg, double *ingest_ms_max);
-void learning_router_metrics_reset(void);
-
-/* Process-local latency telemetry for the implicit-signal detection path
- * (learning_implicit_detect_turn and related detectors). `detection_calls`
- * counts turn-level dispatch invocations (not per-signal fired).
- * Callers not interested in a field can pass NULL. */
-void learning_router_detection_metrics(int64_t *detection_calls, double *detection_ms_avg,
-                                       double *detection_ms_max);
-void learning_router_detection_metrics_reset(void);
 
 /* Called by learning_implicit.c to record a detection-pass timing. */
 void learning_router_record_detection_ms(double ms);

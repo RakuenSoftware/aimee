@@ -59,10 +59,8 @@ as `private_headers` because they live at the module root rather than under
 always compiled by Make: `WITH_TPM2` and `WITH_PKCS11` toggle a `-D` flag that switches the tpm2 and
 pkcs11 sources between a real implementation and a fail-closed stub rather than omitting them.
 `vault_hwm.c` has no external includer but is live: `vault_custody_kms.c` calls
-`vault_hwm_attest_verify` in its high-water-mark attestation path. CMake compiles the six sources the
-thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
-`vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
-`vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
+`vault_hwm_attest_verify` in its high-water-mark attestation path. The CMake
+thin client compiles no vault source, the same intentional thin-client boundary recorded for
 gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the declaration audit and
 `docs/validation/core-modularization-slice-47.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root
@@ -102,6 +100,14 @@ Surfaces include `aimee vault`, server vault routes, unlock/lock/rekey/seal oper
 presence checks, provider bootstrap, and scoped injection into delegates or Git operations. Lists
 and health output expose references and state only; protocol clients and GUI forms must never receive
 stored secret values merely to display whether a credential exists.
+
+Org-vault egress credentials are adopted, bound and rotated through `aimee-kb vault
+adopt|bind|rotate|remediate|schedule|rotations`: the
+command files a request in `org_rotation_request`, and the KB daemon's rotation worker
+(`src/kb/kb_vault_rotation_worker.c`) starts and drives the fenced workflow with the AWS IAM
+provider (`src/kb/kb_vault_rotation_aws.c`). Rotation needs KMS custody, the only custody that keeps a
+signed high-water mark per slot. See the
+[credential rotation runbook](../runbooks/org-vault-credential-rotation.md).
 
 ## Data and migrations
 

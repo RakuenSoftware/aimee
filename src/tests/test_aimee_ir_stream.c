@@ -8,6 +8,23 @@
 #include <aimee/translation/aimee_ir_stream.h>
 #include "cJSON.h"
 
+/* Observe the same split event/data sink used by the live Anthropic edge. */
+static char g_emit_acc[4096];
+typedef struct
+{
+   char *data;
+   size_t capacity;
+} emit_buffer_t;
+static void emit_collect(void *context, const char *event, const char *data_json)
+{
+   emit_buffer_t fallback = {g_emit_acc, sizeof g_emit_acc};
+   emit_buffer_t *out = context ? context : &fallback;
+   size_t used = strlen(out->data);
+   int count = snprintf(out->data + used, out->capacity - used, "event: %s\ndata: %s\n\n", event,
+                        data_json);
+   assert(count >= 0 && (size_t)count < out->capacity - used);
+}
+
 /* accumulate the Anthropic SSE rendered from one OpenAI chunk */
 static void feed(const char *chunk_json, openai_stream_state_t *ost, anthropic_stream_state_t *ast,
                  char *acc, size_t accn)
@@ -16,42 +33,125 @@ static void feed(const char *chunk_json, openai_stream_state_t *ost, anthropic_s
    assert(chunk);
    aimee_delta_t deltas[16];
    int n = openai_chunk_to_deltas(chunk, ost, deltas, 16);
+   emit_buffer_t collected = {acc, accn};
    for (int i = 0; i < n; i++)
-   {
-      char *sse = anthropic_delta_render(&deltas[i], ast, "msg_1", "claude-3-5-sonnet");
-      if (sse)
-      {
-         strncat(acc, sse, accn - strlen(acc) - 1);
-         free(sse);
-      }
-   }
+      anthropic_delta_emit(&deltas[i], ast, "msg_1", "claude-3-5-sonnet", emit_collect, &collected);
    cJSON_Delete(chunk);
 }
 
-/* Collector for the callback-emit path: reframe (event,data) back to SSE so the
- * SAME assertions apply -- proving anthropic_delta_emit == anthropic_delta_render. */
-static char g_emit_acc[4096];
-static void emit_collect(void *ctx, const char *event, const char *data_json)
+static void test_unobserved_stream_usage(void)
 {
-   (void)ctx;
-   char frame[1024];
-   snprintf(frame, sizeof frame, "event: %s\ndata: %s\n\n", event, data_json);
-   strncat(g_emit_acc, frame, sizeof g_emit_acc - strlen(g_emit_acc) - 1);
-}
-static void feed_emit(const char *chunk_json, openai_stream_state_t *ost,
-                      anthropic_stream_state_t *ast)
-{
-   cJSON *chunk = cJSON_Parse(chunk_json);
-   assert(chunk);
-   aimee_delta_t deltas[16];
-   int n = openai_chunk_to_deltas(chunk, ost, deltas, 16);
-   for (int i = 0; i < n; i++)
-      anthropic_delta_emit(&deltas[i], ast, "msg_1", "claude-3-5-sonnet", emit_collect, NULL);
-   cJSON_Delete(chunk);
+   for (int observed = 0; observed < 2; observed++)
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      aimee_delta_t deltas[8];
+      cJSON *chunk =
+          cJSON_Parse(observed ? "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                                 "\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}"
+                               : "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+      int count = openai_chunk_to_deltas(chunk, &state, deltas, 8);
+      assert(count >= 0);
+      int found = 0;
+      for (int i = 0; i < count; i++)
+         if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
+         {
+            assert(deltas[i].usage_unobserved == !observed);
+            found = 1;
+         }
+      if (!found)
+      {
+         assert(openai_stream_finish(&state, deltas, 8) == 1);
+         assert(deltas[0].usage_unobserved == !observed);
+      }
+      cJSON_Delete(chunk);
+   }
+   const char *partial[] = {"null", "{}", "{\"prompt_tokens\":7}", "{\"completion_tokens\":3}"};
+   for (size_t i = 0; i < sizeof partial / sizeof *partial; i++)
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      cJSON *chunk = cJSON_Parse("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+      assert(cJSON_AddItemToObject(chunk, "usage", cJSON_Parse(partial[i])));
+      aimee_delta_t deltas[8];
+      assert(openai_chunk_to_deltas(chunk, &state, deltas, 8) >= 0);
+      assert(openai_stream_finish(&state, deltas, 8) == 1);
+      assert(deltas[0].usage_unobserved && !deltas[0].usage_in && !deltas[0].usage_out);
+      cJSON_Delete(chunk);
+   }
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      cJSON *bad = cJSON_Parse("{\"usage\":\"not counters\",\"choices\":[]}");
+      aimee_delta_t deltas[8];
+      assert(openai_chunk_to_deltas(bad, &state, deltas, 8) < 0);
+      cJSON_Delete(bad);
+   }
+   anthropic_backend_stream_state_t state;
+   anthropic_backend_stream_state_init(&state);
+   const char *events[] = {"message_start", "message_delta", "message_stop"};
+   const char *frames[] = {"{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":7}}}",
+                           "{\"delta\":{\"stop_reason\":\"end_turn\"}}", "{}"};
+   aimee_delta_t delta[2];
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *frame = cJSON_Parse(frames[i]);
+      int count = anthropic_stream_to_deltas(events[i], frame, &state, delta, 2);
+      assert(count >= 0);
+      if (i == 2)
+         assert(count == 1 && delta[0].usage_unobserved && !delta[0].usage_in &&
+                !delta[0].usage_out);
+      cJSON_Delete(frame);
+   }
+   /* Initial output is a progress observation, never a final total. */
+   for (int final_observed = 0; final_observed <= 1; final_observed++)
+   {
+      anthropic_backend_stream_state_t source;
+      anthropic_backend_stream_state_init(&source);
+      cJSON *frame = cJSON_Parse("{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":"
+                                 "20,\"output_tokens\":3}}}");
+      aimee_delta_t result[2];
+      assert(anthropic_stream_to_deltas("message_start", frame, &source, result, 2) == 1);
+      assert(!result[0].usage_unobserved && result[0].usage_out == 3);
+      cJSON_Delete(frame);
+      frame = cJSON_Parse(
+          final_observed
+              ? "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}"
+              : "{\"delta\":{\"stop_reason\":\"end_turn\"}}");
+      assert(anthropic_stream_to_deltas("message_delta", frame, &source, result, 2) >= 0);
+      cJSON_Delete(frame);
+      frame = cJSON_Parse("{}");
+      assert(anthropic_stream_to_deltas("message_stop", frame, &source, result, 2) == 1);
+      assert(result[0].usage_unobserved == !final_observed && !result[0].usage_out);
+      assert(result[0].usage_in == (final_observed ? 20 : 0));
+      cJSON_Delete(frame);
+   }
+   anthropic_stream_state_t client = {0};
+   assert(anthropic_delta_emit(delta, &client, "id", "model", NULL, NULL) < 0);
 }
 
 int main(void)
 {
+   test_unobserved_stream_usage();
+   /* A role-only Chat opening cannot claim observed input zero on Anthropic. */
+   for (int observed = 0; observed <= 1; observed++)
+   {
+      openai_stream_state_t source;
+      openai_stream_state_init(&source);
+      cJSON *chunk =
+          cJSON_Parse(observed ? "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}],\"usage\":{"
+                                 "\"prompt_tokens\":0,\"completion_tokens\":0}}"
+                               : "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}");
+      aimee_delta_t opening[4];
+      assert(openai_chunk_to_deltas(chunk, &source, opening, 4) == 1);
+      assert(opening[0].usage_unobserved == !observed);
+      anthropic_stream_state_t frontend = {0};
+      g_emit_acc[0] = 0;
+      assert((anthropic_delta_emit(opening, &frontend, "id", "model", emit_collect, NULL) > 0) ==
+             observed);
+      assert((g_emit_acc[0] != 0) == observed && frontend.started == observed);
+      cJSON_Delete(chunk);
+   }
    printf("ir-stream: ");
    openai_stream_state_t ost;
    openai_stream_state_init(&ost);
@@ -59,8 +159,9 @@ int main(void)
    char acc[4096] = "";
 
    /* text streaming */
-   feed("{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}", &ost, &ast, acc,
-        sizeof acc);
+   feed("{\"choices\":[{\"delta\":{"
+        "\"role\":\"assistant\",\"content\":\"Hel\"}}]}",
+        &ost, &ast, acc, sizeof acc);
    feed("{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}", &ost, &ast, acc, sizeof acc);
    /* a tool call, id+name then streamed arguments */
    feed("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
@@ -74,8 +175,9 @@ int main(void)
         "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4}}",
         &ost, &ast, acc, sizeof acc);
 
-   /* the accumulated Anthropic SSE must be well-formed + carry the content */
-   assert(strstr(acc, "event: message_start"));
+   /* A Chat role-only opening has unknown usage and cannot render message_start.
+    * Standalone block/terminal render cells still retain their exact content. */
+   assert(!strstr(acc, "event: message_start"));
    assert(strstr(acc, "\"type\":\"content_block_start\"") && strstr(acc, "\"type\":\"text\""));
    assert(strstr(acc, "\"type\":\"text_delta\",\"text\":\"Hel\""));
    assert(strstr(acc, "\"type\":\"text_delta\",\"text\":\"lo\""));
@@ -85,29 +187,8 @@ int main(void)
    assert(strstr(acc, "\"type\":\"content_block_stop\""));
    assert(strstr(acc, "\"stop_reason\":\"tool_use\""));
    assert(strstr(acc, "event: message_stop"));
-   /* exactly one message_start event (not re-emitted per chunk) */
-   char *ms = strstr(acc, "event: message_start");
-   assert(ms && !strstr(ms + 1, "event: message_start"));
-
-   /* The callback-emit path (anthropic_delta_emit, the live-relay sink) must
-    * produce byte-identical framed SSE to anthropic_delta_render (shared builder). */
-   openai_stream_state_t ost2;
-   openai_stream_state_init(&ost2);
-   anthropic_stream_state_t ast2 = {0};
-   g_emit_acc[0] = '\0';
-   feed_emit("{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}", &ost2,
-             &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}", &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
-             "\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}]}}]}",
-             &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
-             "\"function\":{\"arguments\":\"{\\\"p\\\":1}\"}}]}}]}",
-             &ost2, &ast2);
-   feed_emit("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
-             "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4}}",
-             &ost2, &ast2);
-   assert(strcmp(acc, g_emit_acc) == 0); /* emit == render, event-for-event */
+   /* Only a complete canonical response can supply the deferred opening usage. */
+   assert(!ast.started);
 
    /* --- OpenAI-chat reasoning -> THINKING deltas ------------------------------ */
    {
@@ -271,6 +352,168 @@ int main(void)
       A_DONE();
    }
 
+   /* Native Anthropic refusals have the same canonical meaning as content
+    * filtering, while their original stop spelling must survive the wire relay.
+    * Future provider stops still retain the unknown classification. */
+   for (int refused = 0; refused < 2; refused++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start",
+             "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}");
+      assert(n == 1);
+      A_DONE();
+      const char *reason = refused ? "refusal" : "future_stop";
+      char terminal[160];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"%s\"},\"usage\":{\"output_tokens\":0}}", reason);
+      A_FEED("message_delta", terminal);
+      assert(n == 0);
+      A_DONE();
+      A_FEED("message_stop", "{}");
+      assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
+      assert(d[0].stop_reason == (refused ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_UNKNOWN));
+      assert(!strcmp(d[0].raw_stop_reason, reason));
+      anthropic_stream_state_t rendered = {0};
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d[0], &rendered, "msg_refusal", "claude", emit_collect, NULL) >
+             0);
+      const char *wire = g_emit_acc;
+      assert(wire);
+      char expected[80];
+      snprintf(expected, sizeof expected, "\"stop_reason\":\"%s\"", reason);
+      assert(strstr(wire, expected));
+      A_DONE();
+   }
+
+   /* Refusal details outlive the message_delta JSON and remain diagnostic
+    * through canonical assembly and native rendering. Nullable and empty hints
+    * are distinct; unrelated provider fallback hints are never copied. */
+   for (int hints = 0; hints < 3; hints++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start",
+             "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}");
+      assert(n == 1);
+      A_DONE();
+      const char *details[] = {"{\"type\":\"refusal\",\"category\":null,\"explanation\":null}",
+                               "{\"type\":\"refusal\",\"category\":\"future_category\","
+                               "\"explanation\":\"Declined <untrusted> "
+                               "text.\",\"fallback_credit_token\":\"PRIVATE_HINT\"}",
+                               "{\"type\":\"refusal\",\"category\":\"\",\"explanation\":\"\"}"};
+      char terminal[512];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":%s},"
+               "\"usage\":{\"output_tokens\":0}}",
+               details[hints]);
+      A_FEED("message_delta", terminal);
+      assert(n == 0);
+      A_DONE(); /* The following pointers must not borrow this deleted JSON. */
+      A_FEED("message_stop", "{}");
+      assert(n == 1 && d[0].stop_reason == AIMEE_STOP_CONTENT_FILTER && d[0].refusal);
+      if (!hints)
+         assert(!d[0].refusal->category && !d[0].refusal->explanation);
+      else
+      {
+         assert(!strcmp(d[0].refusal->category, hints == 1 ? "future_category" : ""));
+         assert(!strcmp(d[0].refusal->explanation, hints == 1 ? "Declined <untrusted> text." : ""));
+      }
+      anthropic_stream_state_t rendered = {0};
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d[0], &rendered, "msg_refusal", "claude", emit_collect, NULL) >
+             0);
+      const char *wire = g_emit_acc;
+      assert(wire && strstr(wire, "\"stop_reason\":\"refusal\"") &&
+             strstr(wire, "\"stop_details\":{\"type\":\"refusal\""));
+      assert(!strstr(wire, "PRIVATE_HINT") && !strstr(wire, "fallback_credit_token"));
+      A_DONE();
+   }
+
+   const char *invalid_details[] = {
+       "{\"type\":\"future_type\"}", "{\"type\":\"refusal\",\"category\":[]}",
+       "{\"type\":\"refusal\",\"explanation\":true}",
+       "{\"type\":\"refusal\",\"category\":null,\"category\":\"cyber\"}"};
+   for (size_t i = 0; i < sizeof invalid_details / sizeof invalid_details[0]; i++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      char terminal[512];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":%s}}", invalid_details[i]);
+      A_FEED("message_delta", terminal);
+      assert(n == -1);
+      A_DONE();
+   }
+
+   for (int oversized = 0; oversized < 3; oversized++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      char category[66], explanation[4098];
+      memset(category, 'c', 64 + (oversized == 1));
+      category[64 + (oversized == 1)] = 0;
+      memset(explanation, 'e', 4096 + (oversized == 2));
+      explanation[4096 + (oversized == 2)] = 0;
+      cJSON *terminal = cJSON_CreateObject(), *delta = cJSON_AddObjectToObject(terminal, "delta");
+      cJSON_AddStringToObject(delta, "stop_reason", "refusal");
+      cJSON *details = cJSON_AddObjectToObject(delta, "stop_details");
+      cJSON_AddStringToObject(details, "type", "refusal");
+      cJSON_AddStringToObject(details, "category", category);
+      cJSON_AddStringToObject(details, "explanation", explanation);
+      char *encoded = cJSON_PrintUnformatted(terminal);
+      A_FEED("message_delta", encoded);
+      assert(n == (oversized ? -1 : 0));
+      A_DONE();
+      free(encoded);
+      cJSON_Delete(terminal);
+      if (!oversized)
+      {
+         A_FEED("message_stop", "{}");
+         assert(n == 1 && d[0].refusal && strlen(d[0].refusal->category) == 64 &&
+                strlen(d[0].refusal->explanation) == 4096);
+         A_DONE();
+      }
+   }
+
+   /* A canonical content filter must remain a refusal even without native hints. */
+   {
+      aimee_delta_t d = {.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_CONTENT_FILTER};
+      anthropic_stream_state_t st = {0};
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", emit_collect, NULL) > 0);
+      const char *wire = g_emit_acc;
+      assert(wire && strstr(wire, "\"stop_reason\":\"refusal\""));
+      aimee_refusal_details_t details = {.category = "future_category"};
+      d.refusal = &details;
+      d.stop_reason = AIMEE_STOP_END_TURN;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", NULL, NULL) < 0);
+      d.type = AIMEE_DELTA_TURN_START;
+      d.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", NULL, NULL) < 0);
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", emit_collect, NULL) < 0);
+      assert(!g_emit_acc[0]);
+   }
+
    /* --- Anthropic backend rejects malformed KNOWN events ---------------------- */
    {
       anthropic_backend_stream_state_t st;
@@ -392,7 +635,6 @@ int main(void)
                              .kind = AIMEE_BLK_THINKING,
                              .thinking_id = "rs_1",
                              .thinking_encrypted_content = "cipher"};
-      assert(!anthropic_delta_render(&delta, &state, "m", "model"));
       assert(anthropic_delta_emit(&delta, &state, "m", "model", NULL, NULL) < 0);
    }
 

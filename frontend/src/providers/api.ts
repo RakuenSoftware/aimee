@@ -3,6 +3,10 @@ export interface ProviderConnection {
   provider: string;
   endpoint: string;
   auth_type: string;
+  backend?: string;
+  cli_kind?: string;
+  cli_cmd?: string;
+  session_reuse?: boolean;
   model_count: number;
 }
 

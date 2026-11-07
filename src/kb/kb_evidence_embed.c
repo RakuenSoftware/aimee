@@ -1,5 +1,6 @@
 #include "module_commands.h"
 #include "json_fluent.h"
+#include "embed_result.h"
 /* kb_evidence_embed.c: evidence-vector embed worker.
  *
  * Per pending evidence_index_ops row: read the evidence artifact, extract its
@@ -150,8 +151,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    cJSON_AddNumberToObject(embed_0_args, "max_dim", embed_dim);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   cJSON *vector_json = cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector");
-   int dim = jo_float_array(vector_json, vec, embed_dim);
+   int dim = embed_reply_vector(embed_0_reply, vec, embed_dim);
    cJSON_Delete(embed_0_reply);
    if (dim != embed_dim)
    {

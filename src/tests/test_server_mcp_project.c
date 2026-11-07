@@ -99,15 +99,16 @@ int main(void)
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "cwd")),
                   "/model/supplied/foreign"));
 
-   assert(index_calls == 1);
+   /* A resolved canonical owner never consults unrelated index labels. */
+   assert(index_calls == 0);
    index_count = 0;
    invoke("{\"query\":\"owner\"}");
-   assert(index_calls == 2 && resolver_calls == 2);
+   assert(index_calls == 0 && resolver_calls == 2);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "project")),
                   "local:registered-project"));
    index_count = 1;
    invoke("{\"query\":\"owner\"}");
-   assert(index_calls == 3 && resolver_calls == 3);
+   assert(index_calls == 0 && resolver_calls == 3);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "project")),
                   "local:registered-project"));
    index_count = -1;
@@ -136,7 +137,7 @@ int main(void)
    host_cwd = expected_cwd;
    resolver_result = -1;
    invoke("{\"query\":\"owner\"}");
-   assert(resolver_calls == 2 && !cJSON_HasObjectItem(observed, "project"));
+   assert(resolver_calls == 2 && index_calls == 1 && !cJSON_HasObjectItem(observed, "project"));
    resolver_result = 0;
 
    cJSON *args = cJSON_CreateObject();

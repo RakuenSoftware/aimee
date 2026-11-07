@@ -57,7 +57,6 @@ int aimee_backend_host_profile_valid(const aimee_request_t *profile)
       return 0;
    static const char *const chat[] = {"model", "min_p",  "repeat_penalty", "chat_template_kwargs",
                                       "route", "models", "reasoning_split"};
-   static const char *const anthropic[] = {"system"};
    const char *const *keys = NULL;
    size_t count = 0;
    if (profile->frontend == AIMEE_WIRE_OPENAI_CHAT)
@@ -65,12 +64,7 @@ int aimee_backend_host_profile_valid(const aimee_request_t *profile)
       keys = chat;
       count = sizeof chat / sizeof *chat;
    }
-   else if (profile->frontend == AIMEE_WIRE_ANTHROPIC)
-   {
-      keys = anthropic;
-      count = sizeof anthropic / sizeof *anthropic;
-   }
-   else if (profile->frontend != AIMEE_WIRE_RESPONSES)
+   else if (profile->frontend != AIMEE_WIRE_ANTHROPIC && profile->frontend != AIMEE_WIRE_RESPONSES)
       return 0;
    if (!profile->raw)
       return 1;
@@ -142,14 +136,85 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
       return rc;
    return admit_owned_request(out, error, error_capacity);
 }
+static cJSON *render_profile(const aimee_request_t *request, aimee_wire_t wire,
+                             aimee_responses_profile_t profile)
+{
+   return wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_build(request)
+          : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_build(request)
+          : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_build_profile(request, profile)
+                                           : NULL;
+}
+
+static int replay_controls_supported(const aimee_request_t *request, aimee_wire_t wire,
+                                     aimee_responses_profile_t profile)
+{
+   cJSON *native = render_profile(request, wire, profile);
+   int supported = native && !aimee_backend_request_control_losses(request, wire, native);
+   cJSON_Delete(native);
+   return supported;
+}
+
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire)
 {
+   return aimee_backend_render_wire_profile(request, wire, AIMEE_RESPONSES_API, NULL);
+}
+
+char *openai_backend_render_local(const aimee_request_t *request, int disable_thinking)
+{
+   char *body = aimee_backend_render_wire(request, AIMEE_WIRE_OPENAI_CHAT);
+   if (!body || !disable_thinking)
+      return body;
+   cJSON *native = aimee_ir_json_parse_frame(body, strlen(body));
+   free(body);
+   cJSON *kwargs = native ? cJSON_GetObjectItemCaseSensitive(native, "chat_template_kwargs") : NULL;
+   if (!kwargs)
+      kwargs = native ? cJSON_AddObjectToObject(native, "chat_template_kwargs") : NULL;
+   if (!cJSON_IsObject(kwargs))
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(kwargs, "enable_thinking");
+   if (!cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   body = cJSON_PrintUnformatted(native);
+   cJSON_Delete(native);
+   return body;
+}
+
+char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wire_t wire,
+                                        aimee_responses_profile_t profile, int *control_losses)
+{
+   if (control_losses)
+      *control_losses = 0;
    if (aimee_ir_request_admit(request))
       return NULL;
+   if (aimee_ir_request_needs_model_projection(request))
+   {
+      aimee_request_t projected = {0};
+      if (aimee_ir_request_project_model(request, &projected))
+         return NULL;
+      /* Privacy projection may retain only an already closed host layout;
+       * native ingress frames are normalized by their selected host owner. */
+      if (aimee_backend_host_profile_valid(request) &&
+          aimee_backend_preserve_host_extensions(request, &projected, wire))
+      {
+         aimee_request_free(&projected);
+         return NULL;
+      }
+      char *body = aimee_backend_render_wire_profile(&projected, wire, profile, control_losses);
+      aimee_request_free(&projected);
+      return body;
+   }
    int native_transport =
-       wire != AIMEE_WIRE_RESPONSES ||
+       wire != AIMEE_WIRE_RESPONSES || profile == AIMEE_RESPONSES_API ||
        (request->stream && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request->raw, "store")));
-   if (native_transport && request->frontend == wire && request->raw_bytes &&
+   if (native_transport &&
+       !(wire == AIMEE_WIRE_ANTHROPIC && anthropic_ir_omitted_empty_messages(request)) &&
+       request->frontend == wire && request->raw_bytes &&
        request->cache_policy == AIMEE_CACHE_DEFAULT)
    {
       aimee_request_t original = {0};
@@ -163,7 +228,7 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
          int unchanged = same_model && aimee_ir_request_wire_equal(request, &original) &&
                          cJSON_Compare(request->raw, original.raw, 1);
          aimee_request_free(&original);
-         if (unchanged &&
+         if (unchanged && replay_controls_supported(request, wire, profile) &&
              (wire != AIMEE_WIRE_ANTHROPIC || aimee_anthropic_replay_valid(request, request->raw)))
          {
             char *copy = malloc(request->raw_length + 1);
@@ -175,86 +240,13 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
       else
          aimee_request_free(&original);
    }
-   cJSON *native = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_build(request)
-                   : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_build(request)
-                   : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_build(request)
-                                                    : NULL;
-   char *bytes = native ? cJSON_PrintUnformatted(native) : NULL;
+   cJSON *native = render_profile(request, wire, profile);
+   int losses = native ? aimee_backend_request_control_losses(request, wire, native) : 0;
+   if (control_losses)
+      *control_losses = losses;
+   char *bytes = native && (!losses || control_losses) ? cJSON_PrintUnformatted(native) : NULL;
    cJSON_Delete(native);
    return bytes;
-}
-
-int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, size_t length,
-                                      aimee_wire_t wire, aimee_request_t *out, char *error,
-                                      size_t capacity)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof *out);
-   if (parse_native_object(native, wire, out, error, capacity))
-      return -1;
-   if (frame)
-   {
-      aimee_request_t original = {0};
-      if (parse_wire(frame, length, wire, &original, error, capacity))
-      {
-         aimee_request_free(out);
-         return -1;
-      }
-      if (wire == AIMEE_WIRE_ANTHROPIC)
-      {
-         int mi = 0, bi = 0;
-         for (int i = 0; i < out->n_messages; i++)
-            for (int j = 0; j < out->messages[i].n_blocks; j++)
-            {
-               aimee_block_t *block = &out->messages[i].blocks[j];
-               if (block->type != AIMEE_BLK_THINKING)
-                  continue;
-               const aimee_block_t *source = NULL;
-               while (mi < original.n_messages)
-               {
-                  if (bi == original.messages[mi].n_blocks)
-                  {
-                     mi++;
-                     bi = 0;
-                     continue;
-                  }
-                  const aimee_block_t *candidate = &original.messages[mi].blocks[bi++];
-                  if (candidate->type == AIMEE_BLK_THINKING)
-                  {
-                     source = candidate;
-                     break;
-                  }
-               }
-               aimee_block_t current = *block,
-                             original_block = source ? *source : (aimee_block_t){0};
-               /* Cache marker edits are excluded from the signed prefix. */
-               current.cache_control = current.cache_ttl = NULL;
-               original_block.cache_control = original_block.cache_ttl = NULL;
-               aimee_request_t a = {.system = &current, .n_system = 1};
-               aimee_request_t b = {.system = &original_block, .n_system = source ? 1 : 0};
-               char *binding =
-                   source && source->thinking_binding && aimee_ir_request_wire_equal(&a, &b)
-                       ? strdup(source->thinking_binding)
-                       : NULL;
-               if (source && source->thinking_binding && aimee_ir_request_wire_equal(&a, &b) &&
-                   !binding)
-               {
-                  aimee_request_free(&original);
-                  aimee_request_free(out);
-                  return -1;
-               }
-               free(block->thinking_binding);
-               block->thinking_binding = binding;
-            }
-      }
-      out->raw_bytes = original.raw_bytes;
-      out->raw_length = original.raw_length;
-      original.raw_bytes = NULL;
-      original.raw_length = 0;
-      aimee_request_free(&original);
-   }
-   return admit_owned_request(out, error, capacity);
 }
 
 int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
@@ -271,16 +263,16 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
          snprintf(error, capacity, "invalid native provider response frame");
       return -1;
    }
+   int rc = -1;
    cJSON *root = aimee_ir_json_parse_frame(frame, length);
    if (!root && wire == AIMEE_WIRE_RESPONSES)
    {
-      char *bounded = malloc(length + 1);
-      if (!bounded)
-         return -1;
-      memcpy(bounded, frame, length);
-      bounded[length] = 0;
-      root = responses_backend_sse_object(bounded);
+      char *bounded = strndup(frame, length);
+      rc = bounded ? responses_backend_decode_body(bounded, out, error, capacity) : -1;
       free(bounded);
+      /* The shared decoder owns native frame/terminal validation. Its inert
+       * sidecar is not a second source of canonical completion authority. */
+      goto admit;
    }
    int shape = cJSON_IsObject(root);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -312,13 +304,13 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
                   !strcmp(status, "failed") || !strcmp(status, "cancelled"));
       }
    }
-   int rc = -1;
    if (shape && aimee_ir_json_unique(root))
       rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)
                                             : -1;
    cJSON_Delete(root);
+admit:
    if (rc || aimee_ir_response_admit(out))
    {
       if (error && capacity && !error[0])

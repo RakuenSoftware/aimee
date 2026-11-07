@@ -31,22 +31,8 @@ static cJSON *history_import(const cJSON *messages, aimee_wire_t legacy_wire, in
       goto fail;
    if (!native)
    {
-      cJSON_ArrayForEach(item, messages)
-      {
-         aimee_message_t message = {0};
-         if (aimee_ir_message_parse(item, &message) != 0)
-            goto fail;
-         cJSON *copy = aimee_ir_message_json(&message);
-         aimee_message_free(&message);
-         if (copy && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "_compaction_boundary")))
-            cJSON_AddBoolToObject(copy, "_compaction_boundary", 1);
-         if (!copy || !cJSON_AddItemToArray(out, copy))
-         {
-            cJSON_Delete(copy);
-            goto fail;
-         }
-      }
-      return out;
+      cJSON_Delete(out);
+      return aimee_ir_history_clone(messages);
    }
    cJSON *request = cJSON_CreateObject();
    if (!request)

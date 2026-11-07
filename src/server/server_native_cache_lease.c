@@ -1,101 +1,4 @@
 #include "server_native_cache_lease.h"
-#if defined(_WIN32)
-#include <stddef.h>
-#include <stdio.h>
-server_native_cache_lease_t *server_native_cache_lease_open(const char *home, const char *sdk,
-                                                            const char *session,
-                                                            const char *binding, const char *actor,
-                                                            const char *turn, char error[512])
-{
-   (void)home;
-   (void)sdk;
-   (void)session;
-   (void)binding;
-   (void)actor;
-   (void)turn;
-   if (error)
-      snprintf(error, 512, "native cache directory custody is unavailable on this platform");
-   return NULL;
-}
-int server_native_cache_lease_close(server_native_cache_lease_t *lease, int clean)
-{
-   (void)clean;
-   return lease ? -1 : 0;
-}
-server_native_cache_lease_t *server_native_cache_lease_acquire(const char *home, const char *sdk,
-                                                               const char *session,
-                                                               const char *binding,
-                                                               const char *actor, const char *turn,
-                                                               cJSON **prior, char error[512])
-{
-   if (prior)
-      *prior = NULL;
-   return server_native_cache_lease_open(home, sdk, session, binding, actor, turn, error);
-}
-server_native_cache_lease_t *server_native_cache_lease_acquire_unpublished(
-    const char *home, const char *sdk, const char *session, const char *binding, const char *actor,
-    const char *turn, cJSON **prior, char error[512])
-{
-   return server_native_cache_lease_acquire(home, sdk, session, binding, actor, turn, prior, error);
-}
-const cJSON *server_native_cache_lease_manifest(const server_native_cache_lease_t *lease)
-{
-   (void)lease;
-   return NULL;
-}
-const char *server_native_cache_lease_owner(const server_native_cache_lease_t *lease)
-{
-   (void)lease;
-   return NULL;
-}
-int server_native_cache_lease_update(server_native_cache_lease_t *lease, const cJSON *manifest)
-{
-   (void)lease;
-   (void)manifest;
-   return -1;
-}
-int server_native_cache_lease_rotate(server_native_cache_lease_t *lease, const char *turn,
-                                     char error[512])
-{
-   (void)lease;
-   (void)turn;
-   (void)error;
-   return -1;
-}
-int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *lease,
-                                                 const char *turn, char error[512])
-{
-   (void)lease;
-   (void)turn;
-   (void)error;
-   return -1;
-}
-int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
-                                       char *path, size_t capacity)
-{
-   (void)lease;
-   (void)epoch;
-   if (path && capacity)
-      path[0] = 0;
-   return -1;
-}
-int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
-                                        int fd, const char *path)
-{
-   (void)lease;
-   (void)epoch;
-   (void)fd;
-   (void)path;
-   return 0;
-}
-int server_native_cache_sdk_identity(server_native_cache_lease_t *lease, char identity[65])
-{
-   (void)lease;
-   if (identity)
-      identity[0] = 0;
-   return -1;
-}
-#else
 #include "platform_random.h"
 #include "cJSON.h"
 #include <errno.h>
@@ -355,7 +258,7 @@ int server_native_cache_lease_close(server_native_cache_lease_t *lease, int clea
 static server_native_cache_lease_t *lease_acquire(const char *home, const char *sdk,
                                                   const char *session, const char *binding,
                                                   const char *actor, const char *turn,
-                                                  cJSON **prior, char error[512], int publish_fresh)
+                                                  cJSON **prior, char error[512])
 {
    if (prior)
       *prior = NULL;
@@ -394,15 +297,9 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
    }
    struct stat presence;
    int absent = fstatat(root, marker_name, &presence, AT_SYMLINK_NOFOLLOW) && errno == ENOENT;
-   int marker = publish_fresh ? openat(root, marker_name,
-                                       O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)
-                              : -1;
-   if (!publish_fresh && !absent)
-      errno = EEXIST;
-   if (marker < 0 && (publish_fresh || !absent))
+   if (!absent)
    {
-      int saved = errno;
-      int fd = saved == EEXIST ? openat(root, marker_name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC) : -1;
+      int fd = openat(root, marker_name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
       char wire[16385];
       struct stat existing, linked_marker;
       ssize_t count = fd >= 0 ? read(fd, wire, sizeof wire) : -1;
@@ -471,16 +368,8 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
                cJSON_AddStringToObject(manifest, "actor", actor) &&
                cJSON_AddStringToObject(manifest, "turn_id", turn) &&
                cJSON_AddStringToObject(manifest, "owner", nonce);
-   char *wire = valid ? cJSON_PrintUnformatted(manifest) : NULL;
-   valid = wire && strlen(wire) <= 2048 &&
-           (!publish_fresh || (write(marker, wire, strlen(wire)) == (ssize_t)strlen(wire) &&
-                               !fsync(marker) && !fstat(marker, &status) && !fsync(root)));
-   free(wire);
-   if (marker >= 0)
-      close(marker);
    if (!valid)
    {
-      // An interrupted durable publication remains unresolved, never an absent owner.
       cJSON_Delete(manifest);
       free(lease);
       close(lock);
@@ -490,9 +379,6 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
    snprintf(lease->home, sizeof lease->home, "%s", home);
    lease->directory = root;
    lease->lock = lock;
-   if (publish_fresh)
-      lease->marker = status;
-   lease->published = publish_fresh;
    lease->manifest = manifest;
    return lease;
 unavailable:
@@ -623,50 +509,9 @@ int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *le
    lease->manifest = manifest;
    return 0;
 }
-int server_native_cache_lease_rotate(server_native_cache_lease_t *lease, const char *turn,
-                                     char error[512])
-{
-   if (error)
-      error[0] = 0;
-   if (!lease || !turn || !turn[0] || strlen(turn) > 128)
-      return -1;
-   char nonce[33];
-   cJSON *manifest = cJSON_CreateObject();
-   const char *keys[] = {"version", "sdk", "session_id", "binding", "actor"};
-   int valid = manifest && !platform_random_hex(nonce, 32);
-   for (unsigned i = 0; valid && i < sizeof keys / sizeof keys[0]; i++)
-   {
-      cJSON *item = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(lease->manifest, keys[i]), 1);
-      valid = item && cJSON_AddItemToObject(manifest, keys[i], item);
-   }
-   valid = valid && cJSON_AddStringToObject(manifest, "turn_id", turn) &&
-           cJSON_AddStringToObject(manifest, "owner", nonce);
-   int rc = valid ? replace_marker(lease, manifest) : -1;
-   cJSON_Delete(manifest);
-   if (rc && error)
-      snprintf(error, 512, "could not durably rotate exact native cache ownership");
-   return rc;
-}
-server_native_cache_lease_t *server_native_cache_lease_acquire(const char *home, const char *sdk,
-                                                               const char *session,
-                                                               const char *binding,
-                                                               const char *actor, const char *turn,
-                                                               cJSON **prior, char error[512])
-{
-   return lease_acquire(home, sdk, session, binding, actor, turn, prior, error, 1);
-}
 server_native_cache_lease_t *server_native_cache_lease_acquire_unpublished(
     const char *home, const char *sdk, const char *session, const char *binding, const char *actor,
     const char *turn, cJSON **prior, char error[512])
 {
-   return lease_acquire(home, sdk, session, binding, actor, turn, prior, error, 0);
+   return lease_acquire(home, sdk, session, binding, actor, turn, prior, error);
 }
-server_native_cache_lease_t *server_native_cache_lease_open(const char *home, const char *sdk,
-                                                            const char *session,
-                                                            const char *binding, const char *actor,
-                                                            const char *turn, char error[512])
-{
-   return server_native_cache_lease_acquire(home, sdk, session, binding, actor, turn, NULL, error);
-}
-
-#endif

@@ -1,6 +1,7 @@
 #include "json_fluent.h"
 #include "module_commands.h"
-#include <aimee/core/event_bus/bus_runtime.h>
+#include <ouroboros/runtime.h>
+#include <aimee/audit/instance_identity.h>
 #include "aimee.h"
 #include "aimee_home.h"
 #include "agent_exec.h"
@@ -50,6 +51,8 @@
 #include "kb/kb_management_runtime.h"
 #include "kb/kb_vault_operator_runtime.h"
 #include "kb_vault_operator_status.h"
+#include "kb/kb_vault_rotation_cli.h"
+#include "kb/kb_vault_rotation_worker.h"
 #include "kb_vault_tpm_runtime_lock.h"
 #include "modules/kb/c/kb_audit_worm.h"
 #include "modules/kb/c/vault_operator_status_runtime.h"
@@ -69,12 +72,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
-#endif
 
 static kb_service_ctx_t g_ctx;
 
@@ -225,15 +226,37 @@ static int kb_vault_operator_status_equal(const kb_store_vault_operator_status_t
           kb_store_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
 }
 
+static int kb_cmd_tenancy_init_kb_store(void);
+
+/* Org-vault credential rotation requests: filed here, performed by the daemon. */
+static int kb_cmd_vault_rotation(int argc, char **argv)
+{
+   if (kb_cmd_tenancy_init_kb_store() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   int rc = kb_principal_from_verify(&ovr, "", &owner) == 0
+                ? kb_vault_rotation_cli(argc, argv, &owner)
+                : 1;
+   kb_store_shutdown();
+   return rc;
+}
+
 static int kb_cmd_vault(int argc, char **argv)
 {
+   if (argc > 2 && kb_vault_rotation_cli_handles(argv[2]))
+      return kb_cmd_vault_rotation(argc, argv);
    if (argc < 3)
    {
       fputs("Usage: aimee-kb vault status [--json]\n"
             "       aimee-kb vault start --request-id=<32-lowercase-hex> "
             "[--secret-stdin] [--json]\n"
             "       aimee-kb vault resume [--secret-stdin] [--json]\n"
-            "       aimee-kb vault unseal [--secret-stdin] [--json]\n",
+            "       aimee-kb vault unseal [--secret-stdin] [--json]\n"
+            "       aimee-kb vault rotate <team_id> <model_id> [--wait]\n"
+            "       aimee-kb vault remediate <team_id> <rotation_id> [--wait]\n"
+            "       aimee-kb vault rotations <team_id>\n",
             stderr);
       return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
    }
@@ -323,7 +346,6 @@ static int kb_cmd_vault(int argc, char **argv)
    return client;
 }
 
-#ifndef _WIN32
 static void kb_signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
    (void)ucontext;
@@ -350,19 +372,6 @@ static void kb_install_signal_handlers(void)
     * the client reads the whole response before closing.) */
    signal(SIGPIPE, SIG_IGN);
 }
-#else
-static void kb_signal_handler(int sig)
-{
-   (void)sig;
-   g_ctx.running = 0;
-}
-
-static void kb_install_signal_handlers(void)
-{
-   signal(SIGINT, kb_signal_handler);
-   signal(SIGTERM, kb_signal_handler);
-}
-#endif
 
 /* Reapply host-owned embedding policy after an isolated migration session is
  * closed: lifecycle shutdown deliberately clears these process-local values. */
@@ -1505,8 +1514,8 @@ int main(int argc, char **argv)
     * bus. Bring up that bus before the first accessor, then wait only during
     * startup for the supervisor (already running in the entrypoint) to attach. */
    audit_log_open();
-   if (bus_instance_ensure_identity(kb_default_config_dir(), BUS_INSTANCE_KB,
-                                    getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
+   if (aimee_instance_ensure_identity(kb_default_config_dir(), AIMEE_INSTANCE_KB,
+                                      getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
    {
       fputs("aimee-kb: first-boot identity is unavailable or conflicts with kb\n", stderr);
       return 1;
@@ -2110,6 +2119,11 @@ int main(int argc, char **argv)
       }
    }
 
+   /* Org-vault credential rotation: filed by `aimee-kb vault rotate`, driven
+    * here because only the daemon holds custody and the selected key policy. */
+   if (kb_vault_rotation_worker_start() != 0)
+      LOG_WARN("kb.vault.rotation", "failed to start the credential rotation worker");
+
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
    /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
@@ -2149,6 +2163,7 @@ int main(int argc, char **argv)
    mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
    obs_bus_stop();
    kb_management_runtime_stop();
+   kb_vault_rotation_worker_stop();
    kb_service_shutdown(&g_ctx);
    kb_vault_operator_service_stop(vault_operator_service);
    vault_operator_service = NULL;

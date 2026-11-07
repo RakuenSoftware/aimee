@@ -1,6 +1,5 @@
 /* MiniMax's strict arguments contract is satisfied by typed egress, never by
  * rewriting malformed persisted native arguments to an invented empty object. */
-#include "agent_protocol.h"
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
@@ -28,7 +27,6 @@ int main(void)
       aimee_request_t ir = {0};
       char error[256];
       assert(openai_frontend_parse(request, &ir, error, sizeof error) < 0);
-      assert(message_history_repair(messages) < 0);
       assert(cJSON_Compare(request, before, 1));
       aimee_request_free(&ir);
       cJSON_Delete(before);

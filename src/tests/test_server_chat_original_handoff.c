@@ -16,10 +16,6 @@ void server_compute_budget_release(server_ctx_t *ctx, int grant)
    (void)ctx;
    (void)grant;
 }
-void request_context_snapshot_clear(request_context_snapshot_t *snapshot)
-{
-   memset(snapshot, 0, sizeof *snapshot);
-}
 const workspace_turn_mirror_lease_t *
 workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease)
 {
@@ -39,14 +35,23 @@ static host_text_status capture(const char *headers, const cJSON *request, void 
    *owner_state = &cookie;
    return HOST_TEXT_OK;
 }
+static const char *handoff_input_text(const cJSON *request)
+{
+   const cJSON *input = cJSON_GetObjectItemCaseSensitive(request, "message");
+   if (cJSON_IsString(input))
+      return input->valuestring;
+   const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(input, "blocks");
+   assert(cJSON_IsObject(input) && cJSON_GetArraySize(blocks) == 1);
+   return cJSON_GetStringValue(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "text"));
+}
 static host_text_status consume(void *owner_state, const cJSON *request,
                                 host_original_submission_result *out, void *state)
 {
    (void)state;
    assert(owner_state == &cookie);
    consume_calls++;
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "message")),
-                  "raw synthetic input"));
+   assert(!strcmp(handoff_input_text(request), "raw synthetic input"));
    if (selected_case == 2)
       return HOST_TEXT_REFUSED;
    out->text = strdup("safe input");
@@ -63,7 +68,7 @@ static void finish(void *owner_state, int admitted, void *state)
    (void)state;
    assert(owner_state == &cookie);
    finished++;
-   assert(admitted == (selected_case == 1));
+   assert(admitted == (selected_case == 1 || selected_case == 7));
 }
 static void destroy(void *owner_state, void *state)
 {
@@ -86,8 +91,7 @@ static void *handoff_worker(void *arg)
    {
       model_runs++;
       assert(live->original_admitted);
-      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(live->req, "message")),
-                     "safe input"));
+      assert(!strcmp(handoff_input_text(live->req), "safe input"));
    }
    else
       assert(!live->original_admitted);
@@ -107,6 +111,10 @@ static void handoff_case(int which)
    assert(!server_input_attachment_install_owner(admit, created, NULL));
    const char *frame = "{\"message\":\"raw synthetic "
                        "input\",\"aimee_session_id\":\"session-one\",\"ir_version\":0}";
+   if (which == 7)
+      frame = "{\"message\":{\"role\":\"user\",\"blocks\":[{\"type\":\"text\","
+              "\"text\":\"raw synthetic "
+              "input\"}]},\"aimee_session_id\":\"session-one\",\"ir_version\":0}";
    host_original_submission *cap = NULL;
    assert(host_original_submission_capture("header", frame, strlen(frame), &cap) == HOST_TEXT_OK &&
           cap);
@@ -135,8 +143,10 @@ static void handoff_case(int which)
    if (which == 4 || which == 5)
       assert(result == PTHREAD_CANCELED && !model_runs);
    else
-      assert(result == NULL && model_runs == (which == 1));
-   assert(cJSON_GetArraySize(log_entries) == (which == 2 || which == 4 ? 0 : which == 1 ? 3 : 2));
+      assert(result == NULL && model_runs == (which == 1 || which == 7));
+   assert(cJSON_GetArraySize(log_entries) == (which == 2 || which == 4     ? 0
+                                              : (which == 1 || which == 7) ? 3
+                                                                           : 2));
    cJSON_Delete(log_entries);
 }
 #ifndef AIMEE_CHAT_HANDOFF_TEST_MAIN
@@ -144,7 +154,7 @@ static void handoff_case(int which)
 #endif
 int AIMEE_CHAT_HANDOFF_TEST_MAIN(void)
 {
-   for (int i = 1; i <= 6; i++)
+   for (int i = 1; i <= 7; i++)
    {
       pid_t p = fork();
       assert(p >= 0);

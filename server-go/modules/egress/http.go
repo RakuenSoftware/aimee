@@ -12,12 +12,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -94,7 +93,7 @@ func (a *BusAuthorizer) Do(ctx context.Context, traceID uint64, request HTTPRequ
 
 func encodeHTTPResponse(response HTTPResponse) ([]byte, error) {
 	if len(response.Location) > 65535 || len(response.Error) > 65535 ||
-		httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body) > int(bus.ModuleMessageMaxBody) {
+		httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body) > int(ring.ModuleMessageMaxBody) {
 		return nil, errors.New("egress HTTP response exceeds the module body limit")
 	}
 	out := make([]byte, httpHeaderBytes+len(response.Location)+len(response.Error)+len(response.Body))
@@ -148,61 +147,61 @@ func validHTTPHeaders(purpose string, headers map[string]string, credentialPrese
 	return true
 }
 
-func (p policy) handleHTTP(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func (p policy) handleHTTP(invocation ring.ModuleInvocation, body []byte) ([]byte, ring.ModuleStatus) {
 	var request HTTPRequest
 	if json.Unmarshal(body, &request) != nil || invocation.Cancelled() ||
-		request.MaxResponseBytes <= 0 || request.MaxResponseBytes > int64(bus.ModuleMessageMaxBody-httpHeaderBytes) ||
+		request.MaxResponseBytes <= 0 || request.MaxResponseBytes > int64(ring.ModuleMessageMaxBody-httpHeaderBytes) ||
 		request.TimeoutMS <= 0 || time.Duration(request.TimeoutMS)*time.Millisecond > maxHTTPTimeout ||
 		!validHTTPHeaders(request.Purpose, request.Headers, request.CredentialPresent) ||
 		request.RequestSHA256 != RequestDigest(request.Method, request.TargetURL, request.Body, request.CredentialPresent) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	decision := p.decide(invocation, request.Request)
 	if !decision.Allowed {
 		encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "egress denied: " + decision.Reason})
-		return encoded, bus.ModuleStatusOK
+		return encoded, ring.ModuleStatusOK
 	}
 	var bearer []byte
 	if request.Purpose == "forge" {
 		parsed, err := url.Parse(decision.Target)
 		if err != nil || !forgeCredentialTargetAllowed(request.CredentialScope, request.CredentialResource,
 			request.Method, parsed.EscapedPath()) {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		bearer, err = p.credentials.decrypt(time.Now(), invocation, request, parsed.Hostname())
 		if err != nil {
 			encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "egress denied: " + err.Error()})
-			return encoded, bus.ModuleStatusOK
+			return encoded, ring.ModuleStatusOK
 		}
 	} else if request.Purpose == "provider" {
 		if invocation.PrincipalRef != ProvidersClientRef {
-			return nil, bus.ModuleStatusInvalidRequest
+			return nil, ring.ModuleStatusInvalidRequest
 		}
 		if request.CredentialPresent {
 			parsed, err := url.Parse(decision.Target)
 			if err != nil {
-				return nil, bus.ModuleStatusInvalidRequest
+				return nil, ring.ModuleStatusInvalidRequest
 			}
 			bearer, err = p.credentials.decrypt(time.Now(), invocation, request, parsed.Scheme+"://"+parsed.Host)
 			if err != nil {
 				encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "provider credential unavailable: " + err.Error()})
-				return encoded, bus.ModuleStatusOK
+				return encoded, ring.ModuleStatusOK
 			}
 		}
 	} else if request.CredentialPresent || request.Credential != nil || request.CredentialHandle != "" ||
 		request.CredentialScope != "" || request.CredentialResource != "" {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	response := p.executeHTTP(invocation, request, decision, bearer)
 	clear(bearer)
 	encoded, err := encodeHTTPResponse(response)
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return encoded, bus.ModuleStatusOK
+	return encoded, ring.ModuleStatusOK
 }
 
-func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest, decision Decision, bearer []byte) HTTPResponse {
+func (p policy) executeHTTP(invocation ring.ModuleInvocation, request HTTPRequest, decision Decision, bearer []byte) HTTPResponse {
 	parsed, err := url.Parse(decision.Target)
 	if err != nil {
 		return HTTPResponse{Error: "egress: invalid authorized target"}
@@ -265,6 +264,20 @@ func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest
 		return HTTPResponse{Error: "egress: " + err.Error()}
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusFound {
+		download, decision, allowed := p.forgeLogDownload(invocation, request, parsed, response.Header.Get("Location"))
+		if allowed {
+			response.Body.Close()
+			deadline, _ := ctx.Deadline()
+			download.TimeoutMS = time.Until(deadline).Milliseconds()
+			if download.TimeoutMS <= 0 {
+				return HTTPResponse{Error: "egress: log download deadline expired"}
+			}
+			// Empty credential/header custody is deliberate. A second redirect
+			// cannot satisfy the original credential-scope gate and is returned.
+			return p.executeHTTP(invocation, download, decision, nil)
+		}
+	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, request.MaxResponseBytes+1))
 	if err != nil {
 		return HTTPResponse{Status: response.StatusCode, Error: "egress: response read failed"}
@@ -302,23 +315,29 @@ func forgeCredentialTargetAllowed(operation, resource, method, path string) bool
 		if method != "GET" {
 			return false
 		}
-		positive := func(s string) bool { n, err := strconv.Atoi(s); return err == nil && n > 0 && strconv.Itoa(n) == s }
-		sha := func(s string) bool { return regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`).MatchString(s) }
-		if len(parts) == 4 && parts[3] == "issues" {
-			return true
-		}
-		if len(parts) == 5 && (parts[3] == "issues" || parts[3] == "pulls") {
-			return positive(parts[4])
-		}
-		if len(parts) == 6 && parts[3] == "commits" && (parts[5] == "pulls" || parts[5] == "check-runs") {
-			return sha(parts[4])
-		}
-		if len(parts) == 5 && parts[3] == "compare" {
-			refs := strings.Split(parts[4], "...")
-			return len(refs) == 2 && sha(refs[0]) && sha(refs[1])
-		}
-		return false
+		return len(parts) == 5 && parts[3] == "pulls" && positiveForgeID(parts[4]) || forgeAttributionReadAllowed(parts)
 	default:
 		return false
 	}
+}
+
+func positiveForgeID(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n > 0 && strconv.Itoa(n) == s
+}
+
+// No caller-supplied redirect authority: only this owner may derive one signed
+// download from an authenticated, exact-repository GitHub job-log response.
+func (p policy) forgeLogDownload(invocation ring.ModuleInvocation, original HTTPRequest, target *url.URL, location string) (HTTPRequest, Decision, bool) {
+	parts := strings.Split(strings.Trim(target.EscapedPath(), "/"), "/")
+	if invocation.Cancelled() || invocation.PrincipalRef != GitClientRef || original.Purpose != "forge" || original.Method != "GET" || original.CredentialScope != "pr_merge" || !original.CredentialPresent || original.Credential == nil || target.Scheme != "https" || target.Host != "api.github.com" || len(parts) != 7 || parts[3] != "actions" || parts[4] != "jobs" || parts[6] != "logs" || !positiveForgeID(parts[5]) || !forgeCredentialTargetAllowed(original.CredentialScope, original.CredentialResource, "GET", target.EscapedPath()) {
+		return HTTPRequest{}, Decision{}, false
+	}
+	destination, err := url.Parse(location)
+	if err != nil || destination.Scheme != "https" || destination.Hostname() == "" || destination.User != nil || destination.Fragment != "" || destination.Port() != "" && destination.Port() != "443" {
+		return HTTPRequest{}, Decision{}, false
+	}
+	request := HTTPRequest{Request: Request{TargetURL: destination.String(), Purpose: "forge", Method: "GET", RequestSHA256: RequestDigest("GET", destination.String(), nil, false)}, Headers: map[string]string{"Accept": "text/plain"}, MaxResponseBytes: original.MaxResponseBytes, TimeoutMS: original.TimeoutMS}
+	decision := p.resolveTarget(invocation, request.Request, destination)
+	return request, decision, decision.Allowed
 }

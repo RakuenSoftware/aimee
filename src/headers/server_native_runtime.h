@@ -9,6 +9,11 @@
 typedef struct server_native_runtime server_native_runtime_t;
 struct cJSON;
 
+/* Read-only private callback proof, active only while a constructor-admitted
+ * service runtime forwards its own request. No setter or wire capability exists;
+ * it never changes the owner's honest NONE transport or grants operator access. */
+int server_native_runtime_forward_service_admitted(void);
+
 /* Own one native child's local transport. The source session must already belong
  * to the attested request owner. No operator/global CLI credential is borrowed.
  * Model forwarding requires stable selected Vault source lineage (Codex OAuth
@@ -21,9 +26,6 @@ struct cJSON;
  * capture owner, independently of the producer connection, until callbacks join.
  * Model responses commit through that owner before replay-proof capture; message
  * identities include the host callback nonce, while tool identities stay exact. */
-server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
-                                                    const request_context_t *owner,
-                                                    const char *session_id);
 /* Host-prepared, post-policy profile. Copies every owned field; profile must
  * have no original native request bytes and must match the selected model.
  * A retained running capture is required. Every model callback uses its fresh
@@ -32,10 +34,6 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
  * post-policy catalog before tool completion is released to the SDK. Parallel
  * model callbacks refuse rather than fork history.
  * This constructor alone does not attest a launch or activate SDK execution. */
-server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
-                                                            const request_context_t *owner,
-                                                            const char *session_id,
-                                                            const aimee_request_t *profile);
 /* Explicit host binding from an advertised logical tool to the existing
  * registry. mcp_name is the exact MCP tools/list name, or NULL for Codex tools.
  * This is a derived protocol mapping, never a registry or effect permission. */
@@ -46,7 +44,8 @@ typedef struct
 server_native_runtime_t *
 server_native_runtime_open_bound_request(const agent_t *selected, const request_context_t *owner,
                                          const char *session, const aimee_request_t *profile,
-                                         const server_native_tool_binding_t *bindings, int count);
+                                         const server_native_tool_binding_t *bindings, int count,
+                                         char error[512]);
 /* Creator-only release after independently verifying this actual native launch.
  * Bound runtimes hold model forwarding until release; SDK bytes cannot release
  * it. Digest is non-secret launch configuration identity, not a credential. */
@@ -54,6 +53,14 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
  * grant effects: source47 independently validates the registered pending claim. */
 int server_native_runtime_set_native_owner(server_native_runtime_t *runtime,
                                            const struct cJSON *reservation);
+/* Creator-only before launch. Bounds admitted model-generation requests;
+ * count_tokens, MCP and tool routes do not spend turns. Every admitted attempt
+ * spends one turn, including a failed provider request; no retry credit. */
+int server_native_runtime_set_turn_limit(server_native_runtime_t *runtime, int limit);
+int server_native_runtime_turn_limit_reached(const server_native_runtime_t *runtime);
+/* Creator reads after callback quiescence: admitted generations plus the first
+ * attempted generation refused by the cap. This is diagnostic, not retry credit. */
+int server_native_runtime_model_turns(const server_native_runtime_t *runtime);
 int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest);
 /* Host-only original-call admission. Revalidates the committed source prefix
  * and claims once for this turn; it does not execute or authorize any effect.
@@ -78,10 +85,6 @@ int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t 
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);
-/* Immutable initial canonical source, including the running host turn. Borrowed
- * until close; NULL for a runtime without a capture owner. Native files are not
- * consulted. Later observations do not change this initial snapshot. */
-const struct cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime);
 /* A cache scope includes the captured host authority and these independently
  * attested launch/resource identities. Digests must describe the actual SDK
  * build, effective launch settings (including sandbox, built-ins and hooks),
@@ -105,6 +108,19 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
 void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime);
 void server_native_runtime_quiesce(server_native_runtime_t *runtime);
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out);
+/* Read-only accounting projection, independent of latest response completion.
+ * Known subtotals survive uncertain later sends; canonical unknown aggregates
+ * still publish zero numeric fields. Only the quiesced producer may read it. */
+typedef struct
+{
+   long input, output, cache_read, cache_write, reasoning;
+   int unobserved;
+} server_native_usage_t;
+int server_native_runtime_usage(const server_native_runtime_t *runtime, server_native_usage_t *out);
+/* Committed canonical tool results, read after callback quiescence. SDK item
+ * notifications and nested CLI requests do not invent model tool calls. */
+void server_native_runtime_tool_counts(const server_native_runtime_t *runtime, int *calls,
+                                       int *successful);
 void server_native_runtime_close(server_native_runtime_t *runtime);
 
 #endif

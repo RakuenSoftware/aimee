@@ -49,15 +49,6 @@ extern "C"
    int kb_store_entity_edge_neighbors(const char *entity, kb_store_entity_neighbor_t *out, int max,
                                       int limit_sql);
 
-   /* Neighbors of `entity` filtered to relation == `rel_a`, optionally
-    * also matching `rel_b` (NULL = single-relation filter). When
-    * `order_by_weight` is non-zero, the SQL adds ORDER BY weight DESC
-    * before LIMIT. */
-   int kb_store_entity_edge_neighbors_filtered(const char *entity, const char *rel_a,
-                                               const char *rel_b, int order_by_weight,
-                                               kb_store_entity_neighbor_t *out, int max,
-                                               int limit_sql);
-
    /* Walk-step: top-50 neighbors of `node` (symmetric, ORDER BY weight
     * DESC). Used by memory_episodes BFS. Returns full edge_t rows. */
    int kb_store_entity_edge_walk_step(const char *node, edge_t *out, int max);
@@ -83,52 +74,16 @@ extern "C"
       int weight;
    } kb_store_entity_edge_with_kinds_t;
 
-   int kb_store_entity_edge_walk_step_with_kinds(const char *node,
-                                                 kb_store_entity_edge_with_kinds_t *out, int max);
-
-   /* memory_scan recurring topics: top targets where source=? AND
-    * relation=?, GROUP BY target ORDER BY SUM(weight) DESC. */
-   int kb_store_entity_edge_top_targets_by_relation(const char *source, const char *relation,
-                                                    kb_store_entity_neighbor_t *out, int max);
-
-   /* memory_scan top partners: both directions UNION ALL, grouped by
-    * partner, summed by weight, ordered DESC. */
-   int kb_store_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
-                                                     kb_store_entity_neighbor_t *out, int max);
-
-   /* memory_assemble: top distinct triples by weight. */
-   int kb_store_entity_edge_top_distinct_triples(edge_t *out, int max);
-
    /* index.c co-citation: targets where source=? AND relation=? AND
     * weight > min_weight, plus symmetric sources where target=? same
     * filter. Returns up to `max` distinct names. */
    int kb_store_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
                                        char (*out)[128], int max);
 
-   /* memory_improve.c: bump utility_score by delta on every edge that
-    * touches the given key (source = key OR target = key). */
-   int kb_store_entity_edge_bump_utility(const char *key, double delta);
-
-   /* memory_core_search outbound only: targets where source=?, ordered
-    * by weight DESC up to limit_sql rows. */
-   int kb_store_entity_edge_outbound_neighbors(const char *source, kb_store_entity_neighbor_t *out,
-                                               int max, int limit_sql);
-
    /* memory_core_search token search: edges whose source/target/
     * relation matches `token` case-insensitively. Returns full edge_t
     * rows ordered by weight DESC. */
    int kb_store_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql);
-
-   /* Maintenance: drop CO-OCCURRENCE edges where neither endpoint appears in any
-    * L1/L2 memory key/content. Typed-fact ('semantic') edges are never pruned
-    * this way — they were asserted directly rather than observed, and leave only
-    * by §4/§5 retraction or expiry, both of which retain the row. Returns rows
-    * deleted. */
-   int kb_store_entity_edge_prune_orphans(void);
-
-   /* Maintenance: normalize weights per relation so the maximum is 100.
-    * Returns rows updated. */
-   int kb_store_entity_edge_normalize_weights(void);
 
    /* Rich edge row for `graph explain`: full provenance + scoring fields. */
    typedef struct
@@ -166,53 +121,10 @@ extern "C"
       int is_semantic;
    } kb_store_entity_edge_weighted_neighbor_t;
 
-   /* Utility half-life decay.
-    * Returns decayed utility given a stored score, a touch timestamp
-    * (ISO-8601 UTC text), and a half-life in days (default 90).
-    * Empty or invalid timestamp returns 0.0 when score is 0, or the
-    * raw score when non-zero (legacy sentinel). */
-   double kb_store_entity_edge_utility_decay(double raw_score, const char *touched_at,
-                                             int half_life_days);
-
-   /* Compute prune_priority = weight + (utility_weight * decayed_utility).
-    * Used to rank neighbours when the neighbour budget is exceeded.
-    * utility_weight=0 disables utility contribution (Phase 4 default). */
-   double kb_store_entity_edge_prune_priority(int weight, double decayed_utility,
-                                              double utility_weight);
-
-   /* Weighted neighbours: like kb_store_entity_edge_neighbors but also returns
-    * utility_score and effective_utility (decayed with half_life_days=90).
-    * When utility_scoring_enabled=0, effective_utility is set to 0.
-    * Returns count written into out. */
-   int kb_store_entity_edge_neighbors_weighted(const char *entity,
-                                               kb_store_entity_edge_weighted_neighbor_t *out,
-                                               int max, int limit_sql, int utility_scoring_enabled);
-
 /* Largest frontier a single batched neighbour read will accept. Bounds the
  * generated SQL, so the caller expands a wider frontier in chunks rather than
  * building an unbounded statement. */
 #define EE_FRONTIER_BATCH_MAX 64
-
-   /* Neighbours of a WHOLE FRONTIER in one round trip -- the batched form of
-    * kb_store_entity_edge_neighbors_weighted, returning identical fields so a
-    * traversal can swap one for the other without changing how it scores.
-    *
-    * Replaces the earlier two-hop CTE. That reader expanded a single seed to
-    * depth two and left every other level a query per node, so a walk still
-    * paid round trips proportional to its own frontier; batching by level
-    * covers depth two and every other depth with one statement each. Rows are
-    * capped per frontier node, not globally -- see the implementation.
-    *
-    * `nodes` is read but not retained. Returns count written into out. */
-   int kb_store_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
-                                                     kb_store_entity_edge_weighted_neighbor_t *out,
-                                                     int max, int limit_per_node,
-                                                     int utility_scoring_enabled);
-
-   /* Backfill utility_touched_at for rows with non-zero utility_score and
-    * empty utility_touched_at.  Returns rows updated.  Safe to call
-    * repeatedly (idempotent). */
-   int kb_store_entity_edge_backfill_utility_touched_at(void);
 
    /* --- Phase 1: entity edge uniqueness migration --- */
 
@@ -224,17 +136,6 @@ extern "C"
       int64_t largest_group; /* max rows sharing one triple */
       int64_t table_size_kb; /* estimated table + index size in KB */
    } kb_store_entity_edge_dedup_report_t;
-
-   /* Dry-run audit: count duplicate triples and estimate cost.
-    * Returns 0 on success, -1 on DB error. */
-   int kb_store_entity_edge_dedup_audit(kb_store_entity_edge_dedup_report_t *out);
-
-   /* Migrate: write rollback JSONL to rollback_path (if non-NULL), then
-    * merge duplicates — sum weights, clamp utility to [-5, 5], keep
-    * newest utility_touched_at.  dry_run=1 skips writes and fills *out.
-    * Returns 0 on success, -1 on error. */
-   int kb_store_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
-                                          kb_store_entity_edge_dedup_report_t *out);
 
    /* Returns 1 if idx_ee_unique_triple exists, 0 if not, -1 on DB error. */
    int kb_store_entity_edge_unique_index_exists(void);

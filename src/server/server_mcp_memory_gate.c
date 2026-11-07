@@ -4,7 +4,7 @@
 #include "aimee.h"
 #include "kb_client.h"
 #include "json_fluent.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 #include <string.h>
 
 const char *mcp_mutate_verb_method(const char *verb)
@@ -69,7 +69,7 @@ cJSON *server_mcp_memory_maintain_command(uint32_t capabilities, const cJSON *ar
                                     NULL);
    }
    char *raw = kb_v1_action_request("memory.maintenance_run", request);
-   cJSON *reply = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *reply = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                       ? cJSON_ParseWithOpts(raw, NULL, 1)
                       : NULL;
    free(raw);

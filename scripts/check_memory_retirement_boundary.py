@@ -13,8 +13,13 @@ def validate(root):
         raise ValueError('retired concrete owner restored or generic adapter missing')
     metadata=json.loads((root/'tests/baselines/modules/memory-compatibility-extraction.json').read_text())
     cases=metadata['cases']
-    if len(cases)!=7 or len({x['source'] for x in cases})!=7:
+    if len(cases)!=6 or len({x['source'] for x in cases})!=6:
         raise ValueError('review exact historical compatibility inventory')
+    retired=metadata.get('retired_cases',[])
+    if len(retired)!=1 or retired[0]['target']!='unit-test-benchmark-context-transport' or retired[0]['sha256']!='caeac77dc7bfe3cf1c0b68db6235054e74bf3f18c9419525a7e7ff2aa33333d8':
+        raise ValueError('original retired benchmark fixture finding changed')
+    if (root/retired[0]['source']).exists() or retired[0].get('retirement',{}).get('repository')!='RakuenSoftware/aims-db' or retired[0]['retirement'].get('source')!='experiments/legacy-aimee-go/public-owner-retirement-fixtures/20261025/retired-public-contracts/src/tests/test_benchmark_context_transport.c':
+        raise ValueError('retired benchmark fixture restored or historical reference missing')
     actual={str(p.relative_to(root)) for p in (root/'src/tests').glob('*.c') if re.search(r'\bmodule_runtime_fixture_call\s*\(', p.read_text())}
     if actual!={x['source'] for x in cases}:
         raise ValueError('unclassified legacy fixture consumer')
@@ -36,4 +41,4 @@ def validate(root):
 
 if __name__=='__main__':
     validate(ROOT)
-    print('memory-retirement-boundary: unavailable adapter; seven explicitly opt-in legacy compatibility binaries; generic contracts retained')
+    print('memory-retirement-boundary: unavailable adapter; six explicitly opt-in legacy compatibility binaries; generic contracts retained')

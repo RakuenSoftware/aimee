@@ -26,7 +26,6 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
         files = {
             "src/Makefile",
             "CMakeLists.txt",
-            "src/tests/CMakeLists.txt",
             "src/tests/Rules.mk",
             "src/headers/aimee_features.h",
         }
@@ -136,19 +135,6 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                 '#include "aimee_ir.h"\n'
             ),
             "non-canonical-module-include",
-        )
-
-    def test_ir_test_cmake_path_drift_is_rejected(self) -> None:
-        contract = next(item for item in checker.CONTRACTS if item.module == "ir-messaging")
-        self.assert_rejected(
-            contract,
-            lambda root, value: (root / "src/tests/CMakeLists.txt").write_text(
-                (root / "src/tests/CMakeLists.txt").read_text().replace(
-                    value.test_cmake_source,
-                    value.legacy_test_cmake_source,
-                )
-            ),
-            "focused-test-source",
         )
 
     def test_cmake_absence_contracts_reject_source_additions(self) -> None:

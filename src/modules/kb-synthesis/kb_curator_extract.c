@@ -1,5 +1,5 @@
 /* kb_curator_extract.c: curator drain handler — claim one extract_doc job,
- * invoke the sidecar, write artifacts to KB_STORE, mark job done/failed.
+ * invoke the canonical provider, write artifacts to KB_STORE, mark job done/failed.
  * No DB1 access from this file. */
 
 #ifndef _GNU_SOURCE
@@ -396,60 +396,6 @@ static void ce_reclaim_stale_running(int max_attempts)
    pthread_mutex_unlock(&lock);
 }
 
-/* Pick the curator-extract sidecar command from a candidate list. Shared by the
- * doc and code extract stages and exposed for testing. The script is invoked as
- * `python3 <path>`, so it only needs to be READABLE — the previous code checked
- * access(X_OK), which rejected the shipped 0644 script. */
-void kb_curator_pick_sidecar_command(const char *explicit_cmd, const char *const *candidates,
-                                     int n_candidates, char *out, size_t len)
-{
-   if (explicit_cmd && explicit_cmd[0])
-   {
-      snprintf(out, len, "%s", explicit_cmd);
-      return;
-   }
-   for (int i = 0; i < n_candidates; i++)
-   {
-      if (candidates[i] && candidates[i][0] && access(candidates[i], R_OK) == 0)
-      {
-         snprintf(out, len, "python3 %s", candidates[i]);
-         return;
-      }
-   }
-   /* Last resort: cwd-relative — only resolves when run from a repo checkout. */
-   snprintf(out, len, "python3 scripts/curator-extract.py");
-}
-
-/* Resolve the sidecar command, searching the real install locations for
- * curator-extract.py. The container images COPY scripts to /opt/aimee/scripts
- * (binary at /usr/local/bin), so the old <bindir>/../scripts heuristic computed
- * /usr/local/scripts and never matched — falling back to a cwd-relative path
- * that does not resolve from the kb working dir (/var/lib/aimee), stalling every
- * extract job. Try the image path first, then the dev/build tree. */
-void kb_curator_resolve_sidecar_command(const kb_curator_extract_opts_t *opts, char *out,
-                                        size_t len)
-{
-   char exe_rel[768] = "";
-   char exe[512];
-   ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-   if (n > 0)
-   {
-      exe[n] = '\0';
-      char *slash = strrchr(exe, '/');
-      if (slash)
-      {
-         *slash = '\0';
-         snprintf(exe_rel, sizeof(exe_rel), "%s/../scripts/curator-extract.py", exe);
-      }
-   }
-   const char *candidates[] = {
-       "/opt/aimee/scripts/curator-extract.py", /* container image (Dockerfile COPY target) */
-       exe_rel[0] ? exe_rel : NULL,             /* dev/build tree: binary beside scripts/ */
-   };
-   kb_curator_pick_sidecar_command(opts->extract_command, candidates,
-                                   (int)(sizeof(candidates) / sizeof(candidates[0])), out, len);
-}
-
 /* ── Artifact write ─────────────────────────────────────────────────────── */
 
 static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
@@ -623,14 +569,8 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
       return 1;
    }
 
-   char cmd[768];
-   kb_curator_resolve_sidecar_command(opts, cmd, sizeof(cmd));
-
-   /* Route through the §2 dispatch: a configured Tier-A provider (incl. the
-    * bundled-Gemma SYNTHESIS_ENDPOINT env) runs in-process via provider_client; else
-    * the resolved sidecar command. extract_docs is Tier-A. */
-   aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
-             (long long)job.document_id, cmd);
+   aimee_log(LOG_INFO, "kb.curator.extract", "invoking canonical curator provider for doc %lld",
+             (long long)job.document_id);
 
    /* The model can legitimately take minutes on the bundled CPU backend. The
     * durable job is already claimed, and every remaining DB operation can
@@ -640,9 +580,18 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    char sidecar_err[512] = "";
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
    cJSON *extract_schema = ce_build_extract_schema();
+   aimee_request_t model_request = {0};
+   aimee_response_t model_response = {0};
+   int model_rc = kb_curator_llm_request_init(&model_request, sys_prompt, req_str, extract_schema);
+   if (!model_rc)
+      model_rc = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, &model_request, &model_response,
+                                    sidecar_err, sizeof(sidecar_err));
+   else
+      snprintf(sidecar_err, sizeof(sidecar_err), "invalid canonical curator request");
    char *resp_str =
-       kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema, cmd,
-                          CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+       model_rc ? NULL : kb_curator_llm_text(&model_response, sidecar_err, sizeof(sidecar_err));
+   aimee_request_free(&model_request);
+   aimee_response_free(&model_response);
    cJSON_Delete(extract_schema);
    free(req_str);
 

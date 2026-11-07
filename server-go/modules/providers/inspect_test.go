@@ -115,7 +115,7 @@ func TestAnthropicProbeUsesVersionedMessagesRoute(t *testing.T) {
 			p["provider"], p["endpoint"], p["auth_type"] = "anthropic", endpoint, "x-api-key"
 			call(t, m, "provider.save_connection", p)
 			call(t, m, "model.add", object{"args": []string{"mini", "unused", "MiniMax-M3", "--registration", "minimax"}})
-			network := &fixtureNetwork{replies: []egress.HTTPResponse{response(404, `{}`), response(200, `{"content":[{"type":"text","text":"ok"}]}`)}}
+			network := &fixtureNetwork{replies: []egress.HTTPResponse{response(404, `{}`), response(200, `{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)}}
 			m.SetEgress(network)
 			out := call(t, m, "model.probe", object{"args": []string{"mini"}})
 			if !boolean(out, "execution_ok", false) {
@@ -198,22 +198,23 @@ func TestCodexProbeDoesNotBorrowAnotherConnectionsCredentials(t *testing.T) {
 
 func TestProbeResponseRequiresFinalSuccessfulOutput(t *testing.T) {
 	for _, tc := range []struct {
-		name, body    string
-		responses, ok bool
+		name, body, wire string
+		ok               bool
 	}{
-		{"codex", codexCompleted, true, true},
-		{"delta-only", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n", true, false},
-		{"failed-after-text", codexCompleted + "data: {\"type\":\"response.failed\"}\n\n", true, false},
-		{"incomplete", strings.ReplaceAll(codexCompleted, "completed", "incomplete"), true, false},
-		{"reasoning-only", strings.ReplaceAll(codexCompleted, "output_text", "reasoning_text"), true, false},
-		{"bad-event", "data: not json\n\n", true, false},
-		{"openai", `{"choices":[{"message":{"content":"ok"}}]}`, false, true},
-		{"anthropic", `{"content":[{"type":"text","text":"ok"}]}`, false, true},
-		{"invalid-json", "not json", false, false},
-		{"empty", `{}`, false, false},
+		{"codex", codexCompleted, "responses", true},
+		{"delta-only", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n", "responses", false},
+		{"failed-after-text", codexCompleted + "data: {\"type\":\"response.failed\"}\n\n", "responses", false},
+		{"incomplete", strings.ReplaceAll(codexCompleted, "completed", "incomplete"), "responses", false},
+		{"reasoning-only", strings.ReplaceAll(codexCompleted, "output_text", "reasoning_text"), "responses", false},
+		{"bad-event", "data: not json\n\n", "responses", false},
+		{"openai", `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`, "openai_chat", true},
+		{"anthropic", `{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`, "anthropic", true},
+		{"invalid-json", "not json", "openai_chat", false},
+		{"empty", `{}`, "openai_chat", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := probeResponse([]byte(tc.body), tc.responses); (err == nil) != tc.ok {
+			response, err := probeHTTPResponse([]byte(tc.body), tc.wire)
+			if (err == nil && response.CompleteText()) != tc.ok {
 				t.Fatal(err)
 			}
 		})
@@ -228,13 +229,13 @@ func TestCodexProbeAcceptsStreamedOutputWithEmptyCompletion(t *testing.T) {
 		`{"type":"response.content_part.done","part":{"type":"output_text","text":"ok"}}`,
 	} {
 		stream := "data: " + output + "\n\n"
-		if err := probeResponse([]byte(stream+completed), true); err != nil {
+		if response, err := probeHTTPResponse([]byte(stream+completed), "responses"); err != nil || !response.CompleteText() {
 			t.Fatal(err)
 		}
-		if err := probeResponse([]byte(stream), true); err == nil {
+		if response, err := probeHTTPResponse([]byte(stream), "responses"); err == nil && response.CompleteText() {
 			t.Fatal("incomplete stream accepted")
 		}
-		if err := probeResponse([]byte(stream+"data: {\"type\":\"response.failed\"}\n\n"), true); err == nil {
+		if response, err := probeHTTPResponse([]byte(stream+"data: {\"type\":\"response.failed\"}\n\n"), "responses"); err == nil && response.CompleteText() {
 			t.Fatal("failed stream accepted")
 		}
 	}

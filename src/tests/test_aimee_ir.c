@@ -222,8 +222,205 @@ static void test_owned_request_clone(void)
         "OK");
 }
 
+static void test_owned_refusal_clone(void)
+{
+   aimee_response_t source = {.stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                              .raw_stop_reason = dup("refusal")};
+   source.refusal = calloc(1, sizeof *source.refusal);
+   assert(source.refusal);
+   source.refusal->category = dup("future_category");
+   source.refusal->explanation = dup("Bounded diagnostic, not model content.");
+   aimee_response_t copy = {0};
+   assert(!aimee_ir_response_clone(&source, &copy));
+   assert(copy.refusal && copy.refusal != source.refusal);
+   assert(copy.refusal->category != source.refusal->category);
+   assert(copy.refusal->explanation != source.refusal->explanation);
+   assert(!strcmp(copy.refusal->category, source.refusal->category));
+   assert(!strcmp(copy.refusal->explanation, source.refusal->explanation));
+   aimee_response_free(&source);
+   assert(!strcmp(copy.refusal->category, "future_category"));
+   aimee_response_free(&copy);
+}
+
+static void test_refusal_details_validation(void)
+{
+   aimee_refusal_details_t details = {0};
+   assert(aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_valid(NULL));
+   cJSON *json = aimee_refusal_details_json(&details);
+   assert(json && cJSON_GetArraySize(json) == 2);
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(json, "category")));
+   aimee_refusal_details_t *parsed = NULL;
+   assert(!aimee_refusal_details_parse(json, &parsed));
+   assert(parsed && !parsed->category && !parsed->explanation);
+   cJSON_Delete(json);
+   details.category = "unknown_future_category";
+   details.explanation = "A diagnostic only; never an instruction.";
+   json = aimee_refusal_details_json(&details);
+   assert(!aimee_refusal_details_parse(json, &parsed));
+   assert(!strcmp(parsed->category, details.category));
+   assert(!strcmp(parsed->explanation, details.explanation));
+   cJSON_Delete(json);
+   const char *invalid[] = {
+       "{\"category\":null}",
+       "{\"category\":false,\"explanation\":null}",
+       "{\"category\":null,\"explanation\":[]}",
+       "{\"category\":null,\"category\":null,\"explanation\":null}",
+       "{\"category\":null,\"explanation\":null,\"fallback_credit_token\":\"never adopt\"}",
+       "{\"type\":\"refusal\",\"explanation\":null}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      json = cJSON_Parse(invalid[i]);
+      assert(json);
+      aimee_refusal_details_t *before = parsed;
+      assert(aimee_refusal_details_parse(json, &parsed) < 0 && parsed == before);
+      cJSON_Delete(json);
+   }
+   char category[66], explanation[4098];
+   memset(category, 'x', sizeof category);
+   memset(explanation, 'x', sizeof explanation);
+   category[64] = 0;
+   explanation[4096] = 0;
+   details = (aimee_refusal_details_t){category, explanation};
+   assert(aimee_refusal_details_valid(&details));
+   category[64] = 'x';
+   category[65] = 0;
+   assert(!aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_json(&details));
+   category[64] = 0;
+   explanation[4096] = 'x';
+   explanation[4097] = 0;
+   assert(!aimee_refusal_details_valid(&details));
+   explanation[4096] = 0;
+   const char *bad_utf8[] = {"\xc0\x80", "\xed\xa0\x80", "\xf4\x90\x80\x80", "\xe2\x82"};
+   for (size_t i = 0; i < sizeof bad_utf8 / sizeof *bad_utf8; i++)
+   {
+      details.category = (char *)bad_utf8[i];
+      assert(!aimee_refusal_details_valid(&details));
+   }
+   details.category = "\xe2\x82\xac";
+   assert(aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_parse(NULL, &parsed) && !parsed);
+   aimee_refusal_details_free(parsed);
+}
+
+static void test_refusal_builder_and_admission(void)
+{
+   aimee_refusal_details_t details = {.category = "future", .explanation = NULL};
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START, .refusal = &details};
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0 && !builder.started);
+   delta.refusal = NULL;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   delta = (aimee_delta_t){
+       .type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN, .refusal = &details};
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0 && !builder.complete);
+   delta.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   delta.raw_stop_reason = "refusal";
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   assert(builder.complete && builder.response.refusal && builder.response.refusal != &details &&
+          !strcmp(builder.response.refusal->category, "future"));
+   assert(!builder.response.refusal->explanation);
+   assert(!strcmp(builder.response.raw_stop_reason, "refusal"));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   builder.response.error_message = dup("contradictory API error");
+   assert(aimee_ir_response_admit(&builder.response) < 0);
+   free(builder.response.error_message);
+   builder.response.error_message = NULL;
+   builder.response.stop_reason = AIMEE_STOP_END_TURN;
+   assert(aimee_ir_response_admit(&builder.response) < 0);
+   aimee_ir_response_builder_free(&builder);
+}
+
+static void test_general_complete_media(void)
+{
+   cJSON *raw = cJSON_Parse("{\"opaque_media\":9007199254740993}");
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "authored"},
+       {.type = AIMEE_BLK_THINKING, .text = "private", .thinking_encrypted_content = "opaque"},
+       {.type = AIMEE_BLK_IMAGE,
+        .media_type = "image/png",
+        .media_ref = "data:image/png;base64,eA==",
+        .raw = raw},
+       {.type = AIMEE_BLK_DOCUMENT,
+        .media_type = "application/pdf",
+        .media_ref = "https://owned.invalid/document"}};
+   aimee_response_t response = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .content = blocks, .n_content = 4};
+   aimee_response_t before = response;
+   assert(!aimee_ir_response_complete_valid(&response));
+   assert(aimee_ir_response_complete_text_valid(&response));
+   assert(!memcmp(&before, &response, sizeof response));
+   response.content = &blocks[2];
+   response.n_content = 1;
+   assert(!aimee_ir_response_complete_valid(&response) &&
+          aimee_ir_response_complete_text_valid(&response));
+   response.content = &blocks[3];
+   assert(!aimee_ir_response_complete_valid(&response));
+   response.content = &blocks[1];
+   assert(aimee_ir_response_complete_valid(&response));
+   response.content = blocks;
+   response.n_content = 1;
+   assert(!aimee_ir_response_complete_valid(&response));
+   for (int stop = AIMEE_STOP_UNKNOWN; stop <= AIMEE_STOP_ERROR; stop++)
+   {
+      response.stop_reason = stop;
+      assert((aimee_ir_response_complete_valid(&response) == 0) ==
+             (stop == AIMEE_STOP_END_TURN || stop == AIMEE_STOP_STOP_SEQUENCE));
+   }
+   response.stop_reason = AIMEE_STOP_END_TURN;
+   response.error_message = "diagnostic";
+   assert(aimee_ir_response_complete_valid(&response));
+   response.error_message = NULL;
+   blocks[0].type = AIMEE_BLK_TOOL_USE;
+   blocks[0].tool_id = "call";
+   blocks[0].tool_name = "tool";
+   assert(aimee_ir_response_complete_valid(&response));
+   blocks[0].type = AIMEE_BLK_TOOL_RESULT;
+   assert(aimee_ir_response_complete_valid(&response));
+   blocks[0].type = AIMEE_BLK_TEXT;
+   blocks[0].text = "";
+   assert(aimee_ir_response_complete_valid(&response));
+   response.n_content = 0;
+   assert(aimee_ir_response_complete_valid(&response));
+   cJSON_Delete(raw);
+}
+
+static void test_request_from_original_message(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "first 雪"},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/input.png"},
+                             {.type = AIMEE_BLK_TEXT, .text = "last"}};
+   blocks[1].raw = cJSON_Parse("{\"opaque\":true}");
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 3};
+   message.raw = cJSON_Parse("{\"owner\":\"source\"}");
+   assert(blocks[1].raw && message.raw);
+   aimee_request_t request = {0};
+   assert(!aimee_ir_request_from_message(&request, "host policy", &message, 128, 0));
+   assert(request.n_system == 1 && request.n_messages == 1 && request.messages[0].n_blocks == 3);
+   assert(request.system[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(request.messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_USER);
+   assert(!blocks[0].context.origin);
+   assert(request.has_temperature && request.temperature == 0 && request.max_tokens == 128);
+   assert(request.messages[0].blocks != blocks && request.messages[0].raw != message.raw);
+   assert(cJSON_Compare(request.messages[0].raw, message.raw, 1));
+   assert(request.messages[0].blocks[1].raw != blocks[1].raw);
+   assert(cJSON_Compare(request.messages[0].blocks[1].raw, blocks[1].raw, 1));
+   assert(!strcmp(request.messages[0].blocks[2].text, "last"));
+   aimee_request_free(&request);
+   cJSON_Delete(message.raw);
+   cJSON_Delete(blocks[1].raw);
+}
+
 int main(void)
 {
+   test_request_from_original_message();
+   test_general_complete_media();
+   test_owned_refusal_clone();
+   test_refusal_details_validation();
+   test_refusal_builder_and_admission();
    test_owned_request_clone();
    test_exact_function_identity();
    printf("aimee-ir: ");
@@ -249,8 +446,8 @@ int main(void)
    /* last user: two text blocks + a tool_result block that must NOT be concatenated
     * (but must not cause the message to be skipped) */
    r.messages[2].role = dup("user");
-   r.messages[2].n_blocks = 3;
-   r.messages[2].blocks = mk_blocks(3);
+   r.messages[2].n_blocks = 5;
+   r.messages[2].blocks = mk_blocks(5);
    r.messages[2].blocks[0].type = AIMEE_BLK_TEXT;
    r.messages[2].blocks[0].text = dup("fix ");
    r.messages[2].blocks[1].type = AIMEE_BLK_TOOL_RESULT;
@@ -259,11 +456,24 @@ int main(void)
        cJSON_CreateString("output that must not leak into the query");
    r.messages[2].blocks[2].type = AIMEE_BLK_TEXT;
    r.messages[2].blocks[2].text = dup("the login bug");
+   r.messages[2].blocks[3].type = AIMEE_BLK_TEXT;
+   r.messages[2].blocks[3].text = dup("hidden operator note");
+   aimee_ir_block_set_context(&r.messages[2].blocks[3], AIMEE_CTX_ORIGIN_OPERATOR,
+                              AIMEE_CTX_AUTH_DIAGNOSTIC, AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 0, "private-query", "test", 1);
+   r.messages[2].blocks[4].type = AIMEE_BLK_TEXT;
+   r.messages[2].blocks[4].text = dup("restricted source text");
+   aimee_ir_block_set_context(&r.messages[2].blocks[4], AIMEE_CTX_ORIGIN_USER,
+                              AIMEE_CTX_AUTH_TASK_INSTRUCTION, AIMEE_CTX_TRUST_UNTRUSTED,
+                              AIMEE_CTX_SENS_RESTRICTED, 1, "restricted-query", "test", 1);
 
    char q[128];
    size_t got = aimee_ir_last_user_text(&r, q, sizeof q);
    assert(got == strlen("fix the login bug"));
    assert(strcmp(q, "fix the login bug") == 0); /* tool_result dropped, texts joined */
+   assert(r.messages[2].n_blocks == 5 &&
+          !strcmp(r.messages[2].blocks[3].text, "hidden operator note") &&
+          !strcmp(r.messages[2].blocks[4].text, "restricted source text"));
 
    /* truncation: tiny buffer never overflows and is NUL-terminated */
    char tiny[6];
@@ -494,34 +704,6 @@ int main(void)
       assert(aimee_ir_response_has_tool_use(NULL) == 0);
    }
    printf("response-accessors ok; ");
-
-   /* aimee_ir_response_from_text: the bridge the tmux/CLI TUI handler uses to
-    * fold flat scraped text into the unified message IR. */
-   {
-      aimee_response_t r;
-      assert(aimee_ir_response_from_text(&r, "line one\nline two", "claude") == 0);
-      assert(r.role && strcmp(r.role, "assistant") == 0);
-      assert(r.n_content == 1 && r.content[0].type == AIMEE_BLK_TEXT);
-      assert(r.stop_reason == AIMEE_STOP_END_TURN);
-      assert(r.raw_stop_reason && strcmp(r.raw_stop_reason, "end_turn") == 0);
-      assert(r.model && strcmp(r.model, "claude") == 0);
-      char buf[64];
-      /* Round-trips through the standard accessor -> a multi-line answer survives
-       * verbatim, so the handler's projection is lossless. */
-      assert(aimee_ir_response_text(&r, buf, sizeof buf) == (size_t)strlen("line one\nline two"));
-      assert(strcmp(buf, "line one\nline two") == 0);
-      assert(aimee_ir_response_has_tool_use(&r) == 0);
-      aimee_response_free(&r);
-
-      /* NULL/empty text is tolerated (empty TEXT block), model may be NULL. */
-      assert(aimee_ir_response_from_text(&r, NULL, NULL) == 0);
-      assert(r.n_content == 1 && r.content[0].text && r.content[0].text[0] == '\0');
-      assert(r.model == NULL);
-      aimee_response_free(&r);
-
-      assert(aimee_ir_response_from_text(NULL, "x", "y") == -1);
-   }
-   printf("response-from-text ok; ");
 
    printf("ok\n");
    return 0;

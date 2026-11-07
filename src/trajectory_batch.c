@@ -125,12 +125,18 @@ static int load_batch_tasks(const char *path, eval_task_t *tasks, int max_tasks)
 
 static int task_passed(const eval_task_t *task, const agent_result_t *result, int rc)
 {
-   if (rc != 0 || !result || !result->success)
+   if (rc != 0 || !result || !result->success ||
+       aimee_ir_response_complete_text_valid(&result->canonical_response))
       return 0;
    if (!task->success_check_type[0])
       return 1;
    if (strcmp(task->success_check_type, "contains") == 0)
-      return result->response && strstr(result->response, task->success_check_value) != NULL;
+   {
+      char *text = aimee_ir_response_text_alloc(&result->canonical_response);
+      int passed = text && strstr(text, task->success_check_value) != NULL;
+      free(text);
+      return passed;
+   }
    return result->success;
 }
 
@@ -196,8 +202,12 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
       char safe[128];
       safe_name(tasks[i].name, safe, sizeof(safe));
       agent_result_t ar = {0};
-      int rc = agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", NULL, tasks[i].prompt,
-                         0, &ar);
+      aimee_request_t request = {0};
+      int request_rc = aimee_ir_request_from_text(&request, NULL, tasks[i].prompt, 0, 0.3);
+      int rc = request_rc
+                   ? AGENT_RC_CONTEXT_REFUSED
+                   : agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", &request, &ar);
+      aimee_request_free(&request);
       int passed = task_passed(&tasks[i], &ar, rc);
       char *traj = NULL;
       if (!ar.canonical_session_id[0] ||

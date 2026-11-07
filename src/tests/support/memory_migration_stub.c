@@ -48,13 +48,15 @@ __attribute__((weak)) int aimee_module_commands_dispatch_internal_timeout(const 
 
 /* Legacy-only consumer fixtures have no installed verifier context factory. */
 __attribute__((weak)) int aimee_module_commands_dispatch_internal_caller(const char *method,
-                                                                       const cJSON *args,
-                                                                       cJSON **result)
+                                                                         const cJSON *args,
+                                                                         cJSON **result)
 {
    return aimee_module_commands_dispatch_internal(method, args, result);
 }
-__attribute__((weak)) int aimee_module_commands_dispatch_internal_caller_timeout(
-    const char *method, const cJSON *args, int timeout_ms, cJSON **result)
+__attribute__((weak)) int aimee_module_commands_dispatch_internal_caller_timeout(const char *method,
+                                                                                 const cJSON *args,
+                                                                                 int timeout_ms,
+                                                                                 cJSON **result)
 {
    return aimee_module_commands_dispatch_internal_timeout(method, args, timeout_ms, result);
 }

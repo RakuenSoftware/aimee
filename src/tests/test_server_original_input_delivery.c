@@ -265,99 +265,438 @@ int retained_created_main(void)
    return 0;
 }
 
-const unsigned aimee_original_input_delivery_client_contract_v1=1;
-static int prepare_calls,recover_calls,ack_calls,delivery_case;
-static char *delivery_row,*second_delivery_row;
+const unsigned aimee_original_input_delivery_client_contract_v1 = 1;
+static int prepare_calls, recover_calls, ack_calls, delivery_case;
+static char *delivery_row, *second_delivery_row;
 static const server_input_prepared_cap_t *saved_prepared;
 static const server_input_committed_delivery_cap_t *saved_delivery;
-static char *wire_insert_nul_escape(const char *wire,const char *key)
+static char *wire_insert_nul_escape(const char *wire, const char *key)
 {
- char needle[128];snprintf(needle,sizeof needle,"\"%s\":\"",key);const char *start=strstr(wire,needle);assert(start);const char *end=strchr(start+strlen(needle),'"');assert(end);const char *extra="\\u0000suffix";size_t prefix=(size_t)(end-wire),n=strlen(wire),e=strlen(extra);char *out=malloc(n+e+1);assert(out);memcpy(out,wire,prefix);memcpy(out+prefix,extra,e);memcpy(out+prefix+e,end,n-prefix+1);return out;
+   char needle[128];
+   snprintf(needle, sizeof needle, "\"%s\":\"", key);
+   const char *start = strstr(wire, needle);
+   assert(start);
+   const char *end = strchr(start + strlen(needle), '"');
+   assert(end);
+   const char *extra = "\\u0000suffix";
+   size_t prefix = (size_t)(end - wire), n = strlen(wire), e = strlen(extra);
+   char *out = malloc(n + e + 1);
+   assert(out);
+   memcpy(out, wire, prefix);
+   memcpy(out + prefix, extra, e);
+   memcpy(out + prefix + e, end, n - prefix + 1);
+   return out;
 }
 static char *wire_duplicate_actor(const char *wire)
 {
- const char *needle="\"actor\":\"alice\"",*extra="\"actor\":\"alice\",\"actor\":\"alice\"";const char *at=strstr(wire,needle);assert(at);size_t prefix=(size_t)(at-wire),n=strlen(wire),a=strlen(needle),b=strlen(extra);char *out=malloc(n-a+b+1);assert(out);memcpy(out,wire,prefix);memcpy(out+prefix,extra,b);memcpy(out+prefix+b,at+a,n-prefix-a+1);return out;
+   const char *needle = "\"actor\":\"alice\"", *extra = "\"actor\":\"alice\",\"actor\":\"alice\"";
+   const char *at = strstr(wire, needle);
+   assert(at);
+   size_t prefix = (size_t)(at - wire), n = strlen(wire), a = strlen(needle), b = strlen(extra);
+   char *out = malloc(n - a + b + 1);
+   assert(out);
+   memcpy(out, wire, prefix);
+   memcpy(out + prefix, extra, b);
+   memcpy(out + prefix + b, at + a, n - prefix - a + 1);
+   return out;
 }
 static char *wire_duplicate_role(const char *wire)
 {
- const char *needle="\"role\":\"user\"",*extra="\"role\":\"user\",\"role\":\"user\"";const char *at=strstr(wire,needle);assert(at);size_t prefix=(size_t)(at-wire),n=strlen(wire),a=strlen(needle),b=strlen(extra);char *out=malloc(n-a+b+1);assert(out);memcpy(out,wire,prefix);memcpy(out+prefix,extra,b);memcpy(out+prefix+b,at+a,n-prefix-a+1);return out;
+   const char *needle = "\"role\":\"user\"", *extra = "\"role\":\"user\",\"role\":\"user\"";
+   const char *at = strstr(wire, needle);
+   assert(at);
+   size_t prefix = (size_t)(at - wire), n = strlen(wire), a = strlen(needle), b = strlen(extra);
+   char *out = malloc(n - a + b + 1);
+   assert(out);
+   memcpy(out, wire, prefix);
+   memcpy(out + prefix, extra, b);
+   memcpy(out + prefix + b, at + a, n - prefix - a + 1);
+   return out;
 }
 static void *prepared_other_thread(void *ptr)
-{server_input_prepared_view_t v={0};assert(server_input_prepared_view(ptr,&v)==-1);return NULL;}
-static int prepare_delivery(const server_input_prepared_cap_t *cap,char **wire,void *state)
 {
- (void)state;server_input_prepared_view_t v={0};assert(!server_input_prepared_view(cap,&v));
- assert(v.owner_cookie==&owner_cookie && !strcmp(v.principal,"alice") && !strcmp(v.text,"safe original") && v.text_len==13 && strlen(v.opaque_sha256)==64);
- assert(server_input_prepared_view((void*)1,&v)==-1);pthread_t other;assert(!pthread_create(&other,NULL,prepared_other_thread,(void*)cap));assert(!pthread_join(other,NULL));saved_prepared=cap;prepare_calls++;
- *wire=strdup("{\"schema_version\":1,\"receiver_tag\":\"source-owner\",\"intent_key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"opaque_intent\":\"signed-prepared-first\"}");
- if(delivery_case>=11&&delivery_case<=13){const char *keys[]={"receiver_tag","intent_key","opaque_intent"};char *bad=wire_insert_nul_escape(*wire,keys[delivery_case-11]);free(*wire);*wire=bad;}
- if(delivery_case==14){char *bad=malloc(strlen(*wire)+4);assert(bad);strcpy(bad,*wire);strcat(bad," {}");free(*wire);*wire=bad;}
- return 0;
+   server_input_prepared_view_t v = {0};
+   assert(server_input_prepared_view(ptr, &v) == -1);
+   return NULL;
 }
-int db1_session_original_input_begin_delivery(const char *sid,const char *op,const char *turn,const char *actor,const char *wire,const char *intent,db1_original_input_receipt_t *r,uint64_t *id)
+static int prepare_delivery(const server_input_prepared_cap_t *cap, char **wire, void *state)
 {
- assert(prepare_calls==1 && intent);int rc=db1_session_original_input_begin(sid,op,turn,actor,wire,r);*id=73;
- if(rc!=0)return rc;
- cJSON *batch=cJSON_Parse(wire),*row=cJSON_CreateObject();char *event=cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(batch,"input"));char sha[65];assert(!aimee_sha256_hex(event,strlen(event),sha));
- cJSON_AddNumberToObject(row,"schema_version",1);cJSON_AddStringToObject(row,"delivery_id","73");cJSON_AddStringToObject(row,"session_id",sid);cJSON_AddStringToObject(row,"operation_uuid",op);cJSON_AddStringToObject(row,"actor",actor);cJSON_AddStringToObject(row,"receiver_tag","source-owner");cJSON_AddStringToObject(row,"intent_key","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");cJSON_AddStringToObject(row,"opaque_intent","signed-prepared-first");cJSON_AddStringToObject(row,"begin_sequence","1");cJSON_AddStringToObject(row,"input_sequence","2");cJSON_AddStringToObject(row,"original_turn",turn);cJSON_AddStringToObject(row,"begin_sha256","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");cJSON_AddStringToObject(row,"input_sha256",sha);cJSON_AddStringToObject(row,"input_event_json",event);cJSON_AddStringToObject(row,"outcome","pending");cJSON_AddStringToObject(row,"result_json","");delivery_row=cJSON_PrintUnformatted(row);free(event);cJSON_Delete(row);cJSON_Delete(batch);return rc;
+   (void)state;
+   server_input_prepared_view_t v = {0};
+   assert(!server_input_prepared_view(cap, &v));
+   assert(v.owner_cookie == &owner_cookie && !strcmp(v.principal, "alice") &&
+          !strcmp(v.text, "safe original") && v.text_len == 13 && strlen(v.opaque_sha256) == 64);
+   assert(server_input_prepared_view((void *)1, &v) == -1);
+   pthread_t other;
+   assert(!pthread_create(&other, NULL, prepared_other_thread, (void *)cap));
+   assert(!pthread_join(other, NULL));
+   saved_prepared = cap;
+   prepare_calls++;
+   *wire = strdup("{\"schema_version\":1,\"receiver_tag\":\"source-owner\",\"intent_key\":"
+                  "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"opaque_"
+                  "intent\":\"signed-prepared-first\"}");
+   if (delivery_case >= 11 && delivery_case <= 13)
+   {
+      const char *keys[] = {"receiver_tag", "intent_key", "opaque_intent"};
+      char *bad = wire_insert_nul_escape(*wire, keys[delivery_case - 11]);
+      free(*wire);
+      *wire = bad;
+   }
+   if (delivery_case == 14)
+   {
+      char *bad = malloc(strlen(*wire) + 4);
+      assert(bad);
+      strcpy(bad, *wire);
+      strcat(bad, " {}");
+      free(*wire);
+      *wire = bad;
+   }
+   return 0;
 }
-int db1_session_original_input_delivery_get(const char *sid,const char *op,const char *actor,const char *receiver,char **wire)
-{(void)op;assert(!strcmp(actor,"alice")&&!strcmp(receiver,"source-owner"));if(delivery_case==9&&!strcmp(sid,"prototype-second")){*wire=strdup(second_delivery_row);return 0;}if(strcmp(sid,"prototype"))return 1;*wire=strdup(delivery_row);return 0;}
-int db1_session_original_input_delivery_page(const char *receiver,const char *actor,const char *after,const char *limit,const char *budget,char **out)
-{(void)receiver;(void)actor;(void)after;(void)limit;(void)budget;cJSON *p=cJSON_CreateObject(),*rows=cJSON_CreateArray();cJSON_AddNumberToObject(p,"schema_version",1);cJSON_AddItemToArray(rows,cJSON_Parse(delivery_row));if(delivery_case==9)cJSON_AddItemToArray(rows,cJSON_Parse(second_delivery_row));cJSON_AddItemToObject(p,"rows",rows);cJSON_AddStringToObject(p,"next_cursor","73");cJSON_AddBoolToObject(p,"has_more",0);*out=cJSON_PrintUnformatted(p);cJSON_Delete(p);if(delivery_case==26){char *bad=wire_duplicate_actor(*out);free(*out);*out=bad;}return 0;}
-int db1_session_original_input_delivery_ack(const char *id,const char *receiver,const char *actor,const char *key,const char *outcome,const char *result)
+int db1_session_original_input_begin_delivery(const char *sid, const char *op, const char *turn,
+                                              const char *actor, const char *wire,
+                                              const char *intent, db1_original_input_receipt_t *r,
+                                              uint64_t *id)
 {
- assert(!strcmp(id,"73")&&!strcmp(receiver,"source-owner")&&!strcmp(actor,"alice")&&strlen(key)==64&&!strcmp(result,"{\"wide\":9007199254740993}"));ack_calls++;
- if(delivery_case==4)return -1;
- cJSON *row=cJSON_Parse(delivery_row);cJSON_ReplaceItemInObjectCaseSensitive(row,"outcome",cJSON_CreateString(outcome));cJSON_ReplaceItemInObjectCaseSensitive(row,"result_json",cJSON_CreateString(result));free(delivery_row);delivery_row=cJSON_PrintUnformatted(row);cJSON_Delete(row);return 0;
+   assert(prepare_calls == 1 && intent);
+   int rc = db1_session_original_input_begin(sid, op, turn, actor, wire, r);
+   *id = 73;
+   if (rc != 0)
+      return rc;
+   cJSON *batch = cJSON_Parse(wire), *row = cJSON_CreateObject();
+   char *event = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(batch, "input"));
+   char sha[65];
+   assert(!aimee_sha256_hex(event, strlen(event), sha));
+   cJSON_AddNumberToObject(row, "schema_version", 1);
+   cJSON_AddStringToObject(row, "delivery_id", "73");
+   cJSON_AddStringToObject(row, "session_id", sid);
+   cJSON_AddStringToObject(row, "operation_uuid", op);
+   cJSON_AddStringToObject(row, "actor", actor);
+   cJSON_AddStringToObject(row, "receiver_tag", "source-owner");
+   cJSON_AddStringToObject(row, "intent_key",
+                           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+   cJSON_AddStringToObject(row, "opaque_intent", "signed-prepared-first");
+   cJSON_AddStringToObject(row, "begin_sequence", "1");
+   cJSON_AddStringToObject(row, "input_sequence", "2");
+   cJSON_AddStringToObject(row, "original_turn", turn);
+   cJSON_AddStringToObject(row, "begin_sha256",
+                           "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+   cJSON_AddStringToObject(row, "input_sha256", sha);
+   cJSON_AddStringToObject(row, "input_event_json", event);
+   cJSON_AddStringToObject(row, "outcome", "pending");
+   cJSON_AddStringToObject(row, "result_json", "");
+   delivery_row = cJSON_PrintUnformatted(row);
+   free(event);
+   cJSON_Delete(row);
+   cJSON_Delete(batch);
+   return rc;
 }
-static server_input_delivery_outcome_t recover_delivery(const server_input_committed_delivery_cap_t *cap,char **result,void *state)
+int db1_session_original_input_delivery_get(const char *sid, const char *op, const char *actor,
+                                            const char *receiver, char **wire)
 {
- (void)state;server_input_committed_delivery_view_t v={0};assert(!server_input_committed_delivery_view(cap,&v));saved_delivery=cap;recover_calls++;
- assert((v.delivery_id==73||v.delivery_id==74) && v.receipt.begin_sequence==1 && v.receipt.input_sequence==2 && v.receipt.outcome==DB1_ORIGINAL_INPUT_REPLAY && !strcmp(v.text,"safe original") && !strcmp(v.opaque_intent,"signed-prepared-first"));
- server_input_created_view_t created_view={0};assert(server_input_created_view((void*)cap,&created_view)==-1);
- if(delivery_case==5){assert(!pthread_cancel(pthread_self()));pthread_testcancel();return SERVER_INPUT_DELIVERY_UNKNOWN;}
- if(delivery_case==1||(delivery_case==9&&v.delivery_id==74))return SERVER_INPUT_DELIVERY_UNKNOWN;
- *result=strdup("{\"wide\":9007199254740993}");return delivery_case==2?SERVER_INPUT_DELIVERY_TERMINAL:SERVER_INPUT_DELIVERY_DELIVERED;
+   (void)op;
+   assert(!strcmp(actor, "alice") && !strcmp(receiver, "source-owner"));
+   if (delivery_case == 9 && !strcmp(sid, "prototype-second"))
+   {
+      *wire = strdup(second_delivery_row);
+      return 0;
+   }
+   if (strcmp(sid, "prototype"))
+      return 1;
+   *wire = strdup(delivery_row);
+   return 0;
 }
-static int delivery_created(const server_input_created_cap_t *cap,void *state)
+int db1_session_original_input_delivery_page(const char *receiver, const char *actor,
+                                             const char *after, const char *limit,
+                                             const char *budget, char **out)
 {
- assert(!created(cap,state));server_input_created_delivery_view_t v={0};assert(!server_input_created_delivery_view(cap,&v)&&v.delivery_id==73&&!strcmp(v.opaque_intent,"signed-prepared-first"));
- return delivery_case==3?server_input_created_delivery_ack_v1(cap,"{\"wide\":9007199254740993}"):0;
+   (void)receiver;
+   (void)actor;
+   (void)after;
+   (void)limit;
+   (void)budget;
+   cJSON *p = cJSON_CreateObject(), *rows = cJSON_CreateArray();
+   cJSON_AddNumberToObject(p, "schema_version", 1);
+   cJSON_AddItemToArray(rows, cJSON_Parse(delivery_row));
+   if (delivery_case == 9)
+      cJSON_AddItemToArray(rows, cJSON_Parse(second_delivery_row));
+   cJSON_AddItemToObject(p, "rows", rows);
+   cJSON_AddStringToObject(p, "next_cursor", "73");
+   cJSON_AddBoolToObject(p, "has_more", 0);
+   *out = cJSON_PrintUnformatted(p);
+   cJSON_Delete(p);
+   if (delivery_case == 26)
+   {
+      char *bad = wire_duplicate_actor(*out);
+      free(*out);
+      *out = bad;
+   }
+   return 0;
+}
+int db1_session_original_input_delivery_ack(const char *id, const char *receiver, const char *actor,
+                                            const char *key, const char *outcome,
+                                            const char *result)
+{
+   assert(!strcmp(id, "73") && !strcmp(receiver, "source-owner") && !strcmp(actor, "alice") &&
+          strlen(key) == 64 && !strcmp(result, "{\"wide\":9007199254740993}"));
+   ack_calls++;
+   if (delivery_case == 4)
+      return -1;
+   cJSON *row = cJSON_Parse(delivery_row);
+   cJSON_ReplaceItemInObjectCaseSensitive(row, "outcome", cJSON_CreateString(outcome));
+   cJSON_ReplaceItemInObjectCaseSensitive(row, "result_json", cJSON_CreateString(result));
+   free(delivery_row);
+   delivery_row = cJSON_PrintUnformatted(row);
+   cJSON_Delete(row);
+   return 0;
+}
+static server_input_delivery_outcome_t
+recover_delivery(const server_input_committed_delivery_cap_t *cap, char **result, void *state)
+{
+   (void)state;
+   server_input_committed_delivery_view_t v = {0};
+   assert(!server_input_committed_delivery_view(cap, &v));
+   saved_delivery = cap;
+   recover_calls++;
+   assert((v.delivery_id == 73 || v.delivery_id == 74) && v.receipt.begin_sequence == 1 &&
+          v.receipt.input_sequence == 2 && v.receipt.outcome == DB1_ORIGINAL_INPUT_REPLAY &&
+          !strcmp(v.text, "safe original") && !strcmp(v.opaque_intent, "signed-prepared-first"));
+   server_input_created_view_t created_view = {0};
+   assert(server_input_created_view((void *)cap, &created_view) == -1);
+   if (delivery_case == 5)
+   {
+      assert(!pthread_cancel(pthread_self()));
+      pthread_testcancel();
+      return SERVER_INPUT_DELIVERY_UNKNOWN;
+   }
+   if (delivery_case == 1 || (delivery_case == 9 && v.delivery_id == 74))
+      return SERVER_INPUT_DELIVERY_UNKNOWN;
+   *result = strdup("{\"wide\":9007199254740993}");
+   return delivery_case == 2 ? SERVER_INPUT_DELIVERY_TERMINAL : SERVER_INPUT_DELIVERY_DELIVERED;
+}
+static int delivery_created(const server_input_created_cap_t *cap, void *state)
+{
+   assert(!created(cap, state));
+   server_input_created_delivery_view_t v = {0};
+   assert(!server_input_created_delivery_view(cap, &v) && v.delivery_id == 73 &&
+          !strcmp(v.opaque_intent, "signed-prepared-first"));
+   return delivery_case == 3
+              ? server_input_created_delivery_ack_v1(cap, "{\"wide\":9007199254740993}")
+              : 0;
 }
 static void *recovery_cancel_worker(void *unused)
-{(void)unused;(void)server_input_delivery_reconcile_one_v1("prototype","12345678-1234-4234-8234-123456789abc");assert(!"pending recovery cancellation returned");return NULL;}
+{
+   (void)unused;
+   (void)server_input_delivery_reconcile_one_v1("prototype",
+                                                "12345678-1234-4234-8234-123456789abc");
+   assert(!"pending recovery cancellation returned");
+   return NULL;
+}
 static void delivery_run(int mode)
 {
- delivery_case=mode;attest("prototype","alice");minted_setup();assert(!server_input_attachment_install_owner(owner_admit,delivery_created,NULL));
- if(mode==10){server_session_capture_t *early=server_session_capture_open("prototype","early-turn","alice","exec");assert(early);server_session_capture_release(early);assert(server_input_delivery_install_owner_v1("source-owner","alice",prepare_delivery,recover_delivery,NULL)==-1);puts("PASS owner delivery cannot be installed after capture has started");return;}
- assert(!server_input_delivery_install_owner_v1("source-owner",mode==8?"bob":"alice",prepare_delivery,recover_delivery,NULL));assert(server_input_delivery_install_owner_v1("other","alice",prepare_delivery,recover_delivery,NULL)==-1);
- if(mode>=11&&mode<=14){assert(run(minted)<0&&executions==0&&prepare_calls==1&&created_calls==0&&batch_calls==0);puts("PASS malformed prepared intent decoded-NUL/trailing refuses before canonical DB dispatch");return;}
- if(mode==8){assert(run(minted)<0&&executions==0&&prepare_calls==0&&created_calls==0&&batch_calls==0);puts("PASS wrong installed owner denies before prepared callback and canonical DB dispatch");return;}
- assert(!run(minted)&&executions==1&&prepare_calls==1&&created_calls==1);
- server_input_prepared_view_t pv={0};assert(server_input_prepared_view(saved_prepared,&pv)==-1);assert(server_input_created_delivery_ack_v1(saved_cap,"{}")==-1);
- if(mode==5){pthread_t thread;assert(!pthread_create(&thread,NULL,recovery_cancel_worker,NULL));void *status=NULL;assert(!pthread_join(thread,&status)&&status==PTHREAD_CANCELED);assert(recover_calls==1&&ack_calls==0&&executions==1);puts("PASS recovery cancellation clears cap, leaves pending, acknowledges nothing and executes nothing");return;}
- if(mode==6||mode==7){cJSON *row=cJSON_Parse(delivery_row);cJSON_ReplaceItemInObjectCaseSensitive(row,mode==6?"session_id":"actor",cJSON_CreateString(mode==6?"other-session":"bob"));free(delivery_row);delivery_row=cJSON_PrintUnformatted(row);cJSON_Delete(row);}
- if(mode==9){cJSON *row=cJSON_Parse(delivery_row);const char *other="12345678-1234-4234-8234-123456789abd";cJSON_ReplaceItemInObjectCaseSensitive(row,"delivery_id",cJSON_CreateString("74"));cJSON_ReplaceItemInObjectCaseSensitive(row,"session_id",cJSON_CreateString("prototype-second"));cJSON_ReplaceItemInObjectCaseSensitive(row,"operation_uuid",cJSON_CreateString(other));cJSON *event=cJSON_Parse(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row,"input_event_json")));cJSON *payload=cJSON_GetObjectItemCaseSensitive(event,"payload"),*blocks=cJSON_GetObjectItemCaseSensitive(payload,"blocks"),*attachment=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks,0),"input_attachment");cJSON_ReplaceItemInObjectCaseSensitive(attachment,"operation_uuid",cJSON_CreateString(other));char *wire=cJSON_PrintUnformatted(event),sha[65];assert(!aimee_sha256_hex(wire,strlen(wire),sha));cJSON_ReplaceItemInObjectCaseSensitive(row,"input_event_json",cJSON_CreateString(wire));cJSON_ReplaceItemInObjectCaseSensitive(row,"input_sha256",cJSON_CreateString(sha));second_delivery_row=cJSON_PrintUnformatted(row);free(wire);cJSON_Delete(event);cJSON_Delete(row);}
- if(mode>=15&&mode<=18){const char *keys[]={"receiver_tag","intent_key","delivery_id","opaque_intent"};char *bad=wire_insert_nul_escape(delivery_row,keys[mode-15]);free(delivery_row);delivery_row=bad;}
- if(mode==19||mode==21||mode==25){cJSON *row=cJSON_Parse(delivery_row);const char *input=cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row,"input_event_json"));char *bad=mode==21?wire_insert_nul_escape(input,"opaque"):wire_duplicate_role(input);char sha[65];assert(!aimee_sha256_hex(bad,strlen(bad),sha));cJSON_ReplaceItemInObjectCaseSensitive(row,"input_event_json",cJSON_CreateString(bad));cJSON_ReplaceItemInObjectCaseSensitive(row,"input_sha256",cJSON_CreateString(sha));if(mode==25){cJSON_ReplaceItemInObjectCaseSensitive(row,"outcome",cJSON_CreateString("delivered"));cJSON_ReplaceItemInObjectCaseSensitive(row,"result_json",cJSON_CreateString("{}"));}free(delivery_row);delivery_row=cJSON_PrintUnformatted(row);free(bad);cJSON_Delete(row);}
- if(mode==20){cJSON *row=cJSON_Parse(delivery_row);cJSON_DeleteItemFromObjectCaseSensitive(row,"begin_sha256");cJSON_AddStringToObject(row,"unknown_authority","ignored");free(delivery_row);delivery_row=cJSON_PrintUnformatted(row);cJSON_Delete(row);}
- if(mode==22){char *bad=malloc(strlen(delivery_row)+4);assert(bad);strcpy(bad,delivery_row);strcat(bad," {}");free(delivery_row);delivery_row=bad;}
- if(mode==23||mode==24){cJSON *row=cJSON_Parse(delivery_row);cJSON_ReplaceItemInObjectCaseSensitive(row,"delivery_id",cJSON_CreateString(mode==23?"18446744073709551616":"9223372036854775808"));free(delivery_row);delivery_row=cJSON_PrintUnformatted(row);cJSON_Delete(row);}
- uint64_t cursor=0;int before=executions;int rc=mode>=15&&mode<=25?server_input_delivery_reconcile_one_v1("prototype","12345678-1234-4234-8234-123456789abc"):server_input_delivery_reconcile_page_v1(0,32,4194304,&cursor);
- if(mode>=15&&mode<=26){fprintf(stderr,"malformed case%d rc%d cursor%llu callbacks%d ack%d\n",mode,rc,(unsigned long long)cursor,recover_calls,ack_calls);assert(rc==-1&&cursor==0&&recover_calls==0&&ack_calls==0);}
- else if(mode==9){assert(rc==-1&&cursor==73&&recover_calls==2&&ack_calls==1);}
- else if(mode==6||mode==7){assert(rc==-1&&cursor==0&&recover_calls==0&&ack_calls==0);}
- else if(mode==1||mode==4){assert(rc==-1&&cursor==0&&recover_calls==1);assert(ack_calls==(mode==4));}
- else {assert(rc==1&&cursor==73);assert(recover_calls==(mode==3?0:1));assert(ack_calls==1);assert(server_input_delivery_reconcile_one_v1("prototype","12345678-1234-4234-8234-123456789abc")==1);assert(recover_calls==(mode==3?0:1));}
- assert(executions==before);server_input_committed_delivery_view_t cv={0};assert(server_input_committed_delivery_view(saved_delivery,&cv)==-1);printf("PASS generic delivery case%d no recovered execution, cap lifetime, fixed owner, exact receipt, completed skip/unknown prefix\n",mode);
+   delivery_case = mode;
+   attest("prototype", "alice");
+   minted_setup();
+   assert(!server_input_attachment_install_owner(owner_admit, delivery_created, NULL));
+   if (mode == 10)
+   {
+      server_session_capture_t *early =
+          server_session_capture_open("prototype", "early-turn", "alice", "exec");
+      assert(early);
+      server_session_capture_release(early);
+      assert(server_input_delivery_install_owner_v1("source-owner", "alice", prepare_delivery,
+                                                    recover_delivery, NULL) == -1);
+      puts("PASS owner delivery cannot be installed after capture has started");
+      return;
+   }
+   assert(!server_input_delivery_install_owner_v1("source-owner", mode == 8 ? "bob" : "alice",
+                                                  prepare_delivery, recover_delivery, NULL));
+   assert(server_input_delivery_install_owner_v1("other", "alice", prepare_delivery,
+                                                 recover_delivery, NULL) == -1);
+   if (mode >= 11 && mode <= 14)
+   {
+      assert(run(minted) < 0 && executions == 0 && prepare_calls == 1 && created_calls == 0 &&
+             batch_calls == 0);
+      puts("PASS malformed prepared intent decoded-NUL/trailing refuses before canonical DB "
+           "dispatch");
+      return;
+   }
+   if (mode == 8)
+   {
+      assert(run(minted) < 0 && executions == 0 && prepare_calls == 0 && created_calls == 0 &&
+             batch_calls == 0);
+      puts("PASS wrong installed owner denies before prepared callback and canonical DB dispatch");
+      return;
+   }
+   assert(!run(minted) && executions == 1 && prepare_calls == 1 && created_calls == 1);
+   server_input_prepared_view_t pv = {0};
+   assert(server_input_prepared_view(saved_prepared, &pv) == -1);
+   assert(server_input_created_delivery_ack_v1(saved_cap, "{}") == -1);
+   if (mode == 5)
+   {
+      pthread_t thread;
+      assert(!pthread_create(&thread, NULL, recovery_cancel_worker, NULL));
+      void *status = NULL;
+      assert(!pthread_join(thread, &status) && status == PTHREAD_CANCELED);
+      assert(recover_calls == 1 && ack_calls == 0 && executions == 1);
+      puts("PASS recovery cancellation clears cap, leaves pending, acknowledges nothing and "
+           "executes nothing");
+      return;
+   }
+   if (mode == 6 || mode == 7)
+   {
+      cJSON *row = cJSON_Parse(delivery_row);
+      cJSON_ReplaceItemInObjectCaseSensitive(
+          row, mode == 6 ? "session_id" : "actor",
+          cJSON_CreateString(mode == 6 ? "other-session" : "bob"));
+      free(delivery_row);
+      delivery_row = cJSON_PrintUnformatted(row);
+      cJSON_Delete(row);
+   }
+   if (mode == 9)
+   {
+      cJSON *row = cJSON_Parse(delivery_row);
+      const char *other = "12345678-1234-4234-8234-123456789abd";
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "delivery_id", cJSON_CreateString("74"));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "session_id",
+                                             cJSON_CreateString("prototype-second"));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "operation_uuid", cJSON_CreateString(other));
+      cJSON *event = cJSON_Parse(
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "input_event_json")));
+      cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload"),
+            *blocks = cJSON_GetObjectItemCaseSensitive(payload, "blocks"),
+            *attachment =
+                cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "input_attachment");
+      cJSON_ReplaceItemInObjectCaseSensitive(attachment, "operation_uuid",
+                                             cJSON_CreateString(other));
+      char *wire = cJSON_PrintUnformatted(event), sha[65];
+      assert(!aimee_sha256_hex(wire, strlen(wire), sha));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "input_event_json", cJSON_CreateString(wire));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "input_sha256", cJSON_CreateString(sha));
+      second_delivery_row = cJSON_PrintUnformatted(row);
+      free(wire);
+      cJSON_Delete(event);
+      cJSON_Delete(row);
+   }
+   if (mode >= 15 && mode <= 18)
+   {
+      const char *keys[] = {"receiver_tag", "intent_key", "delivery_id", "opaque_intent"};
+      char *bad = wire_insert_nul_escape(delivery_row, keys[mode - 15]);
+      free(delivery_row);
+      delivery_row = bad;
+   }
+   if (mode == 19 || mode == 21 || mode == 25)
+   {
+      cJSON *row = cJSON_Parse(delivery_row);
+      const char *input =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "input_event_json"));
+      char *bad = mode == 21 ? wire_insert_nul_escape(input, "opaque") : wire_duplicate_role(input);
+      char sha[65];
+      assert(!aimee_sha256_hex(bad, strlen(bad), sha));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "input_event_json", cJSON_CreateString(bad));
+      cJSON_ReplaceItemInObjectCaseSensitive(row, "input_sha256", cJSON_CreateString(sha));
+      if (mode == 25)
+      {
+         cJSON_ReplaceItemInObjectCaseSensitive(row, "outcome", cJSON_CreateString("delivered"));
+         cJSON_ReplaceItemInObjectCaseSensitive(row, "result_json", cJSON_CreateString("{}"));
+      }
+      free(delivery_row);
+      delivery_row = cJSON_PrintUnformatted(row);
+      free(bad);
+      cJSON_Delete(row);
+   }
+   if (mode == 20)
+   {
+      cJSON *row = cJSON_Parse(delivery_row);
+      cJSON_DeleteItemFromObjectCaseSensitive(row, "begin_sha256");
+      cJSON_AddStringToObject(row, "unknown_authority", "ignored");
+      free(delivery_row);
+      delivery_row = cJSON_PrintUnformatted(row);
+      cJSON_Delete(row);
+   }
+   if (mode == 22)
+   {
+      char *bad = malloc(strlen(delivery_row) + 4);
+      assert(bad);
+      strcpy(bad, delivery_row);
+      strcat(bad, " {}");
+      free(delivery_row);
+      delivery_row = bad;
+   }
+   if (mode == 23 || mode == 24)
+   {
+      cJSON *row = cJSON_Parse(delivery_row);
+      cJSON_ReplaceItemInObjectCaseSensitive(
+          row, "delivery_id",
+          cJSON_CreateString(mode == 23 ? "18446744073709551616" : "9223372036854775808"));
+      free(delivery_row);
+      delivery_row = cJSON_PrintUnformatted(row);
+      cJSON_Delete(row);
+   }
+   uint64_t cursor = 0;
+   int before = executions;
+   int rc = mode >= 15 && mode <= 25
+                ? server_input_delivery_reconcile_one_v1("prototype",
+                                                         "12345678-1234-4234-8234-123456789abc")
+                : server_input_delivery_reconcile_page_v1(0, 32, 4194304, &cursor);
+   if (mode >= 15 && mode <= 26)
+   {
+      fprintf(stderr, "malformed case%d rc%d cursor%llu callbacks%d ack%d\n", mode, rc,
+              (unsigned long long)cursor, recover_calls, ack_calls);
+      assert(rc == -1 && cursor == 0 && recover_calls == 0 && ack_calls == 0);
+   }
+   else if (mode == 9)
+   {
+      assert(rc == -1 && cursor == 73 && recover_calls == 2 && ack_calls == 1);
+   }
+   else if (mode == 6 || mode == 7)
+   {
+      assert(rc == -1 && cursor == 0 && recover_calls == 0 && ack_calls == 0);
+   }
+   else if (mode == 1 || mode == 4)
+   {
+      assert(rc == -1 && cursor == 0 && recover_calls == 1);
+      assert(ack_calls == (mode == 4));
+   }
+   else
+   {
+      assert(rc == 1 && cursor == 73);
+      assert(recover_calls == (mode == 3 ? 0 : 1));
+      assert(ack_calls == 1);
+      assert(server_input_delivery_reconcile_one_v1("prototype",
+                                                    "12345678-1234-4234-8234-123456789abc") == 1);
+      assert(recover_calls == (mode == 3 ? 0 : 1));
+   }
+   assert(executions == before);
+   server_input_committed_delivery_view_t cv = {0};
+   assert(server_input_committed_delivery_view(saved_delivery, &cv) == -1);
+   printf("PASS generic delivery case%d no recovered execution, cap lifetime, fixed owner, exact "
+          "receipt, completed skip/unknown prefix\n",
+          mode);
 }
 #ifndef SERVER_INPUT_DELIVERY_TEST_ENTRY
 #define SERVER_INPUT_DELIVERY_TEST_ENTRY main
 #endif
 int SERVER_INPUT_DELIVERY_TEST_ENTRY(void)
 {
- assert(!retained_created_main());fflush(stdout);
- for(int mode=0;mode<27;mode++){pid_t child=fork();assert(child>=0);if(!child){alarm(8);delivery_run(mode);fflush(stdout);_exit(0);}int status=0;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);}
- puts("PASS generic delivery27 +legacy11 actual capture/logger; DB transport is explicit synthetic fixture");return 0;
+   assert(!retained_created_main());
+   fflush(stdout);
+   for (int mode = 0; mode < 27; mode++)
+   {
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         alarm(8);
+         delivery_run(mode);
+         fflush(stdout);
+         _exit(0);
+      }
+      int status = 0;
+      assert(waitpid(child, &status, 0) == child);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   }
+   puts("PASS generic delivery27 +legacy11 actual capture/logger; DB transport is explicit "
+        "synthetic fixture");
+   return 0;
 }

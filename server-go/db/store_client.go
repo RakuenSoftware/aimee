@@ -37,8 +37,9 @@ type StageCaller interface {
 }
 
 // ErrStoreUnavailable is what every operation reports when the postgres module
-// is not answering. Distinct from a refusal: the store said nothing, rather
-// than saying no -- and only one of those is worth retrying.
+// is not answering, or answers that its database is unreachable (SQLSTATE
+// class 08). Distinct from a refusal on the merits: the store could not serve,
+// rather than saying no -- and only one of those is worth retrying.
 var ErrStoreUnavailable = errors.New("aimee: the postgres module is not answering")
 
 // WRAPPED, NOT REPLACED, at every site below. The three call sites used to

@@ -9,13 +9,11 @@ on:
     paths:
       - "src/core/**"
       - "examples/c-connection-client/**"
-      - "examples/c-event-bus-module/**"
       - ".github/workflows/core-c.yml"
   pull_request:
     paths:
       - "src/core/**"
       - "examples/c-connection-client/**"
-      - "examples/c-event-bus-module/**"
       - ".github/workflows/core-c.yml"
 
 permissions:
@@ -40,6 +38,3 @@ jobs:
         run: cmake --build build/core --config Release --parallel 2 && cmake --install build/core --config Release
       - name: Build installed connection consumer
         run: cmake -S examples/c-connection-client -B build/connection-consumer -DCMAKE_PREFIX_PATH="$PWD/build/prefix" && cmake --build build/connection-consumer --config Release --parallel 2
-      - name: Build installed event-bus module
-        if: runner.os == 'Linux'
-        run: cmake -S examples/c-event-bus-module -B build/event-bus-module -DCMAKE_PREFIX_PATH="$PWD/build/prefix" && cmake --build build/event-bus-module --config Release --parallel 2

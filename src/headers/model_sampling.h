@@ -34,9 +34,4 @@ double model_sampling_required_temperature(const agent_t *agent);
  * a provider request. Negative values mean omitted; returned strings are borrowed. */
 model_sampling_row_t model_sampling_resolve(const agent_t *agent, double caller_temperature);
 
-void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req,
-                                 double caller_temperature);
-void model_sampling_apply_anthropic(const agent_t *agent, struct cJSON *req,
-                                    double caller_temperature);
-
 #endif /* DEC_MODEL_SAMPLING_H */

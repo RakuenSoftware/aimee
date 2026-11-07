@@ -4,8 +4,8 @@ package governance
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/ir"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -84,13 +84,13 @@ func evaluate(request policyRequest) (uint32, uint32, string) {
 }
 
 // Handle evaluates which response tool calls survive the active governance policy.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	decoded, valid := decodeRequest(request)
 	if invocation.StageID != StageEvaluate || !valid {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	keepMask, drops, finalReason := evaluate(decoded)
@@ -101,5 +101,5 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	binary.LittleEndian.PutUint32(response[12:16], drops)
 	binary.LittleEndian.PutUint32(response[16:20], uint32(len(finalReason)))
 	copy(response[responseStopReasonOff:], finalReason)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

@@ -21,10 +21,10 @@ evidence. An entry cannot outlive its reason: a stale one is reported.
 """
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CMAKE = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
 
 # Each daemon's module-client surface: the one file where it registers what its
 # own code paths need. Both exist for the same reason and neither may stand in
@@ -34,11 +34,11 @@ ADAPTERS = {
     "server": ROOT / "src/server/module_stage_adapters.c",
 }
 
-# Which CMake source lists each daemon links.
-SOURCE_LISTS = {
-    "kb": ("KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "KB_STORE_SRCS", "KB_STORE_HOST_ADAPTER_SRCS"),
-    "server": ("SERVER_SRCS", "SERVER_DATA_SRCS", "SERVER_CORE_SRCS", "DATA_SRCS", "CORE_SRCS",
-               "AGENT_SRCS", "CMD_SRCS", "GIT_SRCS", "DB1_SRCS"),
+# The Make target each daemon is linked by. What it builds is that target's
+# link graph, read from make itself, so the gate sees exactly what ships.
+TARGETS = {
+    "kb": "../aimee-kb",
+    "server": "../aimee-server",
 }
 
 REGISTRAR_DEF = re.compile(r"^\s*void\s+([a-z0-9_]+_register_[a-z0-9_]+)\s*\(", re.M)
@@ -57,69 +57,77 @@ UNREACHABLE = {
     ("kb", "wfe_advance_register_decision_provider"):
         "wfe_advance.c is linked, but wfe_engine.c and wfe_advance_exec.c are not in the KB build, "
         "so nothing drives the advance path there.",
-    ("server", "kb_route_acl_register_authorization_provider"):
-        "kb/http/kb_route_acl.c reaches its provider only from kb_http.c's console-admin branch, "
-        "and that branch is absent from the linked aimee-server binary: 'control-web authorization "
-        "unavailable' appears in aimee-kb and not in aimee-server.",
-    ("server", "kb_curator_grounding_register_provider"):
-        "kb_curator_grounding.c is reached only from kb_curator_extract_code.c, which is absent "
-        "from the linked aimee-server binary: 'sidecar temp path too long to quote safely' appears "
-        "in aimee-kb and not in aimee-server.",
-    ("kb", "agent_tools_register_metadata"):
-        "The metadata getter serves native MCP admission, the async tool worker and agent runtime. "
-        "The shipping Make KB target does not link the tools effect-contract/dispatcher execution "
-        "surface. Its CMake common source list retains the same unreachable agent runtime as the "
-        "classifier seam below; a shared source list does not enable tool execution in KB. "
-        "An absent metadata provider still refuses rather than granting a default read.",
-    ("kb", "agent_tools_register_action_owner"):
-        "The action callback has the same native-dispatch consumer as agent_tools_register_classifier. "
-        "The Make KB target does not link its owner, and the deployed CT109 KB binary lacks both "
-        "'error: spill store unavailable' and 'git tools are not available on this surface'. "
-        "KB does not dispatch this tool surface or own the DB1 action journal.",
-    ("kb", "agent_tools_register_classifier"):
-        "posix/agent_runtime.c is in the KB build and calls dispatch_tool_call_ctx, but the path is "
-        "absent from the linked aimee-kb binary: strings unique to it ('error: spill store "
-        "unavailable', 'git tools are not available on this surface') appear in aimee-server and "
-        "not in aimee-kb, so --gc-sections dropped it because nothing reaches it.",
+    # aimee-server links the KB store sources, but on its link every .text
+    # section of these owners is removed by --gc-sections (seen with
+    # -Wl,--print-gc-sections on a -fno-lto link): no server path reaches them,
+    # so their providers are never consulted there.
+    ("server", "aimee_kb_store_register_css_analysis_providers"):
+        "modules/kb/c/canonical_index.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_css_render_compare_provider"):
+        "modules/kb/c/css_render.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_embed_provider"):
+        "modules/kb/c/kb_payload.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_identity_key_provider"):
+        "modules/kb/c/kb_store_tenant.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_vault_crypto_provider"):
+        "modules/kb/c/vault_pg.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_vault_reseal_provider"):
+        "modules/kb/c/org_vault_rewrap.c is linked into aimee-server, and the linker removes all of it.",
+    ("server", "aimee_kb_store_register_vault_witness_provider"):
+        "modules/kb/c/kb_store_witness_checkpoint.c is linked into aimee-server, and the linker removes all of it.",
 }
 
 
-def expand(name, seen=None):
-    """The .c files named by one set(NAME ...) block, following ${REFERENCES}."""
-    seen = seen or set()
-    if name in seen:
-        return set()
-    seen.add(name)
-    match = re.search(r"^set\(" + name + r"\b(.*?)^\)", CMAKE, re.S | re.M)
-    if not match:
-        return set()
-    body = match.group(1)
-    files = set(re.findall(r"\$\{AIMEE_SRC_DIR\}/(\S+\.c)", body))
-    for ref in re.findall(r"\$\{([A-Z0-9_]+)\}", body):
-        files |= expand(ref, seen)
-    return files
+def linked_sources(root, targets):
+    """The .c files each target links, from make's own database (-pn: no build).
+
+    Archives are followed to their members, so a source linked through a
+    static library counts the same as one named directly; generated objects
+    with no source are skipped."""
+    out = subprocess.run(
+        ["make", "-pn", "--no-print-directory", *targets.values()],
+        cwd=root / "src", capture_output=True, text=True, timeout=300).stdout
+    rules = {}
+    for line in out.splitlines():
+        head, sep, prereqs = line.partition(": ")
+        if sep and not head.startswith(("#", "\t")) and " " not in head and ":=" not in prereqs:
+            rules.setdefault(head, prereqs.split("|")[0].split())
+
+    def sources(target, seen):
+        found = set()
+        for prereq in rules.get(target, ()):
+            if prereq in seen:
+                continue
+            seen.add(prereq)
+            if prereq.endswith(".a"):
+                found |= sources(prereq, seen)
+            elif prereq.startswith("build/obj/") and prereq.endswith(".o"):
+                source = object_source(prereq[len("build/obj/"):-2])
+                if source:
+                    found.add(source)
+        return found
+
+    def object_source(stem):
+        # Some daemons compile their own copy of a source under a prefix (the
+        # KB builds modules/x/y.c as build/obj/kb/modules/x/y.o), so strip
+        # leading directories until the path names a real source.
+        parts = stem.split("/")
+        for start in range(len(parts)):
+            candidate = "/".join(parts[start:]) + ".c"
+            if (root / "src" / candidate).is_file():
+                return candidate
+        return None
+
+    return {daemon: sources(target, set()) for daemon, target in targets.items()}
 
 
-def analyse(root, cmake_text, adapters, source_lists, unreachable):
-    """Returns (exit_code, [messages]). Pure over its inputs so it can be tested."""
-    def expand_in(name, seen=None):
-        seen = seen or set()
-        if name in seen:
-            return set()
-        seen.add(name)
-        match = re.search(r"^set\(" + name + r"\b(.*?)^\)", cmake_text, re.S | re.M)
-        if not match:
-            return set()
-        body = match.group(1)
-        files = set(re.findall(r"\$\{AIMEE_SRC_DIR\}/(\S+\.c)", body))
-        for ref in re.findall(r"\$\{([A-Z0-9_]+)\}", body):
-            files |= expand_in(ref, seen)
-        return files
+def analyse(root, built, adapters, unreachable):
+    """Returns (exit_code, [messages]). Pure over its inputs so it can be tested.
 
-    built = {d: set().union(*(expand_in(l) for l in lists)) for d, lists in source_lists.items()}
+    built maps each daemon to the src-relative .c files it links."""
     for daemon, files in built.items():
         if not files:
-            return 2, [f"no sources resolved for '{daemon}'; the CMake list names have moved"]
+            return 2, [f"no sources resolved for '{daemon}'; its Make link target has moved"]
 
     registered = {}
     for daemon, path in adapters.items():
@@ -185,7 +193,7 @@ def analyse(root, cmake_text, adapters, source_lists, unreachable):
 
 
 def main() -> int:
-    code, messages = analyse(ROOT, CMAKE, ADAPTERS, SOURCE_LISTS, UNREACHABLE)
+    code, messages = analyse(ROOT, linked_sources(ROOT, TARGETS), ADAPTERS, UNREACHABLE)
     stream = sys.stdout if code == 0 else sys.stderr
     for line in messages:
         print(f"check-provider-registration: {line}" if line is messages[0] else line, file=stream)

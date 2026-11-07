@@ -2,6 +2,7 @@
 #include "server_compute_impl.h"
 #include "server_http_identity.h"
 #include "agent_config.h"
+#include "server_session_control.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -10,6 +11,10 @@ void compute_ctx_capture_request_context(compute_ctx_t *cctx, const server_conn_
    request_context_snapshot(&cctx->request_context);
    request_context_snapshot_t *snapshot = &cctx->request_context;
    request_context_t *owner = &snapshot->value;
+   server_control_scope_t *controls = server_control_scope_current();
+   if (snapshot->active && controls)
+      owner->control_reply_capability =
+          owner->control_reply_capability && server_control_scope_can_reply(controls);
    /* A conn-free continuation inherits its actual owner, not CAPS_ALL. Only
     * genuinely context-free server work retains the historical server scope. */
    int inherited_owner = snapshot->active && owner->vault_transport != ATTEST_NONE;

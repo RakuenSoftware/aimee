@@ -14,12 +14,7 @@
         {
           "primitive": "http",
           "path": "src/posix/agent_bridge.c",
-          "count": 11
-        },
-        {
-          "primitive": "http",
-          "path": "src/windows/agent_bridge.c",
-          "count": 9
+          "count": 12
         }
       ]
     },
@@ -66,43 +61,6 @@
       ]
     },
     {
-      "id": "gateway-http",
-      "owner": "gateway core",
-      "direction": "outbound",
-      "purpose": "configured chat delivery, speech sidecars, webhook delivery, and polling",
-      "destination_constraint": "platform-specific fixed authority or operator-configured target with bounded timeout",
-      "credential_constraint": "gateway-owned platform credentials; message content cannot select a credential",
-      "audit_disposition": "gateway action/result audit plus metadata-only transport logs",
-      "review_boundary": "new platforms and destination widening require Gateway and Runtime Security review",
-      "matches": [
-        {
-          "primitive": "http",
-          "path": "src/gateway/platform_ntfy.c",
-          "count": 2
-        },
-        {
-          "primitive": "http",
-          "path": "src/gateway/platform_telegram.c",
-          "count": 3
-        },
-        {
-          "primitive": "http",
-          "path": "src/gateway/platform_webhook.c",
-          "count": 1
-        },
-        {
-          "primitive": "http",
-          "path": "src/gateway/stt.c",
-          "count": 1
-        },
-        {
-          "primitive": "http",
-          "path": "src/gateway/tts.c",
-          "count": 2
-        }
-      ]
-    },
-    {
       "id": "kb-http",
       "owner": "KB core",
       "direction": "outbound",
@@ -120,7 +78,7 @@
         {
           "primitive": "http",
           "path": "src/kb/kb_tsr_sidecar.c",
-          "count": 2
+          "count": 1
         },
         {
           "primitive": "http",
@@ -182,11 +140,6 @@
           "count": 1
         },
         {
-          "primitive": "http",
-          "path": "src/windows/web_egress.c",
-          "count": 1
-        },
-        {
           "primitive": "dns",
           "path": "src/posix/web_egress.c",
           "count": 2
@@ -210,11 +163,6 @@
         },
         {
           "primitive": "inet_socket",
-          "path": "src/gateway/platform_webhook.c",
-          "count": 1
-        },
-        {
-          "primitive": "inet_socket",
           "path": "src/kb/http/kb_http_listener.c",
           "count": 1
         },
@@ -227,11 +175,6 @@
           "primitive": "inet_socket",
           "path": "src/modules/webuser/webuser_editor.c",
           "count": 2
-        },
-        {
-          "primitive": "inet_socket",
-          "path": "src/posix/dashboard.c",
-          "count": 1
         },
         {
           "primitive": "inet_socket",
@@ -338,11 +281,6 @@
           "primitive": "credentialed_git",
           "path": "src/modules/webuser/webuser_editor.c",
           "count": 1
-        },
-        {
-          "primitive": "credentialed_git",
-          "path": "src/modules/workflows/wfe_live_forge.c",
-          "count": 2
         },
         {
           "primitive": "credentialed_git",

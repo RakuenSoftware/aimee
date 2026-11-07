@@ -6,17 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static void test_seed_self_validates(void)
-{
-   char err[256] = "";
-   int rc = rel_types_self_validate(err, sizeof(err));
-   if (rc != 0)
-      fprintf(stderr, "seed self-validation failed: %s\n", err);
-   assert(rc == 0);
-   assert(rel_types_seed_count() > 0);
-   printf("  PASS: test_seed_self_validates\n");
-}
-
 static void test_normalize(void)
 {
    char out[REL_TYPE_NAME_MAX];
@@ -50,81 +39,6 @@ static void test_seed_lookup_case_insensitive(void)
    printf("  PASS: test_seed_lookup_case_insensitive\n");
 }
 
-static void test_kind_allowed(void)
-{
-   const rel_type_def_t *wf = rel_types_seed_lookup("works_for");
-   assert(rel_type_kind_allowed(wf, 1, NODE_PERSON) == 1);
-   assert(rel_type_kind_allowed(wf, 1, NODE_DEVICE) == 0);
-   assert(rel_type_kind_allowed(wf, 0, NODE_ORG) == 1);
-   assert(rel_type_kind_allowed(wf, 0, NODE_PERSON) == 0);
-
-   /* located_in head is ANY (NODE_OTHER wildcard). */
-   const rel_type_def_t *li = rel_types_seed_lookup("located_in");
-   assert(rel_type_kind_allowed(li, 1, NODE_DEVICE) == 1);
-   assert(rel_type_kind_allowed(li, 1, NODE_PERSON) == 1);
-   assert(rel_type_kind_allowed(li, 0, NODE_PLACE) == 1);
-   assert(rel_type_kind_allowed(li, 0, NODE_SCALAR) == 0);
-   assert(rel_type_kind_allowed(NULL, 1, NODE_PERSON) == 0);
-   printf("  PASS: test_kind_allowed\n");
-}
-
-static void test_canonicalize_aliases(void)
-{
-   char out[REL_TYPE_NAME_MAX];
-
-   /* The case that motivated this: a model writes has_ip for a relation we
-    * already model, and without folding it the gate stages a provisional
-    * rel_type on a Class-C edge instead of committing Class B. */
-   rel_type_canonicalize("has_ip", out, sizeof(out));
-   assert(strcmp(out, "device_has_ip") == 0);
-   rel_type_canonicalize("hasIP", out, sizeof(out)); /* normalized, then folded */
-   assert(strcmp(out, "device_has_ip") == 0);
-   rel_type_canonicalize("hostname", out, sizeof(out));
-   assert(strcmp(out, "has_hostname") == 0);
-   rel_type_canonicalize("Works At", out, sizeof(out));
-   assert(strcmp(out, "works_for") == 0);
-   rel_type_canonicalize("married_to", out, sizeof(out));
-   assert(strcmp(out, "spouse") == 0);
-
-   /* A real seed type is already canonical and must never be rewritten. */
-   rel_type_canonicalize("device_has_ip", out, sizeof(out));
-   assert(strcmp(out, "device_has_ip") == 0);
-   rel_type_canonicalize("knows", out, sizeof(out));
-   assert(strcmp(out, "knows") == 0);
-
-   /* Genuinely new predicates pass through normalized. Folding these would
-    * destroy information: founded is not member_of, mentors is not knows. */
-   rel_type_canonicalize("founded", out, sizeof(out));
-   assert(strcmp(out, "founded") == 0);
-   rel_type_canonicalize("mentors", out, sizeof(out));
-   assert(strcmp(out, "mentors") == 0);
-   rel_type_canonicalize("drives", out, sizeof(out));
-   assert(strcmp(out, "drives") == 0);
-
-   rel_type_canonicalize("", out, sizeof(out));
-   assert(out[0] == '\0');
-   rel_type_canonicalize(NULL, out, sizeof(out));
-   assert(out[0] == '\0');
-
-   /* Every alias resolves to a seed type, and folding is idempotent. */
-   assert(rel_types_alias_count() > 0);
-   for (int i = 0; i < rel_types_alias_count(); i++)
-   {
-      const char *canon = NULL;
-      const char *alias = rel_types_alias_at(i, &canon);
-      assert(alias && canon);
-      assert(rel_types_seed_lookup(canon) != NULL);
-      rel_type_canonicalize(alias, out, sizeof(out));
-      assert(strcmp(out, canon) == 0);
-      char twice[REL_TYPE_NAME_MAX];
-      rel_type_canonicalize(out, twice, sizeof(twice));
-      assert(strcmp(twice, out) == 0);
-   }
-   assert(rel_types_alias_at(-1, NULL) == NULL);
-   assert(rel_types_alias_at(rel_types_alias_count(), NULL) == NULL);
-   printf("  PASS: test_canonicalize_aliases\n");
-}
-
 static void test_functional_classification(void)
 {
    /* Single-valued: a new object supersedes the prior (commit-time §4 correction). */
@@ -142,19 +56,6 @@ static void test_functional_classification(void)
    printf("  PASS: test_functional_classification\n");
 }
 
-static void test_enum_text(void)
-{
-   assert(correction_behavior_from_text("immutable") == CORR_IMMUTABLE);
-   assert(correction_behavior_from_text("hard_delete") == CORR_HARD_DELETE);
-   assert(correction_behavior_from_text("garbage") == CORR_SUPERSEDE); /* default */
-   assert(strcmp(correction_behavior_to_text(CORR_IMMUTABLE), "immutable") == 0);
-   assert(rel_sensitivity_from_text("normal") == SENS_NORMAL);
-   assert(rel_sensitivity_from_text("secret") == SENS_SECRET);
-   assert(rel_sensitivity_from_text("garbage") == SENS_PII); /* fail closed */
-   assert(rel_sensitivity_from_text(NULL) == SENS_PII);
-   printf("  PASS: test_enum_text\n");
-}
-
 static void test_governance_rel_types(void)
 {
    /* The P1 decision-record relations are registered in the seed. */
@@ -166,13 +67,9 @@ static void test_governance_rel_types(void)
 
 int main(void)
 {
-   test_seed_self_validates();
    test_normalize();
    test_seed_lookup_case_insensitive();
-   test_kind_allowed();
-   test_canonicalize_aliases();
    test_functional_classification();
-   test_enum_text();
    test_governance_rel_types();
    printf("rel_types: all tests passed\n");
    return 0;

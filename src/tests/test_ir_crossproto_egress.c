@@ -49,6 +49,90 @@ static void same(const char *label, const char *anth_wire, const char *oai_wire)
    free(o);
 }
 
+static void test_service_tier_protocol_custody(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   const char *inputs[] = {"{\"model\":\"m\",\"service_tier\":\"future-tier\",\"messages\":[{"
+                           "\"role\":\"user\",\"content\":\"task\"}]}",
+                           "{\"model\":\"m\",\"service_tier\":\"future-tier\",\"input\":\"task\"}"};
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(inputs[i], strlen(inputs[i]), wires[i], &request, error,
+                                        sizeof error));
+      assert(request.service_tier && !strcmp(request.service_tier, "future-tier"));
+      for (int j = 0; j < 2; j++)
+      {
+         char *bytes = aimee_backend_render_wire(&request, wires[j]);
+         cJSON *body = bytes ? cJSON_Parse(bytes) : NULL;
+         assert(body && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "service_tier")),
+                                "future-tier"));
+         cJSON_Delete(body);
+         free(bytes);
+      }
+      aimee_request_free(&request);
+   }
+   const char *invalid[] = {"{\"service_tier\":7,\"messages\":[]}",
+                            "{\"service_tier\":7,\"input\":\"task\"}"};
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      assert(aimee_frontend_parse_wire(invalid[i], strlen(invalid[i]), wires[i], &request, error,
+                                       sizeof error) < 0);
+      aimee_request_free(&request);
+   }
+   puts("  OpenAI Chat/Responses service tier survives canonical cross-protocol custody OK");
+}
+
+static void test_responses_control_profiles(void)
+{
+   aimee_request_t source = {0};
+   assert(!aimee_ir_request_from_text(&source, NULL, "Preserve the canonical request.", 123, 0.4));
+   source.has_top_p = 1;
+   source.top_p = 0.8;
+   source.metadata = aimee_ir_json_parse_frame("{\"exact\":9007199254740993123456789}",
+                                               strlen("{\"exact\":9007199254740993123456789}"));
+   source.service_tier = strdup("auto");
+   source.has_parallel_tool_calls = 1;
+   source.parallel_tool_calls = 0;
+   cJSON *before = aimee_ir_request_json(&source);
+   assert(before);
+   char *bytes = aimee_backend_render_wire(&source, AIMEE_WIRE_RESPONSES);
+   cJSON *body = bytes ? cJSON_Parse(bytes) : NULL;
+   assert(body && !aimee_backend_request_control_losses(&source, AIMEE_WIRE_RESPONSES, body));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "max_output_tokens")) == 123);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "temperature")) == 0.4);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(body, "top_p")) == 0.8);
+   assert(strstr(bytes, "9007199254740993123456789"));
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "parallel_tool_calls")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "stream")));
+   free(bytes);
+   cJSON_Delete(body);
+   assert(!aimee_backend_render_wire_profile(&source, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_CODEX,
+                                             NULL));
+   int losses = -1;
+   bytes = aimee_backend_render_wire_profile(&source, AIMEE_WIRE_RESPONSES, AIMEE_RESPONSES_CODEX,
+                                             &losses);
+   body = bytes ? cJSON_Parse(bytes) : NULL;
+   assert(body && losses == 4 && cJSON_HasObjectItem(body, "service_tier") &&
+          cJSON_HasObjectItem(body, "parallel_tool_calls") &&
+          !cJSON_HasObjectItem(body, "metadata"));
+   free(bytes);
+   cJSON_Delete(body);
+   source.has_top_k = 1;
+   source.top_k = 17;
+   assert(!aimee_backend_render_wire(&source, AIMEE_WIRE_RESPONSES));
+   source.has_top_k = 0;
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(after && cJSON_Compare(before, after, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(after);
+   aimee_request_free(&source);
+   puts("  Responses API preserves supported controls; Codex requires explicit loss admission OK");
+}
+
 static void test_exact_native_request_bytes(void)
 {
    const char *bodies[] = {
@@ -57,7 +141,7 @@ static void test_exact_native_request_bytes(void)
        "[{\"type\":\"text\",\"text\":\"prefix\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":"
        "\"1h\"}}], \"messages\": [{\"role\":\"user\",\"content\":\"hello\"}]\n} \n",
        "{ \"model\": \"native\", \"messages\": [{\"role\":\"user\",\"content\":\"hello\"}] }\n",
-       "{ \"model\": \"native\", \"input\": \"hello\", \"store\": false, \"stream\": true }\n"};
+       "{ \"model\": \"native\", \"input\": \"hello\", \"store\": true, \"stream\": false }\n"};
    const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
                                  AIMEE_WIRE_RESPONSES};
    for (int i = 0; i < 3; i++)
@@ -914,6 +998,7 @@ static void test_native_thinking_replay_binding(void)
       {
          request.mutated = 1;
          request.messages[0].blocks[0].context.origin = AIMEE_CTX_ORIGIN_MEMORY;
+         request.messages[0].blocks[0].context.model_visible = 1;
          char *exact = aimee_backend_render_wire(&request, AIMEE_WIRE_ANTHROPIC);
          assert(exact && !strcmp(exact, body));
          free(exact);
@@ -975,20 +1060,6 @@ static void test_native_thinking_replay_binding(void)
       cJSON_Delete(native);
       aimee_request_free(&request);
    }
-   cJSON *edited = cJSON_Parse(body);
-   assert(edited);
-   cJSON_SetValuestring(
-       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(edited, "system"), 0), "text"),
-       "compatibility edit");
-   aimee_request_t request = {0};
-   char error[128];
-   assert(!aimee_frontend_parse_native_frame(edited, body, strlen(body), AIMEE_WIRE_ANTHROPIC,
-                                             &request, error, sizeof error));
-   cJSON *native = anthropic_backend_build(&request);
-   assert(native && thinking_count(native) == 0); /* Keep proof from the original frame. */
-   cJSON_Delete(native);
-   cJSON_Delete(edited);
-   aimee_request_free(&request);
    puts("  native prefix/chain fences, cache-only edits and honest historical omission OK");
 }
 
@@ -1079,22 +1150,30 @@ static void test_prompt_cache_controls(void)
       assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
                                         sizeof error));
       char *native = aimee_backend_render_wire(&request, wires[source]);
-      assert(native && !strcmp(native, body));
+      assert(source ? native == NULL : native && !strcmp(native, body));
       free(native);
       assert(!strcmp(request.prompt_cache_key, "tenant/user") &&
              !strcmp(request.prompt_cache_retention, "24h"));
       for (int target = 0; target < 2; target++)
       {
-         native = aimee_backend_render_wire(&request, wires[target]);
+         int losses = -1;
+         native = aimee_backend_render_wire_profile(&request, wires[target], AIMEE_RESPONSES_API,
+                                                    &losses);
+         assert(losses == (target ? 1 : 0));
          cJSON *output = native ? cJSON_Parse(native) : NULL;
          assert(output &&
                 !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_key")),
                         "tenant/user"));
          assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_retention")),
                         "24h"));
-         assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
-                              request.prompt_cache_options, 1));
-         assert(strstr(native, "0.123456789012345678901234567890"));
+         if (!target)
+         {
+            assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
+                                 request.prompt_cache_options, 1));
+            assert(strstr(native, "0.123456789012345678901234567890"));
+         }
+         else
+            assert(!cJSON_HasObjectItem(output, "prompt_cache_options"));
          cJSON_Delete(output);
          free(native);
       }
@@ -1123,8 +1202,12 @@ static void test_prompt_cache_controls(void)
                                       cJSON_Parse("0.123456789012345678901234567891"));
             expected = "0.123456789012345678901234567891";
          }
-         native = aimee_backend_render_wire(&request, wires[source]);
-         assert(native && strstr(native, expected));
+         int losses = -1;
+         native = aimee_backend_render_wire_profile(&request, wires[source], AIMEE_RESPONSES_API,
+                                                    &losses);
+         assert(losses == (source ? 1 : 0));
+         assert(native && (source && change == 2 ? !strstr(native, expected)
+                                                 : strstr(native, expected) != NULL));
          free(native);
       }
       cJSON *canonical = aimee_ir_request_json(&request);
@@ -1177,15 +1260,20 @@ static void test_host_profile_sidecars_exclude_native_selectors(void)
 {
    aimee_request_t profile = {.model = "host-model", .frontend = AIMEE_WIRE_OPENAI_CHAT};
    const char *layouts[] = {
-       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}",
-       "{\"system\":[{\"type\":\"text\",\"text\":\"host system\","
-       "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}]}"};
+       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}", "{}"};
    const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC};
    for (int i = 0; i < 2; i++)
    {
       profile.frontend = wires[i];
+      profile.system_scalar = wires[i] == AIMEE_WIRE_ANTHROPIC;
       profile.raw = cJSON_Parse(layouts[i]);
       assert(aimee_backend_host_profile_valid(&profile));
+      if (wires[i] == AIMEE_WIRE_ANTHROPIC)
+      {
+         cJSON_AddStringToObject(profile.raw, "system", "native system is not a host profile");
+         assert(!aimee_backend_host_profile_valid(&profile));
+         cJSON_DeleteItemFromObjectCaseSensitive(profile.raw, "system");
+      }
       cJSON_AddStringToObject(profile.raw, "conversation", "SDK-side history");
       assert(!aimee_backend_host_profile_valid(&profile));
       cJSON_Delete(profile.raw);
@@ -1226,37 +1314,29 @@ static void test_host_request_owner_precedes_proof_guard(void)
        aimee_frontend_bind_state_guard(inspect_owned_entry, &fixture);
    for (int i = 0; i < 3; i++)
    {
-      for (int parsed_object = 0; parsed_object < 2; parsed_object++)
-      {
-         aimee_request_t request = {0};
-         char error[128];
-         cJSON *native = cJSON_Parse(bodies[i]);
-         int before = fixture.owners;
-         int rc = parsed_object
-                      ? aimee_frontend_parse_native_frame(native, bodies[i], strlen(bodies[i]),
-                                                          wires[i], &request, error, sizeof error)
-                      : aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request,
-                                                  error, sizeof error);
-         cJSON_Delete(native);
-         assert(!rc && fixture.owners == before + 1);
-         request.max_tokens = 17; /* A later approved transform remains effective. */
-         rc = aimee_frontend_guard_state(&request, error, sizeof error);
-         assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
-         char *rendered = aimee_backend_render_wire(&request, wires[i]);
-         assert(rendered && strstr(rendered, "host canonical history") &&
-                !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
-         assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
-         free(rendered);
-         aimee_request_free(&request);
-      }
+      aimee_request_t request = {0};
+      char error[128];
+      int before = fixture.owners;
+      int rc = aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request, error,
+                                         sizeof error);
+      assert(!rc && fixture.owners == before + 1);
+      request.max_tokens = 17; /* A later approved transform remains effective. */
+      rc = aimee_frontend_guard_state(&request, error, sizeof error);
+      assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
+      char *rendered = aimee_backend_render_wire(&request, wires[i]);
+      assert(rendered && strstr(rendered, "host canonical history") &&
+             !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
+      assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
+      free(rendered);
+      aimee_request_free(&request);
    }
-   assert(fixture.owners == 6 && fixture.guards == 12);
+   assert(fixture.owners == 3 && fixture.guards == 6);
    fixture.refuse = 1;
    aimee_request_t refused = {0};
    int rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
                                       NULL, 0);
    assert(rc < 0 && !refused.model && !refused.messages && !refused.raw_bytes &&
-          fixture.guards == 12);
+          fixture.guards == 6);
    aimee_frontend_bind_request_owner(previous_owner.guard, previous_owner.context);
    aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
    rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
@@ -1324,8 +1404,299 @@ static void test_external_claude_observation_import(void)
    puts("external SDK import: owned typed observations only, no repair/effect/proof authority");
 }
 
+static void classified_host_context_keeps_source_history(void)
+{
+   aimee_block_t system[] = {{.type = AIMEE_BLK_TEXT, .text = "TRUSTED_POLICY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "SDK_COMPONENT_IDENTITY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_MEMORY"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_RETRIEVAL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_MODEL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_TOOL"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_OPERATOR"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_PLATFORM"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_USER"},
+                             {.type = AIMEE_BLK_TEXT, .text = "UNTRUSTED_UNKNOWN"},
+                             {.type = AIMEE_BLK_TEXT, .text = "HIDDEN_SECRET"}};
+   aimee_context_origin_t origins[] = {
+       AIMEE_CTX_ORIGIN_PLATFORM,  AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_ORIGIN_MEMORY,
+       AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_ORIGIN_MODEL,    AIMEE_CTX_ORIGIN_TOOL,
+       AIMEE_CTX_ORIGIN_OPERATOR,  AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_ORIGIN_USER,
+       AIMEE_CTX_ORIGIN_UNKNOWN,   AIMEE_CTX_ORIGIN_MEMORY};
+   for (int i = 0; i < 11; ++i)
+      aimee_ir_block_set_context(
+          &system[i], origins[i], i ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_POLICY,
+          AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, i != 10, "source", "scope", 17);
+   aimee_ir_block_set_context(&system[1], AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_PUBLIC, 1,
+                              "native-sdk-profile", "claude", 0);
+   aimee_block_t task = {.type = AIMEE_BLK_TEXT, .text = "ORIGINAL_TASK"};
+   aimee_message_t message = {.role = "user", .blocks = &task, .n_blocks = 1, .content_scalar = 1};
+   aimee_request_t source = {.model = "fixture",
+                             .system = system,
+                             .n_system = 11,
+                             .messages = &message,
+                             .n_messages = 1,
+                             .has_max_tokens = 1,
+                             .max_tokens = 64};
+   assert(aimee_ir_request_needs_model_projection(&source));
+   assert(aimee_ir_request_project_model(&source, &source) == -1);
+   aimee_request_t view = {0};
+   assert(!aimee_ir_request_project_model(&source, &view));
+   assert(view.n_system == 2 && view.n_messages == 2 && view.messages[0].n_blocks == 9);
+   assert(view.messages[1].content_scalar &&
+          !strcmp(view.messages[1].blocks[0].text, "ORIGINAL_TASK"));
+   assert(strstr(view.messages[0].blocks[0].text, "not a new task"));
+   assert(view.messages[0].blocks[8].context.origin == AIMEE_CTX_ORIGIN_UNKNOWN &&
+          view.messages[0].blocks[8].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+   cJSON *first_prefix = aimee_ir_message_json(&view.messages[0]);
+   assert(first_prefix);
+   assert(view.messages[0].blocks[1].context.revision_epoch == 17);
+   assert(!aimee_ir_request_needs_model_projection(&view));
+   aimee_request_free(&view);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   for (int i = 0; i < 3; ++i)
+   {
+      char *body = aimee_backend_render_wire(&source, wires[i]);
+      assert(body && strstr(body, "ORIGINAL_TASK") && strstr(body, "UNTRUSTED_MEMORY") &&
+             strstr(body, "UNTRUSTED_RETRIEVAL") && strstr(body, "UNTRUSTED_MODEL") &&
+             strstr(body, "UNTRUSTED_TOOL") && !strstr(body, "HIDDEN_SECRET"));
+      assert(strstr(body, "UNTRUSTED_MEMORY") < strstr(body, "ORIGINAL_TASK"));
+      cJSON *native = cJSON_Parse(body);
+      assert(native);
+      if (wires[i] == AIMEE_WIRE_OPENAI_CHAT)
+      {
+         const cJSON *row;
+         cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(native, "messages"))
+         {
+            const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "role"));
+            if (role && (!strcmp(role, "system") || !strcmp(role, "developer")))
+            {
+               char *policy = cJSON_PrintUnformatted(row);
+               assert(policy && !strstr(policy, "UNTRUSTED_"));
+               free(policy);
+            }
+         }
+      }
+      else
+      {
+         const cJSON *policy = cJSON_GetObjectItemCaseSensitive(
+             native, wires[i] == AIMEE_WIRE_ANTHROPIC ? "system" : "instructions");
+         char *text = cJSON_PrintUnformatted(policy);
+         assert(text && strstr(text, "SDK_COMPONENT_IDENTITY") && !strstr(text, "UNTRUSTED_"));
+         free(text);
+      }
+      cJSON_Delete(native);
+      free(body);
+      assert(source.n_system == 11 && source.n_messages == 1 && message.n_blocks == 1 &&
+             message.content_scalar && !strcmp(system[10].text, "HIDDEN_SECRET"));
+   }
+   /* Closed host extensions survive filtering; native conversation sidecars do not. */
+   source.frontend = AIMEE_WIRE_OPENAI_CHAT;
+   source.raw = cJSON_Parse("{\"model\":\"fixture\",\"min_p\":0.07}");
+   assert(source.raw);
+   char *host_body = aimee_backend_render_wire(&source, AIMEE_WIRE_OPENAI_CHAT);
+   cJSON *host_native = host_body ? cJSON_Parse(host_body) : NULL;
+   assert(host_native &&
+          cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(host_native, "min_p")) == 0.07);
+   assert(strstr(host_body, "UNTRUSTED_MEMORY") && !strstr(host_body, "HIDDEN_SECRET"));
+   assert(cJSON_GetObjectItemCaseSensitive(source.raw, "min_p") && source.n_messages == 1 &&
+          source.n_system == 11 && !strcmp(system[10].text, "HIDDEN_SECRET"));
+   cJSON_Delete(host_native);
+   free(host_body);
+   assert(cJSON_AddArrayToObject(source.raw, "messages"));
+   host_body = aimee_backend_render_wire(&source, AIMEE_WIRE_OPENAI_CHAT);
+   host_native = host_body ? cJSON_Parse(host_body) : NULL;
+   assert(host_native && !cJSON_GetObjectItemCaseSensitive(host_native, "min_p"));
+   cJSON_Delete(host_native);
+   free(host_body);
+   cJSON_Delete(source.raw);
+   source.raw = NULL;
+   aimee_block_t prior = {.type = AIMEE_BLK_TEXT, .text = "PRIOR_ASSISTANT"};
+   aimee_block_t next = {.type = AIMEE_BLK_TEXT, .text = "CURRENT_FOLLOWUP_TASK"};
+   aimee_message_t continuation[] = {message,
+                                     {.role = "assistant", .blocks = &prior, .n_blocks = 1},
+                                     {.role = "user", .blocks = &next, .n_blocks = 1}};
+   source.messages = continuation;
+   source.n_messages = 3;
+   assert(!aimee_ir_request_project_model(&source, &view));
+   assert(view.n_messages == 4 && !strcmp(view.messages[0].role, "user") &&
+          view.messages[0].n_blocks == 9 &&
+          !strcmp(view.messages[3].blocks[0].text, "CURRENT_FOLLOWUP_TASK"));
+   cJSON *followup_prefix = aimee_ir_message_json(&view.messages[0]);
+   assert(followup_prefix && cJSON_Compare(first_prefix, followup_prefix, 1));
+   assert(!strcmp(view.messages[1].blocks[0].text, "ORIGINAL_TASK"));
+   assert(source.n_messages == 3 && continuation[0].n_blocks == 1);
+   cJSON_Delete(first_prefix);
+   cJSON_Delete(followup_prefix);
+   aimee_request_free(&view);
+   puts("  owned native host evidence projects as user without changing source history OK");
+}
+
+static void policy_role_message_evidence_projects_as_user(void)
+{
+   const char *roles[] = {"system", "developer"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   for (int r = 0; r < 2; ++r)
+   {
+      aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "POLICY_BEFORE"},
+                                {.type = AIMEE_BLK_TEXT, .text = "ROLE_EVIDENCE"},
+                                {.type = AIMEE_BLK_TEXT, .text = "POLICY_AFTER"}};
+      for (int b = 0; b < 3; ++b)
+         aimee_ir_block_set_context(&blocks[b], AIMEE_CTX_ORIGIN_OPERATOR,
+                                    b == 1 ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_POLICY,
+                                    AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                                    "source", "role-test", 12);
+      aimee_block_t task = {.type = AIMEE_BLK_TEXT, .text = "ROLE_TASK"};
+      aimee_message_t messages[] = {{.role = (char *)roles[r], .blocks = blocks, .n_blocks = 3},
+                                    {.role = "user", .blocks = &task, .n_blocks = 1}};
+      aimee_request_t source = {.model = "fixture",
+                                .messages = messages,
+                                .n_messages = 2,
+                                .has_max_tokens = 1,
+                                .max_tokens = 64};
+      cJSON *before = aimee_ir_request_json(&source);
+      assert(before && aimee_ir_request_needs_model_projection(&source));
+      aimee_request_t view = {0};
+      assert(!aimee_ir_request_project_model(&source, &view));
+      assert(view.n_messages == 3 && !strcmp(view.messages[0].role, "user") &&
+             !strcmp(view.messages[0].blocks[1].text, "ROLE_EVIDENCE"));
+      assert(!strcmp(view.messages[1].role, roles[r]) && view.messages[1].n_blocks == 2 &&
+             !strcmp(view.messages[1].blocks[0].text, "POLICY_BEFORE") &&
+             !strcmp(view.messages[1].blocks[1].text, "POLICY_AFTER"));
+      assert(!strcmp(view.messages[2].blocks[0].text, "ROLE_TASK"));
+      aimee_request_free(&view);
+      for (int w = 0; w < 3; ++w)
+      {
+         char *body = aimee_backend_render_wire(&source, wires[w]);
+         cJSON *native = body ? cJSON_Parse(body) : NULL;
+         assert(native && strstr(body, "ROLE_EVIDENCE") && strstr(body, "ROLE_TASK"));
+         const cJSON *rows = cJSON_GetObjectItemCaseSensitive(
+             native, wires[w] == AIMEE_WIRE_RESPONSES ? "input" : "messages");
+         const cJSON *row;
+         int evidence_user = 0;
+         cJSON_ArrayForEach(row, rows)
+         {
+            const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "role"));
+            char *serialized = cJSON_PrintUnformatted(row);
+            assert(serialized);
+            if (strstr(serialized, "ROLE_EVIDENCE"))
+            {
+               assert(role && !strcmp(role, "user"));
+               evidence_user++;
+            }
+            free(serialized);
+         }
+         assert(evidence_user == 1);
+         const cJSON *policy = cJSON_GetObjectItemCaseSensitive(
+             native, wires[w] == AIMEE_WIRE_ANTHROPIC ? "system" : "instructions");
+         if (policy)
+         {
+            char *serialized = cJSON_PrintUnformatted(policy);
+            assert(serialized && !strstr(serialized, "ROLE_EVIDENCE"));
+            free(serialized);
+         }
+         cJSON_Delete(native);
+         free(body);
+         cJSON *after = aimee_ir_request_json(&source);
+         assert(after && cJSON_Compare(before, after, 1));
+         cJSON_Delete(after);
+      }
+      cJSON_Delete(before);
+   }
+   puts("  system/developer message evidence projects as user, policy order/source retained OK");
+}
+
+static void test_historical_empty_assistant_wire_projection(void)
+{
+   const char *frame =
+       "{\"model\":\"m\",\"max_tokens\":64,\"metadata\":{\"user_id\":\"sdk-correlation\",\"host_"
+       "marker\":\"preserved\"},"
+       "\"future_provider_setting\":{\"opaque\":9007199254740993},\"messages\":["
+       "{\"role\":\"user\",\"content\":\"start\",\"message_extension\":\"preserved\"},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[]},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read_"
+       "file\",\"input\":{\"path\":\"file\"}}]},"
+       "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\","
+       "\"content\":[{\"type\":\"text\",\"text\":\"literal result\"}]}]},"
+       "{\"role\":\"user\",\"content\":\"continue\"}]}";
+   aimee_request_t source = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(frame, strlen(frame), AIMEE_WIRE_ANTHROPIC, &source, error,
+                                     sizeof error));
+   cJSON *before = aimee_ir_request_json(&source), *raw = cJSON_Duplicate(source.raw, 1);
+   for (int direct = 0; direct < 2; direct++)
+   {
+      char *wire = NULL;
+      cJSON *body = direct ? anthropic_backend_build(&source) : NULL;
+      if (!direct)
+      {
+         wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+         body = wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
+      }
+      assert(body);
+      cJSON *messages = cJSON_GetObjectItemCaseSensitive(body, "messages");
+      assert(cJSON_GetArraySize(messages) == 4);
+      cJSON *original_messages = cJSON_GetObjectItemCaseSensitive(source.raw, "messages");
+      for (int i = 0; i < 4; i++)
+         assert(cJSON_Compare(cJSON_GetArrayItem(messages, i),
+                              cJSON_GetArrayItem(original_messages, i ? i + 3 : 0), 1));
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(body, "metadata"),
+                           cJSON_GetObjectItemCaseSensitive(source.raw, "metadata"), 1));
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(body, "future_provider_setting"),
+                           cJSON_GetObjectItemCaseSensitive(source.raw, "future_provider_setting"),
+                           1));
+      char *encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, "9007199254740993"));
+      free(encoded);
+      free(wire);
+      cJSON_Delete(body);
+   }
+   char *original_role = source.messages[5].role;
+   source.messages[5].role = "tool";
+   char *tool_wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+   cJSON *tool_body = tool_wire ? aimee_ir_json_parse_frame(tool_wire, strlen(tool_wire)) : NULL;
+   assert(tool_body && !strcmp(source.messages[5].role, "tool"));
+   const cJSON *native_result =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(tool_body, "messages"), 2);
+   const cJSON *original_result =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(source.raw, "messages"), 5);
+   assert(cJSON_Compare(native_result, original_result, 1));
+   source.messages[5].role = original_role;
+   free(tool_wire);
+   cJSON_Delete(tool_body);
+   aimee_wire_projection_report_t report;
+   aimee_backend_projection_report(&source, AIMEE_WIRE_ANTHROPIC, &report);
+   assert(report.omitted_empty_messages == 3 && !report.omitted_reasoning_blocks &&
+          !report.omitted_opaque_state_blocks);
+   cJSON *after = aimee_ir_request_json(&source);
+   assert(after && cJSON_Compare(before, after, 1) && cJSON_Compare(raw, source.raw, 1) &&
+          source.raw_length == strlen(frame) && !memcmp(source.raw_bytes, frame, strlen(frame)));
+   cJSON_Delete(after);
+   cJSON_Delete(before);
+   cJSON_Delete(raw);
+   aimee_request_free(&source);
+   const char *prefill = "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"task\"},{"
+                         "\"role\":\"assistant\",\"content\":[]}]}";
+   assert(!aimee_frontend_parse_wire(prefill, strlen(prefill), AIMEE_WIRE_ANTHROPIC, &source, error,
+                                     sizeof error));
+   assert(!anthropic_ir_omitted_empty_messages(&source));
+   char *wire = aimee_backend_render_wire(&source, AIMEE_WIRE_ANTHROPIC);
+   assert(wire && !strcmp(wire, prefill));
+   free(wire);
+   aimee_request_free(&source);
+   puts("historical empty assistant projection preserves native opaque data and source bytes; "
+        "final prefill is unchanged OK");
+}
+
 int main(void)
 {
+   test_historical_empty_assistant_wire_projection();
+   policy_role_message_evidence_projects_as_user();
+   classified_host_context_keeps_source_history();
    test_external_claude_observation_import();
    test_host_request_owner_precedes_proof_guard();
    test_host_profile_sidecars_exclude_native_selectors();
@@ -1343,6 +1714,8 @@ int main(void)
    test_foreign_reasoning_switch_preserves_canonical_state();
    test_history_entry_migration();
    printf("cross-protocol anthropic egress byte-identity:\n");
+   test_service_tier_protocol_custody();
+   test_responses_control_profiles();
    test_exact_native_request_bytes();
    test_native_message_group_replay();
    test_canonical_replay_egress();

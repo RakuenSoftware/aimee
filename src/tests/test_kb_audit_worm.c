@@ -63,35 +63,12 @@ static void test_outbox_is_immutable(void)
    printf("  PASS: kb_outbox_is_immutable\n");
 }
 
-static void test_capture_via_seam(void)
-{
-   assert(kb_store_artifact_write("src-cap", "doc", "proposed", "entity", "", "curator", 1.0,
-                                  "{}") == 0);
-   assert(kb_store_artifact_write("src-cap2", "doc", "proposed", "user", "", "user", 1.0, "{}") ==
-          0);
-
-   kb_store_kb_audit_worm_set_enabled(1);
-   long long before = outbox_count();
-   assert(kb_store_audit_event_write("aid-cap", "src-cap", "kb.curator.promote_entity", "tgt-cap",
-                                     "curator", "entity", "", 1.0, 0, NULL, "{}") == 0);
-   assert(outbox_count() == before + 1);
-
-   kb_store_kb_audit_worm_set_enabled(0);
-   before = outbox_count();
-   assert(kb_store_audit_event_write("aid-cap2", "src-cap2", "docs", "tgt2", "user", "user", "",
-                                     1.0, 0, NULL, "{}") == 0);
-   assert(outbox_count() == before);
-   kb_store_kb_audit_worm_set_enabled(1);
-   printf("  PASS: kb_capture_via_seam\n");
-}
-
 int main(void)
 {
    kb_store_test_shim_open();
    test_submit_and_pending();
    test_transactional_submit();
    test_outbox_is_immutable();
-   test_capture_via_seam();
    kb_store_test_shim_close();
    printf("kb_audit_worm: all tests passed\n");
    return 0;

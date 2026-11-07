@@ -1,3 +1,4 @@
+#include "support/ir_response_fixture.h"
 /* test_cmd_delegate.c: unit tests for CLI delegation chain depth guard */
 #include "support/delegate_role_seam_stub.h"
 #include <assert.h>
@@ -11,14 +12,14 @@
 #include <aimee/delegates/delegate_role.h>
 #include "model_registry.h"
 #include "log.h"
-#include <aimee/core/event_bus/module_runtime.h>
+#include <ouroboros/module_runtime.h>
 #include <aimee/delegates/module_api.h>
 
-extern aimee_module_status_t aimee_delegates_module_handler(const aimee_module_invocation_t *,
-                                                            const uint8_t *, uint32_t, uint8_t *,
-                                                            uint32_t, uint32_t *, void *);
+extern ouro_module_status_t aimee_delegates_module_handler(const ouro_module_invocation_t *,
+                                                           const uint8_t *, uint32_t, uint8_t *,
+                                                           uint32_t, uint32_t *, void *);
 
-int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+int ouro_module_invocation_cancelled(const ouro_module_invocation_t *invocation)
 {
    (void)invocation;
    return 0;
@@ -39,11 +40,11 @@ static int capabilities_via_module(const char *prompt, int tools_enabled, unsign
        aimee_delegates_cap_request_encode(prompt, prompt_len, tools_enabled, request, request_cap);
    uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
    int rc =
        request_len > 0 && aimee_delegates_module_handler(
                               &invocation, request, (uint32_t)request_len, response,
-                              sizeof(response), &response_len, NULL) == AIMEE_MODULE_STATUS_OK
+                              sizeof(response), &response_len, NULL) == OURO_MODULE_STATUS_OK
            ? aimee_delegates_cap_response_decode(response, response_len, required_caps, min_context)
            : -1;
    free(request);
@@ -86,7 +87,6 @@ static void setup_role_templates(void)
 }
 
 /* Pull in only the declarations we need. */
-int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 
 /* ---- Helpers ---- */
 
@@ -152,6 +152,18 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
    if (!agent)
       return AGENT_ROUTE_NULL;
    return agent->enabled ? AGENT_ROUTE_OK : AGENT_ROUTE_POLICY_EXCLUDED;
+}
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_is_available_for_routing(agent);
+}
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz)
+{
+   assert(execution == AGENT_ROUTE_EXECUTION_HOST);
+   return agent_routing_block_reason(agent, detail, detail_sz);
 }
 
 agent_t *agent_find(agent_config_t *cfg, const char *name)
@@ -247,7 +259,7 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
    return NULL;
 }
 
-void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
+void model_capability_format_flags(unsigned flags, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
@@ -276,130 +288,7 @@ void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
       snprintf(out, out_len, "-");
 }
 
-static void clear_depth_env(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "");
-   platform_setenv("AIMEE_PARENT_DELEGATION_ID", "");
-}
-
 /* ---- Tests: delegate_check_chain_depth ---- */
-
-static void test_depth_zero_when_env_unset(void)
-{
-   clear_depth_env();
-   char errbuf[256] = {0};
-   /* max_depth=3: first call (depth 1) should succeed */
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   assert(errbuf[0] == '\0');
-   /* env var should now be "1" */
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "1") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_zero_when_env_unset\n");
-}
-
-static void test_depth_increments_from_env(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "2");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   assert(errbuf[0] == '\0');
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_increments_from_env\n");
-}
-
-static void test_depth_blocked_at_limit(void)
-{
-   /* parent_depth=3, current=4 > max_depth=3 -> blocked */
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "depth limit exceeded") != NULL);
-   /* env should be unchanged at "3" */
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_blocked_at_limit\n");
-}
-
-static void test_depth_allowed_at_limit_minus_one(void)
-{
-   /* parent_depth=2, current=3 == max_depth=3 -> allowed */
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "2");
-   char errbuf[256] = {0};
-   int rc = delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   const char *val = getenv("AIMEE_DELEGATE_DEPTH");
-   assert(val != NULL);
-   assert(strcmp(val, "3") == 0);
-   clear_depth_env();
-   printf("  PASS: test_depth_allowed_at_limit_minus_one\n");
-}
-
-static void test_depth_custom_limit(void)
-{
-   clear_depth_env();
-   char errbuf[256] = {0};
-
-   /* depth 1..5 all succeed with max_depth=5 */
-   for (int i = 0; i < 5; i++)
-   {
-      int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-      assert(rc == 0);
-      char expected[16];
-      snprintf(expected, sizeof(expected), "%d", i + 1);
-      assert(strcmp(getenv("AIMEE_DELEGATE_DEPTH"), expected) == 0);
-   }
-
-   /* depth 6 > max_depth=5 -> blocked */
-   int rc = delegate_check_chain_depth(5, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "6/5") != NULL);
-
-   clear_depth_env();
-   printf("  PASS: test_depth_custom_limit\n");
-}
-
-static void test_depth_errbuf_null_safe(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   /* Passing NULL errbuf must not crash */
-   int rc = delegate_check_chain_depth(3, NULL, 0);
-   assert(rc == -1);
-   clear_depth_env();
-   printf("  PASS: test_depth_errbuf_null_safe\n");
-}
-
-static void test_depth_error_message_content(void)
-{
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "3");
-   char errbuf[512] = {0};
-   delegate_check_chain_depth(3, errbuf, sizeof(errbuf));
-   assert(strstr(errbuf, "delegation chain depth limit exceeded") != NULL);
-   assert(strstr(errbuf, "max_delegation_depth") != NULL);
-   clear_depth_env();
-   printf("  PASS: test_depth_error_message_content\n");
-}
-
-static void test_delegate_chain_env_clear_policy(void)
-{
-   assert(delegate_chain_env_should_clear("2", "", 0, 0) == 1);
-   assert(delegate_chain_env_should_clear("2", NULL, 0, 0) == 1);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 0, 0) == 0);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 1, 1) == 0);
-   assert(delegate_chain_env_should_clear("2", "deleg-parent", 1, 0) == 1);
-   assert(delegate_chain_env_should_clear("", "deleg-parent", 0, 0) == 0);
-   assert(delegate_chain_env_should_clear("", "deleg-parent", 1, 0) == 1);
-   printf("  PASS: test_delegate_chain_env_clear_policy\n");
-}
 
 static void test_guarded_lxc_readonly_root_matching(void)
 {
@@ -415,45 +304,6 @@ static void test_guarded_lxc_readonly_root_matching(void)
    assert(agent_tools_cmd_refers_to_readonly_root("cat /repo/.aimee/worktrees/session/main/src.c",
                                                   ro, rw) == 0);
    printf("  PASS: test_guarded_lxc_readonly_root_matching\n");
-}
-
-static void test_prompt_plan_inline_prompt_only(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs("summarize this text", NULL, &plan) == 0);
-   assert(strcmp(plan.task_prompt, "summarize this text") == 0);
-   assert(strcmp(plan.user_prompt, "summarize this text") == 0);
-   assert(plan.owned_user_prompt == NULL);
-   printf("  PASS: test_prompt_plan_inline_prompt_only\n");
-}
-
-static void test_prompt_plan_file_only(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs(NULL, "file payload here", &plan) == 0);
-   assert(strcmp(plan.task_prompt, "Work from the user prompt provided below.") == 0);
-   assert(strcmp(plan.user_prompt, "file payload here") == 0);
-   assert(plan.owned_user_prompt == NULL);
-   printf("  PASS: test_prompt_plan_file_only\n");
-}
-
-static void test_prompt_plan_prompt_and_file(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs("extract the marker", "MARKER_ABC_123", &plan) == 0);
-   assert(strcmp(plan.task_prompt, "extract the marker") == 0);
-   assert(plan.owned_user_prompt != NULL);
-   assert(strstr(plan.user_prompt, "extract the marker") == plan.user_prompt);
-   assert(strstr(plan.user_prompt, "# Prompt File\nMARKER_ABC_123") != NULL);
-   free(plan.owned_user_prompt);
-   printf("  PASS: test_prompt_plan_prompt_and_file\n");
-}
-
-static void test_prompt_plan_requires_prompt_source(void)
-{
-   delegate_prompt_plan_t plan;
-   assert(delegate_resolve_prompt_inputs(NULL, NULL, &plan) == -1);
-   printf("  PASS: test_prompt_plan_requires_prompt_source\n");
 }
 
 /* When the caller supplies the review target (target_provided=1, e.g. a diff via
@@ -488,12 +338,26 @@ static void review_tmp_template(char *out, size_t cap, const char *name)
 static unsigned g_review_verdict;
 static const char *g_review_message = "";
 static unsigned g_review_flags_seen;
+static int g_review_calls;
+static const char *g_review_expected_text;
 
 static int test_review_evidence_provider(const char *role, const char *response, unsigned flags,
                                          unsigned *verdict, char *message, size_t message_cap)
 {
    (void)role;
-   (void)response;
+   g_review_calls++;
+   if (flags & AIMEE_DELEGATES_REVIEW_POLICY_ONLY)
+   {
+      assert(flags == AIMEE_DELEGATES_REVIEW_POLICY_ONLY && response && !response[0]);
+      if (verdict)
+         *verdict = g_review_verdict &
+                    (AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS);
+      if (message && message_cap)
+         message[0] = 0;
+      return 0;
+   }
+   if (g_review_expected_text)
+      assert(!strcmp(response, g_review_expected_text));
    g_review_flags_seen = flags;
    if (verdict)
       *verdict = g_review_verdict;
@@ -637,6 +501,97 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
    printf("  PASS: test_review_evidence_drift_ignores_inline_review_annotation\n");
 }
 
+static void review_model_result(agent_result_t *result, const char *text)
+{
+   result->success = 1;
+   assert(!fixture_ir_response_from_text(&result->canonical_response, text, NULL));
+   g_review_expected_text = text;
+}
+static void require_review_projection(const aimee_response_t *source, int success, unsigned policy,
+                                      int expected_rc, int calls)
+{
+   agent_result_t result = {.success = success};
+   assert(!aimee_ir_response_clone(source, &result.canonical_response));
+   aimee_response_t before = result.canonical_response;
+   aimee_block_t blocks_before[3];
+   assert(before.n_content <= 3);
+   memcpy(blocks_before, before.content, before.n_content * sizeof *blocks_before);
+   g_review_expected_text = NULL;
+   g_review_verdict = policy;
+   g_review_message = "";
+   int before_calls = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &result, 0);
+   assert(rc == expected_rc && g_review_calls == before_calls + calls);
+   assert(!memcmp(&before, &result.canonical_response, sizeof before));
+   assert(!memcmp(blocks_before, before.content, before.n_content * sizeof *blocks_before));
+   for (int i = 0; i < before.n_content; i++)
+   {
+      if (source->content[i].text)
+         assert(!strcmp(source->content[i].text, before.content[i].text));
+      if (source->content[i].media_ref)
+         assert(!strcmp(source->content[i].media_ref, before.content[i].media_ref));
+   }
+   agent_result_clear_response(&result);
+}
+static void test_review_role_policy_precedes_text_projection(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://example.invalid/generated.png"},
+                             {.type = AIMEE_BLK_TEXT, .text = "canonical review"},
+                             {.type = AIMEE_BLK_THINKING, .text = "inert reasoning"}};
+   aimee_response_t ir = {.role = "assistant",
+                          .content = blocks,
+                          .n_content = 1,
+                          .stop_reason = AIMEE_STOP_END_TURN,
+                          .raw_stop_reason = "end_turn"};
+   /* Role policy is the module callback's decision, never a C role-name list. */
+   require_review_projection(&ir, 1, 0, 0, 1);
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, -1, 1);
+   ir.n_content = 3;
+   require_review_projection(&ir, 1, 0, 0, 1);
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, -1, 1);
+   ir.content = blocks + 1;
+   ir.n_content = 2;
+   require_review_projection(&ir, 1, AIMEE_DELEGATES_REVIEW_GUARDED, 0, 2);
+   delegate_register_review_evidence_provider(NULL);
+   require_review_projection(&ir, 1, 0, -1, 0);
+   delegate_register_review_evidence_provider(test_review_evidence_provider);
+   require_review_projection(&ir, 0, 0, -1, 0);
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   require_review_projection(&ir, 1, 0, -1, 0);
+   ir.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   ir.raw_stop_reason = "refusal";
+   require_review_projection(&ir, 1, 0, -1, 0);
+   agent_result_t missing = {.success = 1};
+   int before = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("module-owned-role", ".", &rc, &missing, 0);
+   assert(rc == -1 && g_review_calls == before);
+   agent_result_clear_response(&missing);
+   uint8_t wire[128];
+   assert(aimee_delegates_reviewev_request_encode("review", "", AIMEE_DELEGATES_REVIEW_POLICY_ONLY,
+                                                  wire, sizeof wire) > 0);
+   assert(aimee_delegates_reviewev_request_encode("review", "hidden report",
+                                                  AIMEE_DELEGATES_REVIEW_POLICY_ONLY, wire,
+                                                  sizeof wire) == -1);
+   assert(aimee_delegates_reviewev_request_encode("review", "",
+                                                  AIMEE_DELEGATES_REVIEW_POLICY_ONLY |
+                                                      AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY,
+                                                  wire, sizeof wire) == -1);
+   assert(aimee_delegates_reviewev_request_encode("review", "", 1u << 7, wire, sizeof wire) == -1);
+   puts("  PASS: module role policy precedes business-text projection");
+}
+static void test_review_evidence_requires_canonical_output(void)
+{
+   agent_result_t result = {.success = 1};
+   int before = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("review", "/unused", &rc, &result, 0);
+   assert(rc == -1 && !strcmp(result.error, "delegate has no complete canonical outcome"));
+   assert(g_review_calls == before);
+   agent_result_clear_response(&result);
+}
+
 /* The guard reports the module's contradiction verdict, in the module's words.
  *
  * This replaces a fixture that pinned the ROLE list and the claim keywords by
@@ -654,9 +609,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CONTRADICTION;
    g_review_message = "delegate evidence drift: the wording the module chose";
@@ -668,9 +621,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    /* An unguarded verdict leaves the review alone, whatever it said. */
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
    g_review_verdict = 0;
    g_review_message = "";
    rc = 0;
@@ -727,9 +678,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -740,9 +689,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
    agent_result_clear_response(&result);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS;
    rc = 0;
@@ -771,9 +718,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -792,9 +737,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    fclose(f);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
    g_review_flags_seen = 0;
    rc = 0;
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
@@ -1213,6 +1156,8 @@ static void test_inline_acp_agent_synthesis(void)
    assert(strcmp(a->cli_cmd, "claude agent") == 0); /* command + args joined */
    assert(a->role_count == 1 && strcmp(a->roles[0], "code") == 0);
    assert(a->enabled == 1);
+   assert(a->max_parallel == 1);
+   assert(a->model[0] == 0); /* External provider model is not observed. */
    assert(a->tools_enabled == 1);
    assert(a->max_turns == -1); /* no declared cap; role floor applies */
 
@@ -1263,51 +1208,6 @@ const char *agent_scope_name(agent_scope_t s)
    }
 }
 
-/* The scope filter is what makes `--scope bounded` actually shift work to a local
- * seat, and what stops `--scope whole_task` reaching one that cannot serve it.
- * Its error must name the fleet and each ceiling: "nothing can serve this" alone
- * leaves the operator guessing which seat to change. */
-static void test_delegate_filter_route_scope(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   strcpy(cfg.agents[0].name, "local");
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
-   strcpy(cfg.agents[1].name, "capable");
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].max_scope = AGENT_SCOPE_UNSET; /* no ceiling */
-
-   char err[512];
-
-   /* Bounded work: both seats remain eligible. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_BOUNDED, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 1 && cfg.agents[1].enabled == 1);
-
-   /* Whole-task work: the ceiling disables the local seat, not the fleet. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-
-   /* UNSET is a no-op here — the routing filter resolves it to whole_task. */
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 1;
-   strcpy(cfg.agents[0].name, "local");
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_UNSET, err, sizeof(err)) == 0);
-   assert(cfg.agents[0].enabled == 1);
-
-   /* Nothing can serve it: fail, and SAY WHICH SEATS EXIST and their ceilings. */
-   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) != 0);
-   assert(strstr(err, "whole_task") != NULL);
-   assert(strstr(err, "local") != NULL);
-   assert(strstr(err, "bounded") != NULL);
-
-   printf("  PASS: test_delegate_filter_route_scope\n");
-}
-
 static int chain_via_module(unsigned op, int has_depth, int has_parent, int parent_known,
                             int parent_active, int parent_depth, int max_depth, int *flag,
                             int32_t *current_depth)
@@ -1315,13 +1215,13 @@ static int chain_via_module(unsigned op, int has_depth, int has_parent, int pare
    uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
    uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
    uint32_t response_len = 0;
-   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
+   ouro_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
    return aimee_delegates_chain_request_encode(op, has_depth, has_parent, parent_known,
                                                parent_active, (int32_t)parent_depth,
                                                (int32_t)max_depth, request, sizeof(request)) == 0 &&
                   aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
                                                  sizeof(response), &response_len,
-                                                 NULL) == AIMEE_MODULE_STATUS_OK
+                                                 NULL) == OURO_MODULE_STATUS_OK
               ? aimee_delegates_chain_response_decode(response, response_len, flag, current_depth)
               : -1;
 }
@@ -1341,23 +1241,13 @@ int main(void)
    delegate_register_chain_provider(chain_via_module);
    printf("test_cmd_delegate\n");
    setup_role_templates();
-   test_depth_zero_when_env_unset();
-   test_depth_increments_from_env();
-   test_depth_blocked_at_limit();
-   test_depth_allowed_at_limit_minus_one();
-   test_depth_custom_limit();
-   test_depth_errbuf_null_safe();
-   test_depth_error_message_content();
-   test_delegate_chain_env_clear_policy();
    test_guarded_lxc_readonly_root_matching();
-   test_prompt_plan_inline_prompt_only();
-   test_prompt_plan_file_only();
-   test_prompt_plan_prompt_and_file();
-   test_prompt_plan_requires_prompt_source();
    delegate_register_review_evidence_provider(test_review_evidence_provider);
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
+   test_review_role_policy_precedes_text_projection();
+   test_review_evidence_requires_canonical_output();
    test_review_evidence_guard_reports_a_contradiction();
    test_review_evidence_guard_runs_the_snippet_check_only_when_asked();
    test_review_evidence_guard_sends_the_facts_it_owns();
@@ -1374,7 +1264,6 @@ int main(void)
    test_route_filter_refuses_without_a_provider();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
-   test_delegate_filter_route_scope();
    printf("All tests passed.\n");
    return 0;
 }

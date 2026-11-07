@@ -13,10 +13,12 @@
 /* --- a fake capability backing, standing in for the real delegate spawner --- */
 static int g_spawns;
 static char g_last_role[32];
-static int fake_spawn_delegate(void *ctx, const char *role, const char *brief)
+static int fake_spawn_delegate(void *ctx, const char *role, const aimee_message_t *message)
 {
    (void)ctx;
-   (void)brief;
+   assert(message && !strcmp(message->role, "user") && message->n_blocks == 2);
+   assert(message->blocks[1].type == AIMEE_BLK_IMAGE);
+   assert(!strcmp(message->blocks[1].media_ref, "https://fixture.invalid/input.png"));
    g_spawns++;
    if (role)
       snprintf(g_last_role, sizeof(g_last_role), "%s", role);
@@ -44,7 +46,12 @@ static gw_orch_result_t delegate_hook(const gw_turn_snapshot_t *turn,
    (void)turn;
    (void)ud;
    g_ran_delegate++;
-   caps->spawn_delegate(caps->ctx, "reviewer", "check the diff");
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "check the diff"},
+                             {.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://fixture.invalid/input.png"}};
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 2};
+   caps->spawn_delegate(caps->ctx, "reviewer", &message);
    gw_orch_result_t r = {GW_ORCH_CONTINUE, NULL};
    return r;
 }

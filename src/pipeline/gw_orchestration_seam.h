@@ -42,7 +42,7 @@ typedef struct
 typedef struct
 {
    void *ctx;
-   int (*spawn_delegate)(void *ctx, const char *role, const char *brief);
+   int (*spawn_delegate)(void *ctx, const char *role, const aimee_message_t *message);
    int (*dispatch_workflow)(void *ctx, const char *lane, const char *payload);
 } gw_turn_capabilities_t;
 

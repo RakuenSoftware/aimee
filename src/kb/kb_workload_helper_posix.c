@@ -454,10 +454,18 @@ kb_workload_helper_result_t kb_workload_helper_invoke(int helper_fd, const unsig
          goto done;
    }
    if (!surplus && written == request_len && input_closed && output_eof && reaped &&
-       WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0 && remaining_ms(deadline) > 0)
+       WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0)
    {
-      *response_len = received;
-      result = KB_WORKLOAD_HELPER_OK;
+      /* The loop exits on completion before it looks at the clock, so an
+       * exchange that finished past its deadline lands here. That is a timeout,
+       * not an unavailable helper. */
+      if (remaining_ms(deadline) > 0)
+      {
+         *response_len = received;
+         result = KB_WORKLOAD_HELPER_OK;
+      }
+      else
+         result = KB_WORKLOAD_HELPER_TIMEOUT;
    }
 done:
    if (input[0] >= 0)

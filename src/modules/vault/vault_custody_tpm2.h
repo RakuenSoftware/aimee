@@ -108,8 +108,4 @@ int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt
  * and *out_gen on success, -1 on any failure (incl. the default stub build). */
 int vault_custody_tpm2_nv_generation(const char *secret, uint64_t *out_gen);
 
-/* Re-seal + zeroize the singleton's cached KEK and drop its lazy-init state so a
- * fresh instance re-loads the on-disk blob (test reset / clean re-bind). */
-void vault_custody_tpm2_reset(void);
-
 #endif /* DEC_VAULT_CUSTODY_TPM2_H */

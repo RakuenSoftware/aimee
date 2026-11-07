@@ -6,20 +6,11 @@
  * SDK launch. A released flock is never evidence that an old child tree died:
  * the durable marker survives crashes and must continue to refuse restart. */
 typedef struct server_native_cache_lease server_native_cache_lease_t;
-server_native_cache_lease_t *server_native_cache_lease_open(const char *home, const char *sdk,
-                                                            const char *session,
-                                                            const char *binding, const char *actor,
-                                                            const char *turn, char error[512]);
 /* Acquire may return an exact prior manifest while retaining the exclusive lock.
  * It grants no authority to clear that owner: caller must prove the exact saved
  * containment empty and commit durable reconciliation before rotate/clean close. */
-server_native_cache_lease_t *server_native_cache_lease_acquire(const char *home, const char *sdk,
-                                                               const char *session,
-                                                               const char *binding,
-                                                               const char *actor, const char *turn,
-                                                               cJSON **prior, char error[512]);
-/* Qualified fresh launch: hold the physical lock and an in-memory nonce only.
- * Persist DB reservation first, then update publishes its marker before SDK access. */
+/* Fresh launch holds the physical lock and an in-memory nonce only. Persist
+ * DB reservation first; update then publishes its marker before SDK access. */
 server_native_cache_lease_t *server_native_cache_lease_acquire_unpublished(
     const char *home, const char *sdk, const char *session, const char *binding, const char *actor,
     const char *turn, cJSON **prior, char error[512]);
@@ -28,8 +19,6 @@ const char *server_native_cache_lease_owner(const server_native_cache_lease_t *l
 int server_native_cache_lease_update(server_native_cache_lease_t *lease, const cJSON *manifest);
 int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *lease,
                                                  const char *turn, char error[512]);
-int server_native_cache_lease_rotate(server_native_cache_lease_t *lease, const char *turn,
-                                     char error[512]);
 /* Private SDK scheduler cwd; never the operator project or credential HOME.
  * Caller holds this lease and supplies the independently admitted DB epoch.
  * Returned fd is caller-owned; validate again before spawn and init readback. */

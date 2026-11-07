@@ -320,12 +320,11 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
             }
          }
          cJSON_AddStringToObject(src, "turn_version", turn_version);
-         const cJSON *captured_ref =
-             cJSON_GetObjectItemCaseSensitive(captured_item, "source_ref");
+         const cJSON *captured_ref = cJSON_GetObjectItemCaseSensitive(captured_item, "source_ref");
          const cJSON *current_ref = cJSON_GetObjectItemCaseSensitive(record, "source_ref");
          module_source_ref_comparison_t comparison =
              found == 1 ? module_source_ref_compare_legacy(captured_ref, current_ref, id,
-                                                            turn_version, version)
+                                                           turn_version, version)
                         : MODULE_SOURCE_REF_UNKNOWN;
          cJSON_AddBoolToObject(src, "drifted", comparison == MODULE_SOURCE_REF_CHANGED);
          cJSON_AddStringToObject(src, "drift_state",
@@ -333,14 +332,14 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
                                  : comparison == MODULE_SOURCE_REF_EQUAL ? "unchanged"
                                                                          : "unknown");
          if (comparison == MODULE_SOURCE_REF_UNKNOWN)
-            cJSON_AddStringToObject(src, "drift_reason",
-                                    "comparable current and captured source references unavailable");
+            cJSON_AddStringToObject(
+                src, "drift_reason",
+                "comparable current and captured source references unavailable");
          if (module_source_ref_valid(current_ref, id))
             cJSON_AddItemToObject(src, "source_ref", cJSON_Duplicate(current_ref, 1));
          if (module_source_ref_valid(captured_ref, id))
             cJSON_AddItemToObject(src, "turn_source_ref", cJSON_Duplicate(captured_ref, 1));
-         const cJSON *captured_state =
-             cJSON_GetObjectItemCaseSensitive(captured_item, "state_ref");
+         const cJSON *captured_state = cJSON_GetObjectItemCaseSensitive(captured_item, "state_ref");
          const cJSON *current_state = cJSON_GetObjectItemCaseSensitive(record, "state_ref");
          module_source_ref_comparison_t state_comparison =
              found == 1 ? module_source_ref_compare(captured_state, current_state, id)
@@ -349,8 +348,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
                                  state_comparison == MODULE_SOURCE_REF_CHANGED ? "changed"
                                  : state_comparison == MODULE_SOURCE_REF_EQUAL ? "unchanged"
                                                                                : "unknown");
-         cJSON_AddBoolToObject(src, "state_changed",
-                               state_comparison == MODULE_SOURCE_REF_CHANGED);
+         cJSON_AddBoolToObject(src, "state_changed", state_comparison == MODULE_SOURCE_REF_CHANGED);
          if (module_source_ref_valid(current_state, id))
             cJSON_AddItemToObject(src, "state_ref", cJSON_Duplicate(current_state, 1));
          if (module_source_ref_valid(captured_state, id))

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // --- fake database -----------------------------------------------------------
@@ -108,9 +108,9 @@ func (d *fakeDB) Begin(context.Context) (Tx, error) {
 	return d.tx, nil
 }
 
-func invoke(t *testing.T, f Family, db DB, frame []byte) ([]byte, bus.ModuleStatus) {
+func invoke(t *testing.T, f Family, db DB, frame []byte) ([]byte, ring.ModuleStatus) {
 	t.Helper()
-	return f.Handler(db)(bus.ModuleInvocation{StageID: f.Stage}, frame)
+	return f.Handler(db)(ring.ModuleInvocation{StageID: f.Stage}, frame)
 }
 
 // --- codec -------------------------------------------------------------------
@@ -199,7 +199,7 @@ func TestArityMismatchIsInvalidNotAPanic(t *testing.T) {
 	f := echoFamily(okRun, 2, false)
 	frame, _ := wire.EncodeFields(1, []string{"only-one"})
 	response, status := invoke(t, f, &fakeDB{}, frame)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if got, _, _ := wire.DecodeFields(response); got != StatusInvalid {
@@ -213,7 +213,7 @@ func TestVariadicOpAcceptsAnyFieldCount(t *testing.T) {
 		fields := make([]string, n)
 		frame, _ := wire.EncodeFields(1, fields)
 		response, status := invoke(t, f, &fakeDB{}, frame)
-		if status != bus.ModuleStatusOK {
+		if status != ring.ModuleStatusOK {
 			t.Fatalf("n=%d status = %v", n, status)
 		}
 		if got, back, _ := wire.DecodeFields(response); got != StatusOK || len(back) != n {
@@ -225,12 +225,12 @@ func TestVariadicOpAcceptsAnyFieldCount(t *testing.T) {
 func TestUnknownOpAndWrongStageAreRefusedAtTheBus(t *testing.T) {
 	f := echoFamily(okRun, -1, false)
 	frame, _ := wire.EncodeFields(99, nil)
-	if _, status := invoke(t, f, &fakeDB{}, frame); status != bus.ModuleStatusInvalidRequest {
+	if _, status := invoke(t, f, &fakeDB{}, frame); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown op: status = %v, want InvalidRequest", status)
 	}
 	frame, _ = wire.EncodeFields(1, nil)
-	_, status := f.Handler(&fakeDB{})(bus.ModuleInvocation{StageID: f.Stage + 1}, frame)
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := f.Handler(&fakeDB{})(ring.ModuleInvocation{StageID: f.Stage + 1}, frame)
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong stage: status = %v, want InvalidRequest", status)
 	}
 }
@@ -244,7 +244,7 @@ func TestFieldWithNulIsRefused(t *testing.T) {
 	// the module may not assume every peer is the shipped client.
 	frame := EncodeReply(1, []string{"before\x00after"})
 	response, status := invoke(t, f, &fakeDB{}, frame)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	if got, _, _ := wire.DecodeFields(response); got != StatusInvalid {
@@ -258,7 +258,7 @@ func TestOpErrorBecomesFailedAndIsNotLeakedToTheWire(t *testing.T) {
 	}, -1, false)
 	frame, _ := wire.EncodeFields(1, nil)
 	response, status := invoke(t, f, &fakeDB{}, frame)
-	if status != bus.ModuleStatusOK {
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK with an in-band failure", status)
 	}
 	got, fields, err := wire.DecodeFields(response)

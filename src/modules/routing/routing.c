@@ -67,24 +67,6 @@ int agent_has_role(const agent_t *agent, const char *role)
    return 0;
 }
 
-/* 1 if the agent may be dispatched AS `persona`. An agent with no personas list
- * (backward-compatible default) or one containing the "all" wildcard serves any
- * persona; otherwise the persona must be listed. A NULL/empty persona is treated
- * as unconstrained (routing then depends on role alone). */
-int agent_supports_persona(const agent_t *agent, const char *persona)
-{
-   if (!agent)
-      return 0;
-   if (!persona || !persona[0] || agent->persona_count == 0)
-      return 1;
-   for (int i = 0; i < agent->persona_count; i++)
-   {
-      if (strcmp(agent->personas[i], "all") == 0 || strcmp(agent->personas[i], persona) == 0)
-         return 1;
-   }
-   return 0;
-}
-
 /* Selection eligibility is exactly role membership: an agent serves `role` iff
  * it declares the `all` wildcard or the role itself (agent_has_role). There is
  * deliberately NO exec-role fallback here — a role an agent did not declare is a
@@ -96,7 +78,7 @@ static int agent_supports_role(const agent_t *agent, const char *role)
    return agent_has_role(agent, role);
 }
 
-static int agent_command_on_path(const char *cmd)
+static int agent_command_on_path(const char *cmd, int container_executable)
 {
    if (!cmd || !cmd[0])
       return 0;
@@ -115,6 +97,11 @@ static int agent_command_on_path(const char *cmd)
          util_free_tokens(tokens, count);
          return 0;
       }
+   }
+   if (container_executable)
+   {
+      util_free_tokens(tokens, count);
+      return 1; /* Syntax only. The actual container owner must resolve and pin it. */
    }
    const char *exe = (count > 0 && tokens[0]) ? tokens[0] : cmd;
    int available = 0;
@@ -193,22 +180,6 @@ void agent_set_route_capacity_probe(int (*fn)(const char *agent_name))
    g_route_capacity_probe = fn;
 }
 
-/* How many delegates is this agent running right now, or -1 when that is not
- * knowable here (no probe registered, or the controller is unconfigured).
- *
- * Exposed so the agent list served over /v1 can publish live occupancy. The Go
- * WFE routes seats in a separate process and cannot call the in-process probe
- * above, so without this it can only see max_parallel and will happily seat an
- * agent that is already saturated — the seat then fails at admission with
- * AGENT_RC_AT_LIMIT. Keeps the same hook indirection, so this unit still has no
- * link dependency on the admission controller. */
-int agent_route_agent_active(const char *agent_name)
-{
-   if (!g_route_capacity_probe || !agent_name || !agent_name[0])
-      return -1;
-   return g_route_capacity_probe(agent_name);
-}
-
 /* Does this agent have a free concurrency slot right now? Returns 1 when it
  * does, and ALSO when capacity is unknown — no probe registered, controller
  * unconfigured (-1), or an agent with no per-agent cap. Unknown must read as
@@ -239,12 +210,20 @@ int agent_routing_primary_turn(void)
    return g_routing_primary_turn;
 }
 
-agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
+agent_route_block_t agent_routing_block_reason_for_execution(const agent_t *agent,
+                                                             agent_route_execution_t execution,
+                                                             char *detail, size_t detail_sz)
 {
    if (detail && detail_sz)
       detail[0] = '\0';
    if (!agent)
       return AGENT_ROUTE_NULL;
+   if (execution != AGENT_ROUTE_EXECUTION_HOST && execution != AGENT_ROUTE_EXECUTION_CONTAINER)
+   {
+      if (detail && detail_sz)
+         snprintf(detail, detail_sz, "invalid execution namespace");
+      return AGENT_ROUTE_MISSING_COMMAND;
+   }
    /* A provider the health catalog has marked unavailable (e.g. DOWN after a
     * failure streak) must not receive new routed work, or delegates wedge on
     * a dead endpoint. Treat it like a disabled agent so callers fall back to a
@@ -271,7 +250,7 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
    {
       const char *cmd =
           agent->cli_cmd[0] ? agent->cli_cmd : (agent->cli_kind[0] ? agent->cli_kind : "claude");
-      if (!agent_command_on_path(cmd))
+      if (!agent_command_on_path(cmd, 0))
       {
          if (detail && detail_sz)
             snprintf(detail, detail_sz, "%s", cmd);
@@ -289,13 +268,25 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
       return AGENT_ROUTE_OK;
 
    const char *cmd = agent->cli_cmd[0] ? agent->cli_cmd : agent->cli_kind;
-   if (!agent_command_on_path(cmd))
+   if (!agent_command_on_path(cmd, execution == AGENT_ROUTE_EXECUTION_CONTAINER &&
+                                       !strcmp(agent->cli_kind, "acp")))
    {
       if (detail && detail_sz)
          snprintf(detail, detail_sz, "%s", cmd);
       return AGENT_ROUTE_MISSING_COMMAND;
    }
    return AGENT_ROUTE_OK;
+}
+
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
+{
+   return agent_routing_block_reason_for_execution(agent, AGENT_ROUTE_EXECUTION_HOST, detail,
+                                                   detail_sz);
+}
+
+int agent_is_available_for_execution(const agent_t *agent, agent_route_execution_t execution)
+{
+   return agent_routing_block_reason_for_execution(agent, execution, NULL, 0) == AGENT_ROUTE_OK;
 }
 
 int agent_is_available_for_routing(const agent_t *agent)
@@ -309,7 +300,8 @@ int agent_any_delegate_available(void)
    if (agent_load_config(&cfg) != 0)
       return 0;
    for (int i = 0; i < cfg.agent_count; i++)
-      if (cfg.agents[i].enabled && agent_is_available_for_routing(&cfg.agents[i]))
+      if (cfg.agents[i].enabled &&
+          agent_is_available_for_execution(&cfg.agents[i], cfg.route_execution))
          return 1;
    return 0;
 }
@@ -525,7 +517,8 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
    for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       int skip = 0;
       for (int e = 0; e < nexclude && !skip; e++)
@@ -600,15 +593,16 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
       /* Same eligibility triple delegate_pick_for_role applies — a pinned seat
        * resolves with NO substitution, so an agent that exists but is disabled,
        * lacks the role, or is unroutable reports -1 (caller fails the run). */
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          return -1;
       return i;
    }
    return -1;
 }
 
-static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
-                                          unsigned required_caps, int min_context,
+static int agent_route_candidate_eligible(const agent_config_t *cfg, const agent_t *ag,
+                                          const char *role, unsigned required_caps, int min_context,
                                           agent_scope_t scope);
 
 /* A PRIMARY (user-facing) turn must reach the configured default agent whatever
@@ -628,7 +622,8 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
    if (!agent_routing_primary_turn() || !cfg->default_agent[0])
       return NULL;
    agent_t *ag = agent_find(cfg, cfg->default_agent);
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_execution(ag, cfg->route_execution))
       return NULL;
 
    return ag;
@@ -650,7 +645,7 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    {
       agent_t *preferred = agent_find(cfg, cfg->default_delegate);
       if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
-          agent_is_available_for_routing(preferred))
+          agent_is_available_for_execution(preferred, cfg->route_execution))
          return preferred;
    }
 
@@ -661,7 +656,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
       for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         if (ag->enabled && agent_supports_role(ag, role) && agent_is_available_for_routing(ag))
+         if (ag->enabled && agent_supports_role(ag, role) &&
+             agent_is_available_for_execution(ag, cfg->route_execution))
             qualified[count++] = ag;
       }
       if (!count)
@@ -681,7 +677,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (min_tier < 0 || ag->cost_tier < min_tier)
       {
@@ -697,7 +694,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (ag->cost_tier != min_tier)
          continue;
@@ -715,7 +713,8 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || ag->cost_tier != tier || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || ag->cost_tier != tier ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (role && !agent_supports_role(ag, role))
          continue;
@@ -879,7 +878,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    {
       agent_t *preferred = agent_find(cfg, cfg->default_delegate);
       if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
-          agent_is_available_for_routing(preferred) && agent_scope_admits(preferred, scope) &&
+          agent_is_available_for_execution(preferred, cfg->route_execution) &&
+          agent_scope_admits(preferred, scope) &&
           (!(required_caps || min_context > 0) ||
            agent_satisfies_required_caps(preferred, required_caps, min_context, scope)))
          return preferred;
@@ -898,7 +898,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       {
          agent_t *ag = &cfg->agents[i];
          if (!ag->enabled || !agent_supports_role(ag, role) ||
-             !agent_is_available_for_routing(ag) || !agent_is_local(ag))
+             !agent_is_available_for_execution(ag, cfg->route_execution) || !agent_is_local(ag))
             continue;
          if (!agent_scope_admits(ag, scope))
             continue;
@@ -938,7 +938,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
          agent_t *ag = &cfg->agents[i];
          degraded_snapshot[i] = agent_is_degraded(ag);
          if (degraded_snapshot[i] || !ag->enabled || !agent_supports_role(ag, role) ||
-             !agent_is_available_for_routing(ag))
+             !agent_is_available_for_execution(ag, cfg->route_execution))
             continue;
          if (locals_only && !agent_is_local(ag))
             continue;
@@ -958,7 +958,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         if (!agent_route_candidate_eligible(ag, role, required_caps, min_context, scope) ||
+         if (!agent_route_candidate_eligible(cfg, ag, role, required_caps, min_context, scope) ||
              (locals_only && !agent_is_local(ag)) || (healthy_only && degraded_snapshot[i]))
             continue;
          qualified[count++] = ag;
@@ -979,7 +979,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (locals_only && !agent_is_local(ag))
          continue;
@@ -1012,7 +1013,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) ||
+          !agent_is_available_for_execution(ag, cfg->route_execution))
          continue;
       if (ag->cost_tier != min_tier)
          continue;
@@ -1074,11 +1076,12 @@ static int agent_effective_context(const agent_t *ag)
  * policy filter (primary_only), the health filter, and the Claude-CLI structural
  * rule all live inside agent_is_available_for_routing(), so they are enforced
  * here for both paths. `min_context` is the only axis escalation relaxes. */
-static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
-                                          unsigned required_caps, int min_context,
+static int agent_route_candidate_eligible(const agent_config_t *cfg, const agent_t *ag,
+                                          const char *role, unsigned required_caps, int min_context,
                                           agent_scope_t scope)
 {
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_execution(ag, cfg->route_execution))
       return 0;
    if (required_caps || min_context > 0)
       return agent_satisfies_required_caps(ag, required_caps, min_context, scope);
@@ -1094,7 +1097,7 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
    if (cfg->default_agent[0])
    {
       agent_t *def = agent_find(cfg, cfg->default_agent);
-      if (def && agent_route_candidate_eligible(def, role, required_caps, 0, scope))
+      if (def && agent_route_candidate_eligible(cfg, def, role, required_caps, 0, scope))
          return def;
    }
 
@@ -1106,7 +1109,7 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
        * KIND shortfall: if no agent has tools, none can be conjured, and
        * dispatching anyway trades a clear, actionable config error for a doomed
        * request. So required_caps still bind; only min_context is relaxed. */
-      if (!agent_route_candidate_eligible(ag, role, required_caps, 0, scope))
+      if (!agent_route_candidate_eligible(cfg, ag, role, required_caps, 0, scope))
          continue;
       int ctx = agent_effective_context(ag);
       if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
@@ -1142,7 +1145,7 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
       agent_t *ag = &cfg->agents[i];
       if (ag->cost_tier <= failed_tier)
          continue; /* same class of seat: re-running it proves nothing */
-      if (!agent_route_candidate_eligible(ag, role, required_caps, 0, scope))
+      if (!agent_route_candidate_eligible(cfg, ag, role, required_caps, 0, scope))
          continue;
       /* Rank by the operator's DECLARED capability ordering (cost_tier), using
        * the context window only to break ties.

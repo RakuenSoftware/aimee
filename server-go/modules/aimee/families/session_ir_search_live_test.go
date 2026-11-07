@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
@@ -98,13 +99,24 @@ func TestSessionIRLiveSearchCanonicalOnlyAndOwnerScoped(t *testing.T) {
 		}
 		return result
 	}
-	toolEvent := `{"kind":"message","message_id":"actual-tool-result","payload":{"role":"tool","blocks":[{"type":"text","text":"public-tool-prefix","context":null},{"type":"text","text":"hidden-between","context":{"model_visible":false}},{"type":"tool_result","tool_id":"owned-call","content":"canonical-tool-output"},{"type":"text","text":"hidden-search-secret","context":{"model_visible":false}},{"type":"text","text":"classified-search-secret","context":{"model_visible":true,"sensitivity":2}}]}}`
+	// Context is omitted when absent; present contexts use the complete canonical
+	// wire encoder, without granting source authority to these stored observations.
+	toolEvent, err := json.Marshal(map[string]any{"kind": "message", "message_id": "actual-tool-result", "payload": map[string]any{"role": "tool", "blocks": []map[string]any{
+		{"type": "text", "text": "public-tool-prefix"},
+		{"type": "text", "text": "hidden-between", "context": &canonical.Context{ModelVisible: false}},
+		{"type": "tool_result", "tool_id": "owned-call", "content": "canonical-tool-output"},
+		{"type": "text", "text": "hidden-search-secret", "context": &canonical.Context{ModelVisible: false}},
+		{"type": "text", "text": "classified-search-secret", "context": &canonical.Context{ModelVisible: true, Sensitivity: 2}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	toolTx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer toolTx.Rollback(context.Background())
-	toolStatus, _, err := sessionIRAppend(ctx, sessionIRLiveTx{toolTx}, []string{"alice-session", "tool-result", "turn", "alice", toolEvent})
+	toolStatus, _, err := sessionIRAppend(ctx, sessionIRLiveTx{toolTx}, []string{"alice-session", "tool-result", "turn", "alice", string(toolEvent)})
 	if err != nil || toolStatus != store.StatusOK {
 		t.Fatal(toolStatus, err)
 	}
@@ -502,7 +514,7 @@ func TestSessionIRLiveSearchLargeCanonicalWindowsPageWithoutSkipping(t *testing.
 				}
 				messages[i] = map[string]any{"role": "assistant", "blocks": []map[string]any{
 					{"type": "text", "text": text},
-					{"type": "text", "text": "private-pagination-secret", "context": map[string]any{"model_visible": false}},
+					{"type": "text", "text": "private-pagination-secret", "context": &canonical.Context{ModelVisible: false}},
 				}}
 			}
 			encoded, err := json.Marshal(messages)

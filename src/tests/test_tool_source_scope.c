@@ -76,6 +76,7 @@ int main(void)
    cJSON_Delete(untrusted_meta);
    cJSON_Delete(unicode);
    cJSON_Delete(source);
-   puts("tool source scope: exact bytes, owned lifetime, nested/thread isolation and fail-closed custody passed");
+   puts("tool source scope: exact bytes, owned lifetime, nested/thread isolation and fail-closed "
+        "custody passed");
    return 0;
 }

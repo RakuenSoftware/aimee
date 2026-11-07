@@ -25,6 +25,9 @@ func pathWithin(child, parent string) bool {
 // webuserWorkspaceRoot returns the caller's scoped workspace root (the path the
 // agent's cwd must stay within), via aimee-server's /v1/workspace/projects.
 func (s *server) webuserWorkspaceRoot(ctx context.Context, user string) (string, bool, error) {
+	if s.cfg == nil {
+		return "", s.originalInputMode, fmt.Errorf("workspace configuration unavailable")
+	}
 	st, data, headers, err := s.v1RequestWebuserTCapabilityHeaders(ctx, user, http.MethodGet, "/v1/workspace/projects", nil, socketCallTimeout, false)
 	strict := s.originalInputMode
 	if err != nil {
@@ -128,7 +131,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		OriginalInputOperationUUID json.RawMessage `json:"original_input_operation_uuid"`
 		ProtectedSpans             json.RawMessage `json:"protected_spans"`
 		AimeeSessionID             string          `json:"aimee_session_id"`
-		Message                    string          `json:"message"`
+		Message                    json.RawMessage `json:"message"`
 		ClaudeSessionID            string          `json:"claude_session_id"`
 		Cwd                        string          `json:"cwd"`
 		AttachID                   string          `json:"attach_id"`
@@ -149,18 +152,49 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var original *originalInputMetadata
+	var legacyText string
+	legacySource2 := strictInput && canonical.Decode(req.Message, &legacyText)
+	if !legacySource2 && !canonical.ValidMessage(req.Message) {
+		http.Error(w, `{"error":"canonical user message required"}`, http.StatusBadRequest)
+		return
+	}
+	var message canonical.Message
+	if legacySource2 {
+		message.Role = "user"
+		message.Blocks = []canonical.Block{{Type: "text", Text: &legacyText}}
+	} else if !canonical.Decode(req.Message, &message) || message.Role != "user" || len(message.Blocks) == 0 {
+		http.Error(w, `{"error":"a canonical user message is required"}`, http.StatusBadRequest)
+		return
+	}
+	title := ""
+	hasContent := false
+	for _, block := range message.Blocks {
+		if block.Type != "text" && block.Type != "image" && block.Type != "document" {
+			http.Error(w, `{"error":"unsupported user content"}`, http.StatusBadRequest)
+			return
+		}
+		hasContent = hasContent || block.Type != "text" || (block.Text != nil && *block.Text != "")
+		if title == "" && block.Text != nil {
+			title = *block.Text
+		}
+	}
+	if !hasContent {
+		http.Error(w, `{"error":"message content required"}`, http.StatusBadRequest)
+		return
+	}
 	if strictInput {
-		var e error
-		original, e = originalInputTransport(req.Message, req.AimeeSessionID, req.OriginalInputOperationUUID, req.ProtectedSpans)
-		if e != nil {
-			writeJSONError(w, http.StatusBadRequest, e.Error())
+		if len(message.Blocks) != 1 || message.Blocks[0].Type != "text" || message.Blocks[0].Text == nil || message.Blocks[0].InputAttachment != nil || message.Blocks[0].ToolSource != nil {
+			writeJSONError(w, http.StatusBadRequest, "selected original-input source requires one unannotated User text block")
+			return
+		}
+		var err error
+		original, err = originalInputTransport(*message.Blocks[0].Text, req.AimeeSessionID, req.OriginalInputOperationUUID, req.ProtectedSpans)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
-	if req.Message == "" {
-		http.Error(w, `{"error":"message required"}`, http.StatusBadRequest)
-		return
-	}
+
 	cwd, err := resolveProjectRoot(req.Cwd)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
@@ -203,13 +237,10 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
 			return
 		}
-		initialCwd := cwd
-		initialTitleMessage := req.Message
+		initialCwd, initialTitleMessage := cwd, title
 		if strictInput {
-			// A normalized acknowledgment is not yet available. Persisting a
-			// raw-derived title here precedes the C custody/canonical boundary.
-			initialTitleMessage = ""
-			initialCwd = ""
+			// The source owner, not submitted raw input, owns a durable title.
+			initialCwd, initialTitleMessage = "", ""
 		}
 		if err = s.touchChatSession(username, stableSID, initialCwd, initialTitleMessage); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to persist session metadata")
@@ -484,21 +515,22 @@ func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		AimeeSessionID string `json:"aimee_session_id"`
-		Message        string `json:"message"`
+		AimeeSessionID string          `json:"aimee_session_id"`
+		Message        json.RawMessage `json:"message"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	var message canonical.Message
+	if err != nil || !canonical.Decode(raw, &req) || req.AimeeSessionID == "" || !canonical.ValidMessage(req.Message) || !canonical.Decode(req.Message, &message) || message.Role != "user" || len(message.Blocks) == 0 {
+		http.Error(w, "canonical user message and aimee_session_id required", http.StatusBadRequest)
 		return
 	}
-	if req.AimeeSessionID == "" || req.Message == "" {
-		http.Error(w, `{"error":"aimee_session_id and message required"}`, http.StatusBadRequest)
-		return
+	for _, block := range message.Blocks {
+		if block.Type != "text" && block.Type != "image" && block.Type != "document" {
+			http.Error(w, "unsupported user content", http.StatusBadRequest)
+			return
+		}
 	}
-	body, _ := json.Marshal(map[string]string{
-		"aimee_session_id": req.AimeeSessionID,
-		"message":          req.Message,
-	})
+	body, _ := json.Marshal(req)
 	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost,
 		"/v1/chat/interrupt", body)
 	if err != nil {

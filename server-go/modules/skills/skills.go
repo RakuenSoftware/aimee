@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -28,11 +28,11 @@ const (
 	triggerResponseLen          = 12
 )
 
-func handleContext(request []byte) ([]byte, bus.ModuleStatus) {
+func handleContext(request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	count := int32(binary.LittleEndian.Uint32(request[8:12]))
 	interval := int32(binary.LittleEndian.Uint32(request[12:16]))
@@ -43,7 +43,7 @@ func handleContext(request []byte) ([]byte, bus.ModuleStatus) {
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], fire)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 func triggerTokenByte(value byte) bool {
@@ -161,10 +161,10 @@ func triggerMatches(content, toolName, subject string) bool {
 	return sawTriggers && (!sawTool || toolMatch) && (!sawPattern || patternMatch)
 }
 
-func handleTrigger(request []byte) ([]byte, bus.ModuleStatus) {
+func handleTrigger(request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) < triggerHeaderLen || binary.LittleEndian.Uint32(request[0:4]) != triggerRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	contentLen := uint64(binary.LittleEndian.Uint32(request[8:12]))
 	toolLen := uint64(binary.LittleEndian.Uint32(request[12:16]))
@@ -172,12 +172,12 @@ func handleTrigger(request []byte) ([]byte, bus.ModuleStatus) {
 	total := uint64(triggerHeaderLen) + contentLen + toolLen + subjectLen
 	if contentLen > triggerContentMax || toolLen == 0 || toolLen > triggerToolMax ||
 		subjectLen > triggerSubjectMax || total != uint64(len(request)) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	contentEnd := uint64(triggerHeaderLen) + contentLen
 	toolEnd := contentEnd + toolLen
 	if bytes.IndexByte(request[triggerHeaderLen:total], 0) >= 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	match := triggerMatches(string(request[triggerHeaderLen:contentEnd]),
 		string(request[contentEnd:toolEnd]), string(request[toolEnd:total]))
@@ -187,16 +187,16 @@ func handleTrigger(request []byte) ([]byte, bus.ModuleStatus) {
 	if match {
 		binary.LittleEndian.PutUint32(response[8:12], 1)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }
 
 // Handle serves the bounded review-nudge and trigger-match decisions.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID != StageContext && invocation.StageID != StageTrigger {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	if invocation.StageID == StageContext {
 		return handleContext(request)

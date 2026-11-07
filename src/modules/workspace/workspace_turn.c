@@ -17,6 +17,11 @@
 #include "workspace_provider_container.h"
 #include "workspace_provider_detached.h"
 #include "workspace_runner_registry.h"
+#include <aimee/workspace/module_api.h>
+
+/* The server's request context, absent from binaries that link this module
+ * without it (then every op goes to the tree's own runner). */
+const char *request_context_runner_channel(void) __attribute__((weak));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -40,6 +45,9 @@ void workspace_turn_register_project_owner(workspace_turn_project_open_fn owner)
 /* The detached provider bound for the current turn lives here for the turn's
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
+/* A runner channel's queue handle, owned by the binding that uses it. Channels
+ * are per command, so they cannot take one of the registry's fixed handles. */
+static __thread ws_runner_queue_t t_turn_channel;
 static __thread int t_turn_bound;
 static __thread int t_turn_mirror_fd = -1;
 static __thread char t_turn_detached_epoch[65], t_turn_container_epoch[65];
@@ -70,6 +78,7 @@ static __thread const workspace_turn_mirror_lease_t *t_callback_mirror;
 struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
+   ws_runner_queue_t channel;
    int bound;
    int mirror_fd, created_fd;
    char created_cwd[MAX_PATH_LEN];
@@ -107,6 +116,34 @@ typedef struct
  * No credential → the local ops + ambient-cred clone run unchanged via the
  * shared provider's exec seam. The same env is harmlessly present for the local
  * git ops (rev-parse / worktree / apply) too. */
+/* Log a failed mirror git step: the subcommand (the first argument that is
+ * not -C or its directory), the exit status, and git's output on one line. */
+static void ws_mirror_log_git_failure(const char *const args[], int rc, const char *output)
+{
+   const char *sub = "?";
+   for (int i = 0; args[i]; i++)
+   {
+      if (strcmp(args[i], "-C") == 0 && args[i + 1])
+      {
+         i++;
+         continue;
+      }
+      sub = args[i];
+      break;
+   }
+   char text[400];
+   size_t n = 0;
+   for (const char *p = output ? output : ""; *p && n + 1 < sizeof(text); p++)
+   {
+      char c = *p == '\n' || *p == '\r' || *p == '\t' ? ' ' : *p;
+      if (c == ' ' && n > 0 && text[n - 1] == ' ')
+         continue;
+      text[n++] = c;
+   }
+   text[n] = '\0';
+   LOG_WARN("workspace", "mirror git %s failed (rc=%d): %s", sub, rc, n ? text : "(no output)");
+}
+
 static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, size_t out_cap)
 {
    const ws_mirror_runner_ctx_t *rctx = (const ws_mirror_runner_ctx_t *)ctx;
@@ -132,6 +169,18 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    int token_fd = -1;
    char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, NULL, environ, &token_fd);
 
+   /* The server holds no SSH key of its own: with a vaulted HTTPS token and an
+    * SSH remote (git@github.com:..., the usual developer origin), git would use
+    * SSH and fail with "Permission denied (publickey)", so no SSH-origin
+    * checkout could be mirrored. Use the transport the credential can
+    * authenticate -- the same rule the clone path applies -- wherever the remote
+    * appears (clone --mirror, the worktree's origin, the mirror's origin). */
+   char *transport = (envp && remote) ? git_cred_transport_url(remote, envp) : NULL;
+   if (transport && strcmp(transport, remote) != 0)
+      for (int i = 1; argv[i]; i++)
+         if (strcmp(argv[i], remote) == 0)
+            argv[i] = transport;
+
    char *cap = NULL;
    int rc;
    if (envp)
@@ -153,11 +202,25 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    }
    if (token_fd >= 0)
       close(token_fd);
+   /* Say why a step failed: the lifecycle caller often passes no output buffer,
+    * and its own warning names only the workspace, so without this a refused
+    * clone was indistinguishable from any other failure. The token never
+    * reaches git's output (it rides the askpass shim), so the text is safe. */
+   if (rc != 0)
+      ws_mirror_log_git_failure(args, rc, cap);
    if (out && out_cap)
       snprintf(out, out_cap, "%s%s", cap ? cap : "",
                rc == SAFE_EXEC_TIMEOUT ? "git command timed out after 30 seconds\n" : "");
    free(cap);
+   free(transport);
    return rc;
+}
+
+int workspace_turn_mirror_git_for_test(const char *remote, const char *const args[], char *out,
+                                       size_t out_cap)
+{
+   ws_mirror_runner_ctx_t rctx = {.remote = remote};
+   return ws_mirror_git_runner(&rctx, args, out, out_cap);
 }
 
 /* Drive the mirror lifecycle for `root` (the matched workspace) and, on success,
@@ -412,40 +475,11 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
    return 0;
 }
 
-int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_t out_cap)
-{
-   if (out && out_cap)
-      out[0] = '\0';
-   if (!cwd || !cwd[0] || !out || out_cap == 0)
-      return 0;
-   for (int i = 0; i < config_workspace_count(); i++)
-   {
-      if (!cwd_in_workspace(cwd, config_workspaces(i)))
-         continue;
-      ws_provider_kind_t kind = config_workspace_providers(i)[0]
-                                    ? ws_provider_kind_from_string(config_workspace_providers(i))
-                                    : WS_PROVIDER_SHARED;
-      if (kind != WS_PROVIDER_DETACHED)
-         return 0; /* mirror workspaces use the resolver above; shared needs nothing */
-      /* Copied out of the accessor buffers for the same reason as the mirror
-       * resolver: the runner ctx outlives a config read underneath it. */
-      char root[MAX_PATH_LEN], remote[512], head[65];
-      snprintf(root, sizeof(root), "%s", config_workspaces(i));
-      snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
-      snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
-      if (!remote[0] || !head[0])
-         return 0; /* never synced: there is no recorded state to reconstruct */
-      ws_mirror_drift_t v;
-      return mirror_reconstruct_cwd(cwd, root, remote, head, out, out_cap, NULL, 0, &v);
-   }
-   return 0;
-}
-
 static int active_mirror_lease(const char *real);
 
-static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
-                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
-                            int background)
+static int bind_active_into(const char *cwd, ws_detached_provider_t *detached,
+                            ws_runner_queue_t *channel_slot, int *bound, int *mirror_fd,
+                            char resolved[MAX_PATH_LEN], char drift[256], int background)
 {
    *bound = 0;
    *mirror_fd = -1;
@@ -481,9 +515,23 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
                                     : WS_PROVIDER_SHARED;
       if (kind == WS_PROVIDER_DETACHED && !background)
       {
-         /* The runner queue is keyed by the workspace root — the same id the
-          * client's `aimee workspace serve <root>` polls. */
-         ws_runner_queue_t *q = ws_runner_registry_get_or_create(config_workspaces(i));
+         /* The runner queue is the requesting CLI's own channel when it sent
+          * one, so the client that asked runs the op -- not whichever client
+          * polled the tree first, with its own environment and credentials.
+          * Otherwise it is keyed by the workspace root, the id `aimee
+          * workspace serve <root>` polls. */
+         const char *channel =
+             request_context_runner_channel ? request_context_runner_channel() : "";
+         ws_runner_queue_t *q = NULL;
+         if (aimee_ws_runner_channel_valid(channel))
+         {
+            /* The binding owns the channel's handle: the registry's handles
+             * are a fixed table for trees, and one per command would run out. */
+            snprintf(channel_slot->id, sizeof(channel_slot->id), "%s", channel);
+            q = ws_runner_registry_announce(channel) == 0 ? channel_slot : NULL;
+         }
+         else
+            q = ws_runner_registry_get_or_create(config_workspaces(i));
          if (q)
          {
             /* Bind both the unary and streaming transports off the same queue so
@@ -526,8 +574,8 @@ int workspace_turn_bind_active(const char *cwd)
 {
    if (t_turn_mirror_fd >= 0)
       close(t_turn_mirror_fd);
-   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, &t_turn_mirror_fd,
-                                 t_turn_cwd, t_turn_drift, 0);
+   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_channel, &t_turn_bound,
+                                 &t_turn_mirror_fd, t_turn_cwd, t_turn_drift, 0);
    t_turn_detached_epoch[0] = 0;
    if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
        platform_random_hex(t_turn_detached_epoch, 64))
@@ -551,8 +599,8 @@ static int scope_begin(const char *cwd, workspace_turn_scope_t **out, int backgr
    scope->created_fd = -1;
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
-   int result = bind_active_into(cwd, &scope->detached, &scope->bound, &scope->mirror_fd,
-                                 scope->cwd, scope->drift, background);
+   int result = bind_active_into(cwd, &scope->detached, &scope->channel, &scope->bound,
+                                 &scope->mirror_fd, scope->cwd, scope->drift, background);
    if (result < 0)
    {
       workspace_provider_set_active(scope->previous_provider);
@@ -949,12 +997,6 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
             task_id, bcfg.image ? bcfg.image : "<default>", bcfg.workspace,
             bcfg.workspace_read_only ? "ro" : "rw");
    return 1;
-}
-
-void workspace_turn_set_default_workspace_for_test(const char *workspace)
-{
-   snprintf(t_test_default_workspace, sizeof(t_test_default_workspace), "%s",
-            workspace ? workspace : "");
 }
 
 /* Test override: -1 = report the real bound state; 0/1 = force it. Lets guardrail/tool

@@ -18,9 +18,10 @@ typedef struct
    atomic_int released;
    int guarded, refuse, acquired, release_count, write_status, delay_acquire;
    size_t received;
-   int binary_response, chunked_response;
+   int binary_response, chunked_response, binary_request;
    const char *nested_url;
    const char *expected_headers;
+   const char *expected_content_type, *expected_auth;
 } peer_t;
 
 static void *serve(void *opaque)
@@ -30,7 +31,7 @@ static void *serve(void *opaque)
    assert(fd >= 0);
    struct timeval timeout = {5, 0};
    assert(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0);
-   char request[4096] = {0};
+   char request[65536] = {0};
    for (;;)
    {
       ssize_t n = recv(fd, request + p->received, sizeof(request) - p->received - 1, 0);
@@ -38,7 +39,9 @@ static void *serve(void *opaque)
       if (!n)
          break;
       p->received += (size_t)n;
-      if (strstr(request, "\r\n\r\n{}"))
+      char *body = strstr(request, "\r\n\r\n");
+      if (body && (p->binary_request ? p->received >= (size_t)(body + 4 - request) + 4
+                                     : strstr(body, "\r\n\r\n{}") != NULL))
          break;
       assert(p->received < sizeof(request) - 1);
    }
@@ -46,7 +49,24 @@ static void *serve(void *opaque)
       assert(p->received == 0);
    else
    {
-      assert(strstr(request, "\r\n\r\n{}"));
+      if (p->binary_request)
+      {
+         const char bytes[] = {'A', '\0', 'B', (char)0xff};
+         char *body = strstr(request, "\r\n\r\n");
+         assert(body && !memcmp(body + 4, bytes, sizeof(bytes)));
+         assert(strstr(request, "\r\nContent-Length: 4\r\n"));
+         if (p->expected_content_type)
+            assert(strstr(request, p->expected_content_type));
+         else
+            assert(strstr(request, "\r\nContent-Type: application/octet-stream\r\n"));
+         if (p->expected_auth)
+         {
+            const char *auth = strstr(request, p->expected_auth);
+            assert(auth && !strncmp(auth + strlen(p->expected_auth), "\r\n", 2));
+         }
+      }
+      else
+         assert(strstr(request, "\r\n\r\n{}"));
       if (p->expected_headers)
          assert(strstr(request, "anthropic-beta: original,oauth-2025-04-20\r\n"));
       const char *ua = strstr(request, "\r\nUser-Agent: ");
@@ -194,6 +214,53 @@ int main(void)
          free(response);
          finish(&provider);
       }
+   /* Audio/file adapters must retain both binary boundaries. The peer checks
+    * the actual multipart-like bytes and length independently of the client. */
+   for (int chunked = 0; chunked < 2; ++chunked)
+   {
+      peer_t provider = {.binary_request = 1, .binary_response = 1, .chunked_response = chunked};
+      start(&provider);
+      const char bytes[] = {'A', '\0', 'B', (char)0xff};
+      char *body = NULL;
+      size_t length = 99;
+      assert(agent_http_post_content_type_bytes(provider.url, NULL, "application/octet-stream",
+                                                bytes, sizeof(bytes), &body, &length, 3000,
+                                                NULL) == 200);
+      assert(body && length == 5 && !memcmp(body, "{}\0{}", 5) && body[length] == '\0');
+      free(body);
+      finish(&provider);
+   }
+   /* Each header exceeded the old unaccounted 4096-byte request scratch budget. */
+   char *type = malloc(10001), *auth = malloc(12001), *type_line = malloc(10019);
+   assert(type && auth && type_line);
+   memcpy(type, "audio/", 6);
+   memset(type + 6, 'c', 9994);
+   type[10000] = 0;
+   memcpy(auth, "Authorization: Bearer ", 22);
+   memset(auth + 22, 'k', 11978);
+   auth[12000] = 0;
+   snprintf(type_line, 10019, "\r\nContent-Type: %s\r\n", type);
+   peer_t large_headers = {.binary_request = 1,
+                           .binary_response = 1,
+                           .expected_content_type = type_line,
+                           .expected_auth = auth};
+   start(&large_headers);
+   const char upload[] = {'A', '\0', 'B', (char)0xff};
+   char *audio = NULL;
+   size_t audio_length = 0;
+   assert(agent_http_post_content_type_bytes(large_headers.url, auth, type, upload, sizeof upload,
+                                             &audio, &audio_length, 3000, NULL) == 200);
+   assert(audio && audio_length == 5 && !memcmp(audio, "{}\0{}", 5));
+   free(audio);
+   finish(&large_headers);
+   free(type_line);
+   free(type);
+   free(auth);
+   char *invalid_body = (char *)1;
+   size_t invalid_length = 99;
+   assert(agent_http_post_content_type_bytes("invalid", NULL, NULL, NULL, 1, &invalid_body,
+                                             &invalid_length, 3000, NULL) < 0);
+   assert(!invalid_body && !invalid_length);
    /* The real socket sees exactly one original UA, and complete extra headers
     * beyond the previous 512-byte scratch-buffer limit. Ordinary calls retain
     * their default UA, including calls immediately after the native one. */

@@ -35,7 +35,7 @@
 > **2026-07-24 update.** Step (2), the bus wire spec, the single in-source C host, the C and Go
 > reference clients, and the cross-language conformance vectors, is **implemented and merged** on
 > `feat/event-bus` as its own twelve-slice tree
-> ([`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md);
+> (the event-bus feature tree (retired with the ring's move; in git history);
 > [`event-bus-wire-spec.md`](../done/event-bus-wire-spec.md) Implementation status). It also delivered the
 > committed performance-budget baseline that gates step (3), and the governance/audit **tap** the
 > child in step (5) consumes. The bus is deliberately linked into **no** shipping binary. The D7

@@ -2,6 +2,8 @@ package families
 
 import (
 	"context"
+	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -64,8 +66,8 @@ const (
 	// disagreed with its own history.
 	cronJobRecordRunSQL = `INSERT INTO cron_job_runs
 	                           (job_id, completed_at, status, silent, delivered,
-	                            output, error, output_hash)
-	                       VALUES ($1, EXTRACT(EPOCH FROM now())::bigint, $2, $3, $4, $5, $6, $7)
+	                            output, error, output_hash, output_ir)
+	                       VALUES ($1, EXTRACT(EPOCH FROM now())::bigint, $2, $3, $4, $5, $6, $7, $8)
 	                       RETURNING id`
 
 	cronJobTouchLastRunSQL = `UPDATE cron_jobs
@@ -90,7 +92,7 @@ const (
 	                                  ORDER BY id DESC
 	                                  LIMIT $2) r`
 
-	cronJobLatestOutputSQL = `SELECT output FROM cron_job_runs
+	cronJobLatestOutputSQL = `SELECT output, COALESCE(output_ir, '') FROM cron_job_runs
 	                           WHERE job_id = $1 ORDER BY id DESC LIMIT 1`
 
 	cronJobLastOutputHashSQL = `SELECT last_run_output_hash FROM cron_jobs WHERE id = $1`
@@ -283,9 +285,16 @@ func cronJobRecordRun(ctx context.Context, q store.Queryer, f []string) (uint32,
 	if !ok {
 		return store.StatusInvalid, nil, nil
 	}
+	var snapshot any
+	if f[7] != "" {
+		if text, valid := cronOutputIRText(f[7]); !valid || text != f[4] {
+			return store.StatusInvalid, nil, nil
+		}
+		snapshot = f[7]
+	}
 	var runID int64
 	if err := q.QueryRow(ctx, cronJobRecordRunSQL,
-		f[0], f[1], silent, delivered, f[4], f[5], f[6]).Scan(&runID); err != nil {
+		f[0], f[1], silent, delivered, f[4], f[5], f[6], snapshot).Scan(&runID); err != nil {
 		return store.StatusFailed, nil, err
 	}
 	if _, err := q.Exec(ctx, cronJobTouchLastRunSQL, f[0], f[1], f[6]); err != nil {
@@ -318,15 +327,18 @@ func cronJobLatestOutput(ctx context.Context, q store.Queryer, f []string) (uint
 	if f[0] == "" {
 		return store.StatusInvalid, nil, nil
 	}
-	var output string
-	err := q.QueryRow(ctx, cronJobLatestOutputSQL, f[0]).Scan(&output)
+	var output, snapshot string
+	err := q.QueryRow(ctx, cronJobLatestOutputSQL, f[0]).Scan(&output, &snapshot)
 	if store.IsNoRows(err) {
 		return store.StatusMissing, nil, nil
 	}
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}
-	return store.StatusOK, []string{output}, nil
+	if text, valid := cronOutputIRText(snapshot); snapshot != "" && (!valid || text != output) {
+		return store.StatusInvalid, nil, nil
+	}
+	return store.StatusOK, []string{output, snapshot}, nil
 }
 
 func cronJobLastOutputHash(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
@@ -342,4 +354,36 @@ func cronJobLastOutputHash(ctx context.Context, q store.Queryer, f []string) (ui
 		return store.StatusFailed, nil, err
 	}
 	return store.StatusOK, []string{hash}, nil
+}
+
+// output_ir is an independent persisted discriminator. Legacy output is never
+// parsed, regardless of marker-like or JSON-looking bytes in its display text.
+func cronOutputIRText(raw string) (string, bool) {
+	if len(raw) < 1 || len(raw) > 1048576 {
+		return "", false
+	}
+	var envelope struct {
+		Schema string          `json:"schema"`
+		Kind   string          `json:"kind"`
+		Value  json.RawMessage `json:"value"`
+	}
+	if !canonical.Decode([]byte(raw), &envelope) || envelope.Schema != "aimee.cron-output.v1" {
+		return "", false
+	}
+	switch envelope.Kind {
+	case "response":
+		response, err := canonical.DecodeResponse(envelope.Value)
+		if err != nil {
+			return "", false
+		}
+		return response.DisplayText(), response.CompleteText()
+	case "script":
+		var message canonical.Message
+		if !canonical.ValidMessage(envelope.Value) || !canonical.Decode(envelope.Value, &message) || message.Role != "user" || len(message.Blocks) != 1 || message.Blocks[0].Type != "text" || message.Blocks[0].Text == nil {
+			return "", false
+		}
+		return *message.Blocks[0].Text, true
+	default:
+		return "", false
+	}
 }

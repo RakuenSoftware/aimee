@@ -2,8 +2,8 @@ package families
 
 import (
 	"context"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,10 +16,10 @@ func TestOwnedPlanServer(t *testing.T) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	handler := Sessions.Handler(db)
-	wrapped := func(i bus.ModuleInvocation, f []byte) ([]byte, bus.ModuleStatus) {
+	wrapped := func(i ring.ModuleInvocation, f []byte) ([]byte, ring.ModuleStatus) {
 		b, s := handler(i, f)
 		op, a, ok := store.DecodeRequest(f)
-		if os.Getenv("OWNED_INPUT_DROP_AFTER_COMMIT") == "1" && ok && op == 64 && len(a) == 8 && a[0] == "broker-plan-lost" && s == bus.ModuleStatusOK {
+		if os.Getenv("OWNED_INPUT_DROP_AFTER_COMMIT") == "1" && ok && op == 64 && len(a) == 8 && a[0] == "broker-plan-lost" && s == ring.ModuleStatusOK {
 			status, _, valid := store.DecodeRequest(b)
 			if valid && status == store.StatusOK {
 				os.Exit(0)
@@ -27,7 +27,7 @@ func TestOwnedPlanServer(t *testing.T) {
 		}
 		return b, s
 	}
-	if e := bus.RunModuleProcess(ctx, bus.ModuleProcessConfig{SocketPath: os.Getenv("OWNED_INPUT_BUS_SOCKET"), ModuleName: "owned-input-plan", PrincipalClass: 1, PrincipalRef: 30, Stages: []bus.ModuleStage{{EventKind: 11782, StageID: StageSessions}}, Handler: wrapped, MaxIdlePollInterval: time.Millisecond}); e != nil {
+	if e := ring.RunModuleProcess(ctx, ring.ModuleProcessConfig{SocketPath: os.Getenv("OWNED_INPUT_BUS_SOCKET"), ModuleName: "owned-input-plan", PrincipalClass: 1, PrincipalRef: 30, Stages: []ring.ModuleStage{{EventKind: 11782, StageID: StageSessions}}, Handler: wrapped, MaxIdlePollInterval: time.Millisecond}); e != nil {
 		t.Fatal(e)
 	}
 }

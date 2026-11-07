@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shlex
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -83,6 +84,7 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO observer_runtime;
         directories = {str(Path(f).parent) for f in files if f.endswith('.h')}
         directories |= {f.split('/include/')[0]+'/include' for f in files if '/include/' in f}
         flags = ['-I'+str(ROOT/d) for d in sorted(directories)]
+        flags += shlex.split(subprocess.check_output(['pkg-config', '--cflags', 'ouroboros-ring'], text=True))
         flags += ['-I'+str(prefix/'include'), '-I'+str(ROOT/'src')]
         command = ['cc','-O1','-g','-flto','-ffunction-sections','-fdata-sections',
                    '-DAIMEE_DISABLE_KB_STORE_SQLITE_SHIM','-Wall','-Wextra','-Werror',

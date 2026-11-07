@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 import IRTranscript from './Transcript';
 import { nativeOwner } from './interruption.fixture';
+import { operatorCancelError } from './interruption';
 import { emptySession, reduceSession, type Envelope } from './session';
 it.each([false, true])('presents rejected steering as a safe quoted diagnostic without changing canonical state (shortened=%s)', shortened => {
   const preview = '<img src=x onerror="alert(1)">\nKeep this as submitted text';
@@ -141,6 +142,88 @@ it('shows cache projection independently of reasoning without changing history',
   }
 });
 
+it('replays unsupported request settings as a read-only provider boundary notice', () => {
+  const initial = emptySession('s');
+  const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'settings', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'subscription-model', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, omitted_request_controls: 2 } } };
+  const state = reduceSession(initial, report);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('subscription-model could not apply 2 requested settings');
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
+});
+
+it('shows omitted empty assistant envelopes without deleting canonical history', () => {
+  const initial = emptySession('s');
+  const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'empty-assistant', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'claude', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, omitted_empty_messages: 1 } } };
+  const state = reduceSession(initial, report);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain("1 empty assistant message remains in history and was omitted from claude's input");
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
+});
+
+it('replays ACP fidelity as read-only notices without changing message or control authority', () => {
+  const initial = emptySession('s');
+  const report: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'acp-context', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, host_context_blocks_as_text: 1 } } };
+  const state = reduceSession(initial, report);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  expect(reduceSession(state, report)).toBe(state);
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(report)))).toEqual(state);
+  const view = render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP sends host instructions as context (1 block).');
+  expect(screen.queryByRole('button')).toBeNull();
+  view.unmount();
+  const reports = reduceSession(state, { ...report, sequence: '2', event_id: 'acp-tools',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, unverified_external_tool_reports: 2 } } });
+  render(<IRTranscript state={reports} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP sends host instructions as context.');
+  expect(screen.getByRole('status').textContent).toContain('External tool reports are unverified.');
+  expect(screen.getByText('Model compatibility details (2)').closest('details')?.textContent).toContain('External tool reports are unverified (2).');
+  expect(reports.messages).toBe(initial.messages);
+  expect(reports.controls).toBe(initial.controls);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('keeps ACP prior-history context fidelity outside message and tool authority', () => {
+  const initial = emptySession('s');
+  const event: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'history-context', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, history_messages_as_text: 3 } } };
+  const state = reduceSession(initial, event);
+  expect(state.messages).toBe(initial.messages);
+  expect(state.controls).toBe(initial.controls);
+  expect(state.executions).toBe(initial.executions);
+  expect(reduceSession(state, event)).toBe(state);
+  expect(JSON.parse(JSON.stringify([event])).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('ACP receives earlier messages as text context (3).');
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('rejects malformed or empty ACP fidelity counts at the durable replay boundary', () => {
+  for (const field of ['omitted_empty_messages', 'omitted_request_controls', 'host_context_blocks_as_text', 'history_messages_as_text', 'unverified_external_tool_reports']) {
+    for (const count of [-1, 0, 0.5, 4097, Number.MAX_SAFE_INTEGER + 1, null, '1']) {
+      const invalid = { version: 1, session_id: 's', sequence: '1', event_id: 'bad-projection', turn_id: 't', actor: 'alice',
+        event: { kind: 'projection', payload: { model: 'external-agent', boundary: 'response', omitted_reasoning_blocks: 0,
+          omitted_opaque_state_blocks: 0, [field]: count } } };
+      expect(() => reduceSession(emptySession('s'), invalid as Envelope)).toThrow('Invalid projection report');
+    }
+  }
+});
+
 it('loads an expanded delegate from its private canonical log without adding it to parent messages', () => {
   class Stream {
     static instances: Stream[] = [];
@@ -217,6 +300,73 @@ it('waits for child replay, routes its question to the child and retains a pendi
   expect(screen.getByText('question: Resolved')).toBeTruthy();
   expect(onReply).toHaveBeenCalledTimes(1);
   expect(parent.messages).toEqual([]);
+});
+
+it('rejects a same-tick child stream failure click and permits one deliberate reply after reopening', async () => {
+  class Stream {
+    static instances: Stream[] = [];
+    listeners = new Map<string, (event: MessageEvent) => void>();
+    onerror?: () => void;
+    close = vi.fn();
+    constructor(public url: string) { Stream.instances.push(this); }
+    addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, listener); }
+    emit(type: string, value: unknown) { this.listeners.get(type)?.(new MessageEvent(type, { data: JSON.stringify(value) })); }
+  }
+  vi.stubGlobal('EventSource', Stream);
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const parent = reduceSession(emptySession('parent'), { version: 1, session_id: 'parent', sequence: '1', event_id: 'ref', turn_id: 'p', actor: 'alice',
+    event: { kind: 'child_execution', payload: { session_id: 'child', turn_id: 'c', role: 'review', status: 'running' } } });
+  render(<IRTranscript state={parent} onReply={onReply} />);
+  const details = screen.getByText('Delegate: review — running').closest('details')!;
+  act(() => { details.open = true; fireEvent(details, new Event('toggle')); });
+  const envelope = (sequence: string, event: Envelope['event']): Envelope => ({ version: 1, session_id: 'child', sequence, event_id: `child-${sequence}`, turn_id: 'c', actor: 'alice', event });
+  act(() => { Stream.instances[0].emit('ir', envelope('1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[0].emit('ir', envelope('2', { kind: 'control_request', request_id: 'c:q', control_kind: 'question', payload: { questions: [
+      { id: 'answer', question: 'Child choice?', multiple: false, options: [] },
+    ] } })); Stream.instances[0].emit('replay_complete', { session_id: 'child', cursor: '2' }); });
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Child answer' } });
+  const stale = screen.getByRole('button', { name: 'Send answers' });
+  await act(async () => { Stream.instances[0].onerror?.(); fireEvent.click(stale); });
+  expect(onReply).toHaveBeenCalledTimes(0);
+  act(() => { details.open = false; fireEvent(details, new Event('toggle')); });
+  act(() => { details.open = true; fireEvent(details, new Event('toggle')); });
+  act(() => Stream.instances[1].emit('replay_complete', { session_id: 'child', cursor: '2' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Child answer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('c:q', { decision: 'allow', answers: { answer: ['Child answer'] } }, 'child'));
+  expect(onReply).toHaveBeenCalledTimes(1);
+});
+
+it('preserves legitimate grandchild replies through live canonical ancestor guards', async () => {
+  class Stream {
+    static instances: Stream[] = [];
+    listeners = new Map<string, (event: MessageEvent) => void>();
+    close = vi.fn();
+    constructor(public url: string) { Stream.instances.push(this); }
+    addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, listener); }
+    emit(type: string, value: unknown) { this.listeners.get(type)?.(new MessageEvent(type, { data: JSON.stringify(value) })); }
+  }
+  vi.stubGlobal('EventSource', Stream);
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const parent = reduceSession(emptySession('parent'), { version: 1, session_id: 'parent', sequence: '1', event_id: 'ref', turn_id: 'p', actor: 'alice',
+    event: { kind: 'child_execution', payload: { session_id: 'child', turn_id: 'c', role: 'draft', status: 'running' } } });
+  render(<IRTranscript state={parent} onReply={onReply} />);
+  const outer = screen.getByText('Delegate: draft — running').closest('details')!;
+  act(() => { outer.open = true; fireEvent(outer, new Event('toggle')); });
+  const envelope = (sid: string, turn: string, sequence: string, event: Envelope['event']): Envelope => ({ version: 1, session_id: sid, sequence, event_id: `${sid}-${sequence}`, turn_id: turn, actor: 'alice', event });
+  act(() => { Stream.instances[0].emit('ir', envelope('child', 'c', '1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[0].emit('ir', envelope('child', 'c', '2', { kind: 'child_execution', payload: { session_id: 'grandchild', turn_id: 'g', role: 'review', status: 'running' } }));
+    Stream.instances[0].emit('replay_complete', { session_id: 'child', cursor: '2' }); });
+  const inner = screen.getByText('Delegate: review — running').closest('details')!;
+  act(() => { inner.open = true; fireEvent(inner, new Event('toggle')); });
+  act(() => { Stream.instances[1].emit('ir', envelope('grandchild', 'g', '1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[1].emit('ir', envelope('grandchild', 'g', '2', { kind: 'control_request', request_id: 'g:q', control_kind: 'question', payload: { questions: [
+      { id: 'answer', question: 'Grandchild choice?', multiple: false, options: [] },
+    ] } })); Stream.instances[1].emit('replay_complete', { session_id: 'grandchild', cursor: '2' }); });
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Grandchild answer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('g:q', { decision: 'allow', answers: { answer: ['Grandchild answer'] } }, 'grandchild'));
+  expect(onReply).toHaveBeenCalledTimes(1);
 });
 
 it('refuses a child stream that returns another session', () => {
@@ -423,4 +573,37 @@ it('displays the authenticated canonical provider-rejection category without cla
   expect(screen.getByRole('alert').textContent).toBe(reason);
   expect(screen.getByText('Response details').closest('details')?.open).toBe(false);
   expect(JSON.stringify(state)).toBe(retained);
+});
+
+it('keeps a historical cancellation beside its own turn before a later successful answer', () => {
+  const record = (sequence: string, turn: string, event: Envelope['event']): Envelope => ({
+    version: 1, session_id: 's', sequence, turn_id: turn, event_id: `position-${sequence}`, actor: 'alice', event });
+  const message = (id: string, role: 'user' | 'assistant', text: string): Envelope['event'] => ({
+    kind: 'message', message_id: id, payload: { role, blocks: [{ type: 'text', text }] } });
+  const records = [
+    record('1', 'old', { kind: 'execution', payload: { status: 'running' } }),
+    record('2', 'old', message('old-user', 'user', 'Earlier request')),
+    record('3', 'old', message('old-answer', 'assistant', 'Earlier partial response')),
+    record('4', 'old', { kind: 'execution', payload: { status: 'cancelled', error: operatorCancelError } }),
+    record('5', 'new', { kind: 'execution', payload: { status: 'running' } }),
+    record('6', 'new', message('new-user', 'user', 'Later request')),
+    record('7', 'new', message('new-answer', 'assistant', 'Later successful answer')),
+    record('8', 'new', { kind: 'execution', payload: { status: 'completed' } }),
+  ];
+  const state = records.reduce(reduceSession, emptySession('s'));
+  const view = render(<IRTranscript state={state} />);
+  const warning = screen.getByRole('alert');
+  expect(warning.textContent).toBe(operatorCancelError);
+  expect(screen.getByText('Earlier partial response').compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(warning.compareDocumentPosition(screen.getByText('Later request')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.errors).toEqual([operatorCancelError]);
+  expect(state.errorOrigins?.[0].turn).toBe('old');
+  expect(state.executions).toEqual({ old: 'cancelled', new: 'completed' });
+  view.rerender(<IRTranscript state={state} messageLimit={2} />);
+  expect(screen.getByText('Earlier turn')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toBe(operatorCancelError);
+  view.rerender(<IRTranscript state={{ ...state, errorOrigins: undefined }} />);
+  expect(screen.queryByText('Earlier turn')).toBeNull();
+  expect(screen.getByText('Later successful answer').compareDocumentPosition(screen.getByRole('alert')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.errors).toEqual([operatorCancelError]);
 });

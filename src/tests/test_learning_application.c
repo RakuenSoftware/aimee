@@ -66,7 +66,7 @@ char *kb_client_learning_application_json(cJSON *request)
    return strdup("{\"status\":\"ok\",\"event_ref\":\"governed\"}");
 }
 cJSON *aimee_module_json_call(uint32_t kind, uint32_t stage, cJSON *request, size_t max,
-                              int timeout, aimee_module_call_result_t *result)
+                              int timeout, ouro_module_call_result_t *result)
 {
    (void)max;
    (void)timeout;

@@ -20,6 +20,9 @@
  * AIMEE_BLK_TOOL_USE blocks. AIMEE_BLK_THINKING and all other block types pass
  * through without parsing.
  *
+ * Source IR is validated without mutation before recovery. Provider refusal
+ * and failure responses never acquire rescued tool authority.
+ *
  * If `r` already contains any AIMEE_BLK_TOOL_USE block, the function leaves the
  * entire response unchanged and returns 0.
  *

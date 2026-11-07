@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,8 +38,8 @@ func TestInputAttachmentHostOnlyAndOrdinaryDeny(t *testing.T) {
 		}
 		frame, _ := wire.EncodeFields(id, args)
 		db := &sessDB{}
-		_, st := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-		if st != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, st := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+		if st != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal("forged module reached host op")
 		}
 	}

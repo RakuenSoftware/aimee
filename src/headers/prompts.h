@@ -52,13 +52,6 @@ aimee_mode_t aimee_mode_from_string(const char *name);
 /* Canonical lowercase name for a mode ("engineer", "novel"). Never NULL. */
 const char *aimee_mode_to_string(aimee_mode_t mode);
 
-/* Convert tier name string ("MINIMAL", "STANDARD", "EXTENDED") to enum.
- * Returns PROMPT_STANDARD for unrecognised values. */
-prompt_tier_t prompt_tier_from_string(const char *name);
-
-/* Convert tier enum to canonical name string ("MINIMAL", "STANDARD", "EXTENDED"). */
-const char *prompt_tier_to_string(prompt_tier_t tier);
-
 /* Shared principles block for the given mode (engineer -> Code Principles,
  * novel -> Craft Principles). Leads primary-agent startup context and
  * delegate/compute-agent system prompts. Never NULL. */
@@ -68,15 +61,6 @@ const char *prompt_principles_text(aimee_mode_t mode);
  * %s cwd placeholder) for a built-in mode. Used to dump built-in personas to
  * editable files. Never NULL. */
 const char *prompt_persona_text(aimee_mode_t mode);
-
-/* Heap-allocated copy of base_prompt with the mode's principles prepended.
- * Idempotent: if base_prompt already starts with the block, returns a plain
- * duplicate. Caller must free(). Returns NULL only on OOM. */
-char *prompt_prepend_principles(aimee_mode_t mode, const char *base_prompt);
-
-/* Shared coding principles (the AIMEE_MODE_ENGINEER form of
- * prompt_principles_text). */
-const char *prompt_code_principles_text(void);
 
 /* Turn-register instructions, or NULL when `enabled` is 0.
  *
@@ -88,24 +72,6 @@ const char *prompt_code_principles_text(void);
  * A pure function of its argument so the gate and the wording are testable; the caller
  * supplies config_fold_register_enabled(). */
 const char *prompt_turn_registers_text(int enabled);
-
-/* Engineer-mode form of prompt_prepend_principles. Caller must free(). */
-char *prompt_prepend_code_principles(const char *base_prompt);
-
-/* Build a system prompt string.
- *
- * Parameters:
- *   tier        — prompt tier to use
- *   cwd         — working directory to embed (must not be NULL)
- *   custom_file — path to a file whose content replaces the tier prompt entirely;
- *                 pass NULL to use the tier template
- *
- * The function appends <cwd>/.aimee/prompt.md when it exists (project override).
- *
- * Returns a heap-allocated string; caller must free().
- * Returns NULL only on OOM.
- */
-char *prompt_build(prompt_tier_t tier, const char *cwd, const char *custom_file);
 
 /* Mode-aware variant of prompt_build. For AIMEE_MODE_NOVEL it selects the
  * author/worldbuilder persona for the STANDARD/EXTENDED tiers; MINIMAL and the
@@ -125,19 +91,6 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
  * delegates_enabled withholds the whole block, not just the delegation
  * paragraph -- see the definition for why. */
 char *prompt_manager_block(int block_enabled, int delegates_enabled, int review_enabled);
-
-/* Append lower-priority disposition guidance derived from config.
- * Returns a heap-allocated prompt string; caller must free().
- * If no dispositions are configured, returns a duplicate of base_prompt. */
-char *prompt_apply_dispositions(const char *base_prompt);
-
-/* Prepend the operator-authored charter at the top of the prompt so
- * it has highest precedence over dispositions, the working profile,
- * and turn/session context. The charter block only appears when at
- * least one of the four arrays has entries. Returns a heap-allocated
- * string; caller must free(). If no charter is configured, returns a
- * duplicate of base_prompt. */
-char *prompt_apply_charter(const char *base_prompt);
 
 /* Append a `## Working Profile` section to the base prompt describing
  * the committed learned-preference state — soft-constraint framing so

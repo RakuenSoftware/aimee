@@ -372,8 +372,6 @@ export const FIELD_HELP: Record<string, string> = {
   // Agent behavior
   autonomous:
     "Launch the agent CLI with its full autonomous flags, relying on aimee's guardrails for safety. Off by default.",
-  cross_verify:
-    "Have delegates check the primary's fixes and the primary check delegates' fixes. Off by default.",
   max_iterations: "Max tool-call rounds in one interactive turn. 0 uses the default (15).",
   max_iterations_delegate: "Max tool-call rounds in one delegate turn. 0 uses the default (25).",
   verify_enabled:

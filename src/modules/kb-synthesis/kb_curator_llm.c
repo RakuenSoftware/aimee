@@ -3,7 +3,6 @@
 #include "kb_curator_llm.h"
 
 #include "cJSON.h"
-#include "kb_curator_sidecar.h"
 #include "provider_client.h"
 
 #include <stdio.h>
@@ -39,91 +38,55 @@
  * is, while the model is genuinely working. */
 #define KB_CURATOR_PROVIDER_TIMEOUT_MS 600000
 
-char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
-                         const char *request_json, cJSON *json_schema, const char *fallback_command,
-                         int out_cap, char *errbuf, size_t errlen)
+int kb_curator_llm_run(kb_curator_stage_t stage, const aimee_request_t *request,
+                       aimee_response_t *out, char *errbuf, size_t errlen)
 {
    if (errbuf && errlen)
       errbuf[0] = '\0';
-
-   /* 1. Configured provider for this stage's tier (§2a). */
+   if (!out || aimee_ir_request_admit(request))
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "invalid canonical curator request");
+      return -1;
+   }
    provider_def_owned_t prov;
-   if (kb_curator_provider_for_stage(stage, &prov))
+   if (!kb_curator_provider_for_stage(stage, &prov))
    {
-      provider_def_t *def = &prov.def;
-      /* The durable curator contract already carries one operator-controlled
-       * output budget (kb.curator.extract_max_tokens), and the legacy sidecar
-       * receives it in each job payload.  Apply the same budget to the direct
-       * provider path.  Without this, the managed gateway sends an unbounded
-       * generation to its single CPU synth slot: the curator times out at
-       * KB_CURATOR_PROVIDER_TIMEOUT_MS while llama-server keeps the slot occupied, starving
-       * subsequent curator and interactive requests. */
-      if (def->max_tokens <= 0 && config_kb_curator_extract_max_tokens() > 0)
-         def->max_tokens = config_kb_curator_extract_max_tokens();
-      /* Curator work is already retried by its durable job queue. Keep one
-       * provider attempt bounded by KB_CURATOR_PROVIDER_TIMEOUT_MS instead of
-       * nesting the provider client's three retries. The old 120s default was
-       * shorter than a normal constrained extraction on the bundled CPU model and
-       * created overlapping abandoned generations; see that constant for why 300s
-       * turned out to be the same mistake on E4B. */
-      if (def->timeout_ms <= 0)
-         def->timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
-      if (def->max_attempts <= 0)
-         def->max_attempts = 1;
-      aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = (char *)system_prompt};
-      aimee_block_t input = {.type = AIMEE_BLK_TEXT,
-                             .text = (char *)(request_json ? request_json : "")};
-      aimee_ir_block_set_context(&system, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
-                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                                 0);
-      aimee_ir_block_set_context(&input, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
-                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
-                                 0);
-      aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
-      aimee_request_t request = {.system = &system,
-                                 .n_system = system_prompt && system_prompt[0] ? 1 : 0,
-                                 .messages = &message,
-                                 .n_messages = 1};
-      if (json_schema)
-         request.output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
-                                                         .name = "curator_output",
-                                                         .schema = json_schema,
-                                                         .strict = AIMEE_STRICT_TRUE};
-      provider_completion_t out = {0};
-      int rc = provider_client_complete_ir(def, &request, &out, errbuf, errlen);
-      if (rc != 0)
-      {
-         provider_completion_free(&out);
-         if (kb_curator_error_is_provider_unavailable(errbuf))
-            kb_curator_provider_backoff_note();
-         else
-            kb_curator_provider_backoff_recovered();
-         return NULL; /* errbuf set by provider_client_complete */
-      }
-      char *content = out.content; /* transfer ownership to the caller */
-      out.content = NULL;
-      provider_completion_free(&out);
-      if (!content && errbuf && errlen)
-         snprintf(errbuf, errlen, "provider returned empty content");
-      if (content)
-         kb_curator_provider_backoff_recovered();
-      return content;
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "no synthesis endpoint configured; configure canonical curator provider or "
+                  "SYNTHESIS_ENDPOINT; command model fallbacks are unsupported");
+      kb_curator_provider_backoff_note();
+      return -1;
    }
-
-   /* 2. Legacy sidecar command. */
-   if (fallback_command && fallback_command[0])
+   provider_def_t *def = &prov.def;
+   if (def->max_tokens <= 0 && !request->has_max_tokens &&
+       config_kb_curator_extract_max_tokens() > 0)
+      def->max_tokens = config_kb_curator_extract_max_tokens();
+   if (def->timeout_ms <= 0)
+      def->timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
+   if (def->max_attempts <= 0)
+      def->max_attempts = 1;
+   provider_completion_t completion = {0};
+   int rc = provider_client_complete_ir(def, request, &completion, errbuf, errlen);
+   aimee_response_free(out);
+   *out = completion.ir;
+   completion.ir = (aimee_response_t){0};
+   provider_completion_free(&completion);
+   if (rc)
    {
-      char *content =
-          kb_curator_sidecar_run(fallback_command, request_json, out_cap, errbuf, errlen);
-      if (content)
-         kb_curator_provider_backoff_recovered();
-      else if (kb_curator_error_is_provider_unavailable(errbuf))
+      if (kb_curator_error_is_provider_unavailable(errbuf))
          kb_curator_provider_backoff_note();
-      return content;
+      else
+         kb_curator_provider_backoff_recovered();
+      return -1;
    }
-
-   /* 3. Neither configured — the stage stays idle. */
-   if (errbuf && errlen)
-      snprintf(errbuf, errlen, "no curator provider or command configured");
-   return NULL;
+   /* Do not declare a partial/tool-only response recovered just because HTTP
+    * completed. The owned model response is preserved for the caller. */
+   char *text = kb_curator_llm_text(out, errbuf, errlen);
+   if (!text)
+      return -1;
+   free(text);
+   kb_curator_provider_backoff_recovered();
+   return 0;
 }

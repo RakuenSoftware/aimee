@@ -39,7 +39,7 @@ static cJSON *success(void)
 
 cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
                                     size_t max_body, int timeout_ms,
-                                    aimee_module_call_result_t *result)
+                                    ouro_module_call_result_t *result)
 {
    cJSON_Delete(last_request);
    last_request = cJSON_Duplicate(request, 1);
@@ -48,7 +48,7 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
    last_stage_id = stage_id;
    last_max_body = max_body;
    last_timeout_ms = timeout_ms;
-   *result = AIMEE_MODULE_CALL_OK;
+   *result = OURO_MODULE_CALL_OK;
 
    cJSON *operation = cJSON_GetObjectItemCaseSensitive(last_request, "operation");
    must(cJSON_IsString(operation), "request has operation");
@@ -219,8 +219,7 @@ int main(void)
       char copied[MAX_AGENT_NAME + 1];
       memset(copied, '!', sizeof copied);
       (void)config_provider_copy(copied, sizeof copied);
-      must(!strcmp(copied, model_name),
-           "provider copy preserves supported custom agent name");
+      must(!strcmp(copied, model_name), "provider copy preserves supported custom agent name");
       char short_copy[8];
       memset(short_copy, '!', sizeof short_copy);
       (void)config_provider_copy(short_copy, sizeof short_copy);

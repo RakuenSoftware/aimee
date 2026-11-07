@@ -180,6 +180,7 @@ const method_policy_t method_registry[] = {
     {"model.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
+    {"model.generate", CAP_CHAT, "tool-free canonical completion"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
     /* Tool definitions are read-only session metadata. Keeping this behind
@@ -187,6 +188,7 @@ const method_policy_t method_registry[] = {
      * fail during the MCP startup handshake before it can call even read-only
      * tools. Tool execution remains independently gated at mcp.call. */
     {"mcp.tools_list", CAP_SESSION_READ, "MCP tool list"},
+    {"mcp.tools_wait", CAP_SESSION_READ, "wait for the MCP tool list to change"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},
@@ -408,8 +410,8 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
 
    /* Check an existing owner before parsing/hashing content. A missing row is
     * not registered until the upload is valid and this lane is supported. */
-   db1_server_session_t existing;
-   int missing_session = db1_server_session_get(sid, &existing) != 0;
+   db1_server_session_owner_t existing;
+   int missing_session = db1_server_session_owner_get(sid, &existing) != 0;
    if (!missing_session && strcmp(existing.principal, caller) != 0)
       return server_send_error(conn, "session_id owned by another principal", NULL);
 
@@ -442,19 +444,28 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
       return server_send_error(conn, "failed to bind external transcript", NULL);
    }
 
-   if (missing_session)
+   /* Register (idempotent) so the session is locatable even if SessionStart never
+    * ran, then enforce ownership on the FINAL row before any durable write. When
+    * the row is missing we create it and always re-read: success requires a row to
+    * actually be present afterwards (not merely a create that returned ok), which
+    * also covers a create that raced a concurrent create. Whether the row
+    * pre-existed, we just created it, or it appeared via a race, it must belong to
+    * the caller — otherwise a caller could overwrite another principal's transcript
+    * under a known session id. */
+   db1_server_session_owner_t final_owner;
+   if (db1_server_session_owner_get(sid, &final_owner) != 0)
    {
       (void)db1_server_session_create(sid, client_type, caller);
-      if (db1_server_session_get(sid, &existing) != 0)
+      if (db1_server_session_owner_get(sid, &final_owner) != 0)
       {
          free(messages_json);
          return server_send_error(conn, "failed to register session", NULL);
       }
-      if (strcmp(existing.principal, caller) != 0)
-      {
-         free(messages_json);
-         return server_send_error(conn, "session_id owned by another principal", NULL);
-      }
+   }
+   if (strcmp(final_owner.principal, caller) != 0)
+   {
+      free(messages_json);
+      return server_send_error(conn, "session_id owned by another principal", NULL);
    }
 
    int rc = db1_session_ir_history_save(sid, checkpoint, "external-sdk:claude-code", caller,
@@ -481,8 +492,8 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (limit > 100)
       limit = 100;
 
-   db1_server_session_t rows[100];
-   int n = db1_server_session_list_recent(rows, limit);
+   db1_server_session_record_t rows[100];
+   int n = db1_server_session_record_list_recent(rows, limit);
    if (n < 0)
       return server_send_error(conn, "failed to list sessions", NULL);
 
@@ -500,6 +511,7 @@ int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (rows[i].claude_session_id[0])
          cJSON_AddStringToObject(s, "claude_session_id", rows[i].claude_session_id);
       cJSON_AddItemToArray(sessions, s);
+      db1_server_session_record_free(&rows[i]);
    }
 
    cJSON *resp = jo_ok();
@@ -516,8 +528,8 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!sid || !sid[0])
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "missing session_id", NULL);
 
-   db1_server_session_t row;
-   if (db1_server_session_get(sid, &row) != 0)
+   db1_server_session_record_t row;
+   if (db1_server_session_record_get(sid, &row) != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "session not found", NULL);
 
    cJSON *resp = jo_ok();
@@ -532,6 +544,7 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (row.claude_session_id[0])
       cJSON_AddStringToObject(s, "claude_session_id", row.claude_session_id);
    cJSON_AddItemToObject(resp, "session", s);
+   db1_server_session_record_free(&row);
 
    return server_send_ok(conn, resp);
 }

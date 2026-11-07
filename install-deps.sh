@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# aimee proper (server, KB, ring host) is Linux-only. macOS and Windows get the
+# thin client only: download a release, or build it with CMake
+# (cmake -B build && cmake --build build --target aimee).
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "Error: $(basename "$0") installs aimee proper, which runs only on Linux." >&2
+    echo "On macOS and Windows install the thin client (cmake -B build && cmake --build build --target aimee)." >&2
+    exit 1
+fi
+
 # aimee dependency installer (privileged).
 #
 # Installs the system packages aimee needs to build and run, and bootstraps the
@@ -141,12 +150,6 @@ bootstrap_postgres() {
             info "postgres: starting postgresql service"
             $AIMEE_SUDO systemctl enable --now postgresql 2>/dev/null || \
                 warn "postgres: failed to start postgresql service via systemctl"
-        fi
-    elif command -v brew >/dev/null 2>&1 && brew services list 2>/dev/null | grep -q postgresql; then
-        if ! brew services list | awk '$1 ~ /^postgresql/ && $2 == "started" {found=1} END {exit !found}'; then
-            info "postgres: starting postgresql via brew services"
-            brew services start postgresql 2>/dev/null || \
-                warn "postgres: failed to start postgresql via brew services"
         fi
     fi
 

@@ -4,7 +4,7 @@
 #include "server_state_internal.h"
 #include "json_fluent.h"
 #include "kb_client.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +13,7 @@
  * Errors retain their owner classification instead of becoming a missing row. */
 static cJSON *memory_review_response(char *raw, int64_t restore_id)
 {
-   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+   cJSON *parsed = raw && strlen(raw) <= OURO_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    const char *status = jo_cstr(parsed, "status");

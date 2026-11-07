@@ -227,7 +227,7 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
    if (cursor)
       snprintf(after, sizeof(after), "%s", cursor + 7);
    const char *actor = agent_get_request_vault_principal();
-   db1_server_session_t row;
+   db1_server_session_owner_t row;
    if (!actor || !actor[0])
    {
       send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
@@ -235,7 +235,7 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
    }
    /* An attached browser already owns a durable session. A failed lookup is
     * not permission to skip history recovery and advertise a successful replay. */
-   if (db1_server_session_get(session, &row))
+   if (db1_server_session_owner_get(session, &row))
    {
       send_response(fd, 503, "{\"error\":\"session history unavailable\"}", request_id);
       return;
@@ -254,7 +254,7 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
    int seen = 0, quiet = 0, replay_complete = 0;
    for (;;)
    {
-      if (db1_server_session_get(session, &row) == 0)
+      if (db1_server_session_owner_get(session, &row) == 0)
       {
          if (strcmp(row.principal, actor))
             break;

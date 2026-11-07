@@ -1,12 +1,16 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
+	"golang.org/x/sys/unix"
 )
 
 func controlCall(t *testing.T, mux http.Handler, request ControlRequest) ControlResponse {
@@ -16,8 +20,8 @@ func controlCall(t *testing.T, mux http.Handler, request ControlRequest) Control
 		t.Fatalf("encode request: %v", err)
 	}
 	handler := NewControlHandler(mux)
-	body, status := handler(bus.ModuleInvocation{StageID: StageControl}, encoded)
-	if status != bus.ModuleStatusOK {
+	body, status := handler(ring.ModuleInvocation{StageID: StageControl}, encoded)
+	if status != ring.ModuleStatusOK {
 		t.Fatalf("expected OK status, got %v", status)
 	}
 	var response ControlResponse
@@ -135,16 +139,16 @@ func TestControlAnswersMalformedTargetWithoutPanic(t *testing.T) {
 // Advance and control share a module and are told apart only by stage id.
 func TestControlRejectsTheAdvanceStageID(t *testing.T) {
 	handler := NewControlHandler(http.NewServeMux())
-	_, status := handler(bus.ModuleInvocation{StageID: StageAdvance}, []byte(`{"method":"GET","path":"/v1/workflow"}`))
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := handler(ring.ModuleInvocation{StageID: StageAdvance}, []byte(`{"method":"GET","path":"/v1/workflow"}`))
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("expected InvalidRequest, got %v", status)
 	}
 }
 
 func TestControlRejectsUndecodableRequest(t *testing.T) {
 	handler := NewControlHandler(http.NewServeMux())
-	_, status := handler(bus.ModuleInvocation{StageID: StageControl}, []byte("not json"))
-	if status != bus.ModuleStatusInvalidRequest {
+	_, status := handler(ring.ModuleInvocation{StageID: StageControl}, []byte("not json"))
+	if status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("expected InvalidRequest, got %v", status)
 	}
 }
@@ -195,9 +199,9 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 	})
 	handler := NewHandler(mux)
 
-	control, status := handler(bus.ModuleInvocation{StageID: StageControl},
+	control, status := handler(ring.ModuleInvocation{StageID: StageControl},
 		[]byte(`{"method":"GET","path":"/v1/workflow/items"}`))
-	if status != bus.ModuleStatusOK || !reached {
+	if status != ring.ModuleStatusOK || !reached {
 		t.Fatalf("control stage did not reach the mux: status=%v reached=%v", status, reached)
 	}
 	var response ControlResponse
@@ -210,11 +214,130 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 
 	// An advance request must reach the decision, not the mux. A malformed one is
 	// rejected by the decision itself, which is proof it was routed there.
-	if _, status := handler(bus.ModuleInvocation{StageID: StageAdvance}, []byte("short")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: StageAdvance}, []byte("short")); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("advance stage not routed to the decision: %v", status)
 	}
 
-	if _, status := handler(bus.ModuleInvocation{StageID: 99}, nil); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(ring.ModuleInvocation{StageID: 99}, nil); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown stage must be rejected, got %v", status)
+	}
+}
+
+func TestControlLifecycleCancellationDrainsActiveMux(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered, finished := make(chan struct{}), make(chan struct{})
+	fallback := make(chan struct{})
+	defer close(fallback)
+	handler := NewHandlerContext(ctx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-fallback:
+		}
+	}))
+	request, err := json.Marshal(ControlRequest{Method: "POST", Path: "/v1/dev/submit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body []byte
+	var status ring.ModuleStatus
+	go func() { body, status = handler(ring.ModuleInvocation{StageID: StageControl}, request); close(finished) }()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mux never entered")
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lifecycle cancellation did not drain active mux")
+	}
+	if status != ring.ModuleStatusCancelled || len(body) != 0 {
+		t.Fatalf("cancelled mux returned body/status %q/%v", body, status)
+	}
+}
+
+func TestControlAlreadyCancelledLifecycleDoesNotDispatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	handler := NewHandlerContext(ctx, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("cancelled lifecycle dispatched mux") }))
+	body, status := handler(ring.ModuleInvocation{StageID: StageControl}, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+	if status != ring.ModuleStatusCancelled || len(body) != 0 {
+		t.Fatalf("cancelled dispatch returned %q/%v", body, status)
+	}
+}
+
+func TestControlInvocationDeadlineCancelsActiveMux(t *testing.T) {
+	var now unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+		t.Fatal(err)
+	}
+	invocation := ring.ModuleInvocation{StageID: StageControl, DeadlineNS: uint64(now.Nano()) + uint64(500*time.Millisecond)}
+	entered, finished, fallback := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer close(fallback)
+	handler := NewControlHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-fallback:
+		}
+	}))
+	var body []byte
+	var status ring.ModuleStatus
+	go func() {
+		body, status = handler(invocation, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+		close(finished)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadline mux never entered")
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("invocation deadline did not cancel active mux")
+	}
+	if status != ring.ModuleStatusDeadlineExceeded || len(body) != 0 {
+		t.Fatalf("expired mux returned %q/%v", body, status)
+	}
+}
+
+func TestControlExpiredInvocationDoesNotDispatch(t *testing.T) {
+	handler := NewControlHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("expired invocation dispatched mux") }))
+	body, status := handler(ring.ModuleInvocation{StageID: StageControl, DeadlineNS: 1}, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+	if status != ring.ModuleStatusDeadlineExceeded || len(body) != 0 {
+		t.Fatalf("expired dispatch returned %q/%v", body, status)
+	}
+}
+
+// The runtime's real FCancel/atomic-flag behavior is tested in ring. This unit
+// seam changes the same predicate after dispatch without exposing bus internals.
+func TestControlContextObservesCancellationAfterDispatch(t *testing.T) {
+	var cancelled atomic.Bool
+	ctx, release := controlRequestContext(context.Background(), time.Hour, cancelled.Load)
+	defer release()
+	if ctx.Err() != nil {
+		t.Fatal("request cancelled before bus flag")
+	}
+	cancelled.Store(true)
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight bus cancellation not propagated")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("bus cancellation error %v", ctx.Err())
+	}
+}
+
+func TestControlContextAlwaysBoundsStandaloneWork(t *testing.T) {
+	ctx, release := controlRequestContext(context.Background(), (ring.ModuleInvocation{}).Remaining(30*time.Second), func() bool { return false })
+	defer release()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > 30*time.Second {
+		t.Fatal("control request has no host-owned deadline bound")
 	}
 }

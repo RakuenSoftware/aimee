@@ -149,9 +149,6 @@ CFG_KEY_DESC = {
     "kb_curator_extract_docs_workers": "Parallel curator document-extraction workers, bounded to the synthesis service slot count.",
     "kb_evidence_embed_enabled": "Drain evidence-index operations into evidence vectors.",
     "kb_mode": "Setup/deploy mode: local starts a KB, remote connects to kb_client_url.",
-    "verify_cmd": "Command run after a delegated fix to verify it.",
-    "verify_prompt": "Prompt template given to the cross-verification delegate.",
-    "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
     "aimee_with_llamacpp": "Compatibility image flag. Managed 0.4.0 profiles deploy a "
@@ -203,7 +200,6 @@ CFG_KEY_DESC = {
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
     "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
-    "cross_verify": "Enable cross-model verification of outputs.",
     "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-OFF). Enable it explicitly only for approved autonomous workflows. When off, the forge provider is not registered and every forge op fails closed; even when on, each operation re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
     "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
@@ -277,10 +273,6 @@ CFG_KEY_DESC = {
     "registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` "
     "(default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy "
     "`gated` and `governance` values cannot widen the live proxy allowlist.",
-    "delegate_sandbox_require_isolation": "Deprecated compatibility key. Its value is ignored: "
-    "every delegate is created with no network, its complete network/mount/environment posture is "
-    "verified after every start or resume, and any breach or unverifiable fact destroys the "
-    "container and refuses the delegation. There is no host fallback.",
     "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
     "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
     "records them per project (git root), and pre-bakes the learned set into that project's next "
@@ -427,7 +419,6 @@ SECTION_DESC = {
     "context": "Context-engine selection.",
     "cost_reward": "Cost-aware reward shaping.",
     "cron_jobs": "Scheduled job definitions (array of objects).",
-    "cross_verify": "Cross-model output verification.",
     "kb_store": "Legacy knowledge-index settings; connections are owned by PostgreSQL.",
     "dedup": "Response deduplication.",
     "dogfood": "Session capture for dogfood data.",
@@ -1016,7 +1007,6 @@ ENV_DESC = {
     "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
     "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),
     "AIMEE_IR_RESP_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical response IR."),
-    "AIMEE_IR_SHADOW": ("Diagnostics & misc", "Run the canonical IR path in comparison/shadow mode."),
     "AIMEE_IR_STREAM_RELAY": ("Diagnostics & misc", "Enable the canonical streaming-response relay."),
     "AIMEE_KB_HARDENED": ("Knowledge base (aimee-kb)", "Require the hardened KB custody and transport posture at startup."),
     "AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID": ("Knowledge base (aimee-kb)", "Custody identifier for the key that signs JWKS manifests."),
@@ -1074,7 +1064,6 @@ ENV_DESC = {
     "AIMEE_VAULT_TPM2_NV_INDEX": ("Server runtime", "TPM 2 NV index used for anti-rollback state."),
     "AIMEE_VAULT_TPM2_TCTI": ("Server runtime", "TPM 2 TCTI selector."),
     "AIMEE_WFE_ENGINE": ("Workflow engine", "Workflow runtime selector; current server images require `go`."),
-    "AIMEE_WFE_HTTP_SOCKET": ("Workflow engine", "Unix socket for the Go workflow control plane."),
     "AIMEE_WFE_WORKTREE_GC_GRACE_SECS": ("Workflow engine", "Grace period before an unowned workflow worktree can be collected."),
     "AIMEE_WITNESS_CADENCE_TEST_S": ("Diagnostics & misc", "Test-only override that shortens witness checkpoint and verification cadence."),
     "AIMEE_WITNESS_HARNESS_ROLE": ("Diagnostics & misc", "Restricted PostgreSQL role used by the witness live harness."),
@@ -1117,7 +1106,10 @@ def parse_env_vars():
     """Every literal AIMEE_* env read in native and Go runtime sources, excluding tests."""
     found = set()
     for f in sorted(SRC.rglob("*")):
-        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
+        # src/build holds build output and the fetched ouroboros ring, which is
+        # another repository's code, not aimee's runtime configuration surface.
+        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix() or \
+                f.relative_to(SRC).parts[:1] == ("build",):
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
         for m in ENV_RE.finditer(text):
@@ -1213,6 +1205,7 @@ EXT_GROUP_ORDER = ["Provider credentials", "Provider endpoints", "Reasoning effo
                    "Network / proxy", "Editor", "Codex / Claude integration"]
 
 EXT_DESC = {
+    "DOCKER_HOST": ("Network / proxy", "Docker daemon endpoint. Owned delegate execution requires a local Unix socket and pins it for the container lease."),
     "EMBEDDER_URL": ("Provider endpoints", "Compatibility embedding endpoint override when the AIMEE-prefixed endpoint is unset."),
     "EMBEDDER_DIMS": ("Provider endpoints", "Embedding dimension override; must match the stored vector-space identity."),
     "SYNTHESIS_AUTH_REQUIRED": ("Provider endpoints", "Require authenticated synthesis for the configured endpoint; checked by the curator provider."),
@@ -1250,7 +1243,10 @@ EXT_DESC = {
 def parse_external_env():
     found = set()
     for f in sorted(SRC.rglob("*")):
-        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
+        # src/build holds build output and the fetched ouroboros ring, which is
+        # another repository's code, not aimee's runtime configuration surface.
+        if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix() or \
+                f.relative_to(SRC).parts[:1] == ("build",):
             continue
         for m in EXT_RE.finditer(f.read_text(encoding="utf-8", errors="ignore")):
             v = m.group(1)

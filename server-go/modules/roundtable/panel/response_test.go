@@ -21,7 +21,7 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 }
 
 func TestRoundtableRepairPreservesNonBlockingApprovalFindings(t *testing.T) {
-	prompt := panelResponseRepairPrompt("run", "hash", "frozen_diff", "invalid")
+	prompt := panelResponseRepairPrompt("run", "hash", "frozen_diff")
 	if !strings.Contains(prompt, "may carry suggestion or nit findings") || !strings.Contains(prompt, `"verdict":"approve|changes|blocked"`) || strings.Contains(prompt, "approve only with an empty findings array") {
 		t.Fatalf("repair prompt contradicts the panel verdict contract: %s", prompt)
 	}

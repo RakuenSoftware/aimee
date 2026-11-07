@@ -62,9 +62,9 @@ func TestOriginalInputNegotiationBeforePersistence(t *testing.T) {
 				}
 			})
 			s.cfg = startFakeV1(t, mux)
-			body := fmt.Sprintf(`{"aimee_session_id":%q,"message":"Synthetic browser wording"}`, oiSID)
+			body := fmt.Sprintf(`{"aimee_session_id":%q,"message":{"role":"user","blocks":[{"type":"text","text":"Synthetic browser wording"}]}}`, oiSID)
 			if tc.op {
-				body = fmt.Sprintf(`{"aimee_session_id":%q,"message":"Synthetic browser wording","original_input_operation_uuid":%q}`, oiSID, oiUUID)
+				body = fmt.Sprintf(`{"aimee_session_id":%q,"message":{"role":"user","blocks":[{"type":"text","text":"Synthetic browser wording"}]},"original_input_operation_uuid":%q}`, oiSID, oiUUID)
 			}
 			r := httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(body))
 			addWebSession(t, s, r, "alice")

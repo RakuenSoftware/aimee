@@ -9,7 +9,9 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "cli_ir.h"
 #include "platform_path.h"
+#include <aimee/workspace/identity.h>
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
@@ -24,8 +26,20 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
-int cli_agent_probe_response_is_failure(cJSON *resp)
+int cli_agent_probe_response_exit_code(cJSON *resp, int argc, char **argv)
 {
+   int no_run = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--no-run") == 0)
+         no_run = 1;
+      else if (strncmp(argv[i], "--no-run=", 9) == 0)
+         no_run = strcmp(argv[i] + 9, "true") == 0;
+   }
+   const char *backend = json_str(resp, "backend");
+   if (!no_run && backend[0] && strcmp(backend, "http") != 0 &&
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(resp, "execution_tested")))
+      return 2; /* Unsupported diagnostic, not evidence of model failure. */
    cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
    if (execution_ok)
       return !cJSON_IsTrue(execution_ok);
@@ -123,7 +137,7 @@ char *cli_index_worktree_root(const char *method, const cJSON *req)
  * first. The caller's actual worktree registration takes precedence over the
  * main checkout's, including when that registration is ambiguous. */
 static const char *cli_index_registered_project(const cJSON *projects, const char *cwd,
-                                                int *matched)
+                                                const char *identity, int *matched)
 {
    const char *best = NULL;
    size_t best_len = 0;
@@ -135,7 +149,7 @@ static const char *cli_index_registered_project(const cJSON *projects, const cha
    {
       const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
       const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (!name || !name[0] || !root || root[0] != '/')
+      if (!name || strcmp(name, identity) || !root || root[0] != '/')
          continue;
       size_t n = strlen(root);
       while (n > 1 && root[n - 1] == '/')
@@ -160,50 +174,131 @@ int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *
       return 1;
    const cJSON *projects = cJSON_GetObjectItemCaseSensitive(response, "projects");
    const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "cwd"));
+   char identity[128];
+   if (cli_ws_project_identity(NULL, NULL, cwd ? cwd : root, identity, sizeof identity))
+      return 0;
    int matched = 0;
-   const char *name = cli_index_registered_project(projects, cwd, &matched);
+   const char *name = cli_index_registered_project(projects, cwd, identity, &matched);
    if (!matched)
-      name = cli_index_registered_project(projects, root, &matched);
+      name = cli_index_registered_project(projects, root, identity, &matched);
    if (name)
       cJSON_AddStringToObject(req, "project", name);
    return matched;
 }
 
-void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
-                             char *out, size_t out_len)
+int cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root, char *out,
+                            size_t out_len)
 {
-   const char *base = strrchr(abs_root, '/');
-   base = (base && base[1]) ? base + 1 : abs_root;
-   snprintf(out, out_len, "%s", base);
-   const char *verb = NULL;
-   const char *path = cli_v1_route_for_method("index.list", &verb);
-   int status = 0;
-   cJSON *response =
-       path ? cli_http_request(remote, verb ? verb : "POST", path, "{}", bearer, 15000, &status)
-            : NULL;
-   cJSON *projects = response ? cJSON_GetObjectItemCaseSensitive(response, "projects") : NULL;
-   int collision = 0;
-   cJSON *project = NULL;
-   cJSON_ArrayForEach(project, projects)
+   (void)remote;
+   (void)bearer;
+   if (out && out_len)
+      out[0] = 0;
+#if defined(AIMEE_POSIX)
+   return workspace_repo_identity(abs_root, out, out_len, NULL, 0);
+#else
+   /* Client-push indexing and safe argv Git reads remain unsupported here. */
+   (void)abs_root;
+   return -1;
+#endif
+}
+
+/* Workspace paths belong to the client even when served metadata builds the
+ * body. Keep the REST root and the legacy argv carrier in agreement, without
+ * resolving virtual absolute mirror/detached roots on the client filesystem. */
+cJSON *cli_workspace_finalize_root(cJSON *req, int argc, char **argv, const char *root_arg)
+{
+   const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "root"));
+   if (!root || !root[0] || aimee_path_is_absolute(root))
+      return req;
+   char absolute[4096], cwd[4096];
+   if (!getcwd(cwd, sizeof cwd))
+      goto invalid_root;
+   int n = snprintf(absolute, sizeof absolute, "%s/%s", cwd, root);
+   if (n < 0 || (size_t)n >= sizeof absolute)
+      goto invalid_root;
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "args");
+   if (args)
    {
-      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
-      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
-      if (root && strcmp(root, abs_root) == 0 && name && name[0])
+      int index = -1;
+      for (int i = 0; root_arg && i < argc; i++)
+         if (argv[i] == root_arg)
+            index = i;
+      const char *carried = cJSON_GetStringValue(cJSON_GetArrayItem(args, index));
+      if (!carried || strcmp(carried, root) != 0)
+         goto invalid_root;
+      cJSON *value = cJSON_CreateString(absolute);
+      if (!value || !cJSON_ReplaceItemInArray(args, index, value))
       {
-         snprintf(out, out_len, "%s", name);
-         cJSON_Delete(response);
-         return;
+         cJSON_Delete(value);
+         goto invalid_root;
       }
-      if (name && strcmp(name, base) == 0)
-         collision = 1;
    }
-   cJSON_Delete(response);
-   if (!collision)
-      return;
-   unsigned long hash = 2166136261u;
-   for (const unsigned char *p = (const unsigned char *)abs_root; *p; p++)
-      hash = (hash ^ *p) * 16777619u;
-   snprintf(out, out_len, "%s-%08lx", base, hash & 0xfffffffful);
+   cJSON *value = cJSON_CreateString(absolute);
+   if (!value || !cJSON_ReplaceItemInObjectCaseSensitive(req, "root", value))
+   {
+      cJSON_Delete(value);
+      goto invalid_root;
+   }
+   return req;
+invalid_root:
+   fprintf(stderr, "aimee: workspace root cannot be resolved from the client's cwd\n");
+   marshal_request_note_reported();
+   cJSON_Delete(req);
+   return NULL;
+}
+
+/* workspace.add: keep the {method,args} body the socket dispatch parses, but also
+ * surface root + provider as top-level fields so the first-class REST route
+ * POST /v1/workspaces (which reads {root, provider}) accepts the same body when
+ * the thin client routes over a remote /v1 endpoint. The route's response is the
+ * raw dispatch result (ws_dispatch_args -> loopback_rpc), so it parses identically
+ * to the socket path. */
+cJSON *marshal_workspace_add(int argc, char **argv)
+{
+   cJSON *req = marshal_agent_args("workspace.add", argc, argv);
+   if (!req)
+      return NULL;
+   cli_args_t opts;
+   /* --no-scan takes no value, so it must be declared boolean: cli_args_parse would
+    * otherwise treat the following argument as its value, and swallow the flag
+    * entirely when it is last. */
+   static const char *ws_bool_flags[] = {"no-scan", NULL};
+   cli_args_parse(argc, argv, ws_bool_flags, &opts);
+   if (opts.pos_count > 0)
+   {
+      if (!cJSON_AddStringToObject(req, "root", opts.positional[0]))
+      {
+         cJSON_Delete(req);
+         return NULL;
+      }
+   }
+   const char *prov = cli_args_get(&opts, "provider");
+   if (prov)
+      cJSON_AddStringToObject(req, "provider", prov);
+   /* The mirror coordinates need surfacing for the same reason root and provider
+    * do. This body reaches the server through POST /v1/workspaces -- including
+    * locally, over the HTTP UDS -- and that route reads top-level fields, not
+    * `args`. Left in args only, they were silently dropped, so
+    * `aimee workspace add <path> --provider mirror --remote <url>` came back with
+    * "--provider mirror requires --remote <url>" while staring at the flag the
+    * user had just typed. The socket dispatch still parses argv, so both paths
+    * now carry them. */
+   const char *rem = cli_args_get(&opts, "remote");
+   if (rem)
+      cJSON_AddStringToObject(req, "remote", rem);
+   const char *hd = cli_args_get(&opts, "head");
+   if (hd)
+      cJSON_AddStringToObject(req, "head", hd);
+   /* --no-scan registers the workspace and returns instead of walking every
+    * discovered project first. On a large tree the eager scan makes this RPC
+    * take minutes, so a caller with a timeout abandons a registration that
+    * already succeeded; the background ingest timer indexes them regardless.
+    * Omitted (not sent as true) by default, so an older server sees exactly the
+    * body it saw before. */
+   if (cli_args_has_flag(&opts, "no-scan"))
+      cJSON_AddBoolToObject(req, "scan", 0);
+   return cli_workspace_finalize_root(req, argc, argv,
+                                      opts.pos_count > 0 ? opts.positional[0] : NULL);
 }
 
 cJSON *marshal_workspace_prepare(int argc, char **argv)
@@ -1047,10 +1142,20 @@ cJSON *marshal_aux_test(int argc, char **argv)
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "task", opts.positional[0]);
-   if (opts.pos_count > 1)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[1]);
-   if (opts.pos_count > 2)
-      cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
+   if (opts.pos_count > 1 && cli_ir_add_request(req, opts.positional[1], NULL, NULL, NULL,
+                                                opts.pos_count > 2 ? atoi(opts.positional[2]) : 0))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   /* Preserve aux.test's established deterministic sampling at the producer;
+    * consumers retain canonical controls without supplying legacy defaults. */
+   cJSON *input = cJSON_GetObjectItemCaseSensitive(req, "request");
+   if (input && !cJSON_AddNumberToObject(input, "temperature", 0.0))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
    return req;
 }
 

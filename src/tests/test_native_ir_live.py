@@ -22,6 +22,111 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 
+class NativeCatalogObservations:
+    """Full observed declarations, separate from transport/user/auth data."""
+    def __init__(self, directory=None):
+        self.directory = Path(directory) if directory else None
+        self.references = {}
+        self.records = []
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def history_phase(wire, request):
+        # Mirror the actual frontend role mapping, never prompt text or call count.
+        items = request.get("input" if wire == "chatgpt" else "messages", [])
+        if isinstance(items, str):
+            return "opening", dict(scalar=True, items=[])
+        assert isinstance(items, list), "invalid observed wire history"
+        shape = []
+        assistant = False
+        for item in items:
+            assert isinstance(item, dict), "invalid observed history item"
+            role, kind = item.get("role"), item.get("type")
+            shape.append(dict(role=role, type=kind))
+            assistant |= role == "assistant" or (wire == "chatgpt" and kind in
+                ("function_call", "reasoning"))
+        return ("established" if assistant else "opening"), dict(scalar=False, items=shape)
+
+    @staticmethod
+    def opening_tools(tools):
+        # Expected projection from the existing memory gateway_plan.go native-shell
+        # policy. MCP groups keep their callable surface; definitions/order remain exact.
+        aliases = {"exec_command", "local_shell", "shell", "bash", "run_command",
+                   "container.exec", "shell_command", "run_shell_command", "Bash", "Shell"}
+        def shell(tool, namespace=""):
+            if namespace.startswith("mcp__"):
+                return False
+            definition = tool.get("function", tool)
+            return (tool.get("type") == "local_shell" or
+                    (namespace == "container" and definition.get("name") == "exec") or
+                    definition.get("name") in aliases)
+        projected = []
+        for tool in tools:
+            if tool.get("type") == "namespace":
+                children = [child for child in tool.get("tools", []) if not shell(child, tool.get("name", ""))]
+                if children:
+                    projected.append({**tool, "tools": children})
+            elif not shell(tool):
+                projected.append(tool)
+        return projected
+
+    def observe(self, kind, wire, scope, tools, request):
+        with self.lock:
+            return self._observe(kind, wire, scope, tools, request)
+
+    def _observe(self, kind, wire, scope, tools, request):
+        assert isinstance(tools, list), "native request has no tool array"
+        phase, history_shape = self.history_phase(wire, request)
+        encoded = json.dumps(tools, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        key = (kind, wire, scope, phase)
+        previous = self.references.setdefault(key, encoded)
+        names = []
+        for tool in tools:
+            assert isinstance(tool, dict)
+            definition = tool.get("function", tool)
+            if tool.get("type") == "namespace":
+                for child in tool.get("tools", []):
+                    names.append(dict(namespace=tool.get("name"), name=child.get("name")))
+            else:
+                names.append(dict(namespace=None, name=definition.get("name")))
+        record = dict(ordinal=len(self.records) + 1, kind=kind, wire=wire, scope=scope,
+                      history_phase=phase, history_shape=history_shape,
+                      declarations=len(tools), names=names,
+                      sha256=hashlib.sha256(encoded.encode()).hexdigest(), tools=json.loads(encoded))
+        self.records.append(record)
+        if self.directory:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target = self.directory / ("catalog-%04d.json" % record["ordinal"])
+            target.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+            target.chmod(0o600)
+        # Preserve actual offending declarations/history shape before strict failure.
+        assert previous == encoded, ("native catalog changed within policy phase", key)
+        # Internal HTTP delegates use their role-scoped Aimee catalog, not the
+        # external SDK/gateway bootstrap pipeline. Still record declarations and
+        # enforce exact stability within each observed phase for every owner.
+        if kind != "http-child" and phase == "opening":
+            assert self.opening_tools(tools) == tools, ("opening catalog exposes native shell", key)
+        opening = self.references.get((kind, wire, scope, "opening"))
+        established = self.references.get((kind, wire, scope, "established"))
+        if kind != "http-child" and opening is not None and established is not None:
+            assert json.loads(opening) == self.opening_tools(json.loads(established)), (
+                "catalog differs beyond opening native-shell policy", key)
+        return record
+
+    def finish(self):
+        if self.directory:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target = self.directory / "summary.json"
+            target.write_text(json.dumps(dict(records=[{k:v for k,v in r.items() if k != "tools"}
+                              for r in self.records], baseline_full_wire_available=False,
+                              evidence="observed catalogs plus exact source-owned profile fixtures; not baseline wire equivalence"),
+                              indent=2) + "\n")
+            target.chmod(0o600)
+        for key, encoded in self.references.items():
+            print("native integration: observed catalog", *key, "declarations", len(json.loads(encoded)),
+                  "sha256", hashlib.sha256(encoded.encode()).hexdigest(), flush=True)
+
+
 class Local(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX)
@@ -148,12 +253,17 @@ def main():
     async_case = False
     browser_question = False
     browser_delegate_question = False
+    refusal_case = False
+    refusal_details = dict(type="refusal", category="future_fixture_category",
+                           explanation="Synthetic provider decline for fidelity validation.")
     delegation_case = False
     delegation_released = threading.Event()
     child_requests = []
     observed = []
     errors = []
     count = 0
+    artifact = os.environ.get("AIMEE_TEST_NATIVE_ARTIFACT_DIR")
+    catalogs = NativeCatalogObservations(Path(artifact) / "native-catalogs" if artifact else None)
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -166,6 +276,7 @@ def main():
                 if request.get("model") == "native-delegate-child":
                     assert delegation_released.wait(60), "parent native owner did not finish"
                     child_requests.append(request)
+                    catalogs.observe("http-child", "openai", "diagnose", request.get("tools"), request)
                     assert self.headers.get("Authorization") == "Bearer native-child-fixture-only"
                     names = {tool.get("name", tool.get("function", {}).get("name")) for tool in request.get("tools", [])}
                     assert "delegate" not in names and "delegate_status" not in names, names
@@ -211,6 +322,7 @@ def main():
                         assert request["max_tokens"] == 128 and request["temperature"] == 0.25, request
                 auth, token = authorizations[marker]
                 assert all(secret not in encoded for secret in forbidden_credentials)
+                catalogs.observe(kind, wire, "run" if async_case else "primary", request.get("tools"), request)
                 if wire == "anthropic" and auth == "api_key":
                     assert self.headers.get("x-api-key") == token
                 else:
@@ -220,6 +332,31 @@ def main():
                 if auth == "claude-oauth":
                     assert self.headers.get("x-api-key") is None
                     assert "oauth" in self.headers.get("anthropic-beta", "")
+                if refusal_case:
+                    assert kind == "claude" and wire == "anthropic" and count == 1
+                    payload = dict(id="msg_native_refusal", type="message", role="assistant",
+                                   model=marker, content=[], stop_reason="refusal",
+                                   stop_details={**refusal_details,
+                                       "fallback_credit_token": "DO_NOT_PERSIST_REFUSAL_CREDIT",
+                                       "recommended_model": "DO_NOT_SELECT_THIS_MODEL"},
+                                   usage=dict(input_tokens=100, output_tokens=0))
+                    if request.get("stream"):
+                        frames = [("message_start", dict(type="message_start", message={
+                            **payload, "stop_reason": None, "stop_details": None})),
+                            ("message_delta", dict(type="message_delta", delta=dict(
+                                stop_reason="refusal", stop_details=payload["stop_details"]),
+                                usage=dict(output_tokens=0))),
+                            ("message_stop", dict(type="message_stop"))]
+                        data = "".join("event: " + name + "\ndata: " + json.dumps(value) + "\n\n"
+                                       for name, value in frames).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                    else:
+                        self.send_payload(payload)
+                    return
                 tool_call = count == 1 or (delegation_case and count == 2)
                 if delegation_case and count == 2:
                     call_id += "_status"
@@ -469,6 +606,74 @@ def main():
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
             assert "Continue the server-owned canonical turn." not in encoded
             print("native integration:", kind, wire, auth, "typed seeded run, real tool, original response and durable source pass", flush=True)
+        # A refusal is a normal provider response, not an invented HTTP error.
+        # Exercise the real SDK and durable owner without a live provider or retry.
+        refusal_case = True
+        async_case = False
+        marker = case_name("claude", "anthropic", "api_key")
+        active = ("claude", "anthropic", marker, "unused_refusal_tool")
+        count = 0
+        sid = api("/v1/sessions/create", dict(client_type="native-ir-refusal-integration"))["session_id"]
+        sdk_root = home / "browser-claude" / sid
+        sdk_before = {path: path.read_bytes() for path in sdk_root.rglob("*.jsonl")}
+        attachment = api(f"/v1/sessions/{sid}/attach", dict(surface="webchat", owner=actor))["attach_id"]
+        api(f"/v1/sessions/{sid}/primary", dict(agent=marker))
+        try:
+            raw = api("/v1/chat/stream", dict(attach_id=attachment, message=marker + "_FIRST",
+                aimee_session_id=sid, cwd=str(workspace), ir_version=1))
+            records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            assert count == 1 and not errors, (count, errors)
+            events = [record["event"] for record in records]
+            executions = [event["payload"]["status"] for event in events if event["kind"] == "execution"]
+            assert executions == ["running", "failed"], executions
+            stops = [event["payload"] for event in events
+                     if event["kind"] == "delta" and event["payload"]["type"] == "TURN_STOP"]
+            expected = dict(category=refusal_details["category"], explanation=refusal_details["explanation"])
+            assert len(stops) == 1 and stops[0]["stop_reason"] == "content_filter", stops
+            assert stops[0]["raw_stop_reason"] == "refusal" and stops[0]["refusal"] == expected, stops
+            assert not any(event["kind"] in ("native_checkpoint", "control_request", "control_response")
+                           for event in events), events
+            for event in events:
+                if event["kind"] == "message" and event["payload"]["role"] == "assistant":
+                    assert not event["payload"]["blocks"], "SDK diagnostic became model content"
+                if event["kind"] == "delta" and event["role"] == "assistant":
+                    assert event["payload"].get("kind") != "tool_use"
+                    assert not event["payload"].get("text_delta"), "SDK diagnostic became model text"
+            assert "DO_NOT_PERSIST_REFUSAL_CREDIT" not in raw and "DO_NOT_SELECT_THIS_MODEL" not in raw
+            connection = Local("localhost")
+            try:
+                connection.request("GET", f"/v1/sessions/{sid}/events?format=ir&cursor=0")
+                response = connection.getresponse()
+                assert response.status == 200
+                replayed = []
+                target = int(records[-1]["sequence"])
+                while not replayed or int(replayed[-1]["sequence"]) < target:
+                    line = response.readline().decode()
+                    assert line, (sid, target)
+                    if line.startswith("data: "):
+                        replayed.append(json.loads(line[6:]))
+                assert replayed == records, "Refusal metadata changed between live delivery and durable replay"
+            finally:
+                connection.close()
+            diagnostics = []
+            for path in sdk_root.rglob("*.jsonl"):
+                data = path.read_bytes()
+                if data == sdk_before.get(path, b""):
+                    continue
+                assert b"DO_NOT_PERSIST_REFUSAL_CREDIT" not in data and b"DO_NOT_SELECT_THIS_MODEL" not in data
+                for line in data.splitlines():
+                    record = json.loads(line)
+                    message = record.get("message")
+                    if (record.get("type") == "assistant" and isinstance(message, dict)
+                            and message.get("role") == "assistant" and message.get("stop_reason") == "refusal"):
+                        diagnostics.append(message.get("stop_details"))
+            assert diagnostics == [refusal_details], diagnostics
+            print("native integration: Claude actual SDK refusal retains typed category/explanation, "
+                  "durable replay and one-request/no-retry boundary pass", flush=True)
+        finally:
+            api(f"/v1/sessions/{sid}/detach", dict(attach_id=attachment))
+            refusal_case = False
+
         # The model calls the real orchestration tool without supplying cwd.
         # The child must retain the approved mirror after its parent SDK closes.
         delegation_case = True
@@ -523,10 +728,38 @@ def main():
                 time.sleep(0.05)
             assert not errors, errors
             if sandbox_ready:
-                assert child["job_status"] == "done" and "CHILD_MIRROR_OK" in child["result"], child
+                assert child["job_status"] == "done", child
+                output = child["output"]
+                assert output["role"] == "assistant", output
+                text = "".join(block["text"] for block in output["blocks"] if block["type"] == "text")
+                assert "CHILD_MIRROR_OK" in text, output
+                # full_result exposes the actual canonical owner record, not a
+                # response reconstructed from the compatibility job.result.
+                history = child["history"]
+                assert isinstance(history, list) and output in history, child
+                source = child["canonical_source"]
+                assert isinstance(source, dict), child
+                events = child["events"]
+                assert isinstance(events, list) and events, child
+                owner, terminal = source["child"], source["terminal_source"]
+                assert source["execution_status"] == "completed", source
+                assert source["parent_source"]["session_id"] == sid and source["parent_source"]["actor"] == actor, source
+                assert owner["role"] == child["role"] and owner["agent"] == child["agent_name"], source
+                assert terminal["session_id"] == owner["session_id"] and terminal["turn_id"] == owner["turn_id"], source
+                assert terminal["actor"] == actor and int(source["last_sequence"]) >= int(terminal["sequence"]), source
+                completed = [event for event in events if event["event_id"] == terminal["event_id"]]
+                assert len(completed) == 1, events
+                assert completed[0]["turn_id"] == owner["turn_id"] and completed[0]["actor"] == actor, completed
+                assert completed[0]["sequence"] == terminal["sequence"], completed
+                assert completed[0]["payload"]["kind"] == "execution" and completed[0]["payload"]["payload"]["status"] == "completed", completed
                 assert len(child_requests) == child_before + 2, child_requests[child_before:]
             else:
-                assert child["job_status"] == "failed" and "could not be given a sandboxed container" in child["result"], child
+                # Host sandbox admission failed before a child provider call.
+                # This is an operator diagnostic, not a model refusal/output.
+                reason = child.get("diagnostic")
+                assert child["job_status"] == "failed", child
+                assert isinstance(reason, str) and "could not be given a sandboxed container" in reason, child
+                assert child["api_call_count"] == 0 and child["cursor_turn"] == 0, child
                 assert len(child_requests) == child_before, child_requests[child_before:]
             saved = api("/v1/trajectory/export", dict(session_id=sid, compress=False))["trajectory"]
             assert active[3] in json.dumps(saved) and active[3] + "_status" in json.dumps(saved) and "job_id" in json.dumps(saved), saved
@@ -606,6 +839,7 @@ def main():
             models_path.unlink(missing_ok=True)
         else:
             models_path.write_bytes(previous)
+        catalogs.finish()
         delegation_released.set()
         server.shutdown()
         server.server_close()

@@ -30,21 +30,4 @@ typedef enum
    DB1_USER_RECALL_PREFERENCES
 } db1_user_recall_section_t;
 
-/* Fill up to `cap` rows for a recall section from db1 user_memories, using the
- * same tier band (L2..L5) + key conventions as the kb_store selectors. Returns the
- * number filled (0 on empty table / no db1 / error). */
-int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memory_row_t *rows,
-                                int cap);
-
-/* Fast "does this user have any db1 memory at all?" check. Lets hot paths skip
- * the recall parse/merge/reserialize entirely when the table is empty (the
- * production case until capture is wired). */
-int db1_user_memory_any(void);
-
-/* Upsert a user memory (insert or replace by (kind,key)). Returns 0 on success.
- * S1 uses this for seeding + tests; the ergonomic capture commands
- * (aimee identity/prefer) arrive in S2. */
-int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content,
-                           double confidence, const char *source_session);
-
 #endif /* AIMEE_DB1_USER_MEMORY_H */

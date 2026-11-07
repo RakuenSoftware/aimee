@@ -37,6 +37,11 @@ extern "C"
     * without spawning the thread. */
    int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold_secs);
 
+   /* A delegation or agent job changed (the store announced it): have the
+    * monitor look now. Safe from any thread, including the bus consumer: it
+    * only sets a flag and signals. */
+   void server_delegate_monitor_wake(void);
+
    /* Bind/unbind a per-turn heartbeat for the in-flight background delegate on
     * THIS thread. begin() registers an http_retry progress callback that bumps
     * agent_jobs.heartbeat_at after every model HTTP attempt, so a slow-but-

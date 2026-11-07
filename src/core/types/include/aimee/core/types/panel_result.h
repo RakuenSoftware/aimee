@@ -1,12 +1,9 @@
 /* panel_result.h: provider-neutral panel output messages.
  *
- * Core owns the shared panel data layout only. Delegates core owns
- * provider registration, facade invocation, and release dispatch; deliberation
- * policy and execution remain provider-specific. A provider allocates the
- * artifact returned in a successful result and supplies its matching release
- * callback. The caller must invoke aimee_panel_result_release exactly once
- * before the provider is unregistered. A shallow struct copy is a non-owning
- * view of the same allocation and must not be released independently. */
+ * Core owns the shared panel data layout. Deliberation policy and execution
+ * belong to the panel implementation. The caller releases the owned artifact
+ * or canonical response through that implementation's result-free function;
+ * a shallow struct copy is a non-owning view of the same allocation. */
 #ifndef AIMEE_CORE_TYPES_PANEL_RESULT_H
 #define AIMEE_CORE_TYPES_PANEL_RESULT_H 1
 
@@ -87,9 +84,13 @@ typedef struct
    char original_request_alignment_sources[256];
 } aimee_panel_result_t;
 
+struct aimee_response;
+
 typedef struct
 {
-   char response[8192];
+   /* Owned full selected/aggregated canonical source; caller releases through
+    * delegate_ensemble_result_free after every successful run. */
+   struct aimee_response *canonical_response;
    int success;
    double cost_usd;
    int degraded;

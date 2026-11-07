@@ -43,7 +43,7 @@
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
-#include <aimee/core/event_bus/module_protocol.h>
+#include <ouroboros/module_protocol.h>
 extern cJSON *aimee_module_host_command_context(void) __attribute__((weak));
 #include "kb_reqctx.h"
 #include "kb_http_models.h"
@@ -661,8 +661,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
    if (kb_reqctx_apply_asserted(asserted_actor, resolved) != 0)
       return json_body_error(out_buf, out_cap, 403,
                              "caller context conflicts with credential identity");
-   if ((strcmp(path, "/v1/console/memory") == 0 ||
-        strcmp(path, "/v1/console/memory/") == 0) &&
+   if ((strcmp(path, "/v1/console/memory") == 0 || strcmp(path, "/v1/console/memory/") == 0) &&
        vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) != 0)
       return json_body_error(out_buf, out_cap, 403,
                              "console credential required for memory administration");
@@ -739,22 +738,22 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
     * zeroed = owner, consistent with everything open.) */
    if (!vr.scope_kind[0] || strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
    {
-      if (strcmp(path, "/v1/console/memory") == 0 ||
-          strcmp(path, "/v1/console/memory/") == 0)
+      if (strcmp(path, "/v1/console/memory") == 0 || strcmp(path, "/v1/console/memory/") == 0)
       {
          if (strcmp(method, "POST") != 0)
             return json_body_error(out_buf, out_cap, 405, "method not allowed");
          const kb_principal_t *console_actor = kb_reqctx_actor();
          const char *console_kind = NULL, *console_id = NULL;
-         int console_scope = kb_reqctx_verified_scope(&console_kind, &console_id) &&
-                              console_kind && !strcmp(console_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) &&
-                              console_id && console_id[0];
+         int console_scope = kb_reqctx_verified_scope(&console_kind, &console_id) && console_kind &&
+                             !strcmp(console_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) && console_id &&
+                             console_id[0];
          if (!(console_actor && console_actor->authenticated) && !console_scope)
-            return json_body_error(out_buf, out_cap, 403, "authenticated console identity required");
+            return json_body_error(out_buf, out_cap, 403,
+                                   "authenticated console identity required");
          if (!aimee_module_console_admin_extension)
             return json_body_error(out_buf, out_cap, 503,
                                    "memory administration module unavailable");
-         if (!body || body_len <= 0 || (size_t)body_len > AIMEE_MODULE_MESSAGE_MAX_BODY ||
+         if (!body || body_len <= 0 || (size_t)body_len > OURO_MODULE_MESSAGE_MAX_BODY ||
              memchr(body, '\0', (size_t)body_len))
             return json_body_error(out_buf, out_cap, 400, "complete bounded JSON body required");
          char *request_json = malloc((size_t)body_len + 1);
@@ -762,9 +761,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             return json_body_error(out_buf, out_cap, 503, "command request allocation failed");
          memcpy(request_json, body, (size_t)body_len);
          request_json[body_len] = '\0';
-         cJSON *context = aimee_module_host_command_context
-                              ? aimee_module_host_command_context()
-                              : NULL;
+         cJSON *context =
+             aimee_module_host_command_context ? aimee_module_host_command_context() : NULL;
          char *context_json = context ? cJSON_PrintUnformatted(context) : NULL;
          cJSON_Delete(context);
          if (!context_json || strlen(context_json) > 4096)
@@ -774,7 +772,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             return json_body_error(out_buf, out_cap, 503, "verified command context unavailable");
          }
          int status = aimee_module_console_admin_extension(method, path, request_json, context_json,
-                                                             out_buf, out_cap);
+                                                           out_buf, out_cap);
          free(context_json);
          free(request_json);
          return status;

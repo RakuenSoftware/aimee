@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	configowner "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
@@ -57,12 +56,10 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 			config.Handler == nil {
 			t.Fatalf("%s config = %#v, ok=%v", test.name, config, ok)
 		}
-		wantIdle := time.Duration(0)
-		if test.name == "economizer" {
-			wantIdle = time.Millisecond
-		}
-		if config.MaxIdlePollInterval != wantIdle {
-			t.Fatalf("%s idle poll ceiling = %v, want %v", test.name, config.MaxIdlePollInterval, wantIdle)
+		// No module trades idle wakeups for latency any more: the ring wakes
+		// each process for its requests (doorbell, ring D13).
+		if config.MaxIdlePollInterval != 0 {
+			t.Fatalf("%s idle poll ceiling = %v, want none", test.name, config.MaxIdlePollInterval)
 		}
 		// The stage id is derived from the event kind rather than the position:
 		// a module may declare a non-contiguous set when one of its stages is
@@ -108,6 +105,7 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
+				HostedBy  string `json:"hosted_by"`
 			} `json:"stages"`
 		} `json:"components"`
 	}
@@ -166,6 +164,16 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			advertised[s.EventKind] = true
 		}
 		for _, s := range declared.Stages {
+			if s.HostedBy != "" {
+				if declared.ID != "delegates" || s.EventKind != 6679 || s.HostedBy != "server-core" {
+					t.Fatal("unknown core stage ownership")
+				}
+				if advertised[s.EventKind] {
+					t.Fatal("Go process claimed core native execution stage")
+				}
+				continue
+			}
+
 			// roundtable-review is registered ONLY when this process can convene a
 			// panel (roundtableReviewer() succeeds), which it cannot under test.
 			// That conditionality is deliberate and documented above; every other

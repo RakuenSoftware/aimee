@@ -173,8 +173,7 @@ static void build_exclusions_add(build_exclusion_list_t *exclusions, const char 
    char rel[256];
    size_t base_len = base_dir ? strlen(base_dir) : 0;
    size_t token_len = strlen(token);
-   if (base_len >= sizeof(rel) ||
-       token_len >= sizeof(rel) - base_len - (base_len ? 1 : 0))
+   if (base_len >= sizeof(rel) || token_len >= sizeof(rel) - base_len - (base_len ? 1 : 0))
       return;
    if (base_len)
    {
@@ -457,7 +456,7 @@ static int path_in_subproject(const char *policy_path, char prefixes[][MAX_PATH_
  * nested sub-project, so a rescan cleans up files a parent used to absorb. */
 static void purge_subprojects(int64_t project_id, const char *root)
 {
-   char (*prefixes)[MAX_PATH_LEN] = malloc(sizeof(*prefixes) * SUBPROJECT_PREFIX_CAP);
+   char(*prefixes)[MAX_PATH_LEN] = malloc(sizeof(*prefixes) * SUBPROJECT_PREFIX_CAP);
    if (!prefixes)
       return;
    int count = 0;
@@ -484,7 +483,7 @@ static void collect_code_files(const char *dir, const char *root, file_list_t *l
 
    /* Heap-allocated (256 * 4 KiB = 1 MiB) to keep this scan worker's stack
     * frame small; collect_code_files runs on pooled threads. */
-   char (*subproject_prefixes)[MAX_PATH_LEN] =
+   char(*subproject_prefixes)[MAX_PATH_LEN] =
        malloc(sizeof(*subproject_prefixes) * SUBPROJECT_PREFIX_CAP);
    int subproject_count = 0;
    if (subproject_prefixes)
@@ -1045,10 +1044,4 @@ int index_structure(const char *project, const char *file_path, definition_t *ou
 int index_find_callers(const char *project, const char *symbol, caller_hit_t *out, int max)
 {
    return kb_store_code_index_callers_find(project, symbol, out, max);
-}
-
-int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max)
-{
-   /* The direct (non-HTTP) code-search path does not enrich line spans. */
-   return kb_store_code_index_code_search(query, project, out, max, 0);
 }

@@ -3,7 +3,7 @@ package delegates
 import (
 	"encoding/binary"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // What a delegate ROLE implies about how it should be run.
@@ -172,22 +172,22 @@ func RoleFinalAfterTurns(role string) int {
 	return -1
 }
 
-func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleRolePolicy(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if len(request) != rolePolicyRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != rolePolicyRequestMagic ||
 		request[4] != wireVersion || request[5] > 1 || request[6] > 1 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	explicitTools := request[5] == 1
 	holdsTools := request[6] == 1
 	maxTurns := int(int32(binary.LittleEndian.Uint32(request[8:12])))
 	roleLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if roleLen > roleMax {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	role := string(request[16 : 16+roleLen])
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	response := make([]byte, rolePolicyResponseLen)
@@ -199,5 +199,5 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))
 	putBool(response[24:28], RoleNeedsParentDiffEvidence(role))
 	binary.LittleEndian.PutUint32(response[28:32], uint32(RoleTaskShape(role)))
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

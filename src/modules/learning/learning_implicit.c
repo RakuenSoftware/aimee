@@ -15,9 +15,9 @@
 #include <time.h>
 
 static void emit_implicit_refs(const char *signal_type, const char *polarity, const char *title,
-                          const char *description, const char *target_key, int64_t target_memory_id,
-                          const char *workflow_project, const char *workflow_signal_type,
-                          const char *evidence_refs_json)
+                               const char *description, const char *target_key,
+                               int64_t target_memory_id, const char *workflow_project,
+                               const char *workflow_signal_type, const char *evidence_refs_json)
 {
    learning_signal_input_t input;
    memset(&input, 0, sizeof(input));
@@ -45,36 +45,7 @@ static void emit_implicit(const char *signal_type, const char *polarity, const c
                           const char *workflow_project, const char *workflow_signal_type)
 {
    emit_implicit_refs(signal_type, polarity, title, description, target_key, target_memory_id,
-                       workflow_project, workflow_signal_type, NULL);
-}
-
-void learning_implicit_detect_turn(const char *user_text)
-{
-   if (!user_text || !user_text[0])
-      return;
-   if (!config_present())
-      return;
-   if (!config_learning_implicit_citation_repair() &&
-       !config_learning_implicit_citation_continuation())
-      return;
-
-   struct timespec t0, t1;
-   clock_gettime(CLOCK_MONOTONIC, &t0);
-
-   dogfood_autolabel_kind_t kind = dogfood_classify_next_turn(user_text);
-   if (kind == DOGFOOD_AUTOLABEL_REPAIR && config_learning_implicit_citation_repair())
-      emit_implicit("citation_then_repair", "negative", "Implicit citation_then_repair signal",
-                    "User turn classified as repair/correction after memory retrieval.", NULL, 0,
-                    NULL, NULL);
-   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION &&
-            config_learning_implicit_citation_continuation())
-      emit_implicit(
-          "citation_then_continuation", "positive", "Implicit citation_then_continuation signal",
-          "User turn classified as continuation after memory retrieval.", NULL, 0, NULL, NULL);
-
-   clock_gettime(CLOCK_MONOTONIC, &t1);
-   double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;
-   learning_router_record_detection_ms(ms);
+                      workflow_project, workflow_signal_type, NULL);
 }
 
 void learning_implicit_record_repeat_question(const char *session_id, const char *tool,
@@ -141,8 +112,8 @@ void learning_implicit_record_workflow_evidence(const char *workspace, const cha
    {
       if (strlen(evidence_refs_json) >= sizeof(((learning_proposal_t *)0)->evidence_refs))
          return;
-      cJSON *refs = cJSON_ParseWithLengthOpts(evidence_refs_json,
-                                             strlen(evidence_refs_json) + 1, NULL, 1);
+      cJSON *refs =
+          cJSON_ParseWithLengthOpts(evidence_refs_json, strlen(evidence_refs_json) + 1, NULL, 1);
       int valid = cJSON_IsArray(refs);
       cJSON_Delete(refs);
       if (!valid)
@@ -152,8 +123,8 @@ void learning_implicit_record_workflow_evidence(const char *workspace, const cha
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
    emit_implicit_refs("workflow_repetition", "positive", "Implicit workflow_repetition signal",
-                 description ? description : "", workspace, 0, workspace, signal_type,
-                 evidence_refs_json);
+                      description ? description : "", workspace, 0, workspace, signal_type,
+                      evidence_refs_json);
 
    clock_gettime(CLOCK_MONOTONIC, &t1);
    double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;

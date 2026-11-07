@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	wire "github.com/JBailes/aimee/server-go/aimee"
+	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 type retiredMemoryDB struct{ t *testing.T }
@@ -44,8 +44,8 @@ func TestRetiredPersonalMemoryWireCannotReadOrReviveLegacyRows(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reply, status := Conversation.Handler(retiredMemoryDB{t})(bus.ModuleInvocation{StageID: StageConversation}, frame)
-			if status != bus.ModuleStatusOK {
+			reply, status := Conversation.Handler(retiredMemoryDB{t})(ring.ModuleInvocation{StageID: StageConversation}, frame)
+			if status != ring.ModuleStatusOK {
 				t.Fatalf("transport status %v", status)
 			}
 			result, fields, err := wire.DecodeFields(reply)

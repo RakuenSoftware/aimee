@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,7 +25,7 @@ var errLegacyPrimaryReplyTooLong = errors.New("legacy primary reply exceeds modu
 // One raw source field plus all other output fields, each length-prefixed.
 // Storage capacity does not remove the existing complete-reply frame overhead.
 func legacyPrimaryReplyCapacity(otherFields ...string) int {
-	budget := int(bus.ModuleMessageMaxBody) - 8 - 4*(len(otherFields)+1)
+	budget := int(ring.ModuleMessageMaxBody) - 8 - 4*(len(otherFields)+1)
 	for _, field := range otherFields {
 		budget -= len(field)
 	}

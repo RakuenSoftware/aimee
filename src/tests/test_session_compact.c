@@ -624,7 +624,8 @@ static void test_source_result_keeps_cycle_and_dependencies(void)
           "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"native-call\","
           "\"is_error\":false,\"content\":\"native source\",\"tool_source\":{\"schema_version\":1,"
           "\"owner\":\"10000000-0000-4000-8000-000000000001\","
-          "\"visible_sha256\":\"b18a65f14ec019da46fd1d60c9423284aa4c9e6f646cdeee3e82e4774b3c026b\",\"receipt\":\"{}\"}}]}]");
+          "\"visible_sha256\":\"b18a65f14ec019da46fd1d60c9423284aa4c9e6f646cdeee3e82e4774b3c026b\","
+          "\"receipt\":\"{}\"}}]}]");
       assert(messages);
       for (int i = 0; i < 12; i++)
          cJSON_AddItemToArray(messages, make_msg("assistant", "progress evidence"));

@@ -1,5 +1,8 @@
 /* Pin the legacy server's deliberately narrow handoff to the Go egress binary. */
 #include <assert.h>
+#include <errno.h>
+#include <signal.h>
+#include <time.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

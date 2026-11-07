@@ -307,106 +307,6 @@ int kb_store_learning_observation_add_evidence(const char *observation_id, int64
        obs.synthesis_policy_version, &ev, 1, obs.supersedes);
 }
 
-int kb_store_learning_observation_refresh_recurrence(const char *observation_id, const char *role,
-                                                     const char *failure_mode, const char *title,
-                                                     const char *summary, int64_t max_event_id)
-{
-   if (!observation_id || !observation_id[0] || !failure_mode || !failure_mode[0] ||
-       max_event_id <= 0)
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   char err[LRN_ERRBUF] = "";
-   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
-      return -1;
-   int rc = -1;
-   static const char *upsert =
-       "INSERT INTO learning_observations"
-       " (observation_id,scope_kind,scope_id,observation_type,title,summary,status,confidence,"
-       "  synthesis_policy_version,created_at,refreshed_at)"
-       " VALUES (?1,'workspace','','recurring_failure',?2,?3,'candidate',0.0,"
-       "         'recurrence-v1',pg_now_text(),pg_now_text())"
-       " ON CONFLICT (observation_id) DO UPDATE SET title=EXCLUDED.title,summary=EXCLUDED.summary,"
-       " synthesis_policy_version=EXCLUDED.synthesis_policy_version,refreshed_at=pg_now_text(),"
-       " status=CASE WHEN learning_observations.status='rejected' THEN 'rejected' ELSE 'candidate' "
-       "END,"
-       " retired_at=''";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, upsert, err, sizeof(err));
-   if (!st)
-      goto done;
-   aimee_pg_bind_text(st, "?1", observation_id);
-   aimee_pg_bind_text(st, "?2", title ? title : "");
-   aimee_pg_bind_text(st, "?3", summary ? summary : "");
-   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
-   {
-      aimee_pg_finalize(st);
-      goto done;
-   }
-   aimee_pg_finalize(st);
-
-   static const char *attach =
-       "INSERT INTO learning_observation_evidence"
-       " (observation_id,evidence_kind,source_event_id,source_span,stance,observed_at)"
-       " SELECT ?1,'interaction_event',source_event_id,'','supports',created_at"
-       " FROM interaction_event_embeddings"
-       " WHERE event_type='delegate_exit' AND role=?2 AND failure_mode=?3 AND source_event_id<=?4"
-       " ON CONFLICT (observation_id,evidence_kind,source_event_id,source_span,stance) DO NOTHING";
-   st = aimee_pg_prepare(conn, attach, err, sizeof(err));
-   if (!st)
-      goto done;
-   aimee_pg_bind_text(st, "?1", observation_id);
-   aimee_pg_bind_text(st, "?2", role ? role : "");
-   aimee_pg_bind_text(st, "?3", failure_mode);
-   aimee_pg_bind_int64(st, "?4", max_event_id);
-   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
-   {
-      aimee_pg_finalize(st);
-      goto done;
-   }
-   aimee_pg_finalize(st);
-
-   static const char *recompute =
-       "UPDATE learning_observations SET"
-       " evidence_count=(SELECT COUNT(*) FROM learning_observation_evidence oe"
-       "   WHERE oe.observation_id=?1),"
-       " independent_session_count=(SELECT COUNT(DISTINCT ie.session_id)"
-       "   FROM learning_observation_evidence oe JOIN interaction_event_embeddings ie"
-       "     ON ie.source_event_id=oe.source_event_id WHERE oe.observation_id=?1),"
-       " evidence_window_start=COALESCE((SELECT MIN(observed_at)"
-       "   FROM learning_observation_evidence oe WHERE oe.observation_id=?1),''),"
-       " evidence_window_end=COALESCE((SELECT MAX(observed_at)"
-       "   FROM learning_observation_evidence oe WHERE oe.observation_id=?1),''),"
-       " confidence=CASE WHEN (SELECT COUNT(*) FROM learning_observation_evidence oe"
-       "   WHERE oe.observation_id=?1)>=5 THEN 0.95 ELSE 0.5+0.1*(SELECT COUNT(*)"
-       "   FROM learning_observation_evidence oe WHERE oe.observation_id=?1) END,"
-       " status=CASE WHEN status='rejected' THEN 'rejected'"
-       "   WHEN (SELECT COUNT(*) FROM learning_observation_evidence oe WHERE "
-       "oe.observation_id=?1)>=3"
-       "    AND (SELECT COUNT(DISTINCT ie.session_id) FROM learning_observation_evidence oe"
-       "      JOIN interaction_event_embeddings ie ON ie.source_event_id=oe.source_event_id"
-       "      WHERE oe.observation_id=?1)>=2 THEN 'active' ELSE 'retired' END,"
-       " retired_at=CASE WHEN (SELECT COUNT(*) FROM learning_observation_evidence oe"
-       "   WHERE oe.observation_id=?1)<3 THEN pg_now_text() ELSE '' END,refreshed_at=pg_now_text()"
-       " WHERE observation_id=?1";
-   st = aimee_pg_prepare(conn, recompute, err, sizeof(err));
-   if (!st)
-      goto done;
-   aimee_pg_bind_text(st, "?1", observation_id);
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
-      rc = 0;
-   aimee_pg_finalize(st);
-done:
-   if (rc == 0)
-      (void)aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
-   else
-   {
-      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
-      LOG_WARN("kb_store.learning", "observation refresh: %s", err);
-   }
-   return rc;
-}
-
 int kb_store_learning_observation_get(const char *observation_id, learning_observation_t *out)
 {
    if (!observation_id || !observation_id[0] || !out)
@@ -480,29 +380,6 @@ int kb_store_learning_observation_evidence_ids(const char *observation_id, int64
       out[n++] = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return n;
-}
-
-int kb_store_learning_observation_set_status(const char *observation_id, const char *status)
-{
-   if (!observation_id || !observation_id[0] || !status ||
-       (strcmp(status, "candidate") != 0 && strcmp(status, "active") != 0 &&
-        strcmp(status, "retired") != 0 && strcmp(status, "rejected") != 0))
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   static const char *sql = "UPDATE learning_observations SET status=?2,refreshed_at=pg_now_text(),"
-                            " retired_at=CASE WHEN ?2='retired' THEN pg_now_text() ELSE '' END"
-                            " WHERE observation_id=?1";
-   char err[LRN_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", observation_id);
-   aimee_pg_bind_text(st, "?2", status);
-   int rc = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE ? 0 : -1;
-   aimee_pg_finalize(st);
-   return rc;
 }
 
 int kb_store_learning_observations_reconcile(void)
@@ -949,42 +826,6 @@ int kb_store_learning_proposal_get(int id, learning_proposal_t *out)
    return rc;
 }
 
-int kb_store_learning_proposals_settled_counts(int window_days, int64_t *committed,
-                                               int64_t *terminal)
-{
-   if (window_days <= 0)
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-
-   char window_expr[32];
-   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
-
-   static const char *sql =
-       "SELECT"
-       " SUM(CASE WHEN state = 'committed' THEN 1 ELSE 0 END),"
-       " SUM(CASE WHEN state IN ('committed', 'archived') THEN 1 ELSE 0 END)"
-       " FROM learning_proposals"
-       " WHERE COALESCE(committed_at, updated_at, created_at) >= pg_now_text(?1)";
-   char err[LRN_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", window_expr);
-   int rc = -1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      if (committed)
-         *committed = aimee_pg_column_int64(st, 0);
-      if (terminal)
-         *terminal = aimee_pg_column_int64(st, 1);
-      rc = 0;
-   }
-   aimee_pg_finalize(st);
-   return rc;
-}
-
 int kb_store_learning_committed_source_counts(int window_days, const char *sink_or_null,
                                               kb_store_learning_source_count_t *out, int max)
 {
@@ -1101,31 +942,6 @@ int kb_store_learning_fate_record(int proposal_id, const char *fate, const char 
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int kb_store_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
-{
-   if (proposal_id <= 0 || !fate_out || fate_out_len == 0)
-      return -1;
-   fate_out[0] = '\0';
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-
-   static const char *sql = "SELECT fate FROM learning_proposal_fate WHERE proposal_id = ?1";
-   char err[LRN_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int(st, "?1", proposal_id);
-   int found = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      lrn_copy_text(fate_out, fate_out_len, aimee_pg_column_text(st, 0), "");
-      found = 1;
-   }
-   aimee_pg_finalize(st);
-   return found;
-}
-
 int kb_store_learning_fate_counts(int window_days, const char *regret_fates,
                                   kb_store_learning_fate_count_t *out, int max)
 {
@@ -1171,44 +987,6 @@ int kb_store_learning_fate_counts(int window_days, const char *regret_fates,
       out[count].committed = aimee_pg_column_int64(st, 1);
       out[count].settled = aimee_pg_column_int64(st, 2);
       out[count].regret = aimee_pg_column_int64(st, 3);
-      count++;
-   }
-   aimee_pg_finalize(st);
-   return count;
-}
-
-int kb_store_learning_proposal_list(const char *state, const char *sink, int limit,
-                                    learning_proposal_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   void *conn = kb_store_conn();
-   if (!conn)
-      return -1;
-   if (limit <= 0 || limit > max)
-      limit = max;
-
-   static const char *sql =
-       "SELECT id, signal_id, sink, state, target_key, target_memory_id, action_json,"
-       " evidence_refs, corroboration_count, expires_at, committed_at, archive_reason,"
-       " created_at, updated_at"
-       " FROM learning_proposals"
-       " WHERE (?1 = '' OR state = ?2) AND (?3 = '' OR sink = ?4)"
-       " ORDER BY id DESC LIMIT ?5";
-   char err[LRN_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", state ? state : "");
-   aimee_pg_bind_text(st, "?2", state ? state : "");
-   aimee_pg_bind_text(st, "?3", sink ? sink : "");
-   aimee_pg_bind_text(st, "?4", sink ? sink : "");
-   aimee_pg_bind_int(st, "?5", limit);
-
-   int count = 0;
-   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      lrn_load_proposal_row(st, &out[count]);
       count++;
    }
    aimee_pg_finalize(st);

@@ -11,12 +11,6 @@
 #include "provider_catalog.h"
 #include "index.h" /* project_info_t, for server_active_project_match */
 
-/* True when `name` is a provider the chat path can resolve: a built-in CLI
- * provider, a known adapter, or an agent in `acfg` (matched by name or by
- * provider). Gates the durable primary write in handle_provider_set so a
- * mistyped `aimee provider <word>` cannot brick every later chat turn.
- * `acfg` may be NULL to check only the built-in/adapter sets. */
-int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 #include "memory_authority.h" /* memory_authority_t — attested write authority */
 
@@ -312,6 +306,10 @@ int server_vault_bootstrap_prepare(void);
 typedef int (*aimee_agent_resolver_fn)(const char *name, char *canon, size_t cap);
 void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn);
 void server_shutdown(server_ctx_t *ctx);
+
+/* Wake the server's park loop: a SIGHUP, an announced config change, shutdown.
+ * Async-signal-safe. */
+void server_park_wake(void);
 int server_compute_budget_acquire(server_ctx_t *ctx);
 void server_compute_budget_release(server_ctx_t *ctx, int granted);
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
@@ -615,6 +613,9 @@ int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJ
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Read-only projection from the authenticated canonical child-log owner.
+ * 0 observed, 1 no binding, -1 unavailable, -2 owner/source refused. */
+int server_delegate_job_observation(cJSON *out, int job_id, int full);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Credential vault (WP-C.1): resolve the attested principal from the conn. */
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -680,6 +681,7 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -689,6 +691,7 @@ int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
 /* MCP proxy handler (server_mcp.c) */
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_mcp_tools_wait(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Full served tool surface (built-ins + discovery + server-only), unfiltered;
  * caller owns the returned cJSON array (server_mcp_tools.c). */
 cJSON *mcp_build_full_served_list(void);

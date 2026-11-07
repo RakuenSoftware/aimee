@@ -32,25 +32,38 @@ extern "C"
 
    /* Host0-only atomic original BEGIN+User. Unknown/refusal never authorizes
     * execution. Replay retains original turn and never means new work. */
-   typedef enum { DB1_ORIGINAL_INPUT_UNKNOWN=0, DB1_ORIGINAL_INPUT_CREATED=1,
-                  DB1_ORIGINAL_INPUT_REPLAY=2 } db1_original_input_outcome_t;
-   typedef struct {
+   typedef enum
+   {
+      DB1_ORIGINAL_INPUT_UNKNOWN = 0,
+      DB1_ORIGINAL_INPUT_CREATED = 1,
+      DB1_ORIGINAL_INPUT_REPLAY = 2
+   } db1_original_input_outcome_t;
+   typedef struct
+   {
       uint64_t begin_sequence, input_sequence;
       char original_turn[1025];
       unsigned contract_version;
       db1_original_input_outcome_t outcome;
    } db1_original_input_receipt_t;
    /* 0 validated created, 1 exact replay, -1 unavailable/refused/unknown. */
-   int db1_session_original_input_begin(const char *session_id,const char *operation_uuid,
-      const char *proposed_turn,const char *actor,const char *batch_json,
-      db1_original_input_receipt_t *receipt);
+   int db1_session_original_input_begin(const char *session_id, const char *operation_uuid,
+                                        const char *proposed_turn, const char *actor,
+                                        const char *batch_json,
+                                        db1_original_input_receipt_t *receipt);
    extern const unsigned aimee_original_input_delivery_client_contract_v1;
-   int db1_session_original_input_begin_delivery(const char *,const char *,const char *,const char *,const char *,const char *,db1_original_input_receipt_t *,uint64_t *);
-   int db1_session_original_input_delivery_get(const char *,const char *,const char *,const char *,char **);
-   int db1_session_original_input_delivery_page(const char *,const char *,const char *,const char *,const char *,char **);
-   int db1_session_original_input_delivery_ack(const char *,const char *,const char *,const char *,const char *,const char *);
-   int db1_session_input_attachment_history_save(const char *session_id,const char *checkpoint,
-      const char *scope,const char *actor,const char *active_turn,const char *messages_json);
+   int db1_session_original_input_begin_delivery(const char *, const char *, const char *,
+                                                 const char *, const char *, const char *,
+                                                 db1_original_input_receipt_t *, uint64_t *);
+   int db1_session_original_input_delivery_get(const char *, const char *, const char *,
+                                               const char *, char **);
+   int db1_session_original_input_delivery_page(const char *, const char *, const char *,
+                                                const char *, const char *, char **);
+   int db1_session_original_input_delivery_ack(const char *, const char *, const char *,
+                                               const char *, const char *, const char *);
+   int db1_session_input_attachment_history_save(const char *session_id, const char *checkpoint,
+                                                 const char *scope, const char *actor,
+                                                 const char *active_turn,
+                                                 const char *messages_json);
 
    /* Complete bounded, actor-scoped canonical text search. Caller frees JSON. */
    char *db1_session_ir_search(const char *principal, const char *request_json);
@@ -84,10 +97,7 @@ extern "C"
    /* Complete bounded session owner list, including other native models/SDKs. */
    int db1_session_native_active_owned(const char *principal, const char *session_id,
                                        char **out_json);
-   char *db1_session_native_reservation_lookup(const char *principal, const char *request_json);
    int db1_session_native_owner_claim(const char *principal, const char *request_json);
-   int db1_session_native_reconcile(const char *principal, const char *request_json,
-                                    char out_sequence[32]);
 
    /* Canonical ordered session log. Append returns an exact decimal sequence
     * into out_sequence[32]; retrying an event ID is idempotent only when every
@@ -116,7 +126,8 @@ extern "C"
                                             const char *source_agent, const char *source_sha256,
                                             const char *messages_json, const char *report_json);
    int db1_session_tool_source_history_save(const char *session_id, const char *checkpoint,
-       const char *scope, const char *actor, const char *active_turn, const char *messages_json);
+                                            const char *scope, const char *actor,
+                                            const char *active_turn, const char *messages_json);
    int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
@@ -129,7 +140,8 @@ extern "C"
 
    /* Privileged operator cancellation of an exact owned API turn. Native
     * custody must already be resolved. This fences continuation, not effects.
-    * Returns 0 committed/idempotent, 1 stale/refused, -1 storage failure. */
+    * Returns 0 committed/idempotent, 1 stale/refused, 2 exact owned active
+    * native (refused without writes), -1 storage failure. */
    int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
                              char out_sequence[32]);
 
@@ -145,32 +157,11 @@ extern "C"
                                         const char *expected, const char *replacement,
                                         const char *principal);
 
-   /* Upsert the canonical message array JSON for one primary
-    * conversation session. Returns 0 on success. */
-   int db1_primary_session_save(const char *session_id, const char *agent_name,
-                                const char *provider, const char *messages_json);
-
-   /* Return a malloc'd copy of the stored message array JSON, or NULL on miss
-    * or error. Caller frees. */
-   char *db1_primary_session_load(const char *session_id, const char *agent_name,
-                                  const char *provider);
-
-   /* Delete one stored primary conversation session. Returns 0 on success. */
-   int db1_primary_session_delete(const char *session_id, const char *agent_name,
-                                  const char *provider);
-
-   /* Allocate rows for recent or transcript-matching primary sessions. Caller
-    * frees with db1_primary_session_rows_free. Returns row count or -1. */
-   int db1_primary_session_alloc_recent(db1_primary_session_row_t **out, int max);
-   int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_t **out,
-                                        int max);
-
    /* Load the newest transcript row for one session_id. Returns 0 on hit, 1 on miss, -1 on failure.
     */
    int db1_primary_session_get_latest(const char *session_id, db1_primary_session_row_t *out);
 
    void db1_primary_session_row_clear(db1_primary_session_row_t *row);
-   void db1_primary_session_rows_free(db1_primary_session_row_t *rows, int count);
 
 #ifdef __cplusplus
 }

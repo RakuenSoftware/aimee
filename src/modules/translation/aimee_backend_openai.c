@@ -8,6 +8,7 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
 #include "util.h" /* text_split_reasoning_prefix, strip_llm_private_scaffold */
 
 #include <stdio.h>
@@ -208,6 +209,65 @@ static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
    return 0;
 }
 
+/* Reuse the same closed extension owner for normalized host profiles. Native
+ * outer frames are never copied wholesale, and host policy values cannot be
+ * overwritten by a caller's model-specific extension. Only declared IR controls
+ * and these existing semantic extensions enter host execution; domain fields
+ * and outer native framing remain on the unchanged source request. */
+int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
+                                           aimee_request_t *projected, aimee_wire_t wire)
+{
+   if (!source || !projected || source == projected)
+      return -1;
+   if (!source->raw || source->frontend != AIMEE_WIRE_OPENAI_CHAT)
+      return 0;
+   cJSON *extensions = cJSON_CreateObject();
+   cJSON *raw = NULL;
+   aimee_request_t original = *source;
+   original.model =
+       (char *)cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source->raw, "model"));
+   if (!extensions || openai_profile_extensions(&original, extensions))
+      goto fail;
+   if (!extensions->child)
+   {
+      cJSON_Delete(extensions);
+      return 0;
+   }
+   if (!aimee_backend_host_profile_valid(projected) || wire != AIMEE_WIRE_OPENAI_CHAT ||
+       projected->frontend != wire || !original.model || !projected->model ||
+       strcmp(original.model, projected->model) ||
+       (source->model && strcmp(source->model, original.model)))
+      goto fail;
+   raw = projected->raw ? cJSON_Duplicate(projected->raw, 1) : cJSON_CreateObject();
+   if (!raw || (!cJSON_HasObjectItem(raw, "model") &&
+                !cJSON_AddStringToObject(raw, "model", projected->model)))
+      goto fail;
+   for (const cJSON *entry = extensions->child; entry; entry = entry->next)
+   {
+      const cJSON *existing = cJSON_GetObjectItemCaseSensitive(raw, entry->string);
+      if (existing)
+      {
+         if (!cJSON_Compare(existing, entry, 1))
+            goto fail;
+         continue;
+      }
+      cJSON *copy = cJSON_Duplicate(entry, 1);
+      if (!copy || !cJSON_AddItemToObject(raw, entry->string, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   cJSON_Delete(projected->raw);
+   projected->raw = raw;
+   cJSON_Delete(extensions);
+   return 0;
+fail:
+   cJSON_Delete(extensions);
+   cJSON_Delete(raw);
+   return -1;
+}
+
 int openai_family_add_prompt_cache(cJSON *out, const aimee_request_t *request)
 {
    if (!out || !request)
@@ -270,8 +330,26 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       cJSON_AddNumberToObject(out, "top_k", ir->top_k);
    if (ir->metadata)
       cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1));
+   if (ir->service_tier && !cJSON_AddStringToObject(out, "service_tier", ir->service_tier))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    if (ir->stream)
+   {
       cJSON_AddBoolToObject(out, "stream", 1);
+      /* Anthropic's required opening usage must come from the completed Chat
+       * observation. Same-wire client stream options retain their own owner. */
+      if (ir->frontend == AIMEE_WIRE_ANTHROPIC)
+      {
+         cJSON *options = cJSON_AddObjectToObject(out, "stream_options");
+         if (!options || !cJSON_AddBoolToObject(options, "include_usage", 1))
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
+      }
+   }
 
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
    /* system blocks -> leading system messages, one per block (round-trip stable
@@ -636,6 +714,21 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
+   if (wire_usage_validate(usage) || aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
+   }
+   wire_response_usage(out, usage, "prompt_tokens", "completion_tokens");
+
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
    if (failure && !cJSON_IsNull(failure))
    {
@@ -650,6 +743,13 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
       }
       return 0;
    }
+   if (!wire_response_metadata_valid(resp))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider response metadata");
+      aimee_response_free(out);
+      return -1;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
 
@@ -663,6 +763,14 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
 
    if (msg)
    {
+      const cJSON *role = cJSON_GetObjectItemCaseSensitive(msg, "role");
+      if (role && (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant")))
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid provider assistant role");
+         aimee_response_free(out);
+         return -1;
+      }
       out->role = dupstr(ostr(msg, "role"));
 
       const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content");
@@ -699,6 +807,8 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
          aimee_response_free(out);
          return -1;
       }
+      if (cJSON_IsString(refusal) && refusal->valuestring[0])
+         out->stop_reason = AIMEE_STOP_CONTENT_FILTER;
       const cJSON *calls = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "tool_calls");
       const cJSON *c = NULL;
       if (calls && cJSON_IsArray(calls))
@@ -724,20 +834,6 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
                return -1;
             }
          }
-   }
-
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
-   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
-   if (aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
-       aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
-       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
-       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
-   {
-      if (err && errn)
-         snprintf(err, errn, "invalid provider usage counter");
-      aimee_response_free(out);
-      return -1;
    }
 
    return 0;

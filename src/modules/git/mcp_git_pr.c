@@ -1175,6 +1175,10 @@ cJSON *handle_git_pr(cJSON *args)
        * shrink-only, so the cJSON-owned buffer is safe). */
       if (has_body)
          strip_ai_attribution(jbody->valuestring);
+      /* A title is one line, so if stripping removes anything the whole title was
+       * attribution: refuse rather than send an empty or attributed title. */
+      if (has_title && strip_ai_attribution(jtitle->valuestring) > 0)
+         return mcp_text("error: the PR title is AI attribution; give it a real title");
 
       char repo_slug[256];
       if (get_origin_repo_slug(repo_slug, sizeof(repo_slug)) != 0)
@@ -1360,6 +1364,8 @@ cJSON *handle_git_pr(cJSON *args)
        * shrink-only, so the cJSON-owned buffer is safe). */
       if (cJSON_IsString(jbody))
          strip_ai_attribution(jbody->valuestring);
+      if (cJSON_IsString(jtitle) && strip_ai_attribution(jtitle->valuestring) > 0)
+         return mcp_text("error: the PR title is AI attribution; give it a real title");
 
       /* Resolve the repository through mcp_git_run, the SAME runner every other git
        * command here goes through, and hand the slug to the API. The API's

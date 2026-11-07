@@ -38,7 +38,7 @@ func TestOriginalInputModeDoesNotPersistRawDerivedTitle(t *testing.T) {
 					if e := json.NewDecoder(r.Body).Decode(&body); e != nil {
 						t.Fatal(e)
 					}
-					if body["message"] != canary {
+					if body["message"].(map[string]any)["blocks"].([]any)[0].(map[string]any)["text"] != canary {
 						t.Fatal("title fix must not silently alter input bytes")
 					}
 					cs, e := s.getChatSession("alice", oiSID)
@@ -54,7 +54,7 @@ func TestOriginalInputModeDoesNotPersistRawDerivedTitle(t *testing.T) {
 					}
 				})
 				s.cfg = startFakeV1(t, mux)
-				r := httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(fmt.Sprintf(`{"aimee_session_id":%q,"message":%q,"original_input_operation_uuid":%q}`, oiSID, canary, oiUUID)))
+				r := httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(fmt.Sprintf(`{"aimee_session_id":%q,"message":{"role":"user","blocks":[{"type":"text","text":%q}]},"original_input_operation_uuid":%q}`, oiSID, canary, oiUUID)))
 				r.Header.Set("X-Aimee-Webuser", "mallory")
 				addWebSession(t, s, r, "alice")
 				w := httptest.NewRecorder()

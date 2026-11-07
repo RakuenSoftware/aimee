@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -56,7 +56,7 @@ func cappedSeverity(claimed string) string {
 // available whether or not this process can reach the delegate plane: the
 // deliberation rubric and chunk planning. Review is added on top by NewHandler
 // only when a reviewer exists.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	if invocation.StageID == StageChunkPlan {
 		return handleChunkPlan(invocation, request)
 	}
@@ -67,14 +67,14 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 		binary.LittleEndian.Uint32(request[12:16]) > 1 ||
 		binary.LittleEndian.Uint32(request[16:20]) > severityMax ||
 		binary.LittleEndian.Uint32(request[20:24]) != 0 {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	severityLen := int(binary.LittleEndian.Uint32(request[16:20]))
 	if !modulewire.ZeroPadding(request[requestSeverityOff+severityLen:]) {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 
 	status := binary.LittleEndian.Uint32(request[8:12])
@@ -104,5 +104,5 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	binary.LittleEndian.PutUint32(response[4:8], action)
 	binary.LittleEndian.PutUint32(response[8:12], uint32(len(severity)))
 	copy(response[responseSeverityOff:], severity)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

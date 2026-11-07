@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func patchRequestBytes(tasks []PatchTask) []byte {
@@ -36,9 +36,9 @@ func TestPatchStageRoundTrip(t *testing.T) {
 		{ID: 2, StepID: 8, Status: "done", Files: `["src/a.c"]`,
 			Result: packet(`"src/a.c"`, passedTest)},
 	}
-	response, status := Handle(bus.ModuleInvocation{StageID: StagePatchCoord},
+	response, status := Handle(ring.ModuleInvocation{StageID: StagePatchCoord},
 		patchRequestBytes(tasks))
-	if status != bus.ModuleStatusOK ||
+	if status != ring.ModuleStatusOK ||
 		binary.LittleEndian.Uint32(response[0:4]) != patchResponseMagic {
 		t.Fatalf("status %d, %d bytes", status, len(response))
 	}
@@ -71,24 +71,24 @@ func TestPatchStageRoundTrip(t *testing.T) {
 func TestPatchStageRejectsInvalidEnvelope(t *testing.T) {
 	good := patchRequestBytes([]PatchTask{{ID: 1, Status: "pending"}})
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePatchCoord},
-		good[:patchReqHeaderLen-1]); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePatchCoord},
+		good[:patchReqHeaderLen-1]); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("truncated status = %d", status)
 	}
 
 	lying := patchRequestBytes([]PatchTask{{ID: 1, Status: "pending"}})
 	binary.LittleEndian.PutUint32(lying[8:12], 99)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePatchCoord}, lying); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePatchCoord}, lying); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("overrunning task count status = %d", status)
 	}
 
 	trailing := append(patchRequestBytes(nil), 0)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePatchCoord}, trailing); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePatchCoord}, trailing); status != ring.ModuleStatusInvalidRequest {
 		t.Errorf("trailing-byte status = %d", status)
 	}
 
-	if _, status := Handle(bus.ModuleInvocation{StageID: StagePatchCoord, DeadlineNS: 1},
-		good); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StagePatchCoord, DeadlineNS: 1},
+		good); status != ring.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
 	}
 }

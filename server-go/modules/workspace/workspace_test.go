@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func workspaceRequest(ref string) []byte {
@@ -25,8 +25,8 @@ func TestWorkspaceReferenceParity(t *testing.T) {
 		strings.Repeat("a", 65): 0, "owner/": 0, "owner/re\x00po": 0,
 	}
 	for ref, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageAccess}, workspaceRequest(ref))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageAccess}, workspaceRequest(ref))
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != want {
 			t.Errorf("%q response = %x, status = %d, want allowed %d", ref, response, status, want)
@@ -37,11 +37,11 @@ func TestWorkspaceReferenceParity(t *testing.T) {
 func TestWorkspaceRejectsInvalidEnvelopeAndHonorsCancellationPrecedence(t *testing.T) {
 	request := workspaceRequest("owner/repo")
 	request[5] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAccess}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAccess}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("reserved-byte status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageAccess, DeadlineNS: 1},
-		workspaceRequest("owner/repo/extra")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageAccess, DeadlineNS: 1},
+		workspaceRequest("owner/repo/extra")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invalid-ref status = %d", status)
 	}
 }

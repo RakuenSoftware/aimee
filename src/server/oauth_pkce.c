@@ -11,9 +11,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#ifndef AIMEE_WINDOWS
 #include <openssl/sha.h>
-#endif
 
 /* RFC 7636 §4.1: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~" */
 static const char PKCE_UNRESERVED[] =
@@ -70,13 +68,9 @@ int oauth_pkce_s256_challenge(const char *verifier, char *out, size_t outlen)
    if (outlen < OAUTH_PKCE_CHALLENGE_LEN + 1)
       return -1;
 
-#ifdef AIMEE_WINDOWS
-   return -1;
-#else
    unsigned char digest[SHA256_DIGEST_LENGTH];
    SHA256((const unsigned char *)verifier, vlen, digest);
    return oauth_pkce_base64url_encode(digest, sizeof(digest), out, outlen);
-#endif
 }
 
 /* Percent-encode per RFC 3986 into |out| at offset |*pos| (capacity |outlen|).

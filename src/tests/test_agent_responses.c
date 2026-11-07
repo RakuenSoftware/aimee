@@ -52,36 +52,7 @@ void test_responses_parser_accumulates_output_text_deltas(void)
    aimee_response_free(&parsed);
 }
 
-/* Walk a Responses object's output[] for the first non-empty message output_text.
- * Returns a borrowed pointer into `resp`, or NULL. */
-static const char *first_output_text(struct cJSON *resp)
-{
-   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   struct cJSON *item = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
-         continue;
-      struct cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
-      struct cJSON *part = NULL;
-      cJSON_ArrayForEach(part, content)
-      {
-         struct cJSON *pt = cJSON_GetObjectItemCaseSensitive(part, "type");
-         struct cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
-         if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0 && tx &&
-             cJSON_IsString(tx) && tx->valuestring[0])
-            return tx->valuestring;
-      }
-   }
-   return NULL;
-}
-
-/* Codex streams the answer as output_text deltas and its response.completed event
- * carries "output":[] (empty). The response OBJECT the IR/shadow consume must still
- * carry the text, so agent_responses_sse_response_object folds the SSE-aggregated
- * text back into output[] -- otherwise responses_backend_parse sees zero text while
- * the legacy parser recovered it (the live wire=3 shadow mismatch). */
+/* The active typed decoder must preserve delta text when completed.output is empty. */
 void test_responses_object_folds_in_delta_text(void)
 {
    const char *body =
@@ -93,12 +64,11 @@ void test_responses_object_folds_in_delta_text(void)
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}"
        "\r\n\r\n";
 
-   struct cJSON *resp = agent_responses_sse_response_object(body);
-   assert(resp != NULL);
-   const char *txt = first_output_text(resp);
-   assert(txt != NULL);
-   assert(strcmp(txt, "deployed to 192.168.1.254") == 0);
-   cJSON_Delete(resp);
+   aimee_response_t parsed;
+   assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+   assert_ir_text(&parsed, "deployed to 192.168.1.254");
+   assert(parsed.usage_in == 5 && parsed.usage_out == 6);
+   aimee_response_free(&parsed);
 }
 
 /* The codex wire delivers a function_call as a response.output_item.done event and
@@ -115,31 +85,22 @@ void test_responses_object_folds_in_streamed_function_call(void)
        "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"thinking\"}}\r\n\r\n"
        "event: response.output_item.done\r\n"
        "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_42\","
-       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/x\\\"}\"}}\r\n\r\n"
+       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/fixture/x\\\"}\"}}\r\n\r\n"
        "event: response.completed\r\n"
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}}"
        "\r\n\r\n";
 
-   struct cJSON *resp = agent_responses_sse_response_object(body);
-   assert(resp != NULL);
-   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   assert(cJSON_IsArray(output));
-   struct cJSON *item = NULL;
-   const char *name = NULL, *call_id = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
-      {
-         struct cJSON *n = cJSON_GetObjectItemCaseSensitive(item, "name");
-         struct cJSON *c = cJSON_GetObjectItemCaseSensitive(item, "call_id");
-         name = n && cJSON_IsString(n) ? n->valuestring : NULL;
-         call_id = c && cJSON_IsString(c) ? c->valuestring : NULL;
-      }
-   }
-   assert(name != NULL && strcmp(name, "read_file") == 0);
-   assert(call_id != NULL && strcmp(call_id, "call_42") == 0);
-   cJSON_Delete(resp);
+   aimee_response_t parsed;
+   assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+   assert(aimee_ir_response_tool_count(&parsed) == 1);
+   const aimee_block_t *tool = aimee_ir_response_tool(&parsed, 0);
+   assert(!strcmp(tool->tool_name, "read_file") && !strcmp(tool->tool_id, "call_42"));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool->tool_input, "path")), "/fixture/x"));
+   assert(parsed.n_content == 2 && parsed.content[0].type == AIMEE_BLK_THINKING);
+   assert(!strcmp(parsed.content[0].text, "thinking"));
+   assert(parsed.usage_in == 5 && parsed.usage_out == 7);
+   aimee_response_free(&parsed);
 }
 
 /* Never duplicate a call the completed payload already carries -- that payload is
@@ -155,19 +116,13 @@ void test_responses_object_keeps_existing_function_call(void)
        "\"name\":\"list_files\",\"arguments\":\"{}\"}],\"usage\":{\"input_tokens\":1,"
        "\"output_tokens\":2}}}\r\n\r\n";
 
-   struct cJSON *resp = agent_responses_sse_response_object(body);
-   assert(resp != NULL);
-   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   int calls = 0;
-   struct cJSON *item = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
-         calls++;
-   }
-   assert(calls == 1);
-   cJSON_Delete(resp);
+   aimee_response_t parsed;
+   assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+   assert(aimee_ir_response_tool_count(&parsed) == 1);
+   const aimee_block_t *tool = aimee_ir_response_tool(&parsed, 0);
+   assert(!strcmp(tool->tool_name, "list_files") && !strcmp(tool->tool_id, "call_7"));
+   assert(parsed.usage_in == 1 && parsed.usage_out == 2);
+   aimee_response_free(&parsed);
 }
 
 /* Guard against double-injection: when the completed object ALREADY carries the
@@ -182,21 +137,12 @@ void test_responses_object_keeps_existing_text(void)
                       "{\"type\":\"output_text\",\"text\":\"hello there\"}]}],"
                       "\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\r\n\r\n";
 
-   struct cJSON *resp = agent_responses_sse_response_object(body);
-   assert(resp != NULL);
-   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   int message_items = 0;
-   struct cJSON *item = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "message") == 0)
-         message_items++;
-   }
-   assert(message_items == 1); /* not duplicated */
-   const char *txt = first_output_text(resp);
-   assert(txt != NULL && strcmp(txt, "hello there") == 0);
-   cJSON_Delete(resp);
+   aimee_response_t parsed;
+   assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+   assert(parsed.n_content == 1 && parsed.content[0].type == AIMEE_BLK_TEXT);
+   assert_ir_text(&parsed, "hello there");
+   assert(parsed.usage_in == 1 && parsed.usage_out == 2);
+   aimee_response_free(&parsed);
 }
 
 /* Native function calls become owned canonical tool blocks for durable replay. */
@@ -276,8 +222,59 @@ void test_ir_parse_responses_text_only(void)
    aimee_response_free(&p);
 }
 
+static void assert_reasoning_content_does_not_hide_answer_events(void)
+{
+   const char *answer_events[] = {
+       "event: response.output_text.delta\ndata: "
+       "{\"type\":\"response.output_text.delta\",\"delta\":\"HelloWorld\"}\n\n",
+       "event: response.output_text.done\ndata: "
+       "{\"type\":\"response.output_text.done\",\"text\":\"HelloWorld\"}\n\n",
+       "event: response.content_part.done\ndata: "
+       "{\"type\":\"response.content_part.done\",\"part\":{\"type\":\"output_text\",\"text\":"
+       "\"HelloWorld\"}}\n\n",
+       ""};
+   const char *reasoning_types[] = {"reasoning_text", "text"};
+   for (int reasoning = 0; reasoning < 2; reasoning++)
+      for (int event = 0; event < 4; event++)
+         for (int snapshot = 0; snapshot < 2; snapshot++)
+         {
+            char native_reasoning[512], body[4096];
+            snprintf(native_reasoning, sizeof native_reasoning,
+                     "{\"type\":\"reasoning\",\"id\":\"rs_fixture\",\"summary\":[],"
+                     "\"encrypted_content\":\"opaque-encrypted-fixture\",\"content\":[{"
+                     "\"type\":\"%s\",\"text\":\"private synthetic thought must stay opaque\"}]}",
+                     reasoning_types[reasoning]);
+            snprintf(body, sizeof body,
+                     "%sevent: response.completed\n"
+                     "data: {\"type\":\"response.completed\",\"response\":{"
+                     "\"id\":\"fixture-response\",\"status\":\"completed\",\"output\":[%s,{"
+                     "\"type\":\"message\",\"id\":\"msg_fixture\",\"role\":\"assistant\","
+                     "\"content\":[{\"type\":\"output_text\",\"text\":\"%s\"}]}],"
+                     "\"usage\":{\"input_tokens\":5,\"output_tokens\":109,"
+                     "\"output_tokens_details\":{\"reasoning_tokens\":103}}}}\n\n",
+                     answer_events[event], native_reasoning, snapshot ? "snapshot answer" : "");
+            aimee_response_t parsed = {0};
+            assert(!agent_ir_decode_responses(body, -1, NULL, &parsed));
+            assert_ir_text(&parsed, snapshot ? "snapshot answer" : event < 3 ? "HelloWorld" : "");
+            assert(parsed.n_content == (snapshot || event == 3 ? 2 : 3));
+            assert(
+                parsed.content[0].type == AIMEE_BLK_THINKING && !parsed.content[0].text &&
+                !strcmp(parsed.content[0].thinking_id, "rs_fixture") &&
+                !strcmp(parsed.content[0].thinking_encrypted_content, "opaque-encrypted-fixture"));
+            cJSON *expected = cJSON_Parse(native_reasoning);
+            assert(expected && cJSON_Compare(parsed.content[0].raw, expected, 1));
+            cJSON_Delete(expected);
+            assert(parsed.usage_in == 5 && parsed.usage_out == 109 &&
+                   parsed.usage_reasoning == 103);
+            assert(parsed.stop_reason == AIMEE_STOP_END_TURN &&
+                   !strcmp(parsed.raw_stop_reason, "completed"));
+            aimee_response_free(&parsed);
+         }
+}
+
 void test_responses_parser_uses_output_text_done(void)
 {
+   assert_reasoning_content_does_not_hide_answer_events();
    const char *body =
        "event: response.content_part.done\n"
        "data: {\"part\":{\"type\":\"output_text\",\"text\":\"One caveat: the endpoint I could "

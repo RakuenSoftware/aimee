@@ -26,6 +26,7 @@
     "src/modules/kb-synthesis/kb_curator_judge.c",
     "src/modules/kb-synthesis/kb_curator_link_artifacts.c",
     "src/modules/kb-synthesis/kb_curator_llm.c",
+    "src/modules/kb-synthesis/kb_curator_llm_contract.c",
     "src/modules/kb-synthesis/kb_curator_notify.c",
     "src/modules/kb-synthesis/kb_curator_pipeline.c",
     "src/modules/kb-synthesis/kb_curator_promote.c",
@@ -34,8 +35,7 @@
     "src/modules/kb-synthesis/kb_curator_serve.c",
     "src/modules/kb-synthesis/kb_curator_sidecar.c",
     "src/modules/kb-synthesis/kb_curator_synthesize.c",
-    "src/modules/kb-synthesis/kb_curator_version.c",
-    "src/modules/kb-synthesis/module_adapter.c"
+    "src/modules/kb-synthesis/kb_curator_version.c"
   ],
   "go_sources": [
     "server-go/modules/kb-synthesis/kb_synthesis.go"
@@ -78,7 +78,6 @@
     "src/tests/test_curator_notify.c",
     "src/tests/test_curator_pipeline.c",
     "src/tests/test_curator_pipeline_sched.c",
-    "src/tests/test_curator_profile.c",
     "src/tests/test_curator_promote.c",
     "src/tests/test_curator_queue.c",
     "src/tests/test_curator_resolve_entities.c",

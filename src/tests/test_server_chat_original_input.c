@@ -63,10 +63,11 @@ int db1_session_original_input_begin(const char *session, const char *operation,
       free(event);
    }
    cJSON_Delete(batch);
-   *receipt = (db1_original_input_receipt_t){.contract_version = 1,
-                                             .outcome = DB1_ORIGINAL_INPUT_CREATED,
-                                             .begin_sequence = (uint64_t)cJSON_GetArraySize(log_entries) - 1,
-                                             .input_sequence = (uint64_t)cJSON_GetArraySize(log_entries)};
+   *receipt = (db1_original_input_receipt_t){
+       .contract_version = 1,
+       .outcome = DB1_ORIGINAL_INPUT_CREATED,
+       .begin_sequence = (uint64_t)cJSON_GetArraySize(log_entries) - 1,
+       .input_sequence = (uint64_t)cJSON_GetArraySize(log_entries)};
    snprintf(receipt->original_turn, sizeof receipt->original_turn, "%s", turn);
    if (mode == 8)
       receipt->input_sequence = 4;
@@ -144,7 +145,8 @@ static void run(int selected)
                 !strcmp(before, expected_before));
          aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "later callback"};
          aimee_message_t message = {.role = "assistant", .blocks = &text, .n_blocks = 1};
-         aimee_session_event_t later = {.kind = AIMEE_SESSION_MESSAGE, .message_id = "later", .message = &message};
+         aimee_session_event_t later = {
+             .kind = AIMEE_SESSION_MESSAGE, .message_id = "later", .message = &message};
          assert(!server_session_capture_sink(&later, c.ir_capture));
          assert(!server_session_capture_original_input_before(c.ir_capture, before) &&
                 !strcmp(before, expected_before));
@@ -155,8 +157,10 @@ static void run(int selected)
       else
       {
          assert(result != 0 && !model_runs && !c.ir_enabled && !c.ir_capture && !c.ir_controls);
-         int expected =
-             (mode == 3 || mode == 4 || mode == 6 || mode == 8 || mode == 9 || mode == 12 || mode == 14) ? 2 : 0;
+         int expected = (mode == 3 || mode == 4 || mode == 6 || mode == 8 || mode == 9 ||
+                         mode == 12 || mode == 14)
+                            ? 2
+                            : 0;
          assert(cJSON_GetArraySize(log_entries) == expected);
          assert(callbacks == ((mode == 6 || mode == 12 || mode == 14) ? 1 : 0));
       }

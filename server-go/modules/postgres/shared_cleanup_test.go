@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	domain "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,8 +49,8 @@ func TestCancelledFamilyReleasesStoreTransactionBeforeIdleTTL(t *testing.T) {
 	}}}
 	request := make([]byte, 8)
 	binary.LittleEndian.PutUint32(request, 1)
-	reply, transport := family.Handler(store)(bus.ModuleInvocation{StageID: 1}, request)
-	if transport != bus.ModuleStatusOK || !acquired || len(reply) < 4 ||
+	reply, transport := family.Handler(store)(ring.ModuleInvocation{StageID: 1}, request)
+	if transport != ring.ModuleStatusOK || !acquired || len(reply) < 4 ||
 		binary.LittleEndian.Uint32(reply) != domain.StatusFailed {
 		t.Fatal("operation cancellation outcome changed", transport, acquired, reply)
 	}
@@ -135,8 +135,8 @@ func TestCancelledBeforeCommitReleasesExactStoreTransaction(t *testing.T) {
 	}}}}
 	request := make([]byte, 8)
 	binary.LittleEndian.PutUint32(request, 1)
-	reply, transport := family.Handler(store)(bus.ModuleInvocation{StageID: 1}, request)
-	if transport != bus.ModuleStatusInternal || !acquired || len(reply) != 0 {
+	reply, transport := family.Handler(store)(ring.ModuleInvocation{StageID: 1}, request)
+	if transport != ring.ModuleStatusInternal || !acquired || len(reply) != 0 {
 		t.Fatal("cancelled commit error changed", transport, acquired, reply)
 	}
 	handler.txs.mu.Lock()
@@ -181,8 +181,8 @@ func TestLostCommitAcknowledgmentNeverRetriesOrClaimsRollback(t *testing.T) {
 	}}}}
 	request := make([]byte, 8)
 	binary.LittleEndian.PutUint32(request, 1)
-	reply, transport := family.Handler(store)(bus.ModuleInvocation{StageID: 1}, request)
-	if transport != bus.ModuleStatusInternal || len(reply) != 0 {
+	reply, transport := family.Handler(store)(ring.ModuleInvocation{StageID: 1}, request)
+	if transport != ring.ModuleStatusInternal || len(reply) != 0 {
 		t.Fatal("unknown commit was reported successful", transport, reply)
 	}
 	handler.txs.mu.Lock()

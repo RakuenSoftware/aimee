@@ -110,7 +110,8 @@ int main(void)
       {
          assert(result == 0 && step == 3);
          assert(cJSON_GetObjectItemCaseSensitive(response, "http_status")->valueint == 409);
-         assert(!strcmp(cJSON_GetObjectItemCaseSensitive(response, "kind")->valuestring,"input_delivery_conflict"));
+         assert(!strcmp(cJSON_GetObjectItemCaseSensitive(response, "kind")->valuestring,
+                        "input_delivery_conflict"));
          assert(!cJSON_GetObjectItemCaseSensitive(response, "coverage_complete"));
       }
       else if (mode == 1 || mode == 2 || mode == 4)

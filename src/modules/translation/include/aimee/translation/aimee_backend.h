@@ -16,6 +16,24 @@ struct cJSON;
 /* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
  * Independent semantic comparison detects edits even when their flag was missed. */
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
+/* Closed local OpenAI profile extension; shared by host diagnostic and KB edges. */
+char *openai_backend_render_local(const aimee_request_t *request, int disable_thinking);
+/* The Responses API and the authenticated Codex transport have distinct
+ * control contracts. This choice belongs to the provider boundary, not IR. */
+typedef enum
+{
+   AIMEE_RESPONSES_API = 0,
+   AIMEE_RESPONSES_CODEX = 1
+} aimee_responses_profile_t;
+/* A non-NULL loss output authorizes a host projection; its owner must record
+ * that loss before sending. NULL requires every source control to survive. */
+char *aimee_backend_render_wire_profile(const aimee_request_t *request, aimee_wire_t wire,
+                                        aimee_responses_profile_t profile, int *control_losses);
+int aimee_backend_request_control_losses(const aimee_request_t *source, aimee_wire_t wire,
+                                         const struct cJSON *rendered);
+struct cJSON *responses_backend_build_profile(const aimee_request_t *request,
+                                              aimee_responses_profile_t profile);
+
 /* Completed JSON/SSE entry boundary. Owns parsing and canonical admission; no
  * fallback to legacy parsers or projection occurs. */
 int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
@@ -30,14 +48,22 @@ typedef struct
    int omitted_reasoning_blocks;
    int omitted_opaque_state_blocks;
    int omitted_cache_controls;
+   int omitted_empty_messages;
 } aimee_wire_projection_report_t;
 /* Only translation-created host layout extensions belong in a prepared
  * execution profile. Whole native conversations/selectors cannot be profiles. */
 int aimee_backend_host_profile_valid(const aimee_request_t *request);
+/* Preserve recognized same-wire/model extensions in an owned host view.
+ * Conflicting host policy or incompatible extension routes refuse; arbitrary
+ * native frames are never restored into the execution profile. */
+int aimee_backend_preserve_host_extensions(const aimee_request_t *source,
+                                           aimee_request_t *projected, aimee_wire_t wire);
 /* Reports wire incompatibility without editing canonical history. */
 void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
                                      aimee_wire_projection_report_t *report);
 int anthropic_ir_block_replayable(const aimee_block_t *block);
+/* Historical assistant envelopes with no blocks cannot become Anthropic content. */
+int anthropic_ir_omitted_empty_messages(const aimee_request_t *request);
 
 /* A local replay fence from the actual sent Anthropic request. No credentials or
  * provider state; signatures remain opaque and are still verified upstream. */
@@ -107,9 +133,10 @@ int openai_family_add_prompt_cache(struct cJSON *out, const aimee_request_t *req
 /* Parse an OpenAI chat.completion response into the IR. */
 int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
 
-/* Build an OpenAI Responses API request from the IR (codex): system blocks ->
- * `instructions`; messages -> `input` items (message / function_call); tools ->
- * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
+/* Build the authenticated Codex transport from IR. Use the profile API for
+ * generic Responses controls. This low-level renderer reports no losses itself;
+ * execution owners use aimee_backend_render_wire_profile to enforce/report losses.
+ * System -> instructions; messages/tools retain their native item structure. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
 /* Canonical history -> stable Codex thread/inject_items output boundary.
  * Returns owned Responses input items, preserving roles/order/full tool IDs.
@@ -117,8 +144,9 @@ struct cJSON *responses_backend_build(const aimee_request_t *ir);
  * Caller proves resume prefix and account scope; upstream replay guard still
  * validates opaque reasoning when these items reach the selected model. */
 struct cJSON *aimee_codex_history_items(const aimee_request_t *history);
-/* Owned native snapshot assembled at the Responses SSE entry boundary. */
-struct cJSON *responses_backend_sse_object(const char *body);
+/* Native JSON or buffered SSE enters the same Responses event/snapshot owner. */
+int responses_backend_decode_body(const char *body, aimee_response_t *out, char *error,
+                                  size_t capacity);
 /* Reasoning text out of a Responses `reasoning` output item, from its `summary`.
  * SHARED by the backend (provider response) and frontend (client request) parsers,
  * which had independently assumed `summary` is a bare string.

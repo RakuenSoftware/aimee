@@ -60,6 +60,27 @@ describe('canonical session projection', () => {
     expect(state.messages[0].usage).toEqual({ input: 12, output: 7, cacheRead: 9, cacheWrite: 3, reasoning: 2 });
     expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
   });
+  it('keeps unobserved ACP usage distinct from observed zero through replay', () => {
+    for (const usage of [
+      {},
+      { usage_in: 0, usage_out: 0 },
+      { usage_in: 4, usage_out: 1, usage_cache_read: 0, usage_reasoning: 2 },
+    ]) {
+      const events = [
+        envelope(1, { kind: 'delta', message_id: 'external', role: 'assistant', payload: { type: 'TURN_START' } }),
+        envelope(2, message('external', 'assistant', [{ type: 'text', text: 'External reply' }])),
+        envelope(3, { kind: 'delta', message_id: 'external', role: 'assistant', payload: { type: 'TURN_STOP', stop_reason: 'end_turn', ...usage } }),
+      ];
+      const state = events.reduce(reduceSession, emptySession('s'));
+      const replay = JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'));
+      expect(replay).toEqual(state);
+      expect(state.messages[0].complete).toBe(true);
+      expect(state.messages[0].usage).toEqual('usage_in' in usage
+        ? { input: usage.usage_in, output: usage.usage_out,
+          ...('usage_cache_read' in usage ? { cacheRead: usage.usage_cache_read, reasoning: usage.usage_reasoning } : {}) }
+        : undefined);
+    }
+  });
   it('accumulates tool JSON fragments and finalizes them only at block stop', () => {
     const delta = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'm', role: 'assistant', payload });
     const events = [delta(1, { type: 'TURN_START' }), delta(2, { type: 'BLOCK_START', block_id: 0, kind: 'tool_use', tool_id: 'call', name: 'bash' }),

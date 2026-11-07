@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	domain "github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,7 +34,7 @@ func (c *completionWireCaller) Call(ctx context.Context, kind, stage uint32, tra
 	if len(reply) > c.maxReply {
 		c.maxReply = len(reply)
 	}
-	if len(reply) > int(bus.ModuleMessageMaxBody) {
+	if len(reply) > int(ring.ModuleMessageMaxBody) {
 		return nil, fmt.Errorf("actual SQL frame exceeds transport")
 	}
 	if !bytes.Contains(body, []byte("AS terminal_page")) {

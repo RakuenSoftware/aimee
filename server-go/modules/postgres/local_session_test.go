@@ -77,7 +77,14 @@ func TestPostgresLocalNativeSession(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "native-postgres-session")
 	args := []string{"-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-g", "-fsanitize=address,undefined",
 		"-DAIMEE_POSTGRES_LOCAL_PROVIDER=\"" + executable + "\"", "-o", target}
-	for _, dir := range []string{"src", "src/modules/kb/c", "src/headers", "src/vendor/headers", "src/modules/postgres/include", "src/modules/audit/include", "src/core/event_bus/include"} {
+	// The ring's headers come from the installed ring any src/Makefile
+	// invocation provides (current names the last one); the replay targets run
+	// make first.
+	ringInclude := "src/build/deps/ouroboros-ring/current/include"
+	if _, err := os.Stat(filepath.Join(root, ringInclude)); err != nil {
+		t.Fatalf("ouroboros ring headers missing at %s (run make -C src first to provide the ring): %v", ringInclude, err)
+	}
+	for _, dir := range []string{"src", "src/modules/kb/c", "src/headers", "src/vendor/headers", "src/modules/postgres/include", "src/modules/audit/include", ringInclude} {
 		args = append(args, "-I"+filepath.Join(root, dir))
 	}
 	for _, file := range []string{"src/tests/test_postgres_local_session.c", "src/modules/kb/c/db_postgres.c", "src/modules/postgres/client/session.c", "src/modules/postgres/client/local_session.c"} {

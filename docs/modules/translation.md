@@ -9,6 +9,12 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
+Go callers use `server-go/modules/translation/client.go` and the existing server's
+`--module-model-codec` pipe mode to call the same adapters. The mode returns before
+configuration, Vault, database, bus, transport or daemon startup. It adds no second codec
+or installed executable. Provider diagnostics keep their fixed request and health policy
+in the providers owner.
+
 `src/modules/translation/module.yaml` is the complete module-local ownership inventory for shipping
 translation units, canonical public headers, direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
@@ -42,7 +48,8 @@ render IR deltas as Anthropic stream events. They do not decode Bedrock binary f
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
 
-Incremental Responses conversion lives in `aimee_responses_stream.c` and
+Responses buffered and incremental decoding share the native event owner in
+`aimee_backend_responses.c`; client encoding remains in
 `aimee_responses_frontend_stream.c` under this module. The backend emits canonical text,
 reasoning and function-argument deltas before completion, then reconciles prefixes and item
 snapshots through the existing full Responses decoder. The frontend preserves authored message
@@ -51,22 +58,19 @@ Native framing remains bounded inside the entry adapter; transport, policy and p
 with their existing owners. `test_aimee_responses_stream.c` and
 `test_server_responses_stream.c` cover conversion and fragmented host transport.
 
-Native harness conversion lives in `src/modules/translation/harness_ir.c`, exposed by
-`src/modules/translation/include/aimee/translation/harness_ir.h`. Claude stream-json, Codex
-app-server and ACP session/update frames are converted at their reader boundaries, before legacy execution callbacks.
-The adapter emits canonical typed session events synchronously; it does not load credentials,
-choose a session owner, persist, or deliver browser events. Host execution code owns those steps.
-`src/tests/test_harness_ir.c` covers typed tools/results, thinking signatures, streamed text,
-control correlation, unknown items, and sink failure propagation.
+The native control adapter lives in `src/modules/translation/harness_ir.c`, exposed by
+`src/modules/translation/include/aimee/translation/harness_ir.h`. It converts Claude stream-json
+and Codex app-server controls, compaction notices and bounded diagnostics into canonical session
+events. Their original gateway capture owns model, tool and history observations. The retired outgoing
+ACP client has no decoder or compatibility output accumulator here. The host owns credentials,
+execution identity, persistence, browser delivery and actual tool effects.
+`src/tests/test_harness_ir.c` covers exclusive native history ownership, controls, compaction,
+diagnostics and sink failure propagation. Incoming ACP framing remains in the protocols module.
 
-Remaining translation seams include the `aimee_ir_build_provider_body` entry point in
-`src/headers/aimee_ir_serve.h`.
-The target module owns provider-body conversion; the current IR-named symbol remains a
-relocation/compatibility seam until callers and installed headers migrate. `anthropic_http.c` still
-contains legacy `translate_request` and `build_provider_body` paths beside the typed IR path, while
-`openai_chat.c` has its own builder. The mixed `aimee_ir_serve.c` implementation remains explicitly
-deferred: it owns rollout gates, memory-stage configuration and registration, and a transitional legacy
-response bridge. `router_advise.c` is workflow-owned despite its name and is outside translation.
+Host request-stage application lives in `src/server/aimee_ir_serve.c`, with the
+`aimee_ir_apply_gateway_request_stages` and `aimee_ir_apply_native_request_stages` contracts in
+`src/headers/aimee_ir_serve.h`. These apply configured host context stages to admitted canonical
+requests. Provider wire conversion remains in this module; routing remains with its host owners.
 
 ### Native runtime entry boundaries
 
@@ -203,8 +207,8 @@ thinking signatures, redacted content and initial tool input survive this bounda
 fails with a typed error; an EOF cannot manufacture a successful end-of-turn. Other request/response
 bypasses described above still require cutover.
 
-The Anthropic HTTP native builder attaches its original body with
-`aimee_frontend_parse_native_frame` before rendering. Its existing context-injection option selects
+The Anthropic HTTP native builder parses its original body with
+`aimee_frontend_parse_wire` and admits the canonical request before rendering. Its existing context-injection option selects
 the shared canonical stage runner; disabling injection does not bypass canonical admission. Exact
 body replay is selected only after comparing the host-adjusted typed request with the original.
 

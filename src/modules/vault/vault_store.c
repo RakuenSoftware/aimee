@@ -45,8 +45,8 @@ int vault_fenced_use_callback_active(void)
 __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_immutable_custody_contract_v2 = 2;
 
-#define IMMUTABLE_MARKER "immutable_generation_v1"
-#define RETIRED_MARKER "immutable_retired_v1"
+#define IMMUTABLE_MARKER  "immutable_generation_v1"
+#define RETIRED_MARKER    "immutable_retired_v1"
 #define IMMUTABLE_AAD_MAX (VAULT_AAD_MAX + 80)
 static int generation_valid(const char *s)
 {
@@ -152,7 +152,8 @@ static int vault_file_path(const char *principal, char *out, size_t cap)
  * well as threads. Atomic rename alone prevents torn reads, not lost updates. */
 static int vault_write_lock(void)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    pthread_mutex_lock(&g_vault_write_mu);
    char dir[1024], path[1280];
    if (vault_dir(dir, sizeof(dir)) != 0 || platform_mkdir_p(dir, 0700) != 0 ||
@@ -668,9 +669,9 @@ static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAUL
 }
 
 static int jsonfile_get_server_snapshot(cJSON *root, const char *principal,
-                                        const uint8_t server_kek[VAULT_KEK_LEN],
-                                        const char *agent, const char *cred, char *out,
-                                        size_t out_len, size_t *plain_length)
+                                        const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                                        const char *cred, char *out, size_t out_len,
+                                        size_t *plain_length)
 {
    if (plain_length)
       *plain_length = 0;
@@ -776,14 +777,17 @@ static int jsonfile_get_server(void *ctx, const char *principal,
       cJSON_Delete(root);
       return -1;
    }
-   int rc = jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred, out, out_len, NULL);
+   int rc =
+       jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred, out, out_len, NULL);
    cJSON_Delete(root);
    return rc;
 }
 
 static int jsonfile_get_server_generation(void *ctx, const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *expected_generation, char *out, size_t out_len)
+                                          const uint8_t server_kek[VAULT_KEK_LEN],
+                                          const char *agent, const char *cred,
+                                          const char *expected_generation, char *out,
+                                          size_t out_len)
 {
    (void)ctx;
    cJSON *root = load_vault(principal);
@@ -791,24 +795,28 @@ static int jsonfile_get_server_generation(void *ctx, const char *principal,
       return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
    cJSON *entry = find_cred(root, agent, cred);
    int state = entry ? immutable_state(entry) : 0;
-   const char *generation = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER));
+   const char *generation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER));
    int rc = !entry ? VAULT_STORE_NO_ENTRY : state < 0 ? -1 : VAULT_STORE_GENERATION_MISMATCH;
    if (state > 0 && !CRYPTO_memcmp(generation, expected_generation, 32))
       rc = state == 2 ? VAULT_STORE_RETIRED
-                     : jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred, out, out_len, NULL);
+                      : jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred, out,
+                                                     out_len, NULL);
    cJSON_Delete(root);
    return rc;
 }
 
 static int jsonfile_use_server_generation_fenced(void *ctx, const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *generation, char *out, size_t out_len,
-    vault_store_secret_use_fn use, void *use_context)
+                                                 const uint8_t server_kek[VAULT_KEK_LEN],
+                                                 const char *agent, const char *cred,
+                                                 const char *generation, char *out, size_t out_len,
+                                                 vault_store_secret_use_fn use, void *use_context)
 {
    int lock = vault_write_lock();
-   if (lock < 0) return -1;
-   int rc = jsonfile_get_server_generation(ctx, principal, server_kek, agent, cred,
-                                          generation, out, out_len);
+   if (lock < 0)
+      return -1;
+   int rc = jsonfile_get_server_generation(ctx, principal, server_kek, agent, cred, generation, out,
+                                           out_len);
    if (!rc)
    {
       size_t length = strnlen(out, out_len);
@@ -843,8 +851,13 @@ static int jsonfile_add_server_wraps(void *ctx, const char *principal,
       cJSON_ArrayForEach(e, creds)
       {
          int state = immutable_state(e);
-         if (state < 0) { rc = -1; break; }
-         if (state == 2) continue;
+         if (state < 0)
+         {
+            rc = -1;
+            break;
+         }
+         if (state == 2)
+            continue;
 
          if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek_server")))
             continue; /* already dual-wrapped */
@@ -901,8 +914,13 @@ static int jsonfile_rekey_field(void *ctx, const char *principal, const char *fi
       cJSON_ArrayForEach(e, creds)
       {
          int state = immutable_state(e);
-         if (state < 0) { rc = -1; break; }
-         if (state == 2) continue;
+         if (state < 0)
+         {
+            rc = -1;
+            break;
+         }
+         if (state == 2)
+            continue;
 
          cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, field);
          if (!cJSON_IsString(jw))
@@ -1083,8 +1101,13 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
       cJSON_ArrayForEach(e, creds)
       {
          int state = immutable_state(e);
-         if (state < 0) { rc = -1; break; }
-         if (state == 2) continue;
+         if (state < 0)
+         {
+            rc = -1;
+            break;
+         }
+         if (state == 2)
+            continue;
 
          cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek");
          /* The verified user key cannot rewrap a server-only entry. Keep its
@@ -1094,7 +1117,8 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
             cJSON *server_wrap = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek_server");
             uint8_t server_wrapped[VAULT_WRAPPED_DEK_LEN];
             int valid_server = cJSON_IsString(server_wrap) &&
-                b64url_decode(server_wrap->valuestring, server_wrapped, sizeof(server_wrapped)) == VAULT_WRAPPED_DEK_LEN;
+                               b64url_decode(server_wrap->valuestring, server_wrapped,
+                                             sizeof(server_wrapped)) == VAULT_WRAPPED_DEK_LEN;
             OPENSSL_cleanse(server_wrapped, sizeof(server_wrapped));
             if (!valid_server)
             {
@@ -1161,8 +1185,13 @@ static int jsonfile_list(void *ctx, const char *principal, vault_store_entry_t *
       cJSON_ArrayForEach(e, creds)
       {
          int state = immutable_state(e);
-         if (state < 0) { cJSON_Delete(root); return -1; }
-         if (state == 2) continue;
+         if (state < 0)
+         {
+            cJSON_Delete(root);
+            return -1;
+         }
+         if (state == 2)
+            continue;
 
          if (n >= max)
             break;
@@ -1182,19 +1211,35 @@ static int jsonfile_list(void *ctx, const char *principal, vault_store_entry_t *
 
 static int retire_or_remove(cJSON *creds, cJSON *entry)
 {
-   if (!entry) return 0;
+   if (!entry)
+      return 0;
    int state = immutable_state(entry);
-   if (state < 0) return -1;
-   if (state == 2) return 0;
-   if (!state) { remove_cred(creds, entry); return 1; }
+   if (state < 0)
+      return -1;
+   if (state == 2)
+      return 0;
+   if (!state)
+   {
+      remove_cred(creds, entry);
+      return 1;
+   }
    cJSON *retired = cJSON_CreateObject();
    if (!retired ||
-       !cJSON_AddStringToObject(retired, "agent", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry,"agent"))) ||
-       !cJSON_AddStringToObject(retired, "cred", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry,"cred"))) ||
-       !cJSON_AddStringToObject(retired, IMMUTABLE_MARKER, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry,IMMUTABLE_MARKER))) ||
+       !cJSON_AddStringToObject(
+           retired, "agent",
+           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "agent"))) ||
+       !cJSON_AddStringToObject(
+           retired, "cred",
+           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "cred"))) ||
+       !cJSON_AddStringToObject(
+           retired, IMMUTABLE_MARKER,
+           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER))) ||
        !cJSON_AddTrueToObject(retired, RETIRED_MARKER) ||
        !cJSON_ReplaceItemViaPointer(creds, entry, retired))
-   { cJSON_Delete(retired); return -1; }
+   {
+      cJSON_Delete(retired);
+      return -1;
+   }
    return 1;
 }
 
@@ -1203,8 +1248,7 @@ static int retire_or_remove(cJSON *creds, cJSON *entry)
 static int sync_visible_vault(const char *principal)
 {
    char dir[1024], path[1280];
-   if (vault_dir(dir, sizeof(dir)) != 0 ||
-       vault_file_path(principal, path, sizeof(path)) != 0)
+   if (vault_dir(dir, sizeof(dir)) != 0 || vault_file_path(principal, path, sizeof(path)) != 0)
       return -1;
    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
    if (fd < 0)
@@ -1259,7 +1303,6 @@ static int jsonfile_delete(void *ctx, const char *principal, const char *agent, 
    return rc;
 }
 
-
 static int create_identifier(const char *s, size_t cap)
 {
    if (!s || !s[0] || strnlen(s, cap) >= cap)
@@ -1270,9 +1313,8 @@ static int create_identifier(const char *s, size_t cap)
    return 1;
 }
 static vault_create_once_result_t jsonfile_create_server_once(
-    void *ctx, const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
-    const char *agent, const char *cred, const char *secret,
-    char *generation, size_t generation_capacity)
+    void *ctx, const char *principal, const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+    const char *cred, const char *secret, char *generation, size_t generation_capacity)
 {
    (void)ctx;
    (void)generation_capacity;
@@ -1295,12 +1337,13 @@ static vault_create_once_result_t jsonfile_create_server_once(
       }
       root = cJSON_CreateObject();
       char *encoded = b64url_encode(salt, sizeof(salt));
-      int ok = root && encoded &&
-          cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION) &&
-          cJSON_AddStringToObject(root, "principal", principal) &&
-          cJSON_AddStringToObject(root, "kdf_version",
-              !strncmp(principal, "webuser:", 8) ? VAULT_KDF_VERSION_SCRYPT : VAULT_KDF_VERSION) &&
-          cJSON_AddStringToObject(root, "salt", encoded) && cJSON_AddArrayToObject(root, "creds");
+      int ok = root && encoded && cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION) &&
+               cJSON_AddStringToObject(root, "principal", principal) &&
+               cJSON_AddStringToObject(root, "kdf_version",
+                                       !strncmp(principal, "webuser:", 8) ? VAULT_KDF_VERSION_SCRYPT
+                                                                          : VAULT_KDF_VERSION) &&
+               cJSON_AddStringToObject(root, "salt", encoded) &&
+               cJSON_AddArrayToObject(root, "creds");
       free(encoded);
       if (!ok)
          goto done;
@@ -1308,16 +1351,26 @@ static vault_create_once_result_t jsonfile_create_server_once(
    cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "salt");
    cJSON *owner = cJSON_GetObjectItemCaseSensitive(root, "principal");
    if (!cJSON_IsObject(root) || !cJSON_IsString(owner) || strcmp(owner->valuestring, principal) ||
-       cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root, "version")) != VAULT_FILE_VERSION ||
-       !cJSON_IsString(js) || b64url_decode(js->valuestring, salt, sizeof(salt)) != (int)sizeof(salt) ||
+       cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root, "version")) !=
+           VAULT_FILE_VERSION ||
+       !cJSON_IsString(js) ||
+       b64url_decode(js->valuestring, salt, sizeof(salt)) != (int)sizeof(salt) ||
        !creds_array(root))
       goto done;
    cJSON *entry = find_cred(root, agent, cred);
    if (entry)
    {
       int state = immutable_state(entry);
-      if (state < 0) { result = VAULT_CREATE_ONCE_CRYPTO; goto done; }
-      if (state == 2) { result = VAULT_CREATE_ONCE_RETIRED; goto done; }
+      if (state < 0)
+      {
+         result = VAULT_CREATE_ONCE_CRYPTO;
+         goto done;
+      }
+      if (state == 2)
+      {
+         result = VAULT_CREATE_ONCE_RETIRED;
+         goto done;
+      }
 
       const cJSON *marker = cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER);
       const char *retained = cJSON_GetStringValue(marker);
@@ -1336,16 +1389,16 @@ static vault_create_once_result_t jsonfile_create_server_once(
       if (!prior)
          goto done;
       size_t prior_length = 0;
-      if (jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred,
-                                      prior, VAULT_SECRET_MAX + 1, &prior_length))
+      if (jsonfile_get_server_snapshot(root, principal, server_kek, agent, cred, prior,
+                                       VAULT_SECRET_MAX + 1, &prior_length))
       {
          result = VAULT_CREATE_ONCE_CRYPTO;
          goto done;
       }
       size_t length = strlen(secret);
       if (prior_length == length && !CRYPTO_memcmp(prior, secret, length))
-         result = sync_visible_vault(principal) == 0
-                      ? VAULT_CREATE_ONCE_REPLAY : VAULT_CREATE_ONCE_IO;
+         result =
+             sync_visible_vault(principal) == 0 ? VAULT_CREATE_ONCE_REPLAY : VAULT_CREATE_ONCE_IO;
       else
          result = VAULT_CREATE_ONCE_CONFLICT;
       goto done;
@@ -1359,11 +1412,12 @@ static vault_create_once_result_t jsonfile_create_server_once(
    static const char hex[] = "0123456789abcdef";
    for (size_t i = 0; i < sizeof(random_generation); i++)
    {
-      selected_generation[2*i] = hex[random_generation[i] >> 4];
-      selected_generation[2*i+1] = hex[random_generation[i] & 15];
+      selected_generation[2 * i] = hex[random_generation[i] >> 4];
+      selected_generation[2 * i + 1] = hex[random_generation[i] & 15];
    }
    if (!generation_valid(selected_generation) ||
-       vault_stage_credential(root, principal, NULL, server_kek, agent, cred, secret, selected_generation))
+       vault_stage_credential(root, principal, NULL, server_kek, agent, cred, secret,
+                              selected_generation))
    {
       result = VAULT_CREATE_ONCE_CRYPTO;
       goto done;
@@ -1436,9 +1490,10 @@ done:
 }
 
 /* Explicit slot closure; share the create-once provider lock in both race orders. */
-static vault_retire_generation_result_t jsonfile_close_server_slot_once(
-    void *ctx, const char *principal, const char *agent, const char *cred,
-    char *closed_generation, size_t generation_capacity)
+static vault_retire_generation_result_t
+jsonfile_close_server_slot_once(void *ctx, const char *principal, const char *agent,
+                                const char *cred, char *closed_generation,
+                                size_t generation_capacity)
 {
    (void)ctx;
    (void)generation_capacity;
@@ -1459,11 +1514,12 @@ static vault_retire_generation_result_t jsonfile_close_server_slot_once(
          goto done;
       root = cJSON_CreateObject();
       char *encoded = b64url_encode(salt, sizeof salt);
-      int built = root && encoded &&
-          cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION) &&
+      int built =
+          root && encoded && cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION) &&
           cJSON_AddStringToObject(root, "principal", principal) &&
           cJSON_AddStringToObject(root, "kdf_version",
-              !strncmp(principal, "webuser:", 8) ? VAULT_KDF_VERSION_SCRYPT : VAULT_KDF_VERSION) &&
+                                  !strncmp(principal, "webuser:", 8) ? VAULT_KDF_VERSION_SCRYPT
+                                                                     : VAULT_KDF_VERSION) &&
           cJSON_AddStringToObject(root, "salt", encoded) && cJSON_AddArrayToObject(root, "creds");
       free(encoded);
       if (!built)
@@ -1473,7 +1529,8 @@ static vault_retire_generation_result_t jsonfile_close_server_slot_once(
    const char *encoded = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "salt"));
    if (!cJSON_IsObject(root) || !owner || strcmp(owner, principal) || !encoded ||
        b64url_decode(encoded, salt, sizeof salt) != (int)sizeof salt || !creds_array(root) ||
-       cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root, "version")) != VAULT_FILE_VERSION)
+       cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root, "version")) !=
+           VAULT_FILE_VERSION)
       goto done;
    cJSON *entry = find_cred(root, agent, cred);
    if (entry)
@@ -1486,7 +1543,8 @@ static vault_retire_generation_result_t jsonfile_close_server_slot_once(
          result = VAULT_RETIRE_GENERATION_MISMATCH;
          goto done;
       }
-      memcpy(selected, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER)),
+      memcpy(selected,
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, IMMUTABLE_MARKER)),
              sizeof selected);
       if (state == 2)
       {
@@ -1580,7 +1638,8 @@ static const vault_store_backend_t *store_for(const char *principal)
 int vault_store_bind_tenant_backend(const vault_store_backend_t *backend,
                                     const uint8_t instance_kek[VAULT_KEK_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    if (!backend || !instance_kek || !backend->list || !backend->get || !backend->delete)
       return -1;
    enum
@@ -1637,28 +1696,32 @@ done:
  * restores the built-in jsonfile backend. See vault_internal.h. */
 void vault_store_set_backend(const vault_store_backend_t *backend)
 {
-   if (g_fenced_use_callback) return;
+   if (g_fenced_use_callback)
+      return;
    g_store_backend = backend ? backend : &jsonfile_backend;
    g_instance_local = 0;
 }
 
 int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->get_or_create_salt(backend->ctx, principal, salt);
 }
 
 int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->salt_readonly(backend->ctx, principal, salt);
 }
 
 int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->unlock_check(backend->ctx, principal, kek);
 }
@@ -1666,7 +1729,8 @@ int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_
 int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
                     const char *cred, const char *secret)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->set(backend->ctx, principal, kek, agent, cred, secret);
 }
@@ -1675,7 +1739,8 @@ int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN]
                          const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
                          const char *cred, const char *secret)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->set_dual(backend->ctx, principal, kek, server_kek, agent, cred, secret);
 }
@@ -1683,19 +1748,24 @@ int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN]
 int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
                            const char *agent, const char *cred, const char *secret)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->set_server(backend->ctx, principal, server_kek, agent, cred, secret);
 }
 
-vault_create_once_result_t vault_store_create_server_once(
-    const char *principal, const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
-    const char *cred, const char *secret, char *generation, size_t generation_capacity)
+vault_create_once_result_t vault_store_create_server_once(const char *principal,
+                                                          const uint8_t server_kek[VAULT_KEK_LEN],
+                                                          const char *agent, const char *cred,
+                                                          const char *secret, char *generation,
+                                                          size_t generation_capacity)
 {
    if (generation && generation_capacity)
       OPENSSL_cleanse(generation, generation_capacity);
-   if (g_fenced_use_callback) return VAULT_CREATE_ONCE_BADARG;
-   if (!generation || generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP || !server_kek || !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
+   if (g_fenced_use_callback)
+      return VAULT_CREATE_ONCE_BADARG;
+   if (!generation || generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP || !server_kek ||
+       !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
        !create_identifier(agent, sizeof(((vault_store_entry_t *)0)->agent)) ||
        !create_identifier(cred, sizeof(((vault_store_entry_t *)0)->cred)) || !secret ||
        strnlen(secret, VAULT_SECRET_MAX + 1) > VAULT_SECRET_MAX)
@@ -1709,29 +1779,38 @@ vault_create_once_result_t vault_store_create_server_once(
       return VAULT_CREATE_ONCE_UNSUPPORTED;
    vault_create_once_result_t result = backend->create_server_once(
        backend->ctx, principal, server_kek, agent, cred, secret, generation, generation_capacity);
-   if ((result == VAULT_CREATE_ONCE_CREATED || result == VAULT_CREATE_ONCE_REPLAY)
-       && !generation_valid(generation))
+   if ((result == VAULT_CREATE_ONCE_CREATED || result == VAULT_CREATE_ONCE_REPLAY) &&
+       !generation_valid(generation))
       result = VAULT_CREATE_ONCE_ERROR;
    if (result != VAULT_CREATE_ONCE_CREATED && result != VAULT_CREATE_ONCE_REPLAY)
       OPENSSL_cleanse(generation, generation_capacity);
    switch (result)
    {
-   case VAULT_CREATE_ONCE_CREATED: case VAULT_CREATE_ONCE_REPLAY:
-   case VAULT_CREATE_ONCE_CONFLICT: case VAULT_CREATE_ONCE_RETIRED: case VAULT_CREATE_ONCE_ERROR:
-   case VAULT_CREATE_ONCE_UNSUPPORTED: case VAULT_CREATE_ONCE_BADARG:
-   case VAULT_CREATE_ONCE_CRYPTO: case VAULT_CREATE_ONCE_IO:
+   case VAULT_CREATE_ONCE_CREATED:
+   case VAULT_CREATE_ONCE_REPLAY:
+   case VAULT_CREATE_ONCE_CONFLICT:
+   case VAULT_CREATE_ONCE_RETIRED:
+   case VAULT_CREATE_ONCE_ERROR:
+   case VAULT_CREATE_ONCE_UNSUPPORTED:
+   case VAULT_CREATE_ONCE_BADARG:
+   case VAULT_CREATE_ONCE_CRYPTO:
+   case VAULT_CREATE_ONCE_IO:
       return result;
    }
    return VAULT_CREATE_ONCE_ERROR;
 }
 
 int vault_store_get_server_generation(const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *expected_generation, char *out, size_t out_len)
+                                      const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                                      const char *cred, const char *expected_generation, char *out,
+                                      size_t out_len)
 {
-   if (out && out_len) OPENSSL_cleanse(out, out_len);
-   if (g_fenced_use_callback) return -1;
-   if (!principal || !server_kek || !agent || !cred || !generation_valid(expected_generation) || !out || !out_len)
+   if (out && out_len)
+      OPENSSL_cleanse(out, out_len);
+   if (g_fenced_use_callback)
+      return -1;
+   if (!principal || !server_kek || !agent || !cred || !generation_valid(expected_generation) ||
+       !out || !out_len)
       return -1;
    if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
       return VAULT_STORE_GENERATION_UNSUPPORTED;
@@ -1740,8 +1819,10 @@ int vault_store_get_server_generation(const char *principal,
       return VAULT_STORE_GENERATION_UNSUPPORTED;
    int rc = backend->get_server_generation(backend->ctx, principal, server_kek, agent, cred,
                                            expected_generation, out, out_len);
-   if (!rc && !memchr(out, '\0', out_len)) rc = -1;
-   if (rc) OPENSSL_cleanse(out, out_len);
+   if (!rc && !memchr(out, '\0', out_len))
+      rc = -1;
+   if (rc)
+      OPENSSL_cleanse(out, out_len);
    return rc;
 }
 
@@ -1780,32 +1861,42 @@ __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_generation_fenced_use_contract_v1 = 1;
 
 int vault_store_use_server_generation_fenced(const char *principal,
-    const uint8_t server_kek[VAULT_KEK_LEN], const char *agent, const char *cred,
-    const char *generation, vault_store_secret_use_fn use, void *context)
+                                             const uint8_t server_kek[VAULT_KEK_LEN],
+                                             const char *agent, const char *cred,
+                                             const char *generation, vault_store_secret_use_fn use,
+                                             void *context)
 {
-   if (g_fenced_use_callback || !server_kek ||
-       !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
+   if (g_fenced_use_callback || !server_kek || !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
        !create_identifier(agent, sizeof(((vault_store_entry_t *)0)->agent)) ||
        !create_identifier(cred, sizeof(((vault_store_entry_t *)0)->cred)) ||
-       !generation_valid(generation) || !use) return -1;
-   if (!strcmp(principal, VAULT_SERVER_PRINCIPAL)) return VAULT_STORE_GENERATION_UNSUPPORTED;
+       !generation_valid(generation) || !use)
+      return -1;
+   if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
+      return VAULT_STORE_GENERATION_UNSUPPORTED;
    const vault_store_backend_t *backend = store_for(principal);
-   if (!backend->use_server_generation_fenced) return VAULT_STORE_GENERATION_UNSUPPORTED;
+   if (!backend->use_server_generation_fenced)
+      return VAULT_STORE_GENERATION_UNSUPPORTED;
    int previous_cancel;
-   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel)) return -1;
-   enum { CAPACITY = VAULT_SECRET_MAX + 1 };
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &previous_cancel))
+      return -1;
+   enum
+   {
+      CAPACITY = VAULT_SECRET_MAX + 1
+   };
    char *buffer = calloc(1, CAPACITY);
    int rc = -1;
    if (buffer)
    {
-      fenced_use_call call = {.buffer = buffer, .capacity = CAPACITY, .use = use,
-                               .context = context};
-      rc = backend->use_server_generation_fenced(backend->ctx, principal, server_kek,
-                  agent, cred, generation, buffer, CAPACITY, fenced_use_checked, &call);
+      fenced_use_call call = {
+          .buffer = buffer, .capacity = CAPACITY, .use = use, .context = context};
+      rc = backend->use_server_generation_fenced(backend->ctx, principal, server_kek, agent, cred,
+                                                 generation, buffer, CAPACITY, fenced_use_checked,
+                                                 &call);
       if (call.ran)
          rc = rc || call.invalid || call.result ? VAULT_STORE_USE_FAILED : 0;
-      else if (call.invalid || (rc != VAULT_STORE_GENERATION_UNSUPPORTED && rc != VAULT_STORE_RETIRED &&
-               rc != VAULT_STORE_GENERATION_MISMATCH && rc != VAULT_STORE_NO_ENTRY))
+      else if (call.invalid ||
+               (rc != VAULT_STORE_GENERATION_UNSUPPORTED && rc != VAULT_STORE_RETIRED &&
+                rc != VAULT_STORE_GENERATION_MISMATCH && rc != VAULT_STORE_NO_ENTRY))
          rc = -1;
       OPENSSL_cleanse(buffer, CAPACITY);
       free(buffer);
@@ -1817,7 +1908,12 @@ int vault_store_use_server_generation_fenced(const char *principal,
 int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
                            const char *agent, const char *cred, char *out, size_t out_len)
 {
-   if (g_fenced_use_callback) { if (out && out_len) OPENSSL_cleanse(out, out_len); return -1; }
+   if (g_fenced_use_callback)
+   {
+      if (out && out_len)
+         OPENSSL_cleanse(out, out_len);
+      return -1;
+   }
    const vault_store_backend_t *backend = store_for(principal);
    return backend->get_server(backend->ctx, principal, server_kek, agent, cred, out, out_len);
 }
@@ -1825,7 +1921,8 @@ int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT
 int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
                                  const uint8_t server_kek[VAULT_KEK_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->add_server_wraps(backend->ctx, principal, user_kek, server_kek);
 }
@@ -1833,7 +1930,8 @@ int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[V
 int vault_store_write_batch(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
                             const char *agent, const vault_store_write_t *writes, size_t count)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    if (!principal || !principal[0] || !kek || !agent || !agent[0] || !writes || !count ||
        count > 16)
       return -1;
@@ -1875,7 +1973,8 @@ int vault_store_write_batch(const char *principal, const uint8_t kek[VAULT_KEK_L
          if (entry && immutable_state(entry) == 2)
             needs_sync = 1;
          int change = retire_or_remove(creds, entry);
-         if (change < 0) goto done;
+         if (change < 0)
+            goto done;
          changed |= change;
       }
    }
@@ -1942,28 +2041,36 @@ int vault_store_read_snapshot(const char *principal, const uint8_t kek[VAULT_KEK
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
                     const char *cred, char *out, size_t out_len)
 {
-   if (g_fenced_use_callback) { if (out && out_len) OPENSSL_cleanse(out, out_len); return -1; }
+   if (g_fenced_use_callback)
+   {
+      if (out && out_len)
+         OPENSSL_cleanse(out, out_len);
+      return -1;
+   }
    const vault_store_backend_t *backend = store_for(principal);
    return backend->get(backend->ctx, principal, kek, agent, cred, out, out_len);
 }
 
 int vault_store_has_entry(const char *principal, const char *agent, const char *cred)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->has_entry(backend->ctx, principal, agent, cred);
 }
 
 int vault_store_list(const char *principal, vault_store_entry_t *out, int max)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->list(backend->ctx, principal, out, max);
 }
 
 int vault_store_delete(const char *principal, const char *agent, const char *cred)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->delete(backend->ctx, principal, agent, cred);
 }
@@ -1971,7 +2078,8 @@ int vault_store_delete(const char *principal, const char *agent, const char *cre
 int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
                       const uint8_t new_kek[VAULT_KEK_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->rekey(backend->ctx, principal, old_kek, new_kek);
 }
@@ -1980,14 +2088,16 @@ int vault_store_rekey_field(const char *principal, const char *field,
                             const uint8_t old_kek[VAULT_KEK_LEN],
                             const uint8_t new_kek[VAULT_KEK_LEN])
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    const vault_store_backend_t *backend = store_for(principal);
    return backend->rekey_field(backend->ctx, principal, field, old_kek, new_kek);
 }
 
 int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
 {
-   if (g_fenced_use_callback) return -1;
+   if (g_fenced_use_callback)
+      return -1;
    if (!g_instance_local)
       return g_store_backend->list_principals(g_store_backend->ctx, out, max);
    if (!out || max < 1)
@@ -2007,17 +2117,16 @@ __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_generation_retirement_contract_v1 = 1;
 __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_slot_closure_contract_v1 = 1;
-__attribute__((used, externally_visible, retain))
-vault_retire_generation_result_t vault_store_close_server_slot_once(
-    const char *principal, const char *agent, const char *cred,
-    char *closed_generation, size_t generation_capacity)
+__attribute__((used, externally_visible, retain)) vault_retire_generation_result_t
+vault_store_close_server_slot_once(const char *principal, const char *agent, const char *cred,
+                                   char *closed_generation, size_t generation_capacity)
 {
    if (closed_generation && generation_capacity)
       closed_generation[0] = 0;
    if (g_fenced_use_callback || !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
        !create_identifier(agent, sizeof(((vault_store_entry_t *)0)->agent)) ||
-       !create_identifier(cred, sizeof(((vault_store_entry_t *)0)->cred)) ||
-       !closed_generation || generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP)
+       !create_identifier(cred, sizeof(((vault_store_entry_t *)0)->cred)) || !closed_generation ||
+       generation_capacity < VAULT_IMMUTABLE_GENERATION_CAP)
       return VAULT_RETIRE_GENERATION_BADARG;
    if (!strcmp(principal, VAULT_SERVER_PRINCIPAL))
       return VAULT_RETIRE_GENERATION_UNSUPPORTED;
@@ -2041,11 +2150,9 @@ vault_retire_generation_result_t vault_store_close_server_slot_once(
       pthread_testcancel();
    return result;
 }
-__attribute__((used, externally_visible, retain))
-vault_retire_generation_result_t vault_store_retire_server_generation(const char *principal,
-                                                                      const char *agent,
-                                                                      const char *cred,
-                                                                      const char *expected)
+__attribute__((used, externally_visible, retain)) vault_retire_generation_result_t
+vault_store_retire_server_generation(const char *principal, const char *agent, const char *cred,
+                                     const char *expected)
 {
    if (g_fenced_use_callback || !create_identifier(principal, VAULT_PRINCIPAL_MAX) ||
        !create_identifier(agent, sizeof(((vault_store_entry_t *)0)->agent)) ||

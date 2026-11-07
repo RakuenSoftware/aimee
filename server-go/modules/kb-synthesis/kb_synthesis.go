@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -179,13 +179,13 @@ func decide(request groundingRequest) (bool, string) {
 }
 
 // Handle rejects a false no-side-effects claim and names the first structural contradiction.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	decoded, valid := decodeRequest(request)
 	if invocation.StageID != StageGrounding || !valid {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	contradicts, reason := decide(decoded)
 	response := make([]byte, responseLen)
@@ -196,5 +196,5 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	}
 	binary.LittleEndian.PutUint32(response[12:16], uint32(len(reason)))
 	copy(response[responseReasonOff:], reason)
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

@@ -42,21 +42,6 @@ static void append_advisory(cJSON *messages, const char *text, int evidence)
       cJSON_Delete(message);
 }
 
-static void append_text(cJSON *messages, const char *role, const char *text)
-{
-   if (!messages || !text)
-      return;
-   cJSON *message = agent_session_text_message(role, text);
-   if (message && !cJSON_AddItemToArray(messages, message))
-      cJSON_Delete(message);
-}
-
-void agent_session_append_final_message(cJSON *messages, const char *content)
-{
-   if (content && content[0])
-      append_text(messages, "assistant", content);
-}
-
 void agent_session_append_final_instruction(cJSON *messages)
 {
    append_advisory(

@@ -9,6 +9,7 @@
 #include "turn_registry.h"
 #include "modules/git/git_verify.h"
 #include "kb_client.h"
+#include <aimee/ir/session_event.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -39,10 +40,12 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (deleted == DB1_SESSION_DELETE_CONFLICT)
    {
       cJSON *conflict = cJSON_CreateObject();
-      if (!conflict) return server_send_error(conn, "failed to close session", NULL);
+      if (!conflict)
+         return server_send_error(conn, "failed to close session", NULL);
       cJSON_AddStringToObject(conflict, "status", "error");
       cJSON_AddStringToObject(conflict, "kind", "input_delivery_conflict");
-      cJSON_AddStringToObject(conflict, "message", "original input delivery requires reconciliation");
+      cJSON_AddStringToObject(conflict, "message",
+                              "original input delivery requires reconciliation");
       cJSON_AddNumberToObject(conflict, "http_status", 409);
       return server_send_ok(conn, conflict);
    }
@@ -96,10 +99,12 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    aimee_log(LOG_INFO, "graceful_cancel",
              "cancel request: session=%s trusted_local=%d principal=%s", sid, trusted_local,
              conn->vault_principal[0] ? conn->vault_principal : "(none)");
-   if (trusted_local)
-      rc = turn_registry_cancel(sid, NULL);
-   else if (conn->vault_principal[0])
+   /* An attested webuser remains owner-bound even on a privileged local UDS.
+    * Only genuinely principal-less trusted local administration may bypass. */
+   if (conn->vault_principal[0])
       rc = turn_registry_cancel(sid, conn->vault_principal);
+   else if (trusted_local)
+      rc = turn_registry_cancel(sid, NULL);
    else
       return server_send_error(conn, "forbidden: unattested caller", NULL);
    if (rc < 0)
@@ -126,9 +131,33 @@ int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!sid || !sid[0])
       return server_send_error(conn, "missing aimee_session_id", NULL);
    cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(req, "message");
-   const char *message = (jmsg && cJSON_IsString(jmsg)) ? jmsg->valuestring : NULL;
-   if (!message || !message[0])
-      return server_send_error(conn, "missing message", NULL);
+   /* Public protocol ingress may import the historical text field once. Every
+    * internal queue/store/continuation below this boundary owns canonical IR. */
+   if (cJSON_IsString(jmsg))
+   {
+      if (!jmsg->valuestring[0])
+         return server_send_error(conn, "missing message", NULL);
+      aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = jmsg->valuestring};
+      aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+      cJSON *imported = aimee_ir_message_json(&message);
+      if (!imported || !cJSON_ReplaceItemInObjectCaseSensitive(req, "message", imported))
+      {
+         cJSON_Delete(imported);
+         return server_send_error(conn, "failed to import steering message", NULL);
+      }
+      jmsg = imported;
+   }
+   aimee_message_t input = {0};
+   if (aimee_ir_message_parse(jmsg, &input))
+      return server_send_error(conn, "canonical user message required", NULL);
+   int valid = input.role && !strcmp(input.role, "user") && input.n_blocks > 0;
+   for (int i = 0; i < input.n_blocks; ++i)
+      valid = valid &&
+              (input.blocks[i].type == AIMEE_BLK_TEXT || input.blocks[i].type == AIMEE_BLK_IMAGE ||
+               input.blocks[i].type == AIMEE_BLK_DOCUMENT);
+   aimee_message_free(&input);
+   if (!valid)
+      return server_send_error(conn, "unsupported steering message", NULL);
 
    /* Authorize + cancel exactly like graceful_cancel (owner-authz; a trusted
     * local peer — the co-located webchat backend over the UDS — is allowed and
@@ -138,10 +167,12 @@ int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    aimee_log(LOG_INFO, "chat_interrupt",
              "interrupt request: session=%s trusted_local=%d principal=%s", sid, trusted_local,
              conn->vault_principal[0] ? conn->vault_principal : "(none)");
-   if (trusted_local)
-      rc = turn_registry_cancel(sid, NULL);
-   else if (conn->vault_principal[0])
+   /* An attested webuser remains owner-bound even on a privileged local UDS.
+    * Only genuinely principal-less trusted local administration may bypass. */
+   if (conn->vault_principal[0])
       rc = turn_registry_cancel(sid, conn->vault_principal);
+   else if (trusted_local)
+      rc = turn_registry_cancel(sid, NULL);
    else
       return server_send_error(conn, "forbidden: unattested caller", NULL);
    if (rc < 0)
@@ -160,16 +191,16 @@ int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     *    reclaim it; if the worker already took it (it dispatched), leave rc=1. */
    if (rc == 1)
    {
-      if (chat_steer_set(sid, message) != 0)
+      if (chat_steer_set(sid, jmsg) != 0)
       {
          rc = 0;
       }
       else if (!turn_registry_find(sid))
       {
-         char *reclaimed = NULL;
+         cJSON *reclaimed = NULL;
          if (chat_steer_take(sid, &reclaimed))
          {
-            free(reclaimed);
+            cJSON_Delete(reclaimed);
             rc = 0;
          }
       }

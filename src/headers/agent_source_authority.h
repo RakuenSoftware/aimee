@@ -30,9 +30,4 @@ int agent_source_authority_snapshot_clone(const agent_source_authority_snapshot_
 void agent_source_authority_snapshot_destroy(agent_source_authority_snapshot_t *snap);
 void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap);
 
-/* Export this thread's source-authority TLS to the process env. Call ONLY in a
- * post-fork/pre-exec child (single-threaded → race-free) so a re-exec'd child
- * inherits the correct context instead of a concurrently-clobbered global. */
-void agent_source_authority_export_env(void);
-
 #endif /* DEC_AGENT_SOURCE_AUTHORITY_H */

@@ -652,11 +652,9 @@
  "\"default\":40,\"empty\":\"emit\"}]}"},
 
 {"aux.test",
- "{\"fields\":[{\"json\":\"task\",\"count_min\":1,\"from\":"
- "\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"prompt\","
- "\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empty\":\"emit\""
- "},{\"json\":\"max_tokens\",\"count_min\":3,\"from\":\"positional\","
- "\"index\":2,\"type\":\"number_lenient\"}]}"},
+ "{\"fields\":[{\"json\":\"task\",\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"js"
+ "on\":\"request\",\"type\":\"canonical_request\",\"count_min\":2,\"from\":\"positional\",\"index\":1,\"empt"
+ "y\":\"emit\",\"max_tokens_index\":2,\"temperature\":0}]}"},
 
 {"dogfood.review",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"month\",\"from\":"
@@ -675,9 +673,8 @@
  ",\"index\":0,\"empty\":\"emit\"},{\"json\":\"value\",\"count_min\":2,"
  "\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"}]}"},
 {"delegate.aggregate",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"prompt\","
- "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
- "}]}"},
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"request\",\"type\":\"canonical_request\",\"count_min\":"
+ "1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},
 {"evidence.fidelity_retrieval_event",
  "{\"fields\":[{\"json\":\"turn_id\",\"count_min\":1,\"from\":"
  "\"positional\",\"index\":0,\"empty\":\"emit\"}]}"},

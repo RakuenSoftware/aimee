@@ -31,7 +31,5 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
  * wfe_bind_interactive; exposed for direct testing + a reset/flag accessor. */
 void wfe_bind_health_note_enforced_route(void);
 void wfe_bind_health_note_bind(void);
-void wfe_bind_health_reset(void);
-int wfe_bind_health_warned(void);
 
 #endif /* DEC_WFE_BIND_INGRESS_H */

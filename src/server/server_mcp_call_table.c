@@ -158,12 +158,14 @@ static cJSON *mcph_list_facts(struct mcp_call *c)
 }
 /* Optional host deployment policy, not authority from MCP arguments/_meta. */
 extern int aimee_module_tool_source_mode(const char *) __attribute__((weak));
-extern int aimee_module_tool_source_render(const char *,const cJSON *,cJSON **) __attribute__((weak));
+extern int aimee_module_tool_source_render(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 #pragma weak agent_tool_source_attach
 static cJSON *mcph_source_unavailable(struct mcp_call *c)
 {
    (void)c;
-   return text_content("{\"status\":\"error\",\"kind\":\"source_custody_unavailable\",\"message\":\"selected tool output requires an owner-issued source receipt\"}");
+   return text_content("{\"status\":\"error\",\"kind\":\"source_custody_unavailable\",\"message\":"
+                       "\"selected tool output requires an owner-issued source receipt\"}");
 }
 static cJSON *mcph_served_memory(struct mcp_call *c, int card)
 {
@@ -2317,7 +2319,8 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
       if (strcmp(mcp_tool_table[i].name, tool) == 0)
          return aimee_module_tool_source_mode && aimee_module_tool_source_mode(tool) < 0
-                    ? mcph_source_unavailable : mcp_tool_table[i].fn;
+                    ? mcph_source_unavailable
+                    : mcp_tool_table[i].fn;
    return NULL;
 }
 
@@ -2353,9 +2356,8 @@ void mcp_tool_register_native_surface(void)
    agent_tools_set_mcp_provider(server_mcp_native_call, mcp_native_advert);
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
    {
-      if (!mcp_tool_table[i].native ||
-          (aimee_module_tool_source_mode &&
-           aimee_module_tool_source_mode(mcp_tool_table[i].name) < 0))
+      if (!mcp_tool_table[i].native || (aimee_module_tool_source_mode &&
+                                        aimee_module_tool_source_mode(mcp_tool_table[i].name) < 0))
          continue;
       agent_tools_register_mcp_tool(mcp_tool_table[i].name);
       /* `native` is a comma-separated set list: one tool can belong to several

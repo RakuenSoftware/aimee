@@ -127,13 +127,14 @@ static cJSON *ingress_command(cJSON *request, int required_context)
 {
    cJSON *response = NULL;
    int selected_context = ingress_completion_command_context || aimee_module_host_command_context;
-   cJSON *command_context = ingress_completion_command_context
-                                ? cJSON_Duplicate(ingress_completion_command_context, 1)
-                                : aimee_module_host_command_context
-                                      ? aimee_module_host_command_context() : NULL;
-   int rc = selected_context && !command_context ? -1
-       : aimee_module_commands_dispatch_internal_context_timeout(
-             "memory.runtime", request, command_context, 500, &response);
+   cJSON *command_context =
+       ingress_completion_command_context  ? cJSON_Duplicate(ingress_completion_command_context, 1)
+       : aimee_module_host_command_context ? aimee_module_host_command_context()
+                                           : NULL;
+   int rc = selected_context && !command_context
+                ? -1
+                : aimee_module_commands_dispatch_internal_context_timeout(
+                      "memory.runtime", request, command_context, 500, &response);
    cJSON_Delete(command_context);
    cJSON_Delete(request);
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
@@ -202,14 +203,15 @@ static void ingress_deferred_cleanup(void *opaque)
  * The normal envelope is intentionally absent until a fresh actual Model
  * release succeeds, so an older consumer cannot use the previous ticket. */
 static int ingress_finish_deferred_source_release(cJSON **response_pointer,
-                                                   const request_context_t *context)
+                                                  const request_context_t *context)
 {
    cJSON *response = *response_pointer;
    const cJSON *deferred = cJSON_GetObjectItemCaseSensitive(response, "deferred_source_release");
    if (!deferred)
       return 0; /* Existing unselected assembly path is unchanged. */
-   static const char *keys[] = {"schema_version", "append_sources", "source_release_ticket",
-                                "request_id", "principal", "caller_subject", "native_projection_json"};
+   static const char *keys[] = {
+       "schema_version", "append_sources", "source_release_ticket", "request_id",
+       "principal",      "caller_subject", "native_projection_json"};
    if (!context || !cJSON_IsObject(deferred) || cJSON_GetArraySize(deferred) != 7 ||
        cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"))
       goto refused;
@@ -227,14 +229,15 @@ static int ingress_finish_deferred_source_release(cJSON **response_pointer,
    }
    const cJSON *version = cJSON_GetObjectItemCaseSensitive(deferred, "schema_version");
    const char *expected[] = {context->memory_source_release, context->request_id,
-                              context->principal, context->caller_subject};
+                             context->principal, context->caller_subject};
    if (!cJSON_IsNumber(version) || version->valuedouble != 1 ||
        !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(deferred, "append_sources")) ||
        !expected[0][0])
       goto refused;
    for (size_t i = 0; i < sizeof expected / sizeof expected[0]; ++i)
    {
-      const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(deferred, keys[i + 2]));
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(deferred, keys[i + 2]));
       if (!value || strcmp(value, expected[i]))
          goto refused;
    }
@@ -250,31 +253,29 @@ static int ingress_finish_deferred_source_release(cJSON **response_pointer,
    if (bytes > 8u * 1024u * 1024u || aimee_sha256_hex(text, bytes, digest))
       goto refused;
    snprintf(prefixed, sizeof prefixed, "sha256:%s", digest);
-   const cJSON *counts[] = {
-       cJSON_GetObjectItemCaseSensitive(projection, "rendered_bytes"),
-       cJSON_GetObjectItemCaseSensitive(accounting, "rendered_bytes")};
-   const cJSON *limits[] = {
-       cJSON_GetObjectItemCaseSensitive(projection, "max_context_bytes"),
-       cJSON_GetObjectItemCaseSensitive(accounting, "max_context_bytes")};
+   const cJSON *counts[] = {cJSON_GetObjectItemCaseSensitive(projection, "rendered_bytes"),
+                            cJSON_GetObjectItemCaseSensitive(accounting, "rendered_bytes")};
+   const cJSON *limits[] = {cJSON_GetObjectItemCaseSensitive(projection, "max_context_bytes"),
+                            cJSON_GetObjectItemCaseSensitive(accounting, "max_context_bytes")};
    for (size_t i = 0; i < 2; ++i)
    {
-      const char *hash = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-          i ? accounting : projection, "digest"));
+      const char *hash = cJSON_GetStringValue(
+          cJSON_GetObjectItemCaseSensitive(i ? accounting : projection, "digest"));
       if (!cJSON_IsNumber(counts[i]) || counts[i]->valuedouble != (double)bytes ||
           !cJSON_IsNumber(limits[i]) ||
           !(limits[i]->valuedouble >= (double)bytes &&
             limits[i]->valuedouble <= 8u * 1024u * 1024u) ||
           limits[i]->valuedouble != (double)(size_t)limits[i]->valuedouble ||
-          limits[i]->valuedouble != limits[0]->valuedouble ||
-          !hash || strcmp(hash, prefixed))
+          limits[i]->valuedouble != limits[0]->valuedouble || !hash || strcmp(hash, prefixed))
          goto refused;
    }
-   const char *projection_wire = cJSON_GetStringValue(
-       cJSON_GetObjectItemCaseSensitive(deferred, "native_projection_json"));
+   const char *projection_wire =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(deferred, "native_projection_json"));
    if (!projection_wire || strlen(projection_wire) > 8u * 1024u * 1024u)
       goto refused;
    cJSON *wire_view = cJSON_ParseWithOpts(projection_wire, NULL, 1);
-   const char *wire_text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_view, "text"));
+   const char *wire_text =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_view, "text"));
    int wire_valid = cJSON_IsObject(wire_view) && wire_text && !strcmp(wire_text, text) &&
                     cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(wire_view, "append_sources"));
    cJSON_Delete(wire_view);
@@ -316,8 +317,7 @@ static int ingress_finish_deferred_source_release(cJSON **response_pointer,
       scope.released = ingress_command(request, 1);
       const char *ticket = cJSON_GetStringValue(
           cJSON_GetObjectItemCaseSensitive(scope.released, "source_release_ticket"));
-      if (!ticket || !ticket[0] ||
-          strcmp(scope.ticket, context->memory_source_release) ||
+      if (!ticket || !ticket[0] || strcmp(scope.ticket, context->memory_source_release) ||
           strcmp(scope.request_id, context->request_id) ||
           strcmp(scope.principal, context->principal) ||
           strcmp(scope.caller_subject, context->caller_subject) ||
@@ -632,16 +632,20 @@ void ingress_preinject_release_send_guard(void *state)
    const cJSON *prior_context = ingress_completion_command_context;
    int selected_context = prior_context || aimee_module_host_command_context;
    cJSON *command_context = prior_context ? cJSON_Duplicate(prior_context, 1)
-       : aimee_module_host_command_context ? aimee_module_host_command_context() : NULL;
+                            : aimee_module_host_command_context
+                                ? aimee_module_host_command_context()
+                                : NULL;
    char *context_bytes = command_context ? cJSON_PrintUnformatted(command_context) : NULL;
-   int context_ready = !selected_context ||
-                       (cJSON_IsObject(command_context) && context_bytes && strlen(context_bytes) <= 4096);
+   int context_ready = !selected_context || (cJSON_IsObject(command_context) && context_bytes &&
+                                             strlen(context_bytes) <= 4096);
    free(context_bytes);
    if (!context_ready)
    {
       cJSON_Delete(command_context);
       cJSON_Delete(plan);
-      aimee_log(LOG_ERROR, "memory", "verified completion transport unavailable; storage guard remains active pending sending-host recovery");
+      aimee_log(LOG_ERROR, "memory",
+                "verified completion transport unavailable; storage guard remains active pending "
+                "sending-host recovery");
       return;
    }
    /* Snapshot before the first transport attempt, so neither synchronous
@@ -1297,8 +1301,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    const cJSON *assembly_plan = cJSON_GetObjectItemCaseSensitive(plan, "assembly");
    const char *planned_mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "mode"));
    const cJSON *grade_plan = cJSON_GetObjectItemCaseSensitive(plan, "execution_grades");
-   if (!cJSON_IsObject(assembly_plan) || !planned_mode ||
-       (grade_plan && !cJSON_IsBool(grade_plan)))
+   if (!cJSON_IsObject(assembly_plan) || !planned_mode || (grade_plan && !cJSON_IsBool(grade_plan)))
    {
       (void)request_context_refuse_assembly("unavailable");
       cJSON_Delete(plan);

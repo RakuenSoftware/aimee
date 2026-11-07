@@ -114,40 +114,6 @@ static void build_stub(const conv_tool_event_t *events, int count, char *out, in
    *stub_bytes_out = pos;
 }
 
-int64_t conv_ctx_record_event(const char *sid, const char *tool_name, const char *tool_input,
-                              const char *tool_result, int result_bytes)
-{
-   if (!virtual_context_on())
-      return 0;
-   if (!sid || !tool_name)
-      return -1;
-
-   int64_t id = db1_conv_record_event(sid, tool_name, tool_input, tool_result, result_bytes);
-   if (id <= 0)
-      return id;
-
-   /* Auto-flush: count pending events; trigger if threshold reached */
-   conv_tool_event_t peek[1];
-   int pending = db1_conv_pending_events(sid, peek, 1);
-   /* We just inserted one; if we had pending already, re-check */
-   (void)pending; /* suppress unused-variable warning */
-
-   /* Use state to track count cheaply */
-   int64_t last_event = 0;
-   int chain_count = 0, event_count = 0;
-   db1_conv_state_get(sid, &last_event, &chain_count, &event_count);
-   event_count++;
-   db1_conv_state_update(sid, id, chain_count, event_count);
-
-   /* Auto-flush when we have enough events pending */
-   conv_tool_event_t probe[AUTO_FLUSH_THRESHOLD + 1];
-   int n = db1_conv_pending_events(sid, probe, AUTO_FLUSH_THRESHOLD + 1);
-   if (n >= AUTO_FLUSH_THRESHOLD)
-      conv_ctx_flush_pending(sid);
-
-   return id;
-}
-
 int conv_ctx_flush_pending(const char *sid)
 {
    if (!sid)

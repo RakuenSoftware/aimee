@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	wire "github.com/JBailes/aimee/server-go/aimee"
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 	"strings"
 	"testing"
 )
@@ -23,8 +23,8 @@ func TestOriginalInputDeliveryActualHostAuthorization(t *testing.T) {
 		}
 		frame, _ := wire.EncodeFields(id, args)
 		db := &sessDB{}
-		_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
-		if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		_, status := Sessions.Handler(db)(ring.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+		if status != ring.ModuleStatusInvalidRequest || len(db.executed) != 0 {
 			t.Fatal("body receiver tag gave a module host authority")
 		}
 	}

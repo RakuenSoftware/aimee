@@ -34,10 +34,21 @@ aimee_supervise_plane_pair() {
     _aimee_server_born=$(aimee_pid_start_time "$_aimee_server_pid")
     _aimee_wfe_born=$(aimee_pid_start_time "$_aimee_wfe_pid")
 
+    # Sleep until a child exits rather than re-reading /proc ten times a second.
+    # A trapped SIGCHLD makes `wait` on the timer return at once (POSIX), so a
+    # plane's death is seen immediately; the timer only bounds the case where a
+    # plane exits between the liveness check and the wait, and is the whole bound
+    # under bash, whose `wait` ignores a trapped SIGCHLD. /bin/sh here is dash.
+    trap ':' CHLD
     while aimee_pid_is_live "$_aimee_server_pid" "$_aimee_server_born" &&
           aimee_pid_is_live "$_aimee_wfe_pid" "$_aimee_wfe_born"; do
-        sleep 0.1
+        sleep "${AIMEE_PLANE_RECHECK_SECS:-15}" &
+        _aimee_timer=$!
+        wait "$_aimee_timer" 2>/dev/null || true
+        kill "$_aimee_timer" 2>/dev/null || true
+        wait "$_aimee_timer" 2>/dev/null || true
     done
+    trap - CHLD
     if ! aimee_pid_is_live "$_aimee_server_pid" "$_aimee_server_born"; then
         AIMEE_FIRST_EXIT=server
         _aimee_peer_pid=$_aimee_wfe_pid

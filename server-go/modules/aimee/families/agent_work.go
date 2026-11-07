@@ -202,13 +202,13 @@ var AgentWork = store.Family{
 			Name: "cron_job_set_enabled_all", Args: 1, Tx: true, Run: cronJobSetEnabledAll,
 		},
 		opCronJobDelete:    {Name: "cron_job_delete", Args: 1, Tx: true, Run: cronJobDelete},
-		opCronJobRecordRun: {Name: "cron_job_record_run", Args: 7, Tx: true, Run: cronJobRecordRun},
+		opCronJobRecordRun: {Name: "cron_job_record_run", Args: 8, Tx: true, Run: cronJobRecordRun},
 		opCronJobListJSON:  {Name: "cron_job_list_json", Args: 0, Run: cronJobListJSON},
 		opCronJobHistoryJSON: {
 			Name: "cron_job_history_json", Args: 2, Run: cronJobHistoryJSON,
 		},
 		opCronJobLatestOutput: {
-			Name: "cron_job_latest_output", Args: 1, Run: cronJobLatestOutput,
+			Name: "cron_job_latest_output", Args: 1, Cells: 2, Run: cronJobLatestOutput,
 		},
 		opCronJobLastOutputHash: {
 			Name: "cron_job_last_output_hash", Args: 1, Run: cronJobLastOutputHash,

@@ -8,16 +8,36 @@
 
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name)
 {
-   if (!out || !out->success || !out->response)
+   if (!out || !out->success)
       return;
 
+   if (aimee_ir_response_complete_valid(&out->canonical_response))
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "agent did not return a complete canonical answer");
+      return;
+   }
+   char *display = aimee_ir_response_text_alloc(&out->canonical_response);
+   if (!display)
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "cannot project canonical answer display");
+      return;
+   }
+   for (int i = 0; i < out->canonical_response.n_content; i++)
+      if (out->canonical_response.content[i].type == AIMEE_BLK_IMAGE ||
+          out->canonical_response.content[i].type == AIMEE_BLK_DOCUMENT)
+      {
+         free(display);
+         return; /* Empty text does not make an authored media answer degenerate. */
+      }
    int unexecuted_tool_plan = out->tool_calls == 0 && out->turns == 0 &&
-                              liveness_is_unexecuted_tool_plan_response(out->response);
-   if (!liveness_is_degenerate_response(out->response) && !unexecuted_tool_plan)
+                              liveness_is_unexecuted_tool_plan_response(display);
+   int degenerate = liveness_is_degenerate_response(display);
+   free(display);
+   if (!degenerate && !unexecuted_tool_plan)
       return;
 
-   agent_result_clear_response(out);
-   out->response = NULL;
    out->success = 0;
    out->abstained = 1;
    snprintf(out->abstain_reason, sizeof(out->abstain_reason), "degenerate response");

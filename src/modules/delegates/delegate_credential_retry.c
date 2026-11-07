@@ -78,20 +78,18 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
    return DELEGATE_CRED_RESOLVE_OK;
 }
 
-static int run_delegate_attempt(agent_config_t *cfg, const char *role, const char *system_prompt,
-                                const char *run_prompt, int max_tokens, int force_tools,
-                                int enforce_writes, agent_result_t *result)
+int delegate_run_attempt(agent_config_t *cfg, const char *role, const aimee_request_t *request,
+                         int force_tools, int enforce_writes, agent_result_t *result)
 {
    if (force_tools)
-      return agent_run_with_tools_write_enforce(cfg, role, system_prompt, run_prompt, max_tokens,
-                                                enforce_writes, result);
+      return agent_run_with_tools_write_enforce(cfg, role, request, enforce_writes, result);
    /* The delegate decided tools-OFF (e.g. CLI --no-tools -> force_tools=0). Force
-    * it for the turn: agent_run_ex would otherwise re-derive use_tools from the
+    * it for the turn: agent_run would otherwise re-derive use_tools from the
     * agent's config (tools_enabled + exec-role) and silently re-enable tools,
     * which makes an agentic model (e.g. codex) loop on tool calls and return no
     * text instead of the requested single-shot answer. */
    agent_run_force_no_tools(1);
-   int rc = agent_run(cfg, role, system_prompt, run_prompt, max_tokens, result);
+   int rc = agent_run(cfg, role, request, result);
    agent_run_force_no_tools(0);
    return rc;
 }
@@ -115,16 +113,15 @@ static void result_add_prior_metrics(agent_result_t *result, const agent_result_
 }
 
 int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, const char *role,
-                                       const char *system_prompt, const char *run_prompt,
-                                       int max_tokens, int force_tools, int enforce_writes,
-                                       char *leased_cred_name, size_t leased_cred_name_cap,
+                                       const aimee_request_t *request, int force_tools,
+                                       int enforce_writes, char *leased_cred_name,
+                                       size_t leased_cred_name_cap,
                                        const char *credential_state_path, agent_result_t *result)
 {
    if (!cfg || !result)
       return -1;
 
-   int rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
-                                 enforce_writes, result);
+   int rc = delegate_run_attempt(cfg, role, request, force_tools, enforce_writes, result);
    if (!agent || agent->credential_count <= 1 || !leased_cred_name || !leased_cred_name[0])
       return rc;
 
@@ -150,8 +147,7 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
       OPENSSL_cleanse(value, sizeof(value));
 
       memset(result, 0, sizeof(*result));
-      rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
-                                enforce_writes, result);
+      rc = delegate_run_attempt(cfg, role, request, force_tools, enforce_writes, result);
       result_add_prior_metrics(result, &prior);
       agent_result_clear_response(&prior);
    }

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 func gitRequest(operation string) []byte {
@@ -38,8 +38,8 @@ func TestGitOperationParity(t *testing.T) {
 		"unknown": {OperationUnsupported, 0},
 	}
 	for name, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageOperation}, gitRequest(name))
-		if status != bus.ModuleStatusOK || len(response) != responseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageOperation}, gitRequest(name))
+		if status != ring.ModuleStatusOK || len(response) != responseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != responseMagic ||
 			binary.LittleEndian.Uint32(response[4:8]) != want.operation ||
 			binary.LittleEndian.Uint32(response[8:12]) != want.credentials {
@@ -56,8 +56,8 @@ func TestGitRefValidation(t *testing.T) {
 		"unicode-é": false, "colon:ref": false,
 	}
 	for ref, want := range tests {
-		response, status := Handle(bus.ModuleInvocation{StageID: StageRefValidate}, gitRefRequest(ref))
-		if status != bus.ModuleStatusOK || len(response) != refResponseLen ||
+		response, status := Handle(ring.ModuleInvocation{StageID: StageRefValidate}, gitRefRequest(ref))
+		if status != ring.ModuleStatusOK || len(response) != refResponseLen ||
 			binary.LittleEndian.Uint32(response[0:4]) != refResponseMagic ||
 			(binary.LittleEndian.Uint32(response[4:8]) == 1) != want {
 			t.Errorf("%q response = %x, status = %d, want allowed=%v", ref, response, status, want)
@@ -68,28 +68,28 @@ func TestGitRefValidation(t *testing.T) {
 func TestGitRejectsInvalidAndExpiredWire(t *testing.T) {
 	request := gitRequest("push")
 	request[7] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageOperation}, request); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageOperation}, request); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("reserved-byte status = %d", status)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageOperation, DeadlineNS: 1},
-		gitRequest("push")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageOperation, DeadlineNS: 1},
+		gitRequest("push")); status != ring.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 	refRequest := gitRefRequest("main")
 	refRequest[5] = 1
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRefValidate}, refRequest); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRefValidate}, refRequest); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("ref reserved-byte status = %d", status)
 	}
 	tooLong := make([]byte, refRequestLen)
 	binary.LittleEndian.PutUint32(tooLong[0:4], refRequestMagic)
 	tooLong[4] = wireVersion
 	binary.LittleEndian.PutUint16(tooLong[6:8], refMax+1)
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRefValidate}, tooLong); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRefValidate}, tooLong); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("oversize ref status = %d", status)
 	}
 	embeddedNUL := gitRefRequest("main-x")
 	embeddedNUL[12] = 0
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageRefValidate}, embeddedNUL); status != bus.ModuleStatusInvalidRequest {
+	if _, status := Handle(ring.ModuleInvocation{StageID: StageRefValidate}, embeddedNUL); status != ring.ModuleStatusInvalidRequest {
 		t.Fatalf("embedded-NUL wire status = %d", status)
 	}
 }
@@ -122,7 +122,7 @@ func TestGitStageTableMatchesContract(t *testing.T) {
 	// reaches another process, and honouring that from a module process needs
 	// the vault extraction in vault-bus-only-access.md.
 	for _, stage := range []uint32{StageForgeRequest, StageCredResolve} {
-		if _, status := Handle(bus.ModuleInvocation{StageID: stage}, nil); status != bus.ModuleStatusInvalidRequest {
+		if _, status := Handle(ring.ModuleInvocation{StageID: stage}, nil); status != ring.ModuleStatusInvalidRequest {
 			t.Fatalf("unserved stage %d status = %d, want refused", stage, status)
 		}
 	}

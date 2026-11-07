@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/control-web/policy"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -66,13 +66,13 @@ func decodeRequest(request []byte) (uint32, string, string, bool) {
 
 // Handle authorizes one control-web proxy route with the same policy used by
 // the physical HTTPS/session provider.
-func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func Handle(invocation ring.ModuleInvocation, request []byte) ([]byte, ring.ModuleStatus) {
 	target, method, path, valid := decodeRequest(request)
 	if invocation.StageID != StageAuthorize || !valid {
-		return nil, bus.ModuleStatusInvalidRequest
+		return nil, ring.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
+		return nil, ring.ModuleStatusCancelled
 	}
 	allowed := policy.ConsoleAdminAllows(method, path)
 	if target == TargetFleet {
@@ -84,5 +84,5 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if allowed {
 		binary.LittleEndian.PutUint32(response[8:12], 1)
 	}
-	return response, bus.ModuleStatusOK
+	return response, ring.ModuleStatusOK
 }

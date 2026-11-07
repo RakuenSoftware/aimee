@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 const (
@@ -71,9 +71,9 @@ func newCredentialBroker() (*credentialBroker, error) {
 	return &credentialBroker{private: private, keyID: hex.EncodeToString(id)}, nil
 }
 
-func (b *credentialBroker) publicReply() ([]byte, bus.ModuleStatus) {
+func (b *credentialBroker) publicReply() ([]byte, ring.ModuleStatus) {
 	if b == nil || b.private == nil || len(b.keyID) != credentialKeyIDBytes*2 {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
 	reply, err := json.Marshal(struct {
 		Version   int    `json:"version"`
@@ -81,9 +81,9 @@ func (b *credentialBroker) publicReply() ([]byte, bus.ModuleStatus) {
 		PublicKey string `json:"public_key"`
 	}{credentialVersion, b.keyID, base64.StdEncoding.EncodeToString(b.private.PublicKey().Bytes())})
 	if err != nil {
-		return nil, bus.ModuleStatusInternal
+		return nil, ring.ModuleStatusInternal
 	}
-	return reply, bus.ModuleStatusOK
+	return reply, ring.ModuleStatusOK
 }
 
 func credentialAAD(envelope CredentialEnvelope) ([]byte, error) {
@@ -113,7 +113,7 @@ func credentialAAD(envelope CredentialEnvelope) ([]byte, error) {
 	return aad, nil
 }
 
-func (b *credentialBroker) decrypt(now time.Time, invocation bus.ModuleInvocation,
+func (b *credentialBroker) decrypt(now time.Time, invocation ring.ModuleInvocation,
 	request HTTPRequest, targetHost string) ([]byte, error) {
 	if b == nil || b.private == nil || request.Credential == nil ||
 		(request.CredentialHandle != credentialHandleForge && request.CredentialHandle != "provider") || request.CredentialScope == "" ||
