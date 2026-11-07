@@ -69,6 +69,8 @@ def inside(output, shared_profile='owner-client'):
     provider_failure = 'native fixture "quoted"; line\nbreak; path \\ evidence 界'
     scenario, scenario_start = 'single', 0
     previous_recall = None
+    previous_kb_mode = None
+    shared_remote_refusal_qualified = False
     exploration_session = None
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
     fixture_read_root = Path(fixture_files.name)
@@ -365,6 +367,21 @@ def inside(output, shared_profile='owner-client'):
         version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
         observed_version = versioned.get('memory', {}).get('version')
         check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
+        if shared_profile == 'public-reference' and shared_remote:
+            before = len(captures)
+            result, events = run('unavailable shared native context')
+            check('public-reference remote native context refuses the missing shared owner client',
+                  result.get('status') == 'failed' and
+                  any('unavailable' in text for text in strings(events)))
+            check('public-reference shared context refusal sends zero provider requests', len(captures) == before)
+            shared_remote_refusal_qualified = True
+            # This declared profile qualifies the real private owner separately;
+            # a remote configuration correctly requires the absent shared client.
+            # Use the existing explicit private-only mode, not a failed-read fallback.
+            previous_kb_mode = config('get', 'kb_mode')['value']
+            config('set', 'kb_mode', 'none')
+            check('public-reference explicitly selects private-only native context',
+                  config('get', 'kb_mode')['value'] == 'none')
         before = len(captures)
         result, _ = run('healthy native run')
         check('healthy native run completes', result.get('status') == 'completed' and 'NATIVE_MEMORY_OK' in list(strings(result)))
@@ -617,6 +634,10 @@ def inside(output, shared_profile='owner-client'):
                 status, retired = api('/v1/memory/delete', dict(id=str(memory_id)))
                 check('native fixture retires its private identity', status == 200 and retired.get('status') == 'ok')
         finally:
+            if previous_kb_mode is not None:
+                config('set', 'kb_mode', previous_kb_mode)
+                check('native fixture restores its original KB mode',
+                      config('get', 'kb_mode')['value'] == previous_kb_mode)
             if previous_recall is not None:
                 config('set', 'memory_recall_enabled', json.dumps(previous_recall))
             if previous is None:
@@ -628,6 +649,7 @@ def inside(output, shared_profile='owner-client'):
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
                 shared_profile=shared_profile, shared_server_scenarios_qualified=has_shared,
+                shared_remote_refusal_qualified=shared_remote_refusal_qualified,
                 provider_intervention_errors=provider_errors, provider_intervention_retries=mutation_retries,
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],

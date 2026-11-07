@@ -85,6 +85,19 @@ def provider_handler(state):
     return Provider
 
 
+def configure_probe_overlay(stack, fixture, network):
+    # Stack already bound the explicitly selected owner and its exact grants.
+    # Extend that service; replacing the overlay would silently unselect it.
+    overlay = stack.network_override.read_text()
+    if '    volumes:\n' not in overlay:
+        overlay += '    volumes:\n'
+    overlay += '      - ' + json.dumps(str(fixture) + ':/opt/aimee-e2e:ro') + '\n'
+    overlay += ('    networks:\n      default: {}\n      store: {}\n'
+                '      models: {}\n      vault-fixture: {}\n'
+                'networks:\n  vault-fixture:\n    external: true\n    name: ' + network + '\n')
+    stack.network_override.write_text(overlay)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -179,10 +192,7 @@ print(json.dumps(rows))
         for role in ('kb', 'server'):
             stack = matrix.Stack(role, env, args.output, args.reference_memory_owner)
             stacks.append(stack)
-            stack.network_override.write_text('services:\n  aimee-' + role + ':\n    ports: !reset []\n'
-                '    networks:\n      default: {}\n      store: {}\n      models: {}\n      vault-fixture: {}\n'
-                '    volumes:\n      - ' + json.dumps(str(fixture) + ':/opt/aimee-e2e:ro') + '\n'
-                'networks:\n  vault-fixture:\n    external: true\n    name: ' + network + '\n')
+            configure_probe_overlay(stack, fixture, network)
             matrix.command('python3', str(ROOT / 'scripts/compose-vault-init.py'),
                            *stack.compose_args(), 'up', env=stack.env)
             matrix.command('docker', 'compose', *stack.compose_args(), 'run', '--rm', '--no-deps', '-T',
