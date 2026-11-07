@@ -22,8 +22,10 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 }
 char *kb_v1_action_request(const char *action, cJSON *request)
 {
-   (void)action;
-   (void)request;
+   assert(!strcmp(action, "memory.episode_card_generate"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "source_session")),
+                  "s"));
+   cJSON_Delete(request); /* Match the production action transport's ownership. */
    return strdup("{\"status\":\"ok\",\"memory_unit_id\":1}");
 }
 int db1_server_session_delete(const char *sid)

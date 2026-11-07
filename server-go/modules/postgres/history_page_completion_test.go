@@ -194,7 +194,8 @@ func TestCanonicalHistoryCompletionActualSQLWire(t *testing.T) {
 			}
 			denied, denyWire := completionSQLStore(t, pool, "")
 			deniedStatus, deniedCells, err := completionSQLHistory(t, denied, session, "foreign-actor")
-			if err != nil || deniedStatus != domain.StatusMissing || len(deniedCells) != 0 || denyWire.pages != 1 {
+			// The separate owner lock refuses before issuing any history page.
+			if err != nil || deniedStatus != domain.StatusMissing || len(deniedCells) != 0 || denyWire.pages != 0 {
 				t.Fatal("foreign owner disclosed current history", err, deniedStatus)
 			}
 		})

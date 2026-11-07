@@ -3539,8 +3539,8 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "faa17878c6fb097ad350e120dddb636b5c019de65ef2c275bba800336fde442e",
-      "boundary_review": "The added C session.close fixture stubs kb_client_memory_scope_context_apply as a no-op and supplies an opaque success envelope. Its assertions exercise named delivery-conflict HTTP409 and unchanged success/failure cleanup; it implements no memory policy.",
+      "sha256": "4d70610292d40c84ada3bd8f0bd1545a31ce7b6400d1f8f7d8f8d3770a069607",
+      "boundary_review": "The added C session.close fixture stubs kb_client_memory_scope_context_apply as a no-op and supplies an opaque success envelope. Its assertions exercise named delivery-conflict HTTP409 and unchanged success/failure cleanup; it implements no memory policy. PR #3091 CI: the fixture now consumes the owned action request exactly like the production KB transport and asserts the existing episode-card action/session before returning the unchanged opaque reply. Named HTTP409 and cleanup assertions remain intact; the 483-byte ASan fixture leak is closed without adding memory policy.",
       "source_revisions": [
         {
           "disposition": "host-fixture",
@@ -3549,6 +3549,15 @@
           ],
           "sha256": "a5c0c0e0db49743182f1ca29d4cf7c874197d5ccbcb2c38ae4a48112ec08fc18",
           "boundary_review": "The added C session.close fixture stubs kb_client_memory_scope_context_apply as a no-op and supplies an opaque success envelope. Its assertions exercise named delivery-conflict HTTP409 and unchanged success/failure cleanup; it implements no memory policy."
+        },
+        {
+          "disposition": "host-fixture",
+          "symbols": [
+            "kb_client_memory_scope_context_apply"
+          ],
+          "sha256": "faa17878c6fb097ad350e120dddb636b5c019de65ef2c275bba800336fde442e",
+          "boundary_review": "The added C session.close fixture stubs kb_client_memory_scope_context_apply as a no-op and supplies an opaque success envelope. Its assertions exercise named delivery-conflict HTTP409 and unchanged success/failure cleanup; it implements no memory policy.",
+          "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."
         }
       ],
       "format_review": "clang-format 19 mechanical formatting after reviewed upstream merge; current pin refreshed, prior semantic-review source retained in source_revisions."

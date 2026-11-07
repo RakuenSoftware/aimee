@@ -1045,7 +1045,8 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    if (memory_owned)
    {
       cJSON_Delete(req);
-      return error_json("memory bus service unavailable or unsupported");
+      return kb_typed_error_json(KB_CLIENT_RESULT_UNAVAILABLE,
+                                 "memory bus service unavailable or unsupported");
    }
 
    char *escaped = kb_client_query_escape(action);

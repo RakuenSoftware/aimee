@@ -3051,7 +3051,7 @@ $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.
                                         $(OBJDIR)/module_commands.o \
                                         $(OBJDIR)/module_json_call.o \
                                         $(OBJDIR)/cJSON.o $(OURO_RING_LIB)
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
 unit-test-module-json-call: $(TESTPREFIX)/unit-test-module-json-call
 	$<
@@ -3834,7 +3834,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/modules/translation/aimee_resp
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
     $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 # P2c (response-side tool policing) integration test: same source as
 # unit-test-anthropic-http but linked against the REAL modules/gateway/gateway_policy.o
@@ -3847,7 +3847,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/modules/translation/aimee_
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
     $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 # P2c streaming integration test: linked against the REAL modules/gateway/gateway_policy.o
 # so the streaming policy branch in messages_stream runs as in production.
@@ -3859,7 +3859,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/modules/translat
     $(OBJDIR)/core/turn_integrity/turn_integrity.o  \
     $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
     $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto -lm
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -6817,9 +6817,9 @@ unit-test-mcp-source-discovery: $(TESTPREFIX)/unit-test-mcp-source-discovery
 
 # Generic original-input protocol: no DB/service/provider in these boundary tests.
 $(TESTPREFIX)/unit-test-db1-original-input-client: $(OBJDIR)/tests/test_db1_original_input_client.o $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/transport.o
-	$(CC) $(CFLAGS) -Wl,--gc-sections $^ -o $@ $(LDFLAGS)
+	$(TESTLINK_MIN) $(CFLAGS) -Wl,--gc-sections $^ -o $@ $(EXTRA_L_FLAGS) $(LDFLAGS)
 $(TESTPREFIX)/unit-test-host-original-text: $(OBJDIR)/tests/test_host_original_text.o $(OBJDIR)/server/host_original_text.o
-	$(CC) $(CFLAGS) -Wl,--gc-sections $^ -o $@ $(LDFLAGS) -lpthread
+	$(TESTLINK_MIN) $(CFLAGS) -Wl,--gc-sections $^ -o $@ $(EXTRA_L_FLAGS) $(LDFLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-host-original-submission: $(OBJDIR)/tests/test_host_original_submission.o \
     $(OBJDIR)/server/host_original_submission.o $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -7091,7 +7091,6 @@ $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/modules/vault/vault_store.o 
 
 $(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/tests/support/http_empty_module_registry.o $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/core/turn_integrity/turn_integrity.o
 
-$(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: EXTRA_L_FLAGS += -lm
 
 $(TESTPREFIX)/unit-test-anthropic-http $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/server/tool_args_coerce.o
 
@@ -7109,7 +7108,6 @@ $(OBJDIR)/tests/guardrail_telemetry_protocol_client.o: db1_client/telemetry.c
 $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/session_state_protocol_client.o
 $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/guardrail_telemetry_protocol_client.o
 
-$(TESTPREFIX)/unit-test-module-json-call: EXTRA_L_FLAGS += -lcrypto
 
 # These fixtures exercise module dispatch through the real registry and OSV gate.
 $(addprefix $(TESTPREFIX)/unit-test-,oauth-pkce oauth-reauth oauth-refresh-diagnostics policy-arms approach-memory curiosity-resolve eval-candidates server-mgmt-status web-search-fuse bus-shutdown-race): \
@@ -7117,6 +7115,6 @@ $(addprefix $(TESTPREFIX)/unit-test-,oauth-pkce oauth-reauth oauth-refresh-diagn
 
 $(TESTPREFIX)/unit-test-server-native-owned-guard: $(OBJDIR)/tests/support/log_stub.o
 $(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/server/host_original_text.o
-$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: $(KB_MCP_OBJS)
+$(TESTPREFIX)/unit-test-kb-vault-key-use-live $(TESTPREFIX)/unit-test-kb-vault-rotation-live $(TESTPREFIX)/unit-test-kb-vault-rotation-worker-live $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: $(KB_MCP_OBJS) $(OBJDIR)/server/model_provider.o
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/server/module_native_tools.o $(OBJDIR)/server/tool_args_coerce.o
 $(TESTPREFIX)/unit-test-server-dispatch: $(OURO_RING_LIB)

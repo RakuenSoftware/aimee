@@ -57,6 +57,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true', help='retain test containers for diagnosis')
     parser.add_argument('--storage', choices=('plain', 'luks'), default='plain')
+    parser.add_argument('--reference-memory-owner', type=Path,
+                        help='explicit frozen external owner for memory persistence assertions; not shipped')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('run as root in a disposable Docker VM')
@@ -80,7 +82,7 @@ def main():
         if args.storage == 'luks':
             env['AIMEE_DEVICE_MAPPER_MAJOR'] = next(line.split()[0] for line in Path('/proc/devices').read_text().splitlines()
                                                   if line.split()[-1:] == ['device-mapper'])
-        stack = matrix.Stack('kb', env, args.output)
+        stack = matrix.Stack('kb', env, args.output, args.reference_memory_owner)
         exercise(stack, check)
     except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError):
         checks.append(dict(name='current-layout KB recreation completed', passed=False))

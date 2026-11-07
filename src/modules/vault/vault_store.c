@@ -1860,6 +1860,22 @@ static int fenced_use_checked(const char *secret, size_t length, void *opaque)
 __attribute__((used, externally_visible, retain))
 const unsigned aimee_vault_generation_fenced_use_contract_v1 = 1;
 
+/* Deliver a pending cancellation only after locks and secret buffers are gone.
+ * Restore enabled callers in deferred mode before testing, then restore their
+ * original type on normal return. In particular, glibc 2.39 async-enable can
+ * terminate with a NULL join result instead of PTHREAD_CANCELED; an explicit
+ * deferred delivery preserves both cancellation status and the no-success-ACK
+ * boundary. Previously disabled callers remain disabled with their type intact. */
+static void restore_vault_cancellation(int previous_state)
+{
+   int previous_type = PTHREAD_CANCEL_DEFERRED;
+   (void)pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &previous_type);
+   (void)pthread_setcancelstate(previous_state, NULL);
+   if (previous_state == PTHREAD_CANCEL_ENABLE)
+      pthread_testcancel();
+   (void)pthread_setcanceltype(previous_type, NULL);
+}
+
 int vault_store_use_server_generation_fenced(const char *principal,
                                              const uint8_t server_kek[VAULT_KEK_LEN],
                                              const char *agent, const char *cred,
@@ -1901,7 +1917,7 @@ int vault_store_use_server_generation_fenced(const char *principal,
       OPENSSL_cleanse(buffer, CAPACITY);
       free(buffer);
    }
-   (void)pthread_setcancelstate(previous_cancel, NULL);
+   restore_vault_cancellation(previous_cancel);
    return rc;
 }
 
@@ -2145,9 +2161,7 @@ vault_store_close_server_slot_once(const char *principal, const char *agent, con
       result = VAULT_RETIRE_GENERATION_IO;
    if (result == VAULT_RETIRE_GENERATION_CONFIRMED)
       memcpy(closed_generation, selected, sizeof selected);
-   (void)pthread_setcancelstate(previous_cancel, NULL);
-   if (previous_cancel == PTHREAD_CANCEL_ENABLE)
-      pthread_testcancel();
+   restore_vault_cancellation(previous_cancel);
    return result;
 }
 __attribute__((used, externally_visible, retain)) vault_retire_generation_result_t
@@ -2173,8 +2187,6 @@ vault_store_retire_server_generation(const char *principal, const char *agent, c
       r = VAULT_RETIRE_GENERATION_IO;
    /* Every provider lock and temporary buffer must be released before a pending
     * cancellation can be delivered. No canceled caller receives a success ACK. */
-   (void)pthread_setcancelstate(previous_cancel, NULL);
-   if (previous_cancel == PTHREAD_CANCEL_ENABLE)
-      pthread_testcancel();
+   restore_vault_cancellation(previous_cancel);
    return r;
 }

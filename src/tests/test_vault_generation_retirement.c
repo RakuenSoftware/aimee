@@ -173,6 +173,47 @@ static void *held_thread(void *opaque)
                                                     held, NULL));
    return NULL;
 }
+static void cancellation_modes_preserved(void)
+{
+   int saved_state, saved_type;
+   assert(!pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &saved_state));
+   assert(!pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &saved_type));
+   const int states[] = {PTHREAD_CANCEL_ENABLE, PTHREAD_CANCEL_DISABLE};
+   const int types[] = {PTHREAD_CANCEL_DEFERRED, PTHREAD_CANCEL_ASYNCHRONOUS};
+   for (int operation = 0; operation < 3; operation++)
+      for (size_t state = 0; state < 2; state++)
+         for (size_t type = 0; type < 2; type++)
+         {
+            char slot[64], gen[VAULT_IMMUTABLE_GENERATION_CAP], closed[sizeof gen];
+            assert(snprintf(slot, sizeof slot, "cancel-restore-%d-%zu-%zu", operation, state,
+                            type) < (int)sizeof slot);
+            create(slot, gen);
+            assert(!pthread_setcanceltype(types[type], NULL));
+            assert(!pthread_setcancelstate(states[state], NULL));
+            if (operation == 0)
+               assert(vault_store_retire_server_generation(principal, agent, slot, gen) ==
+                      VAULT_RETIRE_GENERATION_CONFIRMED);
+            else if (operation == 1)
+               assert(vault_store_close_server_slot_once(principal, agent, slot, closed,
+                                                         sizeof closed) ==
+                          VAULT_RETIRE_GENERATION_CONFIRMED &&
+                      !strcmp(closed, gen));
+            else
+               assert(!vault_store_use_server_generation_fenced(principal, key, agent, slot, gen,
+                                                                use, NULL));
+            int actual_state, actual_type;
+            assert(!pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &actual_state));
+            assert(!pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &actual_type));
+            assert(actual_state == states[state] && actual_type == types[type]);
+            assert(vault_store_retire_server_generation(principal, agent, slot, gen) ==
+                   VAULT_RETIRE_GENERATION_CONFIRMED);
+            retired(slot, gen);
+         }
+   assert(!pthread_setcanceltype(saved_type, NULL));
+   assert(!pthread_setcancelstate(saved_state, NULL));
+   puts("PASS vault guarded operations preserve caller cancellation state/type (12 cases)");
+}
+
 static void cancellation_tests(const char *home)
 {
    for (cancellation_closure = 0; cancellation_closure < 2; cancellation_closure++)
@@ -240,6 +281,12 @@ static void cancellation_tests(const char *home)
                assert(write(cancellation_release[1], &c, 1) == 1);
             void *result = NULL;
             assert(!pthread_join(worker, &result));
+            if (result != PTHREAD_CANCELED || atomic_load(&cancellation_returned))
+               fprintf(stderr,
+                       "vault cancellation closure=%d async=%d phase=%d cancelled=%d "
+                       "null_result=%d returned=%d\n",
+                       cancellation_closure, async, mode, result == PTHREAD_CANCELED,
+                       result == NULL, atomic_load(&cancellation_returned));
             assert(result == PTHREAD_CANCELED && !atomic_load(&cancellation_returned));
             assert(vault_store_retire_server_generation(principal, agent, slot, cancel_gen) ==
                    VAULT_RETIRE_GENERATION_CONFIRMED);
@@ -641,5 +688,6 @@ int main(int argc, char **argv)
    puts("PASS missing optional backend capability refuses without legacy-delete fallback");
    slot_closure_tests(home, argv[0]);
    cancellation_tests(home);
+   cancellation_modes_preserved();
    return 0;
 }

@@ -130,6 +130,24 @@ class ReferenceSelectionTests(unittest.TestCase):
         self.assertNotIn('ready', result)
         self.assertEqual(result['pool'], dict(size=8, available=False))
 
+    def test_correction_diagnostic_keeps_assertion_evidence_without_content(self):
+        result = MATRIX.safe_correction_summary(dict(kind='forbidden',
+            message='idempotent mutations require an authenticated principal',
+            proposal=dict(content='private-body', payload_digest='private-digest'),
+            private='private-identity'), True)
+        self.assertEqual(result['kind'], 'forbidden')
+        self.assertEqual(result['message_category'], 'retry_principal_absent')
+        self.assertTrue(result['authoritative_content_unchanged'])
+        self.assertNotIn('private-', json.dumps(result))
+
+    def test_owner_model_transport_cannot_assert_operator_identity(self):
+        model = MATRIX.review_action_headers('transport-fixture', 'service-fixture', True)
+        self.assertEqual(model, {'Content-Type': 'application/json',
+            'Authorization': 'Bearer transport-fixture',
+            'X-Aimee-Service-Authorization': 'Bearer service-fixture'})
+        operator = MATRIX.review_action_headers('transport-fixture', 'service-fixture', False)
+        self.assertEqual(operator['X-Aimee-Caller-Subject'], 'review_operator')
+
     def test_container_health_outputs_are_discarded(self):
         secret = 'private-health-command-output'
         result = MATRIX.safe_container_state(dict(Status='running', ExitCode=0, OOMKilled=False,

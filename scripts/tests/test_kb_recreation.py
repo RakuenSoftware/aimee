@@ -2,6 +2,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
+import os
+from unittest.mock import Mock
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +42,25 @@ class Stack:
 
 
 class KBRecreationTests(unittest.TestCase):
+    def test_cli_passes_only_explicit_reference_to_stack(self):
+        for selected in (None, '/external/aimee-module-memory'):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as directory:
+                arguments = ['kb-upgrade-e2e.py', '--output', directory]
+                if selected:
+                    arguments += ['--reference-memory-owner', selected]
+                stack = Mock()
+                def exercise(candidate, check):
+                    self.assertIs(candidate, stack)
+                    check('fixture ready', True)
+                with patch('sys.argv', arguments), patch.object(gate.os, 'geteuid', return_value=0), \
+                     patch.dict(os.environ, dict(AIMEE_APPLICATION_IMAGE='app',
+                                AIMEE_POSTGRES_IMAGE='pg', AIMEE_EMBEDDER_IMAGE='embed')), \
+                     patch.object(gate.matrix, 'Stack', return_value=stack) as factory, \
+                     patch.object(gate, 'exercise', side_effect=exercise):
+                    self.assertEqual(gate.main(), 0)
+                self.assertEqual(factory.call_args.args[3], Path(selected) if selected else None)
+                stack.compose.assert_called_once_with('down', '--volumes', '--remove-orphans')
+
     def run_gate(self, stack):
         def check(name, passed):
             if not passed:

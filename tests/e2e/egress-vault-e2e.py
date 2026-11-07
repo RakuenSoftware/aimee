@@ -88,6 +88,8 @@ def provider_handler(state):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--reference-memory-owner', type=Path,
+                        help='explicit frozen external owner for full application readiness; not shipped')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     checks, stacks = [], []
@@ -175,7 +177,7 @@ print(json.dumps(rows))
                    EMBEDDER_MODEL='bekko-a25m', EMBEDDER_DIMS='384',
                    EMBEDDER_URL='https://aimee-embedder:8762')
         for role in ('kb', 'server'):
-            stack = matrix.Stack(role, env, args.output)
+            stack = matrix.Stack(role, env, args.output, args.reference_memory_owner)
             stacks.append(stack)
             stack.network_override.write_text('services:\n  aimee-' + role + ':\n    ports: !reset []\n'
                 '    networks:\n      default: {}\n      store: {}\n      models: {}\n      vault-fixture: {}\n'

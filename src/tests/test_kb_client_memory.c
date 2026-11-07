@@ -71,7 +71,9 @@ static void unavailable_is_not_empty(void)
    char *raw = request("memory.list", "{\"scope\":\"all\"}", 731);
    cJSON *value = cJSON_Parse(raw);
    assert(value);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "status")), "ok"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "status")),
+                  "unavailable"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value, "retryable")));
    assert(!cJSON_HasObjectItem(value, "memories") && !http_calls);
    free(raw);
    cJSON_Delete(value);
@@ -115,6 +117,13 @@ static void exact_raw_data_scope_and_budget(void)
    raw = request("memory.store", "{\"content\":\"fixture\"}", 731);
    assert(!strcmp(raw, owner_reply));
    free(raw);
+   /* An actual selected-owner projection refusal remains authoritative: do not
+    * reclassify it as the missing optional dependency above. */
+   owner_reply = "{\"status\":\"error\",\"kind\":\"invalid_projection\","
+                 "\"message\":\"selected owner refused projection\"}";
+   raw = request("memory.assemble_typed_context", "{\"query\":\"fixture\"}", 731);
+   assert(!strcmp(raw, owner_reply) && !http_calls);
+   free(raw);
    owner_reply = "{} trailing";
    raw = request("memory.serve", "{\"store\":\"user\"}", 731);
    assert(raw && !strstr(raw, "trailing") && !http_calls);
@@ -146,6 +155,12 @@ static void every_memory_namespace_refuses_fallback(void)
    {
       char *raw = request(methods[i], "{}", 731);
       assert(raw && strstr(raw, "memory bus service unavailable or unsupported"));
+      cJSON *value = cJSON_Parse(raw);
+      assert(value &&
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "status")),
+                     "unavailable"));
+      assert(!cJSON_HasObjectItem(value, "memories") && !http_calls);
+      cJSON_Delete(value);
       free(raw);
    }
    assert(!http_calls);
