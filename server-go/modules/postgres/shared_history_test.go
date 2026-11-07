@@ -164,11 +164,39 @@ func TestSharedCanonicalHistoryPagesEscapedArchiveAndLongLog(t *testing.T) {
 	}
 }
 
+// Count actual SQL wire requests and inject a failure after the first batch was
+// inserted in the transaction. No partial checkpoint may survive that failure.
+type historyImportWireCaller struct {
+	sharedStoreCaller
+	calls, batches, failBatch int
+}
+
+func (c *historyImportWireCaller) Call(ctx context.Context, kind, stage uint32, id uint64, deadline time.Duration, body []byte) ([]byte, error) {
+	c.calls++
+	if len(body) > int(ring.ModuleMessageMaxBody) {
+		return nil, fmt.Errorf("oversized import SQL request: %d", len(body))
+	}
+	if bytes.Contains(body, []byte("WITH supplied AS MATERIALIZED")) {
+		c.batches++
+		if c.batches == c.failBatch {
+			return nil, fmt.Errorf("controlled import second chunk failure")
+		}
+	}
+	return c.sharedStoreCaller.Call(ctx, kind, stage, id, deadline, body)
+}
+
 func TestSharedCanonicalLargeImportUsesBoundedOperationBudget(t *testing.T) {
 	pool := sharedTestDatabase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	store := sharedTestStore(t, pool)
+	handler := &sqlHandler{txs: newTxRegistry(),
+		poolFn:          func(context.Context) (*pgxpool.Pool, error) { return pool, nil },
+		migrationPoolFn: func(context.Context) (*pgxpool.Pool, error) { return pool, nil }}
+	caller := &historyImportWireCaller{sharedStoreCaller: sharedStoreCaller{handler.handle}}
+	store, err := db.NewStore(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := families.ApplySchema(ctx, store); err != nil {
 		t.Fatal(err)
 	}
@@ -195,10 +223,36 @@ func TestSharedCanonicalLargeImportUsesBoundedOperationBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	caller.calls, caller.batches, caller.failBatch = 0, 0, 2
+	failedReply, failedStatus := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
+	failedResult, _, failedErr := wire.DecodeFields(failedReply)
+	if failedStatus == ring.ModuleStatusOK && failedErr == nil && failedResult == domain.StatusOK {
+		t.Fatal("controlled second chunk failure succeeded")
+	}
+	var remaining int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM session_ir_events WHERE session_id='import'`).Scan(&remaining); err != nil || remaining != 0 || caller.batches != 2 {
+		t.Fatal("partial import survived rollback", remaining, caller.batches, err)
+	}
+	var preserved string
+	if err = pool.QueryRow(ctx, `SELECT messages_json FROM primary_sessions WHERE session_id='import'`).Scan(&preserved); err != nil || preserved != string(raw) {
+		t.Fatal("import changed original source", err)
+	}
+	caller.calls, caller.batches, caller.failBatch = 0, 0, 0
+	started := time.Now()
 	reply, status := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
+	t.Logf("4097-message import: %s, SQL calls=%d insert batches=%d", time.Since(started), caller.calls, caller.batches)
+	if caller.calls > 500 || caller.batches != (len(messages)+2+127)/128 {
+		t.Fatal("import reverted to per-message SQL", caller.calls, caller.batches)
+	}
 	result, cells, err := wire.DecodeFields(reply)
 	if status != ring.ModuleStatusOK || err != nil || result != domain.StatusOK || len(cells) != 1 || cells[0] != "imported" {
 		t.Fatalf("large import failed: transport=%d result=%d err=%v disposition=%v", status, result, err, cells)
+	}
+	caller.calls, caller.batches = 0, 0
+	replayReply, replayStatus := families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)
+	replayResult, _, replayErr := wire.DecodeFields(replayReply)
+	if replayStatus != ring.ModuleStatusOK || replayErr != nil || replayResult != domain.StatusOK || caller.batches != 0 || caller.calls > 500 {
+		t.Fatal("exact import replay changed checkpoint or exceeded bounded SQL", replayStatus, replayResult, replayErr, caller.calls, caller.batches)
 	}
 	request, _ = wire.EncodeFields(33, []string{"import", "primary", "actor", ""})
 	reply, status = families.Sessions.Handler(store)(ring.ModuleInvocation{StageID: families.StageSessions}, request)

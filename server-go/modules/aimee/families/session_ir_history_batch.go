@@ -34,14 +34,19 @@ const sessionIRHistoryInsertBatchSQL = `WITH supplied AS MATERIALIZED (
 ) SELECT event_id,sequence::text FROM inserted ORDER BY inserted.sequence`
 
 func sessionIRHistoryAppendBatchAuthorized(ctx context.Context, q store.Queryer, f, events []string, allowToolSource, allowInput bool) (uint32, []string, error) {
+	return sessionIRHistoryAppendBatch(ctx, q, f, events, false, allowToolSource, allowInput)
+}
+
+// Import authority is supplied only by the source-locked migration operation.
+func sessionIRHistoryAppendBatch(ctx context.Context, q store.Queryer, f, events []string, allowImport, allowToolSource, allowInput bool) (uint32, []string, error) {
 	ctx, finishTiming := startHistoryTiming(ctx, historyTimingAppend, -1)
 	defer finishTiming()
 	// Check the complete generated replacement before any store access, exactly as
-	// the individual append path does. These events are only message/commit history.
+	// the individual append path does. Import-only phases require explicit authority.
 	entries := make([]historyAppendEntry, 0, len(events))
 	for index, event := range events {
 		entry := historyAppendEntry{f[1] + ":" + strconv.Itoa(index), event, index}
-		kind, valid := sessionIRAppendInputValid([]string{f[0], entry.ID, f[1], f[3], event}, false, false, false, false, allowToolSource, allowInput)
+		kind, valid := sessionIRAppendInputValid([]string{f[0], entry.ID, f[1], f[3], event}, false, false, false, allowImport, allowToolSource, allowInput)
 		if !valid || kind != "history" {
 			return store.StatusInvalid, nil, nil
 		}
@@ -73,7 +78,7 @@ func sessionIRHistoryAppendBatchAuthorized(ctx context.Context, q store.Queryer,
 			size += len(encoded)
 			end++
 		}
-		status, err := sessionIRHistoryAppendChunk(ctx, q, f, entries[offset:end], allowToolSource, allowInput)
+		status, err := sessionIRHistoryAppendChunk(ctx, q, f, entries[offset:end], allowImport, allowToolSource, allowInput)
 		if err != nil || status != store.StatusOK {
 			return status, nil, err
 		}
@@ -81,7 +86,7 @@ func sessionIRHistoryAppendBatchAuthorized(ctx context.Context, q store.Queryer,
 	}
 	return store.StatusOK, nil, nil
 }
-func sessionIRHistoryAppendChunk(ctx context.Context, q store.Queryer, f []string, entries []historyAppendEntry, allowToolSource, allowInput bool) (uint32, error) {
+func sessionIRHistoryAppendChunk(ctx context.Context, q store.Queryer, f []string, entries []historyAppendEntry, allowImport, allowToolSource, allowInput bool) (uint32, error) {
 	encoded, err := json.Marshal(entries)
 	if err != nil {
 		return 0, err
@@ -89,7 +94,7 @@ func sessionIRHistoryAppendChunk(ctx context.Context, q store.Queryer, f []strin
 	// A single oversized event retains the old bounded individual append path.
 	if len(encoded) > historyAppendBatchBytes {
 		for _, e := range entries {
-			status, _, err := sessionIRAppendInputAuthorized(ctx, q, []string{f[0], e.ID, f[1], f[3], e.Payload}, false, false, false, false, allowToolSource, allowInput)
+			status, _, err := sessionIRAppendInputAuthorized(ctx, q, []string{f[0], e.ID, f[1], f[3], e.Payload}, false, false, false, allowImport, allowToolSource, allowInput)
 			if err != nil || status != store.StatusOK {
 				return status, err
 			}
@@ -139,7 +144,7 @@ func sessionIRHistoryAppendChunk(ctx context.Context, q store.Queryer, f []strin
 	if len(missing) == 0 {
 		return store.StatusOK, nil
 	}
-	if !allowInput {
+	if !allowInput && historyBatchNeedsOrdinaryInput(entries) {
 		allowed, err := ordinaryInputHistoryAllowed(ctx, q, f[0], f[2])
 		if err != nil {
 			return 0, err
@@ -199,4 +204,24 @@ func sessionIRHistoryAppendChunk(ctx context.Context, q store.Queryer, f []strin
 		}
 	}
 	return store.StatusOK, nil
+}
+
+// Report/archive events carry no replacement input. Message, fragment and commit
+// events share the enclosing checkpoint scope, including on import batches.
+func historyBatchNeedsOrdinaryInput(entries []historyAppendEntry) bool {
+	for _, e := range entries {
+		var event struct {
+			Payload struct {
+				Phase string `json:"phase"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal([]byte(e.Payload), &event) != nil {
+			return true
+		}
+		switch event.Payload.Phase {
+		case "message", "message_fragment", "commit":
+			return true
+		}
+	}
+	return false
 }
