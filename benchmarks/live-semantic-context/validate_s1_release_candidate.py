@@ -150,6 +150,15 @@ $(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
                 candidate[file] = candidate[file].replace(
                     "$(OBJDIR)/" + old, "$(OBJDIR)/" + replacement if replacement else "")
                 candidate[file] = candidate[file].replace(old, replacement)
+    # PR #3091 shares the optional committed-code mutation observer with all
+    # test targets. LSP does not call it and unused sections are discarded.
+    # Model this exact additional object in the frozen recipe, rather than
+    # ignoring added objects, compiler flags, or arbitrary link inputs.
+    candidate[1] = candidate[1].replace(
+        "KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o\n",
+        "KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o "
+        "$(OBJDIR)/kb_store/index_observer.o\n")
+    candidate[1] += "\n$(OBJDIR)/kb_store/index_observer.o: C_FLAGS += -Imodules/kb/include\n"
     frozen_plan = build_plan(*candidate)
     # Oct 27: the ring moved to github.com/RakuenSoftware/ouroboros-ring and is
     # linked as an installed package under build/deps/ouroboros-ring. Its include
@@ -229,8 +238,24 @@ REVIEWED_HOST_INTEGRATIONS = json.loads(
     Path(__file__).with_name("s1-host-integration.json").read_text()
 )
 
+# Preserve the earlier reviewed host integration and its immutable candidate
+# pins. Reverse only the exact shared-file source-custody/formatting blocks,
+# then run the existing complete frozen-source comparison below.
+REVIEWED_SOURCE_CUSTODY_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-source-custody-integration.json").read_text()
+)["paths"]
+
+
+def source_custody_integration_base(path: str, current: str) -> str:
+    blocks = REVIEWED_SOURCE_CUSTODY_INTEGRATIONS.get(path, [])
+    if blocks and all(current.count(block["release_text"]) == 1 for block in blocks):
+        for block in blocks:
+            current = current.replace(block["release_text"], block["frozen_text"], 1)
+    return current
+
 
 def host_integration_base(path: str, current: str) -> str | None:
+    current = source_custody_integration_base(path, current)
     blocks = REVIEWED_HOST_INTEGRATIONS.get(path)
     if not blocks:
         return None

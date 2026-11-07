@@ -19,6 +19,39 @@
 static char *g_captured_sql = NULL;
 static int g_fake_conn = 0;
 
+/* Observer opt-in is absent in this schema-only fixture. Any observer data
+ * query would be a scope regression, not a successful fake database read. */
+int aimee_pg_is_shim(void)
+{
+   return 0;
+}
+int aimee_pg_in_transaction(void *connection)
+{
+   assert(connection == &g_fake_conn);
+   return 0;
+}
+int aimee_pg_column_int(aimee_pg_stmt_t *statement, int column)
+{
+   (void)statement;
+   (void)column;
+   assert(!"schema-only fixture unexpectedly queried observer state");
+   return 0;
+}
+int64_t aimee_pg_column_int64(aimee_pg_stmt_t *statement, int column)
+{
+   (void)statement;
+   (void)column;
+   assert(!"schema-only fixture unexpectedly queried observer state");
+   return 0;
+}
+int aimee_pg_column_type(aimee_pg_stmt_t *statement, int column)
+{
+   (void)statement;
+   (void)column;
+   assert(!"schema-only fixture unexpectedly queried observer state");
+   return 0;
+}
+
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    (void)errbuf;

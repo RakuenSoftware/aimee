@@ -242,9 +242,18 @@ static int wire_send_acquire(void *opaque)
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
    if (context && !context->memory_source_release[0])
       return 0;
-   if (!ingress_preinject_acquire_send_guard || !ingress_preinject_release_send_guard)
-      return -1;
-   return ingress_preinject_acquire_send_guard(&attempt->send_guard_state);
+   int result = ingress_preinject_acquire_send_guard && ingress_preinject_release_send_guard
+                    ? ingress_preinject_acquire_send_guard(&attempt->send_guard_state)
+                    : -1;
+   if (result != 0)
+   {
+      /* The guard can set a more specific current refusal. Do not report a
+       * stale default left by an earlier successful wire selection. */
+      context = request_context_get ? request_context_get() : NULL;
+      last_error = context && context->context_refusal_kind[0] ? context->context_refusal_kind
+                                                               : "unavailable";
+   }
+   return result;
 }
 extern int ingress_preinject_started_attempt(const char *) __attribute__((weak));
 static void wire_send_release(void *opaque, int status)

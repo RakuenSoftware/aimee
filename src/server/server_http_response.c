@@ -173,6 +173,10 @@ static void retry_after_header(char *dst, size_t n)
       dst[0] = '\0';
 }
 
+extern int host_original_submission_required(void) __attribute__((weak));
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_original_input_web_negotiation_contract_v1 = 1;
+
 void send_response(int fd, int status, const char *body, const char *request_id)
 {
    const char *reason = status == 200   ? "OK"
@@ -211,11 +215,15 @@ void send_response(int fd, int status, const char *body, const char *request_id)
    const char *encoding = compressed ? "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n" : "";
    const char *request_encoding =
        server_http_gzip_peek() ? "Accept-Request-Encoding: gzip\r\n" : "";
+   const char *original_input =
+       host_original_submission_required && host_original_submission_required()
+           ? "X-Aimee-Original-Input: required\r\n"
+           : "X-Aimee-Original-Input: optional\r\n";
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %zu\r\n%s%s%s%s%sConnection: %s\r\n\r\n",
+                       "Content-Length: %zu\r\n%s%s%s%s%s%sConnection: %s\r\n\r\n",
                        status, reason, wire_len, rid, reh, rah, encoding, request_encoding,
-                       server_http_keepalive_peek() ? "keep-alive" : "close");
+                       original_input, server_http_keepalive_peek() ? "keep-alive" : "close");
    write_all_fd(fd, head, hlen);
    if (wire_len > 0)
       write_all_fd(fd, wire_body, (int)wire_len);
@@ -374,4 +382,48 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
    if (!status)
       return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
    return status;
+}
+
+static int append_sse_text(char *buf, size_t n, size_t *pos, const char *s, size_t len)
+{
+   if (buf && *pos < n)
+   {
+      size_t avail = n - *pos;
+      size_t copy = len < avail ? len : avail - 1;
+      if (copy)
+         memcpy(buf + *pos, s, copy);
+      buf[*pos + copy] = '\0';
+   }
+   *pos += len;
+   return (int)*pos;
+}
+
+int server_http_sse_event_format(const char *event, const char *data_json, char *buf, size_t n)
+{
+   size_t pos = 0;
+   const char *p;
+
+   if (buf && n)
+      buf[0] = '\0';
+   if (!data_json)
+      return 0;
+   if (event && event[0])
+   {
+      append_sse_text(buf, n, &pos, "event: ", 7);
+      append_sse_text(buf, n, &pos, event, strlen(event));
+      append_sse_text(buf, n, &pos, "\n", 1);
+   }
+   p = data_json;
+   for (;;)
+   {
+      const char *nl = strchr(p, '\n');
+      append_sse_text(buf, n, &pos, "data: ", 6);
+      append_sse_text(buf, n, &pos, p, nl ? (size_t)(nl - p) : strlen(p));
+      append_sse_text(buf, n, &pos, "\n", 1);
+      if (!nl)
+         break;
+      p = nl + 1;
+   }
+   append_sse_text(buf, n, &pos, "\n", 1);
+   return (int)pos;
 }

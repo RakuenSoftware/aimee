@@ -50,7 +50,8 @@
     "server-go/modules/postgres/sessions_test.go",
     "server-go/modules/postgres/local_session_test.go",
     "server-go/modules/postgres/runtime_policy_test.go",
-    "server-go/modules/postgres/operator_policy_test.go"
+    "server-go/modules/postgres/operator_policy_test.go",
+    "server-go/modules/postgres/history_page_completion_test.go"
   ],
   "public_headers": [
     "src/modules/postgres/include/aimee/postgres/module_api.h",

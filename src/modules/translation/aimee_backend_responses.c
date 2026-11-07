@@ -187,7 +187,8 @@ cJSON *responses_backend_build_profile(const aimee_request_t *ir, aimee_response
    for (int i = 0; i < ir->n_messages; i++)
    {
       const aimee_message_t *im = &ir->messages[i];
-      int is_assistant = im->role && strcmp(im->role, "assistant") == 0;
+      const char *wire_role = aimee_ir_model_message_role(im);
+      int is_assistant = !strcmp(wire_role, "assistant");
       /* Preserve block ordering: reasoning may precede a call, and text can
        * appear on either side. Each native item is rendered at this boundary. */
       cJSON *last_message = NULL;
@@ -259,7 +260,7 @@ cJSON *responses_backend_build_profile(const aimee_request_t *ir, aimee_response
                   b->type == AIMEE_BLK_DOCUMENT)
          {
             cJSON_AddStringToObject(item, "type", "message");
-            cJSON_AddStringToObject(item, "role", im->role ? im->role : "user");
+            cJSON_AddStringToObject(item, "role", wire_role);
             cJSON *content = cJSON_AddArrayToObject(item, "content");
             cJSON *part = cJSON_CreateObject();
             if (b->type == AIMEE_BLK_TEXT)

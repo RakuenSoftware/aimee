@@ -14,6 +14,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
+#include "json_int64.h"
 #include "modules/kb/c/code_project_lifecycle.h"
 #include "modules/kb/c/cross_repo_stats.h" /* kb_store_cross_repo_set_trust, recompute_blocked_symbols */
 #include "modules/kb/c/cross_repo_classify.h"
@@ -33,7 +34,7 @@ static int code_project_manifest_response(const char *operation, const code_proj
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "operation", operation);
    cJSON_AddStringToObject(resp, "project", m->project);
-   cJSON_AddNumberToObject(resp, "generation", (double)m->generation);
+   cJSON_AddItemToObject(resp, "generation", jo_i64_value_exact(m->generation));
    cJSON_AddStringToObject(resp, "mode", m->mode);
    if (m->criteria[0])
       cJSON_AddStringToObject(resp, "criteria", m->criteria);
@@ -129,7 +130,7 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
          cJSON_AddStringToObject(resp, "status", "ok");
          cJSON_AddStringToObject(resp, "operation", "detach");
          cJSON_AddStringToObject(resp, "project", project);
-         cJSON_AddNumberToObject(resp, "generation", (double)generation);
+         cJSON_AddItemToObject(resp, "generation", jo_i64_value_exact(generation));
          cJSON_AddStringToObject(resp, "state", "detached");
          cJSON_Delete(root);
          char *json = cJSON_PrintUnformatted(resp);

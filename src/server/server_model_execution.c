@@ -18,6 +18,7 @@
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/ir/session_event.h>
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
@@ -38,9 +39,11 @@ static int server_model_post_ir(const agent_t *agent, aimee_request_t *request, 
 {
    /* Completion repair may append a governed tool call after the answer. Its
     * existing owner requires buffering before any response is projected. */
-   int incremental = stream && options->stream_post && wire == AIMEE_WIRE_RESPONSES &&
-                     !server_model_governance_enabled() && !gateway_prevent_subagents_enabled() &&
-                     !gw_ir_response_completion_armed(request);
+   int incremental =
+       stream && options->stream_post && wire == AIMEE_WIRE_RESPONSES &&
+       !server_model_governance_enabled() && !gateway_prevent_subagents_enabled() &&
+       !gw_ir_response_completion_armed(request) &&
+       !agent_tools_module_native_requires_buffered_v1(request->tools, (size_t)request->n_tools);
    if (incremental)
       request->stream = 1;
    char *body = agent_render_gateway_request_ir(agent, request, wire);
@@ -201,11 +204,15 @@ int server_model_execute_prepared(const agent_t *agent, aimee_request_t *request
    }
    if (rc)
       return -1;
+   aimee_ir_capture_cause_t capture_cause = AIMEE_IR_CAPTURE_CAUSE_NONE;
    if (!(stream && stream->used) &&
        (!out->error_message || (options && options->capture_error_observations)) &&
-       aimee_ir_session_emit_buffered_response(out, NULL))
+       aimee_ir_session_emit_buffered_response_checked(out, NULL, &capture_cause))
    {
-      snprintf(error, capacity, "canonical response persistence failed");
+      snprintf(error, capacity, "%s",
+               capture_cause == AIMEE_IR_CAPTURE_CAUSE_INPUT_ADMISSION
+                   ? "module tool input admission refused"
+                   : "canonical response persistence failed");
       return -1;
    }
    if (options && options->response_projection && options->response_projection(out))

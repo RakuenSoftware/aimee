@@ -17,14 +17,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Memory-fact recall + decay/prune surfaces. A `lessons_` reference in any of
 # these means the ledger has leaked into normal recall or the prune schedule.
+# Concrete memory recall policy moved to the external implementation. Retain
+# public KB prune checks and generic adapter/SDK separation; no private parity claim.
 GUARDED = [
-    "server-go/modules/memory/data.go",            # shared scoped memory CRUD + recall
-    "server-go/modules/memory/fact_recall.go",
-    "server-go/modules/memory/assertion_search.go",
-    "server-go/modules/memory/typed_context.go",
-    "src/modules/kb/c/kb_maintenance.c",          # decay / prune sweep
-    "server-go/modules/memory/fact_maintenance.go",
+    "src/modules/kb/c/kb_maintenance.c",
     "src/modules/kb/c/demotion.c",
+    "server-go/modules/memory/adapter/unavailable.go",
+    "server-go/memory/client.go",
 ]
 
 # A `lessons_` token that denotes a table reference (SQL identifier), not an

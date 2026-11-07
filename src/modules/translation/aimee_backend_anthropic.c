@@ -852,7 +852,7 @@ static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
           !strcmp(ir->messages[i].role, "assistant"))
          continue; /* An observed empty assistant stays canonical, never fabricated native text. */
       cJSON *m = cJSON_CreateObject();
-      const char *role = ir->messages[i].role;
+      const char *role = aimee_ir_model_message_role(&ir->messages[i]);
       cJSON_AddStringToObject(m, "role", role && strcmp(role, "tool") ? role : "user");
       cJSON *content =
           blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks, preserve_cache);

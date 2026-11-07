@@ -1,5 +1,8 @@
 #include "agent_runtime_messages.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
 #include <aimee/ir/session_event.h>
 
 cJSON *agent_session_text_message(const char *role, const char *text)
@@ -11,23 +14,46 @@ cJSON *agent_session_text_message(const char *role, const char *text)
    return aimee_ir_message_json(&message);
 }
 
-static void append_text(cJSON *messages, const char *role, const char *text)
+static cJSON *advisory_message(const char *text, aimee_context_origin_t origin,
+                               aimee_context_authority_t authority, aimee_context_trust_t trust)
+{
+   if (!text)
+      return NULL;
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_ir_block_set_context(&block, origin, authority, trust, AIMEE_CTX_SENS_INTERNAL, 1, NULL,
+                              NULL, 0);
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   return aimee_ir_message_json(&message);
+}
+cJSON *agent_session_control_message(const char *text)
+{
+   return advisory_message(text, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_DIAGNOSTIC,
+                           AIMEE_CTX_TRUST_UNVERIFIED);
+}
+cJSON *agent_session_tool_evidence_message(const char *text)
+{
+   return advisory_message(text, AIMEE_CTX_ORIGIN_TOOL, AIMEE_CTX_AUTH_EVIDENCE,
+                           AIMEE_CTX_TRUST_UNTRUSTED);
+}
+static void append_advisory(cJSON *messages, const char *text, int evidence)
 {
    if (!messages || !text)
       return;
-   cJSON *message = agent_session_text_message(role, text);
+   cJSON *message =
+       evidence ? agent_session_tool_evidence_message(text) : agent_session_control_message(text);
    if (message && !cJSON_AddItemToArray(messages, message))
       cJSON_Delete(message);
 }
 
 void agent_session_append_final_instruction(cJSON *messages)
 {
-   append_text(
-       messages, "user",
+   append_advisory(
+       messages,
        "[FINAL RESPONSE REQUIRED] The tool turn budget is exhausted. Do not call tools, do not "
        "emit XML tool_call blocks, and do not request more inspection. Return the best final "
        "answer now from the evidence already gathered. Clearly note any uncertainty or missing "
-       "verification.");
+       "verification.",
+       0);
 }
 
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action)
@@ -42,27 +68,30 @@ void agent_session_append_final_retry_instruction(cJSON *messages, const char *a
             "best final answer now from the evidence already gathered. Clearly note any "
             "uncertainty or missing verification.",
             attempted_action && attempted_action[0] ? attempted_action : "a tool action");
-   append_text(messages, "user", content);
+   append_advisory(messages, content, 0);
 }
 
 void agent_session_append_degenerate_retry_instruction(cJSON *messages)
 {
-   append_text(messages, "user",
-               "[DELEGATE RESPONSE RETRY] Your previous response was raw tool-call markup or "
-               "degenerate text before any tool executed. Aimee is retrying automatically. If "
-               "inspection is needed, use the available tool interface so Aimee can execute it. "
-               "Do not emit XML, bracket, or dollar-prefixed tool-call markup as plain text. If "
-               "no tool is needed, return a plain prose answer.");
+   append_advisory(
+       messages,
+       "[DELEGATE RESPONSE RETRY] Your previous response was raw tool-call markup or "
+       "degenerate text before any tool executed. Aimee is retrying automatically. If "
+       "inspection is needed, use the available tool interface so Aimee can execute it. "
+       "Do not emit XML, bracket, or dollar-prefixed tool-call markup as plain text. If "
+       "no tool is needed, return a plain prose answer.",
+       0);
 }
 
 void agent_session_append_required_evidence_instruction(cJSON *messages)
 {
-   append_text(
-       messages, "user",
+   append_advisory(
+       messages,
        "[REPOSITORY EVIDENCE REQUIRED] Your previous response did not produce a successful "
        "repository lookup. Do not return final review prose yet. Call one of the available "
        "read-only repository or index tools now. Aimee will accept a final response only after "
-       "a successful tool result has been returned to you.");
+       "a successful tool result has been returned to you.",
+       0);
 }
 
 void agent_session_append_repository_evidence(cJSON *messages, const char *tool_name,
@@ -81,7 +110,7 @@ void agent_session_append_repository_evidence(cJSON *messages, const char *tool_
             "does not establish.\n"
             "tool=%s arguments=%s\nBEGIN_TOOL_OUTPUT\n%.8192s\nEND_TOOL_OUTPUT",
             tool_name, arguments ? arguments : "{}", result);
-   append_text(messages, "user", content);
+   append_advisory(messages, content, 1);
 }
 
 int agent_session_retry_final_tool_violation(cJSON *messages, const char *attempted_action,
@@ -192,4 +221,54 @@ int agent_required_evidence_needs_fallback(int required, int successful_evidence
 {
    return evidence_pending(required, successful_evidence_calls) && chatgpt_provider &&
           remaining_calls == 0;
+}
+
+int agent_exec_context_append_text(aimee_message_t *context, const char *text,
+                                   aimee_context_origin_t origin,
+                                   aimee_context_authority_t authority)
+{
+   if (!text || !text[0])
+      return 0;
+   if (context->n_blocks >= AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   aimee_block_t *blocks =
+       realloc(context->blocks, (size_t)(context->n_blocks + 1) * sizeof *blocks);
+   if (!blocks)
+      return -1;
+   context->blocks = blocks;
+   aimee_block_t *block = &blocks[context->n_blocks++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(text)};
+   if (!block->text)
+      return -1;
+   aimee_ir_block_set_context(block, origin, authority,
+                              authority == AIMEE_CTX_AUTH_POLICY ? AIMEE_CTX_TRUST_VERIFIED
+                                                                 : AIMEE_CTX_TRUST_UNVERIFIED,
+                              AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   return 0;
+}
+
+/* Read-only token/compaction view. It is never supplied to the model renderer. */
+char *agent_exec_context_text_view(const aimee_message_t *context)
+{
+   size_t size = 1;
+   for (int i = 0; i < context->n_blocks; ++i)
+      if (context->blocks[i].text)
+      {
+         size_t n = strlen(context->blocks[i].text);
+         if (n > SIZE_MAX - size)
+            return NULL;
+         size += n;
+      }
+   char *view = calloc(1, size);
+   if (!view)
+      return NULL;
+   size_t used = 0;
+   for (int i = 0; i < context->n_blocks; ++i)
+      if (context->blocks[i].text)
+      {
+         size_t n = strlen(context->blocks[i].text);
+         memcpy(view + used, context->blocks[i].text, n);
+         used += n;
+      }
+   return view;
 }

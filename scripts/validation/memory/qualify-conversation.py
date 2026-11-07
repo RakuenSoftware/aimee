@@ -113,7 +113,7 @@ def main():
     parser.add_argument("--endpoint");parser.add_argument("--token-file",type=Path)
     parser.add_argument("--ssh-vm",type=int,choices=(9212,9213,9214))
     parser.add_argument("--lab-root",type=Path)
-    parser.add_argument("--backend",required=True,choices=("native","cognee","hillock"));parser.add_argument("--output",type=Path,required=True)
+    parser.add_argument("--backend",required=True,choices=("native",));parser.add_argument("--output",type=Path,required=True)
     options=parser.parse_args()
     asyncio.run(run(options))
 

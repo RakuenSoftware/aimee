@@ -21,6 +21,7 @@ import aiohttp
 import discord
 
 from conversation_memory import ConversationMemory
+from native_memory import NativeConversation
 from copy import deepcopy
 from model_ir import message as ir_message, display_text, chat_message, chat_turn, ModelTurn
 from model_client import ThinClient
@@ -29,6 +30,10 @@ from behavior import BehaviorStore, context as behavior_context, persona_key, ch
 LOG = logging.getLogger("aimee.discord")
 WEBHOOK_URL = re.compile(r"https://discord\.com/api(?:/v10)?/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{40,200}\Z")
 MAX_RESPONSE = 1024 * 1024
+NATIVE_MODEL_INCOMPATIBILITY = (
+    "aims-native-v1 is incompatible with the canonical ThinClient model path: "
+    "its exact provider-byte custody contract is not supported; native dispatch refused"
+)
 STARTUP_MESSAGE = (
     "`Systems initializing…`\n"
     "`Memory banks linked. Thought engines warming. Discord uplink established.`\n\n"
@@ -92,6 +97,7 @@ class Config:
     behavior_operator_ids: tuple[int, ...] = ()
     workflow_enabled: bool = False
     workflow_peer_bot_ids: tuple[int, ...] = ()
+    native_state_directory: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -114,13 +120,16 @@ class Config:
         aimee_socket = Path(socket_value).expanduser() if socket_value else None
         if aimee_socket and not aimee_socket.is_absolute():
             raise ValueError("Aimee requires an absolute local socket")
+        profile = value.get("memory_profile", "native-assertions")
+        if profile == "aims-native-v1":
+            raise ValueError(NATIVE_MODEL_INCOMPATIBILITY)
         knowledge_endpoint = value.get("knowledge_endpoint")
         knowledge_key_file = Path(value["knowledge_key_file"]).expanduser() if value.get("knowledge_key_file") else None
         if bool(knowledge_endpoint) != bool(knowledge_key_file):
             raise ValueError("durable memory requires both knowledge endpoint and key file")
         if knowledge_endpoint:
             knowledge_url = urlsplit(knowledge_endpoint)
-            if (not aimee_socket or knowledge_url.scheme != "http" or knowledge_url.hostname != "127.0.0.1"
+            if ((not aimee_socket and profile != "aims-native-v1") or knowledge_url.scheme != "http" or knowledge_url.hostname != "127.0.0.1"
                     or not knowledge_url.port or knowledge_url.path != "/v1/actions"
                     or knowledge_url.query or knowledge_url.fragment or knowledge_url.username or knowledge_url.password
                     or not knowledge_key_file.is_absolute()):
@@ -132,8 +141,11 @@ class Config:
             raise ValueError("allowed_user_ids must be Discord user IDs")
         peers = value.get("peer_bot_ids", [])
         profile = value.get("memory_profile", "native-assertions")
-        if profile not in ("native-assertions", "conversation-v2"):
-            raise ValueError("memory_profile must be native-assertions or conversation-v2")
+        if profile not in ("native-assertions", "conversation-v2", "aims-native-v1"):
+            raise ValueError("unsupported memory_profile")
+        native_state_directory = Path(value["native_state_directory"]) if value.get("native_state_directory") else None
+        if profile != "aims-native-v1" and native_state_directory is not None:
+            raise ValueError("native_state_directory requires aims-native-v1")
         if (not isinstance(peers, list) or len(peers) > 8 or any(
                 not re.fullmatch(r"[0-9]{17,20}", str(peer)) for peer in peers)):
             raise ValueError("peer_bot_ids must be at most eight Discord bot IDs")
@@ -165,6 +177,7 @@ class Config:
                    aimee_library=library, aimee_profile=client_profile,
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
+                   native_state_directory=native_state_directory,
                    system_context=system, aimee_socket=aimee_socket,
                    peer_bot_ids=tuple(int(peer) for peer in peers), memory_profile=profile, behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)), workflow_enabled=workflow_enabled, workflow_peer_bot_ids=tuple(map(int, workflow_peers)))
 
@@ -216,7 +229,14 @@ class ModelClient:
     def __init__(self, config: Config, session: aiohttp.ClientSession):
         self.config, self.session = config, session
         self.conversation_memory = None
+        self.native_memory = None
         self.client = ThinClient(config)
+
+    def native_conversation(self, channel_id=None):
+        project = self.channel_project(channel_id)
+        if self.native_memory is None or self.native_memory.project != project:
+            self.native_memory = NativeConversation(self.knowledge_action, project, self.config.native_state_directory)
+        return self.native_memory
 
     def channel_project(self, channel_id: int | None) -> str:
         return f"discord:{self.config.guild_id}:{channel_id or self.config.channel_id}"
@@ -248,6 +268,9 @@ class ModelClient:
     async def capture_turn(self, turn: Turn, reply: str) -> bool:
         if not self.config.knowledge_endpoint:
             return False
+        if self.config.memory_profile == "aims-native-v1":
+            await self.native_conversation(turn.channel_id).capture(turn)
+            return not turn.is_bot
         if self.config.memory_profile == "conversation-v2":
             self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(turn.channel_id))
             await self.conversation_memory.capture(turn)
@@ -287,6 +310,8 @@ class ModelClient:
         return None
 
     async def memory_context(self, text: str, channel_id: int | None = None, *, provenance: bool = False) -> str:
+        if self.config.memory_profile == "aims-native-v1":
+            raise RuntimeError(NATIVE_MODEL_INCOMPATIBILITY)
         if self.config.knowledge_endpoint and self.config.memory_profile == "conversation-v2":
             self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(channel_id))
             return await self.conversation_memory.context(text)
@@ -594,6 +619,8 @@ class ModelClient:
         return f"{subject} is {number} {measurement} tall"
 
     async def reply(self, history: list[dict], text: str, channel_id: int | None = None, *, turn: Turn | None = None, behavior: dict | None = None, memory_unavailable: bool = False) -> dict:
+        if self.config.memory_profile == "aims-native-v1":
+            raise RuntimeError(NATIVE_MODEL_INCOMPATIBILITY)
         instructions = self.config.system_context
         if behavior and behavior.get("persona"):
             instructions = behavior["persona"]["instructions"]
@@ -801,14 +828,21 @@ class ChatBot(discord.Client):
         self.workflow = None
 
     async def setup_hook(self):
+        if self.config.memory_profile == "aims-native-v1":
+            raise RuntimeError(NATIVE_MODEL_INCOMPATIBILITY)
         self.delivery_session = aiohttp.ClientSession(trust_env=False)
         self.delivery = WebhookDelivery(self.config, self.delivery_session)
         await self.delivery.validate()
         self.model_client = ModelClient(self.config, self.delivery_session)
         if self.config.knowledge_endpoint:
-            await self.model_client.knowledge_action("memory.serve", {
-                "view": "relevant_context", "task": "startup",
-                "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
+            if self.config.memory_profile == "aims-native-v1":
+                await self.model_client.native_conversation(self.config.channel_id).probe()
+            else:
+                # Explicit legacy protocol; it is not silently redirected to a
+                # weaker native recall or unsigned collection-source shim.
+                await self.model_client.knowledge_action("memory.serve", {
+                    "view": "relevant_context", "task": "startup",
+                    "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
         if self.config.workflow_enabled:
             from workflow_chat import ChatWorkflow
             self.workflow = ChatWorkflow(self)
@@ -905,6 +939,23 @@ class ChatBot(discord.Client):
         LOG.info("Bot-account chat reply delivered (channel=%s peers=%s)", channel_id, peers)
         return delivered
 
+    async def send_native_chat_reply(self, channel_id, text, peers=()):
+        # Fixed Discord REST framing exposes the exact body-write admission
+        # point; the general discord.py sender does not provide that boundary.
+        native = self.model_client.native_conversation(channel_id)
+        delivered = []
+        for chunk in split_message(text):
+            payload = {"content": chunk, "allowed_mentions": {"parse": [],
+                "users": [str(uid) for uid in peers], "replied_user": False}}
+            value = await native.transmit(self.delivery_session,
+                f"https://discord.com/api/v10/channels/{channel_id}/messages", payload,
+                purpose="discord", headers={"Authorization": "Bot " + read_secret(self.config.bot_token_file)}, timeout=30)
+            message_id = value.get("id")
+            if not isinstance(message_id, str) or not re.fullmatch(r"[0-9]{17,20}", message_id):
+                raise RuntimeError("Discord delivery omitted its actual message receipt")
+            delivered.append(int(message_id))
+        return delivered
+
     async def send_paper(self, channel_id, paper, run, *, before_send=None):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         # Recover a lost acknowledgement before retrying a final delivery.
@@ -977,7 +1028,7 @@ class ChatBot(discord.Client):
                 if self.workflow and self.workflow.ingest(snapshot, turn):
                     # Contributions feed the WFE stage; no unrelated bot banter loop.
                     continue
-                generic = self.config.memory_profile == "conversation-v2"
+                generic = self.config.memory_profile in ("conversation-v2", "aims-native-v1")
                 if generic:
                     unavailable = False
                     try:
@@ -1032,7 +1083,17 @@ class ChatBot(discord.Client):
                 projection = getattr(self.model_client, "conversation_memory", None) if generic else None
                 if projection:
                     await projection.guard("acquire")
-                delivered_ids = await self.send_chat_reply(turn.channel_id, reply, peers)
+                if self.config.memory_profile == "aims-native-v1":
+                    delivered_ids = await self.send_native_chat_reply(turn.channel_id, reply, peers)
+                    response_turn = replace(turn, message_id=delivered_ids[0], user_id=self.user.id,
+                        author_name=getattr(self.user, "name", "Aimee"), is_bot=True,
+                        text=reply, reply_to_message_id=turn.message_id)
+                    try:
+                        await self.model_client.native_conversation(turn.channel_id).capture_response(response_turn)
+                    except Exception:
+                        LOG.warning("Native response retention unconfirmed; actual Discord delivery completed and will not be repeated")
+                else:
+                    delivered_ids = await self.send_chat_reply(turn.channel_id, reply, peers)
                 if projection:
                     await projection.guard("release")
                     try:

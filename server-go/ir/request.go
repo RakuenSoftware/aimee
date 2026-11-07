@@ -208,6 +208,25 @@ func DecodeRequest(encoded []byte) (*Request, error) {
 	if !utf8.Valid(encoded) || !validRequestJSONShape(encoded) || !Decode(encoded, &request) || !request.Valid() {
 		return nil, fmt.Errorf("invalid canonical request")
 	}
+	// Validate original block JSON before pointer fields can normalize an
+	// explicit null host receipt into absence.
+	var raw struct {
+		System   []json.RawMessage `json:"system"`
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if json.Unmarshal(encoded, &raw) != nil {
+		return nil, fmt.Errorf("invalid canonical source shape")
+	}
+	for _, block := range raw.System {
+		if !ValidBlock(block) {
+			return nil, fmt.Errorf("invalid canonical source block")
+		}
+	}
+	for _, message := range raw.Messages {
+		if !ValidMessage(message) {
+			return nil, fmt.Errorf("invalid canonical source message")
+		}
+	}
 	return &request, nil
 }
 
@@ -274,6 +293,15 @@ func DecodePolicyView(encoded []byte) (*PolicyView, error) {
 // DecodeMessages admits canonical history independently of a provider request.
 // Consumers may retain original JSON byte/order views after typed admission.
 func DecodeMessages(encoded []byte) ([]Message, error) {
+	var raw []json.RawMessage
+	if !Decode(encoded, &raw) || raw == nil || len(raw) > 4096 {
+		return nil, fmt.Errorf("invalid canonical messages")
+	}
+	for _, message := range raw {
+		if !ValidMessage(message) {
+			return nil, fmt.Errorf("invalid canonical source message")
+		}
+	}
 	var messages []Message
 	if !utf8.Valid(encoded) || !Decode(encoded, &messages) || messages == nil || len(messages) > 4096 {
 		return nil, fmt.Errorf("invalid canonical messages")

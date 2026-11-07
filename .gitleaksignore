@@ -336,3 +336,15 @@ ca19c574dcb98708bf0588bce846f674ea05366b:tests/baselines/modules/memory-ownershi
 a9cdd64b1b645435d660303bd8f50d3c6e97f2ff:tests/baselines/modules/memory-ownership.json:generic-api-key:2747
 10cffa7730156bb5c61c78ac3ac9181b0c4f8eae:tests/baselines/modules/memory-ownership.json:generic-api-key:2600
 93d6ffa35f7dc5bd5d679215d23c356607ea5c5c:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
+
+# Reviewed content SHA-256 values in the historical ownership source manifest;
+# exact commit/file/rule/line only, not credentials or a path/rule exemption.
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2710
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2711
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2840
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2841
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2853
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2854
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2860
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2908
+01b6cd29b41d061bbf535c868ff07c47b8d4d0fd:tests/baselines/modules/memory-ownership-current.json:generic-api-key:2909

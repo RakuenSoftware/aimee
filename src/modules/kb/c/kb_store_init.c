@@ -1,3 +1,4 @@
+#include "index_observer_internal.h"
 /* Knowledge schema and lease lifecycle. PostgreSQL owns every connection.
  * The bootstrap thread holds an exclusive migration capability; runtime
  * workers lease bounded sessions through the supervised PostgreSQL module.
@@ -279,6 +280,14 @@ static void kb_store_dim_lock_release(void *conn)
    aimee_pg_finalize(st);
 }
 
+static void kb_store_observer_close(void *connection)
+{
+   if (kb_index_observer_connection_closing(connection))
+      aimee_pg_discard(connection);
+   else
+      aimee_pg_close(connection);
+}
+
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
 /* The thread that ran kb_store_init() owns g_conn and uses it directly; every other
@@ -312,7 +321,7 @@ static void thread_conn_destructor(void *p)
       return;
    if (L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
    }
    free(L);
 }
@@ -487,13 +496,13 @@ static void *kb_store_thread_acquire(void)
       L = (kb_store_thread_lease_t *)calloc(1, sizeof(*L));
       if (!L)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          return NULL;
       }
       if (pthread_setspecific(g_thread_conn_key, L) != 0)
       {
          free(L);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          return NULL;
       }
    }
@@ -558,7 +567,7 @@ void kb_store_lease_end(void)
           (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
       if (L && L->conn)
       {
-         aimee_pg_close(L->conn);
+         kb_store_observer_close(L->conn);
          L->conn = NULL;
       }
       g_lease_site = NULL;
@@ -580,7 +589,7 @@ void kb_store_lease_release_idle(void)
    kb_store_thread_lease_t *L = (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
    if (L && L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
       L->conn = NULL;
    }
    g_lease_site = NULL;
@@ -592,7 +601,7 @@ void kb_store_thread_conn_close(void)
    kb_store_thread_lease_t *L = (kb_store_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
    if (L && L->conn)
    {
-      aimee_pg_close(L->conn);
+      kb_store_observer_close(L->conn);
       L->conn = NULL;
    }
 }
@@ -639,6 +648,14 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       return -1;
    }
 
+   KB_INDEX_MUTATION(observer_startup);
+   if (kb_index_observer_startup_begin(&observer_startup, conn) != 0)
+   {
+      kb_store_observer_close(conn);
+      pthread_mutex_unlock(&g_init_lock);
+      return -1;
+   }
+
    /* Hardened multi-tenant tier: fail closed at boot unless kb↔Postgres is
     * verify-full TLS (I1) and the connected runtime role is non-owner, non-super,
     * NOBYPASSRLS, no-CREATE (B4) — otherwise the team-scoped RLS is defeated. The
@@ -651,7 +668,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       if (kb_store_hardening_assert_runtime_role(conn, herr, sizeof(herr)) != 0)
       {
          fprintf(stderr, "aimee-kb: hardened tier runtime-role check failed: %s\n", herr);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -674,7 +691,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
    if (rd == KB_STORE_DIM_ERROR)
    {
       fprintf(stderr, "aimee: kb_store_init: reading recorded embedding dim failed\n");
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -717,7 +734,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                      "embedder dim bootstrap: advisory lock not acquired in %dms and no dim "
                      "recorded; not derived (kb will retry)",
                      total);
-            aimee_pg_close(conn);
+            kb_store_observer_close(conn);
             pthread_mutex_unlock(&g_init_lock);
             return -1;
          }
@@ -731,7 +748,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
          if (rd2 == KB_STORE_DIM_ERROR)
          {
             kb_store_dim_lock_release(conn);
-            aimee_pg_close(conn);
+            kb_store_observer_close(conn);
             pthread_mutex_unlock(&g_init_lock);
             return -1;
          }
@@ -756,7 +773,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                LOG_WARN("kb_store", "embedder dim probe failed/out-of-range (got %d, max %d): %s",
                         probed, EMBED_MAX_DIM, perr[0] ? perr : "(no detail)");
                kb_store_dim_lock_release(conn);
-               aimee_pg_close(conn);
+               kb_store_observer_close(conn);
                pthread_mutex_unlock(&g_init_lock);
                return -1;
             }
@@ -794,7 +811,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
          LOG_ERROR("kb_store", "%s", errbuf);
          if (dim_lock_held)
             kb_store_dim_lock_release(conn);
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -835,7 +852,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
               errbuf);
       if (dim_lock_held)
          kb_store_dim_lock_release(conn);
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -872,7 +889,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
                                                  sizeof(errbuf)) != 0)
    {
       fprintf(stderr, "aimee: kb_store_init: model-identity guard failed: %s\n", errbuf);
-      aimee_pg_close(conn);
+      kb_store_observer_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
@@ -894,7 +911,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
           conn, "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", errcheck, sizeof(errcheck));
       if (!st)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
       }
@@ -902,7 +919,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       aimee_pg_finalize(st);
       if (step != AIMEE_PG_ROW)
       {
-         aimee_pg_close(conn);
+         kb_store_observer_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          fprintf(stderr,
                  "aimee: kb_store_init: pg_trgm extension is not installed in this database. "
@@ -912,6 +929,12 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       }
    }
 
+   if (kb_index_mutation_finish(&observer_startup) != 0)
+   {
+      kb_store_observer_close(conn);
+      pthread_mutex_unlock(&g_init_lock);
+      return -1;
+   }
    g_conn = conn;
    /* Record the owning thread: kb_store_conn() hands g_conn to this thread and a
     * private per-thread connection to every other thread. */
@@ -949,7 +972,7 @@ static int kb_store_init_mode(const char *libpq_url, int mode)
       if (!lease || pthread_setspecific(g_thread_conn_key, lease))
       {
          free(lease);
-         aimee_pg_close(g_conn);
+         kb_store_observer_close(g_conn);
          g_conn = NULL;
          pthread_mutex_unlock(&g_init_lock);
          return -1;
@@ -1058,7 +1081,7 @@ void kb_store_shutdown(void)
    pthread_mutex_lock(&g_init_lock);
    if (g_conn)
    {
-      aimee_pg_close(g_conn);
+      kb_store_observer_close(g_conn);
       g_conn = NULL;
    }
    g_pg_url[0] = '\0';

@@ -318,6 +318,11 @@ int server_native_cli_finish(server_native_cli_t *grant, const cJSON *response)
    return saved ? 0 : -1;
 }
 
+extern int aimee_module_native_tool_input_admit_v1(const char *, const char *, const cJSON *,
+                                                   const char *) __attribute__((weak));
+extern int aimee_module_native_tool_intercept_v1(const char *, const char *, const cJSON *,
+                                                 const char *, char **, int *)
+    __attribute__((weak));
 /* Shared source-derived CLI operation; callers select the exact advertised
  * definition from the retained shell catalog, never from the CLI manifest. */
 int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
@@ -336,6 +341,8 @@ int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
    cJSON *arguments = NULL, *response = NULL;
    aimee_tool_t definition = {0};
    char *wire = NULL, *text = NULL;
+   agent_tool_source_scope_t tool_source_scope = {0};
+   cJSON *tool_source = NULL;
    int reserved = 0, is_error = 1, rc = -1;
    if (server_native_cli_project(request, tool, &arguments, nonce))
       goto done;
@@ -362,6 +369,9 @@ int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
       goto done;
    }
    reserved = 1;
+   if (aimee_module_native_tool_input_admit_v1 &&
+       aimee_module_native_tool_input_admit_v1(tool, attempt, arguments, run_cmd_get_cwd()))
+      goto done;
    const char *refusal = server_native_tool_admit_attempt(tool, arguments, session_id(), attempt,
                                                           detail, sizeof detail);
    if (agent_request_cancelled() || server_native_cli_cancelled(grant) || owner->context_refused ||
@@ -373,12 +383,33 @@ int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
    {
       /* Independent callback TLS/action state: the producer remains inside the
        * real outer Bash call. No producer queue, borrowed sink or fake model ID. */
-      agent_tools_set_effect_authorized(1);
-      text = dispatch_tool_call_ir_ctx_status(&definition, arguments, timeout_ms, &is_error);
-      agent_tools_set_effect_authorized(0);
-      text = policy_annotate_indexed(tool, wire, attempt, text);
+      if (agent_tool_source_scope_begin(&tool_source_scope))
+         goto done;
+      int intercepted = aimee_module_native_tool_intercept_v1
+                            ? aimee_module_native_tool_intercept_v1(
+                                  tool, attempt, arguments, run_cmd_get_cwd(), &text, &is_error)
+                            : 0;
+      if (intercepted == 0 && !text)
+      {
+         agent_tools_set_effect_authorized(1);
+         text = dispatch_tool_call_ir_ctx_status(&definition, arguments, timeout_ms, &is_error);
+         agent_tools_set_effect_authorized(0);
+         text = policy_annotate_indexed(tool, wire, attempt, text);
+      }
+      else if (intercepted != 1 || !text || (is_error != 0 && is_error != 1))
+      {
+         free(text);
+         text = strdup("error: selected tool result owner unavailable");
+         is_error = 1;
+      }
    }
    if (!text)
+      goto done;
+   if (tool_source_scope.active &&
+       agent_tool_source_scope_finish(&tool_source_scope, text, &tool_source))
+      goto done;
+   /* A nested CLI response has no durable canonical parent stdout custody. */
+   if (tool_source)
       goto done;
    /* This is the advertised tool contract, not an operator REST handler
     * with a different batch envelope. Return complete owned text unchanged. */
@@ -410,6 +441,8 @@ int server_native_cli_execute(server_native_cli_t *grant, const cJSON *request,
    response = NULL;
    rc = 0;
 done:
+   agent_tool_source_scope_abort(&tool_source_scope);
+   cJSON_Delete(tool_source);
    if (reserved)
    {
       server_native_cli_finish(grant, NULL);

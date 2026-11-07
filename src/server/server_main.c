@@ -416,11 +416,11 @@ static int run_server(const char *socket_path, log_level_t log_level)
       return 1;
    }
 
-   /* Modules declare their commands over the EVENT BUS when they connect -- a
-    * module never links into core and never calls another module. The memory
-    * module answers stage 6 (event 5894) with its declaration; see
-    * server-go/modules/memory/commands.go. An earlier version of this called a C
-    * registration function in-process, which is the arrangement that replaced. */
+   /* Modules declare their commands over the EVENT BUS when they connect.
+    * The host decoder is src/module_commands.c; the MCP owner implements the
+    * same declaration contract in server-go/modules/mcp/commands.go. Optional
+    * external memory ownership grants no built-in command implementation.
+    * Earlier versions registered peer commands directly in process. */
 
    /* Wire the inference-backed OpenAI completion handlers before the listener
     * accepts requests (agent_http_init above must run first). */

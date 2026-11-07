@@ -32,6 +32,24 @@ void ir_seam_test_native_preinject(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
 const char *ir_seam_test_query(void);
 int ir_seam_test_guidance_provided(void);
+void ir_seam_test_plan_selection(int selection);
+
+static void test_optional_plan_owner_selection(void)
+{
+   for (int selection = -1; selection <= 1; selection++)
+   {
+      ir_seam_test_plan_selection(selection);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(REQ, strlen(REQ), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                        sizeof error));
+      aimee_ir_apply_gateway_request_stages(&request);
+      assert(ir_seam_test_plan_calls("context") == (selection > 0));
+      assert(ir_seam_test_plan_calls("tools") == (selection >= 0));
+      aimee_request_free(&request);
+   }
+   ir_seam_test_memory(0);
+}
 
 /* A provider change imports legacy history once, then reloads canonical IR. */
 static void test_import_history(void)
@@ -103,6 +121,7 @@ static void test_native_stage_replay(void)
 
 int main(void)
 {
+   test_optional_plan_owner_selection();
    test_native_stage_replay();
    printf("ir-serve: ");
    test_import_history();

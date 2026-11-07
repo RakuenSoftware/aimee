@@ -66,7 +66,7 @@ int db1_server_session_erase_subject(const char *id, const char *subject)
 {
    assert(step++ == 2 && strcmp(id, request_id) == 0 &&
           strcmp(subject, "person@example.test") == 0);
-   return 1;
+   return mode == 5 ? DB1_SESSION_DELETE_CONFLICT : 1;
 }
 char *db1_server_session_erasure_receipt(const char *id, const char *subject)
 {
@@ -102,11 +102,19 @@ int main(void)
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "subject", "person@example.test");
    cJSON_AddStringToObject(request, "request_id", request_id);
-   for (mode = 0; mode < 5; mode++)
+   for (mode = 0; mode < 6; mode++)
    {
       step = 0;
       int result = handle_kb_erase_subject(NULL, NULL, request);
-      if (mode == 1 || mode == 2 || mode == 4)
+      if (mode == 5)
+      {
+         assert(result == 0 && step == 3);
+         assert(cJSON_GetObjectItemCaseSensitive(response, "http_status")->valueint == 409);
+         assert(!strcmp(cJSON_GetObjectItemCaseSensitive(response, "kind")->valuestring,
+                        "input_delivery_conflict"));
+         assert(!cJSON_GetObjectItemCaseSensitive(response, "coverage_complete"));
+      }
+      else if (mode == 1 || mode == 2 || mode == 4)
       {
          assert(result == -1 && step == (mode == 1 ? 4 : mode == 2 ? 5 : 7));
          assert(!cJSON_GetObjectItemCaseSensitive(response, "coverage_complete"));

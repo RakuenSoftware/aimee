@@ -4,7 +4,6 @@
 #include "entity_edges.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "fact_mutation.h"
 #include "../headers/rel_types.h" /* correction_behavior + rel_type_is_functional (§4) */
 
 #include <stddef.h>

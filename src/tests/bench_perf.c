@@ -411,6 +411,13 @@ int main(int argc, char **argv)
    double *samples = calloc((size_t)total, sizeof(double));
    assert(samples);
 
+   /* The removed in-process memory engine cannot be measured from this native
+    * harness. Preserve its case names as unavailable so a historical baseline
+    * cannot silently pass with those measurements omitted. Real Go memory
+    * measurements use the frozen private aims-db evaluator and its isolated
+    * PostgreSQL session; the public install does not ship that tool. */
+   int unavailable = 0;
+
    /* Run each benchmark */
    for (int b = 0; b < bench_count; b++)
    {
@@ -443,6 +450,15 @@ int main(int argc, char **argv)
                 benchmarks[i].results.p50_ms, benchmarks[i].results.p95_ms,
                 benchmarks[i].results.p99_ms);
       }
+   }
+
+   if (unavailable)
+   {
+      fprintf(stderr,
+              "%d memory benchmarks unavailable in the native harness; "
+              "use the private aims-db legacy evaluator. No baseline was saved or certified.\n",
+              unavailable);
+      return 2;
    }
 
    /* Save baseline if requested */

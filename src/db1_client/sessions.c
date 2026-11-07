@@ -39,6 +39,7 @@
 #include "log.h"
 #include "module_json_call.h"
 
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +70,13 @@ static uint64_t sessions_call_timeout_ms(uint32_t op)
    case AIMEE_DB1_OP_SESSION_IR_SEARCH:
    case AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT:
    case AIMEE_DB1_OP_SESSION_IR_CANCEL:
+   case AIMEE_DB1_OP_SESSION_TOOL_SOURCE_APPEND:
+   case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN:
+   case AIMEE_DB1_OP_SESSION_INPUT_ATTACHMENT_HISTORY_SAVE:
+   case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN_DELIVERY:
+   case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET:
+   case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_PAGE:
+   case AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_ACK:
       return DB1_SESSIONS_HISTORY_TIMEOUT_MS;
    default:
       return DB1_SESSIONS_CALL_TIMEOUT_MS;
@@ -131,7 +139,8 @@ int db1_server_session_delete(const char *id)
    if (!id || !id[0])
       return -1;
    const char *fields[] = {id};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_DELETE, fields, 1, NULL, NULL, 0, NULL));
+   int status = db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_DELETE, fields, 1, NULL, NULL, 0, NULL);
+   return status == AIMEE_DB1_STATUS_CONFLICT ? DB1_SESSION_DELETE_CONFLICT : write_result(status);
 }
 
 int db1_server_session_count(const char *since_or_null)
@@ -237,6 +246,8 @@ int db1_server_session_erase_subject(const char *request_id, const char *princip
    const size_t caps[] = {sizeof slot0};
    int wire_status = db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT, fields, 2, values, caps,
                                 1, NULL);
+   if (wire_status == AIMEE_DB1_STATUS_CONFLICT)
+      return DB1_SESSION_DELETE_CONFLICT;
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -260,6 +271,19 @@ char *db1_server_session_erasure_receipt(const char *request_id, const char *pri
  * no other writes may be replayed here. Decode
  * into owned strings so a large transcript is bounded by the bus contract,
  * rather than a per-cell malloc ceiling. */
+/* Own the temporary transport buffers across a cancellable module call. */
+struct primary_read_buffers
+{
+   uint8_t *request;
+   uint8_t *response;
+};
+static void primary_read_buffers_cleanup(void *value)
+{
+   struct primary_read_buffers *owned = value;
+   free(owned->request);
+   free(owned->response);
+   owned->request = owned->response = NULL;
+}
 static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
                         char ***out, uint32_t *filled)
 {
@@ -270,40 +294,48 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
    size_t request_len;
    if (db1_request_frame_size(fields, count, &request_len) != 0)
       return -1;
-   uint8_t *request = malloc(request_len);
-   uint32_t capacity = 4096, length = 0;
-   uint8_t *response = malloc(capacity);
-   if (!request || !response)
+   struct primary_read_buffers owned = {0};
+   owned.request = malloc(request_len);
+   /* Only delivery-get has this existing closed producer bound. Other lanes
+    * retain the ordinary small initial buffer and bounded resize retry. */
+   uint32_t capacity = op == AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET
+                           ? 3u * 1024u * 1024u + 12u : 4096u;
+   uint32_t length = 0;
+   owned.response = malloc(capacity);
+   if (!owned.request || !owned.response)
    {
-      free(request);
-      free(response);
+      free(owned.request);
+      free(owned.response);
       return -1;
    }
-   db1_request_encode(request, op, fields, count);
+   volatile int status = -1;
+   pthread_cleanup_push(primary_read_buffers_cleanup, &owned);
+   db1_request_encode(owned.request, op, fields, count);
    uint64_t deadline = aimee_module_call_deadline_ns(sessions_call_timeout_ms(op));
    ouro_module_call_result_t rc;
    for (;;)
    {
       rc = obs_bus_module_call(AIMEE_DB1_EVENT_SESSIONS, AIMEE_DB1_STAGE_SESSIONS, 0, deadline,
-                              request, (uint32_t)request_len, response, capacity, &length,
+                              owned.request, (uint32_t)request_len, owned.response, capacity, &length,
                               NULL, NULL);
       if (rc != OURO_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
           length > OURO_MODULE_MESSAGE_MAX_BODY)
          break;
-      uint8_t *grown = realloc(response, length);
+      uint8_t *grown = realloc(owned.response, length);
       if (!grown)
          break;
-      response = grown;
+      owned.response = grown;
       capacity = length;
    }
-   free(request);
-   int status = -1;
+   free(owned.request);
+   owned.request = NULL;
    char **cells = NULL;
    uint32_t n = 0;
    if (rc != OURO_MODULE_CALL_OK || length < 8 || length > capacity)
       goto done;
-   status = (int)aimee_db1_get_u32(response);
-   n = aimee_db1_get_u32(response + 4);
+   uint32_t reply_status=0;
+   if(db1_reply_frame_validate(owned.response,length,&reply_status,&n))goto invalid;
+   status=(int)reply_status;
    if (n > (length - 8) / 4 || (status != AIMEE_DB1_STATUS_OK && n))
       goto invalid;
    cells = calloc(n ? n : 1, sizeof(*cells));
@@ -314,14 +346,14 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
    {
       if (length - at < 4)
          goto invalid;
-      uint32_t size = aimee_db1_get_u32(response + at);
+      uint32_t size = aimee_db1_get_u32(owned.response + at);
       at += 4;
-      if (size > length - at || memchr(response + at, 0, size))
+      if (size > length - at || memchr(owned.response + at, 0, size))
          goto invalid;
       cells[i] = malloc((size_t)size + 1);
       if (!cells[i])
          goto invalid;
-      memcpy(cells[i], response + at, size);
+      memcpy(cells[i], owned.response + at, size);
       cells[i][size] = 0;
       at += size;
    }
@@ -336,8 +368,8 @@ invalid:
    free(cells);
    status = -1;
 done:
-   free(response);
-   return status;
+   pthread_cleanup_pop(1);
+   return (int)status;
 }
 
 static void primary_cells_free(char **cells, uint32_t count)
@@ -484,6 +516,14 @@ int db1_session_ir_running_history_load(const char *session_id, const char *acto
    }
    primary_cells_free(cells, count);
    return rc;
+}
+
+int db1_session_tool_source_history_save(const char *session_id, const char *checkpoint,
+ const char *scope, const char *actor, const char *active_turn, const char *messages_json)
+{
+ if (!session_id || !checkpoint || !scope || !actor || !active_turn || !messages_json) return -1;
+ const char *fields[]={session_id,checkpoint,scope,actor,active_turn,messages_json};
+ return write_result(db1_call(&family,AIMEE_DB1_OP_SESSION_TOOL_SOURCE_HISTORY_SAVE,fields,6,NULL,NULL,0,NULL));
 }
 
 int db1_session_ir_history_save(const char *session_id, const char *checkpoint, const char *scope,
@@ -880,6 +920,20 @@ int db1_session_native_source_append(const char *session_id, const char *event_i
                                 values, caps, 1, NULL));
 }
 
+int db1_session_tool_source_append(const char *session_id, const char *event_id, const char *turn,
+                                   const char *actor, const char *payload, char out_sequence[32])
+{
+   if (!out_sequence)
+      return -1;
+   out_sequence[0] = 0;
+   const char *fields[] = {session_id ? session_id : "", event_id ? event_id : "", turn ? turn : "",
+                           actor ? actor : "", payload ? payload : ""};
+   char *const values[] = {out_sequence};
+   const size_t caps[] = {32u};
+   return write_result(db1_call(&history_family, AIMEE_DB1_OP_SESSION_TOOL_SOURCE_APPEND, fields, 5,
+                                values, caps, 1, NULL));
+}
+
 int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
                           char out_sequence[32])
 {
@@ -982,4 +1036,218 @@ int db1_session_ir_history_import_browse(const char *session_id, const char *act
 {
    return session_ir_history_import_mode(session_id, "primary", actor, session_id, source_agent,
                                          source_sha256, messages_json, report_json, "browse");
+}
+
+/* Strong shipping producer/client contract. Runtime DB1 reply version is still
+ * mandatory: this symbol alone is never an admission or host authority. */
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_original_input_attachment_contract_v1 = 1;
+static int original_input_sequence(const char *s, uint64_t *out)
+{
+   if (!s || !s[0] || s[0] == '0')
+      return 0;
+   uint64_t n = 0;
+   for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+   {
+      if (*p < '0' || *p > '9' || n > (INT64_MAX - (uint64_t)(*p - '0')) / 10)
+         return 0;
+      n = n * 10 + (uint64_t)(*p - '0');
+   }
+   *out = n;
+   return 1;
+}
+static int original_input_utf8(const unsigned char *s, size_t n)
+{
+   size_t i = 0;
+   while (i < n)
+   {
+      unsigned a = s[i++], cp;
+      int k;
+      if (!a)
+         return 0;
+      if (a < 128)
+         continue;
+      if (a >= 0xc2 && a <= 0xdf)
+      {
+         cp = a & 31;
+         k = 1;
+      }
+      else if (a >= 0xe0 && a <= 0xef)
+      {
+         cp = a & 15;
+         k = 2;
+      }
+      else if (a >= 0xf0 && a <= 0xf4)
+      {
+         cp = a & 7;
+         k = 3;
+      }
+      else
+         return 0;
+      int count = k;
+      if (i + (size_t)k > n)
+         return 0;
+      while (k--)
+      {
+         unsigned b = s[i++];
+         if ((b & 0xc0) != 0x80)
+            return 0;
+         cp = (cp << 6) | (b & 63);
+      }
+      if ((count == 1 && cp < 128) || (count == 2 && cp < 2048) || (count == 3 && cp < 65536) ||
+          cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+         return 0;
+   }
+   return 1;
+}
+__attribute__((used, externally_visible, retain)) int
+db1_session_original_input_begin(const char *session_id, const char *operation_uuid,
+                                 const char *proposed_turn, const char *actor,
+                                 const char *batch_json, db1_original_input_receipt_t *receipt)
+{
+   if (!receipt)
+      return -1;
+   memset(receipt, 0, sizeof *receipt);
+   if (!session_id || !operation_uuid || !proposed_turn || !actor || !batch_json)
+      return -1;
+   const char *fields[] = {session_id, operation_uuid, proposed_turn, actor, batch_json};
+   char begin[32] = {0}, input[32] = {0}, turn[1025] = {0}, version[2] = {0}, outcome[8] = {0};
+   char *const values[] = {begin, input, turn, version, outcome};
+   const size_t caps[] = {sizeof begin, sizeof input, sizeof turn, sizeof version, sizeof outcome};
+   uint32_t filled = 0;
+   int status = db1_call(&history_family, AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN, fields, 5,
+                         values, caps, 5, &filled);
+   db1_original_input_receipt_t parsed = {0};
+   if (status != AIMEE_DB1_STATUS_OK || filled != 5 || strcmp(version, "1") ||
+       !original_input_sequence(begin, &parsed.begin_sequence) ||
+       !original_input_sequence(input, &parsed.input_sequence) ||
+       (parsed.begin_sequence == UINT64_MAX ||
+        parsed.input_sequence != parsed.begin_sequence + 1) ||
+       !turn[0] || !original_input_utf8((const unsigned char *)turn, strlen(turn)))
+      return -1;
+   int created = !strcmp(outcome, "created"), replay = !strcmp(outcome, "replay");
+   if ((!created && !replay) || (created && strcmp(turn, proposed_turn)))
+      return -1;
+   memcpy(parsed.original_turn, turn, strlen(turn) + 1);
+   parsed.contract_version = 1;
+   parsed.outcome = created ? DB1_ORIGINAL_INPUT_CREATED : DB1_ORIGINAL_INPUT_REPLAY;
+   *receipt = parsed;
+   return created ? 0 : 1;
+}
+__attribute__((used, externally_visible, retain)) int
+db1_session_input_attachment_history_save(const char *session_id, const char *checkpoint,
+                                          const char *scope, const char *actor,
+                                          const char *active_turn, const char *messages_json)
+{
+   if (!session_id || !checkpoint || !scope || !actor || !active_turn || !messages_json)
+      return -1;
+   const char *fields[] = {session_id, checkpoint, scope, actor, active_turn, messages_json};
+   char version[2] = {0};
+   char *const values[] = {version};
+   const size_t caps[] = {sizeof version};
+   uint32_t filled = 0;
+   int status = db1_call(&history_family, AIMEE_DB1_OP_SESSION_INPUT_ATTACHMENT_HISTORY_SAVE,
+                         fields, 6, values, caps, 1, &filled);
+   return status == AIMEE_DB1_STATUS_OK && filled == 1 && !strcmp(version, "1") ? 0 : -1;
+}
+
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_original_input_delivery_client_contract_v1 = 1;
+__attribute__((used, externally_visible, retain)) int db1_session_original_input_begin_delivery(
+    const char *session_id, const char *operation_uuid, const char *proposed_turn,
+    const char *actor, const char *batch_json, const char *delivery_json,
+    db1_original_input_receipt_t *receipt, uint64_t *delivery_id)
+{
+   if (!receipt || !delivery_id)
+      return -1;
+   memset(receipt, 0, sizeof *receipt);
+   *delivery_id = 0;
+   if (!session_id || !operation_uuid || !proposed_turn || !actor || !batch_json || !delivery_json)
+      return -1;
+   const char *fields[] = {session_id, operation_uuid, proposed_turn,
+                           actor,      batch_json,     delivery_json};
+   char begin[32] = {0}, input[32] = {0}, turn[1025] = {0}, version[2] = {0}, outcome[8] = {0},
+        id[32] = {0};
+   char *const values[] = {begin, input, turn, version, outcome, id};
+   const size_t caps[] = {sizeof begin,   sizeof input,   sizeof turn,
+                          sizeof version, sizeof outcome, sizeof id};
+   uint32_t filled = 0;
+   int status = db1_call(&history_family, AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_BEGIN_DELIVERY,
+                         fields, 6, values, caps, 6, &filled);
+   db1_original_input_receipt_t parsed = {0};
+   uint64_t parsed_id = 0;
+   if (status != AIMEE_DB1_STATUS_OK || filled != 6 || strcmp(version, "1") ||
+       !original_input_sequence(begin, &parsed.begin_sequence) ||
+       !original_input_sequence(input, &parsed.input_sequence) ||
+       !original_input_sequence(id, &parsed_id) || parsed.begin_sequence == UINT64_MAX ||
+       parsed.input_sequence != parsed.begin_sequence + 1 || !turn[0] ||
+       !original_input_utf8((const unsigned char *)turn, strlen(turn)))
+      return -1;
+   int created = !strcmp(outcome, "created"), replay = !strcmp(outcome, "replay");
+   if ((!created && !replay) || (created && strcmp(turn, proposed_turn)))
+      return -1;
+   memcpy(parsed.original_turn, turn, strlen(turn) + 1);
+   parsed.contract_version = 1;
+   parsed.outcome = created ? DB1_ORIGINAL_INPUT_CREATED : DB1_ORIGINAL_INPUT_REPLAY;
+   *receipt = parsed;
+   *delivery_id = parsed_id;
+   return created ? 0 : 1;
+}
+static int delivery_json_read(uint32_t op, const char *const *fields, uint32_t count, char **out)
+{
+   if (!out || *out)
+      return -1;
+   char **cells = NULL;
+   uint32_t filled = 0;
+   int status = primary_read(op, fields, count, &cells, &filled);
+   if (status == AIMEE_DB1_STATUS_MISSING)
+   {
+      primary_cells_free(cells, filled);
+      return 1;
+   }
+   if (status != AIMEE_DB1_STATUS_OK || filled != 1 || !cells[0] || !cells[0][0] ||
+       strlen(cells[0]) > 4 * 1024 * 1024)
+   {
+      primary_cells_free(cells, filled);
+      return -1;
+   }
+   *out = cells[0];
+   cells[0] = NULL;
+   primary_cells_free(cells, filled);
+   return 0;
+}
+__attribute__((used, externally_visible, retain)) int
+db1_session_original_input_delivery_get(const char *session_id, const char *operation_uuid,
+                                        const char *actor, const char *receiver_tag, char **out)
+{
+   if (!session_id || !operation_uuid || !actor || !receiver_tag)
+      return -1;
+   const char *fields[] = {session_id, operation_uuid, actor, receiver_tag};
+   return delivery_json_read(AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_GET, fields, 4, out);
+}
+__attribute__((used, externally_visible, retain)) int
+db1_session_original_input_delivery_page(const char *receiver_tag, const char *actor,
+                                         const char *after_id, const char *limit,
+                                         const char *max_bytes, char **out)
+{
+   if (!receiver_tag || !actor || !after_id || !limit || !max_bytes)
+      return -1;
+   const char *fields[] = {receiver_tag, actor, after_id, limit, max_bytes};
+   return delivery_json_read(AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_PAGE, fields, 5, out);
+}
+__attribute__((used, externally_visible, retain)) int
+db1_session_original_input_delivery_ack(const char *delivery_id, const char *receiver_tag,
+                                        const char *actor, const char *intent_key,
+                                        const char *outcome, const char *result_json)
+{
+   if (!delivery_id || !receiver_tag || !actor || !intent_key || !outcome || !result_json)
+      return -1;
+   const char *fields[] = {delivery_id, receiver_tag, actor, intent_key, outcome, result_json};
+   char version[2] = {0};
+   char *const values[] = {version};
+   const size_t caps[] = {sizeof version};
+   uint32_t filled = 0;
+   int status = db1_call(&history_family, AIMEE_DB1_OP_SESSION_ORIGINAL_INPUT_DELIVERY_ACK, fields,
+                         6, values, caps, 1, &filled);
+   return status == AIMEE_DB1_STATUS_OK && filled == 1 && !strcmp(version, "1") ? 0 : -1;
 }

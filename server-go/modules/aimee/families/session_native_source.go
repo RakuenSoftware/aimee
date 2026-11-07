@@ -137,5 +137,5 @@ func sessionNativeSourceAppend(ctx context.Context, q store.Queryer, f []string)
 	} else if !store.IsNoRows(err) {
 		return 0, nil, err
 	}
-	return sessionIRAppendAuthorized(ctx, q, f, false, false, true)
+	return sessionIRAppendSourceAuthorized(ctx, q, f, false, false, true, false, true)
 }

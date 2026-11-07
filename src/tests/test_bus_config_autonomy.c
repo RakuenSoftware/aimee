@@ -8,6 +8,7 @@
 #include "config.h"
 #include "config_client.h"
 #include "config_database.h"
+#include "agent_types.h"
 #include "module_json_call.h"
 
 static cJSON *last_request;
@@ -18,6 +19,7 @@ static size_t last_max_body;
 static int last_timeout_ms;
 static int changed_version;
 static int snapshot_calls;
+static const char *selected_provider = "seed-provider";
 
 static void must(int condition, const char *message)
 {
@@ -61,6 +63,13 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       cJSON *response = success();
       cJSON *values = cJSON_AddObjectToObject(response, "values");
       must(values && cJSON_AddNumberToObject(values, "max_iterations", 37), "snapshot values");
+      must(cJSON_AddStringToObject(values, "provider", selected_provider) != NULL,
+           "selected model provider snapshot");
+      cJSON *workspaces = cJSON_AddArrayToObject(values, "workspace_providers");
+      must(workspaces != NULL, "workspace placement snapshot");
+      cJSON_AddItemToArray(workspaces, cJSON_CreateString("shared"));
+      cJSON_AddItemToArray(workspaces, cJSON_CreateString("detached"));
+      cJSON_AddItemToArray(workspaces, cJSON_CreateString("mirror"));
       cJSON_AddNumberToObject(values, "db2_pool_size", 99);
       cJSON_AddStringToObject(values, "db2_url", "retired-credential");
       cJSON_AddObjectToObject(values, "db2");
@@ -193,6 +202,35 @@ int main(void)
                 "AIMEE_KB_SERVICE_IDENTITY_TOKEN"),
         "service identity stays in Vault");
    must(!config_client_key_is_secret("max_iterations"), "ordinary key is public");
+
+   /* Model names are <MAX_AGENT_NAME bytes in the deployed Go manager. The
+    * top-level selector is a model name, unlike the workspace placement enum. */
+   const size_t lengths[] = {15, 16, 22, MAX_AGENT_NAME - 1};
+   char model_name[MAX_AGENT_NAME];
+   for (size_t i = 0; i < sizeof lengths / sizeof *lengths; i++)
+   {
+      memset(model_name, 'a', lengths[i]);
+      model_name[0] = 'm';
+      model_name[lengths[i]] = 0;
+      selected_provider = model_name;
+      must(config_client_refresh() == 0, "refresh selected custom model name");
+      must(!strcmp(config_provider(), model_name),
+           "provider getter preserves supported custom agent name");
+      char copied[MAX_AGENT_NAME + 1];
+      memset(copied, '!', sizeof copied);
+      (void)config_provider_copy(copied, sizeof copied);
+      must(!strcmp(copied, model_name), "provider copy preserves supported custom agent name");
+      char short_copy[8];
+      memset(short_copy, '!', sizeof short_copy);
+      (void)config_provider_copy(short_copy, sizeof short_copy);
+      must(short_copy[sizeof short_copy - 1] == 0 &&
+               !strncmp(short_copy, model_name, sizeof short_copy - 1),
+           "explicit short caller buffer remains bounded and terminated");
+      must(!strcmp(config_workspace_providers(0), "shared") &&
+               !strcmp(config_workspace_providers(1), "detached") &&
+               !strcmp(config_workspace_providers(2), "mirror"),
+           "workspace placement enums remain exact and separate from models");
+   }
 
    cJSON_Delete(last_request);
    cJSON_Delete(last_mutation);

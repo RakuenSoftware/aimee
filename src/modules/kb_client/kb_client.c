@@ -3,6 +3,7 @@
 #endif
 #include "kb_client.h"
 #include <aimee/core/connection/auth.h>
+#include <ouroboros/module_protocol.h>
 #include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
@@ -488,6 +489,13 @@ char *kb_client_last_result_json(const char *message)
    return kb_typed_error_json(kb_client_last_result_status(), message);
 }
 
+/* Optional installed owner transport. Borrowed arguments; selected results are
+ * owned JSON bytes. 0 may preserve non-memory business transport, 1 supplies
+ * a response, -1 refuses without fallback. Memory-owned actions never use HTTP. */
+extern int aimee_module_commands_owner_action_raw(const char *, const cJSON *, int, char **)
+    __attribute__((weak));
+extern int aimee_module_kb_action_request(const char *, const cJSON *, int, char **)
+    __attribute__((weak));
 static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int timeout_ms,
                                           kb_client_error_json_fn error_json);
 
@@ -996,30 +1004,49 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    if (!req)
       return error_json("failed to allocate knowledge service request");
 
-   /* All native memory writers share the local Go screening boundary before
-    * crossing to the KB. Direct action forwarding must not bypass it. */
-   if (!strcmp(action, "memory.store") || !strcmp(action, "memory.update") ||
-       !strcmp(action, "memory.supersede") || !strcmp(action, "memory.reject"))
+   if (aimee_module_commands_owner_action_raw || aimee_module_kb_action_request)
    {
-      const cJSON *key = cJSON_GetObjectItemCaseSensitive(req, "key");
-      int withheld = cJSON_IsString(key) && kb_client_pii_identifier_sensitive(key->valuestring);
-      const char *fields[] = {"content", "new_content", "use_cases", "reason", NULL};
-      for (int i = 0; !withheld && fields[i]; i++)
-      {
-         const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
-         if (!cJSON_IsString(value))
-            continue;
-         char *redacted = NULL;
-         withheld = kb_client_pii_screen(value->valuestring, &redacted) != 0;
-         if (!withheld && redacted)
-            cJSON_ReplaceItemInObjectCaseSensitive(req, fields[i], cJSON_CreateString(redacted));
-         free(redacted);
-      }
-      if (withheld)
+      char *owned = NULL;
+      int selected = aimee_module_commands_owner_action_raw
+                         ? aimee_module_commands_owner_action_raw(action, req, timeout_ms, &owned)
+                         : aimee_module_kb_action_request(action, req, timeout_ms, &owned);
+      if (selected != 0)
       {
          cJSON_Delete(req);
-         return kb_client_pii_withheld_json();
+         cJSON *validated = selected == 1 && owned &&
+                                    strnlen(owned, OURO_MODULE_MESSAGE_MAX_BODY + 1u) <=
+                                        OURO_MODULE_MESSAGE_MAX_BODY
+                                ? cJSON_ParseWithOpts(owned, NULL, 1)
+                                : NULL;
+         int valid = cJSON_IsObject(validated);
+         cJSON_Delete(validated);
+         if (valid)
+            return owned; /* Validation must not normalize exact integer bytes. */
+         free(owned);
+         return error_json("installed owner action unavailable");
       }
+   }
+
+   /* Memory is a bus-owned service. HTTP is only its web edge, never an
+    * internal owner transport, including when no owner is installed. */
+   static const char *memory_owned_actions[] = {"session_briefing.commitments",
+                                                "session_briefing.directives",
+                                                "evidence.emit_retrieval_event",
+                                                "evidence.merge_retrieval_event",
+                                                "evidence.trace_retrieval_event",
+                                                "evidence.provenance_retrieval_event",
+                                                "evidence.fidelity_retrieval_event",
+                                                "ranker.emit_event",
+                                                "ranker.record_outcome"};
+   int memory_owned = !strncmp(action, "memory.", 7);
+   for (size_t i = 0;
+        !memory_owned && i < sizeof(memory_owned_actions) / sizeof(memory_owned_actions[0]); i++)
+      memory_owned = !strcmp(action, memory_owned_actions[i]);
+   if (memory_owned)
+   {
+      cJSON_Delete(req);
+      return kb_typed_error_json(KB_CLIENT_RESULT_UNAVAILABLE,
+                                 "memory bus service unavailable or unsupported");
    }
 
    char *escaped = kb_client_query_escape(action);

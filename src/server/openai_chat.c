@@ -1,3 +1,4 @@
+#include "responses_history_owner.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "embed_result.h"
@@ -600,16 +601,26 @@ static int responses_restore_history(aimee_request_t *request, char *error, size
       snprintf(error, capacity, "invalid or unauthorized previous_response_id");
       return -1;
    }
-   int status = db1_session_ir_history_load(id, scope, actor, "", &json);
-   if (status)
+   cJSON *history = NULL;
+   int owned = aimee_responses_history_owner_load_v1(id, scope, actor, &history);
+   if (owned < 0)
    {
-      snprintf(error, capacity, "%s",
-               status > 0 ? "previous_response_id was not found in this session scope"
-                          : "durable Responses history is unavailable");
+      snprintf(error, capacity, "durable Responses history is unavailable");
       return -1;
    }
-   cJSON *history = cJSON_Parse(json);
-   free(json);
+   if (owned == 1)
+   {
+      int status = db1_session_ir_history_load(id, scope, actor, "", &json);
+      if (status)
+      {
+         snprintf(error, capacity, "%s",
+                  status > 0 ? "previous_response_id was not found in this session scope"
+                             : "durable Responses history is unavailable");
+         return -1;
+      }
+      history = cJSON_Parse(json);
+      free(json);
+   }
    cJSON *current = aimee_ir_request_history_json(request);
    if (!cJSON_IsArray(history) || !current)
    {
@@ -640,6 +651,9 @@ static int responses_store_history(const char *id, const aimee_request_t *reques
    char scope[80];
    if (!actor || !actor[0] || responses_history_scope(scope))
       return -1;
+   int owned = aimee_responses_history_owner_save_v1(id, scope, actor);
+   if (owned != 1)
+      return owned;
    cJSON *history = aimee_ir_request_history_json(request);
    aimee_message_t assistant = {
        .role = "assistant", .blocks = response->content, .n_blocks = response->n_content};
@@ -1607,4 +1621,62 @@ void openai_chat_register(void)
    server_http_set_responses_handler(responses_handler);
    server_http_set_models_provider(models_provider);
    server_http_set_models_raw_provider(codex_models_raw);
+}
+
+/* Generic forwarding only. Concrete binding, currentness and durability are
+ * selected owner's policy; this adapter never interprets an opaque receipt. */
+
+#include <stdatomic.h>
+#include <stddef.h>
+static atomic_int owner_state;
+static aimee_responses_history_owner_v1 owner_copy;
+int aimee_responses_history_owner_install_v1(const aimee_responses_history_owner_v1 *owner)
+{
+   if (!owner || owner->contract_version != 1 || !owner->save || !owner->load)
+      return -1;
+   int empty = 0;
+   if (!atomic_compare_exchange_strong(&owner_state, &empty, 1))
+      return -1;
+   owner_copy = *owner;
+   atomic_store(&owner_state, 2);
+   return 0;
+}
+int aimee_responses_history_owner_save_v1(const char *id, const char *scope, const char *actor)
+{
+   int state = atomic_load(&owner_state);
+   if (!state)
+      return 1;
+   if (state != 2)
+      return -1;
+   const aimee_responses_history_owner_v1 *owner = &owner_copy;
+   if (!id || !scope || !actor || !id[0] || !scope[0] || !actor[0])
+      return -1;
+   int rc = owner->save(owner->context, id, scope, actor);
+   return rc == 0 || rc == 1 ? rc : -1;
+}
+int aimee_responses_history_owner_load_v1(const char *id, const char *scope, const char *actor,
+                                          cJSON **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   int state = atomic_load(&owner_state);
+   if (!state)
+      return 1;
+   if (state != 2)
+      return -1;
+   const aimee_responses_history_owner_v1 *owner = &owner_copy;
+   if (!id || !scope || !actor || !id[0] || !scope[0] || !actor[0])
+      return -1;
+   cJSON *history = NULL;
+   int rc = owner->load(owner->context, id, scope, actor, &history);
+   if (rc == 0 && cJSON_IsArray(history))
+   {
+      *out = history;
+      return 0;
+   }
+   /* Even an unselected answer may not smuggle a partial history into fallback. */
+   int unselected = rc == 1 && !history;
+   cJSON_Delete(history);
+   return unselected ? 1 : -1;
 }

@@ -41,6 +41,24 @@
 #include <strings.h>
 #include <time.h>
 
+/* Optional generic result ownership. Policy and configured client selection live
+ * in the selected module. The call identity below comes from the retained
+ * canonical claim, never from an extra tool argument or a new retry UUID. */
+extern int aimee_module_native_tool_intercept_v1(const char *, const char *, const cJSON *,
+                                                 const char *, char **, int *)
+    __attribute__((weak));
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_native_tool_intercept_contract_v1 = 1;
+
+/* Optional pure input policy: no publication/permission is implied. A selected
+ * owner requires buffering and complete argument admission before canonical
+ * source persistence. Existing module-adapter admission remains separate. */
+extern int aimee_module_native_tool_input_buffered_v1(void) __attribute__((weak));
+extern int aimee_module_native_tool_input_admit_v1(const char *, const char *, const cJSON *,
+                                                   const char *) __attribute__((weak));
+__attribute__((used, externally_visible, retain))
+const unsigned aimee_native_tool_input_admission_contract_v1 = 1;
+
 struct server_native_runtime
 {
    pthread_t producer;
@@ -120,7 +138,7 @@ typedef struct
 {
    server_native_runtime_t *runtime;
    aimee_request_t request, admitted;
-   int prepared, guarded, require_complete;
+   int prepared, guarded, require_complete, history_imported;
 } native_request_owner_t;
 
 /* The final egress guard sees the actual post-policy catalog. Entry ownership
@@ -151,6 +169,18 @@ static int native_owned_guard(aimee_request_t *request, void *context)
          return -1;
       }
    }
+   if (server_native_history_tool_sources_preserved(&owner->request, request) ||
+       (!owner->history_imported &&
+        (server_native_history_tool_sources_preserved(request, &owner->request) ||
+         server_native_history_accept_tool_sources(request))))
+   {
+      server_session_capture_fail(owner->runtime->capture);
+      return -1;
+   }
+   /* The first import covers the complete immutable canonical source set.
+    * Later guards still prove every retained receipt/visible byte belongs to
+    * that set; final Native source/Model admission remains separate. */
+   owner->history_imported = 1;
    aimee_request_t catalog = {
        .model = request->model, .tools = request->tools, .n_tools = request->n_tools, .mutated = 1};
    if (aimee_ir_request_clone(&catalog, &owner->admitted))
@@ -197,7 +227,15 @@ static int native_tool_in_catalog(const native_model_capture_t *capture, const a
       return -1;
    /* Admit complete original arguments before the tool-complete delta can be
     * released to the SDK. The SDK's later command observation is not evidence. */
-   return cJSON_IsObject(call->tool_input) && aimee_ir_block_valid(call) ? 0 : -1;
+   if (!cJSON_IsObject(call->tool_input) || !aimee_ir_block_valid(call))
+      return -1;
+   const server_native_tool_binding_t *binding =
+       native_tool_binding(capture->runtime, call->tool_namespace, call->tool_name, 0);
+   const char *resolved = binding ? binding->registry_name : call->tool_name;
+   return aimee_module_native_tool_input_admit_v1
+              ? aimee_module_native_tool_input_admit_v1(resolved, call->tool_id, call->tool_input,
+                                                        capture->runtime->cwd)
+              : 0;
 }
 
 static int native_capture_admit(native_model_capture_t *capture, const aimee_session_event_t *event)
@@ -215,6 +253,12 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
    if (event->kind != AIMEE_SESSION_DELTA)
       return 0;
    if (!event->delta || !event->message_id || !event->role || strcmp(event->role, "assistant"))
+      return -1;
+   /* An opted-in input owner must see complete arguments. Unexpected streaming
+    * starts refuse before any argument chunk reaches canonical storage. */
+   if (event->delta->type == AIMEE_DELTA_BLOCK_START && event->delta->kind == AIMEE_BLK_TOOL_USE &&
+       aimee_module_native_tool_input_buffered_v1 &&
+       aimee_module_native_tool_input_buffered_v1() != 0)
       return -1;
    /* Transport/admission can fail before the provider starts a message. This
     * typed diagnostic has a host correlation ID, not an original assistant
@@ -815,6 +859,7 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    server_native_tool_claim_t claim = {0};
    aimee_block_t result = {0};
    char *arguments = NULL, *text = NULL;
+   agent_tool_source_scope_t tool_source_scope = {0};
    int rc = -1, is_error = 1;
    aimee_tool_t registered = {0};
    const server_native_tool_binding_t *binding =
@@ -880,15 +925,36 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
             previous_environment =
                 agent_tools_bind_bash_environment(server_native_cli_environment(shell));
          }
-         agent_tools_set_effect_authorized(1);
-         text = dispatch_tool_call_ir_ctx_status(function, original->tool_input, 120000, &is_error);
-         agent_tools_set_effect_authorized(0);
+         if (agent_tool_source_scope_begin(&tool_source_scope))
+            goto done;
+         /* A selected owner may conclude this admitted call before its native
+          * side effect. Keep the same canonical result/source-custody path. */
+         int intercepted = aimee_module_native_tool_intercept_v1
+                               ? aimee_module_native_tool_intercept_v1(
+                                     function->name, original->tool_id, original->tool_input,
+                                     runtime->cwd, &text, &is_error)
+                               : 0;
+         if (intercepted == 0 && !text)
+         {
+            agent_tools_set_effect_authorized(1);
+            text =
+                dispatch_tool_call_ir_ctx_status(function, original->tool_input, 120000, &is_error);
+            agent_tools_set_effect_authorized(0);
+         }
+         else if (intercepted != 1 || !text || (is_error != 0 && is_error != 1))
+         {
+            free(text);
+            text = strdup("error: selected tool result owner unavailable");
+            is_error = 1;
+         }
          if (local_shell)
          {
             agent_tools_bind_bash_environment(previous_environment);
             native_cli_shell_close(runtime, shell);
          }
-         text = policy_annotate_indexed(function->name, arguments, attempt, text);
+         /* An intercepted publication is not a filesystem execution observation. */
+         if (!intercepted)
+            text = policy_annotate_indexed(function->name, arguments, attempt, text);
       }
    }
    /* NULL after dispatch is not evidence that no effect occurred. The durable
@@ -900,6 +966,9 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    result.tool_result = cJSON_CreateString(text);
    result.tool_is_error = is_error;
    if (!result.tool_id || !result.tool_result)
+      goto done;
+   if (tool_source_scope.active &&
+       agent_tool_source_scope_finish(&tool_source_scope, text, &result.tool_source))
       goto done;
    char message_id[96];
    snprintf(message_id, sizeof message_id, "native-tool:%s:%d", claim.sequence, claim.block_index);
@@ -921,6 +990,7 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    memset(&result, 0, sizeof result);
    rc = 0;
 done:
+   agent_tool_source_scope_abort(&tool_source_scope);
    agent_tools_set_effect_authorized(0);
    if (rc)
       server_session_capture_fail(runtime->capture);
@@ -1298,7 +1368,7 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_codex_credentials_t current = {0};
    agent_api_credentials_t current_api = {0};
    agent_claude_credentials_t current_claude = {0};
-   int forked_sources = 0;
+   int request_owner_installed = 0;
    const char *failure_stage = "request owner nonce";
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
@@ -1311,6 +1381,7 @@ static int native_perform(const char *method, const char *path, const char *head
    /* The browser turn's dedup key cannot collapse distinct SDK requests. */
    admitted.idempotency_key[0] = 0;
    request_context_set(&admitted);
+   request_owner_installed = 1;
    server_http_identity_bind_request_owner(&admitted);
    failure_stage = "source fork";
    native_mcp_stage(&diagnostic, "source-fork", NATIVE_MCP_STAGE_BEGIN);
@@ -1320,7 +1391,6 @@ static int native_perform(const char *method, const char *path, const char *head
       goto restore;
    }
    native_mcp_stage(&diagnostic, "source-fork", NATIVE_MCP_STAGE_OK);
-   forked_sources = runtime->owner.memory_source_release[0] != 0;
    agent_request_creds_restore(&runtime->credentials);
    agent_set_request_session(runtime->session);
    if (runtime->lineage[0])
@@ -1461,7 +1531,10 @@ restore:
       (void)native_mcp_refused(work, path, failure_stage);
    if (!work)
       anthropic_http_capture_request_headers(NULL);
-   if (forked_sources)
+   const request_context_t *source_owner = request_context_get();
+   if (request_owner_installed && source_owner && source_owner->memory_source_release[0] &&
+       !strcmp(source_owner->request_id, admitted.request_id) &&
+       strcmp(source_owner->memory_source_release, runtime->owner.memory_source_release))
       ingress_preinject_finish_sources();
    OPENSSL_cleanse(&current_claude, sizeof current_claude);
    OPENSSL_cleanse(&current_api, sizeof current_api);

@@ -1,26 +1,41 @@
 # Memory reliability evaluation and promotion
 
-Run `python3 scripts/check_memory_reliability_release.py --output RESULT.json`
-with disposable `AIMEE_MEMORY_EVAL_URL`, `AIMEE_KB_STORE_REPLAY_URL`,
-`AIMEE_TEST_PG_URL` and `AIMEE_DB_TEST_URL` databases. Bootstrap the KB_STORE replay
-store from `src/modules/kb/c/schema.sql`. Use distinct DB1/KB_STORE stores, a role able
-to create disposable evaluation databases, and serialize their test runners.
-In CI the required `postgres-knowledge-replay` job provisions these stores and runs
-the check after `memory-owner-replay-check`. It passes that run's `go test -json`
-record with `--go-events`, so packages the replay already executed with `-race` are
-verified from the record. Only packages missing from the record run again. A record
-that does not end with the package result counts as missing, not as a pass.
+The full historical MR18 mixed-source certification is **unavailable** in the
+public adapter checkout after concrete evaluator extraction. The old
+`scripts/check_memory_reliability_release.py` exits with an explicit error and
+never writes a pass artifact. Its original checker, frozen manifest and generic
+helper assertions are preserved byte-for-byte in the private aims-db
+`experiments/legacy-aimee-go/release-gate-fixtures`; historical hashes were not
+refreshed.
 
-`tests/eval/memory_reliability_release_v1.json` freezes twelve adversarial groups,
-ordered test identities, source/fixture hashes and promotion thresholds. It
-references the original 123 acceptance clauses without changing their text or
-hashes. Tests contain success and refusal variants. A changed fixture requires
-explicit review and a new recorded hash; the gate never refreshes hashes itself.
-A required skipped test or subtest, missing test, failed package or malformed
-Go test stream rejects the run. A pass artifact is written atomically only after
-all required cases execute. Its implementation commit and working-diff digest
-must match the checkout under review. Zero violations means zero in these
-fixtures, not a guarantee of zero production risk.
+While the serving Go owner remains, run the distinctly named transitional gate:
+
+```sh
+python3 scripts/check_current_memory_contracts.py --output current-contracts.json
+```
+
+It retains all **163** still-applicable Go case identities for the current memory
+owner, module adapter, execution policy and application families, plus generic
+Python metric/denominator contracts. Exactly **10 extracted evaluator cases** are
+listed separately as not executed here. This gate does not recertify full MR18,
+measure generated-answer accuracy or compare aims-db latency. Missing, skipped
+required cases, failed packages and incomplete recorded executions refuse a pass.
+Its current source hashes are evidence of this execution, not refreshed historical
+fixture hashes.
+
+Use disposable `AIMEE_MEMORY_EVAL_URL`, `AIMEE_KB_STORE_REPLAY_URL`,
+`AIMEE_TEST_PG_URL` and `AIMEE_DB_TEST_URL` databases. Bootstrap the replay store
+from `src/modules/kb/c/schema.sql`; keep evaluation databases empty and separate
+from that store. CI retains these live PostgreSQL requirements. It supplies
+`memory-owner-replay-check`'s complete same-job `go test -json` record through
+`--go-events`, so already executed serving-owner/module cases are verified from
+that record. The removed evaluator package is never requested from this checkout.
+
+The private immutable baseline and extracted evaluator assertions are independently
+qualified with `python3 experiments/legacy-aimee-go/qualify.py --help` in aims-db.
+Its recorded1,083-pass owned PostgreSQL run preserves the original memory tests,
+including evaluator assertions; this is a different qualification boundary from
+full historical mixed-source MR18. Dated public reports remain historical evidence.
 
 The Python LoCoMo/LongMemEval readers retain questions without gold evidence.
 Every input question receives an ordered ID and inclusion/exclusion reason,

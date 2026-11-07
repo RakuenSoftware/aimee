@@ -16,7 +16,6 @@ import (
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
-	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	aimeeprocess "github.com/JBailes/aimee/server-go/modules/aimee/process"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
@@ -31,7 +30,7 @@ import (
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
-	"github.com/JBailes/aimee/server-go/modules/memory"
+	memoryadapter "github.com/JBailes/aimee/server-go/modules/memory/adapter"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
 	"github.com/JBailes/aimee/server-go/modules/observability"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
@@ -189,29 +188,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "memory":
 		config.ModuleName = name
 		config.PrincipalRef = 7
-		config.Stages = []ring.ModuleStage{
-			{EventKind: memory.EventExtractIndex, StageID: memory.StageExtractIndex},
-			{EventKind: memory.EventWrite, StageID: memory.StageWrite},
-			{EventKind: memory.EventEmbed, StageID: memory.StageEmbed},
-			{EventKind: memory.EventRetrieve, StageID: memory.StageRetrieve},
-			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
-			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
-			{EventKind: memory.EventData, StageID: memory.StageData},
-			{EventKind: memory.EventCommand, StageID: memory.StageCommand},
-			{EventKind: 4096 + 7*256 + ring.StageDescribeCommands, StageID: ring.StageDescribeCommands},
-		}
-		// Static registry inspection has no live resources. Every running
-		// process uses the owner's same placement-aware constructor.
-		if ctx == nil {
-			config.Handler = memory.NewHandler(nil)
-		} else {
-			var err error
-			config.Handler, err = memory.NewProcessHandler(ctx, moduleBusSocket, os.Getenv("AIMEE_MODULE_PLACEMENT"))
-			if err != nil {
-				log.Printf("memory module unavailable: %v", err)
-				return config, false
-			}
-		}
+		return config, false
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
@@ -295,13 +272,6 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		config.Handler = modulegit.NewHandler(moduleEgress(ctx, moduleBusSocket, egress.GitClientRef))
 	case "egress":
-		if ctx != nil {
-			if err := memorycontract.ConfigureBackendProcess(ctx, moduleBusSocket, egressConfigPrincipalRef); err != nil {
-				log.Printf("egress: backend configuration: %v", err)
-				config.ModuleName = name
-				return config, false
-			}
-		}
 		config.ModuleName = name
 		config.PrincipalRef = egress.PrincipalRef
 		config.Stages = []ring.ModuleStage{
@@ -642,6 +612,9 @@ func principalRefFromEnv() (uint32, error) {
 func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errUsage
+	}
+	if filepath.Base(args[0]) == "aimee-module-memory" {
+		return memoryadapter.Unavailable()
 	}
 	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {

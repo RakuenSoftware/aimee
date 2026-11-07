@@ -882,6 +882,14 @@ void kb_client_memory_scope_context_set(const char *workspace, const char *proje
                                         int include_all);
 void kb_client_memory_scope_context_clear(void);
 void kb_client_memory_scope_context_apply(cJSON *req);
+/* Owned query-intent state only; this is not authenticated credential scope. */
+typedef struct
+{
+   int active, include_all;
+   char workspace[512], project[512];
+} kb_client_memory_scope_context_state_t;
+void kb_client_memory_scope_context_snapshot(kb_client_memory_scope_context_state_t *out);
+void kb_client_memory_scope_context_restore(const kb_client_memory_scope_context_state_t *saved);
 /* Consumes req; optional host file is bounded and sent as unchanged text. */
 char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path);
 

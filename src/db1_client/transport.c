@@ -27,7 +27,7 @@ int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *ne
 {
    /* Zero fields is a legal request: an operation that takes no arguments
       sends the header alone. The upper bound still applies. */
-   if (count > AIMEE_DB1_FIELDS_MAX)
+   if (!need_out || (count && !fields) || count > AIMEE_DB1_FIELDS_MAX)
       return -1;
    size_t need = 8u;
    for (uint32_t i = 0; i < count; ++i)
@@ -38,7 +38,7 @@ int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *ne
       if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
-      if (n > OURO_MODULE_MESSAGE_MAX_BODY - need - 4u)
+      if (need > OURO_MODULE_MESSAGE_MAX_BODY - 4u || n > OURO_MODULE_MESSAGE_MAX_BODY - need - 4u)
          return -1;
       need += 4u + n;
    }
@@ -73,11 +73,42 @@ void db1_request_encode(uint8_t *out, uint32_t op, const char *const *fields, ui
    a list learns its length: the rows are not counted separately on the wire
    because an operation already knows how wide its rows are. Callers that expect
    a fixed shape pass NULL. */
+int db1_reply_frame_validate(const uint8_t *frame, size_t length, uint32_t *status, uint32_t *count)
+{
+   if (!frame || !status || !count || length < 8u || length > OURO_MODULE_MESSAGE_MAX_BODY)
+      return -1;
+   uint32_t reply_status = aimee_db1_get_u32(frame);
+   uint32_t total = aimee_db1_get_u32(frame + 4);
+   if (reply_status > AIMEE_DB1_STATUS_CONFLICT ||
+       (reply_status == AIMEE_DB1_STATUS_CONFLICT && total))
+      return -1;
+   size_t at = 8u;
+   if (total > (length - at) / 4u)
+      return -1;
+   for (uint32_t i = 0; i < total; i++)
+   {
+      if (length - at < 4u)
+         return -1;
+      uint32_t n = aimee_db1_get_u32(frame + at);
+      at += 4u;
+      if (n > length - at || memchr(frame + at, 0, n))
+         return -1;
+      at += n;
+   }
+   if (at != length)
+      return -1;
+   *status = aimee_db1_get_u32(frame);
+   *count = total;
+   return 0;
+}
+
 int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint32_t count,
              char *const *values, const size_t *caps, uint32_t slots, uint32_t *filled_out)
 {
    if (filled_out)
       *filled_out = 0u;
+   if (!family || (slots && (!values || !caps)))
+      return -1;
    for (uint32_t i = 0; i < slots; ++i)
       if (values[i] && caps[i])
          values[i][0] = '\0';
@@ -96,7 +127,12 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
       value_len bytes, so there is no reason to hold more than that. */
    size_t response_cap = 8u;
    for (uint32_t i = 0; i < slots; ++i)
+   {
+      if (response_cap > OURO_MODULE_MESSAGE_MAX_BODY - 4u ||
+          caps[i] > OURO_MODULE_MESSAGE_MAX_BODY - response_cap - 4u)
+         return -1;
       response_cap += 4u + caps[i];
+   }
    uint8_t *request = malloc(request_len);
    uint8_t *response = malloc(response_cap);
    if (!request || !response)
@@ -115,12 +151,16 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
    free(request);
 
    int result = -1;
-   if (rc != OURO_MODULE_CALL_OK || response_len < 8u)
+   if (rc != OURO_MODULE_CALL_OK || response_len < 8u || response_len > response_cap)
       warn_unreachable(family, (int)rc);
    else
    {
-      uint32_t status = aimee_db1_get_u32(response);
-      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
+      uint32_t status = 0, fields_in = 0;
+      if (db1_reply_frame_validate(response, response_len, &status, &fields_in))
+      {
+         free(response);
+         return -1;
+      }
       /* Read the reply's own count rather than assuming an arity: a status with
          no values is how a write answers, one value is a read, and a member
          apiece is a row. */
@@ -155,7 +195,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
          at += 4u;
          /* A reply whose declared length runs past what arrived is not a reply
             to read part of. */
-         if (at + n > response_len)
+         if (n > response_len - at)
          {
             result = -1;
             break;
@@ -164,7 +204,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
          {
             /* No room for the terminator is no room: writing it would land one
                byte past the buffer the caller owns. */
-            if (n >= caps[i])
+            if (n >= caps[i] || memchr(response + at, 0, n))
                result = -1;
             else
             {
@@ -174,6 +214,8 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
          }
          at += n;
       }
+      if (result != -1 && at != response_len)
+         result = -1;
    }
    free(response);
    return result;

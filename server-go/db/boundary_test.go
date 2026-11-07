@@ -18,8 +18,8 @@ func TestSharedDatabaseContractHasNoProviderOrDomainDependency(t *testing.T) {
 	})
 }
 
-func TestMemoryDoesNotImportServerDomainStorage(t *testing.T) {
-	checkImports(t, "../modules/memory", func(path string) bool {
+func TestMemorySDKDoesNotImportServerDomainStorage(t *testing.T) {
+	checkImports(t, "../memory", func(path string) bool {
 		return path == "github.com/JBailes/aimee/server-go/modules/aimee" ||
 			strings.HasPrefix(path, "github.com/JBailes/aimee/server-go/modules/aimee/")
 	})

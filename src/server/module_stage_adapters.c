@@ -875,8 +875,14 @@ static int delegate_permissions(const uint8_t *request, size_t request_len, uint
    return 0;
 }
 
+extern int agent_tools_module_native_has(const char *) __attribute__((weak));
+extern int agent_tools_module_native_metadata(const char *, aimee_tool_metadata_t *)
+    __attribute__((weak));
 static int tool_metadata(const char *name, aimee_tool_metadata_t *metadata)
 {
+   if (agent_tools_module_native_has && agent_tools_module_native_has(name))
+      return agent_tools_module_native_metadata ? agent_tools_module_native_metadata(name, metadata)
+                                                : -1;
    uint8_t request[AIMEE_TOOLS_METADATA_REQUEST_MAX], response[AIMEE_TOOLS_METADATA_LEN];
    uint32_t response_len = 0;
    size_t request_len = aimee_tools_metadata_request_encode(name, request, sizeof request);

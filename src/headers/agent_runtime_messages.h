@@ -2,7 +2,13 @@
 #define DEC_AGENT_RUNTIME_MESSAGES_H 1
 
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stddef.h>
+
+int agent_exec_context_append_text(aimee_message_t *context, const char *text,
+                                   aimee_context_origin_t origin,
+                                   aimee_context_authority_t authority);
+char *agent_exec_context_text_view(const aimee_message_t *context);
 
 #define AGENT_FINAL_TOOL_RETRY_LIMIT          2
 #define AGENT_DEGENERATE_RESPONSE_RETRY_LIMIT 1
@@ -26,6 +32,11 @@ int agent_required_evidence_budget_exhausted(int required, int successful_eviden
 int agent_required_evidence_needs_fallback(int required, int successful_evidence_calls,
                                            int chatgpt_provider, int remaining_calls);
 cJSON *agent_session_text_message(const char *role, const char *text);
+/* Host-generated advisory text is not canonical User input or Model output.
+ * Model renderers preserve the existing User-wire advisory shape. */
+cJSON *agent_session_control_message(const char *text);
+cJSON *agent_session_tool_evidence_message(const char *text);
+void agent_session_append_final_message(cJSON *messages, const char *content);
 void agent_session_append_final_instruction(cJSON *messages);
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action);
 void agent_session_append_degenerate_retry_instruction(cJSON *messages);

@@ -33,6 +33,29 @@ def strings(value):
             yield from strings(child)
 
 
+
+def request_outcome(status, response, provider_requests):
+    """Content-free failure evidence; never retain prompts, tokens or headers."""
+    error = response.get('error') if isinstance(response, dict) else None
+    message = error.get('message') if isinstance(error, dict) else None
+    if not isinstance(message, str) and isinstance(response, dict):
+        message = response.get('message')
+    message = message if isinstance(message, str) else ''
+    categories = {
+        'the requested model is not available': 'model_unavailable',
+        'cannot prepare canonical completion request': 'request_preparation_refused',
+        'canonical provider request failed': 'canonical_request_refused',
+        'upstream model provider or endpoint is unavailable': 'provider_unavailable',
+        'upstream model credentials are unavailable': 'credentials_unavailable',
+        'module tool input admission refused': 'tool_input_admission_refused',
+        'canonical response persistence failed': 'canonical_capture_refused',
+    }
+    encoded = message.encode('utf-8')
+    return dict(http_status=status, provider_requests=provider_requests,
+                error_category=categories.get(message, 'other' if message else 'none_recorded'),
+                error_message_bytes=len(encoded), error_message_sha256=hashlib.sha256(encoded).hexdigest())
+
+
 def admission_idle_cpu():
     """Measure the owned economizer process while this fixture sends no work."""
     matches = []
@@ -174,6 +197,12 @@ def inside(output, budget_benchmark=False):
                 endpoint=f'http://127.0.0.1:{provider.server_port}/v1', roles=['all'], enabled=True,
                 tools_enabled=False, context_window=32768, max_output=4096, max_parallel=4))
         roster.write_text(json.dumps(models))
+        status, advertised = api('/v1/models')
+        registered = {row.get('id') for row in advertised.get('data', []) if isinstance(row, dict)}
+        check('Both loopback fixture models are registered before provider dispatch',
+              status == 200 and all(prefix + '-' + protocol in registered
+                                    for protocol in ('openai', 'anthropic')),
+              request_outcome(status, advertised, len(captures)))
         content = 'Memory wire fixture αβ🦊; limit=7; quoted="value"; path=C:\\fixture\\memory\nsecond line'
         status, stored = api('/v1/memory/store', dict(key=prefix, content=content))
         check('Go private memory stores the Unicode and escaping fixture', status == 200 and stored.get('status') == 'ok')
@@ -215,8 +244,9 @@ def inside(output, budget_benchmark=False):
                 with lock:
                     before = len(captures)
                 status, response = api(path, body)
-                check(name + ' completes through the real provider adapter', status == 200 and
-                      any('MEMORY_BOUNDARY_OK' in text for text in strings(response)))
+                completed = status == 200 and any('MEMORY_BOUNDARY_OK' in text for text in strings(response))
+                check(name + ' completes through the real provider adapter', completed,
+                      request_outcome(status, response, len(captures) - before) if not completed else None)
                 with lock:
                     selected = captures[before:]
                 check(name + ' dispatches exactly one request', len(selected) == 1)

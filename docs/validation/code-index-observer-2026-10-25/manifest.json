@@ -1,0 +1,42 @@
+{
+  "README.md": {
+    "bytes": 2373,
+    "sha256": "8a2ae8f26cbfdcab2b1d6077d8af7b46cc571911f3fb737f0e93558efee3d0b9"
+  },
+  "commands.log.gz": {
+    "bytes": 8282,
+    "sha256": "48386ec0dc7e61ef0689dd74df7b2582c8f86dbf307b97565d7433d32e119064"
+  },
+  "compile-command.json": {
+    "bytes": 10634,
+    "sha256": "1474d055c1fa64c1b5fc9a6e67681534c3684872beed0d2ab9c901bb248c15a2"
+  },
+  "header-layout.log": {
+    "bytes": 25,
+    "sha256": "8532cfda87a121f60b0f2f972e0f1f2168735ba1bb614de3ba510719a01c29df"
+  },
+  "make-objects.log.gz": {
+    "bytes": 1047,
+    "sha256": "cb2a4717f3666c7c9930a433b1693dc65383a8461e86a01ad65fcbb7114d0f89"
+  },
+  "module-descriptor.log": {
+    "bytes": 50,
+    "sha256": "3aefe748cafa3ba6320d4d1e345ce1ff61af464c9fc04389b4e94f0a15601171"
+  },
+  "module-docs.log": {
+    "bytes": 505,
+    "sha256": "7df130d31301d8eb0d75c4119e1fc8e506d4d2565d5602db7bfe318029ba887b"
+  },
+  "result.json": {
+    "bytes": 6538,
+    "sha256": "bf6b205d2c289c6e605ebb621bcc98a166529fdcea2a7a2305df00048239a036"
+  },
+  "seal-fix-make.log.gz": {
+    "bytes": 838,
+    "sha256": "1bcb42e14cb21b849d2c5f929230adcfbc87e1105917ded4d0a9483d94830b36"
+  },
+  "source-ownership.log": {
+    "bytes": 58,
+    "sha256": "a1d6a1fab5426784547380f13cdfd9139d946473b84404521bc994e5543070fc"
+  }
+}

@@ -35,6 +35,7 @@
 #include "gw_stage_completion.h"
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
+#include <aimee/tools/agent_tools.h>
 #include "router_advise.h" /* Canonical request routing. */
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee_ir_serve.h" /* Slice 5: IR live request-build */
@@ -591,6 +592,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
    int parity = driver_is_anthropic(driver);
+   /* Reject malformed caller capability metadata at ingress, before the shared
+    * executor classifies endpoint/credential availability. Streaming uses the
+    * same existing header validator and the same client-error category. */
+   char parity_headers[2048] = "";
+   if (parity && build_anthropic_parity_headers(parity_headers, sizeof parity_headers, ag))
+   {
+      status = write_error(resp, cap, 400, "invalid_request_error",
+                           "invalid OAuth capability headers", 0);
+      goto cleanup;
+   }
    if (messages_prepare_request(body, ag, parity, &policy, policy_error, sizeof policy_error))
    {
       status = write_error(resp, cap, 400, "invalid_request_error",
@@ -1178,7 +1189,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * the buffered replay path too. */
    responses_wire = strstr(url, "/responses") != NULL;
    if (parity && build_anthropic_parity_headers(extra, sizeof extra, ag))
+   {
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "invalid OAuth capability headers"};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
+      stream_status = 400;
       goto cleanup;
+   }
 
    /* Whether we ask the UPSTREAM to stream depends on how we READ the reply, not on
     * what the client asked. The buffered-replay path (prevent-subagents, or a
@@ -1192,7 +1210,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * canonical relay. */
    int completion_buffered = gw_ir_response_completion_armed(&policy);
    int buffered_replay =
-       gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
+       gateway_prevent_subagents_enabled() || responses_wire || completion_buffered ||
+       agent_tools_module_native_requires_buffered_v1(policy.tools, (size_t)policy.n_tools);
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
    policy.stream = upstream_stream;

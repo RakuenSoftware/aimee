@@ -1,5 +1,7 @@
 /* Exercise the production primary owner across model switches and restart. */
 #include "primary_session_adapter.h"
+#include "agent_runtime_messages.h"
+#include "headers/server_session_capture.h"
 #include <aimee/ir/session_event.h>
 #include "agent_exec.h"
 #include "db1_client/primary_sessions.h"
@@ -9,9 +11,53 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 
 static char *stored, *canonical_stored;
-static int fail_checkpoint, compact_enabled;
+static cJSON *model_override, *capture_history;
+static int capture_present, capture_bad, capture_refs, save32, save55, save57;
+static int preserving_failure, cancel_checkpoint;
+static const char *capture_session = "stable", *capture_turn = "current-turn";
+static int capture_object;
+int server_session_capture_retain_current(const char *session, const char *actor,
+                                          server_session_capture_t **out)
+{
+   *out = NULL;
+   if (!capture_present)
+      return 0;
+   if (capture_bad || strcmp(session, "stable") || strcmp(actor, "alice"))
+      return -1;
+   *out = (server_session_capture_t *)&capture_object;
+   ++capture_refs;
+   return 0;
+}
+const char *server_session_capture_session(const server_session_capture_t *owner)
+{
+   assert(owner == (void *)&capture_object);
+   return capture_session;
+}
+const char *server_session_capture_turn(const server_session_capture_t *owner)
+{
+   assert(owner == (void *)&capture_object);
+   return capture_turn;
+}
+void server_session_capture_release(server_session_capture_t *owner)
+{
+   if (owner)
+   {
+      assert(owner == (void *)&capture_object);
+      assert(capture_refs == 1);
+      --capture_refs;
+   }
+}
+int server_session_capture_history(server_session_capture_t *owner, cJSON **out)
+{
+   assert(owner == (void *)&capture_object);
+   *out = cJSON_Duplicate(capture_history, 1);
+   return *out ? 0 : -1;
+}
+
+static int fail_checkpoint, compact_enabled, compact_keep;
 static int retry_evidence_case;
 int server_clean_retry_begin(const primary_session_request_t *req, cJSON **messages, char **summary,
                              char attempt[65], char *error, size_t error_len)
@@ -123,11 +169,44 @@ int db1_session_ir_history_save(const char *id, const char *checkpoint, const ch
 {
    assert(!strcmp(id, "stable") && strlen(checkpoint) == 32 && !strcmp(scope, "primary") &&
           !strcmp(actor, "alice"));
-   if (fail_checkpoint)
+   ++save32;
+   /* Actual ordinary opcode32 rejects both families before any append. */
+   if (fail_checkpoint || strstr(json, "\"input_attachment\"") || strstr(json, "\"tool_source\""))
       return -1;
    free(canonical_stored);
    canonical_stored = strdup(json);
    return 0;
+}
+static int preserving_save(const char *id, const char *checkpoint, const char *scope,
+                           const char *actor, const char *active, const char *json)
+{
+   assert(!strcmp(id, "stable") && strlen(checkpoint) == 32 && !strcmp(scope, "primary") &&
+          !strcmp(actor, "alice") && !strcmp(active, "current-turn") && capture_refs == 1);
+   if (cancel_checkpoint)
+   {
+      int prior;
+      assert(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &prior) == 0);
+      assert(prior == PTHREAD_CANCEL_DISABLE);
+      assert(pthread_cancel(pthread_self()) == 0);
+   }
+   if (preserving_failure)
+      return -1;
+   free(canonical_stored);
+   canonical_stored = strdup(json);
+   return 0;
+}
+int db1_session_tool_source_history_save(const char *id, const char *checkpoint, const char *scope,
+                                         const char *actor, const char *active, const char *json)
+{
+   ++save55;
+   return preserving_save(id, checkpoint, scope, actor, active, json);
+}
+int db1_session_input_attachment_history_save(const char *id, const char *checkpoint,
+                                              const char *scope, const char *actor,
+                                              const char *active, const char *json)
+{
+   ++save57;
+   return preserving_save(id, checkpoint, scope, actor, active, json);
 }
 static int import_reports, import_failure;
 int db1_session_ir_history_import(const char *id, const char *scope, const char *actor,
@@ -188,6 +267,11 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
    if (!compact_enabled)
       return -1;
    int before = cJSON_GetArraySize(messages);
+   if (compact_keep)
+   {
+      *result = (session_compact_result_t){.messages_before = before, .messages_after = before};
+      return 0;
+   }
    while (cJSON_GetArraySize(messages))
       cJSON_DeleteItemFromArray(messages, 0);
    cJSON_AddItemToArray(messages, cJSON_Parse("{\"role\":\"user\",\"blocks\":[{\"type\":\"text\","
@@ -281,7 +365,9 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
       assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(message, "blocks")));
       assert(!cJSON_GetObjectItemCaseSensitive(message, "content"));
    }
-   *updated = initial ? cJSON_Duplicate(initial, 1) : cJSON_CreateArray();
+   *updated = model_override ? cJSON_Duplicate(model_override, 1)
+              : initial      ? cJSON_Duplicate(initial, 1)
+                             : cJSON_CreateArray();
    cJSON_AddItemToArray(
        *updated,
        cJSON_Parse("{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\",\"text\":\"reply\"}]}"));
@@ -535,8 +621,276 @@ static void test_browser_history_open(void)
    browse_open = 0;
 }
 
+static cJSON *source_message(const char *text, int annotated)
+{
+   cJSON *message = cJSON_CreateObject(), *blocks = cJSON_CreateArray(),
+         *block = cJSON_CreateObject();
+   cJSON_AddStringToObject(message, "role", "user");
+   cJSON_AddItemToObject(message, "blocks", blocks);
+   cJSON_AddItemToArray(blocks, block);
+   cJSON_AddStringToObject(block, "type", "text");
+   cJSON_AddStringToObject(block, "text", text);
+   if (annotated)
+      cJSON_AddItemToObject(
+          block, "input_attachment",
+          cJSON_Parse("{\"schema_version\":1,\"kind\":\"host.original-input.v1\","
+                      "\"operation_uuid\":\"00000000-0000-4000-8000-000000000001\","
+                      "\"text_sha256\":"
+                      "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+                      "\"opaque\":\"{ \\\"wide\\\":18446744073709551615 }\"}"));
+   return message;
+}
+static cJSON *tool_history(size_t receipt_size)
+{
+   cJSON *messages = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\","
+       "\"tool_id\":\"call-1\",\"name\":\"fixture\",\"input\":{}}]},"
+       "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"call-1\","
+       "\"is_error\":false,\"content\":\"wide result 18446744073709551615\"}]}]");
+   assert(messages);
+   cJSON *block =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(messages, 1), "blocks"), 0);
+   cJSON *source = cJSON_Parse(
+       "{\"schema_version\":1,\"owner\":\"00000000-0000-4000-8000-000000000002\","
+       "\"visible_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}");
+   char *receipt = malloc(receipt_size + 32);
+   assert(receipt);
+   strcpy(receipt, "{\"opaque\":\"");
+   memset(receipt + strlen(receipt), 'x', receipt_size);
+   strcpy(receipt + 11 + receipt_size, "\"}");
+   cJSON_AddStringToObject(source, "receipt", receipt);
+   free(receipt);
+   cJSON_AddItemToObject(block, "tool_source", source);
+   return messages;
+}
+static int preserving_turn(agent_t *agent)
+{
+   cJSON *initial = cJSON_Parse(canonical_stored);
+   expected_count = initial ? cJSON_GetArraySize(initial) : 0;
+   cJSON_Delete(initial);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "continue"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   primary_session_request_t req = {.agent = agent,
+                                    .aimee_session_id = "stable",
+                                    .request = &request,
+                                    .active_turn_id = "current-turn"};
+   agent_result_t out = {0};
+   int rc = primary_session_adapter_turn(&req, &out, NULL, 0);
+   assert(capture_refs == 0);
+   return rc;
+}
+static void preserving_reset(void)
+{
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = strdup("[]");
+   cJSON_Delete(capture_history);
+   capture_history = cJSON_CreateArray();
+   cJSON_Delete(model_override);
+   model_override = cJSON_CreateArray();
+   capture_present = 1;
+   capture_bad = 0;
+   capture_session = "stable";
+   capture_turn = "current-turn";
+   preserving_failure = 0;
+   save32 = save55 = save57 = 0;
+}
+static void *cancel_preserving_turn(void *opaque)
+{
+   (void)preserving_turn(opaque);
+   pthread_testcancel();
+   assert(0);
+   return NULL;
+}
+static void test_preserving_checkpoint(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "codex");
+   strcpy(agent.provider, "chatgpt");
+   primary_session_adapter_set_native_reconcile(mock_native_reconcile);
+   preserving_reset();
+   cJSON_Delete(model_override);
+   model_override = tool_history(70000);
+   assert(preserving_turn(&agent) == 0 && save55 == 1 && !save32 && !save57);
+   assert(strlen(canonical_stored) > 65536);
+   cJSON *saved = cJSON_Parse(canonical_stored);
+   cJSON *left = cJSON_GetObjectItem(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(model_override, 1), "blocks"), 0),
+       "tool_source");
+   cJSON *right = cJSON_GetObjectItem(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(saved, 1), "blocks"), 0),
+       "tool_source");
+   assert(cJSON_Compare(left, right, 1));
+   cJSON_Delete(saved);
+
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("first", 1));
+   cJSON_AddItemToArray(model_override, source_message("first", 0));
+   assert(preserving_turn(&agent) == 0 && save57 == 1 && !save32 && !save55);
+   assert(strstr(canonical_stored, "input_attachment"));
+   /* Exact same advisory bytes: a real ordinary User remains a User and must
+    * not acquire an inferred attachment or disappear by copied provenance. */
+   for (int evidence = 0; evidence < 2; evidence++)
+   {
+      preserving_reset();
+      cJSON_AddItemToArray(capture_history, source_message("first", 1));
+      cJSON_AddItemToArray(model_override, source_message("first", 0));
+      cJSON *hint = evidence ? agent_session_tool_evidence_message("same advisory text")
+                             : agent_session_control_message("same advisory text");
+      assert(hint && cJSON_AddItemToArray(model_override, hint));
+      assert(preserving_turn(&agent) == 0 && save57 == 1 && !save32 && !save55);
+      preserving_reset();
+      cJSON_AddItemToArray(capture_history, source_message("first", 1));
+      cJSON_AddItemToArray(model_override, source_message("first", 0));
+      hint = evidence ? agent_session_tool_evidence_message("same advisory text")
+                      : agent_session_control_message("same advisory text");
+      assert(hint &&
+             cJSON_ReplaceItemInObjectCaseSensitive(hint, "role", cJSON_CreateString("user")) &&
+             cJSON_AddItemToArray(model_override, hint));
+      assert(preserving_turn(&agent) != 0 && !save57 && !save32 && !save55);
+   }
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("first", 1));
+   cJSON_AddItemToArray(model_override, source_message("first", 0));
+   assert(preserving_turn(&agent) == 0 && save57 == 1);
+   /* Restart and second active turn preserve the first exact pair and add a new one. */
+   primary_session_adapter_reset();
+   cJSON_Delete(capture_history);
+   capture_history = cJSON_Parse(canonical_stored);
+   cJSON_AddItemToArray(capture_history, source_message("second", 1));
+   cJSON_Delete(model_override);
+   model_override = cJSON_Parse(canonical_stored);
+   cJSON_AddItemToArray(model_override, source_message("second", 0));
+   assert(preserving_turn(&agent) == 0 && save57 == 2 && !save32);
+
+   /* Explicitly retained identical pairs are not guessed and remain legitimate. */
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("same", 1));
+   cJSON_AddItemToArray(capture_history, source_message("same", 1));
+   cJSON_Delete(model_override);
+   model_override = cJSON_Duplicate(capture_history, 1);
+   assert(preserving_turn(&agent) == 0 && save57 == 1);
+
+   for (int fault = 0; fault < 13; fault++)
+   {
+      preserving_reset();
+      cJSON_AddItemToArray(capture_history, source_message("first", 1));
+      cJSON_AddItemToArray(model_override, source_message("first", 0));
+      if (fault == 0)
+         capture_present = 0;
+      if (fault == 1)
+         capture_bad = 1;
+      if (fault == 2)
+         capture_session = "foreign";
+      if (fault == 3)
+         capture_turn = "old-turn";
+      if (fault == 4)
+      {
+         cJSON_Delete(model_override);
+         model_override = cJSON_CreateArray();
+      }
+      if (fault == 5)
+         cJSON_ReplaceItemInArray(model_override, 0, source_message("changed", 0));
+      if (fault == 6)
+      {
+         cJSON_AddItemToArray(capture_history, source_message("first", 0));
+         cJSON_AddItemToArray(model_override, source_message("first", 0));
+      }
+      if (fault == 7)
+         cJSON_ReplaceItemInArray(model_override, 0, source_message("first", 1)),
+             cJSON_SetValuestring(
+                 cJSON_GetObjectItem(
+                     cJSON_GetObjectItem(
+                         cJSON_GetArrayItem(
+                             cJSON_GetObjectItem(cJSON_GetArrayItem(model_override, 0), "blocks"),
+                             0),
+                         "input_attachment"),
+                     "opaque"),
+                 "{\"foreign\":true}");
+      if (fault == 8)
+      {
+         cJSON_AddItemToArray(capture_history, source_message("second", 0));
+         cJSON_InsertItemInArray(model_override, 0, source_message("second", 0));
+      }
+      if (fault == 9)
+         preserving_failure = 1;
+      if (fault == 10) /* Same text moved to another User block is not the same input. */
+         cJSON_InsertItemInArray(
+             cJSON_GetObjectItem(cJSON_GetArrayItem(model_override, 0), "blocks"), 0,
+             cJSON_Parse("{\"type\":\"text\",\"text\":\"extra\"}"));
+      if (fault == 11) /* No current canonical input can authorize a supplied attachment. */
+      {
+         cJSON_ReplaceItemInArray(capture_history, 0, source_message("first", 0));
+         cJSON_ReplaceItemInArray(model_override, 0, source_message("first", 1));
+      }
+      if (fault == 12) /* Matching words moved across User message boundaries refuse. */
+      {
+         cJSON_AddItemToArray(capture_history, source_message("second", 0));
+         cJSON *extra = source_message("second", 0);
+         cJSON *block = cJSON_DetachItemFromArray(cJSON_GetObjectItem(extra, "blocks"), 0);
+         cJSON_AddItemToArray(cJSON_GetObjectItem(cJSON_GetArrayItem(model_override, 0), "blocks"),
+                              block);
+         cJSON_Delete(extra);
+      }
+      assert(preserving_turn(&agent) != 0 && !save32 && !save55);
+      assert(save57 == (fault == 9));
+   }
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("both", 1));
+   cJSON_Delete(model_override);
+   model_override = tool_history(80000);
+   cJSON_InsertItemInArray(model_override, 0, source_message("both", 0));
+   assert(preserving_turn(&agent) == 0 && save57 == 1 && !save55 && !save32);
+   assert(strstr(canonical_stored, "tool_source") && strstr(canonical_stored, "input_attachment"));
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("compact source", 1));
+   free(canonical_stored);
+   canonical_stored = cJSON_PrintUnformatted(capture_history);
+   primary_session_request_t compact_req = {.agent = &agent, .aimee_session_id = "stable"};
+   session_compact_result_t compact_result;
+   char compact_error[256];
+   compact_enabled = compact_keep = 1;
+   assert(primary_session_adapter_compact(&compact_req, &compact_result, NULL, 0, compact_error,
+                                          sizeof compact_error) != 0 &&
+          !save32 && !save57);
+   compact_req.active_turn_id = "current-turn";
+   compact_keep = 0; /* A live owner does not authorize dropping/changing User TEXT. */
+   assert(primary_session_adapter_compact(&compact_req, &compact_result, NULL, 0, compact_error,
+                                          sizeof compact_error) != 0 &&
+          !save32 && !save57);
+   compact_keep = 1;
+   assert(primary_session_adapter_compact(&compact_req, &compact_result, NULL, 0, compact_error,
+                                          sizeof compact_error) == 0 &&
+          save57 == 1 && !save32);
+   compact_enabled = compact_keep = 0;
+   preserving_reset();
+   cJSON_AddItemToArray(capture_history, source_message("cancel", 1));
+   cJSON_AddItemToArray(model_override, source_message("cancel", 0));
+   pthread_t thread;
+   void *outcome = NULL;
+   cancel_checkpoint = 1;
+   assert(pthread_create(&thread, NULL, cancel_preserving_turn, &agent) == 0);
+   assert(pthread_join(thread, &outcome) == 0 && outcome == PTHREAD_CANCELED);
+   assert(capture_refs == 0 && save57 == 1);
+   cancel_checkpoint = 0;
+   /* Same owner can checkpoint again: cancellation left no busy lock/ref. */
+   assert(preserving_turn(&agent) == 0 && save57 == 2);
+   cJSON_Delete(model_override);
+   model_override = NULL;
+   cJSON_Delete(capture_history);
+   capture_history = NULL;
+   capture_present = 0;
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = NULL;
+   puts("preserving checkpoint: tool-only, input, both, >64KiB, second turn 13 refusals and "
+        "cancellation PASS");
+}
+
 int main(void)
 {
+   test_preserving_checkpoint();
    test_browser_native_recovery();
    test_browser_history_open();
    test_authenticated_history_loader();

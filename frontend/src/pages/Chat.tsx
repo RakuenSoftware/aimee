@@ -115,6 +115,18 @@ function newAimeeSessionId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Send identity belongs to the queued action, independently of its text or SID.
+function newOriginalInputOperationUUID(): string {
+  const api = globalThis.crypto;
+  try { if (api?.randomUUID) return api.randomUUID(); } catch { /* try CSPRNG bytes */ }
+  if (!api?.getRandomValues) throw new Error('Could not create a send identifier. Your message is retained.');
+  const bytes = api.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
 }
@@ -143,6 +155,7 @@ interface BootstrapStatus {
 }
 
 interface QueuedChatSend {
+  operationUUID?: string;
   sessionId: string;
   historyVersion: number;
   projectRoot: string;
@@ -998,6 +1011,25 @@ export default function Chat() {
     session.id === item.sessionId && session.aimeeSid === item.originSid && session.projectRoot === item.projectRoot);
   const [rulesStatus, setRulesStatus] = useState('');
   const irSessions = useRef<Record<string, SessionState>>({});
+  const pendingTitles = useRef(new Map<string, { version: number; sessionId?: string; title: string; operationUUID: string }>());
+  function titleFromCommittedUser(owner: string, state: SessionState) {
+    const pending = pendingTitles.current.get(owner);
+    if (!pending) return;
+    const message = state.messages.find(message => message.role === 'user' && message.complete &&
+      message.blocks.every(block => {
+        const attachment = (block as typeof block & { input_attachment?: { operation_uuid?: unknown } }).input_attachment;
+        return !attachment || attachment.operation_uuid === pending.operationUUID;
+      }));
+    if (!message) return;
+    pendingTitles.current.delete(owner);
+    const session = sessionOwners.current.find(session => session.aimeeSid === owner);
+    if (pending.version !== sendQueueVersionRef.current || !session ||
+        session.id !== pending.sessionId || session.name !== pending.title) return;
+    const text = message.blocks.filter(block => block.type === 'text').map(block => block.text ?? '').join('\n');
+    if (!text) return;
+    const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
+    patchSession(session.id, { name: title });
+  }
   const irPending = useRef<Record<string, Map<string, Envelope>>>({});
   const irFlush = useRef<number | null>(null);
   const [, setIRRevision] = useState(0);
@@ -1033,6 +1065,7 @@ export default function Chat() {
     }
     irPending.current[owner] = pending;
     irSessions.current[owner] = state;
+    titleFromCommittedUser(owner, state);
     if (irFlush.current === null) irFlush.current = window.setTimeout(() => {
       irFlush.current = null; setIRRevision(n => n + 1);
     }, 50);
@@ -1369,6 +1402,7 @@ export default function Chat() {
 
   function abortActiveSends(): void {
     sendQueueVersionRef.current++;
+    pendingTitles.current.clear();
     sendQueuesRef.current.clear();
     /* Do NOT clear sendDrainingRef here: a drainer mid-`await sendQueuedMessage`
      * still owns its sid and will self-remove in its own finally. Clearing it
@@ -1822,14 +1856,7 @@ export default function Chat() {
   }
 
   function enqueueChatMessage(origin: QueuedChatSend) {
-    const { originSid, sessionId } = origin;
-    const text = origin.message.blocks.map(block => block.text ?? '').join('');
-    const hasExistingMessages = (irSessions.current[originSid]?.messages.length ?? 0) > 0 ||
-      activeSendAbortRefs.current.size > 0 || (sendQueuesRef.current.get(originSid)?.length ?? 0) > 0;
-    if (!hasExistingMessages) {
-      const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
-      patchSession(sessionId, { name: title });
-    }
+    const { originSid } = origin;
     atBottomRef.current = true;
     pushToSendQueue(originSid, origin);
     recomputeWorkCounts();
@@ -1891,6 +1918,13 @@ export default function Chat() {
       if (activeContextSid.current !== aimeeSid || !ownsQueuedOrigin(item) || !irReadyRef.current[aimeeSid] || failedHistory.current.has(aimeeSid) || item.historyVersion !== (historyGeneration.current.get(aimeeSid) ?? 0)) {
         throw new Error('Conversation connection changed before sending. Your unsent message is retained.');
       }
+      item.operationUUID ??= newOriginalInputOperationUUID();
+      const owner = sessionOwners.current.find(session => session.id === item.sessionId);
+      if (owner && !(irSessions.current[aimeeSid]?.messages.length)) {
+        // Only the committed canonical User row may provide a persisted title.
+        pendingTitles.current.set(aimeeSid, { version: item.version, sessionId: item.sessionId,
+          title: owner.name, operationUUID: item.operationUUID });
+      }
       dispatchStarted = true;
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
@@ -1902,6 +1936,7 @@ export default function Chat() {
         body: JSON.stringify({
           message: item.message,
           aimee_session_id: aimeeSid,
+          original_input_operation_uuid: item.operationUUID,
           attach_id: attachId,
           cwd: item.projectRoot,
         }),

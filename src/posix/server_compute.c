@@ -1,3 +1,4 @@
+#include "server/host_original_submission.h"
 /* server_compute.c: POSIX chat.send_stream worker for primary-agent streaming. */
 #include "aimee.h"
 #include "aimee_home.h"
@@ -1112,6 +1113,45 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
 void chat_stream_worker(void *arg)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
+   int original_disposition = server_chat_original_submission_prepare(cctx);
+   if (original_disposition < 0)
+   {
+      compute_error(cctx, "original input admission unavailable");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (original_disposition == 1)
+   {
+      cJSON *receipt = host_original_submission_delivered_json_v1(cctx->original_submission);
+      cJSON *response = receipt ? cJSON_CreateObject() : NULL;
+      if (!response ||
+          !cJSON_AddStringToObject(response, "status", "user_input_already_delivered") ||
+          !cJSON_AddItemToObject(response, "input_receipt", receipt))
+      {
+         cJSON_Delete(receipt);
+         cJSON_Delete(response);
+         compute_error(cctx, "existing input receipt unavailable");
+      }
+      else
+         compute_respond(cctx, response);
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (host_original_submission_user_source_only(cctx->original_submission))
+   {
+      /* Only canonical User-source admission completed here. Private module
+       * effects may still be pending; do not report stored/reset/set success. */
+      cJSON *admitted = cJSON_CreateObject();
+      cJSON_AddStringToObject(admitted, "status", "user_source_admitted");
+      cJSON *module_result = host_original_submission_outcome_json_v1(cctx->original_submission);
+      if (module_result)
+         cJSON_AddItemToObject(admitted, "module_result", module_result);
+      else
+         cJSON_AddStringToObject(admitted, "module_result", "unconfirmed");
+      compute_respond(cctx, admitted);
+      compute_ctx_free(cctx);
+      return;
+   }
    compute_ctx_begin_budget(cctx);
    cJSON *req = cctx->req;
 
@@ -1166,7 +1206,8 @@ void chat_stream_worker(void *arg)
    cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
    /* Capture ownership follows the admitted host turn, independently of the
     * subscriber's transport version. Legacy consumers retain their projection. */
-   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : &cctx->ir_input) != 0)
+   if (!cctx->original_admitted &&
+       server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : &cctx->ir_input) != 0)
    {
       compute_error(cctx, "cannot initialize canonical session");
       compute_ctx_free(cctx);

@@ -32,6 +32,27 @@ static cJSON *context_call(const cJSON *args, void *context)
    free(text);
    return result;
 }
+/* Optional private current-context connection. The module selects opaque kind
+ * and arguments; no domain policy or grant selection belongs in this host. */
+extern char *aimee_module_owned_context_query(const char *, const cJSON *) __attribute__((weak));
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((externally_visible))
+#endif
+__attribute__((used, retain)) const unsigned aimee_ir_owner_context_binding_contract_v1 = 1;
+static cJSON *owner_context_call(const cJSON *args, void *context)
+{
+   (void)context;
+   if (!aimee_module_owned_context_query || !cJSON_IsObject(args))
+      return NULL;
+   const char *kind = field(args, "kind");
+   const cJSON *opaque_args = cJSON_GetObjectItemCaseSensitive(args, "args");
+   if (!kind || !kind[0] || strlen(kind) > 64 || !cJSON_IsObject(opaque_args))
+      return NULL;
+   char *text = aimee_module_owned_context_query(kind, opaque_args);
+   cJSON *result = text ? cJSON_CreateString(text) : NULL;
+   free(text);
+   return result;
+}
 static cJSON *audit_call(const cJSON *args, void *context)
 {
    (void)context;
@@ -60,11 +81,10 @@ static cJSON *log_call(const cJSON *args, void *context)
    LOG_INFO(module, "%s", message);
    return cJSON_CreateBool(1);
 }
-const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{"context", context_call},
-                                                           {"audit", audit_call},
-                                                           {"epoch", epoch_call},
-                                                           {"log", log_call},
-                                                           {NULL, NULL}};
+const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {
+    {"context", context_call}, {"owner_context", owner_context_call},
+    {"audit", audit_call},     {"epoch", epoch_call},
+    {"log", log_call},         {NULL, NULL}};
 const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{"guidance", AIMEE_GUIDANCE_BLOCK},
                                                              {NULL, NULL}};
 /* Lean plan consumers may have no HTTP request context. Production HTTP hosts
@@ -87,6 +107,11 @@ int server_ir_plan_enabled(const char *method, const char *operation, const char
    }
    int rc = aimee_module_commands_dispatch_internal_timeout(method, args, 500, &reply);
    cJSON_Delete(args);
+   if (rc == 0)
+   {
+      cJSON_Delete(reply);
+      return -1; /* No registered owner; distinct from a selected owner failure. */
+   }
    const char *status = field(reply, "status");
    int enabled = !(rc > 0 && status && strcmp(status, "ok") == 0 &&
                    cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(reply, "enabled")));

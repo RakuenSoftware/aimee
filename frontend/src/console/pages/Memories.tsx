@@ -67,11 +67,12 @@ export default function Memories() {
 
   return (
     <section>
-      <h1>Memories</h1>
+      <h1>Legacy memory review</h1>
       <p className="kbc-muted">
-        Inspect retained memory exactly as the system stores it. Rejecting creates durable negative
+        This page requires the legacy memory review owner and its row IDs. Native memory uses the separate administration page. Rejecting creates durable negative
         memory, keeps the row out of recall, and refuses automatic re-extraction until a human restores it.
       </p>
+      <p><a href="/memory">Open native memory administration</a></p>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
         <label>Show{' '}
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>

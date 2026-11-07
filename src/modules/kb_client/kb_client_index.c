@@ -3,6 +3,7 @@
 #include "kb_client_internal.h"
 #include "code_collect.h"
 #include "cJSON.h"
+#include "json_int64.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -582,7 +583,13 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
       return -1;
    }
    snprintf(out->project, sizeof(out->project), "%s", project_json->valuestring);
-   out->generation = (long long)generation->valuedouble;
+   int64_t exact_generation;
+   if (!jo_read_i64_token_exact(generation, &exact_generation) || exact_generation <= 0)
+   {
+      cJSON_Delete(resp);
+      return -1;
+   }
+   out->generation = exact_generation;
    snprintf(out->freshness, sizeof(out->freshness), "%s", freshness->valuestring);
    out->resolved = 1;
 
@@ -604,7 +611,12 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
       snprintf(out->dependency_meta[i].project, sizeof(out->dependency_meta[i].project), "%s",
                v->valuestring);
       v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
-      out->dependency_meta[i].generation = (long long)v->valuedouble;
+      if (!jo_read_i64_token_exact(v, &exact_generation) || exact_generation <= 0)
+      {
+         cJSON_Delete(resp);
+         return -1;
+      }
+      out->dependency_meta[i].generation = exact_generation;
       v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
       snprintf(out->dependency_meta[i].freshness, sizeof(out->dependency_meta[i].freshness), "%s",
                v->valuestring);
@@ -627,7 +639,12 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
       snprintf(out->dependent_meta[i].project, sizeof(out->dependent_meta[i].project), "%s",
                v->valuestring);
       v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
-      out->dependent_meta[i].generation = (long long)v->valuedouble;
+      if (!jo_read_i64_token_exact(v, &exact_generation) || exact_generation <= 0)
+      {
+         cJSON_Delete(resp);
+         return -1;
+      }
+      out->dependent_meta[i].generation = exact_generation;
       v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
       snprintf(out->dependent_meta[i].freshness, sizeof(out->dependent_meta[i].freshness), "%s",
                v->valuestring);

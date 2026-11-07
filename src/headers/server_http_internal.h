@@ -66,6 +66,13 @@ typedef struct
    int is_management;
 } conn_job_t;
 void handle_conn(int fd, int is_tcp, int is_management);
+typedef void (*server_http_owned_stream_fn)(int fd, const char *headers, const char *body,
+                                            size_t body_length, uint32_t conn_caps,
+                                            const char *request_id, int original_source_ready);
+void server_http_owned_user_source(int fd, const char *headers, const char *body,
+                                   size_t body_length, uint32_t conn_caps, const char *request_id,
+                                   server_http_owned_stream_fn forward);
+
 /* promoted cross-TU (former .inc statics) */
 int emit(char *resp, int cap, cJSON *obj);
 int err_json(char *resp, int cap, int status, const char *msg);
@@ -134,6 +141,7 @@ typedef struct
 } route_req_t;
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
+int rh_module_console_admin(const route_req_t *rq, char *resp, int cap);
 
 /* Request bodies are one JSON document, not a JSON prefix. cJSON_Parse accepts
  * a valid value followed by arbitrary bytes, which let `{} {}` reach every

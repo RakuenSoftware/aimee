@@ -438,7 +438,7 @@ static int build_summary(const cJSON *messages, const compact_history_t *history
             free(text);
       }
       tool_call_count += msg_tool_count(msg);
-      if (!strcmp(role, "assistant"))
+      if (!strcmp(role, "assistant") && !aimee_ir_message_runtime_advisory(msg))
       {
          char *text = msg_text(msg);
          if (!text)
@@ -745,6 +745,14 @@ static int compact_canonical(cJSON *messages, const compact_history_t *history, 
    for (int i = start; i < end; i++)
    {
       const aimee_message_t *message = &history->messages[i];
+      /* A lossy summary cannot silently shed a host source dependency. Keep
+       * its entire cycle until an owner-attested derived projection exists. */
+      const cJSON *raw = cJSON_GetArrayItem(messages, i);
+      const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(raw, "blocks");
+      const cJSON *block = NULL;
+      cJSON_ArrayForEach(block,
+                         blocks) if ((cJSON_HasObjectItem(block, "tool_source") ||
+                                      cJSON_HasObjectItem(block, "input_attachment"))) return 0;
       if (canonical_protected(message) && msg_is_tool_result(message))
          return 0; /* A mixed protected result keeps its preceding cycle intact. */
    }

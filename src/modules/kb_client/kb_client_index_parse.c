@@ -7,6 +7,7 @@
  * successful empty scan, hiding real KB_STORE/canonical-index failures. */
 #include "cJSON.h"
 #include "json_fluent.h"
+#include "json_int64.h"
 #include "kb_client.h"
 #include "kb_index_timeouts.h"
 
@@ -182,9 +183,11 @@ static int blast_edge_valid(const cJSON *edge, const char *identity_field)
    const cJSON *project = cJSON_GetObjectItemCaseSensitive(edge, "project");
    const cJSON *generation = cJSON_GetObjectItemCaseSensitive(edge, "generation");
    const cJSON *freshness = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+   int64_t exact_generation;
    return cJSON_IsString(identity) && identity->valuestring[0] && cJSON_IsString(provenance) &&
           provenance->valuestring[0] && cJSON_IsString(confidence) && confidence->valuestring[0] &&
-          cJSON_IsString(project) && project->valuestring[0] && cJSON_IsNumber(generation) &&
+          cJSON_IsString(project) && project->valuestring[0] &&
+          jo_read_i64_token_exact(generation, &exact_generation) && exact_generation > 0 &&
           cJSON_IsString(freshness) && freshness->valuestring[0];
 }
 
@@ -223,7 +226,8 @@ int kb_client_index_blast_response_valid(const void *resp_v, char *why, size_t w
 
    if (!cJSON_IsString(project) || !project->valuestring[0])
       BLAST_REJECT("project");
-   if (!cJSON_IsNumber(generation))
+   int64_t exact_generation;
+   if (!jo_read_i64_token_exact(generation, &exact_generation) || exact_generation <= 0)
       BLAST_REJECT("generation");
    if (!cJSON_IsString(freshness) || !freshness->valuestring[0])
       BLAST_REJECT("freshness");

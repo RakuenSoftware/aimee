@@ -116,3 +116,5 @@ Startup verifies the schema using runtime authority. An older schema is upgraded
 through the PostgreSQL provider's fixed migration profile, restricted to the
 bootstrap thread, and that connection is closed before runtime serving begins.
 The audit writer runs off the bus consumer so provider replies remain routable.
+
+The optional [generic code-index source observer](../contracts/code-index-observer.md) fences selected external snapshot publication across actual SQL mutations and startup.

@@ -32,6 +32,7 @@ static int begin_text(compute_ctx_t *c, const char *session, const char *text)
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled, delivered_sequence;
 static server_session_capture_t *page_writer;
+static int fail_page;
 static char owner[64] = "alice";
 static compute_ctx_t *cancel_during_finish;
 static int externally_cancel(const char *, const char *, const char *, char[32]);
@@ -121,6 +122,8 @@ int db1_session_ir_append_verified(const char *session, const char *event, const
 char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *principal)
 {
    assert(!strcmp(sid, "session-one") && !strcmp(principal, owner) && limit == 128);
+   if (fail_page)
+      return NULL;
    cJSON *events = cJSON_CreateArray();
    if (page_writer)
    {

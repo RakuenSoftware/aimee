@@ -23,6 +23,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* JSON transport fixtures install no MCP effects; a discovery attempt here
+ * would be an unintended extra operation, not an authorized scanner call. */
+int mcp_osv_gate_blocks_argv(const char *name, int argc, const char *const argv[])
+{
+   (void)name;
+   (void)argc;
+   (void)argv;
+   assert(!"JSON transport unexpectedly entered MCP effect discovery");
+   return 1;
+}
+
 static const char *g_saved_backend = "native";
 
 /* Snapshot boundary only: use the production startup capture and restart policy. */

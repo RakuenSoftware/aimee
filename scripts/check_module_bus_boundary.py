@@ -49,6 +49,9 @@ IR_SHARED_TYPE = {
     # Tool dispatch consumes the exact admitted function data contract. Tool
     # metadata and execution-policy authority still cross their owned bus seams.
     ("src/modules/tools/agent_tools_effect_contract.c", "aimee/ir/aimee_ir.h"),
+    # Per-result custody validates the public canonical ToolSource shape and
+    # visible-byte digest; source authorization stays with the installed owner.
+    ("src/modules/tools/agent_tools_tool_source.c", "aimee/ir/aimee_ir.h"),
     # Hook admission owns canonical tool intents, not a peer domain service.
     ("src/modules/translation/include/aimee/translation/hook_ir.h", "aimee/ir/aimee_ir.h"),
     # Response stages mutate shared owned IR; governance decisions still cross the bus.

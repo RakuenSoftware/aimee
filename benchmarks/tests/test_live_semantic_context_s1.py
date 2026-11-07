@@ -420,6 +420,27 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         ):
             self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
+    def test_release_validator_only_allows_exact_source_custody_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_SOURCE_CUSTODY_INTEGRATIONS.items():
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            # Every new exact block must reverse to the previously reviewed
+            # source, whose own frozen-candidate check still runs afterwards.
+            original = validator.source_custody_integration_base(path, current)
+            self.assertEqual(original.strip(), validator.git_output(
+                "show", f"6157e7f3c:{path}"))
+            for block in blocks:
+                release = block["release_text"]
+                for drift in (current.replace(release, "", 1), current + release,
+                              current.replace(release, release + "/* unreviewed */", 1),
+                              current.replace("lsp", "unreviewed_lsp", 1)):
+                    with self.subTest(path=path, block=release[:40]):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
     def test_release_validator_only_allows_exact_host_integration(self) -> None:
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
@@ -486,7 +507,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         release, prior = blocks[0]["release_text"], blocks[0]["frozen_text"]
         self.assertEqual(current.count(release), 1)
-        original = current
+        original = validator.source_custody_integration_base(path, current)
         for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
             if "canonical-native-project-dispatch:" in block.get("review", ""):
                 self.assertEqual(original.count(block["release_text"]), 1)
@@ -515,7 +536,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             self.assertEqual(len(blocks), 1 if "server_mcp" in path else 4)
             # Prove these exact changes restore the reviewed host source before
             # any pre-existing host or frozen memory normalization is applied.
-            original = current
+            original = validator.source_custody_integration_base(path, current)
             # Normalize the separately reviewed later native callback extraction,
             # role membership and gateway retirement first; search must still
             # restore its own base.
@@ -584,7 +605,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                   if "canonical-native-project-dispatch:" in block.get("review", "")]
         self.assertEqual(len(blocks), 2)
         self.assertEqual(validator.REVIEWED_HOST_INTEGRATIONS[path][:2], blocks)
-        original = current
+        original = validator.source_custody_integration_base(path, current)
         for block in blocks:
             self.assertEqual(original.count(block["release_text"]), 1)
             original = original.replace(block["release_text"], block["frozen_text"], 1)

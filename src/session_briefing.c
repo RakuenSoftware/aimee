@@ -9,6 +9,7 @@
 
 #include "aimee.h"
 #include "session_briefing.h"
+#include "session_briefing_source.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "cJSON.h"

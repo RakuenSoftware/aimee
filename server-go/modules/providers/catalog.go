@@ -55,8 +55,8 @@ func (m *Manager) catalog(ctx context.Context, req Request) (object, error) {
 			return nil, errors.New("config service unavailable")
 		}
 		if req.Operation == "provider.set" {
-			if name == "" || !validText(name, 16) {
-				return nil, errors.New("provider name required (maximum 15 bytes)")
+			if name == "" || !validText(name, 64) {
+				return nil, errors.New("provider name required (maximum 63 bytes)")
 			}
 			valid := profile(name) != nil || name == "claude" || name == "codex" || name == "chatgpt"
 			_, err := m.store.transaction(false, func(root object) (object, error) {

@@ -1,15 +1,9 @@
 package memory
 
 import (
-	"context"
 	"errors"
-	"net/url"
 	"os"
 	"strings"
-	"time"
-
-	appconfig "github.com/JBailes/aimee/server-go/config"
-	"github.com/RakuenSoftware/ouroboros-ring/go/ring"
 )
 
 // BackendSettings is non-secret startup configuration. Credentials remain in Vault.
@@ -41,57 +35,18 @@ func ResolveBackendSettings(values map[string]any, lookup func(string) string) (
 	if cfg.Engine == "" || cfg.Engine == "aimee-native" {
 		cfg.Engine = "native"
 	}
-	if cfg.Engine != "native" && cfg.Engine != "cognee" && cfg.Engine != "hillock" {
-		return cfg, errors.New("unknown memory backend")
+	if cfg.Engine != "native" {
+		return cfg, errors.New("in-process memory backend retired or unknown; install an independent memory module and export legacy data offline")
 	}
 	if cfg.Auth == "" {
 		cfg.Auth = "bearer"
 	}
-	if cfg.Auth != "bearer" && cfg.Auth != "none" && (cfg.Auth != "api-key" || cfg.Engine != "cognee") {
+	if cfg.Auth != "bearer" && cfg.Auth != "none" {
 		return cfg, errors.New("unsupported memory backend authentication")
 	}
-	if cfg.Engine == "native" {
-		cfg.Endpoint = ""
-		return cfg, nil
-	}
-	if cfg.Endpoint == "" {
-		if cfg.Engine == "hillock" {
-			cfg.Endpoint = lookup("AIMEE_HILLOCK_URL")
-		} else {
-			cfg.Endpoint = lookup("AIMEE_COGNEE_URL")
-		}
-	}
-	endpoint, err := url.Parse(cfg.Endpoint)
-	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.User != nil || (endpoint.Path != "" && endpoint.Path != "/") || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return cfg, errors.New("memory backend endpoint must be an HTTP(S) origin")
-	}
-	return cfg, nil
-}
+	cfg.Endpoint = ""
 
-// ConfigureBackendProcess reads through the config owner's bus before serving.
-// The process-local environment keeps existing adapter/egress constructors using
-// the same frozen settings, with deployment environment overrides taking priority.
-func ConfigureBackendProcess(ctx context.Context, socket string, principal uint32) error {
-	client, err := ring.ConnectClient(ctx, socket, 1, principal)
-	if err != nil {
-		return err
-	}
-	defer client.Detach()
-	caller, err := ring.NewConcurrentModuleCaller(ctx, client)
-	if err != nil {
-		return err
-	}
-	defer caller.CloseAndWait()
-	config, err := appconfig.NewClient(caller, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	// The config module starts with this process, not before it.
-	values, err := config.SnapshotWhenServed(ctx, 30*time.Second)
-	if err != nil {
-		return err
-	}
-	return ApplyBackendSettings(values)
+	return cfg, nil
 }
 
 // ApplyBackendSettings freezes the config-owner snapshot for existing constructors.

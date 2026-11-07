@@ -76,6 +76,41 @@ static int classify_blocks(aimee_block_t *blocks, int count, aimee_context_origi
    return changed;
 }
 
+int aimee_ir_message_runtime_advisory(const aimee_message_t *message)
+{
+   if (!message || !message->role || strcmp(message->role, "assistant") || message->n_blocks < 1 ||
+       message->n_blocks > AIMEE_IR_MAX_BLOCKS || !message->blocks)
+      return 0;
+   int kind = 0;
+   for (int i = 0; i < message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if (block->type != AIMEE_BLK_TEXT || !block->text || block->input_attachment ||
+          block->tool_source || block->context.model_visible != 1 ||
+          block->context.sensitivity != AIMEE_CTX_SENS_INTERNAL)
+         return 0;
+      int selected = block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                             block->context.authority == AIMEE_CTX_AUTH_DIAGNOSTIC &&
+                             block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED
+                         ? 1
+                     : block->context.origin == AIMEE_CTX_ORIGIN_TOOL &&
+                             block->context.authority == AIMEE_CTX_AUTH_EVIDENCE &&
+                             block->context.trust == AIMEE_CTX_TRUST_UNTRUSTED
+                         ? 2
+                         : 0;
+      if (!selected || (kind && kind != selected))
+         return 0;
+      kind = selected;
+   }
+   return kind;
+}
+const char *aimee_ir_model_message_role(const aimee_message_t *message)
+{
+   return aimee_ir_message_runtime_advisory(message) ? "user"
+          : message && message->role                 ? message->role
+                                                     : "user";
+}
+
 int aimee_ir_classify_context(aimee_request_t *request)
 {
    if (!request)
@@ -474,6 +509,56 @@ int aimee_ir_thinking_binding_valid(const char *binding)
    return 1;
 }
 
+int aimee_ir_input_attachment_shape_valid(const cJSON *value)
+{
+   if (!cJSON_IsObject(value) || !aimee_ir_json_unique(value) || cJSON_GetArraySize(value) != 5)
+      return 0;
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(value, "schema_version");
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "operation_uuid"));
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "kind"));
+   const char *hash = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "text_sha256"));
+   const char *opaque = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "opaque"));
+   if (!operation || strlen(operation) != 36 ||
+       !strcmp(operation, "00000000-0000-0000-0000-000000000000"))
+      return 0;
+   for (int i = 0; i < 36; i++)
+      if ((i == 8 || i == 13 || i == 18 || i == 23)
+              ? operation[i] != '-'
+              : !((operation[i] >= '0' && operation[i] <= '9') ||
+                  (operation[i] >= 'a' && operation[i] <= 'f')))
+         return 0;
+   return cJSON_IsNumber(version) && version->valuedouble == 1 && kind &&
+          !strcmp(kind, "host.original-input.v1") && hash && strlen(hash) == 64 &&
+          strspn(hash, "0123456789abcdef") == 64 && opaque && opaque[0] && strlen(opaque) <= 262144;
+}
+
+int aimee_ir_tool_source_shape_valid(const cJSON *source)
+{
+   if (!cJSON_IsObject(source) || !aimee_ir_json_unique(source) || cJSON_GetArraySize(source) != 4)
+      return 0;
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive(source, "schema_version");
+   const char *owner = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "owner"));
+   const char *digest =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "visible_sha256"));
+   const char *receipt = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "receipt"));
+   if (!cJSON_IsNumber(schema) || schema->valuedouble != 1 || !owner || strlen(owner) != 36 ||
+       !strcmp(owner, "00000000-0000-0000-0000-000000000000") || !digest || strlen(digest) != 64 ||
+       strspn(digest, "0123456789abcdef") != 64 || !receipt || !receipt[0] ||
+       strlen(receipt) > 524288)
+      return 0;
+   for (int i = 0; i < 36; i++)
+      if ((i == 8 || i == 13 || i == 18 || i == 23)
+              ? owner[i] != '-'
+              : !((owner[i] >= '0' && owner[i] <= '9') || (owner[i] >= 'a' && owner[i] <= 'f')))
+         return 0;
+   cJSON *opaque = aimee_ir_json_parse_frame(receipt, strlen(receipt));
+   if (!opaque)
+      return 0;
+   cJSON_Delete(opaque);
+   return 1;
+}
+
 int aimee_ir_block_valid(const aimee_block_t *block)
 {
    if (!block || block->type < AIMEE_BLK_TEXT || block->type >= AIMEE_BLK_UNKNOWN ||
@@ -484,6 +569,13 @@ int aimee_ir_block_valid(const aimee_block_t *block)
       return 0;
    if ((block->tool_input && !aimee_ir_json_unique(block->tool_input)) ||
        (block->tool_result && !aimee_ir_json_unique(block->tool_result)))
+      return 0;
+   if (block->input_attachment && (block->type != AIMEE_BLK_TEXT ||
+                                   !aimee_ir_input_attachment_shape_valid(block->input_attachment)))
+      return 0;
+   if (block->tool_source &&
+       (block->type != AIMEE_BLK_TOOL_RESULT || !cJSON_IsString(block->tool_result) ||
+        !aimee_ir_tool_source_shape_valid(block->tool_source)))
       return 0;
    if (block->thinking_binding && (block->type != AIMEE_BLK_THINKING ||
                                    !aimee_ir_thinking_binding_valid(block->thinking_binding)))
@@ -511,6 +603,8 @@ void aimee_block_free_contents(aimee_block_t *b)
    free_str(b->tool_namespace);
    cJSON_Delete(b->tool_input);
    cJSON_Delete(b->tool_result);
+   cJSON_Delete(b->tool_source);
+   cJSON_Delete(b->input_attachment);
    free_str(b->media_type);
    free_str(b->media_ref);
    free_str(b->cache_control);
@@ -672,6 +766,8 @@ static int clone_block(aimee_block_t *out, const aimee_block_t *source)
                   clone_string(&out->tool_namespace, source->tool_namespace) ||
                   clone_json(&out->tool_input, source->tool_input) ||
                   clone_json(&out->tool_result, source->tool_result) ||
+                  clone_json(&out->tool_source, source->tool_source) ||
+                  clone_json(&out->input_attachment, source->input_attachment) ||
                   clone_string(&out->media_type, source->media_type) ||
                   clone_string(&out->media_ref, source->media_ref) ||
                   clone_string(&out->cache_control, source->cache_control) ||
@@ -1300,7 +1396,7 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    switch (a->type)
    {
    case AIMEE_BLK_TEXT:
-      return str_eq(a->text, b->text);
+      return str_eq(a->text, b->text) && json_eq(a->input_attachment, b->input_attachment);
    case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature) &&
              str_eq(a->thinking_binding, b->thinking_binding) &&
@@ -1314,7 +1410,7 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
              str_eq(a->tool_namespace, b->tool_namespace) && json_eq(a->tool_input, b->tool_input);
    case AIMEE_BLK_TOOL_RESULT:
       return str_eq(a->tool_id, b->tool_id) && a->tool_is_error == b->tool_is_error &&
-             json_eq(a->tool_result, b->tool_result);
+             json_eq(a->tool_result, b->tool_result) && json_eq(a->tool_source, b->tool_source);
    case AIMEE_BLK_IMAGE:
    case AIMEE_BLK_DOCUMENT:
       return str_eq(a->media_type, b->media_type) && str_eq(a->media_ref, b->media_ref);
@@ -1336,6 +1432,8 @@ static int blocks_eq(const aimee_block_t *a, int na, const aimee_block_t *b, int
          memset(&left.context, 0, sizeof left.context);
          memset(&right.context, 0, sizeof right.context);
          left.thinking_binding = right.thinking_binding = NULL;
+         left.tool_source = right.tool_source = NULL;
+         left.input_attachment = right.input_attachment = NULL;
       }
       if (!block_eq(&left, &right))
          return 0;
@@ -2134,4 +2232,66 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
          return -1;
    }
    return 0;
+}
+
+/* Keep exact ordered TEXT/opaque pairs through generic canonical transforms. */
+int aimee_ir_original_inputs_preserved(const aimee_request_t *before, const aimee_request_t *after)
+{
+   if (!before || !after)
+      return 0;
+   const aimee_request_t *requests[] = {before, after};
+   for (int x = 0; x < 2; x++)
+   {
+      const aimee_request_t *q = requests[x];
+      if (q->n_messages < 0 || q->n_messages > AIMEE_IR_MAX_BLOCKS ||
+          (q->n_messages && !q->messages))
+         return 0;
+      for (int i = 0; i < q->n_messages; i++)
+      {
+         const aimee_message_t *m = &q->messages[i];
+         if (!m->role || m->n_blocks < 0 || m->n_blocks > AIMEE_IR_MAX_BLOCKS ||
+             (m->n_blocks && !m->blocks))
+            return 0;
+      }
+   }
+   size_t n = 0, k = 0;
+   const aimee_block_t **pairs = NULL;
+   for (int i = 0; i < before->n_messages; i++)
+      for (int j = 0; j < before->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *b = &before->messages[i].blocks[j];
+         if (!b->input_attachment)
+            continue;
+         if (n >= AIMEE_IR_MAX_BLOCKS || strcmp(before->messages[i].role, "user") ||
+             b->type != AIMEE_BLK_TEXT || !b->text ||
+             !aimee_ir_input_attachment_shape_valid(b->input_attachment))
+         {
+            free(pairs);
+            return 0;
+         }
+         if (!pairs)
+         {
+            pairs = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *pairs);
+            if (!pairs)
+               return 0;
+         }
+         pairs[n++] = b;
+      }
+   for (int i = 0; i < after->n_messages; i++)
+      for (int j = 0; j < after->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *b = &after->messages[i].blocks[j];
+         if (!b->input_attachment)
+            continue;
+         if (k >= n || strcmp(after->messages[i].role, "user") || b->type != AIMEE_BLK_TEXT ||
+             !b->text || strcmp(pairs[k]->text, b->text) ||
+             !cJSON_Compare(pairs[k]->input_attachment, b->input_attachment, 1))
+         {
+            free(pairs);
+            return 0;
+         }
+         k++;
+      }
+   free(pairs);
+   return n == k;
 }

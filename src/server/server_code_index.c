@@ -1,3 +1,4 @@
+#include "aimee/kb/index_observer.h"
 /* Private code indexing: reuse the shipping collector and language extractors;
  * persist through the existing memory and PostgreSQL modules. */
 #include "server_code_index.h"
@@ -77,6 +78,9 @@ static cJSON *extract_file(const cJSON *file)
 
 static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
 {
+   if (aimee_kb_index_observer_required())
+      return NULL; /* independent legacy user-code owner is not source-qualified */
+
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "code-index");
    cJSON *index = cJSON_AddObjectToObject(request, "code_index");

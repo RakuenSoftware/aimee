@@ -28,15 +28,15 @@ import (
 	"strings"
 )
 
-// The five result codes every operation answers with, from the catalog's
-// result_codes. A family does not get to invent a sixth: callers switch on
-// these, and an unknown status is indistinguishable from a corrupt frame.
+// Result codes are shared with the catalog and C client. Conflict is additive;
+// Conflict replies never carry cells. Existing result shapes stay unchanged.
 const (
-	StatusOK      uint32 = 0
-	StatusMissing uint32 = 1
-	StatusInvalid uint32 = 2
-	StatusTooLong uint32 = 3
-	StatusFailed  uint32 = 4
+	StatusOK       uint32 = 0
+	StatusMissing  uint32 = 1
+	StatusInvalid  uint32 = 2
+	StatusTooLong  uint32 = 3
+	StatusFailed   uint32 = 4
+	StatusConflict uint32 = 5
 )
 
 // FieldsMax bounds a decoded request, mirroring the caller-side cap. It is a

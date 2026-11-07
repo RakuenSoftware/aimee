@@ -880,7 +880,14 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 static void server_hook_principal(const server_conn_t *conn, char *out, size_t cap)
 {
    if (conn->vault_principal[0])
-      snprintf(out, cap, "%s", conn->vault_principal);
+   {
+      if (cap)
+      {
+         size_t n = strnlen(conn->vault_principal, cap - 1);
+         memcpy(out, conn->vault_principal, n);
+         out[n] = '\0';
+      }
+   }
    else
       snprintf(out, cap, "transport:%d:uid:%u", (int)conn->attested_transport,
                (unsigned)conn->peer_uid);
@@ -1231,8 +1238,18 @@ static void session_start_worktree_gc(const char *hook_input)
          struct tm tm_utc;
          gmtime_r(&now, &tm_utc);
          char marker[MAX_PATH_LEN];
-         snprintf(marker, sizeof(marker), "%s/.aimee/worktrees/.last-gc-%04d%02d%02d", git_root,
-                  tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday);
+         char suffix[96];
+         int suffix_n = snprintf(suffix, sizeof(suffix), "/.aimee/worktrees/.last-gc-%04d%02d%02d",
+                                 tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday);
+         size_t root_n = strlen(git_root);
+         if (suffix_n < 0 || (size_t)suffix_n >= sizeof(suffix) || root_n >= sizeof(marker) ||
+             (size_t)suffix_n >= sizeof(marker) - root_n)
+         {
+            cJSON_Delete(hi_json);
+            return;
+         }
+         memcpy(marker, git_root, root_n);
+         memcpy(marker + root_n, suffix, (size_t)suffix_n + 1);
          struct stat st;
          if (stat(marker, &st) != 0)
          {
